@@ -400,20 +400,51 @@
 		"Youngstown State": [0.1, "Horizon"],
 	};
 
-	// Destinations for players whose college is blank ("None" in game).
-	// `strength` is the level of competition, on the same 0-100 team scale.
+	/* Destinations for players whose college is blank ("None" in game).
+
+	   `strength` is the level of competition on the same 0-100 team scale.
+	   `w` is the default weight in the blank-college draw, and `regions` scales
+	   it by where the player was born — a Serbian leans EuroLeague and the ABA,
+	   an Australian leans NBL and NBL1, a Chinese prospect leans CBA.
+
+	   Before this there were exactly three destinations plus a rare DII roll,
+	   which meant every blank-college prospect in the world went to one of
+	   EuroLeague, the G League or the NBL. Liga ACB, the BBL, the Adriatic
+	   League, LNB Pro A, the EuroCup, the CBA, NBL1, Overtime Elite and the NBA
+	   Academies are all real destinations for exactly this population. */
 	const NON_NCAA = {
-		"EuroLeague":   { strength: 88, pro: true },
-		"NBA G League": { strength: 84, pro: true },
-		"NBL":          { strength: 80, pro: true },
-		"DII NCAA":     { strength: 38, pro: false },
+		"EuroLeague":     { strength: 88, pro: true, w: 26, tier: 1,
+			regions: { usa: 0.35, europe: 2.4, oceania: 0.5, asia: 0.4, latam: 0.6, africa: 0.7, other: 1.0 } },
+		"NBA G League":   { strength: 84, pro: true, w: 30, tier: 1,
+			regions: { usa: 1.7, europe: 0.5, oceania: 0.6, asia: 0.5, latam: 0.9, africa: 0.8, other: 1.0 } },
+		"Liga ACB":       { strength: 80, pro: true, w: 10, tier: 2, domestic: "Spain", relegation: 2,
+			regions: { usa: 0.2, europe: 1.5, oceania: 0.2, asia: 0.2, latam: 1.4, africa: 0.9, other: 0.7 } },
+		"NBL":            { strength: 80, pro: true, w: 12, tier: 1,
+			regions: { usa: 0.3, europe: 0.2, oceania: 2.6, asia: 0.6, latam: 0.2, africa: 0.3, other: 0.7 } },
+		"Chinese CBA":    { strength: 78, pro: true, w: 6, tier: 2, domestic: "China",
+			regions: { usa: 0.2, europe: 0.15, oceania: 0.3, asia: 2.8, latam: 0.2, africa: 0.4, other: 0.4 } },
+		"LNB Pro A":      { strength: 76, pro: true, w: 9, tier: 2, domestic: "France", relegation: 2,
+			regions: { usa: 0.25, europe: 1.3, oceania: 0.2, asia: 0.2, latam: 0.4, africa: 1.5, other: 0.7 } },
+		"EuroCup":        { strength: 76, pro: true, w: 9, tier: 2,
+			regions: { usa: 0.3, europe: 1.6, oceania: 0.3, asia: 0.3, latam: 0.5, africa: 0.6, other: 0.8 } },
+		"Basketball Bundesliga": { strength: 74, pro: true, w: 8, tier: 2, domestic: "Germany", relegation: 2,
+			regions: { usa: 0.3, europe: 1.3, oceania: 0.2, asia: 0.2, latam: 0.3, africa: 0.6, other: 0.7 } },
+		"Adriatic League": { strength: 74, pro: true, w: 8, tier: 2,
+			regions: { usa: 0.1, europe: 1.5, oceania: 0.1, asia: 0.1, latam: 0.2, africa: 0.3, other: 0.5 } },
+		"NBL1":           { strength: 58, pro: true, w: 4, tier: 3, domestic: "Australia",
+			regions: { usa: 0.2, europe: 0.1, oceania: 2.2, asia: 0.3, latam: 0.1, africa: 0.2, other: 0.4 } },
+		"Overtime Elite": { strength: 46, pro: true, w: 5, tier: 3, youth: true,
+			regions: { usa: 1.6, europe: 0.4, oceania: 0.5, asia: 0.4, latam: 0.6, africa: 0.9, other: 0.8 } },
+		"NBA Academy":    { strength: 40, pro: false, w: 4, tier: 3, youth: true,
+			regions: { usa: 0.2, europe: 0.4, oceania: 1.1, asia: 1.6, latam: 1.6, africa: 2.0, other: 1.2 } },
+		"DII NCAA":       { strength: 38, pro: false, w: 0, tier: 3,
+			regions: { usa: 1, europe: 0.2, oceania: 0.2, asia: 0.2, latam: 0.3, africa: 0.3, other: 0.3 } },
 	};
 
-	/* Real clubs for the non-NCAA destinations, so a EuroLeague prospect gets a
+	/* Real clubs for the non-NCAA destinations, so a prospect abroad gets a
 	   team, a league table and a finish instead of a one-line note reading
 	   "EuroLeague". `s` is a strength offset against the league's own level —
-	   Real Madrid is not a relegation side, and the old model gave every club
-	   the identical constant 88. */
+	   Real Madrid is not a relegation side. */
 	const PRO_CLUBS = {
 		"EuroLeague": [
 			["Real Madrid", 9], ["FC Barcelona", 8], ["Panathinaikos", 7],
@@ -435,12 +466,81 @@
 			["Birmingham Squadron", -3], ["College Park Skyhawks", -3],
 			["Capital City Go-Go", -4],
 		],
+		"Liga ACB": [
+			["Real Madrid", 8], ["FC Barcelona", 7], ["Unicaja Malaga", 5],
+			["Valencia Basket", 5], ["Baskonia", 4], ["Dreamland Gran Canaria", 2],
+			["Joventut Badalona", 2], ["La Laguna Tenerife", 3],
+			["UCAM Murcia", 0], ["Casademont Zaragoza", 0], ["Bilbao Basket", -1],
+			["BAXI Manresa", -1], ["Basquet Girona", -2], ["MoraBanc Andorra", -3],
+			["Rio Breogan", -3], ["Monbus Obradoiro", -4],
+		],
 		"NBL": [
 			["Melbourne United", 4], ["Sydney Kings", 4], ["Perth Wildcats", 3],
 			["New Zealand Breakers", 2], ["Illawarra Hawks", 1],
 			["Tasmania JackJumpers", 1], ["Brisbane Bullets", -1],
 			["Adelaide 36ers", -1], ["South East Melbourne Phoenix", -2],
 			["Cairns Taipans", -3],
+		],
+		"Chinese CBA": [
+			["Liaoning Flying Leopards", 6], ["Zhejiang Golden Bulls", 5],
+			["Guangdong Southern Tigers", 5], ["Xinjiang Flying Tigers", 3],
+			["Shenzhen Aviators", 2], ["Beijing Ducks", 1], ["Zhejiang Lions", 1],
+			["Shanghai Sharks", 0], ["Shandong Heroes", 0], ["Shanxi Loongs", -1],
+			["Jiangsu Dragons", -2], ["Qingdao Eagles", -2],
+			["Nanjing Monkey Kings", -3], ["Sichuan Blue Whales", -3],
+			["Fujian Sturgeons", -4], ["Tianjin Pioneers", -5],
+		],
+		"LNB Pro A": [
+			["AS Monaco", 7], ["LDLC ASVEL", 5], ["Paris Basketball", 5],
+			["Cholet Basket", 1], ["Nanterre 92", 1], ["Le Mans Sarthe", 1],
+			["SIG Strasbourg", 0], ["JDA Dijon", 0], ["Limoges CSP", -1],
+			["JL Bourg", 2], ["BCM Gravelines-Dunkerque", -2], ["Chorale Roanne", -2],
+			["Saint-Quentin", -2], ["ESSM Le Portel", -3], ["SLUC Nancy", -3],
+			["Elan Chalon", -3],
+		],
+		"EuroCup": [
+			["Dreamland Gran Canaria", 4], ["Turk Telekom", 3], ["Buducnost", 2],
+			["Joventut Badalona", 3], ["Bahcesehir Koleji", 2],
+			["Cedevita Olimpija", 1], ["London Lions", 0], ["Aris Midea", 0],
+			["Trento", 0], ["Veolia Towers Hamburg", -1], ["Wolves Twinsbet", -1],
+			["Slask Wroclaw", -2], ["U-BT Cluj-Napoca", -1], ["Trefl Sopot", -3],
+			["Besiktas", -2], ["Hapoel Jerusalem", 1],
+		],
+		"Basketball Bundesliga": [
+			["Bayern Munich", 6], ["Alba Berlin", 4], ["Ratiopharm Ulm", 3],
+			["Telekom Baskets Bonn", 3], ["MHP Riesen Ludwigsburg", 1],
+			["Wurzburg Baskets", 1], ["Niners Chemnitz", 1],
+			["Basketball Lowen Braunschweig", -1], ["EWE Baskets Oldenburg", 0],
+			["Veolia Towers Hamburg", -1], ["BG Gottingen", -2],
+			["Bamberg Baskets", -1], ["Skyliners Frankfurt", -2],
+			["MLP Academics Heidelberg", -3], ["Rostock Seawolves", -3],
+			["Hakro Merlins Crailsheim", -4],
+		],
+		"Adriatic League": [
+			["Crvena Zvezda", 7], ["Partizan Belgrade", 7], ["Buducnost", 3],
+			["Cedevita Olimpija", 2], ["Igokea", 0], ["Zadar", 0], ["Cibona", -1],
+			["Split", -2], ["Mega Basket", 1], ["FMP Beograd", -1],
+			["Borac Cacak", -2], ["Studentski Centar", -3], ["Krka", -3],
+			["Spartak Subotica", -4],
+		],
+		"NBL1": [
+			["Melbourne Tigers", 3], ["Nunawading Spectres", 2],
+			["Basketball Australia CoE", 2], ["Ringwood Hawks", 1],
+			["Frankston Blues", 0], ["Geelong Supercats", 0], ["Bendigo Braves", 0],
+			["Sandringham Sabres", -1], ["Knox Raiders", -1],
+			["Perth Redbacks", -1], ["Joondalup Wolves", -2],
+			["Lakeside Lightning", -2], ["Norths Bears", -2],
+			["Sutherland Sharks", -3], ["Bankstown Bruins", -3],
+			["Brisbane Capitals", -3],
+		],
+		"Overtime Elite": [
+			["City Reapers", 2], ["Cold Hearts", 1], ["YNG Dreamerz", 0],
+			["RWE", 0], ["Diamond Doves", -1], ["Fear of God Athletics", -1],
+		],
+		"NBA Academy": [
+			["NBA Global Academy", 3], ["NBA Academy Africa", 1],
+			["NBA Academy Latin America", 0], ["NBA Academy India", -2],
+			["NBA Academy Mexico City", -1],
 		],
 		"DII NCAA": [
 			["Northwest Missouri State", 6], ["Nova Southeastern", 5],
@@ -463,6 +563,23 @@
 		"Ireland","Wales","Iceland","Cyprus","Armenia",
 	];
 	const OCEANIA_HINTS = ["Australia","New Zealand","Fiji","Samoa","Tonga","Papua"];
+	const ASIA_HINTS = [
+		"China","Japan","Korea","Philippines","Taiwan","Iran","India","Lebanon",
+		"Indonesia","Kazakhstan","Jordan","Vietnam","Thailand","Malaysia",
+		"Singapore","Mongolia","Syria","Qatar","Emirates","Saudi",
+	];
+	const LATAM_HINTS = [
+		"Brazil","Argentina","Mexico","Dominican","Puerto Rico","Venezuela",
+		"Colombia","Chile","Uruguay","Panama","Cuba","Bahamas","Jamaica",
+		"Haiti","Trinidad","Ecuador","Peru","Bolivia","Paraguay","Guatemala",
+		"Honduras","Costa Rica","Virgin Islands",
+	];
+	const AFRICA_HINTS = [
+		"Nigeria","Senegal","Cameroon","Congo","Sudan","Mali","Angola","Egypt",
+		"Tunisia","Morocco","Algeria","Ghana","Kenya","Ivory Coast","Guinea",
+		"South Africa","Rwanda","Uganda","Tanzania","Zimbabwe","Burkina",
+		"Benin","Togo","Gabon","Chad","Niger","Somalia","Ethiopia","Libya",
+	];
 
 	function isUSA(loc) {
 		return typeof loc === "string" && /USA$/.test(loc);
@@ -472,8 +589,22 @@
 		const s = String(loc || "");
 		if (EURO_HINTS.some((h) => s.indexOf(h) !== -1)) return "europe";
 		if (OCEANIA_HINTS.some((h) => s.indexOf(h) !== -1)) return "oceania";
+		if (AFRICA_HINTS.some((h) => s.indexOf(h) !== -1)) return "africa";
+		if (LATAM_HINTS.some((h) => s.indexOf(h) !== -1)) return "latam";
+		if (ASIA_HINTS.some((h) => s.indexOf(h) !== -1)) return "asia";
 		if (/Canada/.test(s)) return "usa";
 		return "other";
+	}
+
+	/* Weight of one non-NCAA destination for a player born in `loc`. */
+	function leagueWeight(name, loc, override) {
+		const lg = NON_NCAA[name];
+		if (!lg) return 0;
+		const base = Number.isFinite(override) ? override : lg.w;
+		const mult = (lg.regions && lg.regions[region(loc)]) !== undefined
+			? lg.regions[region(loc)]
+			: 1;
+		return Math.max(0, base) * mult;
 	}
 
 	const conferenceOf = (name) => (COLLEGES[name] ? COLLEGES[name][1] : null);
@@ -495,7 +626,7 @@
 
 	global.Colleges = {
 		COLLEGES, CONFERENCES, NON_NCAA, PRO_CLUBS, byConference,
-		conferenceOf, frequencyOf, prestige, region, isUSA,
+		conferenceOf, frequencyOf, prestige, region, isUSA, leagueWeight,
 		names: Object.keys(COLLEGES),
 	};
-})(window);
+})(typeof window !== "undefined" ? window : self);

@@ -112,4 +112,4 @@
 	}
 
 	global.BBGMRng = { Rng, clamp, hashSeed };
-})(window);
+})(typeof window !== "undefined" ? window : self);

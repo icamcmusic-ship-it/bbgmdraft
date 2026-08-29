@@ -1,52 +1,174 @@
-/* UI: file loading, config binding, the result views, per-player edits, and
-   export. */
-(function () {
+/* UI: state, settings, staged runs, per-player and bulk editing, persistence
+   and export. The views themselves live in js/views.js. */
+(function (global) {
 	"use strict";
 
-	const CFG = window.Config;
-	const C = window.Colleges;
-	const RB = window.RatingsBuilder;
-	const BB = window.BBGM;
+	const CFG = global.Config;
+	const C = global.Colleges;
+	const RB = global.RatingsBuilder;
+	const BB = global.BBGM;
+	const V = global.Views;
+	const el = V.el;
+	const n1 = V.n1;
+	const pc = V.pc;
 	const $ = (id) => document.getElementById(id);
-	const el = (tag, cls, text) => {
-		const n = document.createElement(tag);
-		if (cls) n.className = cls;
-		if (text !== undefined) n.textContent = text;
-		return n;
-	};
+
+	const STORE_KEY = "bbgm-draft-workshop/v1";
 
 	const state = {
 		cfg: CFG.make(),
-		files: [],       // [{name, data}]
+		files: [],       // [{name, data, fingerprint}]
+		runners: [],     // parallel to files
 		results: [],     // parallel to files; entries may be null until needed
 		active: 0,
 		tab: "players",
-		sort: { key: "newOvr", dir: -1 },
+		sort: [{ key: "newOvr", dir: -1 }],
 		filter: { q: "", pos: "", conf: "", changedOnly: false, lockedOnly: false },
-		overrides: {},   // pid -> {ovr, pot, archetype, college}
+		noteQuery: "",   // the Notes tab has its own search; it used to share one
+		overrides: {},   // player key -> {ovr, pot, archetype, college, ratings, …}
+		overrideFingerprint: null,
+		selected: {},    // player key -> true, for bulk editing
 		history: [],     // recent seeds, newest first
 		presetName: "default",
 		presetDirty: false,
-		editing: null,   // pid currently open in the editor
+		customPresets: {},
+		editing: null,   // player key currently open in the editor
+		hiddenColumns: {},
+		statMode: "perGame",
+		density: "normal",
+		compactBracket: false,
+		theme: "system",
+		logPlayer: null,
+		pinned: null,
+		undo: [],
+		lastSeed: null,
 	};
+	global.App = { state };
+
+	/* ------------------------------------------------------------ persistence */
+
+	/* Nothing survived a refresh: settings, locks and seed history were all
+	   lost unless you happened to have copied the link first. The loaded FILE
+	   cannot be stored (it is megabytes and it is the user's data), so it is
+	   the one thing that has to be dropped in again. */
+	function persist() {
+		try {
+			localStorage.setItem(STORE_KEY, JSON.stringify({
+				cfg: state.cfg,
+				overrides: state.overrides,
+				overrideFingerprint: state.overrideFingerprint,
+				history: state.history.slice(0, 12),
+				presetName: state.presetName,
+				presetDirty: state.presetDirty,
+				customPresets: state.customPresets,
+				hiddenColumns: state.hiddenColumns,
+				statMode: state.statMode,
+				density: state.density,
+				compactBracket: state.compactBracket,
+				theme: state.theme,
+				sort: state.sort,
+				tab: state.tab,
+				// Small (a name and six numbers per prospect) and the whole
+				// point of pinning is that it outlives the class you pinned.
+				pinned: state.pinned,
+				open: openGroups(),
+			}));
+		} catch (e) { /* private browsing, quota, or no storage at all */ }
+	}
+
+	function restore() {
+		let saved = null;
+		try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) { saved = null; }
+		if (!saved) return null;
+		if (saved.cfg) state.cfg = CFG.make(saved.cfg);
+		if (saved.overrides) state.overrides = saved.overrides;
+		if (saved.overrideFingerprint) state.overrideFingerprint = saved.overrideFingerprint;
+		if (Array.isArray(saved.history)) state.history = saved.history;
+		if (saved.presetName) state.presetName = saved.presetName;
+		state.presetDirty = !!saved.presetDirty;
+		if (saved.customPresets) state.customPresets = saved.customPresets;
+		if (saved.hiddenColumns) state.hiddenColumns = saved.hiddenColumns;
+		if (saved.statMode) state.statMode = saved.statMode;
+		if (saved.density) state.density = saved.density;
+		state.compactBracket = !!saved.compactBracket;
+		if (saved.theme) state.theme = saved.theme;
+		if (Array.isArray(saved.sort) && saved.sort.length) state.sort = saved.sort;
+		if (saved.pinned) state.pinned = saved.pinned;
+		// Never land on a tab that has nothing to show.
+		if (saved.tab && (saved.tab !== "compare" || state.pinned)) state.tab = saved.tab;
+		return saved;
+	}
+
+	function openGroups() {
+		const out = {};
+		for (const d of document.querySelectorAll("details.grp")) out[d.id] = d.open;
+		return out;
+	}
+
+	function applyOpenGroups(map) {
+		if (!map) return;
+		for (const d of document.querySelectorAll("details.grp")) {
+			if (map[d.id] !== undefined) d.open = map[d.id];
+		}
+	}
+
+	/* ------------------------------------------------------------------ undo */
+
+	/* "Reset to defaults" and "Clear lock" were both irreversible, and the word
+	   undo appeared nowhere in the codebase. */
+	function pushUndo(label) {
+		state.undo.push({
+			label,
+			cfg: JSON.parse(JSON.stringify(state.cfg)),
+			overrides: JSON.parse(JSON.stringify(state.overrides)),
+		});
+		if (state.undo.length > 40) state.undo.shift();
+		paintUndo();
+	}
+
+	function undo() {
+		const prev = state.undo.pop();
+		if (!prev) return;
+		state.cfg = CFG.make(prev.cfg);
+		state.overrides = prev.overrides;
+		paintUndo();
+		paintConfig();
+		setStatus("Undid: " + prev.label);
+		run();
+	}
+
+	function paintUndo() {
+		const b = $("btnUndo");
+		b.disabled = !state.undo.length;
+		b.title = state.undo.length
+			? "Undo: " + state.undo[state.undo.length - 1].label + " (Ctrl+Z)"
+			: "Nothing to undo";
+	}
 
 	/* ---------------------------------------------------------------- config */
 
 	const SLIDERS = [
 		"classQuality", "classDepth", "eliteCount", "potBias", "potSpread",
-		"specialization", "archetypeDiversity", "buildNoise", "freshmanShare",
-		"wEuroLeague", "wGLeague", "wNBL", "pDII",
-		"pace", "scoringEnv", "statNoise", "upsetFactor", "awardStrictness",
+		"specialization", "archetypeDiversity", "classFlavor", "buildNoise",
+		"freshmanShare", "transferShare", "redshirtShare", "reclassShare", "pDII",
+		"pace", "scoringEnv", "statNoise", "upsetFactor",
+		"awardStrictness", "confAwardStrictness", "proAwardStrictness",
 	];
 
 	const FORMAT = {
 		pDII: (v) => (v * 100).toFixed(1) + "%",
 		specialization: (v) => v.toFixed(2) + "x",
+		classFlavor: (v) => v.toFixed(2) + "x",
 		statNoise: (v) => v.toFixed(2) + "x",
 		upsetFactor: (v) => v.toFixed(2) + "x",
 		awardStrictness: (v) => v.toFixed(2) + "x",
+		confAwardStrictness: (v) => v.toFixed(2) + "x",
+		proAwardStrictness: (v) => v.toFixed(2) + "x",
 		archetypeDiversity: (v) => v + "%",
 		freshmanShare: (v) => v + "%",
+		transferShare: (v) => v + "%",
+		redshirtShare: (v) => v + "%",
+		reclassShare: (v) => v + "%",
 	};
 
 	/* What each slider actually does, in units. "Class quality 2" means nothing
@@ -57,20 +179,54 @@
 		classDepth: (v) => (v < 0 ? "top-heavy: stars, then a cliff"
 			: v > 0 ? "deep: fewer stars, more rotation players" : "an even curve"),
 		eliteCount: (v) => v === 0 ? "no genuine stars" : v + " prospect(s) get a star ceiling",
-		potBias: (v) => "ovr→pot gap shifted " + (v >= 0 ? "+" : "") + (v * 2.2).toFixed(1) + " points",
+		potBias: (v) => "ovr→pot gap shifted " + (v >= 0 ? "+" : "") + (v * 2.2).toFixed(1) +
+			" points (cosmetic: potential does not feed the season)",
 		potSpread: (v) => "gap sd " + v + " points (higher = more boom/bust)",
 		specialization: (v) => v < 0.4 ? "BBGM's samey builds"
 			: v > 1.6 ? "extreme specialists" : "clear roles, real weaknesses",
-		archetypeDiversity: (v) => Math.round(100 - v) + "% of the class stays Balanced-ish",
+		// True by construction now: the +0.05 / +0.02 fudge terms that made this
+		// label a 30% overstatement are gone.
+		archetypeDiversity: (v) => "exactly " + Math.round(100 - v) + "% of the class stays Balanced",
+		classFlavor: (v) => v < 0.15 ? "every class has the same archetype mix"
+			: v > 1.5 ? "a class is unmistakably one thing"
+			: "each class leans guard-heavy, big-heavy, defensive…",
 		buildNoise: (v) => "±" + v + " rating points of per-rating jitter",
 		freshmanShare: (v) => "≈" + v + "% freshmen; the rest spread over So/Jr/Sr",
-		pace: (v) => "≈" + Math.round(v * 1.05) + " team points per game",
+		transferShare: (v) => "≈" + v + "% of upperclassmen arrived from another programme",
+		redshirtShare: (v) => "≈" + v + "% of upperclassmen redshirted a year",
+		reclassShare: (v) => "≈" + v + "% reclassified in or out of their year",
+		pDII: (v) => (v <= 0 ? "no DII conversions" :
+			"about " + (v * 100).toFixed(1) + "% of blank colleges become DII"),
+		// Measured, not asserted: the whole simulated field runs ORtg ~102.5,
+		// so points per game land near pace x 1.025, not pace x 1.05.
+		pace: (v) => "≈" + Math.round(v * 1.025) + " team points per game (Division I only)",
 		scoringEnv: (v) => (v >= 0 ? "+" : "") + (v * 1.6).toFixed(1) + " possessions per 40",
 		statNoise: (v) => v < 0.3 ? "stat lines follow ratings exactly" : "season-to-season luck",
 		upsetFactor: (v) => v < 0.6 ? "chalk: seeds mostly hold" : v > 1.4 ? "madness" : "a normal March",
-		awardStrictness: (v) => v > 1.2 ? "fewer honours reach this class"
-			: v < 0.9 ? "more honours reach this class" : "realistic award volume",
+		awardStrictness: (v) => v > 1.2 ? "fewer national honours reach this class"
+			: v < 0.9 ? "more national honours reach this class" : "realistic national award volume",
+		confAwardStrictness: (v) => v > 1.2 ? "fewer conference honours"
+			: v < 0.9 ? "more conference honours" : "realistic conference award volume",
+		proAwardStrictness: (v) => v > 1.2 ? "a higher bar for honours abroad"
+			: v < 0.9 ? "a lower bar for honours abroad" : "a realistic bar abroad",
 	};
+
+	function awardInteractionHint() {
+		const fresh = state.cfg.freshmanShare;
+		const parts = [
+			"These interact with settings elsewhere. " +
+			(fresh < 20
+				? "With only " + fresh + "% freshmen, the Freshman of the Year and " +
+					"All-Freshman categories mostly dry up."
+				: fresh > 70
+				? "With " + fresh + "% freshmen, almost every honour in the class is " +
+					"also a freshman honour."
+				: "Freshman categories scale with the “Freshmen in the class” slider."),
+			"Award strictness used to be one slider driving three different " +
+			"mechanisms; it is three sliders now.",
+		];
+		return parts.join(" ");
+	}
 
 	function paintConfig() {
 		for (const key of SLIDERS) {
@@ -100,22 +256,65 @@
 		$("ovrModeHint").textContent = curve
 			? "Overalls are re-dealt along a configurable curve; the class can get better or worse."
 			: "Each prospect keeps the overall BBGM gave him. Only his build changes.";
-		const preset = $("preset");
-		if (preset) {
-			const opt = preset.querySelector('option[value="' + state.presetName + '"]');
-			if (opt) {
-				const base = state.presetName === "default" ? "— presets —" : state.presetName;
-				opt.textContent = base + (state.presetDirty ? " (modified)" : "");
-			}
-			preset.value = state.presetName;
-		}
+		$("awardInteractionHint").textContent = awardInteractionHint();
+		paintPresets();
 		paintNoteLines();
+		paintArchWeights();
+		paintLeagueWeights();
+		document.body.className = "density-" + state.density;
+	}
+
+	function paintPresets() {
+		const preset = $("preset");
+		if (!preset) return;
+		const want = state.presetName;
+		preset.innerHTML = "";
+		for (const name of Object.keys(CFG.PRESETS)) {
+			preset.appendChild(new Option(name === "default" ? "— presets —" : name, name));
+		}
+		const custom = Object.keys(state.customPresets);
+		if (custom.length) {
+			const grp = document.createElement("optgroup");
+			grp.label = "Saved";
+			for (const name of custom) grp.appendChild(new Option(name, name));
+			preset.appendChild(grp);
+		}
+		const opt = preset.querySelector('option[value="' + cssEscape(want) + '"]');
+		if (opt) {
+			const base = want === "default" ? "— presets —" : want;
+			opt.textContent = base + (state.presetDirty ? " (modified)" : "");
+			preset.value = want;
+		}
+		$("btnDeletePreset").disabled = !state.customPresets[want];
+	}
+
+	function cssEscape(s) {
+		return String(s).replace(/["\\]/g, "\\$&");
+	}
+
+	/* Repaint every archetype weight box, whether or not a custom set exists.
+	   The old code only repainted when cfg.archetypeWeights was truthy, so
+	   "Reset weights" followed by a preset change left stale numbers on screen. */
+	function paintArchWeights() {
 		const aw = $("archWeights");
-		if (aw && state.cfg.archetypeWeights) {
-			for (const i of aw.querySelectorAll("input")) {
-				const v = state.cfg.archetypeWeights[i.dataset.arch];
-				if (Number.isFinite(v)) i.value = v;
-			}
+		if (!aw) return;
+		const custom = state.cfg.archetypeWeights;
+		for (const i of aw.querySelectorAll("input")) {
+			const a = RB.ARCHETYPES.filter((x) => x.name === i.dataset.arch)[0];
+			const fallback = a && a.w !== undefined ? a.w : 1;
+			const v = custom && Number.isFinite(custom[i.dataset.arch])
+				? custom[i.dataset.arch] : fallback;
+			i.value = v;
+		}
+	}
+
+	function paintLeagueWeights() {
+		const box = $("leagueWeights");
+		if (!box) return;
+		const w = state.cfg.leagueWeights || {};
+		for (const i of box.querySelectorAll("input")) {
+			const v = w[i.dataset.league];
+			i.value = Number.isFinite(v) ? v : 0;
 		}
 	}
 
@@ -123,40 +322,57 @@
 		state.presetDirty = true;
 	}
 
+	/* Describe an archetype's offset vector, so the sixty names in the sidebar
+	   are not sixty names and a number box. */
+	function archetypeTooltip(a) {
+		const keys = Object.keys(a.o || {}).sort((x, y) => Math.abs(a.o[y]) - Math.abs(a.o[x]));
+		const body = keys.length
+			? keys.map((k) => k + " " + (a.o[k] > 0 ? "+" : "") + a.o[k]).join(", ")
+			: "no offsets — the build BBGM would have produced";
+		const hgt = (a.min > 0 || a.max < 100)
+			? "\nheight rating " + a.min + "–" + a.max : "\nany height";
+		return a.name + "\n" + body + hgt +
+			"\nrarity weight " + (a.w === undefined ? 1 : a.w);
+	}
+
 	function bindConfig() {
 		for (const key of SLIDERS) {
 			const input = $(key);
 			if (!input) continue;
+			let pushed = false;
+			input.addEventListener("pointerdown", () => { pushed = false; });
 			input.addEventListener("input", () => {
+				if (!pushed) { pushUndo("moved " + key); pushed = true; }
 				state.cfg[key] = Number(input.value);
 				markDirty();
 				paintConfig();
 				scheduleRun();
 			});
+			input.addEventListener("change", () => { pushed = false; persist(); });
 		}
 		$("ovrMode").addEventListener("change", () => {
+			pushUndo("changed the overall mode");
 			state.cfg.ovrMode = $("ovrMode").value;
 			markDirty();
 			paintConfig();
 			scheduleRun();
 		});
 		$("varySize").addEventListener("change", () => {
+			pushUndo("toggled Vary size");
 			state.cfg.varySize = $("varySize").checked;
 			markDirty();
 			scheduleRun();
 		});
 		$("seed").addEventListener("change", () => {
 			state.cfg.seed = $("seed").value.trim();
-			scheduleRun();
+			run();
 		});
 
 		const preset = $("preset");
-		for (const name of Object.keys(CFG.PRESETS)) {
-			preset.appendChild(new Option(name === "default" ? "— presets —" : name, name));
-		}
 		preset.addEventListener("change", () => {
-			const p = CFG.PRESETS[preset.value];
+			const p = CFG.PRESETS[preset.value] || state.customPresets[preset.value];
 			if (!p) return;
+			pushUndo("applied the preset " + preset.value);
 			const seed = state.cfg.seed;
 			state.cfg = CFG.make(p);
 			state.cfg.seed = seed;
@@ -166,7 +382,53 @@
 			run();
 		});
 
+		$("btnSavePreset").addEventListener("click", () => {
+			const box = el("div");
+			const input = el("input");
+			input.type = "text";
+			input.placeholder = "a name for these settings";
+			input.style.width = "100%";
+			input.value = state.presetName === "default" ? "" : state.presetName;
+			box.appendChild(el("p", "hint",
+				"Twenty tuned sliders used to be keepable only by copying a URL."));
+			box.appendChild(input);
+			modal("Save preset", box, () => {
+				const name = input.value.trim();
+				if (!name || CFG.PRESETS[name]) {
+					showError(new Error(name
+						? "“" + name + "” is a built-in preset name."
+						: "Give the preset a name."));
+					return;
+				}
+				const saved = {};
+				for (const k of Object.keys(CFG.DEFAULTS)) {
+					if (k === "seed") continue;
+					if (JSON.stringify(state.cfg[k]) !== JSON.stringify(CFG.DEFAULTS[k])) {
+						saved[k] = state.cfg[k];
+					}
+				}
+				state.customPresets[name] = saved;
+				state.presetName = name;
+				state.presetDirty = false;
+				persist();
+				paintConfig();
+				setStatus("Saved the preset “" + name + "”.");
+			});
+			setTimeout(() => input.focus(), 30);
+		});
+
+		$("btnDeletePreset").addEventListener("click", () => {
+			const name = state.presetName;
+			if (!state.customPresets[name]) return;
+			delete state.customPresets[name];
+			state.presetName = "default";
+			persist();
+			paintConfig();
+			setStatus("Deleted the preset “" + name + "”.");
+		});
+
 		$("btnReset").addEventListener("click", () => {
+			pushUndo("reset every setting to the defaults");
 			state.cfg = CFG.make();
 			state.presetName = "default";
 			state.presetDirty = false;
@@ -178,7 +440,9 @@
 		const aw = $("archWeights");
 		for (const a of RB.ARCHETYPES) {
 			const row = el("div", "archrow");
-			row.appendChild(el("span", "archname", a.name));
+			const name = el("span", "archname", a.name);
+			name.title = archetypeTooltip(a);
+			row.appendChild(name);
 			const inp = el("input");
 			inp.type = "number";
 			inp.step = "0.05";
@@ -186,8 +450,10 @@
 			inp.max = "8";
 			inp.dataset.arch = a.name;
 			inp.value = a.w === undefined ? 1 : a.w;
+			inp.title = archetypeTooltip(a);
 			inp.setAttribute("aria-label", "Rarity weight for " + a.name);
 			inp.addEventListener("change", () => {
+				pushUndo("changed archetype weights");
 				const w = {};
 				for (const i of aw.querySelectorAll("input")) w[i.dataset.arch] = Number(i.value);
 				state.cfg.archetypeWeights = w;
@@ -198,31 +464,79 @@
 			aw.appendChild(row);
 		}
 		$("btnArchReset").addEventListener("click", () => {
+			pushUndo("reset the archetype weights");
 			state.cfg.archetypeWeights = null;
-			for (const i of aw.querySelectorAll("input")) {
-				const a = RB.ARCHETYPES.filter((x) => x.name === i.dataset.arch)[0];
-				i.value = a && a.w !== undefined ? a.w : 1;
-			}
 			markDirty();
+			paintArchWeights();
+			run();
+		});
+
+		// Destination weights, one row per non-NCAA league.
+		const lw = $("leagueWeights");
+		for (const name of Object.keys(C.NON_NCAA)) {
+			if (name === "DII NCAA") continue;
+			const lg = C.NON_NCAA[name];
+			const row = el("div", "archrow");
+			const label = el("span", "archname", name);
+			label.title = name + "\nstrength " + lg.strength +
+				"\n" + (lg.pro ? "professional" : "amateur") +
+				"\ndefault weight " + lg.w;
+			row.appendChild(label);
+			const inp = el("input");
+			inp.type = "number";
+			inp.step = "1";
+			inp.min = "0";
+			inp.max = "100";
+			inp.dataset.league = name;
+			inp.setAttribute("aria-label", "Weight for " + name);
+			inp.addEventListener("change", () => {
+				pushUndo("changed destination weights");
+				const w = {};
+				for (const i of lw.querySelectorAll("input")) w[i.dataset.league] = Number(i.value);
+				state.cfg.leagueWeights = w;
+				// The three legacy sliders are folded in by Config.make, so they
+				// have to stop overriding once the user edits the table.
+				state.cfg.wEuroLeague = null;
+				state.cfg.wGLeague = null;
+				state.cfg.wNBL = null;
+				markDirty();
+				scheduleRun();
+			});
+			row.appendChild(inp);
+			lw.appendChild(row);
+		}
+		$("btnLeagueReset").addEventListener("click", () => {
+			pushUndo("reset the destination weights");
+			state.cfg.leagueWeights = CFG.defaultLeagueWeights();
+			state.cfg.wEuroLeague = null;
+			state.cfg.wGLeague = null;
+			state.cfg.wNBL = null;
+			markDirty();
+			paintLeagueWeights();
 			run();
 		});
 
 		// Note template: which lines are written into each player's note.
 		const box = $("noteLines");
-		for (const [key, label] of window.Engine.NOTE_LINES) {
+		for (const [key, label] of global.Engine.NOTE_LINES) {
 			const lab = el("label", "check");
 			const cb = el("input");
 			cb.type = "checkbox";
 			cb.value = key;
 			cb.addEventListener("change", () => {
-				const want = Array.from(box.querySelectorAll("input:checked")).map((i) => i.value);
-				state.cfg.noteLines = want;
+				pushUndo("changed the note template");
+				state.cfg.noteLines = Array.from(box.querySelectorAll("input:checked"))
+					.map((i) => i.value);
 				markDirty();
 				scheduleRun();
 			});
 			lab.appendChild(cb);
 			lab.appendChild(document.createTextNode(" " + label));
 			box.appendChild(lab);
+		}
+
+		for (const d of document.querySelectorAll("details.grp")) {
+			d.addEventListener("toggle", persist);
 		}
 	}
 
@@ -242,9 +556,6 @@
 
 	/* ------------------------------------------------------- config sharing */
 
-	/* The seed alone does not reproduce a class — the twenty settings that
-	   shaped it matter just as much. Both go in the URL hash, so one link is a
-	   complete recipe. */
 	function encodeConfig() {
 		const out = {};
 		for (const k of Object.keys(CFG.DEFAULTS)) {
@@ -252,7 +563,15 @@
 			const d = CFG.DEFAULTS[k];
 			if (JSON.stringify(v) !== JSON.stringify(d)) out[k] = v;
 		}
-		if (Object.keys(state.overrides).length) out.overrides = state.overrides;
+		if (Object.keys(state.overrides).length) {
+			out.overrides = state.overrides;
+			/* Locks are keyed by pid. Opening a shared link with a DIFFERENT
+			   draft class loaded used to apply them to whichever players
+			   happened to share those pids — silently, and to the wrong people.
+			   The link now carries a fingerprint of the class the locks were
+			   made against. */
+			out.fp = state.overrideFingerprint || fingerprint(activeFile());
+		}
 		return out;
 	}
 
@@ -268,17 +587,37 @@
 
 	function readHash() {
 		const m = /[#&]c=([^&]+)/.exec(location.hash || "");
-		if (!m) return;
+		if (!m) return false;
 		try {
 			const payload = JSON.parse(decodeURIComponent(m[1]));
 			if (payload.overrides) {
 				state.overrides = payload.overrides;
+				state.overrideFingerprint = payload.fp || null;
 				delete payload.overrides;
+				delete payload.fp;
 			}
 			state.cfg = CFG.make(payload);
 			state.presetDirty = true;
-		} catch (e) { showError(new Error("Could not read the settings in this link.")); }
+			return true;
+		} catch (e) {
+			showError(new Error("Could not read the settings in this link."));
+			return false;
+		}
 	}
+
+	/* A short, stable identity for one draft class file. */
+	function fingerprint(file) {
+		if (!file || !file.data) return null;
+		const players = file.data.players || [];
+		const sample = players.slice(0, 6).concat(players.slice(-3))
+			.map((p) => (p.pid === undefined ? "?" : p.pid) + ":" +
+				(p.firstName || "") + (p.lastName || "")).join("|");
+		const h = global.BBGMRng.hashSeed(
+			players.length + "/" + file.data.startingSeason + "/" + sample);
+		return (h() >>> 0).toString(36);
+	}
+
+	function activeFile() { return state.files[state.active] || null; }
 
 	/* ------------------------------------------------------------ file input */
 
@@ -291,40 +630,44 @@
 
 	function readFiles(fileList) {
 		const problems = [];
+		// A five-file drop used to just sit there with nothing on screen.
+		$("empty").classList.add("busy");
+		setStatus("Reading " + fileList.length + " file" +
+			(fileList.length === 1 ? "" : "s") + "…", true);
 		const jobs = Array.from(fileList).map(
-			(f) =>
-				new Promise((resolve) => {
-					const r = new FileReader();
-					r.onerror = () => {
-						problems.push(f.name + ": could not be read from disk");
+			(f) => new Promise((resolve) => {
+				const r = new FileReader();
+				r.onerror = () => {
+					problems.push(f.name + ": could not be read from disk");
+					resolve(null);
+				};
+				r.onload = () => {
+					try {
+						const text = String(r.result).replace(/^\ufeff/, "");
+						const data = JSON.parse(text);
+						// Full schema check up front, so a bad file is rejected
+						// with a sentence instead of throwing a raw TypeError
+						// out of the middle of the sim.
+						const check = global.Engine.validateLeagueFile(data);
+						resolve({ name: f.name, data, warnings: check.warnings });
+					} catch (e) {
+						problems.push(f.name + ": " + e.message);
 						resolve(null);
-					};
-					r.onload = () => {
-						try {
-							const text = String(r.result).replace(/^﻿/, "");
-							const data = JSON.parse(text);
-							// Full schema check up front, so a bad file is
-							// rejected with a sentence instead of throwing a
-							// raw TypeError out of the middle of the sim.
-							window.Engine.validateLeagueFile(data);
-							resolve({ name: f.name, data });
-						} catch (e) {
-							problems.push(f.name + ": " + e.message);
-							resolve(null);
-						}
-					};
-					r.readAsText(f);
-				}),
+					}
+				};
+				r.readAsText(f);
+			}),
 		);
 		Promise.all(jobs).then((loaded) => {
+			$("empty").classList.remove("busy");
 			const ok = loaded.filter(Boolean);
-			// The old code used alert(), which is modal and loses every error
-			// after the first when several files are dropped at once.
 			if (problems.length) showError(new Error(problems.join("\n")));
 			else clearError();
-			if (!ok.length) return;
+			if (!ok.length) { setStatus(""); return; }
 			state.files = ok.sort((a, b) =>
 				(a.data.startingSeason || 0) - (b.data.startingSeason || 0));
+			for (const f of state.files) f.fingerprint = fingerprint(f);
+			state.runners = state.files.map((f) => global.Engine.createRunner(f.data));
 			state.results = [];
 			state.active = 0;
 			const sel = $("fileSelect");
@@ -340,11 +683,35 @@
 			$("fileSummary").textContent = state.files.map(
 				(f) => f.name + ": " + summarise(f.data)).join("  ·  ");
 			$("fileSummary").hidden = false;
-			for (const id of ["btnReroll", "btnRerun", "btnExport", "btnExportAll"]) {
-				$(id).disabled = false;
-			}
+			for (const id of ["btnReroll", "btnRerun", "btnExport", "btnExportMenu",
+				"btnExportAll", "btnPin"]) $(id).disabled = false;
+			checkLockFingerprint();
+			const warns = state.files.flatMap((f) => (f.warnings || [])
+				.map((w) => f.name + ": " + w));
+			if (warns.length) showWarning(warns.join("\n"));
+			setStatus("");
 			run();
 		});
+	}
+
+	/* Locks belong to the class they were made against. */
+	function checkLockFingerprint() {
+		const file = activeFile();
+		if (!file) return;
+		const n = Object.keys(state.overrides).length;
+		if (!n) { state.overrideFingerprint = file.fingerprint; return; }
+		if (!state.overrideFingerprint) {
+			state.overrideFingerprint = file.fingerprint;
+			return;
+		}
+		if (state.overrideFingerprint !== file.fingerprint) {
+			state.overrides = {};
+			state.overrideFingerprint = file.fingerprint;
+			showWarning(n + " lock" + (n === 1 ? "" : "s") +
+				" came from a different draft class and have been dropped. " +
+				"Locks are tied to the file they were made against — applying " +
+				"them by pid alone would silently lock the wrong players.");
+		}
 	}
 
 	function bindFiles() {
@@ -352,12 +719,10 @@
 		$("file").addEventListener("change", (e) => readFiles(e.target.files));
 		$("fileSelect").addEventListener("change", (e) => {
 			state.active = Number(e.target.value);
+			checkLockFingerprint();
 			ensureResult(state.active);
 			render();
 		});
-		// dragover/dragleave on the body fire for every child element the
-		// pointer crosses, so the drop zone flickered on the way in. Count
-		// enter/leave pairs instead.
 		let depth = 0;
 		const body = document.body;
 		body.addEventListener("dragenter", (e) => {
@@ -380,64 +745,80 @@
 
 	/* ----------------------------------------------------------------- run */
 
-	// Engine errors must surface: without this, an exception mid-run leaves
-	// the previous render frozen on screen and sliders silently do nothing.
 	function showError(err) {
 		const b = $("errBanner");
 		b.hidden = false;
 		b.textContent = (err && err.message ? err.message : String(err)) +
 			"\n(Click to dismiss.)";
 	}
-	function clearError() {
-		$("errBanner").hidden = true;
+	function clearError() { $("errBanner").hidden = true; }
+	function showWarning(text) {
+		const b = $("warnBanner");
+		b.hidden = false;
+		b.textContent = text + "\n(Click to dismiss.)";
 	}
 
+	/* The settings actually handed to the engine.
+
+	   `seed` is pinned to the last class generated whenever the seed box is
+	   blank. Without that, an empty seed meant the engine drew a fresh random
+	   one on every run — so moving a slider re-rolled the entire class under
+	   you, and no two adjacent positions of the same slider were comparable.
+	   It also defeated the staged pipeline completely: a new seed invalidates
+	   the first phase, so every change re-simulated everything. Reroll is the
+	   button that changes the seed. */
 	function effectiveCfg() {
 		const cfg = CFG.make(state.cfg);
 		cfg.overrides = state.overrides;
+		if (!cfg.seed && state.lastSeed) cfg.seed = state.lastSeed;
 		return cfg;
 	}
 
-	/* Only the file on screen is simulated eagerly. With five files loaded,
-	   dragging a slider used to run the engine five times per frame; the other
-	   four are computed when you switch to them or export. */
 	function ensureResult(i) {
 		if (state.results[i]) return state.results[i];
-		const f = state.files[i];
-		if (!f) return null;
-		const cfg = effectiveCfg();
+		const runner = state.runners[i];
+		if (!runner) return null;
 		// Every file in a batch shares the seed, so they stay one set.
-		if (!cfg.seed && state.lastSeed) cfg.seed = state.lastSeed;
-		state.results[i] = window.Engine.run(f.data, cfg);
+		state.results[i] = runner.run(effectiveCfg());
 		return state.results[i];
 	}
 
+	/* The engine is staged: a runner only redoes the phases whose settings
+	   changed. Moving the note template or an award dial used to re-simulate
+	   353 programs, 11,000 games and every stat line in the country — about
+	   200ms of blocking work every 140ms while a slider was moving. */
 	function run() {
 		if (!state.files.length) return;
-		let seed;
+		let res;
+		const t0 = performance.now();
 		try {
-			// Only the file on screen is simulated now; the others are cleared
-			// and recomputed on demand against the same seed.
 			state.results = new Array(state.files.length).fill(null);
-			state.results[state.active] =
-				window.Engine.run(state.files[state.active].data, effectiveCfg());
-			seed = state.results[state.active].seed;
-			state.lastSeed = seed;
+			res = state.runners[state.active].run(effectiveCfg());
+			state.results[state.active] = res;
+			state.lastSeed = res.seed;
 			clearError();
 		} catch (err) {
 			showError(err);
 			return;
 		}
+		const ms = performance.now() - t0;
 		$("seedPill").hidden = false;
-		$("seedPill").textContent = "seed " + seed;
-		$("seedPill").dataset.seed = seed;
-		if (state.history[0] !== seed) {
-			state.history.unshift(seed);
+		$("seedPill").textContent = "seed " + res.seed;
+		$("seedPill").dataset.seed = res.seed;
+		$("seedPill").title = "Click to copy · " + Math.round(ms) + "ms (" +
+			(res.phasesRun.length ? res.phasesRun.join(" → ") : "nothing to redo") + ")";
+		if (state.history[0] !== res.seed) {
+			state.history.unshift(res.seed);
 			state.history = state.history.slice(0, 12);
 			paintHistory();
 		}
 		writeHash();
-		render();
+		persist();
+		/* The note text is only ever shown on the Notes tab, so a change that
+		   rebuilt nothing but the notes does not need a 70-row table rebuilt
+		   behind it. Everything else re-renders. */
+		const notesOnly = res.phasesRun.length === 1 && res.phasesRun[0] === "notes";
+		if (!(notesOnly && state.tab !== "notes")) render();
 	}
 
 	function paintHistory() {
@@ -450,32 +831,39 @@
 
 	function reroll() {
 		const previous = state.lastSeed;
+		pushUndo("rerolled the class");
 		state.cfg.seed = "";
+		// Reroll is the only thing that changes a blank seed; everything else
+		// keeps the class you are looking at.
+		state.lastSeed = null;
 		$("seed").value = "";
+		// A reroll replaces every player, so an open editor showing the old one
+		// is a stale panel over a class that no longer contains him.
+		state.editing = null;
+		state.selected = {};
 		run();
-		// run() returns early on an engine error, so read the seed back from
-		// the result that actually exists rather than trusting state.results[0]
-		// to have been replaced (it used to write the PREVIOUS run's seed into
-		// the box, or throw outright on an empty results array).
 		const res = state.results[state.active];
 		if (!res) {
-			state.cfg.seed = previous || "";
-			$("seed").value = state.cfg.seed;
+			state.lastSeed = previous || null;
 			return;
 		}
-		state.cfg.seed = res.seed;
-		$("seed").value = res.seed;
+		// The reroll's seed becomes the pinned one; the box stays blank so the
+		// next reroll draws again.
+		state.lastSeed = res.seed;
 	}
 
 	/* ---------------------------------------------------------------- views */
 
 	const TABS = [
 		["players", "Prospects"],
+		["board", "Draft board"],
 		["teams", "AP Poll & Teams"],
 		["bracket", "March Madness"],
 		["awards", "Awards & leaders"],
+		["gamelog", "Game logs"],
 		["distribution", "Distributions"],
 		["notes", "Player notes"],
+		["compare", "Compare"],
 	];
 
 	function render() {
@@ -487,7 +875,7 @@
 			b.setAttribute("role", "tab");
 			b.setAttribute("aria-selected", key === state.tab ? "true" : "false");
 			b.tabIndex = key === state.tab ? 0 : -1;
-			b.addEventListener("click", () => { state.tab = key; render(); });
+			b.addEventListener("click", () => { state.tab = key; persist(); render(); });
 			b.addEventListener("keydown", (e) => {
 				const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
 				if (!d) return;
@@ -503,284 +891,81 @@
 		view.innerHTML = "";
 		const res = ensureResult(state.active);
 		if (!res) return;
-		({
-			players: viewPlayers, teams: viewTeams, bracket: viewBracket,
-			awards: viewAwards, distribution: viewDistribution, notes: viewNotes,
-		})[state.tab](view, res);
+		(V[state.tab] || V.players)(view, res);
 	}
 
-	const n1 = (x) => (x === undefined || x === null ? "" : x.toFixed(1));
-	const pc = (x) => (x * 100).toFixed(1);
-
-	function delta(now, before) {
-		const d = now - before;
-		const s = el("span", d > 0 ? "up" : d < 0 ? "down" : "");
-		s.textContent = d === 0 ? "" : (d > 0 ? " +" : " ") + d;
-		return s;
-	}
-
-	function sortable(table, rows, columns) {
-		const thead = el("thead");
-		const tr = el("tr");
-		for (const col of columns) {
-			const th = el("th", (col.num ? "num " : "") + "sortable", col.label);
-			th.title = col.title || col.label;
-			th.tabIndex = 0;
-			const activate = () => {
-				if (state.sort.key === col.key) state.sort.dir *= -1;
-				else state.sort = { key: col.key, dir: col.num === false ? 1 : -1 };
-				render();
-			};
-			th.addEventListener("click", activate);
-			th.addEventListener("keydown", (e) => {
-				if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activate(); }
-			});
-			if (state.sort.key === col.key) {
-				th.textContent = col.label + (state.sort.dir < 0 ? " ▾" : " ▴");
-				th.setAttribute("aria-sort", state.sort.dir < 0 ? "descending" : "ascending");
-			}
-			tr.appendChild(th);
-		}
-		thead.appendChild(tr);
-		table.appendChild(thead);
-
-		const key = state.sort.key;
-		const dir = state.sort.dir;
-		const sorted = rows.slice().sort((a, b) => {
-			const va = a.sortVals[key];
-			const vb = b.sortVals[key];
-			if (typeof va === "string" || typeof vb === "string") {
-				return String(va).localeCompare(String(vb)) * dir;
-			}
-			return ((va || 0) - (vb || 0)) * dir;
-		});
-		const tbody = el("tbody");
-		for (const r of sorted) tbody.appendChild(r.node);
-		table.appendChild(tbody);
-	}
-
-	function matchesFilter(p, res) {
-		const f = state.filter;
-		if (f.q) {
-			const hay = (p.name + " " + p.newCollege + " " + p.archetype + " " +
-				(p.awards || []).join(" ")).toLowerCase();
-			if (hay.indexOf(f.q.toLowerCase()) === -1) return false;
-		}
-		if (f.pos && p.newPos !== f.pos) return false;
-		if (f.conf) {
-			const t = res.teams[p.newCollege];
-			const conf = t ? t.conf : (p.nonNcaa ? p.newCollege : "");
-			if (conf !== f.conf) return false;
-		}
-		if (f.changedOnly && !p.collegeChanged) return false;
-		if (f.lockedOnly && !state.overrides[p.pid]) return false;
-		return true;
-	}
-
-	function filterBar(res, onChange) {
-		const bar = el("div", "filters");
-		const q = el("input");
-		q.type = "search";
-		q.placeholder = "Search name, school, archetype, honour…";
-		q.value = state.filter.q;
-		q.setAttribute("aria-label", "Search prospects");
-		q.addEventListener("input", () => { state.filter.q = q.value; onChange(); });
-		bar.appendChild(q);
-
-		const posSel = el("select");
-		posSel.setAttribute("aria-label", "Filter by position");
-		posSel.appendChild(new Option("all positions", ""));
-		for (const p of ["PG", "G", "SG", "GF", "SF", "F", "PF", "FC", "C"]) {
-			posSel.appendChild(new Option(p, p));
-		}
-		posSel.value = state.filter.pos;
-		posSel.addEventListener("change", () => { state.filter.pos = posSel.value; onChange(); });
-		bar.appendChild(posSel);
-
-		const confs = {};
-		for (const p of res.players) {
-			const t = res.teams[p.newCollege];
-			const c = t ? t.conf : (p.nonNcaa ? p.newCollege : null);
-			if (c) confs[c] = true;
-		}
-		const confSel = el("select");
-		confSel.setAttribute("aria-label", "Filter by conference");
-		confSel.appendChild(new Option("all conferences", ""));
-		for (const c of Object.keys(confs).sort()) confSel.appendChild(new Option(c, c));
-		confSel.value = state.filter.conf;
-		confSel.addEventListener("change", () => { state.filter.conf = confSel.value; onChange(); });
-		bar.appendChild(confSel);
-
-		for (const [key, label] of [["changedOnly", "reassigned colleges only"],
-			["lockedOnly", "locked players only"]]) {
-			const lab = el("label", "check");
-			const cb = el("input");
-			cb.type = "checkbox";
-			cb.checked = state.filter[key];
-			cb.addEventListener("change", () => { state.filter[key] = cb.checked; onChange(); });
-			lab.appendChild(cb);
-			lab.appendChild(document.createTextNode(" " + label));
-			bar.appendChild(lab);
-		}
-
-		const csv = el("button", null, "Export table as CSV");
-		csv.addEventListener("click", () => exportCsv(res));
-		bar.appendChild(csv);
-		return bar;
-	}
-
-	function viewPlayers(view, res) {
-		const summary = el("div", "rowflex");
-		const ncaa = res.players.filter((p) => !p.nonNcaa);
-		const conv = res.players.filter((p) => p.collegeChanged);
-		const avgOvr = res.players.reduce((a, p) => a + p.newOvr, 0) / res.players.length;
-		const avgOld = res.players.reduce((a, p) => a + p.origOvr, 0) / res.players.length;
-		for (const t of [
-			res.players.length + " prospects",
-			"avg ovr " + avgOld.toFixed(1) + " → " + avgOvr.toFixed(1),
-			"top ovr " + Math.max.apply(null, res.players.map((p) => p.newOvr)),
-			conv.length + " colleges reassigned",
-			ncaa.length + " in NCAA D-I",
-			Object.keys(state.overrides).length + " locked",
-		]) summary.appendChild(el("span", "pill", t));
-		view.appendChild(summary);
-		view.appendChild(filterBar(res, render));
-		view.appendChild(el("p", "legendline",
-			"Click a column to sort, or a row to edit and lock that prospect. " +
-			"Ovr/Pot show the change from the original file."));
-
-		const columns = [
-			{ key: "lock", label: "🔒", num: false, title: "Locked settings survive a reroll" },
-			{ key: "name", label: "Player", num: false },
-			{ key: "pos", label: "Pos", num: false },
-			{ key: "year", label: "Year", num: false },
-			{ key: "newOvr", label: "Ovr", num: true },
-			{ key: "newPot", label: "Pot", num: true },
-			{ key: "archetype", label: "Archetype", num: false },
-			{ key: "college", label: "College / League", num: false },
-			{ key: "conf", label: "Conf", num: false },
-			{ key: "mpg", label: "MPG", num: true },
-			{ key: "ppg", label: "PPG", num: true },
-			{ key: "rpg", label: "RPG", num: true },
-			{ key: "apg", label: "APG", num: true },
-			{ key: "spg", label: "SPG", num: true },
-			{ key: "bpg", label: "BPG", num: true },
-			{ key: "topg", label: "TO", num: true },
-			{ key: "pfpg", label: "PF", num: true },
-			{ key: "usg", label: "USG%", num: true, title: "Share of team chances used on the floor" },
-			{ key: "fgp", label: "FG%", num: true },
-			{ key: "tpp", label: "3P%", num: true },
-			{ key: "ftp", label: "FT%", num: true },
-			{ key: "ts", label: "TS%", num: true },
-			{ key: "awards", label: "Honors", num: false },
-		];
-
-		const shown = res.players.filter((p) => matchesFilter(p, res));
-		const rows = shown.map((p) => {
-			const s = p.stats || {};
-			const team = res.teams[p.newCollege];
-			const tr = el("tr");
-			if (state.overrides[p.pid]) tr.className = "locked";
-			tr.tabIndex = 0;
-			const open = () => openEditor(p, res);
-			tr.addEventListener("click", (e) => {
-				if (e.target.tagName === "BUTTON") return;
-				open();
-			});
-			tr.addEventListener("keydown", (e) => {
-				if (e.key === "Enter") { e.preventDefault(); open(); }
-			});
-			const add = (txt, cls) => { tr.appendChild(el("td", cls, txt)); };
-
-			add(state.overrides[p.pid] ? "🔒" : "");
-			const nameTd = el("td");
-			nameTd.appendChild(document.createTextNode(p.name));
-			tr.appendChild(nameTd);
-			add(p.newPos + (p.newPos !== p.origPos ? " (" + p.origPos + ")" : ""));
-			add(p.classYear);
-
-			const ovrTd = el("td", "num");
-			ovrTd.appendChild(document.createTextNode(String(p.newOvr)));
-			ovrTd.appendChild(delta(p.newOvr, p.origOvr));
-			tr.appendChild(ovrTd);
-			const potTd = el("td", "num");
-			potTd.appendChild(document.createTextNode(String(p.newPot)));
-			potTd.appendChild(delta(p.newPot, p.origPot));
-			tr.appendChild(potTd);
-
-			const aTd = el("td");
-			aTd.appendChild(el("span", "tag arch", p.archetype));
-			tr.appendChild(aTd);
-
-			const cTd = el("td");
-			if (p.nonNcaa) cTd.appendChild(el("span", "tag pro", p.proClub || p.newCollege));
-			else cTd.appendChild(document.createTextNode(p.newCollege || "—"));
-			if (p.collegeChanged && !p.nonNcaa) cTd.appendChild(el("span", "tag", "new"));
-			tr.appendChild(cTd);
-
-			add(team ? team.conf : p.nonNcaa ? p.newCollege : "");
-			for (const k of ["mpg", "ppg", "rpg", "apg", "spg", "bpg", "topg", "pfpg"]) {
-				add(n1(s[k]), "num");
-			}
-			for (const k of ["usg", "fgp", "tpp", "ftp", "ts"]) {
-				add(s[k] === undefined ? "" : pc(s[k]), "num");
-			}
-			const awTd = el("td", "wrap");
-			awTd.textContent = (p.awards || []).join("; ");
-			tr.appendChild(awTd);
-
-			return {
-				node: tr,
-				sortVals: {
-					lock: state.overrides[p.pid] ? 1 : 0,
-					name: p.name, pos: p.newPos, year: p.classYear, newOvr: p.newOvr,
-					newPot: p.newPot, archetype: p.archetype, college: p.newCollege,
-					conf: team ? team.conf : "", mpg: s.mpg, ppg: s.ppg, rpg: s.rpg,
-					apg: s.apg, spg: s.spg, bpg: s.bpg, topg: s.topg, pfpg: s.pfpg,
-					usg: s.usg, fgp: s.fgp, tpp: s.tpp, ftp: s.ftp, ts: s.ts,
-					awards: (p.awards || []).length,
-				},
-			};
-		});
-
-		view.appendChild(el("p", "legendline",
-			shown.length + " of " + res.players.length + " prospects shown"));
-		const wrap = el("div", "scroll");
-		const table = el("table");
-		sortable(table, rows, columns);
-		wrap.appendChild(table);
-		view.appendChild(wrap);
-		if (state.editing !== null) {
-			const p = res.players.filter((x) => x.pid === state.editing)[0];
-			if (p) view.appendChild(editorPanel(p, res));
-		}
+	/* The selection count lives in the bulk bar, so ticking a row has to
+	   refresh it. Only that bar is rebuilt — not the whole table. */
+	function refreshBulkBar() {
+		const old = document.getElementById("bulkBar");
+		const res = state.results[state.active];
+		if (!old || !res) return;
+		const fresh = global.Views.bulkBar(res);
+		old.replaceWith(fresh);
 	}
 
 	/* ----------------------------------------------------- per-player editor */
 
-	function openEditor(p, res) {
-		state.editing = state.editing === p.pid ? null : p.pid;
+	function openEditor(p) {
+		state.editing = state.editing === p.key ? null : p.key;
 		render();
 	}
 
 	function editorPanel(p, res) {
 		const panel = el("div", "editor");
 		const head = el("div", "rowflex");
-		head.appendChild(el("h3", null, p.name + " — " + p.newPos + " · " + p.newOvr + "/" + p.newPot));
+		head.appendChild(el("h3", null,
+			p.name + " — " + p.newPos + " · " + p.newOvr + "/" + p.newPot +
+			(p.boardRank ? " · board No. " + p.boardRank : "")));
 		const close = el("button", null, "Close");
 		close.addEventListener("click", () => { state.editing = null; render(); });
 		head.appendChild(close);
 		panel.appendChild(head);
 
-		const ov = state.overrides[p.pid] || {};
-		const grid = el("div", "editgrid");
+		const ov = state.overrides[p.key] || {};
 
-		const field = (label, node) => {
+		/* engine.js carefully worked out that a locked overall was unreachable
+		   for this player's height and stored it in p.lockUnreachable "so an
+		   impossible lock can be reported instead of quietly ignored". Nothing
+		   read it, so the editor just showed a different number. */
+		if (p.lockUnreachable) {
+			const u = p.lockUnreachable;
+			panel.appendChild(el("div", "warnbox",
+				"You asked for overall " + u.asked + ", but at " + p.newHgtInches +
+				" inches this build can only reach " + u.range.min + "–" + u.range.max +
+				". He came out at " + u.got + ". Height is never shifted, so a very " +
+				"tall or very short player has a real floor and ceiling."));
+		} else if (p.ovrRange) {
+			panel.appendChild(el("p", "hint",
+				"This build can be solved to any overall from " + p.ovrRange.min +
+				" to " + p.ovrRange.max + "."));
+		}
+
+		const grid = el("div", "editgrid");
+		const controls = {};
+		/* Every lock is opt-in. "Apply lock" used to write BOTH ovr and pot
+		   unconditionally, so there was no way to lock only the archetype or
+		   only the school without also freezing two numbers you did not mean
+		   to touch. */
+		const field = (key, label, node, current) => {
 			const w = el("div", "ctl");
+			const row = el("div", "lockrow");
+			const cb = el("input");
+			cb.type = "checkbox";
+			cb.checked = ov[key] !== undefined && ov[key] !== null;
+			cb.id = "lock-" + key;
+			cb.setAttribute("aria-label", "Lock " + label);
 			const l = el("label", null, label);
-			w.appendChild(l);
+			l.htmlFor = cb.id;
+			l.style.margin = "0";
+			row.appendChild(cb);
+			row.appendChild(l);
+			w.appendChild(row);
 			w.appendChild(node);
 			grid.appendChild(w);
+			node.addEventListener("input", () => { cb.checked = true; });
+			node.addEventListener("change", () => { cb.checked = true; });
+			controls[key] = { cb, node, current };
 			return node;
 		};
 
@@ -789,23 +974,29 @@
 		ovrIn.min = 0;
 		ovrIn.max = 100;
 		ovrIn.value = Number.isFinite(ov.ovr) ? ov.ovr : p.newOvr;
-		field("Lock overall", ovrIn);
+		field("ovr", "Overall", ovrIn);
 
 		const potIn = el("input");
 		potIn.type = "number";
 		potIn.min = 0;
 		potIn.max = 100;
 		potIn.value = Number.isFinite(ov.pot) ? ov.pot : p.newPot;
-		field("Lock potential", potIn);
+		field("pot", "Potential", potIn);
 
 		const archSel = el("select");
 		archSel.appendChild(new Option("(roll it)", ""));
+		/* Gate on the height the build ACTUALLY uses. With Vary size on, the
+		   rebuild works from a shifted hgt rating, so a list filtered on
+		   origRatings.hgt offered the wrong archetypes at the boundaries. */
+		const buildHgt = p.newRatings ? p.newRatings.hgt : p.origRatings.hgt;
 		for (const a of RB.ARCHETYPES) {
-			if (p.origRatings.hgt < a.min || p.origRatings.hgt > a.max) continue;
-			archSel.appendChild(new Option(a.name, a.name));
+			if (buildHgt < a.min || buildHgt > a.max) continue;
+			const opt = new Option(a.name, a.name);
+			opt.title = archetypeTooltip(a);
+			archSel.appendChild(opt);
 		}
 		archSel.value = ov.archetype || "";
-		field("Lock archetype", archSel);
+		field("archetype", "Archetype", archSel);
 
 		const colSel = el("select");
 		colSel.appendChild(new Option("(roll it)", ""));
@@ -813,45 +1004,116 @@
 			colSel.appendChild(new Option(name, name));
 		}
 		colSel.value = ov.college || "";
-		field("Lock school / league", colSel);
+		field("college", "School / league", colSel);
+
+		const nameIn = el("input");
+		nameIn.type = "text";
+		nameIn.value = ov.name || p.name;
+		field("name", "Name", nameIn);
+
+		const hgtIn = el("input");
+		hgtIn.type = "number";
+		hgtIn.min = 58;
+		hgtIn.max = 96;
+		hgtIn.value = Number.isFinite(ov.hgtInches) ? ov.hgtInches : p.newHgtInches;
+		field("hgtInches", "Listed height (inches)", hgtIn);
 		panel.appendChild(grid);
+
+		/* Individual ratings. Sometimes you just want to bump one guy's tp to
+		   70, and there was no way to say so. A hand-set rating is pinned: the
+		   solver leaves it alone and finds the target overall from the others. */
+		panel.appendChild(el("h4", null, "Individual ratings (blank = let the solver decide)"));
+		const rgrid = el("div", "ratinggrid");
+		const ratingInputs = {};
+		for (const k of BB.RATING_KEYS) {
+			const cell = el("div");
+			const lab = el("label", null, k);
+			lab.htmlFor = "rating-" + k;
+			const inp = el("input");
+			inp.type = "number";
+			inp.id = "rating-" + k;
+			inp.min = 0;
+			inp.max = 100;
+			inp.placeholder = String(p.newRatings[k]);
+			const pinnedVal = ov.ratings && Number.isFinite(ov.ratings[k]) ? ov.ratings[k] : "";
+			inp.value = pinnedVal === "" ? "" : String(pinnedVal);
+			if (pinnedVal !== "") cell.className = "changed";
+			if (k === "hgt") {
+				inp.disabled = true;
+				inp.title = "Height comes from the listed height above.";
+			}
+			ratingInputs[k] = inp;
+			cell.appendChild(lab);
+			cell.appendChild(inp);
+			rgrid.appendChild(cell);
+		}
+		panel.appendChild(rgrid);
 
 		const buttons = el("div", "rowflex");
 		const apply = el("button", "primary", "Apply lock");
 		apply.addEventListener("click", () => {
-			const next = { ovr: Number(ovrIn.value), pot: Number(potIn.value) };
-			if (archSel.value) next.archetype = archSel.value;
-			if (colSel.value) next.college = colSel.value;
-			state.overrides[p.pid] = next;
+			pushUndo("locked " + p.name);
+			const next = {};
+			if (controls.ovr.cb.checked) next.ovr = Number(ovrIn.value);
+			if (controls.pot.cb.checked) next.pot = Number(potIn.value);
+			if (controls.archetype.cb.checked && archSel.value) next.archetype = archSel.value;
+			if (controls.college.cb.checked && colSel.value) next.college = colSel.value;
+			if (controls.name.cb.checked && nameIn.value.trim()) next.name = nameIn.value.trim();
+			if (controls.hgtInches.cb.checked) next.hgtInches = Number(hgtIn.value);
+			const ratings = {};
+			for (const k of BB.RATING_KEYS) {
+				const raw = ratingInputs[k].value;
+				if (raw !== "" && Number.isFinite(Number(raw))) ratings[k] = Number(raw);
+			}
+			if (Object.keys(ratings).length) next.ratings = ratings;
+			if (!Object.keys(next).length) delete state.overrides[p.key];
+			else state.overrides[p.key] = next;
+			state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
 			run();
 		});
 		buttons.appendChild(apply);
 		const clear = el("button", null, "Clear lock");
 		clear.addEventListener("click", () => {
-			delete state.overrides[p.pid];
+			pushUndo("cleared the lock on " + p.name);
+			delete state.overrides[p.key];
 			run();
 		});
 		buttons.appendChild(clear);
 		panel.appendChild(buttons);
 
-		// "Explain this player": what fired, what it cost, and the full ratings
-		// diff against the original file.
 		panel.appendChild(el("h4", null, "Why this player looks like this"));
 		const why = el("div", "note");
 		const s = p.stats;
+		const team = res.teams[p.newCollege];
 		why.textContent = [
 			"Archetype: " + p.archetype + (ov.archetype ? " (locked)" : "") +
 				" — offsets are made ovr-neutral before the solver runs, so the",
 			"  build changed his shape, not his overall.",
+			res.flavor && res.flavor.name !== "balanced"
+				? "Class flavour: " + res.flavor.label + " (archetype weights are tilted this year)"
+				: "",
 			"Overall: " + p.origOvr + " → " + p.newOvr +
 				(state.cfg.ovrMode === "curve" ? " (re-dealt along the class curve)" : " (preserved)"),
 			"Potential: " + p.origPot + " → " + p.newPot,
+			p.potFactors ? potExplain(p) : "",
 			"College: " + (p.origCollege || "(none in file)") + " → " + p.newCollege +
 				(p.collegeChanged ? " (reassigned)" : ""),
-			"Class year: " + p.classYear,
+			"Class year: " + p.classYear +
+				(p.transfer ? " · " + p.transfer.kind + " from " + p.transfer.from : "") +
+				(p.redshirt ? " · " + p.redshirt : "") +
+				(p.reclassified ? " · " + p.reclassified : ""),
+			p.recruiting ? "Recruiting: " + p.recruiting.stars + "-star, No. " +
+				p.recruiting.rank + " nationally" +
+				(p.recruiting.headliner ? ", headline signing of his class" : "") : "",
 			s ? "Stat line comes from " + n1(s.mpg) + " MPG at USG " + pc(s.usg) +
-				"% on a team rated " + (res.teams[p.newCollege]
-					? res.teams[p.newCollege].rating.toFixed(1) : "—") : "",
+				"% on a team rated " + (team ? team.rating.toFixed(1) : "—") : "",
+			s && team && team.oppDefense
+				? "Opponents faced: rim defence " + (team.oppDefense.rim >= 0 ? "+" : "") +
+					(team.oppDefense.rim * 100).toFixed(1) + ", perimeter " +
+					(team.oppDefense.perimeter >= 0 ? "+" : "") +
+					(team.oppDefense.perimeter * 100).toFixed(1) : "",
+			p.shareOf ? "Share of his team: " + pc(p.shareOf.pts) + "% of points, " +
+				pc(p.shareOf.ast) + "% of assists, " + pc(p.shareOf.reb) + "% of rebounds" : "",
 		].filter(Boolean).join("\n");
 		panel.appendChild(why);
 
@@ -875,9 +1137,8 @@
 		dtr.appendChild(el("td", null, "change"));
 		for (const k of BB.RATING_KEYS) {
 			const d = p.newRatings[k] - p.origRatings[k];
-			const td = el("td", "num " + (d > 0 ? "up" : d < 0 ? "down" : ""),
-				d === 0 ? "" : (d > 0 ? "+" : "") + d);
-			dtr.appendChild(td);
+			dtr.appendChild(el("td", "num " + (d > 0 ? "up" : d < 0 ? "down" : ""),
+				d === 0 ? "" : (d > 0 ? "+" : "") + d));
 		}
 		db.appendChild(dtr);
 		dt.appendChild(db);
@@ -886,402 +1147,80 @@
 		return panel;
 	}
 
-	/* ------------------------------------------------------------ team views */
-
-	function viewTeams(view, res) {
-		view.appendChild(el("h3", null, "AP Top 25"));
-		view.appendChild(el("p", "legendline",
-			"Rankings come from record, strength of schedule and roster quality. " +
-			"Program strength starts from each school's BBGM draft frequency, then " +
-			"this year's prospects are layered on top."));
-		const wrap = el("div", "scroll");
-		const table = el("table");
-		const thead = el("thead");
-		const hr = el("tr");
-		for (const h of ["#", "Team", "Conf", "Record", "Conf record", "SOS", "Seed", "Result", "Prospects"]) {
-			hr.appendChild(el("th", h === "#" || h === "SOS" ? "num" : "", h));
-		}
-		thead.appendChild(hr);
-		table.appendChild(thead);
-		const tb = el("tbody");
-		res.poll.forEach((t, i) => {
-			const tr = el("tr");
-			tr.appendChild(el("td", "num", String(i + 1)));
-			tr.appendChild(el("td", null, t.name));
-			tr.appendChild(el("td", null, t.conf));
-			tr.appendChild(el("td", null, t.w + "-" + t.l +
-				(t.confRegularChamp ? " ★" : "")));
-			tr.appendChild(el("td", null, t.cw + "-" + t.cl));
-			tr.appendChild(el("td", "num", t.sosAvg.toFixed(1)));
-			tr.appendChild(el("td", null, t.ncaaSeed ? "No. " + t.ncaaSeed : "—"));
-			tr.appendChild(el("td", null, t.ncaaResult || (t.bid ? "NCAA field" : "—")));
-			const names = t.prospects.map((p) => p.name + " (" + p.newOvr + ")").join(", ");
-			tr.appendChild(el("td", "wrap", names));
-			tb.appendChild(tr);
-		});
-		table.appendChild(tb);
-		wrap.appendChild(table);
-		view.appendChild(wrap);
-		view.appendChild(el("p", "legendline", "★ = regular-season conference champion."));
-
-		view.appendChild(el("h3", null, "Programs with prospects in this class"));
-		const cards = el("div", "cards");
-		const withP = Object.values(res.teams)
-			.filter((t) => t.prospects.length)
-			.sort((a, b) => b.resume - a.resume);
-		for (const t of withP) {
-			const c = el("div", "card");
-			c.appendChild(el("h4", null,
-				t.name + " — " + t.w + "-" + t.l + (t.apRank ? "  (AP #" + t.apRank + ")" : "")));
-			const best = t.log.filter((g) => g.won)
-				.sort((a, b) => b.quality - a.quality)[0];
-			c.appendChild(el("div", "note",
-				t.conf + " " + t.cw + "-" + t.cl +
-				(t.confRegularChamp ? " · regular-season champion" : "") +
-				(t.confTourneyChamp ? " · conference tournament champion" : "") +
-				"\n" + (t.ncaaSeed ? "No. " + t.ncaaSeed + " seed, " + t.ncaaResult : (t.bid ? t.ncaaResult : "Did not make the field")) +
-				(best ? "\nBest win: " + best.pf + "-" + best.pa + " over " + best.opp : "") +
-				"\n" + t.prospects.map((p) =>
-					"  " + p.name + " — " + p.newOvr + "/" + p.newPot + " " + p.newPos +
-					", " + n1(p.stats.ppg) + "/" + n1(p.stats.rpg) + "/" + n1(p.stats.apg)).join("\n")));
-			cards.appendChild(c);
-		}
-		view.appendChild(cards);
-
-		// Pro / DII leagues get a table of their own rather than a bare name.
-		const leagues = res.proLeagues || {};
-		for (const name of Object.keys(leagues)) {
-			const lg = leagues[name];
-			view.appendChild(el("h3", null, name + " — " +
-				(lg.champion ? lg.champion.name + " win the title" : "season table")));
-			const lw = el("div", "scroll");
-			const lt = el("table");
-			const lh = el("thead");
-			const lhr = el("tr");
-			for (const h of ["#", "Club", "Record", "Prospects"]) {
-				lhr.appendChild(el("th", h === "#" ? "num" : "", h));
-			}
-			lh.appendChild(lhr);
-			lt.appendChild(lh);
-			const lb = el("tbody");
-			lg.table.forEach((c, i) => {
-				const tr = el("tr");
-				tr.appendChild(el("td", "num", String(i + 1)));
-				tr.appendChild(el("td", null, c.name + (c.leagueChamp ? " 🏆" : "")));
-				tr.appendChild(el("td", null, c.w + "-" + c.l));
-				tr.appendChild(el("td", "wrap", c.prospects.map((p) =>
-					p.name + " (" + n1(p.stats.ppg) + " ppg)").join(", ")));
-				lb.appendChild(tr);
-			});
-			lt.appendChild(lb);
-			lw.appendChild(lt);
-			view.appendChild(lw);
-		}
-	}
-
-	function gameNode(a, b, winner, seedA, seedB, score) {
-		const g = el("div", "game" + (winner === b && seedB > seedA + 2 ? " upset" : ""));
-		const line = (t, seed, won) => {
-			const d = el("div", won ? "w" : "l");
-			d.appendChild(el("span", "sd", seed === undefined ? "" : String(seed)));
-			d.appendChild(el("span", "gn", t.name));
-			return d;
+	function potExplain(p) {
+		const f = p.potFactors;
+		const bits = [];
+		const add = (label, v) => {
+			if (Math.abs(v) < 0.3) return;
+			bits.push(label + " " + (v > 0 ? "+" : "") + v.toFixed(1));
 		};
-		g.appendChild(line(a, seedA, winner === a));
-		g.appendChild(line(b, seedB, winner === b));
-		if (score) g.appendChild(el("div", "score", score));
-		return g;
+		add("archetype", f.arch);
+		add("age", f.age);
+		add("age in class", f.ageClass);
+		add("shooting touch (FT%)", f.touch);
+		add("frame", f.frame);
+		add("role vs production", f.role);
+		add("your bias slider", f.bias || 0);
+		return "  potential built from: " + (bits.length ? bits.join(", ") : "nothing notable");
 	}
 
-	function viewBracket(view, res) {
-		const t = res.tourney;
-		const head = el("div", "rowflex");
-		head.appendChild(el("span", "pill",
-			"Champion: " + t.champion.team.name + " (No. " + t.champion.seed + ")"));
-		head.appendChild(el("span", "pill", "Runner-up: " + t.runnerUp.team.name));
-		head.appendChild(el("span", "pill",
-			"Final Four: " + t.finalFour.map((x) => x.team.name).join(", ")));
-		const upsets = [];
-		for (const r of window.Tournament.REGIONS) {
-			for (const round of t.regions[r].rounds) {
-				for (const g of round) if (g.upset) upsets.push(g);
-			}
-		}
-		head.appendChild(el("span", "pill", upsets.length + " upsets"));
-		view.appendChild(head);
+	/* --------------------------------------------------------------- bulk */
 
-		// Cinderella: the best run by a double-digit seed.
-		const cinderella = [];
-		for (const r of window.Tournament.REGIONS) {
-			for (const x of t.regions[r].seeds) {
-				if (x.seed >= 10 && (x.team.ncaaWins || 0) >= 1) cinderella.push(x);
-			}
-		}
-		cinderella.sort((a, b) => (b.team.ncaaWins || 0) - (a.team.ncaaWins || 0));
-		if (cinderella.length) {
-			const c = cinderella[0];
-			view.appendChild(el("p", "legendline",
-				"Cinderella: No. " + c.seed + " " + c.team.name + " won " +
-				c.team.ncaaWins + " game(s) — " + c.team.ncaaResult + "."));
-		}
-
-		const path = el("div", "ctl");
-		const sel = el("select");
-		sel.appendChild(new Option("follow a team's path…", ""));
-		const inField = [];
-		for (const r of window.Tournament.REGIONS) {
-			for (const x of t.regions[r].seeds) inField.push(x);
-		}
-		inField.sort((a, b) => a.team.name.localeCompare(b.team.name));
-		for (const x of inField) sel.appendChild(new Option(x.team.name, x.team.name));
-		const out = el("div", "note");
-		sel.addEventListener("change", () => {
-			out.textContent = "";
-			if (!sel.value) return;
-			const lines = [];
-			for (const r of window.Tournament.REGIONS) {
-				for (const round of t.regions[r].rounds) {
-					for (const g of round) {
-						if (g.a.team.name !== sel.value && g.b.team.name !== sel.value) continue;
-						const me = g.a.team.name === sel.value ? g.a : g.b;
-						const them = g.a.team.name === sel.value ? g.b : g.a;
-						lines.push((g.winner === me ? "W over " : "L to ") +
-							"No. " + them.seed + " " + them.team.name +
-							(g.score ? "  " + g.score : ""));
-					}
-				}
-			}
-			for (const g of t.semis.concat([t.final])) {
-				if (!g.a || !g.b) continue;
-				if (g.a.team.name !== sel.value && g.b.team.name !== sel.value) continue;
-				const me = g.a.team.name === sel.value ? g.a : g.b;
-				const them = g.a.team.name === sel.value ? g.b : g.a;
-				lines.push((g.winner === me ? "W over " : "L to ") + them.team.name +
-					(g.score ? "  " + g.score : ""));
-			}
-			out.textContent = lines.join("\n") || "Did not play in the main draw.";
-		});
-		path.appendChild(sel);
-		path.appendChild(out);
-		view.appendChild(path);
-
-		view.appendChild(el("h3", null, "First Four"));
-		const ff = el("div", "bracket");
-		const ffr = el("div", "round");
-		for (const g of t.firstFour) {
-			ffr.appendChild(gameNode(g.a, g.b, g.winner, g.seed, g.seed, g.score));
-		}
-		ff.appendChild(ffr);
-		view.appendChild(ff);
-
-		const ROUNDS = ["Round of 64", "Round of 32", "Sweet 16", "Elite Eight"];
-		// Mirrored layout: two regions feed in from the left, two from the
-		// right, with the Final Four in the middle — so the whole draw reads as
-		// one bracket instead of four separate scrolling strips.
-		const REG = window.Tournament.REGIONS;
-		const mirror = el("div", "bracketwrap");
-		const leftCol = el("div", "half");
-		const rightCol = el("div", "half right");
-		REG.forEach((region, i) => {
-			const r = t.regions[region];
-			const box = el("div", "regionbox");
-			box.appendChild(el("h4", null, region + " — " + r.champ.team.name + " advances"));
-			const br = el("div", "bracket");
-			r.rounds.forEach((games, gi) => {
-				const col = el("div", "round");
-				col.appendChild(el("h5", null, ROUNDS[gi] || "Round " + (gi + 1)));
-				for (const g of games) {
-					col.appendChild(gameNode(g.a.team, g.b.team, g.winner.team,
-						g.a.seed, g.b.seed, g.score));
-				}
-				br.appendChild(col);
-			});
-			box.appendChild(br);
-			(i < 2 ? leftCol : rightCol).appendChild(box);
-		});
-		const centre = el("div", "centrecol");
-		centre.appendChild(el("h4", null, "Final Four"));
-		for (const g of t.semis) {
-			centre.appendChild(gameNode(g.a.team, g.b.team, g.winner.team,
-				g.a.seed, g.b.seed, g.score));
-		}
-		centre.appendChild(el("h4", null, "National championship"));
-		centre.appendChild(gameNode(t.final.a.team, t.final.b.team, t.final.winner.team,
-			t.final.a.seed, t.final.b.seed, t.final.score));
-		mirror.appendChild(leftCol);
-		mirror.appendChild(centre);
-		mirror.appendChild(rightCol);
-		view.appendChild(mirror);
-
-		view.appendChild(el("h3", null, "Last four in / first four out"));
-		const bub = el("div", "note");
-		bub.textContent =
-			"Last in:  " + t.selection.atLarge.slice(-4).map((x) => x.name + " (" + x.w + "-" + x.l + ")").join(", ") +
-			"\nFirst out: " + t.selection.bubble.slice(0, 4).map((x) => x.name + " (" + x.w + "-" + x.l + ")").join(", ");
-		view.appendChild(bub);
+	function bulkTargets() {
+		return Object.keys(state.selected);
 	}
 
-	/* --------------------------------------------------------------- awards */
-
-	function leaderTable(res, title, key, fmt) {
-		const list = res.players.filter((p) => p.stats && p.stats.mpg >= 15)
-			.sort((a, b) => b.stats[key] - a.stats[key])
-			.slice(0, 10);
-		const box = el("div", "card");
-		box.appendChild(el("h4", null, title));
-		const lines = list.map((p, i) =>
-			(i + 1) + ". " + (fmt ? fmt(p.stats[key]) : n1(p.stats[key])) + "  " +
-			p.name + " (" + (p.proClub || p.newCollege) + ")");
-		box.appendChild(el("div", "note", lines.join("\n")));
-		return box;
-	}
-
-	function viewAwards(view, res) {
-		view.appendChild(el("h3", null, "Statistical leaders"));
-		view.appendChild(el("p", "legendline",
-			"The first thing to check when sanity-testing a class."));
-		const leaders = el("div", "cards");
-		leaders.appendChild(leaderTable(res, "Points", "ppg"));
-		leaders.appendChild(leaderTable(res, "Rebounds", "rpg"));
-		leaders.appendChild(leaderTable(res, "Assists", "apg"));
-		leaders.appendChild(leaderTable(res, "Blocks", "bpg"));
-		leaders.appendChild(leaderTable(res, "Steals", "spg"));
-		leaders.appendChild(leaderTable(res, "True shooting", "ts", (v) => pc(v) + "%"));
-		view.appendChild(leaders);
-
-		const teamRows = Object.values(res.teams).filter((t) => t.prospects.length)
-			.sort((a, b) => b.pct - a.pct).slice(0, 15);
-		const trBox = el("div", "card");
-		trBox.appendChild(el("h4", null, "Best records among programs with prospects"));
-		trBox.appendChild(el("div", "note", teamRows.map((t) =>
-			t.w + "-" + t.l + "  " + t.name + " (" + t.conf + ")").join("\n")));
-		view.appendChild(trBox);
-
-		view.appendChild(el("h3", null, "Honours"));
-		const honored = res.players.filter((p) => p.awards && p.awards.length)
-			.sort((a, b) => (b.scoreTotal || 0) - (a.scoreTotal || 0));
-		if (!honored.length) {
-			view.appendChild(el("p", "legendline",
-				"Nobody in this class cleared the field. Lower “Award strictness” to hand out more."));
+	function bulkApply(patch, label) {
+		const keys = bulkTargets();
+		if (!keys.length) return;
+		pushUndo(label);
+		for (const key of keys) {
+			state.overrides[key] = Object.assign({}, state.overrides[key] || {}, patch);
 		}
-		view.appendChild(el("p", "legendline",
-			"Prospects are ranked against every returning player in Division I, not " +
-			"only against each other, so an All-America slot has to be earned."));
-		const cards = el("div", "cards");
-		for (const p of honored) {
-			const c = el("div", "card");
-			c.appendChild(el("h4", null, p.name + " — " + (p.proClub || p.newCollege)));
-			const s = p.stats;
-			c.appendChild(el("div", "note",
-				p.newPos + " · " + p.newOvr + "/" + p.newPot + " · " + p.archetype + "\n" +
-				n1(s.ppg) + " PPG / " + n1(s.rpg) + " RPG / " + n1(s.apg) + " APG · " +
-				pc(s.fgp) + "% FG, " + pc(s.tpp) + "% 3P\n" +
-				p.awards.join("\n")));
-			cards.appendChild(c);
+		state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
+		run();
+	}
+
+	function bulkShiftOvr(d) {
+		const keys = bulkTargets();
+		if (!keys.length) return;
+		const res = state.results[state.active];
+		pushUndo("shifted overall by " + d + " for " + keys.length + " prospects");
+		for (const key of keys) {
+			const p = res.players.filter((x) => x.key === key)[0];
+			if (!p) continue;
+			const base = Number.isFinite((state.overrides[key] || {}).ovr)
+				? state.overrides[key].ovr : p.newOvr;
+			state.overrides[key] = Object.assign({}, state.overrides[key] || {},
+				{ ovr: Math.max(0, Math.min(100, base + d)) });
 		}
-		view.appendChild(cards);
+		state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
+		run();
 	}
 
-	/* --------------------------------------------------------- distributions */
-
-	function histogram(title, values, buckets, fmt) {
-		const box = el("div", "card");
-		box.appendChild(el("h4", null, title));
-		if (!values.length) return box;
-		const lo = Math.min.apply(null, values);
-		const hi = Math.max.apply(null, values);
-		const n = buckets || 12;
-		const width = (hi - lo) / n || 1;
-		const counts = new Array(n).fill(0);
-		for (const v of values) {
-			counts[Math.min(n - 1, Math.floor((v - lo) / width))]++;
-		}
-		const max = Math.max.apply(null, counts);
-		const chart = el("div", "hist");
-		counts.forEach((c, i) => {
-			const row = el("div", "histrow");
-			row.appendChild(el("span", "histlabel",
-				(fmt ? fmt(lo + i * width) : (lo + i * width).toFixed(1))));
-			const bar = el("span", "histbar");
-			bar.style.width = (max ? (100 * c) / max : 0) + "%";
-			bar.title = c + " prospects";
-			row.appendChild(bar);
-			row.appendChild(el("span", "histcount", String(c)));
-			chart.appendChild(row);
-		});
-		box.appendChild(chart);
-		const sorted = values.slice().sort((a, b) => a - b);
-		const q = (p) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
-		box.appendChild(el("div", "note",
-			"median " + q(0.5).toFixed(1) + " · p90 " + q(0.9).toFixed(1) +
-			" · max " + hi.toFixed(1)));
-		return box;
+	function bulkClear() {
+		const keys = bulkTargets();
+		if (!keys.length) return;
+		pushUndo("cleared locks on " + keys.length + " prospects");
+		for (const key of keys) delete state.overrides[key];
+		run();
 	}
 
-	function viewDistribution(view, res) {
-		view.appendChild(el("p", "legendline",
-			"Eyeball the shape of a class in one second instead of reading 70 rows."));
-		const cards = el("div", "cards");
-		const withStats = res.players.filter((p) => p.stats);
-		cards.appendChild(histogram("Overall rating", res.players.map((p) => p.newOvr), 12));
-		cards.appendChild(histogram("Potential", res.players.map((p) => p.newPot), 12));
-		cards.appendChild(histogram("Points per game", withStats.map((p) => p.stats.ppg), 12));
-		cards.appendChild(histogram("Minutes per game", withStats.map((p) => p.stats.mpg), 12));
-		cards.appendChild(histogram("Usage rate", withStats.map((p) => p.stats.usg * 100), 12));
-		cards.appendChild(histogram("True shooting", withStats.map((p) => p.stats.ts * 100), 12));
+	/* -------------------------------------------------------------- modal */
 
-		const counts = {};
-		for (const p of res.players) counts[p.archetype] = (counts[p.archetype] || 0) + 1;
-		const archBox = el("div", "card");
-		archBox.appendChild(el("h4", null, "Archetypes in this class"));
-		archBox.appendChild(el("div", "note", Object.keys(counts)
-			.sort((a, b) => counts[b] - counts[a])
-			.map((k) => String(counts[k]).padStart(3) + "  " + k).join("\n")));
-		cards.appendChild(archBox);
-
-		const years = {};
-		for (const p of res.players) years[p.classYear] = (years[p.classYear] || 0) + 1;
-		const yBox = el("div", "card");
-		yBox.appendChild(el("h4", null, "Class years"));
-		yBox.appendChild(el("div", "note", ["Freshman", "Sophomore", "Junior", "Senior"]
-			.map((k) => String(years[k] || 0).padStart(3) + "  " + k).join("\n")));
-		cards.appendChild(yBox);
-		view.appendChild(cards);
+	let modalOk = null;
+	function modal(title, body, onOk, okLabel) {
+		$("modalTitle").textContent = title;
+		const b = $("modalBody");
+		b.innerHTML = "";
+		b.appendChild(body);
+		$("modalOk").textContent = okLabel || "OK";
+		modalOk = onOk;
+		$("modal").hidden = false;
 	}
+	function closeModal() { $("modal").hidden = true; modalOk = null; }
 
-	/* ---------------------------------------------------------------- notes */
-
-	function viewNotes(view, res) {
-		view.appendChild(el("p", "legendline",
-			"This is exactly what gets written into each player's note field in the " +
-			"exported file. Choose which lines appear under “Note template” in the sidebar."));
-		const bar = el("div", "filters");
-		const q = el("input");
-		q.type = "search";
-		q.placeholder = "Search notes…";
-		q.value = state.filter.q;
-		q.setAttribute("aria-label", "Search notes");
-		q.addEventListener("input", () => { state.filter.q = q.value; render(); });
-		bar.appendChild(q);
-		const copy = el("button", null, "Copy all notes");
-		copy.addEventListener("click", () => {
-			const text = res.players.slice().sort((a, b) => b.newOvr - a.newOvr)
-				.map((p) => p.name + "\n" + p.note).join("\n\n");
-			copyText(text, copy, "Copy all notes");
-		});
-		bar.appendChild(copy);
-		view.appendChild(bar);
-
-		const cards = el("div", "cards");
-		for (const p of res.players.slice().sort((a, b) => b.newOvr - a.newOvr)) {
-			if (!matchesFilter(p, res)) continue;
-			const c = el("div", "card");
-			c.appendChild(el("h4", null, p.name));
-			c.appendChild(el("div", "note", p.note));
-			cards.appendChild(c);
-		}
-		view.appendChild(cards);
-	}
+	/* ------------------------------------------------------------- clipboard */
 
 	function copyText(text, button, restore) {
 		const done = () => {
@@ -1289,9 +1228,6 @@
 			button.textContent = "Copied ✓";
 			setTimeout(() => { button.textContent = restore; }, 1400);
 		};
-		if (navigator.clipboard && navigator.clipboard.writeText) {
-			navigator.clipboard.writeText(text).then(done, () => fallback());
-		} else fallback();
 		function fallback() {
 			const ta = document.createElement("textarea");
 			ta.value = text;
@@ -1300,6 +1236,9 @@
 			try { document.execCommand("copy"); done(); } catch (e) { /* nothing to do */ }
 			ta.remove();
 		}
+		if (navigator.clipboard && navigator.clipboard.writeText) {
+			navigator.clipboard.writeText(text).then(done, fallback);
+		} else fallback();
 	}
 
 	/* --------------------------------------------------------------- export */
@@ -1311,9 +1250,8 @@
 		if (!sticky) setTimeout(() => { if (s.textContent === text) s.hidden = true; }, 3500);
 	}
 
-	function download(name, text) {
-		// BBGM writes its exports with a BOM; match it.
-		const blob = new Blob(["﻿" + text], { type: "application/json" });
+	function download(name, text, type) {
+		const blob = new Blob([text], { type: type || "text/plain" });
 		const a = document.createElement("a");
 		a.href = URL.createObjectURL(blob);
 		a.download = name;
@@ -1326,12 +1264,11 @@
 		const res = ensureResult(i);
 		if (!res) return false;
 		try {
-			const out = window.Engine.exportFile(res);
+			const out = global.Engine.exportFile(res);
 			const base = state.files[i].name.replace(/\.json$/i, "");
-			// A very large class can blow the string limit; say so instead of
-			// failing silently on an empty download.
-			const text = JSON.stringify(out, null, 2);
-			download(base + "_customized.json", text);
+			// BBGM writes its exports with a BOM; match it.
+			download(base + "_customized.json", "\ufeff" + JSON.stringify(out, null, 2),
+				"application/json");
 			return true;
 		} catch (err) {
 			showError(new Error("Could not export " + state.files[i].name + ": " + err.message));
@@ -1339,40 +1276,152 @@
 		}
 	}
 
+	const CSV_COLS = ["key", "name", "pos", "year", "ovr", "pot", "archetype", "college",
+		"conf", "board", "preseason", "move", "gp", "mpg", "ppg", "rpg", "orpg", "drpg",
+		"apg", "spg", "bpg", "topg", "pfpg", "cspg", "deflpg", "chgpg", "drtg",
+		"usg", "fgp", "tpp", "ftp", "ts", "awards"];
+
+	function esc(v) {
+		const s = v === undefined || v === null ? "" : String(v);
+		return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+	}
+
 	function exportCsv(res) {
-		const cols = ["name", "pos", "year", "ovr", "pot", "archetype", "college", "conf",
-			"gp", "mpg", "ppg", "rpg", "orpg", "drpg", "apg", "spg", "bpg", "topg", "pfpg",
-			"usg", "fgp", "tpp", "ftp", "ts", "awards"];
-		const esc = (v) => {
-			const s = v === undefined || v === null ? "" : String(v);
-			return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-		};
-		const lines = [cols.join(",")];
+		const lines = [CSV_COLS.join(",")];
 		for (const p of res.players) {
-			if (!matchesFilter(p, res)) continue;
+			if (!V.matchesFilter(p, res)) continue;
 			const s = p.stats || {};
 			const t = res.teams[p.newCollege];
 			lines.push([
-				p.name, p.newPos, p.classYear, p.newOvr, p.newPot, p.archetype,
+				p.key, p.name, p.newPos, p.classYear, p.newOvr, p.newPot, p.archetype,
 				p.proClub || p.newCollege, t ? t.conf : p.newCollege,
+				p.boardRank, p.preseasonRank, p.stockMove,
 				s.gp, s.mpg, s.ppg, s.rpg, s.orpg, s.drpg, s.apg, s.spg, s.bpg,
-				s.topg, s.pfpg, s.usg, s.fgp, s.tpp, s.ftp, s.ts,
+				s.topg, s.pfpg, s.cspg, s.deflpg, s.chgpg, s.drtg,
+				s.usg, s.fgp, s.tpp, s.ftp, s.ts,
 				(p.awards || []).join("; "),
 			].map((v) => esc(typeof v === "number" ? Number(v.toFixed(3)) : v)).join(","));
 		}
-		const blob = new Blob([lines.join("\n")], { type: "text/csv" });
-		const a = document.createElement("a");
-		a.href = URL.createObjectURL(blob);
-		a.download = "prospects.csv";
-		document.body.appendChild(a);
-		a.click();
-		setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+		download("prospects.csv", lines.join("\n"), "text/csv");
 		setStatus("CSV exported.");
 	}
 
-	/* Browsers throttle or silently drop multiple programmatic downloads that
-	   are not tied to a user gesture, so exporting N files is done one click at
-	   a time with an explicit prompt rather than a fire-and-forget stagger. */
+	/* The whole simulated season was throwaway except for the note strings. */
+	function exportSeasonJson(res) {
+		download("season_" + res.seed + ".json",
+			JSON.stringify(global.Engine.exportSeason(res), null, 2), "application/json");
+		setStatus("Season exported.");
+	}
+
+	function exportSeasonCsv(res) {
+		const season = global.Engine.exportSeason(res);
+		const lines = ["section,a,b,c,d,e"];
+		for (const t of season.teams) {
+			lines.push(["team", t.name, t.conf, t.w + "-" + t.l,
+				t.ncaaResult || t.nitResult || "", t.apRank || ""].map(esc).join(","));
+		}
+		for (const g of season.bracket) {
+			lines.push(["bracket", g.region, "round " + g.round,
+				g.winnerSeed + " " + g.winner, g.loserSeed + " " + g.loser, g.score]
+				.map(esc).join(","));
+		}
+		for (const a of season.awards) {
+			lines.push(["award", a.name, a.school, a.awards.join("; "), "", ""].map(esc).join(","));
+		}
+		for (const b of season.board) {
+			lines.push(["board", b.rank, b.name, b.school, b.round || "", b.pick || ""]
+				.map(esc).join(","));
+		}
+		download("season_" + res.seed + ".csv", lines.join("\n"), "text/csv");
+		setStatus("Season CSV exported.");
+	}
+
+	function exportNotes(res) {
+		const lines = ["name\tnote"];
+		for (const p of res.players.slice().sort((a, b) => b.newOvr - a.newOvr)) {
+			lines.push(p.name + "\t" + (p.note || "").replace(/\n/g, " · "));
+		}
+		download("notes.tsv", lines.join("\n"), "text/tab-separated-values");
+		setStatus("Notes exported.");
+	}
+
+	/* Re-apply locks in bulk from a CSV. The natural workflow — export the
+	   table, edit ovr/archetype/college in a spreadsheet, bring it back — had
+	   no return path at all. */
+	function importLocksCsv(text) {
+		const rows = parseCsv(text);
+		if (!rows.length) { showError(new Error("That CSV has no rows.")); return; }
+		const head = rows[0].map((h) => h.trim().toLowerCase());
+		const idx = (name) => head.indexOf(name);
+		const res = state.results[state.active];
+		if (!res) return;
+		const byKey = {};
+		const byName = {};
+		for (const p of res.players) {
+			byKey[p.key] = p;
+			byName[p.name.toLowerCase()] = p;
+		}
+		const cols = {
+			key: idx("key"), name: idx("name"), ovr: idx("ovr"), pot: idx("pot"),
+			archetype: idx("archetype"), college: idx("college"),
+		};
+		if (cols.key < 0 && cols.name < 0) {
+			showError(new Error("The CSV needs a `key` or `name` column to match players."));
+			return;
+		}
+		let applied = 0;
+		const unmatched = [];
+		pushUndo("imported locks from a CSV");
+		for (let i = 1; i < rows.length; i++) {
+			const r = rows[i];
+			if (!r.length || r.every((c) => !c.trim())) continue;
+			const k = cols.key >= 0 ? String(r[cols.key]).trim() : null;
+			const nm = cols.name >= 0 ? String(r[cols.name]).trim().toLowerCase() : null;
+			const p = (k && byKey[k]) || (nm && byName[nm]);
+			if (!p) { unmatched.push(k || nm); continue; }
+			const patch = {};
+			const num = (c) => {
+				const v = Number(String(r[c]).trim());
+				return Number.isFinite(v) ? v : null;
+			};
+			if (cols.ovr >= 0 && num(cols.ovr) !== null) patch.ovr = num(cols.ovr);
+			if (cols.pot >= 0 && num(cols.pot) !== null) patch.pot = num(cols.pot);
+			if (cols.archetype >= 0 && String(r[cols.archetype]).trim()) {
+				patch.archetype = String(r[cols.archetype]).trim();
+			}
+			if (cols.college >= 0 && String(r[cols.college]).trim()) {
+				patch.college = String(r[cols.college]).trim();
+			}
+			if (!Object.keys(patch).length) continue;
+			state.overrides[p.key] = Object.assign({}, state.overrides[p.key] || {}, patch);
+			applied++;
+		}
+		state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
+		run();
+		setStatus("Applied " + applied + " lock" + (applied === 1 ? "" : "s") +
+			(unmatched.length ? "; " + unmatched.length + " row(s) matched nobody." : "."));
+	}
+
+	function parseCsv(text) {
+		const rows = [];
+		let row = [];
+		let cell = "";
+		let quoted = false;
+		for (let i = 0; i < text.length; i++) {
+			const c = text[i];
+			if (quoted) {
+				if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; }
+				else if (c === '"') quoted = false;
+				else cell += c;
+			} else if (c === '"') quoted = true;
+			else if (c === ",") { row.push(cell); cell = ""; }
+			else if (c === "\n") { row.push(cell); rows.push(row); row = []; cell = ""; }
+			else if (c !== "\r") cell += c;
+		}
+		if (cell !== "" || row.length) { row.push(cell); rows.push(row); }
+		return rows;
+	}
+
 	function exportAll() {
 		let i = 0;
 		const step = () => {
@@ -1395,77 +1444,254 @@
 		step();
 	}
 
-	/* ------------------------------------------------------------ batch mode */
+	function exportMenu() {
+		const res = state.results[state.active];
+		if (!res) return;
+		const box = el("div");
+		box.appendChild(el("p", "hint",
+			"The simulated season used to be thrown away except for the note strings."));
+		const list = el("div", "checks");
+		const item = (label, fn) => {
+			const b = el("button", null, label);
+			b.addEventListener("click", () => { closeModal(); fn(); });
+			list.appendChild(b);
+		};
+		item("Prospect table as CSV (respects the current filter)", () => exportCsv(res));
+		item("Season as JSON — records, bracket, awards, board", () => exportSeasonJson(res));
+		item("Season as CSV", () => exportSeasonCsv(res));
+		item("Note text only, for a spreadsheet", () => exportNotes(res));
+		item("Import locks from a CSV…", () => $("csvFile").click());
+		box.appendChild(list);
+		modal("Export and import", box, null, "Close");
+	}
+
+	/* ------------------------------------------------------------ comparison */
+
+	function snapshot(res) {
+		const withStats = res.players.filter((p) => p.stats);
+		const mean = (v) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0);
+		return {
+			seed: res.seed,
+			flavor: res.flavor ? res.flavor.label : null,
+			avgOvr: mean(res.players.map((p) => p.newOvr)),
+			avgPot: mean(res.players.map((p) => p.newPot)),
+			avgPpg: mean(withStats.map((p) => p.stats.ppg)),
+			avgMpg: mean(withStats.map((p) => p.stats.mpg)),
+			topPpg: withStats.length ? Math.max.apply(null, withStats.map((p) => p.stats.ppg)) : 0,
+			awards: res.players.reduce((a, p) => a + (p.awards || []).length, 0),
+			archetypes: new Set(res.players.map((p) => p.archetype)).size,
+			players: res.players.map((p) => ({
+				key: p.key, name: p.name, ovr: p.newOvr, pot: p.newPot,
+				archetype: p.archetype, college: p.proClub || p.newCollege,
+				ppg: p.stats ? p.stats.ppg : 0, board: p.boardRank || 0,
+			})),
+		};
+	}
+
+	/* ----------------------------------------------------------- batch mode */
+
+	let batchCancel = false;
+	let batchWorker = null;
+
+	function batchProgress(done, total) {
+		$("batchProgress").hidden = false;
+		$("batchBar").style.width = Math.round((100 * done) / total) + "%";
+		$("batchNote").textContent = done + " of " + total + " classes";
+	}
+
+	function batchDone(rows) {
+		$("batchProgress").hidden = true;
+		$("btnBatch").disabled = false;
+		$("btnBatchCancel").hidden = true;
+		batchWorker = null;
+		if (!rows || !rows.length) { setStatus("Batch cancelled."); return; }
+		renderBatch(rows);
+		setStatus("");
+	}
+
+	function renderBatch(rows) {
+		const B = global.BatchStats;
+		const view = $("view");
+		view.innerHTML = "";
+		view.appendChild(el("h3", null, rows.length + " classes with these settings"));
+		const col = (k) => rows.map((r) => r[k]);
+		const line = (label, k, digits) =>
+			label.padEnd(18) + B.mean(col(k)).toFixed(digits === undefined ? 2 : digits);
+		view.appendChild(el("div", "note", [
+			line("mean ovr", "ovr"),
+			line("mean pot", "pot"),
+			line("mean MPG", "mpg"),
+			line("mean PPG", "ppg"),
+			line("mean APG", "apg"),
+			line("mean USG%", "usg"),
+			line("mean TS%", "ts"),
+			line("team PPG", "teamPpg"),
+			line("team AST", "teamAst"),
+			line("scoring leader", "topPpg"),
+			line("assist leader", "topApg"),
+			line("block leader", "topBpg"),
+			line("awards/class", "awards", 1),
+			line("honoured players", "honoured", 1),
+			line("distinct archetypes", "archetypes", 1),
+			"",
+			"seeds: " + rows.map((r) => r.seed).join(", "),
+		].join("\n")));
+		const cards = el("div", "cards");
+		cards.appendChild(V.histogram("Scoring leader per class", col("topPpg"), 10));
+		cards.appendChild(V.histogram("Awards per class", col("awards"), 10));
+		cards.appendChild(V.histogram("Mean PPG per class", col("ppg"), 10));
+		cards.appendChild(V.histogram("Distinct archetypes per class", col("archetypes"), 10));
+		const flavours = {};
+		for (const r of rows) flavours[r.flavor || "—"] = (flavours[r.flavor || "—"] || 0) + 1;
+		const fBox = el("div", "card");
+		fBox.appendChild(el("h4", null, "Class flavours drawn"));
+		fBox.appendChild(el("div", "note", Object.keys(flavours)
+			.sort((a, b) => flavours[b] - flavours[a])
+			.map((k) => String(flavours[k]).padStart(3) + "  " + k).join("\n")));
+		cards.appendChild(fBox);
+		view.appendChild(cards);
+	}
 
 	function runBatch(n) {
-		const file = state.files[state.active];
+		const file = activeFile();
 		if (!file) return;
-		setStatus("Generating " + n + " classes…", true);
-		setTimeout(() => {
-			const rows = [];
-			const agg = { ppg: [], mpg: [], ovr: [], awards: [], top: [] };
-			for (let i = 0; i < n; i++) {
-				const cfg = effectiveCfg();
-				cfg.seed = "";
-				let res;
-				try { res = window.Engine.run(file.data, cfg); } catch (err) {
-					showError(err);
-					return;
+		batchCancel = false;
+		$("btnBatch").disabled = true;
+		$("btnBatchCancel").hidden = false;
+		batchProgress(0, n);
+		const cfg = effectiveCfg();
+
+		/* A worker keeps the tab responsive. Opening index.html straight off
+		   the disk blocks workers in most browsers, and that is the documented
+		   way to use this tool, so the fallback below has to be just as usable:
+		   it slices the work into single classes on a timer, which yields to
+		   the UI between each one and can be cancelled the same way. */
+		try {
+			batchWorker = new Worker("js/worker.js");
+			batchWorker.onmessage = (e) => {
+				const m = e.data;
+				if (m.type === "progress") batchProgress(m.done, m.total);
+				else if (m.type === "done") batchDone(m.rows);
+				else if (m.type === "error") {
+					showError(new Error(m.message));
+					batchDone(null);
 				}
-				const withStats = res.players.filter((p) => p.stats);
-				const mean = (v) => v.reduce((a, b) => a + b, 0) / Math.max(1, v.length);
-				agg.ppg.push(mean(withStats.map((p) => p.stats.ppg)));
-				agg.mpg.push(mean(withStats.map((p) => p.stats.mpg)));
-				agg.ovr.push(mean(res.players.map((p) => p.newOvr)));
-				agg.awards.push(res.players.reduce((a, p) => a + (p.awards || []).length, 0));
-				agg.top.push(Math.max.apply(null, withStats.map((p) => p.stats.ppg)));
-				rows.push(res.seed);
+			};
+			batchWorker.onerror = () => {
+				if (batchWorker) { batchWorker.terminate(); batchWorker = null; }
+				runBatchInline(file, cfg, n);
+			};
+			batchWorker.postMessage({ type: "batch", leagueFile: file.data, cfg, n });
+		} catch (cannotStartWorker) {
+			batchWorker = null;
+			runBatchInline(file, cfg, n);
+		}
+	}
+
+	function runBatchInline(file, cfg, n) {
+		const runner = global.Engine.createRunner(file.data);
+		const rows = [];
+		let i = 0;
+		const step = () => {
+			if (batchCancel) { batchDone(null); return; }
+			if (i >= n) { batchDone(rows); return; }
+			const c = CFG.make(cfg);
+			c.seed = "";
+			c.overrides = cfg.overrides || {};
+			try {
+				rows.push(global.BatchStats.summarise(runner.run(c)));
+			} catch (err) {
+				showError(err);
+				batchDone(null);
+				return;
 			}
-			const mean = (v) => v.reduce((a, b) => a + b, 0) / v.length;
-			const view = $("view");
-			view.innerHTML = "";
-			view.appendChild(el("h3", null, n + " classes with these settings"));
-			view.appendChild(el("div", "note",
-				"mean ovr        " + mean(agg.ovr).toFixed(2) + "\n" +
-				"mean PPG        " + mean(agg.ppg).toFixed(2) + "\n" +
-				"mean MPG        " + mean(agg.mpg).toFixed(2) + "\n" +
-				"scoring leader  " + mean(agg.top).toFixed(2) + " (avg per class)\n" +
-				"awards/class    " + mean(agg.awards).toFixed(1) + "\n\n" +
-				"seeds: " + rows.join(", ")));
-			const cards = el("div", "cards");
-			cards.appendChild(histogram("Scoring leader per class", agg.top, 10));
-			cards.appendChild(histogram("Awards per class", agg.awards, 10));
-			view.appendChild(cards);
-			setStatus("");
-		}, 20);
+			i++;
+			batchProgress(i, n);
+			setTimeout(step, 0);
+		};
+		setTimeout(step, 0);
+	}
+
+	function cancelBatch() {
+		batchCancel = true;
+		if (batchWorker) {
+			batchWorker.terminate();
+			batchWorker = null;
+			batchDone(null);
+		}
+	}
+
+	/* ------------------------------------------------------------- theming */
+
+	function applyTheme() {
+		const root = document.documentElement;
+		if (state.theme === "system") root.removeAttribute("data-theme");
+		else root.setAttribute("data-theme", state.theme);
+		$("btnTheme").textContent = state.theme === "dark" ? "☾"
+			: state.theme === "light" ? "☀" : "◐";
+		$("btnTheme").title = "Theme: " + state.theme + " (click to change)";
 	}
 
 	/* ----------------------------------------------------------------- init */
 
-	/* The sticky sidebar's offset was a hardcoded 53px, but the header is
-	   flex-wrap: wrap and grows to two lines on a narrow window. Measure it. */
 	function syncHeaderHeight() {
 		const h = document.querySelector("header");
 		if (h) {
 			document.documentElement.style.setProperty("--headerH", h.offsetHeight + "px");
 		}
 	}
+
+	Object.assign(global.App, {
+		state, render, run, persist, openEditor, editorPanel, modal, closeModal,
+		copyText, bulkApply, bulkShiftOvr, bulkClear, refreshBulkBar, snapshot,
+		exportCsv, setStatus, showError,
+	});
+
+	const saved = restore();
+	const fromHash = readHash();
+	if (fromHash) state.overrideFingerprint = state.overrideFingerprint || null;
 	window.addEventListener("resize", syncHeaderHeight);
 	syncHeaderHeight();
 
-	readHash();
 	bindConfig();
 	bindFiles();
+	applyTheme();
 	paintConfig();
 	paintHistory();
+	paintUndo();
+	if (saved) applyOpenGroups(saved.open);
 
 	$("errBanner").addEventListener("click", clearError);
+	$("warnBanner").addEventListener("click", () => { $("warnBanner").hidden = true; });
 	$("btnReroll").addEventListener("click", reroll);
 	$("btnRerun").addEventListener("click", run);
+	$("btnUndo").addEventListener("click", undo);
 	$("btnExport").addEventListener("click", () => {
 		if (exportOne(state.active)) setStatus("Exported " + state.files[state.active].name + ".");
 	});
+	$("btnExportMenu").addEventListener("click", exportMenu);
 	$("btnExportAll").addEventListener("click", exportAll);
+	$("csvFile").addEventListener("change", (e) => {
+		const f = e.target.files[0];
+		if (!f) return;
+		const r = new FileReader();
+		r.onload = () => importLocksCsv(String(r.result));
+		r.readAsText(f);
+		e.target.value = "";
+	});
+	$("btnPin").addEventListener("click", () => {
+		const res = state.results[state.active];
+		if (!res) return;
+		state.pinned = snapshot(res);
+		state.tab = "compare";
+		setStatus("Pinned seed " + res.seed + " as the comparison baseline.");
+		render();
+	});
+	$("btnTheme").addEventListener("click", () => {
+		state.theme = state.theme === "system" ? "dark" : state.theme === "dark" ? "light" : "system";
+		applyTheme();
+		persist();
+	});
 	$("seedHistory").addEventListener("change", (e) => {
 		if (!e.target.value) return;
 		state.cfg.seed = e.target.value;
@@ -1481,10 +1707,27 @@
 	});
 	$("btnCopyLink").addEventListener("click", () => {
 		writeHash();
-		copyText(location.href, $("btnCopyLink"), "Copy shareable link");
+		copyText(location.href, $("btnCopyLink"), "Link");
 	});
 	$("btnBatch").addEventListener("click", () => {
 		if (!state.files.length) return;
-		runBatch(Number($("batchN").value) || 10);
+		runBatch(Math.max(2, Math.min(200, Number($("batchN").value) || 10)));
 	});
-})();
+	$("btnBatchCancel").addEventListener("click", cancelBatch);
+	$("modalOk").addEventListener("click", () => {
+		const fn = modalOk;
+		closeModal();
+		if (fn) fn();
+	});
+	$("modalCancel").addEventListener("click", closeModal);
+	$("modal").addEventListener("click", (e) => { if (e.target === $("modal")) closeModal(); });
+	document.addEventListener("keydown", (e) => {
+		if (e.key === "Escape" && !$("modal").hidden) closeModal();
+		if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
+			const tag = (e.target.tagName || "").toLowerCase();
+			if (tag === "input" || tag === "textarea" || tag === "select") return;
+			e.preventDefault();
+			undo();
+		}
+	});
+})(window);

@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>BBGM Draft Class Workshop</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23d97706'/%3E%3Cpath d='M2 16h28M16 2v28M6 6c6 4 6 16 0 20M26 6c-6 4-6 16 0 20' stroke='%23000' fill='none' stroke-width='1.6'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -11,31 +12,48 @@
 <header>
 	<h1>BBGM <span>Draft Class Workshop</span></h1>
 	<input type="file" id="file" accept=".json" multiple hidden>
-	<button id="btnLoad">Load draft class…</button>
-	<select id="fileSelect" hidden></select>
+	<input type="file" id="csvFile" accept=".csv" hidden>
+	<div class="btngroup">
+		<button id="btnLoad">Load draft class…</button>
+		<select id="fileSelect" hidden aria-label="Loaded file"></select>
+	</div>
 	<span class="spacer"></span>
-	<button class="pill seedpill" id="seedPill" hidden title="Click to copy this seed"></button>
-	<select id="seedHistory" hidden aria-label="Recent seeds"></select>
-	<button id="btnCopyLink" title="Copy a link that reproduces this exact class, settings and locks">Copy shareable link</button>
-	<button id="btnReroll" class="warn" disabled>Reroll class</button>
-	<button id="btnRerun" disabled title="Re-apply the current settings with the same seed">Re-apply</button>
-	<button id="btnExport" class="primary" disabled>Export JSON</button>
-	<button id="btnExportAll" disabled hidden>Export all</button>
+	<div class="btngroup" role="group" aria-label="Seed">
+		<button class="pill seedpill" id="seedPill" hidden title="Click to copy this seed"></button>
+		<select id="seedHistory" hidden aria-label="Recent seeds"></select>
+	</div>
+	<div class="btngroup" role="group" aria-label="Generate">
+		<button id="btnReroll" class="warn" disabled title="New seed, same settings">Reroll</button>
+		<button id="btnRerun" disabled title="Re-apply the current settings with the same seed">Re-apply</button>
+		<button id="btnUndo" disabled title="Undo the last settings or lock change (Ctrl+Z)">Undo</button>
+	</div>
+	<div class="btngroup" role="group" aria-label="Share and export">
+		<button id="btnPin" disabled title="Keep this class as a comparison baseline">Pin</button>
+		<button id="btnCopyLink" title="Copy a link that reproduces this exact class, settings and locks">Link</button>
+		<button id="btnExport" class="primary" disabled>Export JSON</button>
+		<button id="btnExportMenu" disabled title="Other exports" aria-haspopup="true">▾</button>
+		<button id="btnExportAll" disabled hidden>Export all</button>
+	</div>
+	<button id="btnTheme" title="Switch between light and dark" aria-label="Switch colour theme">◐</button>
 </header>
 
 <div class="layout">
-<aside>
+<aside aria-label="Settings">
 	<div class="ctl">
 		<label for="preset">Preset</label>
 		<select id="preset"></select>
+	</div>
+	<div class="btngroup wide">
+		<button id="btnSavePreset" type="button" title="Save the current settings as a named preset">Save preset…</button>
+		<button id="btnDeletePreset" type="button" title="Delete the selected saved preset">Delete</button>
 	</div>
 	<div class="ctl">
 		<label for="seed">Seed <b id="seedNote">random</b></label>
 		<input type="text" id="seed" placeholder="blank = random each reroll">
 	</div>
 
-	<fieldset>
-		<legend>Class quality &amp; depth</legend>
+	<details class="grp" id="grp-quality" open>
+		<summary>Class quality &amp; depth</summary>
 		<div class="ctl">
 			<label for="ovrMode">Overall ratings</label>
 			<select id="ovrMode">
@@ -49,63 +67,85 @@
 		<div class="ctl" data-curve><label for="eliteCount">Elite prospects <b></b></label><input type="range" id="eliteCount" min="0" max="8" step="1"></div>
 		<div class="ctl"><label for="potBias">Potential bias <b></b></label><input type="range" id="potBias" min="-3" max="3" step="0.5"></div>
 		<div class="ctl"><label for="potSpread">Potential spread <b></b></label><input type="range" id="potSpread" min="0" max="16" step="0.5"></div>
-	</fieldset>
+	</details>
 
-	<fieldset>
-		<legend>Builds</legend>
+	<details class="grp" id="grp-builds" open>
+		<summary>Builds</summary>
 		<div class="ctl"><label for="specialization">Specialisation <b></b></label><input type="range" id="specialization" min="0" max="2.5" step="0.05"></div>
 		<div class="ctl"><label for="archetypeDiversity">Archetype diversity <b></b></label><input type="range" id="archetypeDiversity" min="0" max="100" step="1"></div>
+		<div class="ctl"><label for="classFlavor">Class flavour <b></b></label><input type="range" id="classFlavor" min="0" max="2" step="0.05"></div>
 		<div class="ctl"><label for="buildNoise">Build noise <b></b></label><input type="range" id="buildNoise" min="0" max="14" step="0.5"></div>
-		<div class="ctl"><label for="freshmanShare">Freshmen in the class <b></b></label><input type="range" id="freshmanShare" min="0" max="100" step="1"></div>
 		<div class="ctl"><label><input type="checkbox" id="varySize"> Let height &amp; weight drift with the build</label></div>
 		<p class="hint">Every rebuilt player is re-solved against BBGM's own ovr formula, so specialising a build never changes his overall.</p>
-	</fieldset>
+	</details>
 
-	<fieldset>
-		<legend>Players with no college</legend>
-		<div class="ctl"><label for="wEuroLeague">EuroLeague weight <b></b></label><input type="range" id="wEuroLeague" min="0" max="100" step="1"></div>
-		<div class="ctl"><label for="wGLeague">NBA G League weight <b></b></label><input type="range" id="wGLeague" min="0" max="100" step="1"></div>
-		<div class="ctl"><label for="wNBL">NBL weight <b></b></label><input type="range" id="wNBL" min="0" max="100" step="1"></div>
+	<details class="grp" id="grp-years">
+		<summary>Class years &amp; paths</summary>
+		<div class="ctl"><label for="freshmanShare">Freshmen in the class <b></b></label><input type="range" id="freshmanShare" min="0" max="100" step="1"></div>
+		<div class="ctl"><label for="transferShare">Upperclassmen who transferred <b></b></label><input type="range" id="transferShare" min="0" max="90" step="1"></div>
+		<div class="ctl"><label for="redshirtShare">Redshirts <b></b></label><input type="range" id="redshirtShare" min="0" max="30" step="1"></div>
+		<div class="ctl"><label for="reclassShare">Reclassified <b></b></label><input type="range" id="reclassShare" min="0" max="30" step="1"></div>
+	</details>
+
+	<details class="grp" id="grp-leagues">
+		<summary>Players with no college</summary>
+		<p class="hint">Destination weights. Each is scaled by where the player was born — a Serbian leans EuroLeague and the Adriatic League, an Australian leans NBL.</p>
+		<div id="leagueWeights" class="archlist"></div>
+		<button id="btnLeagueReset" type="button">Reset destinations</button>
 		<div class="ctl"><label for="pDII">DII NCAA chance <b></b></label><input type="range" id="pDII" min="0" max="0.15" step="0.005"></div>
-		<p class="hint">Weights are modified by where the player was born — Serbians lean EuroLeague, Australians lean NBL.</p>
-	</fieldset>
+	</details>
 
-	<fieldset>
-		<legend>College season</legend>
+	<details class="grp" id="grp-season">
+		<summary>College season</summary>
 		<div class="ctl"><label for="pace">Pace (poss / 40) <b></b></label><input type="range" id="pace" min="58" max="80" step="1"></div>
 		<div class="ctl"><label for="scoringEnv">Scoring environment <b></b></label><input type="range" id="scoringEnv" min="-3" max="3" step="0.5"></div>
 		<div class="ctl"><label for="statNoise">Stat randomness <b></b></label><input type="range" id="statNoise" min="0" max="2.5" step="0.05"></div>
 		<div class="ctl"><label for="upsetFactor">March upsets <b></b></label><input type="range" id="upsetFactor" min="0" max="2" step="0.05"></div>
-		<div class="ctl"><label for="awardStrictness">Award strictness <b></b></label><input type="range" id="awardStrictness" min="0.4" max="2" step="0.05"></div>
-	</fieldset>
+		<p class="hint">Pace, scoring environment and stat randomness apply to Division I only. Every professional league abroad has its own pace and game length.</p>
+	</details>
 
-	<fieldset>
-		<legend>Archetype frequencies</legend>
-		<p class="hint">Rarity weight per build (1 = common). Height bands are fixed by the archetype.</p>
+	<details class="grp" id="grp-awards">
+		<summary>Awards</summary>
+		<div class="ctl"><label for="awardStrictness">National awards <b></b></label><input type="range" id="awardStrictness" min="0.4" max="2" step="0.05"></div>
+		<div class="ctl"><label for="confAwardStrictness">Conference awards <b></b></label><input type="range" id="confAwardStrictness" min="0.4" max="2" step="0.05"></div>
+		<div class="ctl"><label for="proAwardStrictness">Awards abroad <b></b></label><input type="range" id="proAwardStrictness" min="0.4" max="2" step="0.05"></div>
+		<p class="hint" id="awardInteractionHint"></p>
+	</details>
+
+	<details class="grp" id="grp-arch">
+		<summary>Archetype frequencies</summary>
+		<p class="hint">Rarity weight per build (1 = common, 3.6 = the most common, 0.16 = the rarest). Height bands are fixed by the archetype. Hover a name to see what it does to the ratings.</p>
 		<div id="archWeights" class="archlist"></div>
 		<button id="btnArchReset" type="button">Reset weights</button>
-	</fieldset>
+	</details>
 
-	<fieldset>
-		<legend>Note template</legend>
+	<details class="grp" id="grp-notes">
+		<summary>Note template</summary>
 		<div id="noteLines" class="checks"></div>
 		<p class="hint">Exactly these lines are written into each player's note.</p>
-	</fieldset>
+	</details>
 
-	<fieldset>
-		<legend>Batch calibration</legend>
+	<details class="grp" id="grp-batch">
+		<summary>Batch calibration</summary>
 		<div class="ctl">
 			<label for="batchN">Generate N classes and show the aggregate</label>
-			<input type="number" id="batchN" min="2" max="60" value="10">
+			<input type="number" id="batchN" min="2" max="200" value="10">
 		</div>
-		<button id="btnBatch">Run batch</button>
-	</fieldset>
+		<div class="btngroup wide">
+			<button id="btnBatch">Run batch</button>
+			<button id="btnBatchCancel" hidden class="warn">Cancel</button>
+		</div>
+		<div id="batchProgress" hidden>
+			<div class="progress"><span id="batchBar"></span></div>
+			<p class="hint" id="batchNote"></p>
+		</div>
+	</details>
 
 	<button id="btnReset">Reset to defaults</button>
 </aside>
 
 <main>
-	<div id="empty" class="drop" >
+	<div id="empty" class="drop">
 		<h2 style="margin:0 0 8px;font-size:18px">Drop a BBGM draft class file here</h2>
 		<p style="margin:0">Export one from Basketball GM via <b>Tools → Export → Draft class</b>, then drop the
 		<code>.json</code> here (or use “Load draft class…”). Multiple files are fine.</p>
@@ -113,6 +153,7 @@
 	</div>
 
 	<div id="errBanner" role="alert" hidden title="Click to dismiss"></div>
+	<div id="warnBanner" role="status" hidden title="Click to dismiss"></div>
 	<p id="status" class="status" role="status" hidden></p>
 	<p id="fileSummary" class="legendline" hidden></p>
 
@@ -121,6 +162,17 @@
 		<div id="view"></div>
 	</div>
 </main>
+</div>
+
+<div id="modal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+	<div class="modalbox">
+		<h3 id="modalTitle"></h3>
+		<div id="modalBody"></div>
+		<div class="rowflex modalbtns">
+			<button id="modalOk" class="primary">OK</button>
+			<button id="modalCancel">Cancel</button>
+		</div>
+	</div>
 </div>
 
 <script src="js/rng.js"></script>
@@ -134,6 +186,8 @@
 <script src="js/tournament.js"></script>
 <script src="js/awards.js"></script>
 <script src="js/engine.js"></script>
+<script src="js/batch.js"></script>
+<script src="js/views.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
