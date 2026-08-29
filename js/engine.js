@@ -310,6 +310,9 @@
 			p.newCollege = ov.college ||
 				assignCollege(rng.child("college:" + p.key), p.src, cfg);
 			p.collegeChanged = p.newCollege !== p.origCollege;
+			// Professional (a EuroLeague club) as against amateur (DII, an NBA
+			// Academy). The UI tags the two differently and the award bar
+			// scales with it.
 			p.leaguePro = !!C.NON_NCAA[p.newCollege] && C.NON_NCAA[p.newCollege].pro;
 			p.nonNcaa = !!C.NON_NCAA[p.newCollege];
 		}

@@ -449,8 +449,12 @@
 					break;
 				case "college":
 					td = el("td");
-					if (p.nonNcaa) td.appendChild(el("span", "tag pro", p.proClub || p.newCollege));
-					else td.appendChild(document.createTextNode(p.newCollege || "—"));
+					if (p.nonNcaa) {
+						// A professional club and an academy or DII programme are
+						// not the same kind of destination.
+						td.appendChild(el("span", p.leaguePro ? "tag pro" : "tag",
+							p.proClub || p.newCollege));
+					} else td.appendChild(document.createTextNode(p.newCollege || "—"));
 					if (p.collegeChanged && !p.nonNcaa) td.appendChild(el("span", "tag", "new"));
 					sortVals.college = p.newCollege;
 					break;
