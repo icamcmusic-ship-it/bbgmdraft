@@ -19,7 +19,11 @@
 	}
 
 	function Rng(seed) {
-		const next = hashSeed(seed === undefined ? String(Math.random()) : seed);
+		const seedString = seed === undefined ? String(Math.random()) : String(seed);
+		// Kept so child() can derive from the seed itself rather than from the
+		// parent's stream position.
+		this.seedString = seedString;
+		const next = hashSeed(seedString);
 		let a = next();
 		// mulberry32
 		this.random = function () {
@@ -91,9 +95,16 @@
 		return a;
 	};
 
-	// Stable child RNG so per-entity randomness does not depend on iteration order.
+	/* Stable child RNG: derived from the parent's SEED, not from a draw off the
+	   parent's stream. The old version called this.random(), which made every
+	   child depend on how many children had been created before it — so the
+	   documented "same seed, same class" guarantee would have broken silently
+	   the first time anyone reordered a loop or added a filter.
+
+	   new Rng("x").child("alpha") is now the same generator whether or not
+	   child("beta") was created first. */
 	Rng.prototype.child = function (key) {
-		return new Rng(String(key) + "|" + this.random());
+		return new Rng(this.seedString + "|" + String(key));
 	};
 
 	function clamp(x, lo, hi) {

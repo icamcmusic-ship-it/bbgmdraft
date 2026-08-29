@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Regression tests
+        run: node tools/test.js
+      - name: Calibration bands
+        run: node tools/validate.js 20
+      - name: Calibration report (JSON, for diffing across runs)
+        if: always()
+        run: node tools/validate.js 20 --json > calibration.json || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: calibration
+          path: calibration.json

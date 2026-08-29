@@ -63,7 +63,7 @@ td.wrap { white-space: normal; min-width: 250px; max-width: 340px; font-size: 11
 tbody tr:hover { background: var(--panel-2); }
 tbody td { vertical-align: top; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-.scroll { overflow-x: auto; max-height: calc(100vh - 190px); overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; }
+.scroll { max-width: 100%; overflow-x: auto; max-height: calc(100vh - 190px); overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; }
 .tag { display: inline-block; font-size: 10.5px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); }
 .tag.arch { border-color: #3b5b7d; color: #8fc0f0; }
 .tag.pro { border-color: #6b5230; color: var(--accent-2); }
@@ -95,3 +95,103 @@ h3:first-child { margin-top: 0; }
 	}
 	button.primary { color: #fff; }
 }
+
+/* ---- semantic colours in light mode -------------------------------------
+   The light block used to override only the greys, leaving --good/--bad and
+   --accent-2 at values tuned for a dark background. */
+@media (prefers-color-scheme: light) {
+	:root {
+		--good: #1a7f4b; --bad: #c0323a; --accent-2: #a2601a;
+	}
+	.game .w { background: rgba(26,127,75,.10); }
+	.game.upset .w { background: rgba(162,96,26,.13); }
+	.tag.arch { border-color: #9dc0e4; color: #17548d; }
+	.tag.pro { border-color: #d8b98a; color: #8a5714; }
+}
+
+/* ---- focus + affordances ------------------------------------------------- */
+:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+	border-radius: 4px;
+}
+/* Only sortable headers get the pointer; the AP Poll and bracket headers are
+   not clickable and should not pretend to be. */
+th { cursor: default; }
+th.sortable { cursor: pointer; }
+th.sortable:hover { color: var(--text); }
+
+/* ---- header height as a variable, not a magic 53px ----------------------- */
+:root { --headerH: 53px; }
+aside { height: calc(100vh - var(--headerH)); top: var(--headerH); }
+
+/* ---- new controls -------------------------------------------------------- */
+.seedpill { cursor: pointer; font-family: var(--mono); }
+.status {
+	font-size: 12px; color: var(--accent-2); border: 1px solid var(--line);
+	border-left: 3px solid var(--accent-2); border-radius: 6px;
+	padding: 7px 10px; margin: 0 0 10px;
+}
+#errBanner {
+	position: sticky; top: 0; z-index: 50; background: #7f1d1d; color: #fff;
+	padding: 10px 14px; font-size: 13px; white-space: pre-wrap; cursor: pointer;
+	border-radius: 6px; margin-bottom: 10px;
+}
+.filters { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 10px; }
+.filters input[type=search] { min-width: 240px; flex: 1 1 240px; }
+.check { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--dim); }
+.checks { display: grid; gap: 4px; }
+.unit { font-size: 10.5px; color: var(--dim); margin: 2px 0 0; opacity: .85; }
+tr.locked { background: rgba(255,180,84,.08); }
+tbody tr { cursor: pointer; }
+
+.editor { border: 1px solid var(--accent); border-radius: 10px; padding: 12px 14px; margin-top: 14px; background: var(--panel); }
+.editor h3 { margin: 0; }
+.editor h4 { margin: 14px 0 6px; font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
+.editgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin: 10px 0; }
+.editgrid input, .editgrid select { width: 100%; }
+
+/* ---- histograms ---------------------------------------------------------- */
+.hist { display: grid; gap: 3px; margin: 6px 0; }
+.histrow { display: grid; grid-template-columns: 48px 1fr 32px; gap: 6px; align-items: center; font-size: 11px; }
+.histlabel { color: var(--dim); font-variant-numeric: tabular-nums; text-align: right; }
+.histbar { background: var(--accent); height: 10px; border-radius: 3px; min-width: 1px; display: block; }
+.histcount { color: var(--dim); font-variant-numeric: tabular-nums; }
+
+/* ---- mirrored bracket ---------------------------------------------------- */
+.bracketwrap { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.bracketwrap .half { flex: 1 1 300px; min-width: 0; display: grid; gap: 14px; }
+.bracketwrap .centrecol { flex: 0 1 230px; min-width: 200px; align-self: center; }
+.bracketwrap .centrecol h4 { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .07em; margin: 10px 0 6px; }
+.regionbox h4 { margin: 0 0 6px; font-size: 12px; }
+.game .gn { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.game .score { font-size: 10.5px; color: var(--dim); font-variant-numeric: tabular-nums; border-top: 1px solid var(--line); }
+
+/* ---- narrow viewports ---------------------------------------------------- */
+@media (max-width: 860px) {
+	/* Column layout: a flex line takes its cross size from the widest item, so
+	   main would otherwise stretch to the table's max-content width and the
+	   whole page would scroll sideways. Pin both children to the viewport and
+	   let the .scroll wrappers do the horizontal scrolling instead. */
+	.layout { flex-direction: column; max-width: 100%; }
+	.layout > * { width: 100%; max-width: 100%; min-width: 0; }
+	aside {
+		width: 100%; height: auto; position: static; border-right: none;
+		border-bottom: 1px solid var(--line); padding-bottom: 20px;
+	}
+	main { padding: 12px; }
+	main > *, #app, #view, #view > * { max-width: 100%; min-width: 0; }
+	.scroll { max-height: none; }
+	header { padding: 10px 12px; gap: 8px; }
+	header h1 { font-size: 14px; width: 100%; }
+	.bracketwrap { flex-direction: column; }
+	.bracketwrap .centrecol { align-self: stretch; }
+}
+@media (max-width: 520px) {
+	.filters input[type=search] { min-width: 0; }
+	.cards { grid-template-columns: 1fr; }
+}
+.archlist { max-height: 210px; overflow-y: auto; display: grid; gap: 2px; border: 1px solid var(--line); border-radius: 6px; padding: 6px; }
+.archrow { display: grid; grid-template-columns: 1fr 62px; gap: 6px; align-items: center; font-size: 11px; color: var(--dim); }
+.archrow input { padding: 2px 5px; font-size: 11px; }
+.archname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

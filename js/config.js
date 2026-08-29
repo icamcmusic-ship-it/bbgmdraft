@@ -25,6 +25,19 @@
 		wNBL: 20,
 		pDII: 0.02,            // rare DII NCAA conversion
 
+		// --- class years ---------------------------------------------------
+		// BBGM draft classes are nearly all age 19, so class year has to be
+		// rolled rather than read off the birthday. This is the share of the
+		// class that stayed one year; the rest spread across the other three.
+		freshmanShare: 46,
+
+		// Per-archetype rarity overrides, {name: weight}. Empty = use the
+		// built-in weights.
+		archetypeWeights: null,
+
+		// --- notes -----------------------------------------------------------
+		noteLines: ["team", "stats", "shooting", "signature", "awards"],
+
 		// --- college season ----------------------------------------------
 		pace: 68,              // team possessions per 40 minutes
 		scoringEnv: 0,         // -3 (grind) .. +3 (track meet)
@@ -43,12 +56,18 @@
 		"Deep, no stars": { classDepth: 2, eliteCount: 0, ovrMode: "curve" },
 		"Specialist league": { specialization: 1.8, archetypeDiversity: 95, buildNoise: 7 },
 		"Vanilla builds": { specialization: 0.2, archetypeDiversity: 20 },
+		"One-and-done era": { freshmanShare: 78 },
+		"Veteran-heavy class": { freshmanShare: 16 },
 		"Chalk March": { upsetFactor: 0.35 },
 		"Total madness": { upsetFactor: 1.9 },
 	};
 
 	function make(overrides) {
-		return Object.assign({}, DEFAULTS, overrides || {});
+		const cfg = Object.assign({}, DEFAULTS, overrides || {});
+		// noteLines is the one array in here; copy it so presets and the URL
+		// hash cannot alias the shared default.
+		cfg.noteLines = (cfg.noteLines || DEFAULTS.noteLines).slice();
+		return cfg;
 	}
 
 	global.Config = { DEFAULTS, PRESETS, make };

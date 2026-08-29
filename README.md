@@ -30,30 +30,64 @@ lopsided, not better.
 into a real landscape: program strength starts from each school's draft frequency
 (Kentucky 116, Wagner 0.1) on a log scale, plus conference strength, plus a year of
 variance. Prospects are layered onto their program alongside synthetic returning
-teammates. Then everyone plays ~31 games, conference tournaments, and a 68-team
-national tournament. The stat model (turnover rate, free-throw rate, 3PA share,
-rim / mid-range / FT percentages, usage-by-talent) is calibrated against 61,061
-real D-I player-seasons from 2009-2021, including all 1,435 drafted players —
-see `js/calibration.js` for the empirical anchors.
+teammates. Then every program plays the same 31-game schedule, conference
+tournaments, and a 68-team national tournament — with real scores, overtimes and
+teams that are a few points better in March than in November.
 
-**4. Writes a scouting note for every player.** School, conference, class year,
-the full stat line (PPG / RPG / APG / SPG / BPG, FG% / 3P% / FT% / TS%), and any
-honours won. This goes into the player's `note` field, which BBGM displays on the
-player page. (Team record, age and archetype are deliberately left out of the
-exported note; the archetype still shows in the tool's own table.)
+The stat model (turnover rate, free-throw rate, 3PA share, rim / mid-range / FT
+percentages, usage-by-talent) is calibrated against 61,061 real D-I
+player-seasons from 2009-2021, including all 1,435 drafted players — see
+`js/calibration.js` for the empirical anchors. Possessions follow the standard
+identity `Poss = FGA - ORB + TOV + 0.44*FTA`, so a team's *scoring chances*
+exceed its possession count by its offensive rebounds (D-I ORB% ~29%, a ratio
+near 1.15). The stat line carries points, an offensive/defensive rebound split,
+assists, steals, blocks, turnovers, personal fouls, usage rate and the shooting
+splits, and it reconciles: recomputing points from the attempts and percentages
+printed beside it returns the same PPG.
 
-**5. Hands out awards.** National Player of the Year, Consensus All-America teams,
-National Defensive Player of the Year, Freshman of the Year, conference Player /
-Defensive Player / Freshman of the Year, All-Conference teams, conference tournament
-MVPs, Final Four Most Outstanding Player and All-Tournament team — plus pro-league
-equivalents for the EuroLeague / G League / NBL players.
+**Non-NCAA prospects get a real season too.** EuroLeague, G League, NBL and DII
+players are placed on an actual club (Real Madrid, Rio Grande Valley, Melbourne
+United, …) with per-club strength, a full league table and a playoff, rather than
+one anonymous synthetic team.
+
+**4. Writes a scouting note for every player.** Which lines go in is yours to
+choose under *Note template*: school/club and class year, team record and
+postseason result, the stat line, shooting splits, advanced numbers (usage,
+rebound split, fouls), the best single game of his season ("32 points in a win
+over Kansas, 78-71"), the archetype label, and honours. This goes into the
+player's `note` field, which BBGM displays on the player page.
+
+**5. Hands out awards — against the whole of Division I.** A 70-man draft class
+shares D-I with ~4,000 players this tool does not otherwise model, so every
+returning player on every roster is scored on the same scale and prospects have
+to finish ahead of them. Without that, awards were handed out by array index:
+every class contained the National Player of the Year and all five Consensus
+First Teamers. Now the POY shows up in roughly a third of classes and a typical
+class has one or two First Team All-Americans, with conference honours, tournament
+MVPs and the Final Four Most Outstanding Player decided the same way. DII players
+compete for the DII awards, never for D-I ones.
+
+**Class years are rolled, not read off the birthday.** BBGM draft classes are
+almost entirely age 19, which used to make all 70 prospects freshmen and collapse
+four award categories into one. Class year now comes from the prospect's standing
+in the class plus a *Freshmen in the class* slider (age is used instead whenever
+the file actually varies it).
 
 **6. Shows the AP Top 25 and the full bracket**, including the First Four, all four
 regions, upsets highlighted, and the last four in / first four out.
 
-**7. Rerolls.** Every result is a pure function of the seed and the settings, so
-"Reroll class" gives a brand new class and "Re-apply" reproduces the current one
-exactly. Paste an old seed back in to get that class again.
+**7. Rerolls, locks and sharing.** Every result is a pure function of the seed and
+the settings, so "Reroll class" gives a brand new class and "Re-apply" reproduces
+the current one exactly. Click any row to edit a prospect and **lock** his overall,
+potential, archetype or school — locks survive rerolls. The seed pill is
+click-to-copy, recent seeds are one click away, and *Copy shareable link* puts the
+seed, all settings and any locks in the URL, so one link reproduces a class exactly
+(a seed alone never could).
+
+**8. Tells you what you are looking at.** Search and filter the prospect table,
+export it as CSV, read statistical leaderboards, eyeball ovr/PPG/usage histograms,
+follow one team's path through the bracket, and run a batch of N classes with the
+same settings to see the aggregate distributions.
 
 ---
 
@@ -73,10 +107,15 @@ exactly. Paste an old seed back in to get that class again.
 | **Blank-college weights** | EuroLeague / G League / NBL shares and the DII chance. |
 | **Pace, scoring environment, stat randomness** | The college scoring environment the notes are generated in. |
 | **March upsets** | 0 = chalk, 2 = total madness. |
-| **Award strictness** | How hard it is to clear an award bar. |
+| **Award strictness** | How far into the national and conference field the honours reach. |
+| **Freshmen in the class** | Share of the class that stayed one year; the rest spread over So/Jr/Sr. |
+| **Archetype frequencies** | Per-build rarity weights, editable for all 60 archetypes. |
+| **Note template** | Which lines are written into each player's exported note. |
 
 Presets (Loaded class, Weak class, Top heavy, Deep no stars, Specialist league,
-Vanilla builds, Chalk March, Total madness) set several of these at once.
+Vanilla builds, One-and-done era, Veteran-heavy class, Chalk March, Total madness)
+set several of these at once; the dropdown says "(modified)" once you change
+anything by hand.
 
 ---
 
@@ -88,12 +127,27 @@ functions from the game's source. Checked against the five sample draft classes
 tool writes evaluate identically inside the game.
 
 Statistical output is calibrated against 61,061 real 2009–2021 D-I player-seasons
-(all 1,435 drafted players included) and *verified*, not just intended:
-`node tools/validate.js` runs the full engine over synthetic classes and asserts
-the outputs land in bands around the empirical anchors — ~47% FG, ~33.5% 3P,
-~72% FT, TS ~56%, USG capped at a physical 33%, scoring leaders in the low 20s,
-rebound/assist/block leaders around 14 / 8 / 3.8. Run it after touching the
-stat model; it exits non-zero when calibration drifts.
+(all 1,435 drafted players included) and *verified*, not just intended.
+
+```
+node tools/validate.js [nSeeds] [--json]   # calibration bands
+node tools/test.js [--update-golden]       # regression tests
+```
+
+`validate.js` runs the full engine over synthetic classes and asserts the outputs
+land within ~10% of the empirical anchors: MPG 28.0, GP 32.3, USG 22.8 (p95 30.4),
+TS 56.5, FT 72.3, 3P 34.6, FG ~47. It also checks the numbers a per-player rate
+band cannot catch — **team points 68-77, team FGA 53-60, team possessions 63-74** —
+which is what a broken possession model actually shows up in, plus award volume
+and whether every stat line reconciles with its own shooting splits. `--json`
+makes the results diffable in CI.
+
+`test.js` covers what the prose used to only claim: a golden-file hash of the
+exported JSON for three configurations, seed→output determinism, the 420/420
+round-trip (exported ratings recompute to the same `ovr`/`pos`), solver property
+tests at extreme targets, malformed-input handling, that locks survive rerolls,
+and that non-D-I players never win D-I awards. Both run on every push
+(`.github/workflows/ci.yml`).
 
 ## Export
 
@@ -122,6 +176,9 @@ js/teams.js         program strength, rosters, schedule, conference tournaments
 js/stats.js         minutes, usage and the stat line model
 js/tournament.js    AP poll, selection, seeding, the 68-team bracket
 js/awards.js        national / conference / tournament honours
-js/engine.js        the pipeline, note text and file export
+js/engine.js        the pipeline, pro leagues, note text and file export
 js/app.js           views and interaction
+tools/validate.js   calibration bands against the empirical anchors
+tools/test.js       golden-file, round-trip, determinism and property tests
+tools/golden.json   recorded output hashes
 ```

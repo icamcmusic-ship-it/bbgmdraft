@@ -14,7 +14,9 @@
 	<button id="btnLoad">Load draft class…</button>
 	<select id="fileSelect" hidden></select>
 	<span class="spacer"></span>
-	<span class="pill" id="seedPill" hidden></span>
+	<button class="pill seedpill" id="seedPill" hidden title="Click to copy this seed"></button>
+	<select id="seedHistory" hidden aria-label="Recent seeds"></select>
+	<button id="btnCopyLink" title="Copy a link that reproduces this exact class, settings and locks">Copy shareable link</button>
 	<button id="btnReroll" class="warn" disabled>Reroll class</button>
 	<button id="btnRerun" disabled title="Re-apply the current settings with the same seed">Re-apply</button>
 	<button id="btnExport" class="primary" disabled>Export JSON</button>
@@ -54,6 +56,7 @@
 		<div class="ctl"><label for="specialization">Specialisation <b></b></label><input type="range" id="specialization" min="0" max="2.5" step="0.05"></div>
 		<div class="ctl"><label for="archetypeDiversity">Archetype diversity <b></b></label><input type="range" id="archetypeDiversity" min="0" max="100" step="1"></div>
 		<div class="ctl"><label for="buildNoise">Build noise <b></b></label><input type="range" id="buildNoise" min="0" max="14" step="0.5"></div>
+		<div class="ctl"><label for="freshmanShare">Freshmen in the class <b></b></label><input type="range" id="freshmanShare" min="0" max="100" step="1"></div>
 		<div class="ctl"><label><input type="checkbox" id="varySize"> Let height &amp; weight drift with the build</label></div>
 		<p class="hint">Every rebuilt player is re-solved against BBGM's own ovr formula, so specialising a build never changes his overall.</p>
 	</fieldset>
@@ -76,6 +79,28 @@
 		<div class="ctl"><label for="awardStrictness">Award strictness <b></b></label><input type="range" id="awardStrictness" min="0.4" max="2" step="0.05"></div>
 	</fieldset>
 
+	<fieldset>
+		<legend>Archetype frequencies</legend>
+		<p class="hint">Rarity weight per build (1 = common). Height bands are fixed by the archetype.</p>
+		<div id="archWeights" class="archlist"></div>
+		<button id="btnArchReset" type="button">Reset weights</button>
+	</fieldset>
+
+	<fieldset>
+		<legend>Note template</legend>
+		<div id="noteLines" class="checks"></div>
+		<p class="hint">Exactly these lines are written into each player's note.</p>
+	</fieldset>
+
+	<fieldset>
+		<legend>Batch calibration</legend>
+		<div class="ctl">
+			<label for="batchN">Generate N classes and show the aggregate</label>
+			<input type="number" id="batchN" min="2" max="60" value="10">
+		</div>
+		<button id="btnBatch">Run batch</button>
+	</fieldset>
+
 	<button id="btnReset">Reset to defaults</button>
 </aside>
 
@@ -86,6 +111,10 @@
 		<code>.json</code> here (or use “Load draft class…”). Multiple files are fine.</p>
 		<p class="hint">Everything runs locally in your browser. Nothing is uploaded.</p>
 	</div>
+
+	<div id="errBanner" role="alert" hidden title="Click to dismiss"></div>
+	<p id="status" class="status" role="status" hidden></p>
+	<p id="fileSummary" class="legendline" hidden></p>
 
 	<div id="app" hidden>
 		<div class="tabs" id="tabs"></div>

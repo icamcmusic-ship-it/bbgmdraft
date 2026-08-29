@@ -22,13 +22,21 @@
 	function selectField(teams) {
 		const autos = [];
 		const autoSet = new Set();
+		// Every conference that actually has teams gets an auto bid, Independent
+		// included — out-of-database schools used to be silently excluded from
+		// the whole postseason.
+		const pools = {};
 		for (const conf of Object.keys(C.byConference)) {
-			const champ = C.byConference[conf]
-				.map((n) => teams[n])
-				.filter((t) => t.confTourneyChamp)[0];
-			const pick = champ || C.byConference[conf]
-				.map((n) => teams[n])
-				.sort((a, b) => b.resume - a.resume)[0];
+			pools[conf] = C.byConference[conf].map((n) => teams[n]).filter(Boolean);
+		}
+		const indep = Object.values(teams).filter((t) => t.conf === "Independent");
+		if (indep.length >= 2) pools.Independent = indep;
+		for (const conf of Object.keys(pools)) {
+			if (!pools[conf].length) continue;
+			const champ = pools[conf].filter((t) => t.confTourneyChamp)[0];
+			const pick = champ || pools[conf]
+				.slice().sort((a, b) => b.resume - a.resume)[0];
+			if (!pick) continue;
 			autos.push(pick);
 			autoSet.add(pick.name);
 			pick.bid = "auto";
@@ -68,10 +76,15 @@
 				const a = list[i];
 				const b = list[i + 1];
 				if (!b) { adv.push(a); continue; }
-				const won = T.playGame(rng, a, b, 0, cfg);
+				const sc = T.playGameScore(rng, a, b, 0, cfg, 1);
+				const won = sc.won;
 				const winner = won ? a : b;
 				const loser = won ? b : a;
-				firstFour.push({ seed, a, b, winner });
+				firstFour.push({
+					seed, a, b, winner,
+					score: (won ? sc.a + "-" + sc.b : sc.b + "-" + sc.a) +
+						(sc.ot ? (sc.ot > 1 ? " " + sc.ot + "OT" : " OT") : ""),
+				});
 				loser.ncaaResult = "Lost in the First Four";
 				loser.ncaaSeed = seed;
 				// Tracked separately from ncaaWins so round-name labelling
@@ -118,12 +131,15 @@
 					const A = alive[i];
 					const B = alive[i + 1];
 					if (!B) { next.push(A); continue; }
-					const won = T.playGame(rng, A.team, B.team, 0, cfg);
+					const sc = T.playGameScore(rng, A.team, B.team, 0, cfg, 1);
+					const won = sc.won;
 					const winner = won ? A : B;
 					const loser = won ? B : A;
 					games.push({
 						region: r, a: A, b: B, winner,
 						upset: winner.seed > loser.seed + 2,
+						score: (won ? sc.a + "-" + sc.b : sc.b + "-" + sc.a) +
+							(sc.ot ? (sc.ot > 1 ? " " + sc.ot + "OT" : " OT") : ""),
 					});
 					winner.team.ncaaWins = (winner.team.ncaaWins || 0) + 1;
 					next.push(winner);
@@ -138,15 +154,23 @@
 		const semis = [];
 		const finalists = [];
 		for (let i = 0; i < 4; i += 2) {
-			const won = T.playGame(rng, ff[i].team, ff[i + 1].team, 0, cfg);
+			const sc = T.playGameScore(rng, ff[i].team, ff[i + 1].team, 0, cfg, 1);
+			const won = sc.won;
 			const winner = won ? ff[i] : ff[i + 1];
-			semis.push({ a: ff[i], b: ff[i + 1], winner });
+			semis.push({
+				a: ff[i], b: ff[i + 1], winner,
+				score: (won ? sc.a + "-" + sc.b : sc.b + "-" + sc.a) +
+					(sc.ot ? (sc.ot > 1 ? " " + sc.ot + "OT" : " OT") : ""),
+			});
 			winner.team.ncaaWins = (winner.team.ncaaWins || 0) + 1;
 			finalists.push(winner);
 		}
-		const wonFinal = T.playGame(rng, finalists[0].team, finalists[1].team, 0, cfg);
+		const finalSc = T.playGameScore(rng, finalists[0].team, finalists[1].team, 0, cfg, 1);
+		const wonFinal = finalSc.won;
 		const champion = wonFinal ? finalists[0] : finalists[1];
 		const runnerUp = wonFinal ? finalists[1] : finalists[0];
+		const finalScore = (wonFinal ? finalSc.a + "-" + finalSc.b : finalSc.b + "-" + finalSc.a) +
+			(finalSc.ot ? (finalSc.ot > 1 ? " " + finalSc.ot + "OT" : " OT") : "");
 		champion.team.ncaaWins = (champion.team.ncaaWins || 0) + 1;
 
 		for (const r of REGIONS) {
@@ -164,7 +188,7 @@
 
 		return {
 			selection: sel, firstFour, regions: regionResults, semis,
-			final: { a: finalists[0], b: finalists[1], winner: champion },
+			final: { a: finalists[0], b: finalists[1], winner: champion, score: finalScore },
 			champion, runnerUp, finalFour: ff,
 		};
 	}
