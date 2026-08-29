@@ -177,9 +177,39 @@
 
 	/* ----------------------------------------------------------------- run */
 
+	// Engine errors must surface: without this, an exception mid-run leaves
+	// the previous render frozen on screen and sliders silently do nothing.
+	function showError(err) {
+		let b = $("errBanner");
+		if (!b) {
+			b = el("div");
+			b.id = "errBanner";
+			b.style.cssText =
+				"position:sticky;top:0;z-index:50;background:#7f1d1d;color:#fff;" +
+				"padding:10px 14px;font-size:13px;white-space:pre-wrap;cursor:pointer;";
+			b.title = "Click to dismiss";
+			b.addEventListener("click", () => { b.hidden = true; });
+			document.querySelector("main").prepend(b);
+		}
+		b.hidden = false;
+		b.textContent = "Simulation failed: " +
+			(err && err.message ? err.message : String(err)) +
+			"\nFix the input file or settings and re-apply. (Click to dismiss.)";
+	}
+	function clearError() {
+		const b = $("errBanner");
+		if (b) b.hidden = true;
+	}
+
 	function run() {
 		if (!state.files.length) return;
-		state.results = state.files.map((f) => window.Engine.run(f.data, state.cfg));
+		try {
+			state.results = state.files.map((f) => window.Engine.run(f.data, state.cfg));
+			clearError();
+		} catch (err) {
+			showError(err);
+			return;
+		}
 		$("seedPill").hidden = false;
 		$("seedPill").textContent = "seed " + state.results[0].seed;
 		render();

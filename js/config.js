@@ -15,7 +15,7 @@
 
 		// --- builds ------------------------------------------------------
 		specialization: 1.0,   // 0 = keep BBGM's samey builds, 2 = extreme specialists
-		archetypeDiversity: 70,// 0-100, how often a non-balanced archetype is used
+		archetypeDiversity: 85,// 0-100, how often a non-balanced archetype is used
 		buildNoise: 5,         // per-rating random jitter (rating points)
 		varySize: false,       // let hgt/weight drift with the archetype
 

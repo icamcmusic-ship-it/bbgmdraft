@@ -8,13 +8,18 @@
 	const C = global.Colleges;
 
 	// "College talent" scale, 0-100. Distinct from BBGM ovr: an 18-year-old
-	// with a 40 NBA ovr is already a monster in college.
+	// with a 40 NBA ovr is already very good in college — but not automatically
+	// the best player on a blue-blood roster. The slope is chosen so an ovr-40
+	// second-rounder (~67) is comparable to a top program's returning core
+	// (makeFiller mean 0.72*level+6 ≈ 71 at level 90), while an ovr-55+
+	// lottery talent (~81) clearly leads any roster. No saturation until the
+	// clamp at ovr ~73, so the top of a class stays ordered.
 	function prospectTalent(ovr, pot) {
-		return clamp(44 + (ovr - 20) * 1.55 + (pot - ovr) * 0.10, 20, 99);
+		return clamp(30 + ovr * 0.92 + (pot - ovr) * 0.15, 20, 97);
 	}
 
 	function programLevel(name, rng) {
-		const conf = C.CONFERENCES[C.conferenceOf(name)];
+		const conf = C.CONFERENCES[C.conferenceOf(name)] || C.CONFERENCES.Independent;
 		const base = 0.45 * C.prestige(name) + 0.4 * conf.strength;
 		// Year-to-year variance: good programs are steadier than bad ones.
 		const vol = 9 - 0.03 * C.prestige(name);
@@ -50,7 +55,10 @@
 	   name to the rebuilt draft prospects who play there. */
 	function buildPrograms(prospectsBySchool, rng) {
 		const teams = {};
-		for (const name of C.names) {
+		// Colleges outside the built-in 353 (league files drift across BBGM
+		// versions) become independent mid-level programs instead of crashing.
+		const extra = Object.keys(prospectsBySchool).filter((n) => !C.COLLEGES[n]);
+		for (const name of C.names.concat(extra)) {
 			const trng = rng.child("prog:" + name);
 			const level = programLevel(name, trng);
 			const prospects = prospectsBySchool[name] || [];
@@ -64,7 +72,7 @@
 
 			teams[name] = {
 				name,
-				conf: C.conferenceOf(name),
+				conf: C.conferenceOf(name) || "Independent",
 				prestige: C.prestige(name),
 				level,
 				members,
@@ -94,7 +102,9 @@
 		if (won) { t.w++; if (conference) t.cw++; } else { t.l++; if (conference) t.cl++; }
 		t.sos += opp.rating;
 		t.games++;
-		if (won && opp.rating > 70) t.quadWins++;
+		// Team ratings run mean ~38, p95 ~61 on this scale, so "quality win"
+		// means beating a clearly-above-average opponent, not a near-unicorn.
+		if (won && opp.rating > 55) t.quadWins++;
 	}
 
 	const CONF_GAMES = 18;
@@ -123,10 +133,21 @@
 			need.set(a, need.get(a) - 1);
 			need.set(b, need.get(b) - 1);
 		}
+		// Cleanup sweep: anyone still short of games plays the other neediest
+		// teams (rematches allowed, filter waived) so schedules are comparable.
+		let sweep = 0;
+		while (sweep++ < pool.length * 4) {
+			const short = pool.filter((t) => need.get(t) > 0)
+				.sort((a, b) => need.get(b) - need.get(a));
+			if (short.length < 2) break;
+			onGame(short[0], short[1]);
+			need.set(short[0], need.get(short[0]) - 1);
+			need.set(short[1], need.get(short[1]) - 1);
+		}
 	}
 
 	function simulateRegularSeason(teams, cfg, rng) {
-		const names = C.names;
+		const names = Object.keys(teams);
 
 		for (const conf of Object.keys(C.byConference)) {
 			const pool = C.byConference[conf].map((n) => teams[n]);
@@ -150,6 +171,21 @@
 				record(A, B, won, false);
 				record(B, A, !won, false);
 			});
+
+		// Independent (out-of-database) programs have no conference slate, so
+		// top their schedules up against random opponents to a full season.
+		const indep = names.map((n) => teams[n]).filter((t) => t.conf === "Independent");
+		const allTeams = names.map((n) => teams[n]);
+		for (const t of indep) {
+			let guard = 0;
+			while (t.games < CONF_GAMES + NON_CONF_GAMES - 2 && guard++ < 60) {
+				const opp = allTeams[Math.floor(rng.random() * allTeams.length)];
+				if (opp === t) continue;
+				const won = playGame(rng, t, opp, 0, cfg);
+				record(t, opp, won, false);
+				record(opp, t, !won, false);
+			}
+		}
 
 		for (const name of names) {
 			const t = teams[name];

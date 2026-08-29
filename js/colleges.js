@@ -37,6 +37,10 @@
 		"NEC":            { strength: 50, bids: 1, tier: "low" },
 		"SWAC":           { strength: 48, bids: 1, tier: "low" },
 		"MEAC":           { strength: 48, bids: 1, tier: "low" },
+		// Catch-all for colleges outside the built-in database (league files
+		// drift across BBGM versions). Not a real league: no members in
+		// byConference, no auto bid — just sane strength for lookups.
+		"Independent":    { strength: 62, bids: 0, tier: "mid" },
 	};
 
 	// school -> [BBGM frequency, conference]

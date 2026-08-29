@@ -36,7 +36,8 @@
 	};
 
 	Rng.prototype.int = function (lo, hi) {
-		return Math.floor(this.uniform(lo, hi + 1 - 1e-9));
+		const v = Math.floor(lo + (hi - lo + 1) * this.random());
+		return v > hi ? hi : v;
 	};
 
 	// Box-Muller
