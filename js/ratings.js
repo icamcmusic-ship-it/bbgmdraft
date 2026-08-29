@@ -79,6 +79,33 @@
 		{ name: "Balanced", min: 0, max: 100, o: {} },
 	];
 
+	/* How much room to grow each build implies, in ovr→pot gap points. A Raw
+	   Project should be a wider bet than a Floor General by construction; the
+	   old model drew the gap from one distribution regardless of who the player
+	   was, so potential said nothing about the build. */
+	const POT_BY_ARCHETYPE = {
+		"Raw Project": 9, "Athletic Freak": 6, "Glide Athlete": 5,
+		"Lob Threat": 4, "Rim Runner": 4, "Transition Wing": 3,
+		"Mobile Shot-Swatter": 3, "Cutter / Finisher": 2, "Energy Wing": 2,
+		"Bully Slasher": 2, "Downhill Attacker": 2, "Slasher": 2,
+		"Heliocentric Guard": 2, "Point Center": 3, "Jumbo Playmaker": 3,
+		"Skilled Big": 1, "Two-Way Wing": 1, "Balanced": 0,
+		"Sharpshooter": -1, "Movement Shooter": -1, "Corner Specialist": -2,
+		"Sixth-Man Gunner": -2, "Free-Throw Merchant": -2, "Glue Guy": -3,
+		"Iron Man": -3, "Floor General": -3, "Pesky On-Ball Stopper": -3,
+		"Old-School Center": -4, "Post-Up Guard": -4, "Undersized Rebounder": -4,
+		"Low-Post Bruiser": -3, "Foul-Prone Enforcer": -2,
+	};
+
+	/* Potential gap for a finished build: what the archetype implies, plus the
+	   fact that a younger prospect has more time to get there. */
+	function potAdjust(archetypeName, age) {
+		const arch = POT_BY_ARCHETYPE[archetypeName] || 0;
+		// 19 is the modal draft age; every year younger is worth real upside.
+		const ageAdj = Number.isFinite(age) ? clamp((19.5 - age) * 2.4, -7, 7) : 0;
+		return arch + ageAdj;
+	}
+
 	// How freely each rating may be shifted when solving for the target ovr.
 	// Endurance is scarce for teenagers, so it moves less and never collapses.
 	const SHIFT_SCALE = {
@@ -114,26 +141,93 @@
 		}
 	})();
 
+	/* How large a slice of the league each archetype is even eligible for.
+	   Normalising by the eligible set alone made an archetype's real frequency
+	   rarity / (number of archetypes eligible at that height): guards see ~26
+	   eligible builds and 7-footers ~14, so guard archetypes came out
+	   systematically rarer at equal w, and a narrow band like Point Center
+	   (hgt >= 60, w 0.35) appeared about once per thousand players — which is
+	   not "occasional", it is never.
+
+	   Dividing by each archetype's exposure makes w mean what it says: a target
+	   share of the whole class, not a share of one height band. Computed once
+	   from the height distribution BBGM actually generates. */
+	const HGT_MEAN = 48;
+	const HGT_SD = 17;
+	(function computeExposure() {
+		const grid = [];
+		let total = 0;
+		for (let h = 0; h <= 100; h++) {
+			const z = (h - HGT_MEAN) / HGT_SD;
+			const d = Math.exp(-0.5 * z * z);
+			grid.push({ h, d });
+			total += d;
+		}
+		for (const a of ARCHETYPES) {
+			let e = 0;
+			for (const g of grid) if (g.h >= a.min && g.h <= a.max) e += g.d;
+			// Floor keeps a vanishing band from exploding into every class.
+			a.exposure = Math.max(0.06, e / total);
+		}
+	})();
+
 	function pickArchetype(rng, hgtRating, cfg) {
 		const eligible = ARCHETYPES.filter(
 			(a) => hgtRating >= a.min && hgtRating <= a.max,
 		);
 		const diversity = clamp(cfg.archetypeDiversity, 0, 100) / 100;
+		const custom = cfg.archetypeWeights || null;
+		const wOf = (a) => {
+			const base = custom && Number.isFinite(custom[a.name])
+				? custom[a.name]
+				: (a.w === undefined ? 1 : a.w);
+			return Math.max(0, base) / a.exposure;
+		};
 		// Balanced keeps ~(1 - diversity) of the probability mass however many
 		// specialist builds are eligible; the rest is split by rarity weight.
 		const specialists = eligible.filter((a) => a.name !== "Balanced");
-		const wSum = specialists.reduce((s, a) => s + (a.w || 1), 0) || 1;
+		const wSum = specialists.reduce((s, a) => s + wOf(a), 0) || 1;
 		return rng.weighted(eligible, (a) =>
 			a.name === "Balanced"
 				? 1 - diversity + 0.05
-				: ((diversity + 0.02) * (a.w || 1)) / wSum,
+				: ((diversity + 0.02) * wOf(a)) / wSum,
 		);
 	}
 
-	function applyShift(base, k) {
+	/* Per-rating shift scales for one build. A uniform shift preserves the gaps
+	   between ratings but not the build's identity at the extremes: pushing a
+	   low-ovr specialist down drives several ratings into the floor, after
+	   which further shift moves only the others and quietly de-specialises him.
+	   The same happens at the ceiling going up.
+
+	   So the solver spends its budget where the archetype lives — raising the
+	   signature ratings first when it must add, and cutting them last when it
+	   must subtract. That also lets a genuine specialist clear BBGM's skill-
+	   badge cutoffs: "V" (usage > .61), "A" (athleticism > .63) and "B"
+	   (dribbling > .68) were previously unreachable for anything this tool
+	   produced, so exported classes systematically lacked three of the nine
+	   badges a native BBGM class has. */
+	function shiftScales(arch, up) {
+		const out = {};
+		let maxOff = 0;
+		for (const k of Object.keys(arch.o || {})) maxOff = Math.max(maxOff, Math.abs(arch.o[k]));
+		for (const key of BB.RATING_KEYS) {
+			const base = SHIFT_SCALE[key];
+			const off = (arch.o && arch.o[key]) || 0;
+			const sig = maxOff > 0 ? clamp(off / maxOff, -1, 1) : 0;
+			// Going up: lean into the signature ratings. Going down: protect
+			// them and take the points out of everything else.
+			const f = up ? 1 + 0.75 * Math.max(0, sig) : 1 - 0.55 * Math.max(0, sig);
+			out[key] = Math.max(0, base * f);
+		}
+		return out;
+	}
+
+	function applyShift(base, k, scales) {
+		const sc = scales || SHIFT_SCALE;
 		const out = {};
 		for (const key of BB.RATING_KEYS) {
-			out[key] = clamp(Math.round(base[key] + k * SHIFT_SCALE[key]), 0, 100);
+			out[key] = clamp(Math.round(base[key] + k * sc[key]), 0, 100);
 		}
 		return out;
 	}
@@ -141,18 +235,38 @@
 	// Solve for the uniform shift that makes BBGM's ovr equal targetOvr. The
 	// shift preserves the gaps between ratings, so a specialist stays a
 	// specialist; it just gets better or worse across the board.
-	function solveToOvr(base, targetOvr) {
-		let lo = -60;
-		let hi = 60;
-		if (BB.ovr(applyShift(base, lo)) > targetOvr) return applyShift(base, lo);
-		if (BB.ovr(applyShift(base, hi)) < targetOvr) return applyShift(base, hi);
-		for (let i = 0; i < 48; i++) {
+	/* The ovr range a build can be solved to. hgt is never shifted (it is tied
+	   to listed height), and every other rating clamps at 0/100, so a very tall
+	   or very short base simply cannot reach every target. Callers — the lock
+	   editor, the tests — need to know which asks are impossible rather than
+	   silently getting the nearest thing. */
+	function ovrRange(base, arch) {
+		const upScales = arch ? shiftScales(arch, true) : SHIFT_SCALE;
+		const downScales = arch ? shiftScales(arch, false) : SHIFT_SCALE;
+		return {
+			min: BB.ovr(applyShift(base, -90, downScales)),
+			max: BB.ovr(applyShift(base, 90, upScales)),
+		};
+	}
+
+	function solveToOvr(base, targetOvr, arch) {
+		// Two scale vectors, one for each direction; both equal SHIFT_SCALE at
+		// k = 0, so the shift stays continuous and monotone across the origin
+		// and the bisection below is still valid.
+		const upScales = arch ? shiftScales(arch, true) : SHIFT_SCALE;
+		const downScales = arch ? shiftScales(arch, false) : SHIFT_SCALE;
+		const shift = (k) => applyShift(base, k, k >= 0 ? upScales : downScales);
+		let lo = -90;
+		let hi = 90;
+		if (BB.ovr(shift(lo)) > targetOvr) return shift(lo);
+		if (BB.ovr(shift(hi)) < targetOvr) return shift(hi);
+		for (let i = 0; i < 52; i++) {
 			const mid = (lo + hi) / 2;
-			if (BB.ovr(applyShift(base, mid)) < targetOvr) lo = mid;
+			if (BB.ovr(shift(mid)) < targetOvr) lo = mid;
 			else hi = mid;
 		}
-		const a = applyShift(base, lo);
-		const b = applyShift(base, hi);
+		const a = shift(lo);
+		const b = shift(hi);
 		return Math.abs(BB.ovr(a) - targetOvr) <= Math.abs(BB.ovr(b) - targetOvr) ? a : b;
 	}
 
@@ -176,8 +290,11 @@
 	/* Rebuild one player's ratings.
 	   orig: the ratings row from the league file
 	   targetOvr / targetPot: what the rebuilt player must come out to */
-	function rebuild(rng, orig, targetOvr, targetPot, cfg) {
-		const arch = pickArchetype(rng, orig.hgt, cfg);
+	function rebuild(rng, orig, targetOvr, targetPot, cfg, forcedArchetype) {
+		const forced = forcedArchetype
+			? ARCHETYPES.filter((a) => a.name === forcedArchetype)[0]
+			: null;
+		const arch = forced || pickArchetype(rng, orig.hgt, cfg);
 		const spec = clamp(cfg.specialization, 0, 3);
 		const noise = Math.max(0, cfg.buildNoise);
 
@@ -191,7 +308,7 @@
 			);
 		}
 
-		const solved = solveToOvr(base, targetOvr);
+		const solved = solveToOvr(base, targetOvr, arch);
 		const finalOvr = BB.ovr(solved);
 		const pot = clamp(Math.max(targetPot, finalOvr + 1), finalOvr, 100);
 
@@ -202,8 +319,14 @@
 			pos: BB.pos(solved),
 			skills: BB.skills(Object.assign({ fuzz: orig.fuzz }, solved)),
 			archetype: arch.name,
+			// What this player's height actually allows, so an impossible lock
+			// can be reported instead of quietly ignored.
+			ovrRange: ovrRange(base, arch),
 		};
 	}
 
-	global.RatingsBuilder = { ARCHETYPES, rebuild, classCurve, pickArchetype, solveToOvr };
+	global.RatingsBuilder = {
+		ARCHETYPES, rebuild, classCurve, pickArchetype, solveToOvr, shiftScales, ovrRange,
+		potAdjust, POT_BY_ARCHETYPE,
+	};
 })(window);

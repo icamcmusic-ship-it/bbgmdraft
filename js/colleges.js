@@ -409,6 +409,50 @@
 		"DII NCAA":     { strength: 38, pro: false },
 	};
 
+	/* Real clubs for the non-NCAA destinations, so a EuroLeague prospect gets a
+	   team, a league table and a finish instead of a one-line note reading
+	   "EuroLeague". `s` is a strength offset against the league's own level —
+	   Real Madrid is not a relegation side, and the old model gave every club
+	   the identical constant 88. */
+	const PRO_CLUBS = {
+		"EuroLeague": [
+			["Real Madrid", 9], ["FC Barcelona", 8], ["Panathinaikos", 7],
+			["Olympiacos", 7], ["Fenerbahce", 6], ["Anadolu Efes", 5],
+			["Maccabi Tel Aviv", 5], ["Zalgiris Kaunas", 3], ["Virtus Bologna", 3],
+			["Olimpia Milano", 2], ["AS Monaco", 4], ["Baskonia", 1],
+			["Partizan Belgrade", 2], ["Crvena Zvezda", 1], ["LDLC ASVEL", -2],
+			["Alba Berlin", -3], ["Paris Basketball", -2], ["Bayern Munich", 0],
+			["Valencia Basket", 0], ["Dubai BC", -4],
+		],
+		"NBA G League": [
+			["Austin Spurs", 3], ["Rio Grande Valley Vipers", 3],
+			["Santa Cruz Warriors", 2], ["Oklahoma City Blue", 2],
+			["Raptors 905", 1], ["Long Island Nets", 1], ["Delaware Blue Coats", 1],
+			["Sioux Falls Skyforce", 0], ["Wisconsin Herd", 0], ["Stockton Kings", 0],
+			["Salt Lake City Stars", -1], ["Grand Rapids Gold", -1],
+			["Maine Celtics", -1], ["Memphis Hustle", -2], ["Iowa Wolves", -2],
+			["Westchester Knicks", -2], ["Cleveland Charge", -3],
+			["Birmingham Squadron", -3], ["College Park Skyhawks", -3],
+			["Capital City Go-Go", -4],
+		],
+		"NBL": [
+			["Melbourne United", 4], ["Sydney Kings", 4], ["Perth Wildcats", 3],
+			["New Zealand Breakers", 2], ["Illawarra Hawks", 1],
+			["Tasmania JackJumpers", 1], ["Brisbane Bullets", -1],
+			["Adelaide 36ers", -1], ["South East Melbourne Phoenix", -2],
+			["Cairns Taipans", -3],
+		],
+		"DII NCAA": [
+			["Northwest Missouri State", 6], ["Nova Southeastern", 5],
+			["Minnesota State", 4], ["West Liberty", 3], ["Black Hills State", 2],
+			["Indiana (PA)", 2], ["Cal State San Bernardino", 1],
+			["Augusta University", 0], ["Lincoln Memorial", 0],
+			["Colorado School of Mines", -1], ["Bentley", -2], ["Barry", -2],
+			["West Texas A&M", -3], ["Fort Hays State", -3], ["Queens (NC)", -4],
+			["Angelo State", -5],
+		],
+	};
+
 	// Countries/regions that read as European for EuroLeague weighting.
 	const EURO_HINTS = [
 		"Spain","Serbia","France","Italy","Greece","Lithuania","Slovenia","Croatia",
@@ -450,7 +494,7 @@
 	}
 
 	global.Colleges = {
-		COLLEGES, CONFERENCES, NON_NCAA, byConference,
+		COLLEGES, CONFERENCES, NON_NCAA, PRO_CLUBS, byConference,
 		conferenceOf, frequencyOf, prestige, region, isUSA,
 		names: Object.keys(COLLEGES),
 	};
