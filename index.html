@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BBGM Draft Class Workshop</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header>
+	<h1>BBGM <span>Draft Class Workshop</span></h1>
+	<input type="file" id="file" accept=".json" multiple hidden>
+	<button id="btnLoad">Load draft class…</button>
+	<select id="fileSelect" hidden></select>
+	<span class="spacer"></span>
+	<span class="pill" id="seedPill" hidden></span>
+	<button id="btnReroll" class="warn" disabled>Reroll class</button>
+	<button id="btnRerun" disabled title="Re-apply the current settings with the same seed">Re-apply</button>
+	<button id="btnExport" class="primary" disabled>Export JSON</button>
+	<button id="btnExportAll" disabled hidden>Export all</button>
+</header>
+
+<div class="layout">
+<aside>
+	<div class="ctl">
+		<label for="preset">Preset</label>
+		<select id="preset"></select>
+	</div>
+	<div class="ctl">
+		<label for="seed">Seed <b id="seedNote">random</b></label>
+		<input type="text" id="seed" placeholder="blank = random each reroll">
+	</div>
+
+	<fieldset>
+		<legend>Class quality &amp; depth</legend>
+		<div class="ctl">
+			<label for="ovrMode">Overall ratings</label>
+			<select id="ovrMode">
+				<option value="preserve">Preserve each player's ovr (never inflate)</option>
+				<option value="curve">Rebuild the class curve</option>
+			</select>
+			<p class="hint" id="ovrModeHint"></p>
+		</div>
+		<div class="ctl" data-curve><label for="classQuality">Class quality <b></b></label><input type="range" id="classQuality" min="-3" max="3" step="0.5"></div>
+		<div class="ctl" data-curve><label for="classDepth">Depth (top-heavy → deep) <b></b></label><input type="range" id="classDepth" min="-3" max="3" step="0.5"></div>
+		<div class="ctl" data-curve><label for="eliteCount">Elite prospects <b></b></label><input type="range" id="eliteCount" min="0" max="8" step="1"></div>
+		<div class="ctl"><label for="potBias">Potential bias <b></b></label><input type="range" id="potBias" min="-3" max="3" step="0.5"></div>
+		<div class="ctl"><label for="potSpread">Potential spread <b></b></label><input type="range" id="potSpread" min="0" max="16" step="0.5"></div>
+	</fieldset>
+
+	<fieldset>
+		<legend>Builds</legend>
+		<div class="ctl"><label for="specialization">Specialisation <b></b></label><input type="range" id="specialization" min="0" max="2.5" step="0.05"></div>
+		<div class="ctl"><label for="archetypeDiversity">Archetype diversity <b></b></label><input type="range" id="archetypeDiversity" min="0" max="100" step="1"></div>
+		<div class="ctl"><label for="buildNoise">Build noise <b></b></label><input type="range" id="buildNoise" min="0" max="14" step="0.5"></div>
+		<div class="ctl"><label><input type="checkbox" id="varySize"> Let height &amp; weight drift with the build</label></div>
+		<p class="hint">Every rebuilt player is re-solved against BBGM's own ovr formula, so specialising a build never changes his overall.</p>
+	</fieldset>
+
+	<fieldset>
+		<legend>Players with no college</legend>
+		<div class="ctl"><label for="wEuroLeague">EuroLeague weight <b></b></label><input type="range" id="wEuroLeague" min="0" max="100" step="1"></div>
+		<div class="ctl"><label for="wGLeague">NBA G League weight <b></b></label><input type="range" id="wGLeague" min="0" max="100" step="1"></div>
+		<div class="ctl"><label for="wNBL">NBL weight <b></b></label><input type="range" id="wNBL" min="0" max="100" step="1"></div>
+		<div class="ctl"><label for="pDII">DII NCAA chance <b></b></label><input type="range" id="pDII" min="0" max="0.15" step="0.005"></div>
+		<p class="hint">Weights are modified by where the player was born — Serbians lean EuroLeague, Australians lean NBL.</p>
+	</fieldset>
+
+	<fieldset>
+		<legend>College season</legend>
+		<div class="ctl"><label for="pace">Pace (poss / 40) <b></b></label><input type="range" id="pace" min="58" max="80" step="1"></div>
+		<div class="ctl"><label for="scoringEnv">Scoring environment <b></b></label><input type="range" id="scoringEnv" min="-3" max="3" step="0.5"></div>
+		<div class="ctl"><label for="statNoise">Stat randomness <b></b></label><input type="range" id="statNoise" min="0" max="2.5" step="0.05"></div>
+		<div class="ctl"><label for="upsetFactor">March upsets <b></b></label><input type="range" id="upsetFactor" min="0" max="2" step="0.05"></div>
+		<div class="ctl"><label for="awardStrictness">Award strictness <b></b></label><input type="range" id="awardStrictness" min="0.4" max="2" step="0.05"></div>
+	</fieldset>
+
+	<button id="btnReset">Reset to defaults</button>
+</aside>
+
+<main>
+	<div id="empty" class="drop" >
+		<h2 style="margin:0 0 8px;font-size:18px">Drop a BBGM draft class file here</h2>
+		<p style="margin:0">Export one from Basketball GM via <b>Tools → Export → Draft class</b>, then drop the
+		<code>.json</code> here (or use “Load draft class…”). Multiple files are fine.</p>
+		<p class="hint">Everything runs locally in your browser. Nothing is uploaded.</p>
+	</div>
+
+	<div id="app" hidden>
+		<div class="tabs" id="tabs"></div>
+		<div id="view"></div>
+	</div>
+</main>
+</div>
+
+<script src="js/rng.js"></script>
+<script src="js/bbgm.js"></script>
+<script src="js/colleges.js"></script>
+<script src="js/config.js"></script>
+<script src="js/ratings.js"></script>
+<script src="js/teams.js"></script>
+<script src="js/stats.js"></script>
+<script src="js/tournament.js"></script>
+<script src="js/awards.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
