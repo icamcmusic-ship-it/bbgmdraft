@@ -1,16 +1,32 @@
+/* Palette. Light is the base; dark is applied under the media query and under
+   an explicit [data-theme] so the manual toggle wins in both directions. */
 :root {
 	color-scheme: light dark;
-	--bg: #0f1216;
-	--panel: #161b22;
-	--panel-2: #1c232c;
-	--line: #2a323d;
-	--text: #e6edf3;
-	--dim: #9aa7b4;
-	--accent: #4da3ff;
-	--accent-2: #ffb454;
-	--good: #57c78a;
-	--bad: #f2686a;
+	--bg: #f6f8fa;
+	--panel: #ffffff;
+	--panel-2: #f0f3f6;
+	--line: #d6dde4;
+	--text: #1c2128;
+	--dim: #59636e;
+	--accent: #0969da;
+	--accent-2: #a2601a;
+	--good: #1a7f4b;
+	--bad: #c0323a;
+	--rowH: 6px;
+	--headerH: 53px;
 	--mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) {
+		--bg: #0f1216; --panel: #161b22; --panel-2: #1c232c; --line: #2a323d;
+		--text: #e6edf3; --dim: #9aa7b4; --accent: #4da3ff; --accent-2: #ffb454;
+		--good: #57c78a; --bad: #f2686a;
+	}
+}
+:root[data-theme="dark"] {
+	--bg: #0f1216; --panel: #161b22; --panel-2: #1c232c; --line: #2a323d;
+	--text: #e6edf3; --dim: #9aa7b4; --accent: #4da3ff; --accent-2: #ffb454;
+	--good: #57c78a; --bad: #f2686a;
 }
 * { box-sizing: border-box; }
 body {
@@ -20,35 +36,60 @@ body {
 	color: var(--text);
 }
 header {
-	display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+	display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
 	padding: 12px 18px; background: var(--panel); border-bottom: 1px solid var(--line);
-	position: sticky; top: 0; z-index: 20;
+	position: sticky; top: 0; z-index: 60;
 }
 header h1 { font-size: 16px; margin: 0; letter-spacing: .2px; }
 header h1 span { color: var(--accent); }
 .spacer { flex: 1; }
-button, select, input[type=text], input[type=number] {
+/* Six loose buttons in a row read as one undifferentiated bar. */
+.btngroup { display: inline-flex; gap: 0; align-items: center; }
+.btngroup.wide { display: flex; gap: 6px; margin: 6px 0; }
+.btngroup > button, .btngroup > select { border-radius: 0; margin-left: -1px; }
+.btngroup > *:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+.btngroup > *:last-child { border-radius: 0 6px 6px 0; }
+.btngroup > *:only-child { border-radius: 6px; }
+.btngroup.wide > * { border-radius: 6px; margin-left: 0; flex: 1; }
+button, select, input[type=text], input[type=number], input[type=search] {
 	font: inherit; color: var(--text); background: var(--panel-2);
 	border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px;
 }
 button { cursor: pointer; }
-button:hover:not(:disabled) { border-color: var(--accent); }
+button:hover:not(:disabled) { border-color: var(--accent); position: relative; z-index: 1; }
 button:disabled { opacity: .45; cursor: default; }
-button.primary { background: var(--accent); color: #08131f; border-color: var(--accent); font-weight: 600; }
+button.primary { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
 button.warn { border-color: var(--accent-2); color: var(--accent-2); }
+button.tiny { padding: 2px 7px; font-size: 11px; }
 .layout { display: flex; align-items: flex-start; gap: 0; }
 aside {
-	width: 310px; flex: none; padding: 14px 16px 60px; border-right: 1px solid var(--line);
-	background: var(--panel); height: calc(100vh - 53px); overflow-y: auto; position: sticky; top: 53px;
+	width: 320px; flex: none; padding: 14px 16px 60px; border-right: 1px solid var(--line);
+	background: var(--panel); height: calc(100vh - var(--headerH));
+	overflow-y: auto; position: sticky; top: var(--headerH);
 }
 main { flex: 1; min-width: 0; padding: 16px 20px 80px; }
-fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 14px; padding: 10px 12px 12px; }
-legend { color: var(--accent); font-size: 11px; text-transform: uppercase; letter-spacing: .09em; padding: 0 5px; }
+
+/* Sidebar groups collapse. Eight open fieldsets meant about two of them fit on
+   a 900px laptop screen and everything else was a scroll away. */
+details.grp {
+	border: 1px solid var(--line); border-radius: 8px; margin: 0 0 10px;
+	background: var(--panel);
+}
+details.grp > summary {
+	cursor: pointer; padding: 8px 12px; color: var(--accent); font-size: 11px;
+	text-transform: uppercase; letter-spacing: .09em; list-style: none;
+	display: flex; align-items: center; gap: 6px; user-select: none;
+}
+details.grp > summary::-webkit-details-marker { display: none; }
+details.grp > summary::before { content: "▸"; font-size: 10px; transition: transform .12s; }
+details.grp[open] > summary::before { transform: rotate(90deg); }
+details.grp > *:not(summary) { margin-left: 12px; margin-right: 12px; }
+details.grp > *:last-child { margin-bottom: 12px; }
 .ctl { margin: 9px 0; }
 .ctl label { display: flex; justify-content: space-between; font-size: 12px; color: var(--dim); margin-bottom: 3px; gap: 8px; }
 .ctl label b { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 600; }
 .ctl input[type=range] { width: 100%; accent-color: var(--accent); }
-.ctl input[type=text], .ctl select { width: 100%; }
+.ctl input[type=text], .ctl select, .ctl input[type=number] { width: 100%; }
 .hint { font-size: 11px; color: var(--dim); margin: 4px 0 0; }
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 14px; flex-wrap: wrap; }
 .tabs button {
@@ -56,17 +97,43 @@ legend { color: var(--accent); font-size: 11px; text-transform: uppercase; lette
 	border-radius: 0; padding: 8px 12px; color: var(--dim);
 }
 .tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
-table { border-collapse: collapse; width: max-content; min-width: 100%; font-size: 12.5px; }
-th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-th { background: var(--panel); color: var(--dim); font-weight: 600; cursor: pointer; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
-td.wrap { white-space: normal; min-width: 250px; max-width: 340px; font-size: 11.5px; line-height: 1.35; }
-tbody tr:hover { background: var(--panel-2); }
+
+table { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; font-size: 12.5px; }
+th, td { text-align: left; padding: var(--rowH) 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { background: var(--panel); color: var(--dim); font-weight: 600; cursor: default; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; position: sticky; top: 0; z-index: 3; }
+/* The player's name stays put while the other 22 columns scroll past it. */
+th.sticky, td.sticky {
+	position: sticky; left: 0; background: var(--panel); z-index: 2;
+	box-shadow: 1px 0 0 var(--line);
+}
+th.sticky { z-index: 4; }
+tbody tr:hover td { background: var(--panel-2); }
+tbody tr:hover td.sticky { background: var(--panel-2); }
 tbody td { vertical-align: top; }
+td.wrap { white-space: normal; min-width: 250px; max-width: 340px; font-size: 11.5px; line-height: 1.35; }
+/* A prospect can collect a dozen honours. Left to wrap freely, one such cell
+   made its whole row 150px tall and the table stopped being a table. */
+.clamp {
+	display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+	line-clamp: 2; overflow: hidden;
+}
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-.scroll { max-width: 100%; overflow-x: auto; max-height: calc(100vh - 190px); overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; }
+.scroll { max-width: 100%; overflow-x: auto; max-height: calc(100vh - 210px); overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; }
+.density-compact { --rowH: 2px; }
+.density-comfortable { --rowH: 9px; }
 .tag { display: inline-block; font-size: 10.5px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); }
-.tag.arch { border-color: #3b5b7d; color: #8fc0f0; }
-.tag.pro { border-color: #6b5230; color: var(--accent-2); }
+.tag.arch { border-color: #9dc0e4; color: #17548d; }
+.tag.pro { border-color: #d8b98a; color: #8a5714; }
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) .tag.arch { border-color: #3b5b7d; color: #8fc0f0; }
+	:root:not([data-theme="light"]) .tag.pro { border-color: #6b5230; color: var(--accent-2); }
+	:root:not([data-theme="light"]) .game .w { background: rgba(87,199,138,.10); }
+	:root:not([data-theme="light"]) .game.upset .w { background: rgba(255,180,84,.13); }
+}
+:root[data-theme="dark"] .tag.arch { border-color: #3b5b7d; color: #8fc0f0; }
+:root[data-theme="dark"] .tag.pro { border-color: #6b5230; color: var(--accent-2); }
+:root[data-theme="dark"] .game .w { background: rgba(87,199,138,.10); }
+:root[data-theme="dark"] .game.upset .w { background: rgba(255,180,84,.13); }
 .up { color: var(--good); } .down { color: var(--bad); }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
 .card { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--panel); }
@@ -77,79 +144,77 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .round h5 { margin: 0 0 8px; font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .07em; }
 .game { border: 1px solid var(--line); border-radius: 6px; margin-bottom: 6px; font-size: 11.5px; overflow: hidden; }
 .game div { padding: 3px 7px; display: flex; gap: 6px; }
-.game .w { background: rgba(87,199,138,.10); color: var(--text); font-weight: 600; }
+.game .w { background: rgba(26,127,75,.10); color: var(--text); font-weight: 600; }
 .game .l { color: var(--dim); }
 .game .sd { width: 20px; color: var(--dim); font-variant-numeric: tabular-nums; }
-.game.upset .w { background: rgba(255,180,84,.13); }
+.game.upset .w { background: rgba(162,96,26,.13); }
+.game .gn { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.game .score { font-size: 10.5px; color: var(--dim); font-variant-numeric: tabular-nums; border-top: 1px solid var(--line); }
 .drop { border: 2px dashed var(--line); border-radius: 12px; padding: 46px; text-align: center; color: var(--dim); margin: 40px auto; max-width: 620px; }
 .drop.over { border-color: var(--accent); color: var(--text); }
+.drop.busy { border-color: var(--accent-2); }
 .pill { font-size: 11px; color: var(--dim); border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; }
 .rowflex { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 h3 { font-size: 14px; margin: 18px 0 8px; }
 h3:first-child { margin-top: 0; }
 .legendline { font-size: 11.5px; color: var(--dim); margin: -2px 0 10px; }
-@media (prefers-color-scheme: light) {
-	:root {
-		--bg: #f6f8fa; --panel: #fff; --panel-2: #f0f3f6; --line: #d6dde4;
-		--text: #1c2128; --dim: #59636e; --accent: #0969da;
-	}
-	button.primary { color: #fff; }
-}
-
-/* ---- semantic colours in light mode -------------------------------------
-   The light block used to override only the greys, leaving --good/--bad and
-   --accent-2 at values tuned for a dark background. */
-@media (prefers-color-scheme: light) {
-	:root {
-		--good: #1a7f4b; --bad: #c0323a; --accent-2: #a2601a;
-	}
-	.game .w { background: rgba(26,127,75,.10); }
-	.game.upset .w { background: rgba(162,96,26,.13); }
-	.tag.arch { border-color: #9dc0e4; color: #17548d; }
-	.tag.pro { border-color: #d8b98a; color: #8a5714; }
-}
 
 /* ---- focus + affordances ------------------------------------------------- */
-:focus-visible {
-	outline: 2px solid var(--accent);
-	outline-offset: 2px;
-	border-radius: 4px;
-}
-/* Only sortable headers get the pointer; the AP Poll and bracket headers are
-   not clickable and should not pretend to be. */
-th { cursor: default; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 th.sortable { cursor: pointer; }
 th.sortable:hover { color: var(--text); }
 
-/* ---- header height as a variable, not a magic 53px ----------------------- */
-:root { --headerH: 53px; }
-aside { height: calc(100vh - var(--headerH)); top: var(--headerH); }
-
-/* ---- new controls -------------------------------------------------------- */
+/* ---- controls ------------------------------------------------------------ */
 .seedpill { cursor: pointer; font-family: var(--mono); }
 .status {
 	font-size: 12px; color: var(--accent-2); border: 1px solid var(--line);
 	border-left: 3px solid var(--accent-2); border-radius: 6px;
 	padding: 7px 10px; margin: 0 0 10px;
 }
-#errBanner {
-	position: sticky; top: 0; z-index: 50; background: #7f1d1d; color: #fff;
+/* The banner sits inside <main>, below the sticky header (z-index 60). It used
+   to be z-index 50 against a header of 20 and rendered over the top of it. */
+#errBanner, #warnBanner {
+	position: sticky; top: var(--headerH); z-index: 10; color: #fff;
 	padding: 10px 14px; font-size: 13px; white-space: pre-wrap; cursor: pointer;
 	border-radius: 6px; margin-bottom: 10px;
 }
+#errBanner { background: #7f1d1d; }
+#warnBanner { background: #7a5514; }
 .filters { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 10px; }
-.filters input[type=search] { min-width: 240px; flex: 1 1 240px; }
+.filters input[type=search] { min-width: 220px; flex: 1 1 220px; }
 .check { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--dim); }
 .checks { display: grid; gap: 4px; }
 .unit { font-size: 10.5px; color: var(--dim); margin: 2px 0 0; opacity: .85; }
-tr.locked { background: rgba(255,180,84,.08); }
+tr.locked td.sticky, tr.locked td { background: rgba(162,96,26,.08); }
+tr.picked td.sticky, tr.picked td { background: rgba(9,105,218,.10); }
 tbody tr { cursor: pointer; }
+.progress { height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; margin: 6px 0; }
+.progress span { display: block; height: 100%; background: var(--accent); width: 0; transition: width .1s linear; }
 
 .editor { border: 1px solid var(--accent); border-radius: 10px; padding: 12px 14px; margin-top: 14px; background: var(--panel); }
 .editor h3 { margin: 0; }
+.editor .rowflex:first-child { justify-content: space-between; }
 .editor h4 { margin: 14px 0 6px; font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
-.editgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin: 10px 0; }
-.editgrid input, .editgrid select { width: 100%; }
+.editgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 10px; margin: 10px 0; }
+.editgrid > .ctl { min-width: 0; }
+/* width:100% applied to the lock checkboxes too, which stretched each one to
+   the full column and pushed its caption out of the row. */
+.editgrid input:not([type=checkbox]), .editgrid select { width: 100%; }
+.editgrid input[type=checkbox] { width: auto; }
+.lockrow { display: flex; gap: 6px; align-items: center; margin-bottom: 3px; }
+.lockrow input[type=checkbox] { flex: none; margin: 0; }
+/* .ctl label is a space-between flex row for the slider read-outs; inside a
+   lock row that stretched the caption away from its own checkbox. */
+.lockrow label { display: inline; justify-content: flex-start; margin: 0; font-size: 12px; }
+.editor h3 { scroll-margin-top: calc(var(--headerH) + 10px); }
+.ratinggrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(74px, 1fr)); gap: 6px; margin: 8px 0; }
+.ratinggrid label { display: block; font-size: 10.5px; color: var(--dim); }
+.ratinggrid input { width: 100%; padding: 2px 4px; font-size: 12px; }
+.ratinggrid .changed input { border-color: var(--accent); }
+.warnbox {
+	border: 1px solid var(--accent-2); border-left-width: 3px; border-radius: 6px;
+	padding: 7px 10px; margin: 8px 0; font-size: 12px; color: var(--accent-2);
+}
 
 /* ---- histograms ---------------------------------------------------------- */
 .hist { display: grid; gap: 3px; margin: 6px 0; }
@@ -157,22 +222,51 @@ tbody tr { cursor: pointer; }
 .histlabel { color: var(--dim); font-variant-numeric: tabular-nums; text-align: right; }
 .histbar { background: var(--accent); height: 10px; border-radius: 3px; min-width: 1px; display: block; }
 .histcount { color: var(--dim); font-variant-numeric: tabular-nums; }
+.histaxis {
+	display: grid; grid-template-columns: 48px 1fr 32px; gap: 6px;
+	font-size: 10px; color: var(--dim); margin-top: 2px;
+}
+.histaxis .ticks { display: flex; justify-content: space-between; }
 
 /* ---- mirrored bracket ---------------------------------------------------- */
-.bracketwrap { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
-.bracketwrap .half { flex: 1 1 300px; min-width: 0; display: grid; gap: 14px; }
-.bracketwrap .centrecol { flex: 0 1 230px; min-width: 200px; align-self: center; }
+/* A region needs four 190px columns to lay out without scrolling. Putting two
+   regions side by side inside a 1100px main area gave each of them about
+   430px, so every region scrolled horizontally inside a page that also
+   scrolled — nested horizontal scroll, which is close to unusable. Regions get
+   the full width by default and only sit side by side when there is genuinely
+   room for both. */
+.bracketwrap { display: grid; gap: 16px; grid-template-columns: 1fr; }
+.bracketwrap .half { min-width: 0; display: grid; gap: 14px; }
+.bracketwrap .centrecol { min-width: 0; order: 1; }
+@media (min-width: 1850px) {
+	.bracketwrap { grid-template-columns: 1fr 240px 1fr; align-items: start; }
+	.bracketwrap .centrecol { order: 0; align-self: center; }
+}
 .bracketwrap .centrecol h4 { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .07em; margin: 10px 0 6px; }
 .regionbox h4 { margin: 0 0 6px; font-size: 12px; }
-.game .gn { flex: 1; overflow: hidden; text-overflow: ellipsis; }
-.game .score { font-size: 10.5px; color: var(--dim); font-variant-numeric: tabular-nums; border-top: 1px solid var(--line); }
+/* Compact mode: winners only, no nested horizontal scroll. */
+.compactregion { font-size: 12px; }
+.compactregion ol { margin: 4px 0 0; padding-left: 18px; }
+.compactregion li { margin: 2px 0; color: var(--dim); }
+.compactregion li b { color: var(--text); font-weight: 600; }
+
+/* ---- modal --------------------------------------------------------------- */
+.modal {
+	position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 100;
+	display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+/* display:flex beats the `hidden` attribute's display:none, so without this the
+   dialog is invisible but still covers the page and swallows every click. */
+.modal[hidden] { display: none; }
+.modalbox {
+	background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+	padding: 16px 18px; max-width: 560px; width: 100%; max-height: 80vh; overflow: auto;
+}
+.modalbox h3 { margin: 0 0 10px; }
+.modalbtns { justify-content: flex-end; margin-top: 12px; }
 
 /* ---- narrow viewports ---------------------------------------------------- */
 @media (max-width: 860px) {
-	/* Column layout: a flex line takes its cross size from the widest item, so
-	   main would otherwise stretch to the table's max-content width and the
-	   whole page would scroll sideways. Pin both children to the viewport and
-	   let the .scroll wrappers do the horizontal scrolling instead. */
 	.layout { flex-direction: column; max-width: 100%; }
 	.layout > * { width: 100%; max-width: 100%; min-width: 0; }
 	aside {
@@ -191,7 +285,9 @@ tbody tr { cursor: pointer; }
 	.filters input[type=search] { min-width: 0; }
 	.cards { grid-template-columns: 1fr; }
 }
-.archlist { max-height: 210px; overflow-y: auto; display: grid; gap: 2px; border: 1px solid var(--line); border-radius: 6px; padding: 6px; }
+.archlist { max-height: 230px; overflow-y: auto; display: grid; gap: 2px; border: 1px solid var(--line); border-radius: 6px; padding: 6px; }
 .archrow { display: grid; grid-template-columns: 1fr 62px; gap: 6px; align-items: center; font-size: 11px; color: var(--dim); }
 .archrow input { padding: 2px 5px; font-size: 11px; }
-.archname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.archname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: help; }
+.archname:hover { color: var(--text); }
+.colpicker { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 3px; }

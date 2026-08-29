@@ -339,11 +339,14 @@
 	   (dribbling > .68) were previously unreachable for anything this tool
 	   produced, so exported classes systematically lacked three of the nine
 	   badges a native BBGM class has. */
-	function shiftScales(arch, up) {
+	function shiftScales(arch, up, pinned) {
 		const out = {};
 		let maxOff = 0;
 		for (const k of Object.keys(arch.o || {})) maxOff = Math.max(maxOff, Math.abs(arch.o[k]));
 		for (const key of BB.RATING_KEYS) {
+			// A rating the user has set by hand is exactly that: set. The
+			// solver spends its budget on the others.
+			if (pinned && Number.isFinite(pinned[key])) { out[key] = 0; continue; }
 			const base = SHIFT_SCALE[key];
 			const off = (arch.o && arch.o[key]) || 0;
 			const sig = maxOff > 0 ? clamp(off / maxOff, -1, 1) : 0;
@@ -372,21 +375,21 @@
 	   or very short base simply cannot reach every target. Callers — the lock
 	   editor, the tests — need to know which asks are impossible rather than
 	   silently getting the nearest thing. */
-	function ovrRange(base, arch) {
-		const upScales = arch ? shiftScales(arch, true) : SHIFT_SCALE;
-		const downScales = arch ? shiftScales(arch, false) : SHIFT_SCALE;
+	function ovrRange(base, arch, pinned) {
+		const upScales = arch ? shiftScales(arch, true, pinned) : SHIFT_SCALE;
+		const downScales = arch ? shiftScales(arch, false, pinned) : SHIFT_SCALE;
 		return {
 			min: BB.ovr(applyShift(base, -90, downScales)),
 			max: BB.ovr(applyShift(base, 90, upScales)),
 		};
 	}
 
-	function solveToOvr(base, targetOvr, arch) {
+	function solveToOvr(base, targetOvr, arch, pinned) {
 		// Two scale vectors, one for each direction; both equal SHIFT_SCALE at
 		// k = 0, so the shift stays continuous and monotone across the origin
 		// and the bisection below is still valid.
-		const upScales = arch ? shiftScales(arch, true) : SHIFT_SCALE;
-		const downScales = arch ? shiftScales(arch, false) : SHIFT_SCALE;
+		const upScales = arch ? shiftScales(arch, true, pinned) : SHIFT_SCALE;
+		const downScales = arch ? shiftScales(arch, false, pinned) : SHIFT_SCALE;
 		const shift = (k) => applyShift(base, k, k >= 0 ? upScales : downScales);
 		let lo = -90;
 		let hi = 90;
@@ -422,7 +425,7 @@
 	/* Rebuild one player's ratings.
 	   orig: the ratings row from the league file
 	   targetOvr / targetPot: what the rebuilt player must come out to */
-	function rebuild(rng, orig, targetOvr, targetPot, cfg, forcedArchetype, flavor) {
+	function rebuild(rng, orig, targetOvr, targetPot, cfg, forcedArchetype, flavor, pinned) {
 		const forced = forcedArchetype
 			? ARCHETYPES.filter((a) => a.name === forcedArchetype)[0]
 			: null;
@@ -432,6 +435,13 @@
 
 		const base = {};
 		for (const key of BB.RATING_KEYS) {
+			// A hand-edited rating is taken literally and never shifted. There
+			// was no way at all to say "leave everything else, just bump his tp
+			// to 70"; the editor could only set ovr, pot, archetype and school.
+			if (pinned && Number.isFinite(pinned[key])) {
+				base[key] = clamp(Math.round(pinned[key]), 0, 100);
+				continue;
+			}
 			const off = arch.o[key] || 0;
 			base[key] = clamp(
 				orig[key] + spec * off + rng.normal(0, noise),
@@ -440,7 +450,7 @@
 			);
 		}
 
-		const solved = solveToOvr(base, targetOvr, arch);
+		const solved = solveToOvr(base, targetOvr, arch, pinned);
 		const finalOvr = BB.ovr(solved);
 		const pot = clamp(Math.max(targetPot, finalOvr + 1), finalOvr, 100);
 
@@ -453,7 +463,7 @@
 			archetype: arch.name,
 			// What this player's height actually allows, so an impossible lock
 			// can be reported instead of quietly ignored.
-			ovrRange: ovrRange(base, arch),
+			ovrRange: ovrRange(base, arch, pinned),
 		};
 	}
 

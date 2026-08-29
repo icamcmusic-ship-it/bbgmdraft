@@ -24,3 +24,17 @@ jobs:
         with:
           name: calibration
           path: calibration.json
+
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # The UI had no automated coverage at all, so a CSS rule that swallowed
+      # every click shipped silently.
+      - name: Install Playwright
+        run: npm install --no-save playwright && npx playwright install --with-deps chromium
+      - name: Browser smoke test
+        run: node tools/uismoke.js

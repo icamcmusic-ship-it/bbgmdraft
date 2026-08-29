@@ -71,6 +71,24 @@
 		return num / den;
 	}
 
+	/* How a program plays. Prospects were dropped onto a school that had a
+	   strength and nothing else — Villanova guards shoot threes and Gonzaga
+	   bigs get lobs, and the tool had no way to express either, so a shooter at
+	   a four-out program and a shooter at a pack-line program produced the same
+	   line. The numbers are shifts applied to the stat model: `three` moves
+	   3PA share, `pace` moves possessions, `rim` moves the rim/mid split and
+	   `press` moves the turnovers a defence forces. */
+	const PROGRAM_STYLES = [
+		{ name: "balanced", w: 3.0, three: 0, pace: 0, rim: 0, press: 0 },
+		{ name: "four-out, three-heavy", w: 2.0, three: 0.09, pace: 1.5, rim: -0.03, press: 0 },
+		{ name: "pack-line, grind it out", w: 1.6, three: -0.02, pace: -4.5, rim: 0.02, press: -0.02 },
+		{ name: "run and gun", w: 1.4, three: 0.05, pace: 5.5, rim: 0.03, press: 0.02 },
+		{ name: "inside-out, post-heavy", w: 1.3, three: -0.08, pace: -1.5, rim: 0.07, press: 0 },
+		{ name: "ball-screen heavy", w: 1.6, three: 0.04, pace: 1.0, rim: 0.02, press: 0 },
+		{ name: "full-court press", w: 0.9, three: 0.02, pace: 4.5, rim: 0.04, press: 0.06 },
+		{ name: "lob city", w: 1.0, three: -0.04, pace: 1.5, rim: 0.08, press: 0 },
+	];
+
 	/* Build every NCAA program for the season. prospectsBySchool maps a college
 	   name to the rebuilt draft prospects who play there. */
 	function buildPrograms(prospectsBySchool, rng) {
@@ -92,6 +110,7 @@
 
 			teams[name] = {
 				name,
+				style: trng.weighted(PROGRAM_STYLES),
 				conf: C.conferenceOf(name) || "Independent",
 				prestige: C.prestige(name),
 				level,
@@ -443,6 +462,7 @@
 		prospectTalent, teamRating, winProb, playGame, playGameScore, ratingOn,
 		rotationWeights, pairUp, record, recordPostseason, finalizeSchedule,
 		REGULAR_NOISE,
-		label, adoptConference, conferencePools, CONF_GAMES, NON_CONF_GAMES,
+		label, adoptConference, conferencePools, PROGRAM_STYLES,
+		CONF_GAMES, NON_CONF_GAMES,
 	};
 })(typeof window !== "undefined" ? window : self);

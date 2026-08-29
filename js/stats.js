@@ -269,7 +269,7 @@
 		// only above/below-typical skill moves the rate off its empirical anchor.
 		const tovRate = clamp(
 			CAL.byHeight("tov", bigness) - 0.10 * (comps.turnovers - 0.467) +
-				0.13 * od.perimeter + rng.normal(0, 0.014 * noise),
+				0.13 * od.perimeter + (ctx.oppPress || 0) + rng.normal(0, 0.014 * noise),
 			0.08, 0.27,
 		);
 		// Free-throw rate climbs steeply with size (FTr .37 guards -> .51
@@ -289,7 +289,11 @@
 
 		// Shot mix: 3PA share anchored to the height buckets (.39 for guards
 		// down to .085 for 6'11"+), stretched by shooting talent.
-		let share3 = CAL.threeShare(bigness, ratings.tp) + rng.normal(0, 0.045 * noise);
+		// The system he plays in. A shooter at a four-out programme and the same
+		// shooter in a pack-line offence do not take the same shots.
+		const style = teamCtx.style || { three: 0, rim: 0, press: 0 };
+		let share3 = CAL.threeShare(bigness, ratings.tp) + style.three +
+			rng.normal(0, 0.045 * noise);
 		share3 = clamp(share3, 0.0, 0.75);
 
 		const tpa = fga * share3;
@@ -319,7 +323,8 @@
 		// this size typically scores on them, to avoid double-counting height.
 		// Rim attempts are ~50% of 2PA for guards and ~55% for centers in the
 		// data — nearly flat; the size effect lives in rim FG%, not shot mix.
-		const rimMix = clamp(0.49 + 0.06 * bigness + 0.10 * (comps.shootingAtRim - comps.shootingMidRange), 0.30, 0.75);
+		const rimMix = clamp(0.49 + 0.06 * bigness + style.rim +
+			0.10 * (comps.shootingAtRim - comps.shootingMidRange), 0.30, 0.75);
 		// Interior defence bites hardest exactly where it should: at the rim.
 		const insideEff = CAL.byHeight("rimPct", bigness) +
 			0.26 * (comps.shootingAtRim - (0.32 + 0.44 * bigness)) +
@@ -641,9 +646,10 @@
 		// Pace: D-I takes the slider, every other league takes its own. The
 		// slider is labelled "College season", and it used to silently rewrite
 		// EuroLeague and G League box scores.
+		const stylePace = (team.style && team.style.pace) || 0;
 		const pace = env.pace !== null && env.pace !== undefined
-			? clamp(env.pace + (cfg.scoringEnv || 0) * 1.2, 50, 115)
-			: clamp(cfg.pace + cfg.scoringEnv * 1.6, 58, 82);
+			? clamp(env.pace + (cfg.scoringEnv || 0) * 1.2 + stylePace, 50, 115)
+			: clamp(cfg.pace + cfg.scoringEnv * 1.6 + stylePace, 58, 82);
 		// Chances exceed possessions by the team's offensive rebounds; solve
 		// chances = poss + orbRate * missShare * chances for the multiplier.
 		// One pass on a nominal ORB rate, then refine with the roster's own.
@@ -667,6 +673,7 @@
 			support: teamTalent,
 			chanceMult,
 			env,
+			style: team.style || { three: 0, rim: 0, press: 0, pace: 0 },
 			rebDen: 0, orbDen: 0, astDen: 0, stlDen: 0, blkDen: 0, pfDen: 0,
 		}, pools);
 		// The pace this team actually plays at, jitter included, so statLine and

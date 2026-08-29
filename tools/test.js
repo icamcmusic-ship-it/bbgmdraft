@@ -12,7 +12,7 @@ const crypto = require("crypto");
 const V = require("./validate.js");
 
 V.loadEngine();
-const { Rng, clamp } = global.BBGMRng;
+const { Rng } = global.BBGMRng;
 const BB = global.BBGM;
 const RB = global.RatingsBuilder;
 
@@ -506,6 +506,36 @@ console.log("\nLeague environments");
 		ppgOf(slow).toFixed(2) + " at pace 58 vs " + ppgOf(fast).toFixed(2) + " at pace 80");
 }
 
+/* ---------------------------------------------------------- program style */
+/* A shooter at a four-out programme and the same shooter in a pack-line
+   offence should not produce the same line. Programs had a strength and
+   nothing else. */
+console.log("\nProgram style");
+{
+	const res = global.Engine.run(V.syntheticClass(121, 70), global.Config.make({ seed: "sty" }));
+	const styles = {};
+	for (const t of Object.values(res.teams)) {
+		styles[t.style.name] = (styles[t.style.name] || 0) + 1;
+	}
+	ok("every program has a playing style",
+		Object.values(res.teams).every((t) => t.style && t.style.name));
+	ok("styles vary across the country", Object.keys(styles).length >= 6,
+		Object.keys(styles).length + " distinct styles");
+	const mean = (v) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0);
+	const three = [];
+	const pack = [];
+	for (const t of Object.values(res.teams)) {
+		if (!t.fieldPlayers) continue;
+		const share = t.fieldPlayers.filter((f) => f.mpg >= 15)
+			.map((f) => (f.line.fga > 0 ? f.line.tpa / f.line.fga : 0));
+		if (t.style.name === "four-out, three-heavy") three.push(mean(share));
+		if (t.style.name === "inside-out, post-heavy") pack.push(mean(share));
+	}
+	ok("a four-out programme takes more threes than a post-heavy one",
+		three.length && pack.length && mean(three) > mean(pack) + 0.08,
+		"four-out " + mean(three).toFixed(3) + " vs post-heavy " + mean(pack).toFixed(3));
+}
+
 /* ------------------------------------------------------------- game logs */
 console.log("\nGame logs");
 {
@@ -516,7 +546,6 @@ console.log("\nGame logs");
 	let worst = 0;
 	for (const p of withLogs) {
 		const g = p.gameLog.games;
-		ok.silent = true;
 		const ppg = g.reduce((a, x) => a + x.pts, 0) / g.length;
 		worst = Math.max(worst, Math.abs(ppg - p.stats.ppg));
 	}

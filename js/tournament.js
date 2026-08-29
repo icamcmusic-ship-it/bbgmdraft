@@ -2,7 +2,6 @@
 (function (global) {
 	"use strict";
 
-	const C = global.Colleges;
 	const T = global.TeamsSim;
 
 	function apPoll(teams, n) {

@@ -304,6 +304,9 @@
 		for (const p of players) {
 			const ov = ovOf(p);
 			p.override = ov;
+			// A renamed prospect keeps the new name everywhere, including in
+			// the exported file.
+			if (ov.name && String(ov.name).trim()) p.name = String(ov.name).trim();
 			p.newCollege = ov.college ||
 				assignCollege(rng.child("college:" + p.key), p.src, cfg);
 			p.collegeChanged = p.newCollege !== p.origCollege;
@@ -334,7 +337,15 @@
 			// listed). ~4.2 rating points per inch on BBGM's mapping.
 			p.newHgtInches = p.hgtInches;
 			let baseRatings = p.origRatings;
-			if (cfg.varySize) {
+			// A hand-set listed height moves the hgt rating with it, so the
+			// player simulates at the size he is listed at.
+			if (Number.isFinite(ov.hgtInches)) {
+				p.newHgtInches = clamp(Math.round(ov.hgtInches), 58, 96);
+				baseRatings = Object.assign({}, p.origRatings, {
+					hgt: clamp(Math.round(p.origRatings.hgt +
+						(p.newHgtInches - p.hgtInches) * (100 / 24)), 0, 100),
+				});
+			} else if (cfg.varySize) {
 				p.newHgtInches = clamp(
 					Math.round(p.hgtInches + prng.normal(0, 1.1)), 64, 92,
 				);
@@ -348,7 +359,7 @@
 
 			const built = RB.rebuild(
 				prng, baseRatings, targetOvr, targetOvr + gap, cfg,
-				ov.archetype || null, state.flavor);
+				ov.archetype || null, state.flavor, ov.ratings || null);
 			p.newRatings = built.ratings;
 			p.newOvr = built.ovr;
 			p.ovrRange = built.ovrRange;
@@ -363,7 +374,12 @@
 			p.newSkills = built.skills;
 			p.archetype = built.archetype;
 			p.newWeight = p.weight;
-			if (cfg.varySize) {
+			if (Number.isFinite(ov.weight)) {
+				p.newWeight = clamp(Math.round(ov.weight), 120, 400);
+			} else if (Number.isFinite(ov.hgtInches)) {
+				p.newWeight = clamp(
+					Math.round(p.weight + (p.newHgtInches - p.hgtInches) * 5), 120, 400);
+			} else if (cfg.varySize) {
 				p.newWeight = clamp(
 					Math.round(p.weight + (built.ratings.stre - p.origRatings.stre) * 0.55 +
 						(p.newHgtInches - p.hgtInches) * 5 + prng.normal(0, 5)), 150, 330,
@@ -502,15 +518,20 @@
 			let rim = 0;
 			let per = 0;
 			let ovr = 0;
+			let press = 0;
 			let n = 0;
 			for (const g of t.log) {
 				const pr = profiles[g.opp];
+				const opp = teams[g.opp];
 				if (!pr) continue;
-				rim += pr.rim; per += pr.perimeter; ovr += pr.overall; n++;
+				rim += pr.rim; per += pr.perimeter; ovr += pr.overall;
+				press += (opp && opp.style ? opp.style.press : 0);
+				n++;
 			}
 			t.oppDefense = n
 				? { rim: rim / n, perimeter: per / n, overall: ovr / n }
 				: { rim: 0, perimeter: 0, overall: 0 };
+			t.oppPress = n ? press / n : 0;
 		}
 
 		/* Every program in the country, not only the forty that happen to have
@@ -527,6 +548,7 @@
 			S.simulateTeamStats(team, {
 				oppStrength: (team.sosAvg + conf.strength * 0.35) / 1.35,
 				oppDefense: team.oppDefense,
+				oppPress: team.oppPress,
 				games: Math.round(team.games),
 				league: S.NCAA_ENV,
 				pro: false,
@@ -995,7 +1017,9 @@
 				lines.push((p.proClub ? p.proClub + " (" + p.newCollege + ")" : p.newCollege) +
 					" · " + p.classYear + (p.proDeal ? " · " + p.proDeal : ""));
 			} else {
-				lines.push(p.newCollege + " (" + team.conf + ") · " + p.classYear);
+				lines.push(p.newCollege + " (" + team.conf + ") · " + p.classYear +
+					(team.style && team.style.name !== "balanced"
+						? " · " + team.style.name : ""));
 			}
 		}
 		if (on("path")) {
@@ -1137,11 +1161,19 @@
 			if (!p) return orig;
 			const out = JSON.parse(JSON.stringify(orig));
 			out.college = p.newCollege;
+			const ov = p.override || {};
+			if (ov.name && String(ov.name).trim()) {
+				const parts = String(ov.name).trim().split(/\s+/);
+				out.firstName = parts.shift();
+				out.lastName = parts.join(" ");
+			}
 			// The README promises hgt/weight are rewritten only when Vary size
 			// is on or the source file lacked them; the old code wrote both
 			// unconditionally, adding keys to files that never had them.
-			if (result.cfg.varySize || !Number.isFinite(orig.hgt)) out.hgt = p.newHgtInches;
-			if (result.cfg.varySize || !Number.isFinite(orig.weight)) out.weight = p.newWeight;
+			const sized = result.cfg.varySize || Number.isFinite(ov.hgtInches) ||
+				Number.isFinite(ov.weight);
+			if (sized || !Number.isFinite(orig.hgt)) out.hgt = p.newHgtInches;
+			if (sized || !Number.isFinite(orig.weight)) out.weight = p.newWeight;
 			const last = out.ratings.length - 1;
 			const r = out.ratings[last];
 			for (const k of BB.RATING_KEYS) r[k] = p.newRatings[k];
