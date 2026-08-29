@@ -188,4 +188,4 @@
 		RATING_KEYS, ovr, pos, skills, composites, compositeRating,
 		COMPOSITE_WEIGHTS, fuzzRating,
 	};
-})(window);
+})(typeof window !== "undefined" ? window : self);

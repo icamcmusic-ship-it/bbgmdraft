@@ -25,12 +25,7 @@
 		// Every conference that actually has teams gets an auto bid, Independent
 		// included — out-of-database schools used to be silently excluded from
 		// the whole postseason.
-		const pools = {};
-		for (const conf of Object.keys(C.byConference)) {
-			pools[conf] = C.byConference[conf].map((n) => teams[n]).filter(Boolean);
-		}
-		const indep = Object.values(teams).filter((t) => t.conf === "Independent");
-		if (indep.length >= 2) pools.Independent = indep;
+		const pools = T.conferencePools(teams);
 		for (const conf of Object.keys(pools)) {
 			if (!pools[conf].length) continue;
 			const champ = pools[conf].filter((t) => t.confTourneyChamp)[0];
@@ -76,7 +71,8 @@
 				const a = list[i];
 				const b = list[i + 1];
 				if (!b) { adv.push(a); continue; }
-				const sc = T.playGameScore(rng, a, b, 0, cfg, 1);
+				const sc = T.playGameScore(rng, a, b, 0, cfg, 1, true);
+				T.recordPostseason(a, b, sc, "ncaa", 1.06, "First Four");
 				const won = sc.won;
 				const winner = won ? a : b;
 				const loser = won ? b : a;
@@ -127,11 +123,14 @@
 			while (alive.length > 1) {
 				const next = [];
 				const games = [];
+				const roundName = ROUND_NAME[regionRounds.length] || "Regional";
 				for (let i = 0; i < alive.length; i += 2) {
 					const A = alive[i];
 					const B = alive[i + 1];
 					if (!B) { next.push(A); continue; }
-					const sc = T.playGameScore(rng, A.team, B.team, 0, cfg, 1);
+					const sc = T.playGameScore(rng, A.team, B.team, 0, cfg, 1, true);
+					T.recordPostseason(A.team, B.team, sc, "ncaa",
+						1.07 + regionRounds.length * 0.01, roundName);
 					const won = sc.won;
 					const winner = won ? A : B;
 					const loser = won ? B : A;
@@ -154,7 +153,8 @@
 		const semis = [];
 		const finalists = [];
 		for (let i = 0; i < 4; i += 2) {
-			const sc = T.playGameScore(rng, ff[i].team, ff[i + 1].team, 0, cfg, 1);
+			const sc = T.playGameScore(rng, ff[i].team, ff[i + 1].team, 0, cfg, 1, true);
+			T.recordPostseason(ff[i].team, ff[i + 1].team, sc, "ncaa", 1.12, "Final Four");
 			const won = sc.won;
 			const winner = won ? ff[i] : ff[i + 1];
 			semis.push({
@@ -165,7 +165,9 @@
 			winner.team.ncaaWins = (winner.team.ncaaWins || 0) + 1;
 			finalists.push(winner);
 		}
-		const finalSc = T.playGameScore(rng, finalists[0].team, finalists[1].team, 0, cfg, 1);
+		const finalSc = T.playGameScore(rng, finalists[0].team, finalists[1].team, 0, cfg, 1, true);
+		T.recordPostseason(finalists[0].team, finalists[1].team, finalSc, "ncaa", 1.13,
+			"National Championship");
 		const wonFinal = finalSc.won;
 		const champion = wonFinal ? finalists[0] : finalists[1];
 		const runnerUp = wonFinal ? finalists[1] : finalists[0];
@@ -186,12 +188,68 @@
 			}
 		}
 
+		const nit = simulateNit(teams, sel, cfg, rng.child("nit"));
+
 		return {
 			selection: sel, firstFour, regions: regionResults, semis,
 			final: { a: finalists[0], b: finalists[1], winner: champion, score: finalScore },
-			champion, runnerUp, finalFour: ff,
+			champion, runnerUp, finalFour: ff, nit,
 		};
 	}
 
-	global.Tournament = { apPoll, simulate, selectField, REGIONS, SEED_ORDER };
-})(window);
+	/* The NIT. A fringe prospect's team plays somewhere in March, and "made a
+	   run to the NIT semifinals" is a real line on a scouting report; before
+	   this, missing the 68 meant the season simply stopped. 32 teams, the best
+	   resumes left on the board, single elimination. */
+	function simulateNit(teams, sel, cfg, rng) {
+		const inField = new Set(sel.field.map((t) => t.name));
+		const pool = Object.values(teams)
+			.filter((t) => !inField.has(t.name))
+			.sort((a, b) => b.resume - a.resume)
+			.slice(0, 32);
+		if (pool.length < 2) return null;
+		for (const t of pool) t.nitBid = true;
+		const NIT_ROUNDS = ["NIT First Round", "NIT Second Round", "NIT Quarterfinal",
+			"NIT Semifinal", "NIT Championship"];
+		let alive = pool.slice();
+		const rounds = [];
+		let r = 0;
+		while (alive.length > 1) {
+			const games = [];
+			const next = [];
+			const roundName = NIT_ROUNDS[r] || "NIT Round " + (r + 1);
+			for (let i = 0; i < Math.floor(alive.length / 2); i++) {
+				const A = alive[i];
+				const B = alive[alive.length - 1 - i];
+				const sc = T.playGameScore(rng, A, B, 0, cfg, 1, true);
+				T.recordPostseason(A, B, sc, "nit", 1.065 + r * 0.01, roundName);
+				const winner = sc.won ? A : B;
+				winner.nitWins = (winner.nitWins || 0) + 1;
+				games.push({
+					a: A, b: B, winner, round: roundName,
+					score: (sc.won ? sc.a + "-" + sc.b : sc.b + "-" + sc.a) +
+						(sc.ot ? (sc.ot > 1 ? " " + sc.ot + "OT" : " OT") : ""),
+				});
+				next.push(winner);
+			}
+			if (alive.length % 2 === 1) next.push(alive[Math.floor(alive.length / 2)]);
+			rounds.push(games);
+			alive = next;
+			r++;
+		}
+		const champ = alive[0];
+		for (const t of pool) {
+			const wins = t.nitWins || 0;
+			t.nitResult = t === champ ? "NIT Champion"
+				: wins >= 4 ? "Lost in the NIT Championship"
+				: wins >= 3 ? "Lost in the NIT Semifinal"
+				: wins >= 2 ? "Lost in the NIT Quarterfinal"
+				: wins >= 1 ? "Lost in the NIT Second Round"
+				: "Lost in the NIT First Round";
+		}
+		if (champ) champ.nitChamp = true;
+		return { field: pool, rounds, champion: champ };
+	}
+
+	global.Tournament = { apPoll, simulate, selectField, simulateNit, REGIONS, SEED_ORDER };
+})(typeof window !== "undefined" ? window : self);

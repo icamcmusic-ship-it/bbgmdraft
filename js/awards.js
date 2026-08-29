@@ -7,12 +7,22 @@
    contained the National Player of the Year and all five Consensus First
    Teamers, 80 awards a year across 51% of the class. So the unseen field is
    modelled explicitly: every filler on every roster gets a comparable score,
-   and a prospect has to finish ahead of them to be honoured. */
+   and a prospect has to finish ahead of them to be honoured.
+
+   The award list itself used to be eighteen strings, three of them generic
+   ("National Player of the Year", "National Defensive Player of the Year") and
+   six conference-templated. A real college season hands out well over a
+   hundred distinguishable honours, and — more importantly — the defensive ones
+   had almost nothing to rank on, because defence was two counting stats and a
+   composite. Both halves are fixed here: the defensive score reads a real
+   defensive box score (contested shots, deflections, charges, defensive
+   rating), and the honours it feeds are the ones that actually exist. */
 (function (global) {
 	"use strict";
 
 	const { clamp } = global.BBGMRng;
 	const C = global.Colleges;
+	const T = global.TeamsSim;
 
 	function productionScore(p) {
 		const s = p.stats;
@@ -22,9 +32,25 @@
 		);
 	}
 
+	/* A defensive resume, not an offensive one wearing a hat.
+
+	   The old version was 2.6*spg + 3.4*bpg + 0.45*rpg + 26*(defense - .45):
+	   two counting stats a low-usage perimeter stopper does not accumulate, and
+	   one composite. Contested shots, deflections and charges are the plays
+	   that make up the rest of a real defensive record, and defensive rating
+	   folds in what happened while he was on the floor. */
 	function defenseScore(p, comps) {
 		const s = p.stats;
-		return 2.6 * s.spg + 3.4 * s.bpg + 0.45 * s.rpg + 26 * (comps.defense - 0.45);
+		const events =
+			2.4 * s.spg + 3.0 * s.bpg + 0.40 * s.drpg +
+			0.55 * (s.cspg || 0) + 0.90 * (s.deflpg || 0) + 1.60 * (s.chgpg || 0);
+		const skill =
+			14 * (comps.defense - 0.45) +
+			7 * (comps.defenseInterior - 0.46) +
+			7 * (comps.defensePerimeter - 0.46);
+		const impact = Number.isFinite(s.drtg) ? 0.30 * (104 - s.drtg) : 0;
+		// Fouling your way through a game is not defence.
+		return events + skill + impact - 0.5 * Math.max(0, s.pfpg - 2.6);
 	}
 
 	const NCAA_BONUS = {
@@ -32,95 +58,280 @@
 		"Lost in the Elite Eight": 4.5, "Lost in the Sweet 16": 3,
 		"Lost in the Round of 32": 1.5, "Lost in the Round of 64": 0.8, "Lost in the First Four": 0.2,
 	};
+	const NIT_BONUS = {
+		"NIT Champion": 1.6, "Lost in the NIT Championship": 1.2,
+		"Lost in the NIT Semifinal": 0.9, "Lost in the NIT Quarterfinal": 0.6,
+		"Lost in the NIT Second Round": 0.3, "Lost in the NIT First Round": 0.1,
+	};
 
-	function resumeScore(p, team) {
+	/* Team-side contribution to an award case. The first parameter used to be a
+	   `p` that the body never read — buildField passed null and it worked, but
+	   it was a trap for the next person to add a `p.` reference. It is gone. */
+	function resumeScore(team) {
 		if (!team) return 0;
 		const conf = C.CONFERENCES[team.conf] || C.CONFERENCES.Independent;
 		// Deliberately a minority of the total: winning helps a candidacy, it
-		// does not manufacture one out of 4 points a game.
+		// does not manufacture one out of 4 points a game. team.w now includes
+		// postseason wins, which is the point — a March run should be worth
+		// something on a resume.
 		return (
 			0.18 * team.w +
 			0.18 * (conf.strength - 58) +
 			0.6 * (NCAA_BONUS[team.ncaaResult] || 0) +
+			(NIT_BONUS[team.nitResult] || 0) +
 			(team.apRank ? (26 - team.apRank) * 0.10 : 0) +
 			(team.confRegularChamp ? 1.2 : 0)
 		);
 	}
 
-	/* Least-squares fit of production score against college talent, taken from
-	   the prospects in this very class. That gives a calibrated way to score
-	   the ~2,800 returning players on the same scale without simulating a stat
-	   line for each of them. */
-	function fitTalentToScore(ncaa, teams) {
-		const xs = [];
-		const ys = [];
-		for (const p of ncaa) {
-			const t = teams[p.newCollege];
-			if (!t || !p.stats) continue;
-			const m = t.members.filter((x) => !x.filler && x.player === p)[0];
-			if (!m) continue;
-			xs.push(m.talent);
-			ys.push(p.scoreProd);
-		}
-		if (xs.length < 4) return { a: -22, b: 0.62, sd: 6 };
-		const n = xs.length;
-		const mx = xs.reduce((a, b) => a + b, 0) / n;
-		const my = ys.reduce((a, b) => a + b, 0) / n;
+	/* Ordinary least squares of a score against college talent.
+
+	   This used to be the whole basis of the unseen field: fit prospect
+	   production against talent, then extrapolate the line down to every
+	   returning player in the country. Two things were wrong with that. The
+	   fit was estimated over prospects only — a talent range of roughly 65-85 —
+	   and extrapolated to talent 20, where a straight line predicts that a
+	   low-major's leading scorer produces nothing; and with fewer than four
+	   prospects it fell back to hardcoded constants, so a five-player class
+	   scored the entire D-I field off a pair of magic numbers and awards became
+	   arbitrary.
+
+	   Every program is now simulated, so the field is made of real stat lines
+	   (see buildField) and no extrapolation is needed. The fit survives for one
+	   job: measuring how far a player's production sits from what a player of
+	   his talent typically produces, which is the "most improved" proxy. It is
+	   estimated on the field itself, which spans the whole talent range. */
+	const FIT_PRIOR = { a: -22, b: 0.62, sd: 6 };
+
+	function fitScores(points, prior) {
+		const pr = prior || FIT_PRIOR;
+		const n = points.length;
+		if (!n) return Object.assign({}, pr);
+		let mx = 0;
+		let my = 0;
+		for (const pt of points) { mx += pt.x; my += pt.y; }
+		mx /= n;
+		my /= n;
 		let sxy = 0;
 		let sxx = 0;
-		for (let i = 0; i < n; i++) {
-			sxy += (xs[i] - mx) * (ys[i] - my);
-			sxx += (xs[i] - mx) * (xs[i] - mx);
+		for (const pt of points) {
+			sxy += (pt.x - mx) * (pt.y - my);
+			sxx += (pt.x - mx) * (pt.x - mx);
 		}
-		const b = sxx > 0 ? sxy / sxx : 0.62;
-		const a = my - b * mx;
+		// Shrink toward the prior by sample size, so the fit degrades smoothly
+		// from "one data point" to "two thousand" instead of falling off a
+		// cliff into constants.
+		const trust = n / (n + 4);
+		const b = trust * (sxx > 1e-9 ? sxy / sxx : pr.b) + (1 - trust) * pr.b;
+		const a = trust * (my - b * mx) + (1 - trust) * pr.a;
 		let ss = 0;
-		for (let i = 0; i < n; i++) {
-			const e = ys[i] - (a + b * xs[i]);
+		for (const pt of points) {
+			const e = pt.y - (a + b * pt.x);
 			ss += e * e;
 		}
-		return { a, b, sd: Math.max(2, Math.sqrt(ss / n)) };
+		return { a, b, sd: Math.max(2, trust * Math.sqrt(ss / n) + (1 - trust) * pr.sd) };
 	}
 
-	/* Every returning player in Division I, scored on the prospects' scale.
-	   These are the players a prospect actually has to beat for an
-	   All-American slot. */
-	function buildField(teams, fit, rng) {
+	/* Backwards-compatible wrapper. */
+	function fitTalentToScore(ncaa, teams, key, prior) {
+		const points = [];
+		for (const p of ncaa) {
+			const t = teams[p.newCollege];
+			if (!t || !p.stats || !Number.isFinite(p[key])) continue;
+			const m = t.members.filter((x) => !x.filler && x.player === p)[0];
+			if (!m) continue;
+			points.push({ x: m.talent, y: p[key] });
+		}
+		return fitScores(points, prior);
+	}
+
+	/* Positions, so the five position-specific national awards have a field to
+	   beat. Roughly the real D-I rotation split. */
+	const FILLER_POS = [
+		["PG", 0.17], ["G", 0.08], ["SG", 0.16], ["GF", 0.09], ["SF", 0.14],
+		["F", 0.08], ["PF", 0.13], ["FC", 0.06], ["C", 0.09],
+	];
+	function rollPos(rng) {
+		let x = rng.random();
+		for (const [pos, w] of FILLER_POS) {
+			x -= w;
+			if (x <= 0) return pos;
+		}
+		return "F";
+	}
+
+	/* Every returning player in Division I, scored on exactly the scale the
+	   prospects are scored on, because his season was simulated by exactly the
+	   same model. These are the players a prospect actually has to beat for an
+	   All-America slot.
+
+	   Team totals, the possession identity, minutes and usage allocation, the
+	   defensive box score — the fillers went through all of it already, and the
+	   lines were being thrown away. */
+	function buildField(teams, rng) {
 		const field = [];
 		for (const name of Object.keys(teams)) {
 			const t = teams[name];
+			if (!t.fieldPlayers || !t.fieldPlayers.length) continue;
 			const trng = rng.child("field|" + name);
-			const resume = resumeScore(null, t);
-			// Only rotation players are candidates for anything.
-			const rotation = t.members.filter((m) => m.filler)
-				.sort((a, b) => b.talent - a.talent)
-				.slice(0, 7);
-			rotation.forEach((m, i) => {
-				const prod = fit.a + fit.b * m.talent + trng.normal(0, fit.sd);
-				// A team's alpha carries the usage (and so the counting stats)
-				// that award voters see; the fifth starter does not, and the
-				// bench does not win awards however talented.
-				const minutesFactor = [1.14, 1.02, 0.94, 0.88, 0.84][i] || 0.5;
+			const resume = resumeScore(t);
+			for (const fp of t.fieldPlayers) {
+				if (fp.mpg < 8) continue;
+				const stats = fp.line;
+				const holder = { stats };
+				const prod = productionScore(holder);
+				// A returner's defensive composites are not stored, so the
+				// composite half of the defensive score is approximated from
+				// his defensive event rates, which are.
+				const def = fieldDefenseScore(stats);
 				field.push({
 					filler: true,
-					name: t.name + " returner " + (i + 1),
+					name: t.name + " returner " + (fp.rotationIndex + 1),
 					conf: t.conf,
 					team: t,
+					stats,
+					pos: rollPos(trng),
 					// Returning players are mostly upperclassmen — that is what
 					// makes them returning players.
 					isFreshman: trng.random() < 0.22,
-					scoreProd: prod * minutesFactor,
-					scoreTotal: prod * minutesFactor + resume + trng.normal(0, 1.4),
-					scoreDefTotal: prod * minutesFactor * 0.42 + resume * 0.5 +
-						trng.normal(0, 2.6),
+					isNewcomer: trng.random() < 0.30,
+					isReserve: fp.rotationIndex >= 5,
+					talent: fp.talent,
+					// A bench player who was a rotation player last year is the
+					// most-improved archetype; so is a sophomore leap.
+					improvement: trng.normal(0, 1),
+					scoreProd: prod,
+					scoreDef: def,
+					scoreTotal: prod + resume + trng.normal(0, 1.4),
+					scoreDefTotal: def + resume * 0.35 + trng.normal(0, 1.2),
 				});
-			});
+			}
 		}
 		return field;
 	}
 
+	/* The defensive score for a player whose rating vector does not exist. The
+	   composite terms of defenseScore() are re-derived from the event rates the
+	   stat model produced, on the same scale. */
+	function fieldDefenseScore(s) {
+		const perMin = (v) => (s.mpg > 0 ? (v * 40) / s.mpg : 0);
+		const events =
+			2.4 * s.spg + 3.0 * s.bpg + 0.40 * s.drpg +
+			0.55 * (s.cspg || 0) + 0.90 * (s.deflpg || 0) + 1.60 * (s.chgpg || 0);
+		// Contest and deflection rates per 40 carry the same information the
+		// defenseInterior / defensePerimeter composites carry for a prospect.
+		const skill =
+			1.05 * (perMin(s.cspg || 0) - 8.4) +
+			1.30 * (perMin(s.deflpg || 0) - 2.6);
+		const impact = Number.isFinite(s.drtg) ? 0.30 * (104 - s.drtg) : 0;
+		return events + skill + impact - 0.5 * Math.max(0, s.pfpg - 2.6);
+	}
+
+	/* --------------------------------------------------------------- awards */
+
+	/* The named national player-of-the-year awards. Six real trophies with six
+	   different electorates: usually the same player sweeps, occasionally they
+	   split, which is exactly what happens in real seasons. `sd` is how much
+	   that electorate diverges from consensus. */
+	const NATIONAL_POY = [
+		{ name: "Naismith Trophy", sd: 1.1 },
+		{ name: "John R. Wooden Award", sd: 1.2 },
+		{ name: "Oscar Robertson Trophy", sd: 1.5 },
+		{ name: "AP Player of the Year", sd: 1.0 },
+		{ name: "NABC Player of the Year", sd: 1.4 },
+		{ name: "Sporting News Player of the Year", sd: 1.6 },
+	];
+	const NATIONAL_DPOY = [
+		{ name: "Naismith Defensive Player of the Year", sd: 1.4 },
+		{ name: "NABC Defensive Player of the Year", sd: 1.6 },
+		{ name: "Lefty Driesell Award", sd: 1.9 },
+	];
+	/* The five position awards. Highest-value addition in the whole list: the
+	   position is already computed, they scale with class composition on their
+	   own, and "Bob Cousy Award finalist" says far more about a prospect than
+	   "All-Big Ten First Team". */
+	const POSITION_AWARDS = [
+		{ name: "Bob Cousy Award", label: "best point guard", pos: ["PG", "G"] },
+		{ name: "Jerry West Award", label: "best shooting guard", pos: ["SG", "G"] },
+		{ name: "Julius Erving Award", label: "best small forward", pos: ["SF", "GF"] },
+		{ name: "Karl Malone Award", label: "best power forward", pos: ["PF", "F"] },
+		{ name: "Kareem Abdul-Jabbar Award", label: "best center", pos: ["C", "FC"] },
+	];
+
+	/* How much an honour is worth on a scouting note, so a résumé reads
+	   "Naismith Trophy; Consensus First Team All-American; All-Big Ten First
+	   Team" and not whatever order the code happened to run in. Lower sorts
+	   first. There are ninety-odd distinguishable honours now; without an
+	   ordering, the good ones get buried. */
+	const AWARD_TIERS = [
+		[/^Consensus National Player of the Year/, 0],
+		[/^(Naismith Trophy|John R\. Wooden Award|Oscar Robertson Trophy|AP Player of the Year|NABC Player of the Year|Sporting News Player of the Year)$/, 1],
+		[/^(Naismith Defensive|NABC Defensive|Lefty Driesell)/, 2],
+		[/^(Bob Cousy|Jerry West|Julius Erving|Karl Malone|Kareem Abdul-Jabbar|Pete Newell|Lute Olson|Wayman Tisdale) Award$/, 3],
+		[/^Consensus First Team All-American$/, 4],
+		[/^Consensus Second Team All-American$/, 5],
+		[/^Third Team All-American$/, 6],
+		[/^NABC All-Defensive First Team$/, 7],
+		[/^NABC All-Defensive Second Team$/, 8],
+		[/^All-Freshman Team$/, 9],
+		[/^Final Four Most Outstanding Player$/, 10],
+		[/All-Region Team$/, 11],
+		[/^NCAA All-Tournament Team$/, 12],
+		[/Player of the Year$/, 13],
+		[/Defensive Player of the Year$/, 14],
+		[/Freshman of the Year$/, 15],
+		[/Sixth Man of the Year$/, 16],
+		[/Most Improved Player$/, 17],
+		[/ First Team$/, 18],
+		[/ Second Team$/, 19],
+		[/Tournament MVP$/, 20],
+		[/Defensive Team$/, 21],
+		[/Freshman Team$/, 22],
+		[/Newcomer Team$/, 23],
+		[/Tournament Team$/, 24],
+		[/^NIT /, 25],
+		[/^Academic All-American$/, 26],
+	];
+	function awardRank(name) {
+		for (const [re, rank] of AWARD_TIERS) if (re.test(name)) return rank;
+		return 30;
+	}
+	function sortAwards(list) {
+		return list.slice().sort((a, b) => awardRank(a) - awardRank(b) || a.localeCompare(b));
+	}
+
+	/* Who is eligible for which kind of honour.
+
+	   These are separate predicates on purpose. Every conference honour used to
+	   run through ONE gate — `mpg < 20 || scoreProd < 12` — including Defensive
+	   Player of the Year, and scoreProd is an offensive box score
+	   (ppg + 1.2*rpg + 1.7*apg + 2.6*spg + 2.6*bpg - 0.8*tov + 55*(ts-.52)).
+	   A genuine low-usage perimeter stopper — 5 points, 3 rebounds, 1.6 steals
+	   — scores about 11 on it and was disqualified from a DEFENSIVE award by
+	   his scoring. Meanwhile the national DPOY used a minutes-only gate, so the
+	   two were not even consistent with each other.
+
+	   Exported so the behaviour is testable directly rather than inferred from
+	   whoever happened to win. */
+	const GATES = {
+		offensive: (x) => !x.stats || (x.stats.mpg >= 20 && x.scoreProd >= 12),
+		// Minutes, plus a DEFENSIVE record. Never an offensive one.
+		defensive: (x) => !x.stats ||
+			(x.stats.mpg >= 20 && (x.scoreDef === undefined || x.scoreDef >= 9)),
+		// A reserve award has to be won by a reserve.
+		reserve: (x) => !x.stats || (x.stats.mpg >= 12 && x.stats.mpg <= 27),
+	};
+
 	function assign(prospects, teams, tourney, cfg, rng) {
 		const strict = clamp(cfg.awardStrictness, 0.2, 3);
+		// Conference hardware is its own dial. 31 conferences hand out far more
+		// of it than the national voters do, and wanting a realistic number of
+		// one was never a reason to get fewer of the other — but one slider
+		// used to drive both, plus the pro-league score bar on top.
+		const confStrict = clamp(
+			cfg.confAwardStrictness === undefined ? strict : cfg.confAwardStrictness, 0.2, 3);
+		const proStrict = clamp(
+			cfg.proAwardStrictness === undefined ? strict : cfg.proAwardStrictness, 0.2, 3);
 		// DII NCAA has pro: false, so splitting on leaguePro put DII players in
 		// the D-I pool — they could and did win Consensus All-American, while
 		// the DII award list was unreachable dead code. Split on nonNcaa.
@@ -132,54 +343,127 @@
 			p.awards = [];
 			p.scoreProd = productionScore(p);
 			p.scoreDef = defenseScore(p, global.BBGM.composites(p.newRatings));
-			p.scoreResume = resumeScore(p, team);
+			p.scoreResume = resumeScore(team);
 			p.scoreTotal = p.scoreProd + p.scoreResume + rng.normal(0, 1.4);
-			p.scoreDefTotal = p.scoreDef + p.scoreResume * 0.5 + rng.normal(0, 1.2);
+			p.scoreDefTotal = p.scoreDef + p.scoreResume * 0.35 + rng.normal(0, 1.2);
 			p.isFreshman = p.classYear === "Freshman";
+			p.isNewcomer = p.isFreshman || !!p.transfer;
+			p.isReserve = p.minutesRank !== undefined && p.minutesRank >= 5;
+			p.pos = p.newPos;
 			p.conf = team ? team.conf : "Independent";
 			p.team = team;
 		}
 
-		// The rest of Division I, scored on the same scale.
-		const fit = fitTalentToScore(ncaa, teams);
-		const field = buildField(teams, fit, rng.child("field"));
+		// The rest of Division I, from its own simulated seasons.
+		const field = buildField(teams, rng.child("field"));
+		/* "Improvement" against what a player of this talent typically
+		   produces: there is no previous season to compare with, so
+		   outperforming your own baseline is the proxy, and it is the same
+		   thing voters actually reward. The fit is estimated on the field,
+		   which spans the whole talent range — the old version fitted it on
+		   prospects alone and extrapolated. */
+		const fit = fitScores(field.map((f) => ({ x: f.talent, y: f.scoreProd })));
+		for (const x of field) {
+			x.improvement = (x.scoreProd - (fit.a + fit.b * x.talent)) / Math.max(1, fit.sd);
+		}
+		for (const p of ncaa) {
+			const team = teams[p.newCollege];
+			const m = team && team.members.filter((x) => !x.filler && x.player === p)[0];
+			p.improvement = m
+				? (p.scoreProd - (fit.a + fit.b * m.talent)) / Math.max(1, fit.sd)
+				: 0;
+		}
 		const everyone = ncaa.concat(field);
+		// A candidate pool for any honour that needs a comparable score for a
+		// player on one particular team.
+		const fieldByTeam = {};
+		for (const x of field) (fieldByTeam[x.team.name] = fieldByTeam[x.team.name] || []).push(x);
 
-		// awardStrictness now shifts how far into the field the honours reach:
+		// awardStrictness shifts how far into the field the honours reach:
 		// 1.0 = the real slot counts, higher = fewer slots, lower = more.
 		const slots = (n) => Math.max(1, Math.round(n / strict));
+		const confSlots = (n) => Math.max(1, Math.round(n / confStrict));
 
-		const label = (conf) =>
-			// "All-American First Team" (the AAC) would read as a national
-			// honour and collide with Consensus All-America; special-case it.
-			(conf === "American" ? "AAC" : conf);
+		const label = T.label;
 
-		// --- conference honours -------------------------------------------
+		/* --- conference honours ------------------------------------------- */
 		const byConf = {};
 		for (const x of everyone) {
 			if (!x.conf) continue;
 			(byConf[x.conf] = byConf[x.conf] || []).push(x);
 		}
 		for (const conf of Object.keys(byConf)) {
-			const list = byConf[conf].slice().sort((a, b) => b.scoreTotal - a.scoreTotal);
+			const pool = byConf[conf];
+			const list = pool.slice().sort((a, b) => b.scoreTotal - a.scoreTotal);
 			const lb = label(conf);
+			// Offensive honours: a bit-part player never wins one however the
+			// maths ranked him.
 			const give = (x, award) => {
 				if (x.filler || !x.awards) return;
-				// Never honour a bit-part player, however the maths ranked him.
-				if (x.stats && (x.stats.mpg < 20 || x.scoreProd < 12)) return;
+				if (!GATES.offensive(x)) return;
 				x.awards.push(award);
 			};
-			list.slice(0, slots(1)).forEach((x) => give(x, lb + " Player of the Year"));
-			list.slice(0, slots(5)).forEach((x, i) => {
-				give(x, "All-" + lb + " " + (i < slots(5) / 2 ? "First" : "Second") + " Team");
-			});
+			/* Defensive honours get their OWN gate. The shared one required
+			   scoreProd >= 12 — an offensive box score — so a genuine
+			   low-usage perimeter stopper (5 points, 3 rebounds, 1.6 steals)
+			   scored about 11 and was disqualified from Defensive Player of the
+			   Year by his scoring. The national DPOY meanwhile used a
+			   minutes-only gate, so the two were not even consistent with each
+			   other. Minutes only, both places, now. */
+			const giveDef = (x, award) => {
+				if (x.filler || !x.awards) return;
+				if (!GATES.defensive(x)) return;
+				x.awards.push(award);
+			};
+			// A reserve award has to be won by a reserve.
+			const giveReserve = (x, award) => {
+				if (x.filler || !x.awards) return;
+				if (!GATES.reserve(x)) return;
+				x.awards.push(award);
+			};
+
+			list.slice(0, confSlots(1)).forEach((x) => give(x, lb + " Player of the Year"));
+			/* Two teams of five, like the real thing. The old code took one
+			   slice of 5 and split it with `i < slots(5) / 2`, i.e. i < 2.5, so
+			   the First Team had three players and the Second Team had two —
+			   measured 19.0 First Team selections per class against 4.3 Second.
+			   Two explicit slices, matching how the national teams are done. */
+			const firstN = confSlots(5);
+			list.slice(0, firstN).forEach((x) => give(x, "All-" + lb + " First Team"));
+			list.slice(firstN, firstN + confSlots(5))
+				.forEach((x) => give(x, "All-" + lb + " Second Team"));
+
 			const fresh = list.filter((x) => x.isFreshman);
-			fresh.slice(0, slots(1)).forEach((x) => give(x, lb + " Freshman of the Year"));
-			const def = byConf[conf].slice().sort((a, b) => b.scoreDefTotal - a.scoreDefTotal);
-			def.slice(0, slots(1)).forEach((x) => give(x, lb + " Defensive Player of the Year"));
+			fresh.slice(0, confSlots(1)).forEach((x) => give(x, lb + " Freshman of the Year"));
+			fresh.slice(0, confSlots(5)).forEach((x) => give(x, "All-" + lb + " Freshman Team"));
+
+			// Newcomer here means "arrived from another programme". Freshmen
+			// have their own team; naming them on both is double-counting the
+			// same five players.
+			const newcomers = list.filter((x) => x.isNewcomer && !x.isFreshman);
+			newcomers.slice(0, confSlots(5))
+				.forEach((x) => give(x, "All-" + lb + " Newcomer Team"));
+
+			const reserves = list.filter((x) => x.isReserve);
+			reserves.slice(0, confSlots(1))
+				.forEach((x) => giveReserve(x, lb + " Sixth Man of the Year"));
+
+			const improved = pool.slice()
+				.sort((a, b) => (b.improvement || 0) - (a.improvement || 0))
+				.filter((x) => !x.isFreshman);
+			improved.slice(0, confSlots(1))
+				.forEach((x) => give(x, lb + " Most Improved Player"));
+
+			const def = pool.slice().sort((a, b) => b.scoreDefTotal - a.scoreDefTotal);
+			def.slice(0, confSlots(1))
+				.forEach((x) => giveDef(x, lb + " Defensive Player of the Year"));
+			// Thirty-one conferences name an all-defensive team and the sim
+			// named none of them.
+			def.slice(0, confSlots(5))
+				.forEach((x) => giveDef(x, "All-" + lb + " Defensive Team"));
 		}
 
-		// --- national honours ---------------------------------------------
+		/* --- national honours ---------------------------------------------- */
 		const ranked = ncaa.slice().sort((a, b) => b.scoreTotal - a.scoreTotal);
 		const nation = everyone.slice().sort((a, b) => b.scoreTotal - a.scoreTotal);
 		const giveNat = (x, award, unshift) => {
@@ -188,20 +472,84 @@
 			if (unshift) x.awards.unshift(award);
 			else x.awards.push(award);
 		};
-		nation.slice(0, slots(1)).forEach((x) => giveNat(x, "National Player of the Year", true));
+
+		/* Six real trophies, six electorates. A clear best player sweeps; a
+		   close year splits, which is how "consensus" ends up meaning
+		   something. Only a sweep gets the consensus label. */
+		const poyWins = new Map();
+		const top = nation.slice(0, Math.max(6, slots(8)));
+		for (const award of NATIONAL_POY) {
+			const vrng = rng.child("poy|" + award.name);
+			const winner = top.slice()
+				.sort((a, b) => (b.scoreTotal + vrng.normal(0, award.sd)) -
+					(a.scoreTotal + vrng.normal(0, award.sd)))[0];
+			if (!winner) continue;
+			giveNat(winner, award.name);
+			poyWins.set(winner, (poyWins.get(winner) || 0) + 1);
+		}
+		for (const [winner, n] of poyWins) {
+			if (n >= 4) giveNat(winner, "Consensus National Player of the Year", true);
+		}
+
 		nation.slice(0, slots(5)).forEach((x) => giveNat(x, "Consensus First Team All-American"));
 		nation.slice(slots(5), slots(10)).forEach((x) => giveNat(x, "Consensus Second Team All-American"));
 		nation.slice(slots(10), slots(15)).forEach((x) => giveNat(x, "Third Team All-American"));
 
+		// Position awards. Each is a one-winner trophy over its own position
+		// group, so award volume tracks what the class is actually made of.
+		for (const pa of POSITION_AWARDS) {
+			const pool = nation.filter((x) => pa.pos.indexOf(x.pos) !== -1);
+			if (!pool.length) continue;
+			const winner = pool[0];
+			giveNat(winner, pa.name);
+		}
+		// Best big man in the country, regardless of the PF/C split.
+		const bigs = nation.filter((x) => ["PF", "FC", "C", "F"].indexOf(x.pos) !== -1);
+		if (bigs.length) giveNat(bigs[0], "Pete Newell Big Man Award");
+		// Best player who is not a freshman.
+		const vets = nation.filter((x) => !x.isFreshman);
+		if (vets.length) giveNat(vets[0], "Lute Olson Award");
+
 		const natDef = everyone.slice().sort((a, b) => b.scoreDefTotal - a.scoreDefTotal);
-		natDef.slice(0, slots(1)).forEach((x) =>
-			giveNat(x, "National Defensive Player of the Year"));
+		const defTop = natDef.slice(0, Math.max(5, slots(6)));
+		for (const award of NATIONAL_DPOY) {
+			const vrng = rng.child("dpoy|" + award.name);
+			const winner = defTop.slice()
+				.sort((a, b) => (b.scoreDefTotal + vrng.normal(0, award.sd)) -
+					(a.scoreDefTotal + vrng.normal(0, award.sd)))[0];
+			if (!winner) continue;
+			if (winner.filler || !winner.awards) continue;
+			if (!GATES.defensive(winner)) continue;
+			winner.awards.push(award.name);
+		}
+		// The NABC all-defensive teams, which did not exist at national level.
+		natDef.slice(0, slots(5)).forEach((x) => {
+			if (x.filler || !x.awards || !GATES.defensive(x)) return;
+			x.awards.push("NABC All-Defensive First Team");
+		});
+		natDef.slice(slots(5), slots(10)).forEach((x) => {
+			if (x.filler || !x.awards || !GATES.defensive(x)) return;
+			x.awards.push("NABC All-Defensive Second Team");
+		});
 
 		const freshmen = nation.filter((x) => x.isFreshman);
-		freshmen.slice(0, slots(1)).forEach((x) => giveNat(x, "National Freshman of the Year"));
+		freshmen.slice(0, slots(1)).forEach((x) => giveNat(x, "Wayman Tisdale Award"));
 		freshmen.slice(0, slots(5)).forEach((x) => giveNat(x, "All-Freshman Team"));
 
-		// --- tournament honours --------------------------------------------
+		/* Academic All-America. BBGM has no academics, so this is rolled from
+		   the player's own seed and gated on basketball IQ and production —
+		   which at least makes it deterministic, rare, and never a surprise on
+		   a player who did not play. */
+		for (const p of ncaa) {
+			if (!p.stats || p.stats.mpg < 22 || p.scoreProd < 14) continue;
+			const r = rng.child("academic|" + p.key);
+			const oiq = (p.newRatings && p.newRatings.oiq) || 45;
+			if (r.random() < clamp((oiq - 45) / 260, 0, 0.14)) {
+				p.awards.push("Academic All-American");
+			}
+		}
+
+		/* --- tournament honours -------------------------------------------- */
 		const ffNames = new Set(tourney.finalFour.map((x) => x.team.name));
 		const inFF = ncaa.filter((p) => ffNames.has(p.newCollege))
 			.sort((a, b) => b.scoreProd - a.scoreProd);
@@ -210,11 +558,8 @@
 		// on a Final Four roster of 10, the prospect is usually not it.
 		const mopField = [];
 		for (const nm of ffNames) {
-			const t = teams[nm];
-			if (!t) continue;
-			const frng = rng.child("mop|" + nm);
-			for (const m of t.members.filter((x) => x.filler).slice(0, 5)) {
-				mopField.push({ filler: true, score: fit.a + fit.b * m.talent + frng.normal(0, fit.sd) });
+			for (const x of (fieldByTeam[nm] || []).slice(0, 5)) {
+				mopField.push({ filler: true, score: x.scoreProd });
 			}
 		}
 		const mopAll = inFF.map((p) => ({ p, score: p.scoreProd + (p.newCollege === champName ? 3 : 0) }))
@@ -226,31 +571,107 @@
 			if (x.p && x.p !== mop) x.p.awards.push("NCAA All-Tournament Team");
 		});
 
-		for (const p of ncaa) {
-			const t = teams[p.newCollege];
-			if (!t || !t.confTourneyChamp) continue;
-			const mates = ncaa.filter((q) => q.newCollege === t.name)
-				.sort((a, b) => b.scoreProd - a.scoreProd);
-			// The MVP of a conference tournament is on the winning team, but he
-			// is only this prospect if the prospect outplayed the returners.
-			const bestReturner = t.members.filter((m) => m.filler)
-				.reduce((a, m) => Math.max(a, fit.a + fit.b * m.talent), -Infinity);
-			if (mates[0] === p && p.stats.mpg >= 20 && p.scoreProd > bestReturner) {
-				p.awards.push(label(t.conf) + " Tournament MVP");
+		/* All-Region teams: five players per regional, drawn from the two teams
+		   that played the regional final. Four more real honours the sim built
+		   the entire bracket for and then never used. */
+		if (tourney.regions) {
+			for (const region of Object.keys(tourney.regions)) {
+				const r = tourney.regions[region];
+				const finalRound = r.rounds[r.rounds.length - 1];
+				if (!finalRound || !finalRound.length) continue;
+				const g = finalRound[0];
+				const names = new Set([g.a.team.name, g.b.team.name]);
+				const cands = ncaa.filter((p) => names.has(p.newCollege))
+					.map((p) => ({ p, score: p.scoreProd }));
+				for (const nm of names) {
+					for (const x of (fieldByTeam[nm] || []).slice(0, 5)) {
+						cands.push({ p: null, score: x.scoreProd });
+					}
+				}
+				cands.sort((a, b) => b.score - a.score);
+				cands.slice(0, 5).forEach((x) => {
+					if (x.p && x.p.stats && x.p.stats.mpg >= 18) {
+						x.p.awards.push("NCAA " + region + " All-Region Team");
+					}
+				});
 			}
 		}
 
-		// --- pro / DII league honours ---------------------------------------
+		// Conference tournament: an MVP and an all-tournament team, not just
+		// the MVP.
+		for (const conf of Object.keys(byConf)) {
+			const champ = Object.values(teams).filter(
+				(t) => t.conf === conf && t.confTourneyChamp)[0];
+			if (!champ) continue;
+			const crng = rng.child("cttourney|" + conf);
+			const cands = ncaa.filter((p) => {
+				const t = teams[p.newCollege];
+				return t && t.conf === conf && t.inConfTourney && (t.ctW || 0) >= 1;
+			}).map((p) => ({
+				p,
+				// The MVP of a conference tournament comes off the winning team
+				// far more often than not.
+				score: p.scoreProd + (p.newCollege === champ.name ? 6 : 0) +
+					crng.normal(0, 1.5),
+			}));
+			for (const t of Object.values(teams)) {
+				if (t.conf !== conf || !t.inConfTourney || (t.ctW || 0) < 1) continue;
+				for (const x of (fieldByTeam[t.name] || []).slice(0, 4)) {
+					cands.push({
+						p: null,
+						score: x.scoreProd + crng.normal(0, 1.5) + (t === champ ? 6 : 0),
+					});
+				}
+			}
+			if (!cands.length) continue;
+			cands.sort((a, b) => b.score - a.score);
+			const lb = label(conf);
+			cands.slice(0, 5).forEach((x, i) => {
+				if (!x.p || !x.p.stats || x.p.stats.mpg < 18) return;
+				x.p.awards.push(i === 0
+					? lb + " Tournament MVP"
+					: "All-" + lb + " Tournament Team");
+			});
+		}
+
+		// NIT all-tournament team.
+		if (tourney.nit && tourney.nit.champion) {
+			const nrng = rng.child("nit-awards");
+			const nitTeams = new Set(tourney.nit.field
+				.filter((t) => (t.nitWins || 0) >= 2).map((t) => t.name));
+			const cands = ncaa.filter((p) => nitTeams.has(p.newCollege))
+				.map((p) => ({ p, score: p.scoreProd + nrng.normal(0, 1.2) }))
+				.sort((a, b) => b.score - a.score);
+			cands.slice(0, 5).forEach((x, i) => {
+				if (!x.p.stats || x.p.stats.mpg < 18) return;
+				x.p.awards.push(i === 0 ? "NIT Most Valuable Player" : "NIT All-Tournament Team");
+			});
+		}
+
+		/* --- pro / DII league honours --------------------------------------- */
 		const PRO_AWARDS = {
 			"EuroLeague": ["EuroLeague Rising Star", "EuroLeague Best Young Player", "All-EuroLeague Second Team"],
 			"NBA G League": ["G League Rookie of the Year", "All-G League First Team", "G League Next Up Award"],
+			"Liga ACB": ["ACB Best Young Player", "ACB Rising Star", "All-ACB Second Team"],
 			"NBL": ["NBL Next Generation Award", "NBL Rookie of the Year", "All-NBL Second Team"],
+			"Chinese CBA": ["CBA Rookie of the Year", "CBA Most Improved Player", "All-CBA Second Team"],
+			"LNB Pro A": ["LNB Best Young Player", "LNB Rising Star", "All-LNB Second Team"],
+			"EuroCup": ["EuroCup Rising Star", "EuroCup Best Young Player", "All-EuroCup Second Team"],
+			"Basketball Bundesliga": ["BBL Best Young Player", "BBL Rising Star", "All-BBL Second Team"],
+			"Adriatic League": ["ABA Best Young Player", "ABA Rising Star", "All-ABA Second Team"],
+			"NBL1": ["NBL1 Youth Player of the Year", "NBL1 Rookie of the Year", "All-NBL1 Second Team"],
+			"Overtime Elite": ["Overtime Elite MVP", "OTE Defensive Player of the Year", "All-OTE First Team"],
+			"NBA Academy": ["NBA Academy Games MVP", "NBA Academy Player of the Year", "Academy All-Star"],
 			"DII NCAA": ["Division II Player of the Year", "Division II All-American", "Division II Freshman of the Year"],
 		};
 		const byLeague = {};
 		for (const p of pros) {
 			p.awards = [];
+			// A prospect with no stat line (a club that never got simulated)
+			// cannot be scored; he must not take the rest of the list down.
+			if (!p.stats) { p.scoreProd = 0; p.scoreTotal = -Infinity; continue; }
 			p.scoreProd = productionScore(p);
+			p.scoreDef = defenseScore(p, global.BBGM.composites(p.newRatings));
 			// A club that finished top of its league helps a case; a prospect
 			// buried on a relegation side has to score his way out.
 			const club = p.proTeam;
@@ -263,18 +684,36 @@
 		for (const lg of Object.keys(byLeague)) {
 			const list = byLeague[lg].sort((a, b) => b.scoreTotal - a.scoreTotal);
 			const names = PRO_AWARDS[lg] || [];
+			const meta = C.NON_NCAA[lg] || {};
 			// These are age-restricted or rookie awards, so a prospect really
-			// can win one — but he still has to be the best of the ones here.
-			const bar = (lg === "DII NCAA" ? 24 : 20) * strict;
+			// can win one — but he still has to be the best of the ones here,
+			// and the bar scales with how hard the league is. A youth league
+			// (Overtime Elite, the NBA Academies) is a league of teenagers, so
+			// there is no age handicap to clear.
+			const base = meta.youth ? 12 : lg === "DII NCAA" ? 24 : 16 + meta.strength * 0.05;
+			const bar = base * proStrict;
+			// Minutes bars scale with the league's own youth cap.
+			const env = global.StatsSim.leagueEnv(lg);
+			const minMpg = env.youthCap ? Math.min(18, env.youthCap * 0.72) : 18;
 			list.forEach((p, i) => {
-				if (i < names.length && p.scoreTotal > bar && p.stats && p.stats.mpg >= 18) {
+				if (i < names.length && p.scoreTotal > bar && p.stats && p.stats.mpg >= minMpg) {
 					p.awards.push(names[i]);
 				}
 			});
 		}
 
+		// One consistent order everywhere: the note, the table, the editor.
+		for (const p of prospects) {
+			if (p.awards && p.awards.length) p.awards = sortAwards(p.awards);
+		}
+
 		return ranked;
 	}
 
-	global.Awards = { assign, productionScore, defenseScore, buildField, fitTalentToScore };
-})(window);
+	global.Awards = {
+		assign, productionScore, defenseScore, fieldDefenseScore, resumeScore,
+		buildField, fitScores, fitTalentToScore, awardRank, sortAwards,
+		NATIONAL_POY, NATIONAL_DPOY, POSITION_AWARDS, AWARD_TIERS,
+		NCAA_BONUS, NIT_BONUS, GATES,
+	};
+})(typeof window !== "undefined" ? window : self);

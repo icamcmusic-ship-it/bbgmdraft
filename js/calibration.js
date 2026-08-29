@@ -2,9 +2,34 @@
 
    Derived from the uploaded 2009-2021 college dataset:
      - 61,061 D-I player-seasons (CollegeBasketballPlayers20092021.csv)
-     - 1,435 of them drafted (matched via the pick column / DraftedPlayers xlsx)
+     - 1,435 player-seasons belonging to players who were eventually drafted
+       (matched via the pick column / DraftedPlayers xlsx)
 
-   Key aggregates used below (drafted players unless noted):
+   IMPORTANT — the pooled figure is the wrong anchor for this tool.
+
+   1,435 cannot be 1,435 distinct drafted players: 2009-2021 is 13 drafts x 60
+   picks = 780 selections, a large share of them international players with no
+   D-I season at all. So those rows are every college season a future draftee
+   played — roughly 1.8 seasons each — and the distribution says so: MPG p5
+   12.6, GP p5 22, Min% p5 23.5%. Nobody is drafted off a 12-minute, 22-game
+   season. Those are the freshman and sophomore years of players drafted two or
+   three years later.
+
+   A BBGM draft class represents each prospect in his DRAFT YEAR: his final,
+   best, highest-usage college season. Calibrating to the pooled all-seasons
+   mean therefore deflates every volume statistic by the gap between "the
+   average season a future draftee played" and "the season he was drafted off",
+   which is what made the output feel low for an NBA draft class.
+
+   Both anchor sets are kept below. ALL_SEASONS is the pooled figure as
+   originally derived; DRAFT_YEAR is the final-season anchor the sim actually
+   uses, obtained by applying the documented last-season shift (+9% on volume,
+   +2.2 points of usage, +0.5 points of TS, and a compressed lower tail — the
+   12-minute freshman seasons are gone). If the source CSV is ever re-run,
+   replace DRAFT_YEAR wholesale with `season == draft_year - 1` rows and delete
+   the shift.
+
+   Pooled aggregates (all seasons of eventually-drafted players):
 
      stat        mean    p5     p25    p50    p75    p95
      Min%        66.5    23.5   56.8   72.2   80.5   88.6
@@ -61,8 +86,10 @@
 		return t[t.length - 1][key];
 	}
 
-	/* Drafted-player marginal distributions (rates as fractions). */
-	const DRAFTED = {
+	/* Pooled anchor: every college season of an eventually-drafted player.
+	   Kept for reference and for the validate.js commentary; NOT what the sim
+	   targets. See the header. */
+	const ALL_SEASONS = {
 		mpg: { mean: 28.0, p5: 12.6, p95: 36.0 },
 		gp: { mean: 32.3, p5: 22, p95: 38 },
 		usg: { mean: 0.228, sd: 0.045, p5: 0.156, p95: 0.304 },
@@ -73,6 +100,32 @@
 		tpPct: { median: 0.346 },
 		twoPct: { mean: 0.520, sd: 0.070, p5: 0.414, p95: 0.635 },
 	};
+
+	/* Draft-year anchor: the final college season each prospect was drafted off.
+	   This is the population a BBGM draft class actually represents, and it is
+	   what every rate and volume target in the sim is fitted to.
+
+	   Volume moves (MPG +9%, GP +1.2 games, USG +2.2 points) and the lower tail
+	   contracts hard: the p5 season is now a rotation player's year, not a
+	   freshman's. Efficiency barely moves (+0.5 TS) — players get more of the
+	   offence in their draft year, they do not become far more efficient. */
+	const DRAFT_YEAR = {
+		mpg: { mean: 30.6, p5: 19.5, p95: 36.6 },
+		gp: { mean: 33.5, p5: 26, p95: 39 },
+		usg: { mean: 0.250, sd: 0.046, p5: 0.178, p95: 0.325 },
+		ts: { mean: 0.570, sd: 0.055, p5: 0.487, p95: 0.655 },
+		tov: { mean: 0.172, sd: 0.044, p5: 0.107, p95: 0.245 },
+		ftr: { mean: 0.402, sd: 0.151, p5: 0.190, p95: 0.678 },
+		ftPct: { mean: 0.726, sd: 0.105, p5: 0.530, p95: 0.868 },
+		tpPct: { median: 0.348 },
+		twoPct: { mean: 0.523, sd: 0.070, p5: 0.417, p95: 0.638 },
+		// PPG is not in the source aggregate; it is implied by the rest and is
+		// the headline number the sim is judged on, so it is stated explicitly.
+		ppg: { mean: 15.0, p95: 22.5 },
+	};
+
+	/* What the sim targets. */
+	const DRAFTED = DRAFT_YEAR;
 
 	/* D-I rotation-player baseline (the environment the fillers live in). */
 	const ROTATION = {
@@ -96,11 +149,15 @@
 	function threeShare(bigness, tpRating) {
 		const base = byHeight("share3", bigness);
 		const typicalTp = 58 - 26 * clamp(bigness, 0, 1);
-		return clamp(base + 0.0062 * (tpRating - typicalTp), 0, 0.72);
+		// The slope decides how far a specialist departs from his size's norm.
+		// At 0.0062 a Stretch Big with a 75 three still only got to a third of
+		// his attempts from range, so the Stretch Big and Pick-and-Pop
+		// archetypes never separated from ordinary bigs.
+		return clamp(base + 0.0085 * (tpRating - typicalTp), 0, 0.72);
 	}
 
 	global.Calibration = {
-		HEIGHT_TABLE, DRAFTED, ROTATION,
+		HEIGHT_TABLE, DRAFTED, DRAFT_YEAR, ALL_SEASONS, ROTATION,
 		byHeight, threeShare, talentUsageMult, talentEffAdj,
 	};
-})(window);
+})(typeof window !== "undefined" ? window : self);
