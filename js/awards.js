@@ -64,27 +64,33 @@
 		}
 		for (const conf of Object.keys(byConf)) {
 			const list = byConf[conf].sort((a, b) => b.scoreTotal - a.scoreTotal);
-			const cs = C.CONFERENCES[conf].strength;
+			const cs = (C.CONFERENCES[conf] || C.CONFERENCES.Independent).strength;
+			// "All-American First Team" (the AAC) would read as a national
+			// honour and collide with Consensus All-America; special-case it.
+			const label = conf === "American" ? "AAC" : conf;
 			// Bar a prospect must clear to beat the (unmodelled) upperclassmen.
-			const bar = (24 + 0.30 * (cs - 50)) * strict;
-			const firstTeamBar = bar - 6 * strict;
-			const secondTeamBar = bar - 11 * strict;
+			// All-conference teams are 5-10 players drawn from the WHOLE league,
+			// ~90% of whom are returning players this sim doesn't rank — so only
+			// the top couple of prospects per conference can realistically make
+			// them, and only with real minutes and production.
+			const bar = (30 + 0.30 * (cs - 50)) * strict;
 
 			list.forEach((p, i) => {
-				if (p.scoreProd < 14) return; // never honour a bit-part player
-				if (i === 0 && p.scoreTotal > bar + 4) p.awards.push(conf + " Player of the Year");
-				if (p.scoreTotal > firstTeamBar && p.awards.length < 3 && i < 5) {
-					p.awards.push("All-" + conf + " First Team");
-				} else if (p.scoreTotal > secondTeamBar && i < 10) {
-					p.awards.push("All-" + conf + " Second Team");
+				if (p.scoreProd < 14 || p.stats.mpg < 22) return; // never honour a bit-part player
+				if (i === 0 && p.scoreTotal > bar + 12 * strict) p.awards.push(label + " Player of the Year");
+				if (p.scoreTotal > bar + 3 * strict && i < 2) {
+					p.awards.push("All-" + label + " First Team");
+				} else if (p.scoreTotal > bar - 6 * strict && i < 3) {
+					p.awards.push("All-" + label + " Second Team");
 				}
-				if (p.classYear === "Freshman" && i === 0 && p.scoreTotal > secondTeamBar) {
-					p.awards.push(conf + " Freshman of the Year");
+				if (p.classYear === "Freshman" && i === 0 && p.scoreTotal > bar + 8 * strict) {
+					p.awards.push(label + " Freshman of the Year");
 				}
 			});
 			const def = list.slice().sort((a, b) => b.scoreDefTotal - a.scoreDefTotal)[0];
-			if (def && def.scoreDefTotal > (18 + 0.22 * (cs - 50)) * strict) {
-				def.awards.push(conf + " Defensive Player of the Year");
+			if (def && def.stats.mpg >= 22 &&
+				def.scoreDefTotal > (16 + 0.18 * (cs - 50)) * strict) {
+				def.awards.push(label + " Defensive Player of the Year");
 			}
 		}
 
@@ -98,7 +104,7 @@
 			else if (i < 15 && p.scoreTotal > natBar - 16 * strict) p.awards.push("Third Team All-American");
 		});
 		const natDef = ncaa.slice().sort((a, b) => b.scoreDefTotal - a.scoreDefTotal)[0];
-		if (natDef && natDef.scoreDefTotal > 34 * strict) {
+		if (natDef && natDef.scoreDefTotal > 24 * strict) {
 			natDef.awards.push("National Defensive Player of the Year");
 		}
 		const freshmen = ranked.filter((p) => p.classYear === "Freshman");
@@ -124,7 +130,9 @@
 			if (!t || !t.confTourneyChamp) continue;
 			const mates = ncaa.filter((q) => q.newCollege === t.name)
 				.sort((a, b) => b.scoreProd - a.scoreProd);
-			if (mates[0] === p) p.awards.push(t.conf + " Tournament MVP");
+			if (mates[0] === p && p.stats.mpg >= 20 && p.scoreProd > 16) {
+				p.awards.push((t.conf === "American" ? "AAC" : t.conf) + " Tournament MVP");
+			}
 		}
 
 		// --- pro league honours ---------------------------------------------

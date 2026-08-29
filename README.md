@@ -36,10 +36,11 @@ rim / mid-range / FT percentages, usage-by-talent) is calibrated against 61,061
 real D-I player-seasons from 2009-2021, including all 1,435 drafted players —
 see `js/calibration.js` for the empirical anchors.
 
-**4. Writes a scouting note for every player.** Team, conference, class year,
-archetype, the full stat line (PPG / RPG / APG / SPG / BPG, FG% / 3P% / FT% / TS%),
-the team's record and postseason run, and any honours won. This goes into the
-player's `note` field, which BBGM displays on the player page.
+**4. Writes a scouting note for every player.** School, conference, class year,
+the full stat line (PPG / RPG / APG / SPG / BPG, FG% / 3P% / FT% / TS%), and any
+honours won. This goes into the player's `note` field, which BBGM displays on the
+player page. (Team record, age and archetype are deliberately left out of the
+exported note; the archetype still shows in the tool's own table.)
 
 **5. Hands out awards.** National Player of the Year, Consensus All-America teams,
 National Defensive Player of the Year, Freshman of the Year, conference Player /
@@ -86,16 +87,21 @@ functions from the game's source. Checked against the five sample draft classes
 (2289–2293, 420 players): **420/420 match on both `ovr` and `pos`**, so ratings this
 tool writes evaluate identically inside the game.
 
-Statistical output is calibrated to look like real Division I basketball — roughly
-46–47% FG, 32–34% 3P, 69–71% FT across the class, with leaders in the low-to-mid 20s
-in scoring, 11–13 rebounds, and 5–6 assists.
+Statistical output is calibrated against 61,061 real 2009–2021 D-I player-seasons
+(all 1,435 drafted players included) and *verified*, not just intended:
+`node tools/validate.js` runs the full engine over synthetic classes and asserts
+the outputs land in bands around the empirical anchors — ~47% FG, ~33.5% 3P,
+~72% FT, TS ~56%, USG capped at a physical 33%, scoring leaders in the low 20s,
+rebound/assist/block leaders around 14 / 8 / 3.8. Run it after touching the
+stat model; it exits non-zero when calibration drifts.
 
 ## Export
 
 `Export JSON` writes `<original name>_customized.json`: the original file with each
 player's `college`, ratings block (all 15 ratings plus `ovr`, `pot`, `pos`, `skills`),
 `draft.ovr` / `draft.pot` / `draft.skills`, and `note` / `noteBool` updated. `pid`,
-`face`, `born`, `relatives` and everything else are untouched, and the file is written
+`face`, `born`, `relatives` and everything else are untouched (`hgt`/`weight` are
+rewritten only when *Vary size* is on or the source file lacked them), and the file is written
 with a BOM the same way BBGM writes its own exports. Load it back with
 **Tools → Import → Draft class**.
 

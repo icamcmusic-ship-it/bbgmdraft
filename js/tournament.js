@@ -62,26 +62,36 @@
 		const autoPlayIn = autos.splice(-4, 4);
 		const atLargePlayIn = atLarge.splice(-4, 4);
 		const firstFour = [];
-		const advance = [];
 		const runPlayIn = (list, seed) => {
+			const adv = [];
 			for (let i = 0; i < list.length; i += 2) {
 				const a = list[i];
 				const b = list[i + 1];
-				if (!b) { advance.push(a); continue; }
+				if (!b) { adv.push(a); continue; }
 				const won = T.playGame(rng, a, b, 0, cfg);
 				const winner = won ? a : b;
 				const loser = won ? b : a;
 				firstFour.push({ seed, a, b, winner });
 				loser.ncaaResult = "Lost in the First Four";
 				loser.ncaaSeed = seed;
-				advance.push(winner);
+				// Tracked separately from ncaaWins so round-name labelling
+				// stays correct while the game still counts for GP.
+				winner.ffWin = 1;
+				adv.push(winner);
 			}
+			return adv;
 		};
-		runPlayIn(autoPlayIn, 16);
-		runPlayIn(atLargePlayIn, 11);
+		const advAuto = runPlayIn(autoPlayIn, 16);
+		const advAtLarge = runPlayIn(atLargePlayIn, 11);
 
-		const field64 = autos.concat(atLarge, advance)
-			.sort((a, b) => b.resume - a.resume)
+		// Play-in winners are locked to the lines they played for (the two 11
+		// seeds and the two 16 seeds), like the real tournament — they are not
+		// re-seeded by resume into better lines.
+		const main = autos.concat(atLarge).sort((a, b) => b.resume - a.resume);
+		const field64 = main.slice(0, 40)          // seed lines 1-10
+			.concat(main.slice(40, 42), advAtLarge)  // 11 line
+			.concat(main.slice(42, 58))              // 12-15 lines
+			.concat(main.slice(58, 60), advAuto)     // 16 line
 			.slice(0, 64);
 
 		// S-curve: overall 1-4 are the 1 seeds, 5-8 the 2 seeds, and so on, one

@@ -54,10 +54,19 @@
 		const season = leagueFile.startingSeason;
 
 		const raw = leagueFile.players || [];
-		const players = raw.map((p) => {
+		const players = raw.map((p, idx) => {
 			const r = p.ratings[p.ratings.length - 1];
+			// Defensive defaults: files without listed height/weight would
+			// otherwise export NaN -> null and produce 0-inch players in BBGM.
+			const hgtIn = Number.isFinite(p.hgt)
+				? p.hgt
+				: inchesFromHgtRating(r.hgt);
+			const wt = Number.isFinite(p.weight)
+				? p.weight
+				: Math.round(140 + hgtIn * 0.9 + (r.stre || 50) * 0.35);
 			return {
 				src: p,
+				idx,
 				pid: p.pid,
 				name: (p.firstName + " " + p.lastName).trim(),
 				born: p.born,
@@ -67,8 +76,8 @@
 				origOvr: r.ovr,
 				origPot: r.pot,
 				origPos: r.pos,
-				hgtInches: p.hgt,
-				weight: p.weight,
+				hgtInches: hgtIn,
+				weight: wt,
 			};
 		});
 		for (const p of players) p.classYear = classYear(p.age);
@@ -94,22 +103,36 @@
 			else gap = Math.max(1, gap + cfg.potBias * 2.2 + prng.normal(0, cfg.potSpread * 0.35));
 			const targetPot = clamp(Math.round(targetOvr + gap), targetOvr, 100);
 
-			const built = RB.rebuild(prng, p.origRatings, targetOvr, targetPot, cfg);
+			// Size variance happens BEFORE the rebuild so the hgt rating and the
+			// listed height stay in sync (they'd otherwise drift up to 3 inches
+			// apart and the player would simulate at a different size than
+			// listed). ~4.2 rating points per inch on BBGM's mapping.
+			p.newHgtInches = p.hgtInches;
+			let baseRatings = p.origRatings;
+			if (cfg.varySize) {
+				p.newHgtInches = clamp(
+					Math.round(p.hgtInches + prng.normal(0, 1.1)), 64, 92,
+				);
+				const dIn = p.newHgtInches - p.hgtInches;
+				if (dIn !== 0) {
+					baseRatings = Object.assign({}, p.origRatings, {
+						hgt: clamp(Math.round(p.origRatings.hgt + dIn * (100 / 24)), 0, 100),
+					});
+				}
+			}
+
+			const built = RB.rebuild(prng, baseRatings, targetOvr, targetPot, cfg);
 			p.newRatings = built.ratings;
 			p.newOvr = built.ovr;
 			p.newPot = built.pot;
 			p.newPos = built.pos;
 			p.newSkills = built.skills;
 			p.archetype = built.archetype;
-			p.newHgtInches = p.hgtInches;
 			p.newWeight = p.weight;
 			if (cfg.varySize) {
-				p.newHgtInches = clamp(
-					Math.round(p.hgtInches + prng.normal(0, 1.1)), 64, 92,
-				);
 				p.newWeight = clamp(
 					Math.round(p.weight + (built.ratings.stre - p.origRatings.stre) * 0.55 +
-						prng.normal(0, 5)), 150, 330,
+						(p.newHgtInches - p.hgtInches) * 5 + prng.normal(0, 5)), 150, 330,
 				);
 			}
 		});
@@ -131,9 +154,12 @@
 		const touched = new Set();
 		for (const school of Object.keys(bySchool)) {
 			const team = teams[school];
-			const conf = C.CONFERENCES[team.conf];
+			const conf = C.CONFERENCES[team.conf] || C.CONFERENCES.Independent;
+			// Postseason games actually played: conference-tournament wins + a
+			// first appearance, First Four, and every NCAA game.
 			const extraGames =
-				(team.confTourneyChamp ? 3 : 2) + (team.ncaaWins || 0) + (team.bid ? 1 : 0);
+				(team.ctW || 0) + 1 + (team.ffWin || 0) +
+				(team.ncaaWins || 0) + (team.bid ? 1 : 0);
 			S.simulateTeamStats(team, {
 				oppStrength: (team.sosAvg + conf.strength * 0.35) / 1.35,
 				games: Math.round(team.games + extraGames),
@@ -182,17 +208,17 @@
 	function pct(x) { return (x * 100).toFixed(1) + "%"; }
 	function n1(x) { return x.toFixed(1); }
 
+	/* The scouting note written into the exported file. Deliberately omits the
+	   team record/result line, the player's age, and the archetype label — the
+	   note carries the school, class year, stat line and honours only. */
 	function buildNote(p, teams, season) {
 		const s = p.stats;
 		const lines = [];
 		const team = teams[p.newCollege];
 		if (p.nonNcaa) {
-			lines.push(p.newCollege + " · Age " + p.age + " · " + p.archetype);
+			lines.push(p.newCollege);
 		} else {
-			lines.push(
-				p.newCollege + " (" + team.conf + ") · " + p.classYear +
-				" · " + p.archetype,
-			);
+			lines.push(p.newCollege + " (" + team.conf + ") · " + p.classYear);
 		}
 		if (s) {
 			lines.push(
@@ -205,15 +231,6 @@
 				" (TS " + pct(s.ts) + ")",
 			);
 		}
-		if (team) {
-			const bits = [team.w + "-" + team.l + " (" + team.cw + "-" + team.cl + " " + team.conf + ")"];
-			if (team.apRank) bits.push("AP #" + team.apRank);
-			if (team.confTourneyChamp) bits.push(team.conf + " Tournament champion");
-			if (team.ncaaSeed) bits.push("No. " + team.ncaaSeed + " seed, " + team.ncaaResult);
-			else if (team.bid) bits.push(team.ncaaResult || "NCAA Tournament");
-			else bits.push("no NCAA bid");
-			lines.push("Team: " + bits.join(", "));
-		}
 		if (p.awards && p.awards.length) {
 			lines.push("Honors: " + p.awards.join("; "));
 		}
@@ -223,11 +240,12 @@
 	/* Produce the modified BBGM draft class file. */
 	function exportFile(result) {
 		const src = result.leagueFile;
-		const byPid = {};
-		for (const p of result.players) byPid[p.pid] = p;
+		// Match by array position, not pid: files with duplicate pids would
+		// otherwise silently give every duplicate the same rebuilt ratings.
+		const byIdx = result.players;
 
-		const players = src.players.map((orig) => {
-			const p = byPid[orig.pid];
+		const players = src.players.map((orig, i) => {
+			const p = byIdx[i] && byIdx[i].src === orig ? byIdx[i] : null;
 			if (!p) return orig;
 			const out = JSON.parse(JSON.stringify(orig));
 			out.college = p.newCollege;
