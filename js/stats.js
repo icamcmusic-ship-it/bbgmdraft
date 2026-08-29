@@ -1,12 +1,17 @@
 /* Season stat lines for every prospect, derived from BBGM composite ratings,
    the strength of their conference, and the teammates they share possessions
-   with (better teammates => fewer shots, better efficiency, more assists). */
+   with (better teammates => fewer shots, better efficiency, more assists).
+
+   Rate targets (turnovers, free-throw rate, shot mix, shooting percentages)
+   are calibrated against the 2009-2021 drafted-player dataset via
+   js/calibration.js; see the tables there for the empirical anchors. */
 (function (global) {
 	"use strict";
 
 	const { clamp } = global.BBGMRng;
 	const BB = global.BBGM;
 	const C = global.Colleges;
+	const CAL = global.Calibration;
 
 	function shareFromWeights(vals, exp) {
 		const p = vals.map((v) => Math.pow(Math.max(0.001, v), exp));
@@ -51,39 +56,65 @@
 		// Teammate spacing/passing helps everyone score more efficiently.
 		const synergy = 0.0015 * (teamCtx.support - 50);
 
-		const tovRate = clamp(0.155 - 0.10 * comps.turnovers + rng.normal(0, 0.012 * noise), 0.04, 0.25);
-		const ftRate = clamp(0.16 + 0.42 * comps.drawingFouls + rng.normal(0, 0.03 * noise), 0.05, 0.62);
+		const bigness = clamp((ratings.hgt - 30) / 55, 0, 1);
+
+		// Turnovers: drafted mean 17.2% of possessions (p5 10.7, p95 24.5),
+		// essentially flat across sizes.
+		const tovRate = clamp(
+			CAL.byHeight("tov", bigness) + 0.045 - 0.10 * comps.turnovers +
+				rng.normal(0, 0.014 * noise),
+			0.08, 0.27,
+		);
+		// Free-throw rate climbs steeply with size (FTr .37 guards -> .51
+		// seven-footers); foul-drawing skill moves it around that anchor.
+		const ftRate = clamp(
+			CAL.byHeight("ftr", bigness) + 0.32 * (comps.drawingFouls - (0.46 + 0.11 * bigness)) +
+				rng.normal(0, 0.045 * noise),
+			0.10, 0.75,
+		);
 
 		const fga = (poss * (1 - tovRate)) / (1 + 0.44 * ftRate);
 		const fta = fga * ftRate;
 		const tov = poss * tovRate;
 
-		// Shot mix.
-		const bigness = clamp((ratings.hgt - 30) / 55, 0, 1);
-		let share3 = clamp(
-			(ratings.tp - 22) / 78 - 0.30 * bigness + 0.10,
-			0.01, 0.78,
-		) + rng.normal(0, 0.04 * noise);
-		share3 = clamp(share3, 0.0, 0.80);
+		// Shot mix: 3PA share anchored to the height buckets (.39 for guards
+		// down to .085 for 6'11"+), stretched by shooting talent.
+		let share3 = CAL.threeShare(bigness, ratings.tp) + rng.normal(0, 0.045 * noise);
+		share3 = clamp(share3, 0.0, 0.75);
 
 		const tpa = fga * share3;
 		const twoA = fga - tpa;
 
-		// Percentages.
+		// Percentages. 3P% centres near the drafted median of .346 for a real
+		// shooter; the .14 floor lets non-shooters brick their token attempts.
 		const tpp = clamp(
-			0.310 + 0.30 * (comps.shootingThreePointer - 0.30) + compAdj + synergy +
+			0.335 + 0.30 * (comps.shootingThreePointer - 0.55) + compAdj + synergy +
 				rng.normal(0, 0.028 * noise),
-			0.14, 0.50,
+			0.14, 0.48,
 		);
-		const rimMix = clamp(0.30 + 0.55 * bigness, 0.2, 0.85);
-		const insideEff = 0.560 + 0.32 * (comps.shootingAtRim - 0.45) + 0.20 * (comps.shootingLowPost - 0.45);
-		const midEff = 0.425 + 0.30 * (comps.shootingMidRange - 0.40);
+		// Rim/mid split and finishing: rim FG% runs .59 (guards) to .72 (bigs).
+		// The calibration table already carries the height effect, so the skill
+		// composites (which lean heavily on hgt) are centred at what a player of
+		// this size typically scores on them, to avoid double-counting height.
+		// Rim attempts are ~50% of 2PA for guards and ~55% for centers in the
+		// data — nearly flat; the size effect lives in rim FG%, not shot mix.
+		const rimMix = clamp(0.49 + 0.06 * bigness + 0.10 * (comps.shootingAtRim - comps.shootingMidRange), 0.30, 0.75);
+		const insideEff = CAL.byHeight("rimPct", bigness) +
+			0.26 * (comps.shootingAtRim - (0.40 + 0.38 * bigness)) +
+			0.16 * (comps.shootingLowPost - (0.44 + 0.17 * bigness));
+		const midEff = CAL.byHeight("midPct", bigness) + 0.26 * (comps.shootingMidRange - 0.50);
 		const twoP = clamp(
 			rimMix * insideEff + (1 - rimMix) * midEff + compAdj + synergy +
-				rng.normal(0, 0.024 * noise),
-			0.28, 0.68,
+				rng.normal(0, 0.026 * noise),
+			0.34, 0.68,
 		);
-		const ftp = clamp(0.56 + 0.40 * (ratings.ft / 100) + rng.normal(0, 0.03 * noise), 0.30, 0.96);
+		// FT%: drafted mean .723 with a real size gradient (.78 guards, .67
+		// centers) beyond what the ft rating alone carries.
+		const ftp = clamp(
+			0.545 + 0.40 * (ratings.ft / 100) - 0.035 * bigness +
+				rng.normal(0, 0.035 * noise),
+			0.35, 0.94,
+		);
 
 		const fgm = twoA * twoP + tpa * tpp;
 		const fgp = fga > 0 ? fgm / fga : 0;
@@ -141,9 +172,12 @@
 			};
 		});
 
-		// Usage: high-usage players on weak teams shoot a lot more.
+		// Usage: high-usage players on weak teams shoot a lot more. Better
+		// prospects also carry a bit more volume (lottery picks averaged
+		// USG 24.3 vs 22.4 for picks 41+ in the 2009-21 data).
 		const rawUsg = members.map((m, i) =>
-			Math.pow(comps[i].usage, 2.2) * Math.pow(0.35 + 1.3 * (m.talent / 100), 1.6),
+			Math.pow(comps[i].usage, 2.2) * Math.pow(0.35 + 1.3 * (m.talent / 100), 1.6) *
+				CAL.talentUsageMult(m.talent),
 		);
 		let denom = 0;
 		for (let i = 0; i < members.length; i++) denom += rawUsg[i] * mins[i];

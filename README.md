@@ -17,9 +17,11 @@ where the player was born — a Serbian leans EuroLeague, an Australian leans NB
 American leans G League.
 
 **2. Rebuilds ratings into varied, specialised builds — without inflating anyone.**
-Each player is assigned one of 18 archetypes (Floor General, 3&D Wing, Rim Protector,
-Stretch Big, Microwave Scorer, Athletic Freak, …), gated by his height so a 7-footer
-never becomes a point guard. The archetype pushes some ratings up and others down,
+Each player is assigned one of nearly 60 archetypes (Floor General, Heliocentric
+Guard, Movement Shooter, 3&D Wing, Point Center, Rim Protector, Stretch Big,
+Lob Threat, Athletic Freak, …), gated by their height so a 7-footer never becomes
+a point guard. Rarer builds (Post-Up Guard, Point Center, Foul-Prone Enforcer)
+carry rarity weights so they show up occasionally, not every class. The archetype pushes some ratings up and others down,
 then the whole build is re-solved against **BBGM's own `ovr` formula** so the finished
 player comes out at exactly the target overall. Specialising a player makes him
 lopsided, not better.
@@ -29,7 +31,10 @@ into a real landscape: program strength starts from each school's draft frequenc
 (Kentucky 116, Wagner 0.1) on a log scale, plus conference strength, plus a year of
 variance. Prospects are layered onto their program alongside synthetic returning
 teammates. Then everyone plays ~31 games, conference tournaments, and a 68-team
-national tournament.
+national tournament. The stat model (turnover rate, free-throw rate, 3PA share,
+rim / mid-range / FT percentages, usage-by-talent) is calibrated against 61,061
+real D-I player-seasons from 2009-2021, including all 1,435 drafted players —
+see `js/calibration.js` for the empirical anchors.
 
 **4. Writes a scouting note for every player.** Team, conference, class year,
 archetype, the full stat line (PPG / RPG / APG / SPG / BPG, FG% / 3P% / FT% / TS%),
@@ -105,6 +110,7 @@ js/rng.js           seeded RNG (mulberry32) + distributions
 js/bbgm.js          BBGM's own rating formulas, reimplemented
 js/colleges.js      353 colleges: frequency, conference, prestige; non-NCAA leagues
 js/config.js        defaults + presets
+js/calibration.js   empirical targets from 61k real 2009-21 D-I player-seasons
 js/ratings.js       archetypes and the ovr-preserving build solver
 js/teams.js         program strength, rosters, schedule, conference tournaments
 js/stats.js         minutes, usage and the stat line model
