@@ -37,6 +37,13 @@
 		"NEC":            { strength: 50, bids: 1, tier: "low" },
 		"SWAC":           { strength: 48, bids: 1, tier: "low" },
 		"MEAC":           { strength: 48, bids: 1, tier: "low" },
+		/* The rebuilt Pac-12. The dataset was half-migrated: the ACC and the
+		   Big Ten already carried their post-realignment eighteen while the
+		   conference the four schools they took came FROM did not exist, so
+		   Gonzaga, Oregon State and Washington State sat in a WCC that in fact
+		   lost them, and five Mountain West schools were in a league they
+		   left. */
+		"Pac-12":         { strength: 78, bids: 3, tier: "mid" },
 		// Catch-all for colleges outside the built-in database (league files
 		// drift across BBGM versions). Not a real league: no members in
 		// byConference, no auto bid — just sane strength for lookups.
@@ -70,7 +77,7 @@
 		"Belmont": [1, "Missouri Valley"],
 		"Bethune-Cookman": [3, "SWAC"],
 		"Binghamton": [0.1, "America East"],
-		"Boise State": [6, "Mountain West"],
+		"Boise State": [6, "Pac-12"],
 		"Boston College": [27, "ACC"],
 		"Boston University": [6, "Patriot"],
 		"Bowling Green": [16, "MAC"],
@@ -103,7 +110,7 @@
 		"Coastal Carolina": [0.1, "Sun Belt"],
 		"Colgate": [4, "Patriot"],
 		"Colorado": [25, "Big 12"],
-		"Colorado State": [11, "Mountain West"],
+		"Colorado State": [11, "Pac-12"],
 		"Columbia": [5, "Ivy"],
 		"Connecticut": [37, "Big East"],
 		"Coppin State": [2, "MEAC"],
@@ -138,7 +145,7 @@
 		"Florida International": [2, "Conference USA"],
 		"Florida State": [38, "ACC"],
 		"Fordham": [11, "Atlantic 10"],
-		"Fresno State": [23, "Mountain West"],
+		"Fresno State": [23, "Pac-12"],
 		"Furman": [3, "Southern"],
 		"Gardner-Webb": [4, "Big South"],
 		"George Mason": [3, "Atlantic 10"],
@@ -148,7 +155,7 @@
 		"Georgia Southern": [3, "Sun Belt"],
 		"Georgia State": [2, "Sun Belt"],
 		"Georgia Tech": [39, "ACC"],
-		"Gonzaga": [20, "WCC"],
+		"Gonzaga": [20, "Pac-12"],
 		"Grambling State": [12, "SWAC"],
 		"Grand Canyon": [2, "WAC"],
 		"Green Bay": [4, "Horizon"],
@@ -272,7 +279,7 @@
 		"Ole Miss": [9, "SEC"],
 		"Oral Roberts": [9, "Summit"],
 		"Oregon": [31, "Big Ten"],
-		"Oregon State": [29, "WCC"],
+		"Oregon State": [29, "Pac-12"],
 		"Pacific": [8, "WCC"],
 		"Penn State": [14, "Big Ten"],
 		"Pennsylvania": [11, "Ivy"],
@@ -304,7 +311,7 @@
 		"Sam Houston State": [2, "Conference USA"],
 		"Samford": [0.1, "Southern"],
 		"San Diego": [1, "WCC"],
-		"San Diego State": [12, "Mountain West"],
+		"San Diego State": [12, "Pac-12"],
 		"San Francisco": [25, "WCC"],
 		"San Jose State": [9, "Mountain West"],
 		"Santa Clara": [14, "WCC"],
@@ -344,7 +351,7 @@
 		"Texas A&M-CC": [0.1, "Southland"],
 		"Texas Rio Grande Valley": [0.1, "WAC"],
 		"Texas Southern": [5, "SWAC"],
-		"Texas State": [2, "Sun Belt"],
+		"Texas State": [2, "Pac-12"],
 		"Texas Tech": [14, "Big 12"],
 		"Texas-Arlington": [1, "WAC"],
 		"Toledo": [11, "MAC"],
@@ -368,7 +375,7 @@
 		"UTEP": [17, "Conference USA"],
 		"UTSA": [2, "American"],
 		"Utah": [31, "Big 12"],
-		"Utah State": [9, "Mountain West"],
+		"Utah State": [9, "Pac-12"],
 		"Utah Valley": [3, "WAC"],
 		"VCU": [10, "Atlantic 10"],
 		"Valparaiso": [7, "Missouri Valley"],
@@ -378,10 +385,31 @@
 		"Virginia": [31, "ACC"],
 		"Virginia Military": [2, "Southern"],
 		"Virginia Tech": [16, "ACC"],
+		/* Programs that reclassified to Division I and were missing, which is
+		   why the table held 353 against a real ~364. Every one of them is a
+		   real destination for a fringe prospect and a real conference member
+		   whose league was a man short without it. Draft frequency 0.1: none of
+		   them has produced an NBA pick, which is the honest number and is what
+		   prestige() reads. */
+		"Le Moyne": [0.1, "NEC"],
+		"Stonehill": [0.1, "NEC"],
+		"Mercyhurst": [0.1, "NEC"],
+		"Queens": [0.1, "ASUN"],
+		"Bellarmine": [0.1, "ASUN"],
+		"West Georgia": [0.1, "ASUN"],
+		"Lindenwood": [0.1, "Ohio Valley"],
+		"Southern Indiana": [0.1, "Ohio Valley"],
+		"Texas A&M-Commerce": [0.1, "Southland"],
+		"Tarleton State": [0.2, "WAC"],
+		"UT Rio Grande Valley": [0.2, "Southland"],
+		"Utah Tech": [0.1, "WAC"],
+		"Little Rock": [0.4, "Ohio Valley"],
+		"Omaha": [0.2, "Summit"],
+		"St. Thomas": [0.2, "Summit"],
 		"Wagner": [0.1, "NEC"],
 		"Wake Forest": [31, "ACC"],
 		"Washington": [39, "Big Ten"],
-		"Washington State": [17, "WCC"],
+		"Washington State": [17, "Pac-12"],
 		"Weber State": [10, "Big Sky"],
 		"West Virginia": [16, "Big 12"],
 		"Western Carolina": [7, "Southern"],
