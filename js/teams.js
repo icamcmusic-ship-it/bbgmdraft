@@ -95,7 +95,22 @@
 		   13.4 against a low-major's 35.5 and 19.9 at the same overall rating,
 		   and where a prospect played predicted his scoring better than how
 		   good he was. */
-		const talent = clamp(rng.normal(mean, 8.5) - Math.pow(i, 1.35) * 2.4, 6, 95);
+		let talent = clamp(rng.normal(mean, 8.5) - Math.pow(i, 1.35) * 2.4, 6, 95);
+		/* The college star who is not a prospect.
+
+		   A returning player's talent was drawn from his programme's level and
+		   nothing else, so the best player in the country was, by construction,
+		   always somebody in the draft class: the national player of the year
+		   came out of the class in 100% of seasons. Real college basketball is
+		   full of men who are excellent college players and not NBA prospects —
+		   several of the 2024 consensus first-team All-Americans went undrafted
+		   — and without them the class has nobody to lose an award to.
+
+		   Rare (about a dozen in the country) and only among the top of a
+		   rotation, because that is what the player is. */
+		if (i <= 2 && rng.random() < STAR_RETURNER_RATE) {
+			talent = clamp(talent + rng.uniform(10, 24), 6, 96);
+		}
 		// Endurance drives how much of a rotation spot a player can actually
 		// hold, and it is the one rating that never fed the minutes model.
 		return {
@@ -121,6 +136,8 @@
 	   untouched, and a roster whose prospect is a genuine lottery talent is
 	   untouched too, because the cap is not binding there. */
 	const FILLER_GAP = 4;
+	/* Per top-three rotation slot, so roughly a dozen across 368 programmes. */
+	const STAR_RETURNER_RATE = 0.012;
 	function capFillers(fillers, prospects) {
 		if (!prospects.length || !fillers.length) return;
 		let best = -Infinity;
@@ -802,7 +819,7 @@
 		prospectTalent, teamRating, winProb, playGame, playGameScore, ratingOn,
 		realign, makeCoach, COACH_SITUATIONS,
 		capFillers, FILLER_GAP, conferenceDrift, programLevel, applyOutages, makeFiller,
-		PROGRAM_VOL, DOWN_YEAR_RATE, BREAKOUT_RATE, makeCoach,
+		PROGRAM_VOL, DOWN_YEAR_RATE, BREAKOUT_RATE, STAR_RETURNER_RATE,
 		rotationWeights, pairUp, record, recordPostseason, finalizeSchedule,
 		REGULAR_NOISE,
 		label, adoptConference, conferencePools, PROGRAM_STYLES,

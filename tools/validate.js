@@ -519,7 +519,15 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   personal ceiling at 19.5%), which is what "the stats all feel the
 		   same" is from the inside. No band on a mean or a percentile can see
 		   a wall, so the shape is checked directly. */
-		["USG spike vs a smooth mode", usgSpike, 0, 1.30],
+		/* The upper bound widens with a smaller sample, and by more than a mean
+		   would. This is a MAXIMUM over about twenty-five bins of a multinomial
+		   share: at 20 seeds each bin's share has a standard error near 0.008
+		   and at 4 seeds near 0.017, and taking a maximum turns that into bias
+		   rather than noise, so a perfectly smooth distribution scores higher
+		   here on a small sample. Without the widening this row failed at the
+		   documented low-seed invocation while passing at 20, which is the
+		   fault the whole seed-scaling section above exists to prevent. */
+		["USG spike vs a smooth mode", usgSpike, 0, 1.30 + 0.45 * (noiseK - 1)],
 		// A per-seed maximum is noisy, so the band has to be wider than the
 		// point estimate or the harness fails at random and everyone learns to
 		// ignore it.
@@ -710,16 +718,13 @@ function collect(nSeeds, cfgOverrides, fixture) {
 
 	];
 
-	const structureRows = [
-		["Pace of honoured minus pace of all",
-			(paceOfHonoured.length ? mean(paceOfHonoured) : 0) -
-				(paceOfAll.length ? mean(paceOfAll) : 0), -1.2, 1.2],
-
-		/* Schedule integrity. */
-		["Regular-season game spread", Math.max.apply(null, gamesSpread), 0, 1],
-		["Champion record includes March", mean(postseasonInRecord), 1, 1],
-		["Games logged out of order", outOfOrder.length, 0, 0],
-
+	/* Award volume is a statement about THE CLASS — how much of the country's
+	   hardware seventy prospects take — so it belongs to the realistic fixture
+	   like every other prospect row. Checked on the synthetic class too, these
+	   bands had to be wide enough to cover a uniformly ovr-45 field as well,
+	   which is how a class that won the national player of the year in 100% of
+	   seasons passed. */
+	const awardRows = [
 		/* Award volume. Prospects are ranked against every returning player in
 		   Division I — against their actual simulated seasons rather than a
 		   regression on talent — so these are the rows that matter. */
@@ -730,26 +735,47 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   most of the hardware: the five consensus first-team All-Americans in
 		   a given year are usually three to five future draft picks. These are
 		   widened at the top for that reason and not to make a row pass. */
-		["National awards/class", mean(natAwards)].concat(perClass(2, 34)),
+		["National awards/class", mean(natAwards)].concat(perClass(8, 32)),
 		/* The finalist tier: named shortlists a class should land on more often
 		   than it wins the trophies themselves, and never so often that being a
 		   finalist stops meaning anything. */
-		["Finalist honours/class", mean(finalistAwards)].concat(perClass(2, 40)),
+		["Finalist honours/class", mean(finalistAwards)].concat(perClass(8, 34)),
 		/* Recentred from [0.05, 0.85]. Now that every program in the country is
 		   simulated and a prospect's minutes are decided by how good he is
 		   rather than by where he plays, the best player in a 70-man draft
 		   class is the best player in the country in 57-75% of seasons — which
 		   is about right: the national player of the year is usually, but not
 		   always, a future draft pick. */
-		["POY in class (rate)", mean(poyClasses)].concat(rateBand(0.25, 0.95)),
-		["Consensus 1st Team/class", mean(firstTeam)].concat(perClass(0.2, 4.2)),
-		["All-conference 1st/class", mean(confFirst)].concat(perClass(8, 32)),
-		["All-conference 2nd/class", mean(confSecond)].concat(perClass(3, 18)),
-		["Defensive awards/class", mean(defAwards)].concat(perClass(4, 34)),
-		["Honoured players/class", mean(honouredCount)].concat(perClass(25, 58)),
+		/* Now that the field contains college stars who are not prospects, the
+		   class does NOT win this every year — which is the point: it was 1.00
+		   before, and a row whose only passing value is its upper bound is not
+		   a check. */
+		["POY in class (rate)", mean(poyClasses)].concat(rateBand(0.45, 0.95)),
+		["Consensus 1st Team/class", mean(firstTeam)].concat(perClass(1.0, 4.0)),
+		["All-conference 1st/class", mean(confFirst)].concat(perClass(11, 24)),
+		["All-conference 2nd/class", mean(confSecond)].concat(perClass(3.5, 12)),
+		["Defensive awards/class", mean(defAwards)].concat(perClass(4, 16)),
+		["Honoured players/class", mean(honouredCount)].concat(perClass(30, 52)),
 		// Dominated by conference honours across ~31 conferences, which future
 		// draft picks legitimately win a lot of.
-		["Awards/class (all)", mean(awardsCount)].concat(perClass(70, 260)),
+		["Awards/class (all)", mean(awardsCount)].concat(perClass(95, 185)),
+	];
+
+	const structureRows = [
+		/* Tempo must not buy honours: productionScore is raw counting volume
+		   and PROGRAM_STYLES moves possessions by +/-5.5 a game. About the
+		   engine, not about the class, so it runs on both fixtures. */
+		["Pace of honoured minus pace of all",
+			(paceOfHonoured.length ? mean(paceOfHonoured) : 0) -
+				(paceOfAll.length ? mean(paceOfAll) : 0), -1.2, 1.2],
+
+		/* Schedule integrity. */
+		["Regular-season game spread", Math.max.apply(null, gamesSpread), 0, 1],
+		["Champion record includes March", mean(postseasonInRecord), 1, 1],
+		["Games logged out of order", outOfOrder.length, 0, 0],
+
+		/* A D-II or professional player winning a Division I national award is
+		   a leak in the award model, not a statement about the class. */
 		["Non-D1 D-I awards", mean(nonNcaaAwards), 0, 0],
 	];
 
@@ -760,6 +786,7 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		tag(prospectRows, "prospect"),
 		tag(fieldRows, "field"),
 		tag(prospectRows2, "prospect"),
+		tag(awardRows, "prospect"),
 		tag(structureRows, "structure"),
 	);
 	return { rows, all, field, leaders, awardsCount };

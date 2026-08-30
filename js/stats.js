@@ -607,6 +607,8 @@
 	function passSkill(comps, ratings) {
 		const raw = ratings && Number.isFinite(ratings.pss) ? ratings.pss / 100 : comps.passing;
 		return clamp((1 - TUNING.AST_PSS) * comps.passing + TUNING.AST_PSS * raw, 0.02, 1);
+		// (The reference shift is applied by the caller, which knows whether
+		// this is a prospect or a synthesised teammate.)
 	}
 	/* `ref` is the composite reference shift (see statLine): the assist and
 	   rebound POOLS are team-level and correctly calibrated, so what a prospect
@@ -831,7 +833,7 @@
 		// The system he plays in. A shooter at a four-out programme and the same
 		// shooter in a pack-line offence do not take the same shots.
 		const style = teamCtx.style || { three: 0, rim: 0, press: 0 };
-		let share3 = CAL.threeShare(bigness, ratings.tp) + style.three +
+		let share3 = CAL.threeShare(bigness, ratings.tp + ref * 100) + style.three +
 			rng.normal(0, 0.045 * noise);
 		share3 = clamp(share3, 0.0, 0.75);
 
@@ -886,8 +888,13 @@
 		);
 		// FT%: draft-year mean .726 with a real size gradient (.78 guards, .67
 		// centers) beyond what the ft rating alone carries.
+		/* Free-throw shooting reads the raw `ft` rating rather than a composite,
+		   so it needs the same reference correction in rating points that the
+		   composite terms get in composite points — otherwise a realistically
+		   shaped class shoots 69.3% from the line against an anchor of 73.0 for
+		   no reason but the level of the fixture the intercept was fitted on. */
 		const ftp = clamp(
-			0.548 + 0.40 * (ratings.ft / 100) - 0.035 * bigness +
+			0.548 + 0.40 * ((ratings.ft + ref * 100) / 100) - 0.035 * bigness +
 				mix(touch, rng.normal(0, 1)) * 0.035 * noise,
 			0.35, 0.94,
 		);
