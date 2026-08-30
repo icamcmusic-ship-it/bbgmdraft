@@ -898,11 +898,19 @@ console.log("\nPer-player reroll");
 	};
 	const a = byKey(before);
 	const b = byKey(after);
+	// Same identity as the assertion below: the whole rating vector, so a
+	// reroll that happens to land on the same build still counts as moved.
+	const vec = (p) => BB.RATING_KEYS.map((k) => p.newRatings[k]).join(",");
 	const moved = Object.keys(a).filter((k) =>
-		a[k].archetype !== b[k].archetype || a[k].newCollege !== b[k].newCollege ||
-		a[k].newOvr !== b[k].newOvr);
+		vec(a[k]) !== vec(b[k]) || a[k].newCollege !== b[k].newCollege);
+	/* Compared on his whole rating vector, not only on archetype and school.
+	   A class is drawn from a pool of about fourteen builds, so a reroll
+	   landing on the same build and the same school is an ordinary outcome
+	   (one in fourteen, not one in sixty) — and it is still a different
+	   player, because every rating under it was redrawn. Asserting on the
+	   labels made this a probabilistic test of the pool size. */
 	ok("rerolling one prospect changes that prospect",
-		a[target].archetype !== b[target].archetype ||
+		vec(a[target]) !== vec(b[target]) ||
 		a[target].newCollege !== b[target].newCollege,
 		a[target].archetype + "/" + a[target].newCollege + " -> " +
 			b[target].archetype + "/" + b[target].newCollege);

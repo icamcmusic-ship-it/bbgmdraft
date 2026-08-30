@@ -93,6 +93,30 @@
 		{ name: "Old-School Center", min: 60, max: 100, w: 0.95, t: ["big", "scoring"], o: { ins: 18, stre: 14, reb: 12, oiq: 6, spd: -14, tp: -16, drb: -10, ft: -8 } },
 		{ name: "Undersized Rebounder", min: 46, max: 64, w: 0.75, t: ["big", "rebounding"], o: { reb: 20, stre: 14, endu: 10, diq: 6, tp: -10, fg: -8, drb: -8, pss: -6 } },
 		{ name: "Foul-Prone Enforcer", min: 54, max: 100, w: 0.6, t: ["big", "defense"], o: { stre: 18, diq: 10, ins: 8, reb: 8, oiq: -14, ft: -10, spd: -8, tp: -8 } },
+		/* --- the gaps ------------------------------------------------------
+
+		   Measured coverage of the 60 builds above: endurance was boosted by 19
+		   of them and REDUCED BY NONE, so one whole rating was decorative — no
+		   conditioning question mark, no foul-trouble-through-effort, no "great
+		   in twenty-two minutes". There was no rebounding-tagged build under
+		   hgt 46 at all, so a Westbrook or a Marcus Smart could not exist. And
+		   the `raw` tag had exactly two members while one flavour multiplies it
+		   by 2.2, which is a tilt applied to nothing.
+
+		   These twelve fill those holes rather than adding more of what was
+		   already well covered. */
+		{ name: "Low-Motor Talent", min: 0, max: 100, w: 1.0, t: ["scoring", "raw"], o: { fg: 16, ins: 10, tp: 8, oiq: 6, endu: -20, diq: -14, reb: -8 } },
+		{ name: "Injury-Prone Talent", min: 0, max: 100, w: 0.7, t: ["raw"], o: { fg: 12, drb: 10, pss: 8, oiq: 8, endu: -22, stre: -12, spd: -4 } },
+		{ name: "Foul Magnet Guard", min: 0, max: 48, w: 0.8, t: ["guard", "scoring"], o: { ft: 16, drb: 12, spd: 10, ins: 6, diq: -14, endu: -10, tp: -8, reb: -6 } },
+		{ name: "Non-Shooting Playmaker", min: 0, max: 52, w: 1.2, t: ["guard", "playmaking"], o: { pss: 22, drb: 16, oiq: 10, spd: 6, tp: -22, ft: -12, ins: -8 } },
+		{ name: "Rebounding Guard", min: 20, max: 46, w: 0.9, t: ["guard", "rebounding", "athletic"], o: { reb: 20, jmp: 12, stre: 10, diq: 8, tp: -12, ins: -10, ft: -8 } },
+		{ name: "Two-Way Point Guard", min: 0, max: 44, w: 1.3, t: ["guard", "playmaking", "defense"], o: { pss: 16, diq: 14, oiq: 10, drb: 8, ins: -12, reb: -10, dnk: -8 } },
+		{ name: "Small-Ball Five", min: 46, max: 66, w: 1.0, t: ["big", "defense", "athletic"], o: { stre: 16, reb: 14, diq: 12, jmp: 8, tp: -12, drb: -10, pss: -8, ft: -6 } },
+		{ name: "Stretch Four Stopper", min: 48, max: 74, w: 1.1, t: ["big", "shooting", "defense"], o: { tp: 16, diq: 14, ft: 8, endu: 6, ins: -14, pss: -10, drb: -8, dnk: -6 } },
+		{ name: "Rim-Running Wing", min: 40, max: 68, w: 1.2, t: ["wing", "athletic"], o: { spd: 16, dnk: 14, jmp: 12, endu: 10, tp: -14, ft: -10, pss: -8, fg: -6 } },
+		{ name: "Late Bloomer", min: 0, max: 100, w: 1.1, t: ["raw"], o: { endu: 10, oiq: 8, spd: 6, stre: 6, fg: -8, tp: -6, ins: -6, drb: -4 } },
+		{ name: "Fifth-Year Senior", min: 0, max: 100, w: 1.2, t: [], o: { oiq: 14, diq: 10, ft: 8, fg: 6, jmp: -14, spd: -10, endu: -4, dnk: -8 } },
+		{ name: "Positionless Forward", min: 38, max: 72, w: 1.4, t: ["wing", "playmaking", "defense"], o: { pss: 12, diq: 10, drb: 10, reb: 8, oiq: 6, ins: -10, dnk: -8, ft: -6 } },
 		{ name: "Balanced", min: 0, max: 100, w: 1.0, t: [], o: {} },
 	];
 
@@ -116,30 +140,34 @@
 	   scoring residual against the class's own ovr fit inside +/-2 points, and
 	   tools/validate.js bands the worst of them so it cannot drift back. */
 	const ROLE_USAGE = {
-		"Floor General": 1.40, "Combo Guard": 0.53, "Sharpshooter": 0.53,
-		"Slasher": 0.83, "Defensive Pest": 2.30, "Heliocentric Guard": 0.86,
-		"Pick-and-Roll Maestro": 0.74, "Movement Shooter": 0.62,
-		"Pull-Up Artist": 0.38, "Downhill Attacker": 0.82,
-		"Crafty Finisher": 0.50, "Pass-First Sparkplug": 2.21, "Ball Hawk": 2.30,
-		"Pesky On-Ball Stopper": 2.30, "Score-First Point": 0.42,
-		"Sixth-Man Gunner": 0.39, "Streaky Volume Scorer": 0.32,
-		"Change-of-Pace Guard": 1.10, "Post-Up Guard": 0.32,
-		"Free-Throw Merchant": 0.92, "3&D Wing": 0.96, "Two-Way Wing": 1.25,
-		"Point Forward": 1.33, "Wing Sniper": 0.68, "Shot-Creating Wing": 0.65,
-		"Transition Wing": 1.91, "Cutter / Finisher": 1.12, "Wing Stopper": 2.30,
-		"Rebounding Wing": 0.96, "Corner Specialist": 0.92,
+		"Floor General": 1.22, "Combo Guard": 0.46, "Sharpshooter": 0.54,
+		"Slasher": 0.92, "Defensive Pest": 2.30, "Heliocentric Guard": 0.86,
+		"Pick-and-Roll Maestro": 0.74, "Movement Shooter": 0.70,
+		"Pull-Up Artist": 0.42, "Downhill Attacker": 0.79,
+		"Crafty Finisher": 0.58, "Pass-First Sparkplug": 1.70, "Ball Hawk": 2.30,
+		"Pesky On-Ball Stopper": 2.30, "Score-First Point": 0.48,
+		"Sixth-Man Gunner": 0.32, "Streaky Volume Scorer": 0.32,
+		"Change-of-Pace Guard": 1.32, "Post-Up Guard": 0.32,
+		"Free-Throw Merchant": 0.92, "3&D Wing": 0.83, "Two-Way Wing": 1.22,
+		"Point Forward": 1.62, "Wing Sniper": 0.58, "Shot-Creating Wing": 0.54,
+		"Transition Wing": 1.78, "Cutter / Finisher": 1.12, "Wing Stopper": 2.30,
+		"Rebounding Wing": 0.96, "Corner Specialist": 0.74,
 		"Midrange Operator": 0.68, "Jumbo Playmaker": 0.59, "Energy Wing": 2.30,
-		"Do-It-All Forward": 2.30, "Bully Slasher": 0.61, "Glide Athlete": 1.73,
-		"Microwave Scorer": 0.50, "Athletic Freak": 1.10, "Glue Guy": 2.11,
-		"High-IQ Connector": 1.45, "Raw Project": 0.98, "Iron Man": 2.02,
-		"Stretch Big": 0.92, "Post Scorer": 0.55, "Rim Protector": 1.82,
-		"Rim Runner": 1.14, "Motor Big": 1.33, "Skilled Big": 0.47,
-		"Point Center": 1.06, "Offensive Rebounding Menace": 1.39,
-		"Switchable Big": 2.14, "Mobile Shot-Swatter": 2.30,
-		"Face-Up Four": 0.67, "Low-Post Bruiser": 0.62, "Pick-and-Pop Big": 0.57,
-		"Lob Threat": 1.71, "Old-School Center": 0.74,
+		"Do-It-All Forward": 1.27, "Bully Slasher": 0.61, "Glide Athlete": 1.60,
+		"Microwave Scorer": 0.50, "Athletic Freak": 1.31, "Glue Guy": 1.38,
+		"High-IQ Connector": 0.80, "Raw Project": 1.03, "Iron Man": 2.02,
+		"Stretch Big": 0.74, "Post Scorer": 0.63, "Rim Protector": 1.88,
+		"Rim Runner": 1.19, "Motor Big": 0.97, "Skilled Big": 0.57,
+		"Point Center": 0.78, "Offensive Rebounding Menace": 1.60,
+		"Switchable Big": 2.12, "Mobile Shot-Swatter": 2.30,
+		"Face-Up Four": 0.68, "Low-Post Bruiser": 0.54, "Pick-and-Pop Big": 0.89,
+		"Lob Threat": 1.16, "Old-School Center": 0.77,
 		"Undersized Rebounder": 1.16, "Foul-Prone Enforcer": 0.76,
-		"Balanced": 0.82,
+		"Low-Motor Talent": 0.34, "Foul Magnet Guard": 0.33,
+		"Non-Shooting Playmaker": 1.09, "Rebounding Guard": 2.07,
+		"Two-Way Point Guard": 1.36, "Small-Ball Five": 2.30,
+		"Stretch Four Stopper": 0.80, "Rim-Running Wing": 1.25,
+		"Late Bloomer": 1.10, "Positionless Forward": 0.91, "Balanced": 0.79,
 	};
 	function roleUsage(name) {
 		const v = ROLE_USAGE[name];
@@ -182,6 +210,11 @@
 		"Crafty Finisher": -2, "Pass-First Sparkplug": -2, "Wing Sniper": -2,
 		"Score-First Point": -2, "Microwave Scorer": -3,
 		"Streaky Volume Scorer": -3, "Midrange Operator": -3,
+		"Low-Motor Talent": 4, "Injury-Prone Talent": 5, "Late Bloomer": 6,
+		"Rim-Running Wing": 3, "Small-Ball Five": 1, "Positionless Forward": 2,
+		"Two-Way Point Guard": 1, "Stretch Four Stopper": 0,
+		"Rebounding Guard": 0, "Non-Shooting Playmaker": -1,
+		"Foul Magnet Guard": -2, "Fifth-Year Senior": -6,
 	};
 
 	/* Potential gap for a finished build.
@@ -260,8 +293,15 @@
 
 	// How freely each rating may be shifted when solving for the target ovr.
 	// Endurance is scarce for teenagers, so it moves less and never collapses.
+	/* Endurance was scarce for teenagers and moved at 0.35, which combined with
+	   nothing in the table ever reducing it to make the rating decorative:
+	   nineteen builds boosted it, none cut it, and the solver barely moved it
+	   either way. Builds that cut it exist now (Low-Motor Talent,
+	   Injury-Prone Talent, Foul Magnet Guard), so the solver is allowed a
+	   little more room — still the most constrained rating in the table,
+	   because a teenager's conditioning genuinely does not span 0-100. */
 	const SHIFT_SCALE = {
-		hgt: 0, stre: 1, spd: 1, jmp: 1, endu: 0.35, ins: 1, dnk: 1, ft: 1,
+		hgt: 0, stre: 1, spd: 1, jmp: 1, endu: 0.5, ins: 1, dnk: 1, ft: 1,
 		fg: 1, tp: 1, oiq: 1, diq: 1, drb: 1, pss: 1, reb: 1,
 	};
 

@@ -506,7 +506,13 @@ function collect(nSeeds, cfgOverrides) {
 		   than it wins the trophies themselves, and never so often that being a
 		   finalist stops meaning anything. */
 		["Finalist honours/class", mean(finalistAwards)].concat(perClass(2, 40)),
-		["POY in class (rate)", mean(poyClasses)].concat(rateBand(0.05, 0.85)),
+		/* Recentred from [0.05, 0.85]. Now that every program in the country is
+		   simulated and a prospect's minutes are decided by how good he is
+		   rather than by where he plays, the best player in a 70-man draft
+		   class is the best player in the country in 57-75% of seasons — which
+		   is about right: the national player of the year is usually, but not
+		   always, a future draft pick. */
+		["POY in class (rate)", mean(poyClasses)].concat(rateBand(0.25, 0.95)),
 		["Consensus 1st Team/class", mean(firstTeam)].concat(perClass(0.2, 3)),
 		["All-conference 1st/class", mean(confFirst)].concat(perClass(8, 26)),
 		["All-conference 2nd/class", mean(confSecond)].concat(perClass(3, 18)),
