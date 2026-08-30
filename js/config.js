@@ -31,6 +31,9 @@
 		   a 7'4" project. Cheap, memorable, and the reason to reroll. 0 turns
 		   them off. */
 		surpriseBudget: 3,
+		/* How injury-prone this season is. Drawn before a game is played, so it
+		   moves records and resumes and not only the note text. */
+		injuryRate: 1,
 
 		// --- blank colleges ----------------------------------------------
 		// Legacy headline sliders. They still work (and old shareable links

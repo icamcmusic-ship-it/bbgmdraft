@@ -513,9 +513,17 @@
 		// Nobody plays every game. Tweaks, illness, a suspension, a coach's
 		// doghouse: the draft-year GP mean is 33.5 against a ~35-game team
 		// schedule, and a sim where everyone is available all year runs high.
-		const missed = rng.random() < 0.46
-			? 0
-			: Math.min(14, Math.round(Math.abs(rng.normal(0, 3.1)) + 1));
+		/* The absence is drawn before a game is played (see assignAvailability
+		   in js/engine.js) so the team's record can respond to it. This used to
+		   invent one here and gameLog invented a second, unrelated one further
+		   downstream, so a note could say a man missed eleven games while his
+		   game log blanked out four different ones. A filler has no availability
+		   of his own, so he keeps the old draw. */
+		const missed = me.availability
+			? me.availability.games
+			: (me.filler && rng.random() >= 0.46
+				? Math.min(14, Math.round(Math.abs(rng.normal(0, 3.1)) + 1))
+				: 0);
 		const games = Math.max(5, teamCtx.games - missed);
 		const minShare = minutes / gameMinutes;
 
@@ -1163,7 +1171,11 @@
 				: "stat:" + m.player.key;
 			const line = statLine(
 				rng.child(seed), ratingRows[i], comps[i], mins[i], usgShare[i], ctx, cfg,
-				teamCtx, { talent: m.talent, filler: !!m.filler },
+				teamCtx, {
+					talent: m.talent,
+					filler: !!m.filler,
+					availability: m.filler ? null : m.player.availability,
+				},
 			);
 			lines.push(line);
 			totals.pts += line.ppg;
@@ -1329,19 +1341,28 @@
 		   conference-first log, so a player who missed games always missed the
 		   last N — which were always non-conference. Missed games are drawn as
 		   an injury (one contiguous block) or as scattered absences. */
+		/* Which games he missed. The absence itself was decided before the
+		   season was played, so this places the games it names rather than
+		   inventing a second, unrelated one: the block of an injury lands on
+		   the dates the team was actually weaker for, and everything else is
+		   scattered. */
 		const missed = new Set();
 		let injury = null;
+		const av = p.availability;
 		if (missedCount > 0) {
-			if (missedCount >= 3 && rng.random() < 0.62) {
-				const start = rng.int(0, Math.max(0, schedule.length - missedCount));
+			if (av && av.injury && av.from !== null) {
+				// Place the block on the same stretch of the calendar the
+				// season simulation took him out of.
+				let start = 0;
+				for (let i = 0; i < schedule.length; i++) {
+					if ((schedule[i].when || 0) >= av.from) { start = i; break; }
+					start = i;
+				}
+				start = Math.max(0, Math.min(start, schedule.length - missedCount));
 				for (let i = 0; i < missedCount; i++) missed.add(start + i);
 				injury = {
 					from: start, to: start + missedCount - 1, games: missedCount,
-					kind: rng.pick([
-						"a sprained ankle", "a hand injury", "a knee sprain",
-						"a stress reaction in his foot", "concussion protocol",
-						"a back strain", "a shoulder injury",
-					]),
+					kind: av.kind,
 				};
 			} else {
 				let guard = 0;
@@ -1350,10 +1371,7 @@
 				}
 				injury = {
 					from: null, to: null, games: missedCount,
-					kind: rng.pick([
-						"illness", "a coach's decision", "a minor knock",
-						"a one-game suspension", "load management",
-					]),
+					kind: av ? av.kind : "a minor knock",
 				};
 			}
 		}

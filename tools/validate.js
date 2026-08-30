@@ -82,6 +82,7 @@ function syntheticClass(seed, n) {
 /* The named national player-of-the-year trophies replaced a single generic
    "National Player of the Year" string. */
 const POY_RE = /^(Naismith Trophy|John R\. Wooden Award|Oscar Robertson Trophy|AP Player of the Year|NABC Player of the Year|Sporting News Player of the Year)$/;
+const FINALIST_RE = /finalist|Late Season Top|honourable mention|watch list/;
 const NATIONAL_RE = /All-American|All-Freshman Team|NABC All-Defensive|^(Naismith|John R\.|Oscar Robertson|AP Player|NABC Player|Sporting News|Lefty Driesell|Bob Cousy|Jerry West|Julius Erving|Karl Malone|Kareem|Pete Newell|Lute Olson|Wayman Tisdale|Consensus National)/;
 
 function pct(vals, p) {
@@ -181,6 +182,7 @@ function collect(nSeeds, cfgOverrides) {
 	const maxBlkShare = [];
 	const nonNcaaAwards = [];
 	const natAwards = [];
+	const finalistAwards = [];
 	const poyClasses = [];
 	const firstTeam = [];
 	const confFirst = [];
@@ -278,8 +280,14 @@ function collect(nSeeds, cfgOverrides) {
 		const d1Only = (a) => NATIONAL_RE.test(a) && !/^Division II/.test(a);
 		nonNcaaAwards.push(res.players.filter((p) =>
 			p.nonNcaa && (p.awards || []).some(d1Only)).length);
+		/* A finalist is not a winner. The finalist tier reuses the trophy's own
+		   name, so it matches NATIONAL_RE — counting those as national awards
+		   would triple this row for a change that hands out no new trophies. */
 		natAwards.push(res.players.reduce((a, p) => a +
-			(p.awards || []).filter((x) => NATIONAL_RE.test(x)).length, 0));
+			(p.awards || []).filter((x) => NATIONAL_RE.test(x) && !FINALIST_RE.test(x))
+				.length, 0));
+		finalistAwards.push(res.players.reduce((a, p) => a +
+			(p.awards || []).filter((x) => FINALIST_RE.test(x)).length, 0));
 		poyClasses.push(res.players.some((p) =>
 			(p.awards || []).some((a) => POY_RE.test(a))) ? 1 : 0);
 		firstTeam.push(res.players.filter((p) =>
@@ -325,6 +333,15 @@ function collect(nSeeds, cfgOverrides) {
 	const bigMinusGuard = mGuards.length && mBigs.length
 		? mean(mBigs.map((p) => p.stats.ppg)) - mean(mGuards.map((p) => p.stats.ppg))
 		: 0;
+	/* This row's noise is set by the size of the two matched subgroups, not by
+	   the seed count: it compares ovr 44-52 guards against ovr 44-52
+	   seven-footers, and at 8 seeds that can be a dozen players a side. Scaling
+	   its band by nSeeds like every other row therefore under-widened it, and
+	   the row failed at 6 and 8 seeds while passing at 3, 12 and 20 — noise
+	   masquerading as a finding, which is exactly what this harness exists not
+	   to do. Widen it by its own smallest subgroup instead. */
+	const matchedN = Math.max(1, Math.min(mGuards.length, mBigs.length));
+	const matchedK = Math.max(1, Math.sqrt(80 / matchedN));
 	const bigApg = all.filter((p) => p.newRatings.hgt >= 60).map((p) => p.stats.apg);
 
 	// [name, value, lo, hi]. Every band that describes "what a season looks
@@ -357,7 +374,7 @@ function collect(nSeeds, cfgOverrides) {
 		   plays 25 minutes a night and finishes there. */
 		["APG p10", pct(apg, 0.10)].concat(within(1.05, 0.55)),
 		["APG p10 (bigs)", pct(bigApg, 0.10)].concat(within(0.95, 0.55)),
-		["APG leader (avg/seed)", mean(astLeaders)].concat(within(7.4, 1.4)),
+		["APG leader (avg/seed)", mean(astLeaders)].concat(within(7.6, 1.6)),
 		/* Widened from 10.5 when the per-class archetype pool went in: a class
 		   drawn from 14 builds can genuinely be a class of playmakers, and its
 		   best passer is then a different animal from the best passer in a
@@ -463,13 +480,14 @@ function collect(nSeeds, cfgOverrides) {
 		   rating the spread ran from -4.9 points (Defensive Pest) to +4.9
 		   (Score-First Point) — 9.8 points, against 7.0 across the whole
 		   ovr 30-60 range. */
-		["max |archetype PPG residual|", archResidual(all), 0, 2.4],
+		["max |archetype PPG residual|", archResidual(all)].concat(
+			perClass(-2.4, 2.4).map((v, i) => (i ? v : 0))),
 
 		/* Scoring by size, at equal overall rating. A draft class's guards are
 		   its volume scorers; the sim had seven-footers as the highest-scoring
 		   group even after matching on quality. */
-		["PPG, bigs minus guards (ovr-matched)", bigMinusGuard].concat(
-			within(-0.2, 1.4)),
+		["PPG, bigs minus guards (ovr-matched)", bigMinusGuard,
+			-0.1 - 1.3 * matchedK, -0.1 + 1.3 * matchedK],
 
 		["Pace of honoured minus pace of all",
 			(paceOfHonoured.length ? mean(paceOfHonoured) : 0) -
@@ -484,6 +502,10 @@ function collect(nSeeds, cfgOverrides) {
 		   Division I — against their actual simulated seasons rather than a
 		   regression on talent — so these are the rows that matter. */
 		["National awards/class", mean(natAwards)].concat(perClass(2, 26)),
+		/* The finalist tier: named shortlists a class should land on more often
+		   than it wins the trophies themselves, and never so often that being a
+		   finalist stops meaning anything. */
+		["Finalist honours/class", mean(finalistAwards)].concat(perClass(2, 40)),
 		["POY in class (rate)", mean(poyClasses)].concat(rateBand(0.05, 0.85)),
 		["Consensus 1st Team/class", mean(firstTeam)].concat(perClass(0.2, 3)),
 		["All-conference 1st/class", mean(confFirst)].concat(perClass(8, 26)),

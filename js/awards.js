@@ -554,6 +554,38 @@
 		freshmen.slice(0, slots(1)).forEach((x) => giveNat(x, "Wayman Tisdale Award"));
 		freshmen.slice(0, slots(5)).forEach((x) => giveNat(x, "All-Freshman Team"));
 
+		/* Finalists.
+
+		   Ninety awards, every one of them binary: you won it or your season
+		   does not appear. That is not how the honours actually work and it
+		   throws away most of the resolution the model already has — the
+		   difference between the ninth-best player in the country and the
+		   fortieth is real, and both of them finished the year with nothing to
+		   show for it.
+
+		   These are real, they are cheap (they are the same ranked list, read
+		   further down), and they roughly triple the number of distinguishable
+		   outcomes without adding a single winner. Named after the trophy, and
+		   never given to somebody who already won the thing itself. */
+		const finalist = (list, from, to, label) => {
+			for (const x of list.slice(from, to)) {
+				if (x.filler || !x.awards) continue;
+				if (x.stats && x.stats.mpg < 20) continue;
+				if (x.awards.some((a) => a.indexOf(label.split(" finalist")[0]) === 0)) continue;
+				x.awards.push(label);
+			}
+		};
+		finalist(nation, 0, slots(4), "Naismith Trophy finalist");
+		finalist(nation, 0, slots(20), "Wooden Award Late Season Top 20");
+		finalist(nation, slots(15), slots(30), "Associated Press honourable mention");
+		finalist(natDef.filter((x) => GATES.defensive(x)), 0, slots(4),
+			"Naismith Defensive Player of the Year finalist");
+		finalist(freshmen, slots(5), slots(10), "Wayman Tisdale Award watch list");
+		for (const pa of POSITION_AWARDS) {
+			const pool = nation.filter((x) => pa.pos.indexOf(x.pos) !== -1);
+			finalist(pool, 0, slots(4), pa.name + " finalist");
+		}
+
 		/* Academic All-America. BBGM has no academics, so this is rolled from
 		   the player's own seed and gated on basketball IQ and production —
 		   which at least makes it deterministic, rare, and never a surprise on

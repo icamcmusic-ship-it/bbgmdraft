@@ -762,6 +762,74 @@
 
 	/* ------------------------------------------------------------- phase 2 */
 
+	/* Who was hurt, and when — drawn BEFORE a game is played.
+
+	   The tool used to invent an injury after the season had been simulated:
+	   gameLog picked a contiguous block of games to blank out and rescaled the
+	   log to match, so a player who missed fourteen games with a knee had
+	   exactly the same effect on his team's record as if he had played every
+	   night. The injury was a sentence in the note and nothing else.
+
+	   Drawn here, an absence is a window on the season's own `when` axis, and
+	   ratingOn() takes the missing player out of his team for the games inside
+	   it — so the team loses games it would have won, the resume the selection
+	   committee reads is the resume the injury produced, and the stat model
+	   downstream reads the same window instead of inventing a second one.
+
+	   Durations follow the injury. A concussion and a stress reaction drew the
+	   same game count out of one uniform table, which is why every absence read
+	   the same length whatever it was called. */
+	const INJURIES = [
+		{ kind: "a sprained ankle", w: 3.0, lo: 1, hi: 5 },
+		{ kind: "a hand injury", w: 1.4, lo: 2, hi: 8 },
+		{ kind: "a knee sprain", w: 1.6, lo: 4, hi: 14 },
+		{ kind: "a stress reaction in his foot", w: 1.0, lo: 6, hi: 18 },
+		{ kind: "concussion protocol", w: 1.2, lo: 1, hi: 4 },
+		{ kind: "a back strain", w: 1.1, lo: 2, hi: 7 },
+		{ kind: "a shoulder injury", w: 1.0, lo: 3, hi: 11 },
+		{ kind: "a broken hand", w: 0.7, lo: 8, hi: 20 },
+		{ kind: "a high ankle sprain", w: 0.9, lo: 5, hi: 13 },
+	];
+	const ABSENCES = [
+		{ kind: "illness", w: 2.2, lo: 1, hi: 3 },
+		{ kind: "a coach's decision", w: 1.3, lo: 1, hi: 3 },
+		{ kind: "a minor knock", w: 2.0, lo: 1, hi: 2 },
+		{ kind: "a one-game suspension", w: 1.0, lo: 1, hi: 1 },
+		{ kind: "load management", w: 0.5, lo: 1, hi: 3 },
+		{ kind: "a personal matter", w: 0.8, lo: 1, hi: 4 },
+	];
+	// A season's worth of `when`, matching the schedule's own axis.
+	const SEASON_GAMES = T.CONF_GAMES + T.NON_CONF_GAMES;
+
+	function assignAvailability(players, rng, cfg) {
+		const rate = clamp(
+			cfg && cfg.injuryRate !== undefined ? cfg.injuryRate : 1, 0, 3);
+		for (const p of players) {
+			p.availability = null;
+			if (p.nonNcaa || p.idleYear) continue;
+			const r = rng.child("inj:" + p.key);
+			// The draft-year games-played mean is 33.5 against a ~35-game
+			// schedule, so a bit over half a class misses something.
+			if (r.random() >= 0.54 * rate) continue;
+			const hurt = r.random() < 0.55 * rate;
+			const table = hurt ? INJURIES : ABSENCES;
+			const pickKind = r.weighted(table);
+			const games = Math.max(1, Math.round(
+				r.uniform(pickKind.lo, pickKind.hi + 0.999)));
+			const span = games / SEASON_GAMES;
+			// A run of games for an injury; scattered nights for everything
+			// else, which is what "illness" and "a coach's decision" are.
+			const from = hurt ? r.uniform(0, Math.max(0, 1 - span)) : null;
+			p.availability = {
+				games: Math.min(games, SEASON_GAMES - 5),
+				kind: pickKind.kind,
+				injury: hurt,
+				from,
+				to: hurt ? from + span : null,
+			};
+		}
+	}
+
 	function phaseRegular(state) {
 		const { cfg } = state;
 		const rng = state.rng;
@@ -771,7 +839,9 @@
 			(bySchool[p.newCollege] = bySchool[p.newCollege] || []).push(p);
 		}
 		state.bySchool = bySchool;
+		assignAvailability(state.players, rng.child("availability"), cfg);
 		const teams = T.buildPrograms(bySchool, rng.child("programs"));
+		T.applyOutages(teams);
 		T.simulateRegularSeason(teams, cfg, rng.child("season"));
 		// Snapshot, so the postseason can be re-run on its own (changing
 		// "March upsets" must not re-play November).
