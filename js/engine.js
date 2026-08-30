@@ -376,10 +376,48 @@
 
 	/* ------------------------------------------------------------- phase 1 */
 
+	/* Apply a flavour's config bend to the settings the user has left alone.
+	   Compared against Config.DEFAULTS key by key: a value the user moved is
+	   theirs and is not touched. */
+	function applyFlavorConfig(cfg, flavor) {
+		const bend = RB.flavorConfig(flavor);
+		if (!bend) return cfg;
+		const out = Object.assign({}, cfg);
+		const D = global.Config.DEFAULTS;
+		let moved = false;
+		for (const k of Object.keys(bend)) {
+			if (cfg[k] !== D[k]) continue;
+			out[k] = bend[k];
+			moved = true;
+		}
+		return moved ? out : cfg;
+	}
+
 	function phaseBuild(state) {
-		const { leagueFile, cfg } = state;
+		const { leagueFile } = state;
 		const rng = state.rng;
 		const season = leagueFile.startingSeason;
+
+		/* This year's flavour, drawn before anything is built because some
+		   flavours bend the class itself and not only its archetype mix.
+
+		   "A weak year", "one-and-done heavy" and "a transfer-portal class" are
+		   the things a draft class is actually remembered as, and none of them
+		   is expressible as a tilt on archetype weights: they are statements
+		   about how good the top of the class is, how old it is, and how it got
+		   where it is. So a flavour carries a config bend, applied here.
+
+		   A user's own setting always wins. The bend is applied only to
+		   settings still sitting at their default, so a flavour moves what the
+		   user has not decided and never overrules what they have. */
+		const flavor = RB.pickFlavor(rng.child("flavor"), state.cfg);
+		state.flavor = flavor;
+		const cfg = applyFlavorConfig(state.cfg, flavor);
+		state.effectiveCfg = cfg;
+		/* The builds this class is made of. Drawing the pool before the players
+		   is what turns "one of everything, every class" into "the year of the
+		   stretch bigs" — see pickClassPool. */
+		state.archetypePool = RB.pickClassPool(rng.child("pool"), cfg, flavor);
 
 		const raw = leagueFile.players || [];
 		const players = raw.map((p, idx) => {
@@ -421,10 +459,6 @@
 			ages.reduce((a, x) => a + (x - ageMean) * (x - ageMean), 0) / ages.length);
 		state.classAge = ageMean;
 		assignClassYears(players, cfg, rng.child("classyears"), ageSd >= 0.75);
-
-		// This year's flavour: guard-heavy, big-heavy, defence-first…
-		const flavor = RB.pickFlavor(rng.child("flavor"), cfg);
-		state.flavor = flavor;
 
 		// --- colleges -------------------------------------------------
 		// Per-player overrides ("lock this guy at 55 ovr / to Duke / as a Rim
@@ -500,8 +534,14 @@
 
 			const built = RB.rebuild(
 				prng, baseRatings, targetOvr, targetOvr + gap, cfg,
-				ov.archetype || null, state.flavor, ov.ratings || null);
+				ov.archetype || null, state.flavor, ov.ratings || null,
+				state.archetypePool);
 			p.newRatings = built.ratings;
+			// The pre-solve base and the pinned vector, so a forced size later
+			// in the pipeline can be re-solved to the same overall instead of
+			// leaving ovr disagreeing with the ratings beside it.
+			p.buildBase = built.base;
+			p.buildPinned = ov.ratings || null;
 			p.newOvr = built.ovr;
 			p.ovrRange = built.ovrRange;
 			p.builtPot = built.pot;
@@ -539,7 +579,145 @@
 		state.players = players;
 		state.season = season;
 		assignRecruiting(players, rng.child("recruiting"));
+		state.surprises = assignSurprises(players, rng.child("surprises"), cfg);
 		return state;
+	}
+
+	/* ------------------------------------------------------------ surprises */
+
+	/* Every class gets two to four forced anomalies.
+
+	   The class-level knobs were flavour and nothing else, and a class made
+	   entirely of things the sliders predict is a class with no story in it:
+	   measured over 24 rerolls, the class's mean scoring varied by a standard
+	   deviation of 0.45 points and the distinct-archetype count by 2.7. At the
+	   aggregate level every class was the same class, so there was nothing to
+	   remember one by and no reason to reroll.
+
+	   These are cheap — each is a bend on data the model already carries — and
+	   they are the kind of thing a draft class IS remembered for. Each names
+	   itself on the player, so the note and the table can say what happened.
+
+	   `apply` runs after ratings, colleges, class years and recruiting, so a
+	   surprise can contradict any of them, which is the point. */
+	const SURPRISES = [
+		{
+			name: "five-star bust", w: 2.0,
+			label: "a five-star recruit whose game never arrived",
+			pick: (p) => !p.nonNcaa && p.recruiting && p.newOvr <= 44,
+			apply: (p, r) => {
+				p.recruiting.rank = r.int(1, 9);
+				p.recruiting.stars = 5;
+				p.recruiting.bust = true;
+			},
+		},
+		{
+			name: "unranked riser", w: 2.0,
+			label: "unranked out of high school",
+			pick: (p) => !p.nonNcaa && p.recruiting && p.newOvr >= 48,
+			apply: (p, r) => {
+				p.recruiting.rank = r.int(240, 320);
+				p.recruiting.stars = 2;
+				p.recruiting.unranked = true;
+			},
+		},
+		{
+			name: "old JUCO scorer", w: 1.4,
+			label: "a 24-year-old who took the long road here",
+			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman",
+			apply: (p, r) => {
+				p.age = 24;
+				p.classYear = "Graduate";
+				p.transfer = {
+					kind: "JUCO transfer",
+					from: r.pick(["Chipola College", "Indian Hills CC", "Salt Lake CC",
+						"Hutchinson CC", "Odessa College"]),
+					fifthYear: true,
+				};
+				p.oldRoad = true;
+			},
+		},
+		{
+			name: "physical outlier", w: 1.6,
+			label: "a physical outlier",
+			pick: (p) => true,
+			apply: (p, r) => {
+				const tall = r.random() < 0.66;
+				const inches = tall ? r.int(87, 89) : r.int(66, 68);
+				/* Height feeds BBGM's overall formula more heavily than any
+				   other rating, so moving it means re-solving: changing the
+				   vector and leaving ovr alone would put the number in the
+				   table at odds with the ratings it was computed from, and the
+				   export round-trip test says so. */
+				const base = Object.assign({}, p.buildBase || p.newRatings, {
+					hgt: clamp(Math.round((p.buildBase || p.newRatings).hgt +
+						(inches - p.newHgtInches) * (100 / 24)), 0, 100),
+				});
+				const re = RB.resolveTo(base, p.newOvr, p.archetype,
+					p.origRatings.fuzz, p.buildPinned);
+				p.newHgtInches = inches;
+				p.buildBase = re.base;
+				p.newRatings = re.ratings;
+				p.newOvr = re.ovr;
+				p.newPos = re.pos;
+				p.newSkills = re.skills;
+				p.ovrRange = re.ovrRange;
+				p.newWeight = tall ? r.int(215, 245) : r.int(155, 175);
+				p.sizeOutlier = tall ? "tall" : "small";
+			},
+		},
+		{
+			name: "reclassified prodigy", w: 1.1,
+			label: "the youngest player in the class",
+			pick: (p) => !p.nonNcaa && p.classYear === "Freshman" && p.newOvr >= 44,
+			apply: (p) => {
+				p.age = 17;
+				p.reclassified = "reclassified up a year";
+				p.prodigy = true;
+			},
+		},
+		{
+			name: "lost season", w: 1.2,
+			label: "coming back off a lost season",
+			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman",
+			apply: (p) => {
+				p.redshirt = "medical redshirt";
+				p.lostSeason = true;
+			},
+		},
+		{
+			name: "walk-on", w: 0.9,
+			label: "a walk-on who ended up a draft pick",
+			pick: (p) => !p.nonNcaa && p.recruiting,
+			apply: (p) => {
+				p.recruiting.rank = 320;
+				p.recruiting.stars = 2;
+				p.transfer = { kind: "walk-on turned starter", from: null, fifthYear: false };
+				p.walkOn = true;
+			},
+		},
+	];
+
+	function assignSurprises(players, rng, cfg) {
+		const budget = clamp(
+			cfg && cfg.surpriseBudget !== undefined ? cfg.surpriseBudget : 3, 0, 8);
+		if (!budget || !players.length) return [];
+		const n = Math.max(0, Math.round(rng.uniform(budget - 1, budget + 1)));
+		const used = new Set();
+		const kinds = SURPRISES.slice();
+		const out = [];
+		for (let i = 0; i < n && kinds.length; i++) {
+			const kind = rng.weighted(kinds);
+			kinds.splice(kinds.indexOf(kind), 1);
+			const options = players.filter((p) => !used.has(p.key) && kind.pick(p));
+			if (!options.length) continue;
+			const who = options[Math.floor(rng.random() * options.length)];
+			used.add(who.key);
+			kind.apply(who, rng.child("sp:" + kind.name));
+			who.surprise = { name: kind.name, label: kind.label };
+			out.push({ name: kind.name, label: kind.label, player: who.name, key: who.key });
+		}
+		return out;
 	}
 
 	/* --------------------------------------------------- recruiting context */
@@ -920,6 +1098,11 @@
 				risers: state.risers,
 				fallers: state.fallers,
 				flavor: state.flavor,
+				// The builds this class was drawn from, and the anomalies it
+				// was given, so the UI can say what makes this class this one.
+				archetypePool: state.archetypePool
+					? state.archetypePool.map((a) => a.name) : null,
+				surprises: state.surprises || [],
 				warnings: validation.warnings,
 				phasesRun: ran,
 				leagueFile,

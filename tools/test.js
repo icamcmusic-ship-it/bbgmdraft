@@ -788,9 +788,26 @@ console.log("\nDistributions");
 	   rating in the twenties still launched about two a game. */
 	const nonShooters = ncaa.filter((p) => p.newRatings.tp <= 25 && p.stats.mpg >= 20);
 	if (nonShooters.length) {
-		const worstTpa = Math.max.apply(null, nonShooters.map((p) => p.stats.tpa));
-		ok("a non-shooter does not launch threes", worstTpa < 2.2,
-			"most attempts by a tp<=25 player: " + worstTpa.toFixed(2));
+		/* Checked as a SHARE of his own attempts, which is what the model
+		   actually floors and what the claim actually means. A raw count is a
+		   count of minutes as much as of shot selection: the same player at 37
+		   minutes takes more of everything than at 30, and a threshold on the
+		   count fails when the minutes model is corrected without shot
+		   selection having changed at all. */
+		/* Scoped to the population the claim is about. A guard who cannot
+		   shoot still takes a fifth of his shots from three — that is what bad
+		   shooting guards do — and it is the seven-footer floored at 8.5% who
+		   was launching two a game that this exists to catch. */
+		const bigNonShooters = nonShooters.filter((p) => p.newRatings.hgt >= 65);
+		const share = (l) => Math.max.apply(null,
+			l.map((p) => (p.stats.fga > 0 ? p.stats.tpa / p.stats.fga : 0)).concat([0]));
+		if (bigNonShooters.length) {
+			ok("a non-shooting big does not launch threes", share(bigNonShooters) < 0.13,
+				"largest 3PA share by a tall tp<=25 player: " +
+					share(bigNonShooters).toFixed(3));
+		}
+		ok("no non-shooter is a volume three-point shooter", share(nonShooters) < 0.26,
+			"largest 3PA share by any tp<=25 player: " + share(nonShooters).toFixed(3));
 	}
 }
 

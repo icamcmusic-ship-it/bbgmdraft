@@ -116,29 +116,30 @@
 	   scoring residual against the class's own ovr fit inside +/-2 points, and
 	   tools/validate.js bands the worst of them so it cannot drift back. */
 	const ROLE_USAGE = {
-		"Floor General": 1.49, "Combo Guard": 0.53, "Sharpshooter": 0.50,
-		"Slasher": 0.89, "Defensive Pest": 1.90, "Heliocentric Guard": 0.86,
-		"Pick-and-Roll Maestro": 0.70, "Movement Shooter": 0.64,
-		"Pull-Up Artist": 0.60, "Downhill Attacker": 0.62,
-		"Crafty Finisher": 0.66, "Pass-First Sparkplug": 1.90, "Ball Hawk": 1.90,
-		"Pesky On-Ball Stopper": 1.90, "Score-First Point": 0.50,
-		"Sixth-Man Gunner": 0.55, "Streaky Volume Scorer": 0.50,
-		"Change-of-Pace Guard": 1.10, "Free-Throw Merchant": 0.92,
-		"3&D Wing": 0.91, "Two-Way Wing": 0.88, "Point Forward": 1.12,
-		"Wing Sniper": 0.76, "Shot-Creating Wing": 0.50, "Transition Wing": 1.21,
-		"Cutter / Finisher": 1.84, "Wing Stopper": 1.90, "Rebounding Wing": 1.81,
-		"Corner Specialist": 0.90, "Midrange Operator": 0.50,
-		"Jumbo Playmaker": 0.59, "Energy Wing": 1.90, "Do-It-All Forward": 1.53,
-		"Bully Slasher": 1.11, "Glide Athlete": 1.73, "Microwave Scorer": 0.50,
-		"Athletic Freak": 0.92, "Glue Guy": 1.90, "High-IQ Connector": 0.93,
-		"Raw Project": 1.08, "Iron Man": 1.36, "Stretch Big": 1.06,
-		"Post Scorer": 0.58, "Rim Protector": 1.90, "Rim Runner": 0.95,
-		"Motor Big": 1.58, "Skilled Big": 0.62, "Point Center": 1.02,
-		"Offensive Rebounding Menace": 1.39, "Switchable Big": 1.90,
-		"Mobile Shot-Swatter": 1.90, "Face-Up Four": 0.72,
-		"Low-Post Bruiser": 0.88, "Pick-and-Pop Big": 0.70, "Lob Threat": 1.27,
-		"Old-School Center": 0.69, "Undersized Rebounder": 1.16,
-		"Foul-Prone Enforcer": 0.76, "Balanced": 0.91,
+		"Floor General": 1.40, "Combo Guard": 0.53, "Sharpshooter": 0.53,
+		"Slasher": 0.83, "Defensive Pest": 2.30, "Heliocentric Guard": 0.86,
+		"Pick-and-Roll Maestro": 0.74, "Movement Shooter": 0.62,
+		"Pull-Up Artist": 0.38, "Downhill Attacker": 0.82,
+		"Crafty Finisher": 0.50, "Pass-First Sparkplug": 2.21, "Ball Hawk": 2.30,
+		"Pesky On-Ball Stopper": 2.30, "Score-First Point": 0.42,
+		"Sixth-Man Gunner": 0.39, "Streaky Volume Scorer": 0.32,
+		"Change-of-Pace Guard": 1.10, "Post-Up Guard": 0.32,
+		"Free-Throw Merchant": 0.92, "3&D Wing": 0.96, "Two-Way Wing": 1.25,
+		"Point Forward": 1.33, "Wing Sniper": 0.68, "Shot-Creating Wing": 0.65,
+		"Transition Wing": 1.91, "Cutter / Finisher": 1.12, "Wing Stopper": 2.30,
+		"Rebounding Wing": 0.96, "Corner Specialist": 0.92,
+		"Midrange Operator": 0.68, "Jumbo Playmaker": 0.59, "Energy Wing": 2.30,
+		"Do-It-All Forward": 2.30, "Bully Slasher": 0.61, "Glide Athlete": 1.73,
+		"Microwave Scorer": 0.50, "Athletic Freak": 1.10, "Glue Guy": 2.11,
+		"High-IQ Connector": 1.45, "Raw Project": 0.98, "Iron Man": 2.02,
+		"Stretch Big": 0.92, "Post Scorer": 0.55, "Rim Protector": 1.82,
+		"Rim Runner": 1.14, "Motor Big": 1.33, "Skilled Big": 0.47,
+		"Point Center": 1.06, "Offensive Rebounding Menace": 1.39,
+		"Switchable Big": 2.14, "Mobile Shot-Swatter": 2.30,
+		"Face-Up Four": 0.67, "Low-Post Bruiser": 0.62, "Pick-and-Pop Big": 0.57,
+		"Lob Threat": 1.71, "Old-School Center": 0.74,
+		"Undersized Rebounder": 1.16, "Foul-Prone Enforcer": 0.76,
+		"Balanced": 0.82,
 	};
 	function roleUsage(name) {
 		const v = ROLE_USAGE[name];
@@ -352,6 +353,8 @@
 	   Dividing by each archetype's exposure makes w mean what it says: a target
 	   share of the whole class, not a share of one height band. Computed once
 	   from the height distribution BBGM actually generates. */
+	const BALANCED = ARCHETYPES.filter((a) => a.name === "Balanced");
+
 	const HGT_MEAN = 48;
 	const HGT_SD = 17;
 	(function computeExposure() {
@@ -398,7 +401,42 @@
 			m: { playmaking: 2.5, shooting: 1.3, raw: 0.45, athletic: 0.7 } },
 		{ name: "top-heavy scoring", w: 0.8, label: "score-first",
 			m: { scoring: 2.4, defense: 0.7, playmaking: 0.85 } },
+		/* Seven more, because nine flavours of which four barely differed is
+		   not a reason to reroll. These carry `c` — a config bend applied to
+		   the whole class, not only to its archetype mix — so a flavour can
+		   move the things a class is actually remembered for: how old it is,
+		   how many of it came through the portal, how good the top of it is.
+		   The archetype tilt alone could never say "weak year". */
+		{ name: "international", w: 0.7, label: "unusually international",
+			m: { shooting: 1.5, playmaking: 1.4, athletic: 0.7, raw: 0.8 },
+			c: { pDII: 0.02, wEuroLeague: 46, wNBL: 20 } },
+		{ name: "one-and-done", w: 0.8, label: "one-and-done heavy",
+			m: { athletic: 1.6, raw: 1.8, scoring: 1.2 },
+			c: { freshmanShare: 68, transferShare: 18, potBias: 1.1 } },
+		{ name: "portal", w: 0.8, label: "a transfer-portal year",
+			m: { shooting: 1.3, scoring: 1.2, raw: 0.5 },
+			c: { freshmanShare: 24, transferShare: 62, potBias: -0.8 } },
+		{ name: "weak", w: 0.6, label: "a weak year",
+			m: { raw: 1.3, athletic: 1.1, shooting: 0.9 },
+			c: { classQuality: -1.4, eliteCount: 0, potSpread: 1.2 } },
+		{ name: "top-heavy cliff", w: 0.7, label: "top-heavy, with a cliff",
+			m: { scoring: 1.3, playmaking: 1.2 },
+			c: { classDepth: -1.6, eliteCount: 5, classQuality: 0.6 } },
+		{ name: "two-man", w: 0.4, label: "a two-man class",
+			m: { scoring: 1.4, athletic: 1.2 },
+			c: { classDepth: -2.2, eliteCount: 2, classQuality: 0.4 } },
+		{ name: "veteran", w: 0.7, label: "old and finished",
+			m: { shooting: 1.4, defense: 1.3, raw: 0.35, athletic: 0.7 },
+			c: { freshmanShare: 18, potBias: -1.3, potSpread: 0.7 } },
 	];
+
+	/* The config bend a flavour applies to the whole class. Returned separately
+	   from the archetype multipliers because the engine applies it once, before
+	   anything is built, and because a user's own setting has to win: a flavour
+	   nudges the DEFAULT, it does not overrule a slider the user moved. */
+	function flavorConfig(flavor) {
+		return (flavor && flavor.cfg) || null;
+	}
 
 	/* Draw one flavour for a class. Returns null when the flavour system is
 	   turned off, which keeps the old behaviour exactly. */
@@ -406,14 +444,16 @@
 		const strength = clamp(cfg && cfg.classFlavor !== undefined ? cfg.classFlavor : 1, 0, 3);
 		if (strength <= 0) return null;
 		const f = rng.weighted(CLASS_FLAVORS);
-		if (f.name === "balanced") return { name: f.name, label: f.label, mult: {}, strength };
+		if (f.name === "balanced") {
+			return { name: f.name, label: f.label, mult: {}, cfg: null, strength };
+		}
 		const mult = {};
 		for (const tag of Object.keys(f.m)) {
 			// strength 1 = the table as written; 0 = no effect; 2 = doubled in
 			// log space, so a 2.2x becomes ~4.8x.
 			mult[tag] = Math.pow(f.m[tag], strength);
 		}
-		return { name: f.name, label: f.label, mult, strength };
+		return { name: f.name, label: f.label, mult, cfg: f.c || null, strength };
 	}
 
 	function flavorMultiplier(arch, flavor) {
@@ -425,18 +465,86 @@
 		return m;
 	}
 
-	function pickArchetype(rng, hgtRating, cfg, flavor) {
-		const eligible = ARCHETYPES.filter(
+	/* The builds THIS class is made of.
+
+	   Measured over 24 rerolls of the same file, every class contained 34.6
+	   distinct archetypes out of 60 (sd 2.66) — one of everything, every time,
+	   which is the whole reason rerolling did not feel like it produced a
+	   different draft. The class-flavour system was built to fix that and moved
+	   the number by about three, because pickArchetype renormalises the
+	   specialist mass to sum to `diversity` within the eligible set: flavour
+	   multiplies the weights and the normalisation divides most of it straight
+	   back out. Doubling every guard weight in a pool that is two-thirds guards
+	   at that height changes almost nothing.
+
+	   So the class draws a POOL of builds first and then draws its players from
+	   the pool. Pool membership is discrete, so a flavour that favours guards
+	   puts more guard builds in the pool and no renormalisation can take that
+	   back — and a 12-build class is "the year of the stretch bigs" rather than
+	   one of everything.
+
+	   Height coverage is not optional: a pool with no build a seven-footer is
+	   eligible for would leave every big in the class Balanced. Each probe
+	   height is topped up to MIN_PER_BAND options before the pool is returned,
+	   which is also what stops the pool being all guards — guards are the
+	   commonest builds and would otherwise crowd out the rest. */
+	const POOL_PROBES = [8, 26, 40, 50, 58, 68, 82, 93];
+	const MIN_PER_BAND = 2;
+
+	function eligibleAt(list, hgt) {
+		return list.filter((a) => hgt >= a.min && hgt <= a.max && a.name !== "Balanced");
+	}
+
+	function archetypeWeight(a, cfg, flavor) {
+		const custom = (cfg && cfg.archetypeWeights) || null;
+		const base = custom && Number.isFinite(custom[a.name])
+			? custom[a.name]
+			: (a.w === undefined ? 1 : a.w);
+		return (Math.max(0, base) * flavorMultiplier(a, flavor)) / a.exposure;
+	}
+
+	/* Draw the class's build pool. `size` is how many specialist builds the
+	   class may contain before height coverage tops it up; 0 or a size at or
+	   above the table turns the pool off entirely and restores the old
+	   behaviour exactly. */
+	function pickClassPool(rng, cfg, flavor) {
+		const size = Math.round(clamp(
+			cfg && cfg.archetypePool !== undefined ? cfg.archetypePool : 0, 0, 60));
+		const specialists = ARCHETYPES.filter((a) => a.name !== "Balanced");
+		if (!size || size >= specialists.length) return null;
+		const remaining = specialists.slice();
+		const pool = [];
+		while (pool.length < size && remaining.length) {
+			const pick = rng.weighted(remaining, (a) => archetypeWeight(a, cfg, flavor));
+			pool.push(pick);
+			remaining.splice(remaining.indexOf(pick), 1);
+		}
+		// Height coverage. A pool that leaves a band empty makes every player
+		// in it Balanced, which is the opposite of the point.
+		for (const h of POOL_PROBES) {
+			let have = eligibleAt(pool, h).length;
+			while (have < MIN_PER_BAND) {
+				const options = eligibleAt(remaining, h);
+				if (!options.length) break;
+				const pick = rng.weighted(options, (a) => archetypeWeight(a, cfg, flavor));
+				pool.push(pick);
+				remaining.splice(remaining.indexOf(pick), 1);
+				have++;
+			}
+		}
+		return pool;
+	}
+
+	function pickArchetype(rng, hgtRating, cfg, flavor, pool) {
+		const source = pool && pool.length ? pool.concat(BALANCED) : ARCHETYPES;
+		const eligible = source.filter(
 			(a) => hgtRating >= a.min && hgtRating <= a.max,
 		);
+		if (!eligible.length) {
+			return ARCHETYPES.filter((a) => a.name === "Balanced")[0];
+		}
 		const diversity = clamp(cfg.archetypeDiversity, 0, 100) / 100;
-		const custom = cfg.archetypeWeights || null;
-		const wOf = (a) => {
-			const base = custom && Number.isFinite(custom[a.name])
-				? custom[a.name]
-				: (a.w === undefined ? 1 : a.w);
-			return (Math.max(0, base) * flavorMultiplier(a, flavor)) / a.exposure;
-		};
+		const wOf = (a) => archetypeWeight(a, cfg, flavor);
 		/* Balanced keeps exactly (1 - diversity) of the probability mass however
 		   many specialist builds are eligible; the rest is split by rarity
 		   weight.
@@ -510,6 +618,23 @@
 		};
 	}
 
+	/* Re-solve a built player after one of his base ratings has been changed
+	   outside the builder — a forced height, in practice. Returns the same
+	   shape rebuild() does for the fields that move. */
+	function resolveTo(base, targetOvr, archName, fuzz, pinned) {
+		const arch = ARCHETYPES.filter((a) => a.name === archName)[0] ||
+			ARCHETYPES[ARCHETYPES.length - 1];
+		const solved = solveToOvr(base, targetOvr, arch, pinned);
+		return {
+			base,
+			ratings: solved,
+			ovr: BB.ovr(solved),
+			pos: BB.pos(solved),
+			skills: BB.skills(Object.assign({ fuzz }, solved)),
+			ovrRange: ovrRange(base, arch, pinned),
+		};
+	}
+
 	function solveToOvr(base, targetOvr, arch, pinned) {
 		// Two scale vectors, one for each direction; both equal SHIFT_SCALE at
 		// k = 0, so the shift stays continuous and monotone across the origin
@@ -551,11 +676,11 @@
 	/* Rebuild one player's ratings.
 	   orig: the ratings row from the league file
 	   targetOvr / targetPot: what the rebuilt player must come out to */
-	function rebuild(rng, orig, targetOvr, targetPot, cfg, forcedArchetype, flavor, pinned) {
+	function rebuild(rng, orig, targetOvr, targetPot, cfg, forcedArchetype, flavor, pinned, pool) {
 		const forced = forcedArchetype
 			? ARCHETYPES.filter((a) => a.name === forcedArchetype)[0]
 			: null;
-		const arch = forced || pickArchetype(rng, orig.hgt, cfg, flavor);
+		const arch = forced || pickArchetype(rng, orig.hgt, cfg, flavor, pool);
 		const spec = clamp(cfg.specialization, 0, 3);
 		const noise = Math.max(0, cfg.buildNoise);
 
@@ -581,12 +706,16 @@
 		const pot = clamp(Math.max(targetPot, finalOvr + 1), finalOvr, 100);
 
 		return {
+			// The pre-solve base, so a later change to a rating (a size
+			// surprise, say) can be re-solved to the same target rather than
+			// leaving ovr disagreeing with the rating vector it came from.
+			base,
+			archetype: arch.name,
 			ratings: solved,
 			ovr: finalOvr,
 			pot: Math.round(pot),
 			pos: BB.pos(solved),
 			skills: BB.skills(Object.assign({ fuzz: orig.fuzz }, solved)),
-			archetype: arch.name,
 			// What this player's height actually allows, so an impossible lock
 			// can be reported instead of quietly ignored.
 			ovrRange: ovrRange(base, arch, pinned),
@@ -595,9 +724,9 @@
 
 	global.RatingsBuilder = {
 		ARCHETYPES, RAW_OFFSETS, OVR_W, SHIFT_SCALE, USAGE_W,
-		rebuild, classCurve, pickArchetype, solveToOvr, shiftScales, ovrRange,
+		rebuild, classCurve, pickArchetype, solveToOvr, shiftScales, ovrRange, resolveTo,
 		potAdjust, potFactors, potFromRole, POT_BY_ARCHETYPE,
 		ROLE_USAGE, roleUsage,
-		CLASS_FLAVORS, pickFlavor, flavorMultiplier,
+		CLASS_FLAVORS, pickFlavor, flavorMultiplier, flavorConfig, pickClassPool,
 	};
 })(typeof window !== "undefined" ? window : self);

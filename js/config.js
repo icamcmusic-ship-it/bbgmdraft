@@ -22,6 +22,15 @@
 		// big-heavy, defensive, shooting-rich, …). 0 = every class has the same
 		// archetype mix, 2 = a class is unmistakably one thing.
 		classFlavor: 1.0,
+		/* How many specialist builds one class may contain, before height
+		   coverage tops the pool up. 0 turns the pool off, which restores the
+		   pre-2026 behaviour of one of everything in every class. */
+		archetypePool: 14,
+		/* How many forced anomalies a class gets: a five-star bust, an
+		   unranked recruit who turns into a lottery pick, a 24-year-old JUCO,
+		   a 7'4" project. Cheap, memorable, and the reason to reroll. 0 turns
+		   them off. */
+		surpriseBudget: 3,
 
 		// --- blank colleges ----------------------------------------------
 		// Legacy headline sliders. They still work (and old shareable links

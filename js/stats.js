@@ -125,7 +125,7 @@
 		   same slot. Coaches play the future pro. */
 		PROSPECT_PREMIUM: 1.12,
 		/* How often a drafted player spends his draft year as a reserve. */
-		RESERVE_RATE: 0.12,
+		RESERVE_RATE: 0.17,
 		MINUTES_TILT_ABS: 0.55,
 		MINUTES_TILT_REL: 0.22,
 		MINUTES_TILT_ANCHOR: 62,
@@ -316,7 +316,7 @@
 			const rate = TUNING.RESERVE_RATE *
 				(year === "Freshman" ? 1.6 : year === "Sophomore" ? 1.0
 					: year === "Junior" ? 0.6 : 0.45);
-			if (rng.random() < rate) return rng.uniform(0.42, 0.70);
+			if (rng.random() < rate) return rng.uniform(0.34, 0.68);
 			return Math.exp(rng.normal(0, 0.11));
 		};
 		const talentShares = shareFromWeights(members.map((m, i) => shapeAt(slotOf[i]) *

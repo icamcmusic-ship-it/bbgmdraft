@@ -18,12 +18,54 @@
 		return clamp(30 + ovr * 0.92 + (pot - ovr) * 0.15, 20, 97);
 	}
 
-	function programLevel(name, rng) {
+	/* `confStrength` is this season's strength for the conference, which drifts
+	   from year to year (see conferenceDrift) rather than being the constant in
+	   the table. The Big East being down and the Mountain West being up is an
+	   ordinary year-to-year fact and it moves the whole AP poll, the bracket
+	   and the award distribution for free. */
+	function programLevel(name, rng, confStrength) {
 		const conf = C.CONFERENCES[C.conferenceOf(name)] || C.CONFERENCES.Independent;
-		const base = 0.45 * C.prestige(name) + 0.4 * conf.strength;
-		// Year-to-year variance: good programs are steadier than bad ones.
-		const vol = 9 - 0.03 * C.prestige(name);
-		return clamp(base + rng.normal(0, vol), 12, 95);
+		const strength = Number.isFinite(confStrength) ? confStrength : conf.strength;
+		const base = 0.45 * C.prestige(name) + 0.4 * strength;
+		/* Year-to-year variance. The slope used to be `9 - 0.03 * prestige`,
+		   which shrank the noise exactly where you would most want it:
+		   Kentucky drew sigma 5.5 around a high base and Wagner sigma 9 around
+		   a low one, so the blue bloods were pinned. Measured over 24 rerolls,
+		   the AP No. 1 was one of six teams and the national champion one of
+		   eleven. A blue blood's floor IS higher — that is what the base is for
+		   — but Duke going 17-15 is a thing that happens and the model could
+		   not express it. The slope is flat now, and a rare down year (or a
+		   breakout) is drawn on top. */
+		let level = base + rng.normal(0, PROGRAM_VOL);
+		if (rng.random() < DOWN_YEAR_RATE) {
+			// It falls apart: transfers out, an injury in November, a freshman
+			// class that did not arrive. Bigger for a program with more to lose.
+			level -= 6 + 0.14 * C.prestige(name) + rng.uniform(0, 6);
+		} else if (rng.random() < BREAKOUT_RATE) {
+			// The other direction: a mid-major that keeps everybody.
+			level += 5 + 0.10 * (100 - C.prestige(name)) + rng.uniform(0, 5);
+		}
+		return clamp(level, 12, 95);
+	}
+
+	const PROGRAM_VOL = 7.0;
+	const DOWN_YEAR_RATE = 0.09;
+	const BREAKOUT_RATE = 0.09;
+
+	/* This season's conference strengths. CONFERENCES[x].strength is a constant
+	   and a conference's real strength moves several points a year; a static
+	   table is why every simulated season had the same eight teams at the top
+	   of it. Returns a name -> strength map for one run. */
+	function conferenceDrift(rng) {
+		const out = {};
+		for (const name of Object.keys(C.CONFERENCES)) {
+			const base = C.CONFERENCES[name].strength;
+			// A strong conference is steadier, because it is strong for
+			// structural reasons; a one-bid league swings on two rosters.
+			const sd = 2.0 + 0.055 * (95 - base);
+			out[name] = clamp(base + rng.child("conf:" + name).normal(0, sd), 30, 96);
+		}
+		return out;
 	}
 
 	/* Returning players are good, but not "NBA draft prospect" good: a top
@@ -135,9 +177,10 @@
 		// Colleges outside the built-in 353 (league files drift across BBGM
 		// versions) become independent mid-level programs instead of crashing.
 		const extra = Object.keys(prospectsBySchool).filter((n) => !C.COLLEGES[n]);
+		const confStrength = conferenceDrift(rng.child("confdrift"));
 		for (const name of C.names.concat(extra)) {
 			const trng = rng.child("prog:" + name);
-			const level = programLevel(name, trng);
+			const level = programLevel(name, trng, confStrength[C.conferenceOf(name)]);
 			const prospects = prospectsBySchool[name] || [];
 			const members = prospects.map((p) => ({
 				filler: false,
@@ -152,6 +195,10 @@
 
 			teams[name] = {
 				name,
+				// This season's conference strength, so anything that reads it
+				// (selection, the note, the harness) reads the same number the
+				// program was built from.
+				confStrength: confStrength[C.conferenceOf(name)],
 				style: trng.weighted(PROGRAM_STYLES),
 				conf: C.conferenceOf(name) || "Independent",
 				prestige: C.prestige(name),
@@ -520,7 +567,8 @@
 	global.TeamsSim = {
 		buildPrograms, simulateRegularSeason, simulateConferenceTournaments,
 		prospectTalent, teamRating, winProb, playGame, playGameScore, ratingOn,
-		capFillers, FILLER_GAP,
+		capFillers, FILLER_GAP, conferenceDrift, programLevel,
+		PROGRAM_VOL, DOWN_YEAR_RATE, BREAKOUT_RATE,
 		rotationWeights, pairUp, record, recordPostseason, finalizeSchedule,
 		REGULAR_NOISE,
 		label, adoptConference, conferencePools, PROGRAM_STYLES,

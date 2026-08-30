@@ -487,3 +487,15 @@ button.lockbadge {
 	color: inherit;
 }
 button.lockbadge:hover, button.lockbadge:focus-visible { text-decoration: underline; }
+
+/* A run of text that acts as a link but is a button, because it does something
+   in the page rather than going anywhere. */
+button.linky {
+	font: inherit;
+	background: none;
+	border: 0;
+	padding: 0;
+	color: var(--accent);
+	cursor: pointer;
+	text-decoration: underline;
+}

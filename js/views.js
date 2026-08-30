@@ -689,8 +689,29 @@
 		if (res.flavor && res.flavor.name !== "balanced") {
 			pills.push("this class is " + res.flavor.label);
 		}
+		/* What makes THIS class this one. The class is drawn from a pool of
+		   builds and given two to four forced anomalies, and both were
+		   invisible: a user rerolling had no way to see that the year was a
+		   stretch-big year, only to feel that it was not. */
+		if (res.archetypePool && res.archetypePool.length) {
+			pills.push(res.archetypePool.length + " builds in this class");
+		}
 		for (const t of pills) summary.appendChild(el("span", "pill", t));
 		view.appendChild(summary);
+		if (res.surprises && res.surprises.length) {
+			const line = el("p", "legendline");
+			line.appendChild(document.createTextNode("Story of the class: "));
+			res.surprises.forEach((sp, i) => {
+				if (i) line.appendChild(document.createTextNode(" · "));
+				const b = el("button", "linky", sp.player + ", " + sp.label);
+				b.addEventListener("click", () => {
+					const who = res.players.filter((x) => x.key === sp.key)[0];
+					if (who) A().openEditor(who);
+				});
+				line.appendChild(b);
+			});
+			view.appendChild(line);
+		}
 		view.appendChild(filterBar(res));
 		view.appendChild(rangeBar(res));
 		view.appendChild(bulkBar(res));
