@@ -435,7 +435,7 @@ tr.picked td.sticky::after { content: " ✓"; font-size: .9em; }
 		border-radius: 8px;
 		margin: 0 0 8px;
 		padding: 8px 10px;
-		background: var(--card);
+		background: var(--panel);
 	}
 	.cardtable td {
 		display: flex;
@@ -457,7 +457,7 @@ tr.picked td.sticky::after { content: " ✓"; font-size: .9em; }
 	}
 	.cardtable td[data-label]::before {
 		content: attr(data-label);
-		color: var(--muted);
+		color: var(--dim);
 		font-weight: 500;
 		text-align: left;
 	}
@@ -497,10 +497,10 @@ tr.picked td.sticky::after { content: " ✓"; font-size: .9em; }
 /* ---- the keyboard sheet -------------------------------------------------- */
 .shortcuts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
 .shortcuts dt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
-.shortcuts dd { margin: 0; color: var(--muted); }
+.shortcuts dd { margin: 0; color: var(--dim); }
 
 /* ---- range-filter units and the clickable lock badge --------------------- */
-.rangefilter .unit { color: var(--muted); font-size: 11px; align-self: center; }
+.rangefilter .unit { color: var(--dim); font-size: 11px; align-self: center; }
 button.lockbadge {
 	font: inherit;
 	background: none;
@@ -536,3 +536,7 @@ table.mini tr.now { font-weight: 600; }
 /* Two prospects side by side: the better number in each row is marked with a
    glyph as well as a colour. */
 table.compare td.num.up::after { content: " ▲"; font-size: .8em; }
+
+/* The build's signature ratings, printed on the row rather than hidden in a
+   title attribute that a touch device never shows. */
+.offsets { color: var(--dim); font-size: 11px; white-space: nowrap; }

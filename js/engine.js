@@ -363,9 +363,19 @@
 	   his key changes his draw and leaves every other player's stream
 	   untouched — which is the difference between "look at this guy again" and
 	   "reroll the class and hope the other sixty-nine come back the same". */
-	function rerollSalt(p) {
-		const n = Number(p && p.override && p.override.reroll);
-		return n ? "~" + Math.round(n) : "";
+	function rerollSalt(p, axis) {
+		const ov = (p && p.override) || {};
+		/* Axis-wise rerolls. "Reroll just him" redraws everything about a
+		   prospect at once, and the thing you usually want is narrower: this
+		   build at a different school, or this school with a different build,
+		   or the same player with the stat noise redrawn. Each axis carries its
+		   own counter so the streams it does not name are untouched.
+
+		   The whole-player counter still salts every axis, so "reroll him"
+		   keeps meaning what it meant. */
+		const n = Number(ov.reroll) || 0;
+		const a = axis ? Number(ov["reroll_" + axis]) || 0 : 0;
+		return (n ? "~" + Math.round(n) : "") + (a ? "@" + axis + Math.round(a) : "");
 	}
 
 	/* The stable per-player key every RNG stream and every lock is derived
@@ -475,7 +485,7 @@
 			if (ov.name && String(ov.name).trim()) p.name = String(ov.name).trim();
 			p.newCollege = ov.college ||
 				assignCollege(
-					rng.child("college:" + p.key + rerollSalt(p)), p.src, cfg);
+					rng.child("college:" + p.key + rerollSalt(p, "school")), p.src, cfg);
 			p.collegeChanged = p.newCollege !== p.origCollege;
 			// Professional (a EuroLeague club) as against amateur (DII, an NBA
 			// Academy). The UI tags the two differently and the award bar
@@ -496,7 +506,7 @@
 			   and leaves every other player's stream untouched — which is the
 			   difference between "look at this guy again" and "reroll the class
 			   and hope the other sixty-nine come back the same". */
-			const prng = rng.child("build:" + p.key + rerollSalt(p));
+			const prng = rng.child("build:" + p.key + rerollSalt(p, "build"));
 			const targetOvr = Number.isFinite(ov.ovr)
 				? clamp(Math.round(ov.ovr), 0, 100)
 				: (curve ? curve[i] : p.origOvr);
@@ -540,6 +550,9 @@
 			// The pre-solve base and the pinned vector, so a forced size later
 			// in the pipeline can be re-solved to the same overall instead of
 			// leaving ovr disagreeing with the ratings beside it.
+			// Carried onto the player so the stat model can salt its own stream
+			// without knowing anything about overrides.
+			p.statSalt = rerollSalt(p, "stats");
 			p.buildBase = built.base;
 			p.buildPinned = ov.ratings || null;
 			p.newOvr = built.ovr;

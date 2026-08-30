@@ -1168,7 +1168,9 @@
 			// possession model; team points per game can.
 			const seed = m.filler
 				? "fillerstat|" + team.name + "|" + i
-				: "stat:" + m.player.key;
+				// The stat-noise axis of a per-player reroll: same build, same
+				// school, a different set of nights.
+				: "stat:" + m.player.key + (m.player.statSalt || "");
 			const line = statLine(
 				rng.child(seed), ratingRows[i], comps[i], mins[i], usgShare[i], ctx, cfg,
 				teamCtx, {

@@ -840,11 +840,34 @@
 					td.title = potTooltip(p);
 					sortVals.newPot = p.newPot;
 					break;
-				case "archetype":
+				case "archetype": {
 					td = el("td");
-					td.appendChild(el("span", "tag arch", p.archetype));
+					/* The build's signature ratings, on the row.
+
+					   The offsets were on a `title` attribute only, which is
+					   invisible on a touch device and unreliable to a screen
+					   reader — so on a phone the archetype was a name and
+					   nothing else. The three ratings the build leans on are
+					   printed beside it, and the full vector stays on the title
+					   and in aria-label for anyone who wants all of it. */
+					const tag = el("span", "tag arch", p.archetype);
+					const raw = (RB.RAW_OFFSETS || {})[p.archetype] || {};
+					const keys = Object.keys(raw)
+						.sort((x, y) => Math.abs(raw[y]) - Math.abs(raw[x]));
+					const full = keys.length
+						? keys.map((k) => k + " " + (raw[k] > 0 ? "+" : "") + raw[k]).join(", ")
+						: "no offsets — the build BBGM would have produced";
+					tag.title = p.archetype + ": " + full;
+					tag.setAttribute("aria-label", p.archetype + ", " + full);
+					td.appendChild(tag);
+					const top = keys.filter((k) => raw[k] > 0).slice(0, 3);
+					if (top.length) {
+						td.appendChild(el("span", "offsets",
+							" " + top.map((k) => k + "+" + raw[k]).join(" ")));
+					}
 					sortVals.archetype = p.archetype;
 					break;
+				}
 				case "college":
 					td = el("td");
 					if (p.nonNcaa) {

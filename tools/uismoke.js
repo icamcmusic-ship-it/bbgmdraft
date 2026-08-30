@@ -337,6 +337,20 @@ function ok(name, condition, detail) {
 	await page.locator("#tabs button", { hasText: "Prospects" }).first().click();
 	await page.waitForTimeout(250);
 
+	/* The export menu, which is also where the new verbs live. */
+	await page.locator("#btnExportMenu").click();
+	await page.waitForTimeout(250);
+	const menuText = await page.locator("#modal").innerText();
+	ok("the export menu offers Markdown notes, a message history and a preset diff",
+		/Markdown/.test(menuText) && /Message history/.test(menuText) &&
+		/Compare two presets/.test(menuText), menuText.replace(/\n/g, " · ").slice(0, 140));
+	await page.locator('#modal button:has-text("Compare two presets")').click();
+	await page.waitForTimeout(250);
+	ok("two presets can be compared",
+		(await page.locator("#modal").innerText()).length > 30);
+	await page.locator("#modalCancel, #modalOk").first().click();
+	await page.waitForTimeout(200);
+
 	console.log("\nBatch");
 	await page.evaluate(() => {
 		// The sidebar groups are collapsible and remember their state.

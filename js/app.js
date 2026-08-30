@@ -469,17 +469,61 @@
 	function presetDiff() {
 		const preset = CFG.PRESETS[state.presetName] || state.customPresets[state.presetName];
 		if (!preset) return [];
-		const base = CFG.make(preset);
+		return diffConfigs(CFG.make(preset), state.cfg);
+	}
+
+	/* The settings two configurations differ on, as "name: was → is".
+	   Object-valued settings (the archetype and destination weight tables) are
+	   summarised rather than dumped. */
+	function diffConfigs(a, b) {
 		const out = [];
 		for (const k of Object.keys(CFG.DEFAULTS)) {
 			if (k === "seed") continue;
-			const a = base[k];
-			const b = state.cfg[k];
-			if (JSON.stringify(a) === JSON.stringify(b)) continue;
-			if (a && typeof a === "object") { out.push(k + " (edited)"); continue; }
-			out.push(k + " " + a + " → " + b);
+			const x = a[k];
+			const y = b[k];
+			if (JSON.stringify(x) === JSON.stringify(y)) continue;
+			if (x && typeof x === "object") { out.push(k + " (edited)"); continue; }
+			out.push(k + " " + x + " → " + y);
 		}
 		return out;
+	}
+
+	/* Any two presets against each other. The dropdown told you what the
+	   CURRENT settings changed from the selected preset, which answers one
+	   question; "what is the difference between these two presets I saved" was
+	   the other one, and it had no answer at all. */
+	function comparePresets() {
+		const names = Object.keys(CFG.PRESETS).concat(Object.keys(state.customPresets));
+		const box = el("div");
+		const bar = el("div", "filters");
+		const pick = (which) => {
+			const sel = el("select");
+			sel.setAttribute("aria-label", "Preset " + which);
+			for (const n of names) {
+				sel.appendChild(new Option(n === "default" ? "Defaults" : n, n));
+			}
+			bar.appendChild(sel);
+			return sel;
+		};
+		const left = pick("A");
+		const right = pick("B");
+		left.value = "default";
+		right.value = state.presetName in CFG.PRESETS ||
+			state.presetName in state.customPresets ? state.presetName : names[0];
+		box.appendChild(bar);
+		const out = el("div", "note");
+		box.appendChild(out);
+		const paint = () => {
+			const cfgOf = (n) => CFG.make(CFG.PRESETS[n] || state.customPresets[n] || {});
+			const rows = diffConfigs(cfgOf(left.value), cfgOf(right.value));
+			out.textContent = rows.length
+				? rows.join("\n")
+				: "These two presets are identical.";
+		};
+		left.addEventListener("change", paint);
+		right.addEventListener("change", paint);
+		paint();
+		modal("Compare presets", box, null, "Close");
 	}
 
 	function cssEscape(s) {
@@ -885,6 +929,21 @@
 		}
 	}
 
+	/* A short, stable identity for one GENERATED class. Built from what the
+	   user actually sees — who each player is, what he was built into, where he
+	   plays and what he averaged — so any difference that matters shows up and
+	   a difference that does not (the order of a tab, a theme) does not. */
+	function classFingerprint(res) {
+		const parts = [];
+		for (const p of res.players.slice().sort((a, b) => (a.key < b.key ? -1 : 1))) {
+			parts.push(p.key + ":" + p.newOvr + "/" + p.newPot + ":" + p.archetype +
+				":" + (p.proClub || p.newCollege) +
+				":" + (p.stats ? p.stats.ppg.toFixed(1) : "-"));
+		}
+		const h = global.BBGMRng.hashSeed(parts.join("|"));
+		return (h() >>> 0).toString(36).slice(0, 6);
+	}
+
 	/* A short, stable identity for one draft class file. */
 	function fingerprint(file) {
 		if (!file || !file.data) return null;
@@ -1044,14 +1103,18 @@
 	function showError(err) {
 		const b = $("errBanner");
 		b.hidden = false;
-		b.querySelector(".bannertext").textContent =
-			err && err.message ? err.message : String(err);
+		const text = err && err.message ? err.message : String(err);
+		b.querySelector(".bannertext").textContent = text;
+		// Banners are dismissible and a dismissed banner used to be gone for
+		// good; everything said this session is kept (Tools → Message history).
+		remember("Error: " + text);
 	}
 	function clearError() { $("errBanner").hidden = true; }
 	function showWarning(text) {
 		const b = $("warnBanner");
 		b.hidden = false;
 		b.querySelector(".bannertext").textContent = text;
+		remember("Warning: " + text);
 	}
 
 	/* The settings actually handed to the engine.
@@ -1099,9 +1162,16 @@
 		}
 		const ms = performance.now() - t0;
 		$("seedPill").hidden = false;
-		$("seedPill").textContent = "seed " + res.seed;
+		/* A short hash OF THE CLASS, not of the seed. Two people can share a
+		   seed and still be looking at different classes — a different source
+		   file, a lock one of them set, a version of the tool with a different
+		   model in it — and had no way to notice. Matching fingerprints mean
+		   the same seventy players. */
+		$("seedPill").textContent = "seed " + res.seed + " · " + classFingerprint(res);
 		$("seedPill").dataset.seed = res.seed;
-		$("seedPill").title = "Click to copy, shift-click or right-click to paste one · " + Math.round(ms) + "ms (" +
+		$("seedPill").title = "Seed and class fingerprint — two people with the same " +
+			"fingerprint are looking at the same seventy players. " +
+			"Click to copy the seed, shift-click or right-click to paste one · " + Math.round(ms) + "ms (" +
 			(res.phasesRun.length ? res.phasesRun.join(" → ") : "nothing to redo") + ")";
 		if (state.history[0] !== res.seed) {
 			state.history.unshift(res.seed);
@@ -1496,18 +1566,44 @@
 		   The trick is that every RNG stream is keyed off the player's key, so
 		   giving him a salt gives him a different draw and leaves everybody
 		   else's stream untouched. */
-		const again = el("button", null, "Reroll just him");
-		again.title = "Draw this prospect again. Nobody else in the class moves.";
-		again.addEventListener("click", () => {
-			pushUndo("rerolled " + p.name);
-			const cur = state.overrides[p.key] || {};
-			const next = Object.assign({}, cur);
-			next.reroll = (Number(cur.reroll) || 0) + 1;
-			state.overrides[p.key] = next;
-			state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
-			run();
-		});
-		buttons.appendChild(again);
+		const rerollAxis = (key, label, title) => {
+			const b = el("button", null, label);
+			b.title = title;
+			b.addEventListener("click", () => {
+				pushUndo(key ? "rerolled " + p.name + "'s " + key : "rerolled " + p.name);
+				const cur = state.overrides[p.key] || {};
+				const next = Object.assign({}, cur);
+				const field = key ? "reroll_" + key : "reroll";
+				next[field] = (Number(cur[field]) || 0) + 1;
+				state.overrides[p.key] = next;
+				state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
+				run();
+			});
+			buttons.appendChild(b);
+			return b;
+		};
+		rerollAxis(null, "Reroll just him",
+			"Draw this prospect again. Nobody else in the class moves.");
+		/* One axis at a time. Rerolling the whole player is a blunt instrument:
+		   the thing you usually want is this build at a different school, or
+		   this school with a different build, or the same player with the stat
+		   noise redrawn. Each axis has its own counter, so the streams it does
+		   not name are untouched. */
+		rerollAxis("build", "↻ build",
+			"Redraw his archetype and ratings. Same school, same season.");
+		/* Only where the tool actually chooses the school. A player whose
+		   college is in the league file keeps it — that is the whole point of
+		   the college assignment — so the button would be a no-op, and a button
+		   that does nothing is worse than no button. */
+		const schoolIsOurs = !p.origCollege || !String(p.origCollege).trim();
+		const sb = rerollAxis("school", "↻ school",
+			schoolIsOurs
+				? "Send him somewhere else. Same build."
+				: "His school comes from the league file, so there is nothing to redraw. " +
+					"Lock a school in the field above to move him.");
+		if (!schoolIsOurs) sb.disabled = true;
+		rerollAxis("stats", "↻ season",
+			"Same player, a different set of nights.");
 		panel.appendChild(buttons);
 
 		panel.appendChild(el("h4", null, "Why this player looks like this"));
@@ -1821,11 +1917,38 @@
 
 	/* --------------------------------------------------------------- export */
 
+	/* Everything the status line has said this session. Warnings and messages
+	   were dismissible banners with no history, so a warning you dismissed — or
+	   one that timed out while you were looking elsewhere — was simply gone.
+	   Tools → Message history brings them back. */
+	const messages = [];
+
+	function remember(text) {
+		messages.push({ at: new Date(), text: String(text) });
+		if (messages.length > 200) messages.shift();
+	}
+
 	function setStatus(text, sticky) {
 		const s = $("status");
 		s.textContent = text;
 		s.hidden = !text;
+		if (text) remember(text);
 		if (!sticky) setTimeout(() => { if (s.textContent === text) s.hidden = true; }, 3500);
+	}
+
+	function messageHistory() {
+		const box = el("div");
+		if (!messages.length) {
+			box.appendChild(el("p", "hint", "Nothing has been reported yet."));
+		} else {
+			const list = el("dl", "shortcuts");
+			for (const m of messages.slice().reverse()) {
+				list.appendChild(el("dt", null, m.at.toLocaleTimeString()));
+				list.appendChild(el("dd", null, m.text));
+			}
+			box.appendChild(list);
+		}
+		modal("Message history", box, null, "Close");
 	}
 
 	/* CSV gets a byte-order mark for the same reason the JSON export does:
@@ -1963,16 +2086,100 @@
 		setStatus("Notes exported.");
 	}
 
+	/* The same notes as Markdown, so they survive a paste into a forum post or
+	   an issue instead of arriving as one run-on paragraph per player. */
+	function exportNotesMarkdown(res) {
+		const out = ["# Draft class " + res.season + " — seed `" + res.seed + "`", ""];
+		if (res.flavor && res.flavor.name !== "balanced") {
+			out.push("_This class is " + res.flavor.label + "._", "");
+		}
+		if (res.surprises && res.surprises.length) {
+			out.push("**Story of the class:** " +
+				res.surprises.map((s) => s.player + ", " + s.label).join("; "), "");
+		}
+		const board = res.players.slice()
+			.sort((a, b) => (a.boardRank || 999) - (b.boardRank || 999));
+		for (const p of board) {
+			out.push("## " + (p.boardRank ? p.boardRank + ". " : "") + p.name);
+			out.push("");
+			out.push("`" + p.newPos + "` **" + p.newOvr + "/" + p.newPot + "** · " +
+				p.archetype + " · " + p.classYear + " · " +
+				(p.proClub || p.newCollege));
+			out.push("");
+			for (const line of String(p.note || "").split("\n")) {
+				if (line.trim()) out.push(line.trim());
+			}
+			out.push("");
+		}
+		download("notes.md", out.join("\n"), "text/markdown");
+		setStatus("Notes exported as Markdown.");
+	}
+
 	/* Re-apply locks in bulk from a CSV. The natural workflow — export the
 	   table, edit ovr/archetype/college in a spreadsheet, bring it back — had
 	   no return path at all. */
 	function importLocksCsv(text) {
+		/* A preview first. This applied everything and reported the dropped
+		   rows afterwards, so the way to find out what a spreadsheet was about
+		   to do to a class was to let it. */
+		const plan = planLockImport(text);
+		if (!plan) return;
+		if (!plan.applied.length) {
+			showError(new Error("Nothing in that CSV matched a player in this class." +
+				(plan.unmatched.length
+					? " " + plan.unmatched.length + " row(s) named somebody else." : "")));
+			return;
+		}
+		const box = el("div");
+		box.appendChild(el("p", "hint",
+			plan.applied.length + " of " + plan.total + " rows will lock settings on " +
+			"this class" +
+			(plan.unmatched.length
+				? "; " + plan.unmatched.length + " matched nobody and will be skipped"
+				: "") + "."));
+		const wrap = el("div", "scroll");
+		const table = el("table", "mini");
+		const hr = el("tr");
+		for (const h of ["Player", "Will lock"]) hr.appendChild(el("th", null, h));
+		table.appendChild(hr);
+		for (const a of plan.applied.slice(0, 200)) {
+			const tr = el("tr");
+			tr.appendChild(el("td", null, a.player.name));
+			tr.appendChild(el("td", null, Object.keys(a.patch)
+				.map((k) => k + " = " + a.patch[k]).join(", ")));
+			table.appendChild(tr);
+		}
+		wrap.appendChild(table);
+		box.appendChild(wrap);
+		if (plan.unmatched.length) {
+			box.appendChild(el("p", "hint",
+				"Not matched: " + plan.unmatched.slice(0, 12).join(", ") +
+				(plan.unmatched.length > 12 ? ", …" : "")));
+		}
+		modal("Import locks — preview", box, () => applyLockImport(plan), "Apply");
+	}
+
+	function applyLockImport(plan) {
+		pushUndo("imported locks from a CSV");
+		for (const a of plan.applied) {
+			state.overrides[a.player.key] =
+				Object.assign({}, state.overrides[a.player.key] || {}, a.patch);
+		}
+		state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
+		run();
+		setStatus("Applied " + plan.applied.length + " lock" +
+			(plan.applied.length === 1 ? "" : "s") +
+			(plan.unmatched.length
+				? "; " + plan.unmatched.length + " row(s) matched nobody." : "."));
+	}
+
+	function planLockImport(text) {
 		const rows = parseCsv(text);
-		if (!rows.length) { showError(new Error("That CSV has no rows.")); return; }
+		if (!rows.length) { showError(new Error("That CSV has no rows.")); return null; }
 		const head = rows[0].map((h) => h.trim().toLowerCase());
 		const idx = (name) => head.indexOf(name);
 		const res = state.results[state.active];
-		if (!res) return;
+		if (!res) return null;
 		const byKey = {};
 		const byName = {};
 		for (const p of res.players) {
@@ -1985,14 +2192,15 @@
 		};
 		if (cols.key < 0 && cols.name < 0) {
 			showError(new Error("The CSV needs a `key` or `name` column to match players."));
-			return;
+			return null;
 		}
-		let applied = 0;
+		const applied = [];
 		const unmatched = [];
-		pushUndo("imported locks from a CSV");
+		let total = 0;
 		for (let i = 1; i < rows.length; i++) {
 			const r = rows[i];
 			if (!r.length || r.every((c) => !c.trim())) continue;
+			total++;
 			const k = cols.key >= 0 ? String(r[cols.key]).trim() : null;
 			const nm = cols.name >= 0 ? String(r[cols.name]).trim().toLowerCase() : null;
 			const p = (k && byKey[k]) || (nm && byName[nm]);
@@ -2011,13 +2219,9 @@
 				patch.college = String(r[cols.college]).trim();
 			}
 			if (!Object.keys(patch).length) continue;
-			state.overrides[p.key] = Object.assign({}, state.overrides[p.key] || {}, patch);
-			applied++;
+			applied.push({ player: p, patch });
 		}
-		state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
-		run();
-		setStatus("Applied " + applied + " lock" + (applied === 1 ? "" : "s") +
-			(unmatched.length ? "; " + unmatched.length + " row(s) matched nobody." : "."));
+		return { applied, unmatched, total };
 	}
 
 	function parseCsv(text) {
@@ -2079,7 +2283,10 @@
 		item("Season as JSON — records, bracket, awards, board", () => exportSeasonJson(res));
 		item("Season as CSV", () => exportSeasonCsv(res));
 		item("Note text only, for a spreadsheet", () => exportNotes(res));
+		item("Notes as Markdown, for a forum post", () => exportNotesMarkdown(res));
 		item("Import locks from a CSV…", () => $("csvFile").click());
+		item("Message history", messageHistory);
+		item("Compare two presets…", comparePresets);
 		box.appendChild(list);
 		modal("Export and import", box, null, "Close");
 	}
@@ -2148,11 +2355,33 @@
 		setStatus("");
 	}
 
+	/* The previous batch, held for comparison. The whole point of running a
+	   calibration sweep is the diff between two settings, and a batch was a
+	   distribution with nothing to hold it against: you read one panel, changed
+	   a slider, ran again, and compared from memory. */
+	let heldBatch = null;
+
 	function renderBatch(rows) {
 		const B = global.BatchStats;
 		const view = $("view");
 		view.innerHTML = "";
-		view.appendChild(el("h3", null, rows.length + " classes with these settings"));
+		const head = el("div", "rowflex");
+		head.appendChild(el("h3", null, rows.length + " classes with these settings"));
+		const hold = el("button", "tiny",
+			heldBatch ? "Hold this as A (replacing the held batch)" : "Hold this as A");
+		hold.title = "Keep this batch as a baseline; the next one is compared against it.";
+		hold.addEventListener("click", () => {
+			heldBatch = { rows: rows.slice(), seed: batchBaseSeed, cfg: effectiveCfg() };
+			setStatus("Batch held as A. Change a setting and run another.");
+			renderBatch(rows);
+		});
+		head.appendChild(hold);
+		if (heldBatch) {
+			const drop = el("button", "tiny", "Forget A");
+			drop.addEventListener("click", () => { heldBatch = null; renderBatch(rows); });
+			head.appendChild(drop);
+		}
+		view.appendChild(head);
 		const col = (k) => rows.map((r) => r[k]);
 		/* A batch of fifty classes exists to show a distribution, and the panel
 		   showed one row of averages. p5 / p50 / p95 answers "how unusual was
@@ -2198,6 +2427,7 @@
 				"  (class i of this batch is seed “" + (batchBaseSeed || "") + "#i”)",
 			"seeds: " + rows.map((r) => r.seed).join(", "),
 		].join("\n")));
+		if (heldBatch && heldBatch.rows.length) view.appendChild(batchDiff(heldBatch, rows));
 		const cards = el("div", "cards");
 		cards.appendChild(V.histogram("Scoring leader per class", col("topPpg"), 10));
 		cards.appendChild(V.histogram("Awards per class", col("awards"), 10));
@@ -2277,6 +2507,61 @@
 			setTimeout(step, 0);
 		};
 		setTimeout(step, 0);
+	}
+
+	/* A against B, on every row the batch panel reports, plus which settings
+	   differ between the two — because "the scoring leader moved 1.4 points"
+	   only means something next to "because I moved pace and specialisation". */
+	const BATCH_ROWS = [
+		["mean ovr", "ovr", 2], ["mean pot", "pot", 2], ["mean MPG", "mpg", 2],
+		["mean PPG", "ppg", 2], ["mean RPG", "rpg", 2], ["mean APG", "apg", 2],
+		["mean USG%", "usg", 2], ["mean TS%", "ts", 2],
+		["team PPG", "teamPpg", 2], ["team AST", "teamAst", 2],
+		["scoring leader", "topPpg", 2], ["assist leader", "topApg", 2],
+		["block leader", "topBpg", 2], ["awards/class", "awards", 1],
+		["honoured players", "honoured", 1], ["distinct archetypes", "archetypes", 1],
+	];
+
+	function batchDiff(held, rows) {
+		const B = global.BatchStats;
+		const box = el("div", "card");
+		box.appendChild(el("h4", null,
+			"A (seed " + (held.seed || "—") + ", " + held.rows.length + " classes)" +
+			"  vs  B (seed " + (batchBaseSeed || "—") + ", " + rows.length + " classes)"));
+		const now = effectiveCfg();
+		const changed = Object.keys(now).filter((k) => {
+			if (k === "seed" || k === "overrides" || k === "leagueWeights" ||
+				k === "archetypeWeights" || k === "noteLines") return false;
+			return String(held.cfg[k]) !== String(now[k]);
+		});
+		box.appendChild(el("p", "hint", changed.length
+			? "Settings that differ: " +
+				changed.map((k) => k + " " + held.cfg[k] + " → " + now[k]).join(", ")
+			: "Same settings — the difference below is sampling noise."));
+		const table = el("table", "mini");
+		const hr = el("tr");
+		for (const h of ["", "A", "B", "B − A"]) {
+			hr.appendChild(el("th", h ? "num" : "", h));
+		}
+		table.appendChild(hr);
+		for (const [label, key, digits] of BATCH_ROWS) {
+			const a = B.mean(held.rows.map((r) => r[key]));
+			const b = B.mean(rows.map((r) => r[key]));
+			if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+			const tr = el("tr");
+			tr.appendChild(el("td", null, label));
+			tr.appendChild(el("td", "num", a.toFixed(digits)));
+			tr.appendChild(el("td", "num", b.toFixed(digits)));
+			const d = b - a;
+			const td = el("td", "num");
+			td.appendChild(el("span", Math.abs(d) < Math.pow(10, -digits) ? ""
+				: d > 0 ? "up" : "down",
+				(d > 0 ? "+" : "") + d.toFixed(digits)));
+			tr.appendChild(td);
+			table.appendChild(tr);
+		}
+		box.appendChild(table);
+		return box;
 	}
 
 	function cancelBatch() {
