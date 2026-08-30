@@ -67,6 +67,27 @@
 		{ kind: "JUCO transfer", w: 1.2, from: "juco" },
 		{ kind: "fifth-year transfer", w: 1.1, from: "high", fifthYear: true },
 		{ kind: "low-major jump", w: 1.4, from: "low" },
+		/* Five kinds could not describe a transfer portal that produces all of
+		   these every single year. A service academy releases players who
+		   cannot commit to the service obligation; a man who signed abroad at
+		   eighteen and came back is a recognisable draft-class character; the
+		   NAIA-to-D-I jump is the classic late riser; and the walk-on who
+		   earned a scholarship is the one the arena stands up for. */
+		{ kind: "service academy transfer", w: 0.45, from: "academy" },
+		{ kind: "returned from overseas", w: 0.55, from: "overseas" },
+		{ kind: "NAIA transfer", w: 0.5, from: "naia" },
+		{ kind: "walk-on turned starter", w: 0.5, from: "walkon", sameSchool: true },
+		{ kind: "grad transfer", w: 1.0, from: "mid", fifthYear: true },
+	];
+	const ACADEMIES = ["Army", "Navy", "Air Force", "VMI", "The Citadel", "Merchant Marine"];
+	const OVERSEAS_ORIGINS = [
+		"Real Madrid's academy", "FC Barcelona's academy", "Ratiopharm Ulm",
+		"KK Mega Basket", "Zalgiris Kaunas", "the NBA Global Academy",
+		"Overtime Elite", "the Australian NBL's Next Stars",
+	];
+	const NAIA_ORIGINS = [
+		"Indiana Wesleyan", "Talladega", "Georgetown (KY)", "Arizona Christian",
+		"Freed-Hardeman", "Ottawa (AZ)", "Bethel (IN)", "Xavier (LA)",
 	];
 
 	function assignClassYears(players, cfg, rng, ageIsInformative) {
@@ -89,10 +110,18 @@
 			(conf.tier === "high" ? highMajors : conf.tier === "mid" ? midMajors : lowMajors)
 				.push(name);
 		}
+		/* Nine schools was the entire junior-college world, so every JUCO
+		   transfer in every class came from the same nine names. */
 		const JUCO = [
 			"Chipola College", "Northwest Florida State", "Salt Lake CC",
 			"Hutchinson CC", "Vincennes University", "Indian Hills CC",
 			"Ranger College", "South Plains College", "Trinity Valley CC",
+			"Odessa College", "Coffeyville CC", "Moberly Area CC",
+			"Eastern Florida State", "Northwest Kansas Tech", "Casper College",
+			"Western Nebraska CC", "Mineral Area College", "Iowa Western CC",
+			"John A. Logan College", "Southeastern CC", "Panola College",
+			"Wabash Valley College", "Cochise College", "Barton CC",
+			"Snow College", "Southern Idaho", "Tallahassee CC", "Gillette College",
 		];
 
 		order.forEach((p, i) => {
@@ -139,11 +168,16 @@
 			if (yearIdx >= 1 && r.random() < transferShare * (0.55 + 0.55 * yearIdx)) {
 				const kind = r.weighted(TRANSFER_KINDS);
 				const pool = kind.from === "juco" ? JUCO
+					: kind.from === "academy" ? ACADEMIES
+					: kind.from === "overseas" ? OVERSEAS_ORIGINS
+					: kind.from === "naia" ? NAIA_ORIGINS
 					: kind.from === "high" ? highMajors
 					: kind.from === "mid" ? midMajors : lowMajors;
 				p.transfer = {
 					kind: kind.kind,
-					from: pool.length ? r.pick(pool) : "junior college",
+					// A walk-on did not come from anywhere: he was already here.
+					from: kind.sameSchool ? null
+						: (pool.length ? r.pick(pool) : "junior college"),
 					fifthYear: !!kind.fifthYear,
 				};
 				if (kind.fifthYear) p.classYear = "Graduate";
@@ -488,7 +522,7 @@
 				stars,
 				// A transfer was recruited somewhere else; a freshman was
 				// recruited here.
-				committed: p.transfer ? p.transfer.from : p.newCollege,
+				committed: (p.transfer && p.transfer.from) || p.newCollege,
 			};
 		});
 		// Who the headline signing was at each program, and who shared a class.
@@ -864,6 +898,22 @@
 		}
 		for (const lgName of Object.keys(byLeague)) {
 			const lg = C.NON_NCAA[lgName];
+			/* A year with no season in it. A redshirt, a visa that never came,
+			   an ACL in October: the tool could only ever put a man in a
+			   league, so a real and common draft-class outcome was
+			   inexpressible. These players get no club, no schedule and no stat
+			   line — which is the point, and which everything downstream
+			   already tolerates, because a stat line has always been optional
+			   (`p.stats ? ... : ...`) for a player the engine could not
+			   simulate. */
+			if (lg.idle) {
+				for (const p of byLeague[lgName]) {
+					p.proClub = null;
+					p.idleYear = true;
+					p.proDeal = "and did not play a competitive season";
+				}
+				continue;
+			}
 			const env = S.leagueEnv(lgName);
 			const lrng = rng.child("lg:" + lgName);
 			const roster = C.PRO_CLUBS[lgName] ||
@@ -1115,7 +1165,10 @@
 				if (p.recruiting.headliner) bits.push("headline signing of his class");
 			}
 			if (p.transfer) {
-				bits.push(p.transfer.kind + " from " + p.transfer.from);
+				// A walk-on turned starter has no previous school to name.
+				bits.push(p.transfer.from
+					? p.transfer.kind + " from " + p.transfer.from
+					: p.transfer.kind);
 			}
 			if (p.redshirt) bits.push(p.redshirt);
 			if (p.reclassified) bits.push(p.reclassified);

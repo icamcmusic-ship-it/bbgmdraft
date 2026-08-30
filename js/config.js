@@ -127,9 +127,17 @@
 
 	function make(overrides) {
 		const cfg = Object.assign({}, DEFAULTS, overrides || {});
-		// noteLines is the one array in here; copy it so presets and the URL
-		// hash cannot alias the shared default.
+		/* Copy every container the UI can write into, so a preset or a URL
+		   payload can never be mutated in place by the editor that displays it.
+
+		   noteLines was copied and archetypeWeights was not, even though the
+		   archetype-frequency editor writes straight into
+		   state.cfg.archetypeWeights: editing a weight after loading a preset
+		   (or a shared link) rewrote the preset itself, silently and
+		   permanently. leagueWeights is rebuilt below, but from an object the
+		   caller still owns. */
 		cfg.noteLines = (cfg.noteLines || DEFAULTS.noteLines).slice();
+		cfg.archetypeWeights = Object.assign({}, cfg.archetypeWeights || {});
 		// Destination weights: start from the built-ins, apply anything the
 		// caller set, then fold in the three legacy sliders so old presets and
 		// old shareable links still mean what they meant.

@@ -175,6 +175,18 @@
 		"Overtime Elite":        { pace: 84, gameMinutes: 40, youthCap: null, mpgCap: 34 },
 		"NBA Academy":           { pace: 76, gameMinutes: 40, youthCap: null, mpgCap: 34 },
 		"DII NCAA":              { pace: null, gameMinutes: 40, youthCap: null, mpgCap: 37.5 },
+		"Basketball Champions League": { pace: 73, gameMinutes: 40, youthCap: 24, mpgCap: 33 },
+		"Turkish BSL":           { pace: 74, gameMinutes: 40, youthCap: 22, mpgCap: 32 },
+		"Greek Basket League":   { pace: 71, gameMinutes: 40, youthCap: 22, mpgCap: 32 },
+		"Israeli Premier League": { pace: 78, gameMinutes: 40, youthCap: 24, mpgCap: 33 },
+		"Japan B.League":        { pace: 76, gameMinutes: 40, youthCap: 26, mpgCap: 34 },
+		"Brazil NBB":            { pace: 78, gameMinutes: 40, youthCap: 26, mpgCap: 34 },
+		"Basketball Africa League": { pace: 76, gameMinutes: 40, youthCap: 28, mpgCap: 34 },
+		"CEBL":                  { pace: 84, gameMinutes: 40, youthCap: 30, mpgCap: 35 },
+		// Youth and amateur levels: everybody is a teenager or an amateur, so
+		// there is nothing to cap.
+		"Prep / Postgrad":       { pace: 80, gameMinutes: 32, youthCap: null, mpgCap: 29 },
+		"NAIA":                  { pace: 74, gameMinutes: 40, youthCap: null, mpgCap: 36 },
 	};
 	// Everything else (D-I, and any league without an entry) takes cfg.pace and
 	// a 40-minute game.
