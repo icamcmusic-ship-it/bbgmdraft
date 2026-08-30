@@ -96,6 +96,55 @@
 		{ name: "Balanced", min: 0, max: 100, w: 1.0, t: [], o: {} },
 	];
 
+	/* Role usage: the share of a team's offence a build is given, over and
+	   above what BBGM's usage composite says.
+
+	   The composite is (1.5*ins + dnk + fg + tp + 0.5*(spd + hgt + drb + oiq)),
+	   which is a description of a player's SHOT-MAKING, not of the role a
+	   coach hands him. USAGE_PROTECT stops the ovr-neutralising normaliser
+	   gutting a defensive build's offence, and it works in its own terms — but
+	   it can only protect what the composite reads, so a stopper still lost
+	   volume, and the measured spread of scoring at equal overall rating ran
+	   from -4.9 points (Defensive Pest) to +4.9 (Score-First Point). Nearly ten
+	   points of scoring decided by build alone, at the same rating, is not a
+	   specialisation, it is a different player.
+
+	   `u` says what the composite cannot: an on-ball creator is given the ball
+	   whether or not his ins rating agrees, and a rim protector is not, and
+	   both of those are role facts. Absent = 1.0. The table is fitted, not
+	   guessed: each value is the multiplier that brings its build's mean
+	   scoring residual against the class's own ovr fit inside +/-2 points, and
+	   tools/validate.js bands the worst of them so it cannot drift back. */
+	const ROLE_USAGE = {
+		"Floor General": 1.49, "Combo Guard": 0.53, "Sharpshooter": 0.50,
+		"Slasher": 0.89, "Defensive Pest": 1.90, "Heliocentric Guard": 0.86,
+		"Pick-and-Roll Maestro": 0.70, "Movement Shooter": 0.64,
+		"Pull-Up Artist": 0.60, "Downhill Attacker": 0.62,
+		"Crafty Finisher": 0.66, "Pass-First Sparkplug": 1.90, "Ball Hawk": 1.90,
+		"Pesky On-Ball Stopper": 1.90, "Score-First Point": 0.50,
+		"Sixth-Man Gunner": 0.55, "Streaky Volume Scorer": 0.50,
+		"Change-of-Pace Guard": 1.10, "Free-Throw Merchant": 0.92,
+		"3&D Wing": 0.91, "Two-Way Wing": 0.88, "Point Forward": 1.12,
+		"Wing Sniper": 0.76, "Shot-Creating Wing": 0.50, "Transition Wing": 1.21,
+		"Cutter / Finisher": 1.84, "Wing Stopper": 1.90, "Rebounding Wing": 1.81,
+		"Corner Specialist": 0.90, "Midrange Operator": 0.50,
+		"Jumbo Playmaker": 0.59, "Energy Wing": 1.90, "Do-It-All Forward": 1.53,
+		"Bully Slasher": 1.11, "Glide Athlete": 1.73, "Microwave Scorer": 0.50,
+		"Athletic Freak": 0.92, "Glue Guy": 1.90, "High-IQ Connector": 0.93,
+		"Raw Project": 1.08, "Iron Man": 1.36, "Stretch Big": 1.06,
+		"Post Scorer": 0.58, "Rim Protector": 1.90, "Rim Runner": 0.95,
+		"Motor Big": 1.58, "Skilled Big": 0.62, "Point Center": 1.02,
+		"Offensive Rebounding Menace": 1.39, "Switchable Big": 1.90,
+		"Mobile Shot-Swatter": 1.90, "Face-Up Four": 0.72,
+		"Low-Post Bruiser": 0.88, "Pick-and-Pop Big": 0.70, "Lob Threat": 1.27,
+		"Old-School Center": 0.69, "Undersized Rebounder": 1.16,
+		"Foul-Prone Enforcer": 0.76, "Balanced": 0.91,
+	};
+	function roleUsage(name) {
+		const v = ROLE_USAGE[name];
+		return Number.isFinite(v) ? v : 1;
+	}
+
 	/* How much room to grow each build implies, in ovr→pot gap points. A Raw
 	   Project should be a wider bet than a Floor General by construction; the
 	   old model drew the gap from one distribution regardless of who the player
@@ -528,6 +577,7 @@
 		ARCHETYPES, RAW_OFFSETS, OVR_W, SHIFT_SCALE, USAGE_W,
 		rebuild, classCurve, pickArchetype, solveToOvr, shiftScales, ovrRange,
 		potAdjust, potFactors, potFromRole, POT_BY_ARCHETYPE,
+		ROLE_USAGE, roleUsage,
 		CLASS_FLAVORS, pickFlavor, flavorMultiplier,
 	};
 })(typeof window !== "undefined" ? window : self);

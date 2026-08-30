@@ -31,7 +31,17 @@
 	const TUNING = {
 		MPG_CAP: 37.5,      // D-I minutes leaders run 36-38, not a flat 35.5
 		USG_CAP: 0.365,     // share of team possessions while on the floor
-		USG_FLOOR: 0.155,   // a drafted player never vanishes from the offence
+		/* A drafted player never vanishes from the offence. The draft-year 5th
+		   percentile is USG 17.8, so this is where a prospect's usage settles,
+		   not where it stops: `softUsg` approaches it from below rather than
+		   clamping onto it. The hard clamp piled 3.7% of the whole class on
+		   exactly 15.5% usage — a wall, which is the artefact the soft CEILING
+		   was introduced to remove, left in place at the other end. */
+		USG_FLOOR: 0.175,
+		USG_FLOOR_FILLER: 0.10,
+		// How far below the floor the softened curve may reach, as a fraction
+		// of it. The floor becomes an asymptote instead of a clamp.
+		USG_FLOOR_BAND: 0.22,
 		USG_EXP: 2.35,      // steepness of the usage composite -> volume curve
 		/* Assists. At 4.1 the exponent produced a physically impossible floor:
 		   a centre's 10th-percentile line was 0.15 assists per game and the Rim
@@ -94,11 +104,43 @@
 		   correlation between how good he was and how much he scored (+0.42).
 		   Where you play should not predict your scoring better than how good
 		   you are. */
-		MINUTES_UNIFORM: 0.14,
+		MINUTES_UNIFORM: 0.08,
+		/* Rotation priority for a drafted player, as a slot floor that depends
+		   on how good he is: a lottery talent starts anywhere, a late
+		   second-rounder is at worst his team's fifth man. `SLOT_ANCHOR` is the
+		   college-talent level that always starts and `SLOT_STEP` how much
+		   talent one rotation slot is worth. */
+		PROSPECT_SLOT_ANCHOR: 76,
+		PROSPECT_SLOT_STEP: 7,
+		PROSPECT_SLOT_MAX: 2,
+		/* How far talent tilts a player off the canonical rotation shape.
+		   Two terms, because they answer two different questions. The ABS term
+		   is how good he is on the college-talent scale, which is what makes a
+		   lottery pick out-minute a late second-rounder wherever either of them
+		   plays. The REL term is how much better he is than his own teammates,
+		   which is real (a coach rides the one man who can play) but is also
+		   the entire channel by which a program's strength used to decide a
+		   prospect's minutes, so it carries much the smaller weight. */
+		/* A drafted player's rotation priority over a returning player in the
+		   same slot. Coaches play the future pro. */
+		PROSPECT_PREMIUM: 1.12,
+		/* How often a drafted player spends his draft year as a reserve. */
+		RESERVE_RATE: 0.12,
+		MINUTES_TILT_ABS: 0.55,
+		MINUTES_TILT_REL: 0.22,
+		MINUTES_TILT_ANCHOR: 62,
+		MINUTES_TILT_REF: 14,
 		/* How much of the class's scoring gradient is allowed to come from
 		   playing at a weak programme rather than from being good. */
 		STL_ATH: 0.60,
 	};
+
+	/* The shape of a college rotation's minutes, by slot. Measured off D-I
+	   box scores: a starter plays 30-34, the sixth man low twenties, and the
+	   ninth man single figures — and that shape barely moves between a blue
+	   blood and a low major. It is renormalised to the team total below, so
+	   only the ratios here matter. */
+	const ROTATION_SHAPE = [1.00, 0.95, 0.89, 0.83, 0.75, 0.61, 0.47, 0.33, 0.21, 0.13];
 
 	/* The composite an average D-I rotation actually scores on each pool key,
 	   measured off the filler synthesis in simulateTeamStats and blended the
@@ -166,9 +208,107 @@
 			const bigness = c ? clamp((c.blocking - 0.18) / 0.55, 0, 1) : 0.45;
 			return (0.80 + 0.40 * clamp(endu, 0, 1)) * (1 + 0.10 * (0.45 - bigness));
 		});
-		const talentShares = shareFromWeights(
-			members.map((m, i) => m.talent * stamina[i] * (1 + rng.normal(0, 0.05))), 1.6,
-		);
+		/* Minutes come off a canonical rotation SHAPE, not off raw talent ratios.
+
+		   The old model shared minutes out as `talent^1.6 / sum`, which makes a
+		   rotation's minute spread a function of its talent DISPERSION rather
+		   than of anybody's quality. At a level-23 program the best player was
+		   talent 76 against teammates at 19 and 17 — a 4x ratio, so 9x the
+		   weight, so 37.5 minutes on the cap. At a level-89 program the same
+		   rotation ran 82/79/69, a 1.2x ratio, so its best player drew 27.5.
+		   Measured, that made where a prospect played predict his minutes
+		   (-0.78) two and a half times better than how good he was (+0.29), and
+		   28% of late second-rounders finished under 10 points a game.
+
+		   A coach does not do that. He plays his best man about 33 minutes
+		   whether the rest of the roster is good or bad; the SHAPE of a rotation
+		   is close to fixed and talent decides who occupies which slot. So the
+		   weight is the canonical shape at a player's slot, tilted by how far
+		   his talent sits from his own rotation's mean — a bounded tilt, so a
+		   flat roster and a top-heavy one still differ, but not by 10 minutes. */
+		const val = members.map((m, i) => m.talent * stamina[i] * (1 + rng.normal(0, 0.05)));
+		const order = members.map((m, i) => i).sort((a, b) => val[b] - val[a]);
+		/* Rotation priority, which is not a talent bonus.
+
+		   A coach's rotation is not a pure talent ranking: a future NBA player
+		   plays, because he is the reason the season is interesting and because
+		   he is leaving in April. A program that landed a draft pick did not
+		   already have three better players. So the r-th best prospect on a
+		   roster is promoted to no worse than slot r + PROSPECT_SLOT, which at a
+		   weak program is never binding (he already leads the team) and at a
+		   blue blood stops him being the fifth option on his own team. His
+		   talent is untouched: usage, team rating and the ovr solver see exactly
+		   what they saw before. */
+		let seen = 0;
+		for (let r = 0; r < order.length; r++) {
+			if (members[order[r]].filler) continue;
+			const target = seen + clamp(Math.round(
+				(TUNING.PROSPECT_SLOT_ANCHOR - members[order[r]].talent) /
+					TUNING.PROSPECT_SLOT_STEP), 0, TUNING.PROSPECT_SLOT_MAX);
+			seen++;
+			if (r <= target) continue;
+			const idx = order.splice(r, 1)[0];
+			order.splice(Math.min(target, order.length), 0, idx);
+		}
+		const slotOf = new Array(members.length);
+		order.forEach((idx, slot) => { slotOf[idx] = slot; });
+		let meanTalent = 0;
+		for (const m of members) meanTalent += m.talent;
+		meanTalent /= members.length || 1;
+		const shapeAt = (slot) => (slot < ROTATION_SHAPE.length
+			? ROTATION_SHAPE[slot]
+			: ROTATION_SHAPE[ROTATION_SHAPE.length - 1] *
+				Math.pow(0.7, slot - ROTATION_SHAPE.length + 1));
+		/* The tilt is applied to the DRAFT PROSPECTS only; a returning player
+		   sits on the shape his slot gives him.
+
+		   This is the difference between a minutes model and a talent-ratio
+		   model. If the tilt were applied to everybody, a filler's weight would
+		   track his program's level (his talent is drawn from it), so a
+		   prospect's share — his weight over the roster's total — would fall as
+		   his program got stronger, for no reason but arithmetic. That is the
+		   whole of the residual -0.52 correlation between where a man played
+		   and how long he played. There is also nothing to say with a
+		   synthetic teammate: the roster shape already carries everything the
+		   model knows about him. */
+		/* The RELATIVE tilt applies to everybody: a coach rides the one man on
+		   his roster who can play, and that is as true of a low major's senior
+		   as of a lottery pick. Without it every team's best player drew the
+		   same 32 minutes, which flattened the field a draft class is judged
+		   against and handed the prospects a third more national awards than
+		   they should win.
+
+		   The ABSOLUTE tilt and the prospect premium apply only to the draft
+		   prospects. A returning player's talent is drawn FROM his program's
+		   level, so tilting him on it would make every rotation at a strong
+		   program flatter than every rotation at a weak one for no reason but
+		   arithmetic — which is the whole of the location bias this rework
+		   exists to remove. */
+		const relTilt = (talent) => 1 +
+			TUNING.MINUTES_TILT_REL * clamp((talent - meanTalent) / 12, -1.5, 1.5);
+		const absTilt = (m) => (m.filler ? 0 : TUNING.PROSPECT_PREMIUM - 1 +
+			TUNING.MINUTES_TILT_ABS *
+				clamp((m.talent - TUNING.MINUTES_TILT_ANCHOR) / TUNING.MINUTES_TILT_REF, -1.5, 1.5));
+		/* The reserve year. Talent and slot alone give every drafted player a
+		   starter's minutes, and real draft classes do not look like that: the
+		   draft-year 5th percentile is about 19 minutes a game, because some of
+		   a class is freshmen who came off the bench behind a senior, players
+		   who lost half a season to a knee, and eighteen-year-olds a coach
+		   brought along slowly. None of that is predictable from a rating, so
+		   it is drawn — independently of where he plays, so it widens the
+		   distribution without putting the location bias back. Freshmen draw it
+		   most often; a senior who is still a reserve has usually transferred. */
+		const roleOf = (m) => {
+			if (m.filler) return 1;
+			const year = m.player && m.player.classYear;
+			const rate = TUNING.RESERVE_RATE *
+				(year === "Freshman" ? 1.6 : year === "Sophomore" ? 1.0
+					: year === "Junior" ? 0.6 : 0.45);
+			if (rng.random() < rate) return rng.uniform(0.42, 0.70);
+			return Math.exp(rng.normal(0, 0.11));
+		};
+		const talentShares = shareFromWeights(members.map((m, i) => shapeAt(slotOf[i]) *
+			stamina[i] * roleOf(m) * Math.max(0.05, relTilt(m.talent) + absTilt(m))), 1);
 		// Real rotations are flatter than raw talent: fouls, matchups, blowouts
 		// and coaching spread minutes around. But not as flat as they were.
 		const uniform = 1 / members.length;
@@ -819,10 +959,16 @@
 		   offence than its centres. At 1.05 an overall-matched guard, wing and
 		   centre score within half a point of one another, with the guard
 		   ahead — which is the ordering a draft board shows. */
+		/* Role usage. BBGM's usage composite reads shot-making, not the role a
+		   coach hands a player, so the archetype says what the composite
+		   cannot — see ROLE_USAGE in js/ratings.js. Fillers have no archetype
+		   and take 1. */
+		const RB = global.RatingsBuilder;
 		const rawUsg = members.map((m, i) =>
 			Math.pow(comps[i].usage, TUNING.USG_EXP) * Math.pow(0.35 + 1.3 * (m.talent / 100), 1.6) *
 				(1 + 1.05 * (0.42 - bignessOf(i))) *
-				CAL.talentUsageMult(m.talent),
+				CAL.talentUsageMult(m.talent) *
+				(m.filler || !RB ? 1 : RB.roleUsage(m.player.archetype)),
 		);
 		let denom = 0;
 		for (let i = 0; i < members.length; i++) denom += rawUsg[i] * mins[i];
@@ -841,7 +987,7 @@
 		// every good prospect converge on the same number.
 		const bounds = members.map((m, i) => {
 			const ms = mins[i] / gameMinutes;
-			const floor = (m.filler ? 0.10 : TUNING.USG_FLOOR) * ms;
+			const floor = (m.filler ? TUNING.USG_FLOOR_FILLER : TUNING.USG_FLOOR) * ms;
 			/* The ceiling is the player's, not the league's. A universal cap made
 			   every good prospect converge on the same number.
 
@@ -856,11 +1002,22 @@
 					0.105 * (0.42 - bignessOf(i)),
 				0.195, TUNING.USG_CAP,
 			);
-			return { floor, room: Math.max(1e-6, personal * ms - floor) };
+			return {
+				floor,
+				band: Math.max(1e-9, floor * TUNING.USG_FLOOR_BAND),
+				room: Math.max(1e-6, personal * ms - floor),
+			};
 		});
+		/* Saturating at BOTH ends. Above the floor the curve bends towards the
+		   player's personal ceiling; below it, it bends towards floor - band
+		   instead of clamping flat onto the floor. Both branches have slope 1
+		   at the floor, so the map stays continuous, monotone and smooth and
+		   the bisection below is still valid — and a genuine 12%-usage role
+		   player is still ordered below a 15% one instead of both printing the
+		   same number. */
 		const softUsg = (v, i) => {
 			const b = bounds[i];
-			if (v <= b.floor) return b.floor;
+			if (v <= b.floor) return b.floor - b.band * (1 - Math.exp(-(b.floor - v) / b.band));
 			return b.floor + b.room * (1 - Math.exp(-(v - b.floor) / b.room));
 		};
 		const usgTotalAt = (k) => usgShare.reduce((a, s, i) => a + softUsg(s * k, i), 0);
@@ -1284,6 +1441,6 @@
 		defenseProfile, rosterDefenseProfile, rosterShooting,
 		astWeight, stlWeight, rebWeight, passSkill,
 		leagueEnv, LEAGUE_ENV, NCAA_ENV,
-		TUNING,
+		TUNING, ROTATION_SHAPE,
 	};
 })(typeof window !== "undefined" ? window : self);

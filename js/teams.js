@@ -62,6 +62,37 @@
 		};
 	}
 
+	/* A program that landed a future draft pick usually landed him because it
+	   did not already have two of them.
+
+	   Without this, `makeFiller` and `prospectTalent` sit on incompatible
+	   scales at the top of the country: a level-85 program's three best
+	   returning players synthesise to 63.6 / 61.2 / 57.5, while an ovr-30
+	   second-rounder is talent 59.9 — so a drafted NBA player was routinely the
+	   fourth option on his own college team, fell to ~25 minutes and printed
+	   seven points. Measured, where a prospect played predicted his minutes
+	   (-0.76) two and a half times better than how good he was (+0.30), and
+	   28% of late second-rounders finished under 10 points a game.
+
+	   So the two best returning players on a roster that carries a prospect are
+	   capped just below the best prospect on it. Rosters with no prospect are
+	   untouched, and a roster whose prospect is a genuine lottery talent is
+	   untouched too, because the cap is not binding there. */
+	const FILLER_GAP = 4;
+	function capFillers(fillers, prospects) {
+		if (!prospects.length || !fillers.length) return;
+		let best = -Infinity;
+		for (const p of prospects) best = Math.max(best, p.talent);
+		const cap = best - FILLER_GAP;
+		// The cap applies to the two best returners as realised, not to the two
+		// nominal slots: the draw has sd 8.5, so slot 3 routinely out-rolls
+		// slot 0 and capping by slot index would miss the player it is for.
+		const order = fillers.slice().sort((a, b) => b.talent - a.talent);
+		for (let i = 0; i < Math.min(2, order.length); i++) {
+			order[i].talent = Math.min(order[i].talent, cap);
+		}
+	}
+
 	function rotationWeights(n) {
 		const w = [1, 0.96, 0.9, 0.84, 0.76, 0.6, 0.45, 0.3, 0.18, 0.1];
 		return w.slice(0, n);
@@ -114,7 +145,10 @@
 				talent: prospectTalent(p.newOvr, p.newPot),
 			}));
 			const nFill = Math.max(6, 10 - members.length);
-			for (let i = 0; i < nFill; i++) members.push(makeFiller(trng, level, i));
+			const fillers = [];
+			for (let i = 0; i < nFill; i++) fillers.push(makeFiller(trng, level, i));
+			capFillers(fillers, members);
+			for (const f of fillers) members.push(f);
 
 			teams[name] = {
 				name,
@@ -486,6 +520,7 @@
 	global.TeamsSim = {
 		buildPrograms, simulateRegularSeason, simulateConferenceTournaments,
 		prospectTalent, teamRating, winProb, playGame, playGameScore, ratingOn,
+		capFillers, FILLER_GAP,
 		rotationWeights, pairUp, record, recordPostseason, finalizeSchedule,
 		REGULAR_NOISE,
 		label, adoptConference, conferencePools, PROGRAM_STYLES,
