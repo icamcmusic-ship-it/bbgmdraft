@@ -147,6 +147,61 @@ function ok(name, condition, detail) {
 	ok("a lock stores only the fields that were ticked",
 		lock && Object.keys(lock).length === 1 && lock.archetype, JSON.stringify(lock));
 
+	console.log("\nTable controls");
+	// Numeric range filters. For a 70-man class this is the main missing verb:
+	// "show me everyone over 18 points a game".
+	const shownRows = () => page.locator("table tbody tr").count();
+	const before = await shownRows();
+	await page.locator('button:has-text("+ range filter")').click();
+	await page.waitForTimeout(200);
+	await page.selectOption(".rangefilter select", "ppg");
+	await page.waitForTimeout(250);
+	await page.fill(".rangefilter .rangebox >> nth=0", "18");
+	await page.locator(".rangefilter .rangebox >> nth=0").press("Enter");
+	await page.waitForTimeout(350);
+	const filtered = await shownRows();
+	const minPpg = await page.evaluate(() => {
+		const res = window.App.state.results[window.App.state.active];
+		return Math.min.apply(null, res.players
+			.filter((p) => window.Views.matchesFilter(p, res))
+			.map((p) => (p.stats ? p.stats.ppg : 0)));
+	});
+	ok("a numeric range filter narrows the table",
+		filtered > 0 && filtered < before && minPpg >= 18,
+		filtered + " of " + before + " rows, lowest PPG " + minPpg);
+	await page.locator('button:has-text("Clear ranges")').click();
+	await page.waitForTimeout(300);
+	ok("clearing the range filter restores every row", (await shownRows()) === before);
+
+	// Shooting volume, which was computed and never displayed.
+	await page.evaluate(() => {
+		window.App.state.hiddenColumns = {};
+		window.App.render();
+	});
+	await page.waitForTimeout(250);
+	const heads = await page.locator("table thead th").allTextContents();
+	// A sorted header carries a ▾/▴ and, in a multi-key sort, its level number.
+	const has = (t) => heads.some((h) => h.replace(/\s*[▾▴]\d*$/, "").trim() === t);
+	ok("the shooting-volume columns are available",
+		has("FGA") && has("3PA") && has("FTA") && has("3PAr") && has("eFG%"),
+		heads.join(" "));
+	ok("team context and physicals are available",
+		has("Team") && has("AP") && has("Seed") && has("Ht") && has("Wt"),
+		heads.join(" "));
+
+	// Multi-key sort, and a way back out of it.
+	await page.locator("table thead th", { hasText: "PPG" }).first().click();
+	await page.waitForTimeout(200);
+	await page.locator("table thead th", { hasText: "Ovr" }).first()
+		.click({ modifiers: ["Shift"] });
+	await page.waitForTimeout(250);
+	ok("the sort stack shows every level",
+		(await page.locator(".sortstack .chip").count()) === 2);
+	await page.locator(".sortstack .chip >> nth=1").locator("button", { hasText: "×" }).click();
+	await page.waitForTimeout(250);
+	ok("a sort level can be removed",
+		(await page.evaluate(() => window.App.state.sort.length)) === 1);
+
 	console.log("\nStaged re-runs");
 	const phases = async (mutate) => {
 		await page.evaluate(mutate);
@@ -167,6 +222,54 @@ function ok(name, condition, detail) {
 			i.dispatchEvent(new Event("input", { bubbles: true }));
 		})) === "awards,stock,notes");
 
+	console.log("\nEra and efficiency");
+	const teamPpg = async () => page.evaluate(() => {
+		const res = window.App.state.results[window.App.state.active];
+		const t = Object.values(res.teams).filter((x) => x.teamTotals);
+		return t.reduce((a, x) => a + x.teamTotals.pts, 0) / t.length;
+	});
+	const modernPpg = await teamPpg();
+	await page.evaluate(() => {
+		const sel = document.getElementById("era");
+		sel.value = "2009-2021";
+		sel.dispatchEvent(new Event("change", { bubbles: true }));
+	});
+	await page.waitForTimeout(800);
+	const oldPpg = await teamPpg();
+	ok("the era switch moves the whole scoring environment",
+		modernPpg - oldPpg > 2, modernPpg.toFixed(1) + " -> " + oldPpg.toFixed(1));
+	await page.evaluate(() => {
+		const sel = document.getElementById("era");
+		sel.value = "modern";
+		sel.dispatchEvent(new Event("change", { bubbles: true }));
+	});
+	await page.waitForTimeout(800);
+
+	// The efficiency dial, which did not exist: pace and scoringEnv are both
+	// possession dials and left true shooting unmoved in every configuration.
+	const fieldTs = async () => page.evaluate(() => {
+		const res = window.App.state.results[window.App.state.active];
+		const ps = res.players.filter((p) => p.stats);
+		return ps.reduce((a, p) => a + p.stats.ts, 0) / ps.length;
+	});
+	const tsBefore = await fieldTs();
+	await page.evaluate(() => {
+		const i = document.getElementById("efficiencyEnv");
+		i.value = "3";
+		i.dispatchEvent(new Event("input", { bubbles: true }));
+	});
+	await page.waitForTimeout(800);
+	const tsAfter = await fieldTs();
+	ok("the efficiency dial moves true shooting",
+		tsAfter - tsBefore > 0.01,
+		(tsBefore * 100).toFixed(1) + " -> " + (tsAfter * 100).toFixed(1));
+	await page.evaluate(() => {
+		const i = document.getElementById("efficiencyEnv");
+		i.value = "0";
+		i.dispatchEvent(new Event("input", { bubbles: true }));
+	});
+	await page.waitForTimeout(800);
+
 	console.log("\nBatch");
 	await page.evaluate(() => {
 		// The sidebar groups are collapsible and remember their state.
@@ -178,8 +281,13 @@ function ok(name, condition, detail) {
 		() => document.getElementById("batchProgress").hidden === true,
 		null, { timeout: 120000 });
 	await page.waitForTimeout(250);
-	ok("batch mode produces an aggregate",
-		/mean ovr/.test(await page.locator("#view").innerText()));
+	const batchText = await page.locator("#view").innerText();
+	ok("batch mode produces an aggregate", /mean ovr/.test(batchText));
+	// A batch of averages with no spread and no seed cannot be re-run or read.
+	ok("the batch panel shows a distribution and its seed",
+		/p5/.test(batchText) && /p95/.test(batchText) && /batch seed/.test(batchText));
+	ok("the batch says which population its per-player rows cover",
+		/NCAA prospects per class/.test(batchText));
 
 	console.log("\nNo errors");
 	ok("no console or page errors", errors.length === 0, errors.join("\n         "));

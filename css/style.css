@@ -291,3 +291,103 @@ tbody tr { cursor: pointer; }
 .archname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: help; }
 .archname:hover { color: var(--text); }
 .colpicker { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 3px; }
+
+/* ---- range filters, sort stack and the new table furniture --------------- */
+.ranges { gap: 6px; }
+.rangefilter { display: inline-flex; align-items: center; gap: 4px; }
+.rangefilter select { max-width: 130px; }
+.rangebox { width: 74px; }
+.sortstack { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+.sortstack .chip {
+	display: inline-flex; align-items: center; gap: 4px;
+	background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px;
+	padding: 1px 4px 1px 9px; font-size: 11px; color: var(--dim);
+}
+.sortstack .chip button { padding: 0 5px; line-height: 1.5; }
+th.sorted { color: var(--text); }
+
+/* The horizontal-scroll shadow. With every stat column on, the sticky name
+   column looks like the left edge of the table and there is nothing to say the
+   rest of it is off to the right. */
+.scroll {
+	background:
+		linear-gradient(to right, var(--panel) 30%, rgba(0,0,0,0)) left / 40px 100% no-repeat,
+		linear-gradient(to left, var(--panel) 30%, rgba(0,0,0,0)) right / 40px 100% no-repeat,
+		radial-gradient(farthest-side at 0 50%, rgba(0,0,0,.18), rgba(0,0,0,0)) left / 14px 100% no-repeat,
+		radial-gradient(farthest-side at 100% 50%, rgba(0,0,0,.18), rgba(0,0,0,0)) right / 14px 100% no-repeat;
+	background-attachment: local, local, scroll, scroll;
+}
+
+/* Row focus has to be visible on a dark theme against a hover highlight, so it
+   gets an inset ring rather than the page-wide outline, which the sticky first
+   column would clip anyway. */
+tbody tr:focus-visible { outline: none; }
+tbody tr:focus-visible td { box-shadow: inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
+tbody tr:focus-visible td.sticky { box-shadow: inset 2px 0 0 var(--accent), inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
+tbody tr.editing td { background: rgba(9,105,218,.14); }
+tbody tr.editing td.sticky { background: rgba(9,105,218,.14); }
+
+/* ---- banners ------------------------------------------------------------- */
+/* Same trap the modal fell into: display:flex beats the `hidden` attribute's
+   display:none, so without the second rule an empty banner sits on the page
+   whenever there is nothing to say. */
+.banner { display: flex; align-items: flex-start; gap: 10px; }
+.banner[hidden] { display: none; }
+.bannertext { flex: 1; white-space: pre-wrap; }
+.bannerclose {
+	background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.3);
+	color: #fff; border-radius: 6px; line-height: 1; padding: 2px 8px; cursor: pointer;
+	font-size: 15px;
+}
+.bannerclose:hover { background: rgba(255,255,255,.28); }
+
+/* ---- settings panel ------------------------------------------------------ */
+.rerun { margin: 2px 0 0; font-size: 10px; color: var(--dim); opacity: .8; letter-spacing: .02em; }
+.archgroup {
+	display: flex; align-items: center; gap: 6px;
+	margin: 8px 0 2px; padding-top: 6px; border-top: 1px solid var(--line);
+	font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim);
+}
+.archgroup:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+.archgroup .archname { flex: 1; cursor: default; }
+.archgroup button { padding: 0 6px; font-size: 10px; }
+/* Weight, and what that weight actually produced last run. */
+.archrow { grid-template-columns: 1fr 42px 62px; }
+.archgot { font-variant-numeric: tabular-nums; text-align: right; font-size: 10px; color: var(--accent); }
+.archgot.none { color: var(--dim); opacity: .5; }
+.archlist { max-height: 300px; }
+
+/* ---- motion -------------------------------------------------------------- */
+/* Nothing here is load-bearing animation, so honour the preference outright. */
+@media (prefers-reduced-motion: reduce) {
+	*, *::before, *::after {
+		animation-duration: .001ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: .001ms !important;
+		scroll-behavior: auto !important;
+	}
+}
+
+/* ---- narrow viewports ---------------------------------------------------- */
+/* The aside + main grid was desktop-only and said so nowhere. It stacks now,
+   the table keeps its own horizontal scroll rather than pushing the page
+   sideways, and the settings panel collapses to one column. */
+@media (max-width: 860px) {
+	.editgrid, .ratinggrid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+	.sortstack { font-size: 11px; }
+	.rangefilter select { max-width: 104px; }
+	.rangebox { width: 58px; }
+}
+@media (max-width: 560px) {
+	header .btngroup { flex: 1 1 auto; }
+	header h1 span { display: none; }
+	.filters { gap: 5px; }
+	.filters select, .filters button { font-size: 11px; }
+	.rangefilter { flex: 1 1 100%; }
+	.rangefilter select { max-width: none; flex: 1; }
+	.scroll { max-height: none; }
+	/* A 40-column table on a phone is a horizontal scroll no matter what, so
+	   make the row header narrower rather than pretending otherwise. */
+	th.sticky, td.sticky { max-width: 120px; }
+	.editgrid, .ratinggrid { grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); }
+}

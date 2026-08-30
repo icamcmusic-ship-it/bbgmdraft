@@ -47,6 +47,15 @@
 		{ key: "archetype", label: "Archetype", num: false },
 		{ key: "college", label: "College / League", num: false },
 		{ key: "conf", label: "Conf", num: false },
+		/* Team context. All three are on res.teams and none of them was shown,
+		   so a 19-point scorer's row said nothing about whether he did it for a
+		   one seed or for a team that finished 9-22. */
+		{ key: "record", label: "Team", num: false, off: true, title: "His team's record" },
+		{ key: "apRank", label: "AP", num: true, off: true, title: "His team's final AP ranking" },
+		{ key: "seed", label: "Seed", num: true, off: true, title: "His team's NCAA tournament seed" },
+		// Physicals, which varySize can change and which were never displayed.
+		{ key: "hgtInches", label: "Ht", num: true, off: true, phys: true, title: "Listed height" },
+		{ key: "weight", label: "Wt", num: true, off: true, phys: true, title: "Listed weight in pounds" },
 		{ key: "gp", label: "GP", num: true, stat: true },
 		{ key: "mpg", label: "MPG", num: true, stat: true },
 		{ key: "ppg", label: "PPG", num: true, stat: true },
@@ -58,18 +67,53 @@
 		{ key: "bpg", label: "BPG", num: true, stat: true },
 		{ key: "topg", label: "TO", num: true, stat: true },
 		{ key: "pfpg", label: "PF", num: true, stat: true },
+		/* Shooting VOLUME. Every one of these numbers was already on p.stats and
+		   none of them was on screen, so the table could tell you a prospect
+		   shot 35% from three and not whether that was on two attempts a game
+		   or on eight — which for a draft tool is the single most-missed set of
+		   columns there is. */
+		{ key: "fga", label: "FGA", num: true, stat: true, off: true, title: "Field-goal attempts" },
+		{ key: "tpa", label: "3PA", num: true, stat: true, off: true, title: "Three-point attempts" },
+		{ key: "fta", label: "FTA", num: true, stat: true, off: true, title: "Free-throw attempts" },
+		{ key: "tpar", label: "3PAr", num: true, off: true, derived: true, title: "Share of shots taken from three, as a ratio (.381 = 38.1%)" },
+		{ key: "ftr", label: "FTr", num: true, off: true, derived: true, title: "Free-throw attempts per field-goal attempt, as a ratio" },
 		{ key: "cspg", label: "CS", num: true, stat: true, off: true, title: "Contested shots per game" },
 		{ key: "deflpg", label: "DEFL", num: true, stat: true, off: true, title: "Deflections per game" },
 		{ key: "chgpg", label: "CHG", num: true, stat: true, off: true, title: "Charges drawn per game" },
 		{ key: "drtg", label: "DRtg", num: true, off: true, title: "Points allowed per 100 possessions on the floor" },
+		{ key: "ortg", label: "ORtg", num: true, off: true, derived: true, title: "Points produced per 100 possessions he used" },
 		{ key: "usg", label: "USG%", num: true, title: "Share of team chances used on the floor" },
 		{ key: "fgp", label: "FG%", num: true },
+		{ key: "efg", label: "eFG%", num: true, off: true, derived: true, title: "Field-goal percentage counting a three as one and a half shots" },
 		{ key: "tpp", label: "3P%", num: true },
 		{ key: "ftp", label: "FT%", num: true },
 		{ key: "ts", label: "TS%", num: true },
+		{ key: "astTo", label: "A:TO", num: true, off: true, derived: true, title: "Assists per turnover" },
+		{ key: "prod", label: "PROD", num: true, off: true, derived: true, title: "Production score — the single number the award model ranks on" },
 		{ key: "awards", label: "Honors", num: false },
 	];
-	const PCT_KEYS = { usg: 1, fgp: 1, tpp: 1, ftp: 1, ts: 1 };
+	const PCT_KEYS = { usg: 1, fgp: 1, tpp: 1, ftp: 1, ts: 1, efg: 1 };
+
+	/* Columns computed from the stat line rather than stored on it. They were
+	   all derivable and none of them was derived, which is why a table with
+	   thirty-three columns still could not answer "who is efficient on volume".
+	   Per-game / totals / per-40 does not apply to a ratio, so these are
+	   excluded from statValue's unit conversion. */
+	const DERIVED = {
+		tpar: (s) => (s.fga > 0 ? s.tpa / s.fga : undefined),
+		ftr: (s) => (s.fga > 0 ? s.fta / s.fga : undefined),
+		efg: (s) => (s.fga > 0 ? (s.fgp * s.fga + 0.5 * s.tpa * s.tpp) / s.fga : undefined),
+		astTo: (s) => (s.topg > 0.02 ? s.apg / s.topg : undefined),
+		// Points produced per 100 chances used, the offensive mirror of DRtg.
+		ortg: (s) => {
+			const used = s.fga + 0.44 * s.fta + s.topg;
+			return used > 0 ? (100 * (s.ppg + 1.1 * s.apg)) / used : undefined;
+		},
+		// awards.js already computes exactly this to rank the whole country;
+		// there was no reason for it to be invisible.
+		prod: (s) => s.ppg + 1.2 * s.rpg + 1.7 * s.apg + 2.6 * s.spg + 2.6 * s.bpg -
+			0.8 * s.topg + 55 * (s.ts - 0.52),
+	};
 
 	/* Per-game, totals or per-40. The table only ever showed per-game, which is
 	   the wrong unit half the time you are comparing two prospects who played
@@ -81,7 +125,12 @@
 	];
 	function statValue(p, key, mode) {
 		const s = p.stats;
-		if (!s || s[key] === undefined) return undefined;
+		if (!s) return undefined;
+		if (DERIVED[key]) {
+			const d = DERIVED[key](s);
+			return Number.isFinite(d) ? d : undefined;
+		}
+		if (s[key] === undefined) return undefined;
 		const v = s[key];
 		if (!Number.isFinite(v)) return undefined;
 		const col = COLUMNS.filter((c) => c.key === key)[0];
@@ -93,12 +142,98 @@
 		return v;
 	}
 
+	/* The value a column shows, for anything: a stat, a derived stat, a team
+	   context field or a physical. One function so the table, the CSV, the
+	   range filters and the sort all agree on what a column means. */
+	function cellValue(p, key, res, mode) {
+		const s = p.stats;
+		const team = res && res.teams ? res.teams[p.newCollege] : null;
+		switch (key) {
+		case "newOvr": return p.newOvr;
+		case "newPot": return p.newPot;
+		case "board": return p.boardRank;
+		case "move": return p.stockMove || 0;
+		case "hgtInches": return p.newHgtInches;
+		case "weight": return p.newWeight;
+		case "apRank": return team ? team.apRank : undefined;
+		case "seed": return team ? team.ncaaSeed : undefined;
+		// Sorted and filtered on games above .500, which is what the cell shows.
+		case "record": return team ? team.w - team.l : undefined;
+		default:
+			if (!s) return undefined;
+			return PCT_KEYS[key] && !DERIVED[key] ? s[key] : statValue(p, key, mode);
+		}
+	}
+
+	/* Height as a person reads it. */
+	function feet(inches) {
+		if (!Number.isFinite(inches)) return "";
+		return Math.floor(inches / 12) + "'" + Math.round(inches % 12) + '"';
+	}
+
 	function visibleColumns() {
 		const hidden = A().state.hiddenColumns || {};
 		return COLUMNS.filter((c) => c.fixed || !hidden[c.key]);
 	}
 
 	/* --------------------------------------------------------------- table */
+
+	/* What the pinned baseline recorded for one player and one column, so the
+	   main table can show a ± against it. Returns undefined when nothing is
+	   pinned or the player is not in the pinned class. */
+	const PINNED_COLS = { ppg: 1, rpg: 1, apg: 1, mpg: 1, ts: 1, board: 1 };
+	function pinnedValue(key, col) {
+		const st = A().state;
+		// A ± is only meaningful against the same units. Season totals and
+		// per-40 are conversions of a per-game snapshot; don't pretend.
+		if (st.statMode !== "perGame" || !PINNED_COLS[col]) return undefined;
+		const pin = st.pinned;
+		if (!pin || !pin.byKey) return undefined;
+		const p = pin.byKey[key];
+		return p && Number.isFinite(p[col]) ? p[col] : undefined;
+	}
+
+	/* O·P·A·S·H·N — overall, potential, archetype, school, height, name. */
+	const LOCK_KEYS = [
+		["ovr", "O", "overall"], ["pot", "P", "potential"],
+		["archetype", "A", "archetype"], ["college", "S", "school"],
+		["hgtInches", "H", "listed height"], ["name", "N", "name"],
+	];
+	function lockBadge(ov) {
+		const on = LOCK_KEYS.filter(([k]) => ov[k] !== undefined && ov[k] !== null)
+			.map(([, letter]) => letter);
+		if (ov.ratings && Object.keys(ov.ratings).length) on.push("R");
+		// A per-player reroll is state, not a lock; it gets its own mark.
+		if (Number(ov.reroll)) on.push("↻");
+		return on.length ? on.join("·") : "🔒";
+	}
+	function lockSummary(ov) {
+		const bits = LOCK_KEYS.filter(([k]) => ov[k] !== undefined && ov[k] !== null)
+			.map(([k, , label]) => label + " = " + ov[k]);
+		if (ov.ratings && Object.keys(ov.ratings).length) {
+			bits.push("ratings: " + Object.keys(ov.ratings)
+				.map((k) => k + " " + ov.ratings[k]).join(", "));
+		}
+		if (Number(ov.reroll)) bits.push("rerolled on his own " + ov.reroll + " time(s)");
+		return bits.length
+			? "Locked — survives a reroll:\n  " + bits.join("\n  ")
+			: "Nothing locked.";
+	}
+
+	function potTooltip(p) {
+		const f = p.potFactors;
+		if (!f) return "Potential " + p.newPot;
+		const label = {
+			arch: "archetype", age: "age", ageClass: "age within the class",
+			touch: "shooting touch (FT%)", frame: "frame", role: "role vs production",
+			bias: "your potential bias slider",
+		};
+		const bits = Object.keys(label)
+			.filter((k) => Number.isFinite(f[k]) && Math.abs(f[k]) >= 0.3)
+			.map((k) => "  " + label[k] + " " + (f[k] > 0 ? "+" : "") + f[k].toFixed(1));
+		return "Potential " + p.newPot + " — built from ovr " + p.newOvr + " plus:\n" +
+			(bits.length ? bits.join("\n") : "  nothing notable");
+	}
 
 	function delta(now, before) {
 		const d = now - before;
@@ -126,6 +261,44 @@
 			}
 			return 0;
 		});
+	}
+
+	/* The sort stack, shown and editable. Shift-clicking added a level and
+	   there was no way to see the whole stack or to remove one of them, so
+	   "tier, then PPG, then oh no what did I click" was a one-way trip. */
+	function sortStack() {
+		const st = A().state;
+		const bar = el("div", "sortstack");
+		if (!st.sort.length) return bar;
+		bar.appendChild(el("span", "hint", "sorted by "));
+		st.sort.forEach((k, i) => {
+			const col = COLUMNS.filter((c) => c.key === k.key)[0];
+			const chip = el("span", "chip");
+			chip.appendChild(document.createTextNode(
+				(i + 1) + ". " + ((col && col.label) || k.key) + (k.dir < 0 ? " ▾" : " ▴")));
+			const flip = el("button", "tiny", "⇅");
+			flip.title = "Reverse this level";
+			flip.setAttribute("aria-label", "Reverse the sort on " + ((col && col.label) || k.key));
+			flip.addEventListener("click", () => {
+				k.dir *= -1;
+				A().persist();
+				A().render();
+			});
+			chip.appendChild(flip);
+			if (st.sort.length > 1) {
+				const rm = el("button", "tiny", "×");
+				rm.title = "Remove this sort level";
+				rm.setAttribute("aria-label", "Remove the sort on " + ((col && col.label) || k.key));
+				rm.addEventListener("click", () => {
+					st.sort.splice(i, 1);
+					A().persist();
+					A().render();
+				});
+				chip.appendChild(rm);
+			}
+			bar.appendChild(chip);
+		});
+		return bar;
 	}
 
 	function buildTable(rows, columns) {
@@ -161,6 +334,7 @@
 				th.textContent = col.label + (sort[si].dir < 0 ? " ▾" : " ▴") +
 					(sort.length > 1 ? String(si + 1) : "");
 				th.setAttribute("aria-sort", sort[si].dir < 0 ? "descending" : "ascending");
+				th.classList.add("sorted");
 			}
 			tr.appendChild(th);
 		}
@@ -170,6 +344,24 @@
 		for (const r of sortRows(rows)) tbody.appendChild(r.node);
 		table.appendChild(tbody);
 		return table;
+	}
+
+	/* Move focus (and, when the editor is open, the editor) one row along. */
+	function moveRow(from, dir, follow) {
+		const rows = Array.prototype.slice.call(
+			from.parentNode ? from.parentNode.querySelectorAll("tr") : []);
+		const i = rows.indexOf(from);
+		const next = rows[i + dir];
+		if (!next) return;
+		if (follow && next.dataset.pkey) {
+			A().state.editing = next.dataset.pkey;
+			A().render();
+			const again = document.querySelector('tr[data-pkey="' +
+				next.dataset.pkey.replace(/["\\]/g, "\\$&") + '"]');
+			if (again) again.focus();
+			return;
+		}
+		next.focus();
 	}
 
 	function matchesFilter(p, res) {
@@ -188,7 +380,77 @@
 		}
 		if (f.changedOnly && !p.collegeChanged) return false;
 		if (f.lockedOnly && !A().state.overrides[p.key]) return false;
+		/* Numeric range filters. For a 70-man class across forty columns,
+		   "show me everyone over 18 points a game" and "overall 45 to 55" are
+		   the two verbs the table did not have: you could search text and pick
+		   a position, and that was all. */
+		for (const r of f.ranges || []) {
+			if (!r.key) continue;
+			const raw = cellValue(p, r.key, res, A().state.statMode);
+			if (raw === undefined || !Number.isFinite(raw)) return false;
+			// Percentages are entered the way they are displayed.
+			const v = PCT_KEYS[r.key] ? raw * 100 : raw;
+			if (Number.isFinite(r.min) && v < r.min) return false;
+			if (Number.isFinite(r.max) && v > r.max) return false;
+		}
 		return true;
+	}
+
+	/* Every column a range filter can be built on. */
+	function numericColumns() {
+		return COLUMNS.filter((c) => c.num && c.key !== "pick" && c.key !== "lock");
+	}
+
+	function rangeBar(res) {
+		const st = A().state;
+		const bar = el("div", "filters ranges");
+		const rows = st.filter.ranges || (st.filter.ranges = []);
+		const commit = () => { A().persist(); A().render(); };
+		rows.forEach((r, i) => {
+			const grp = el("span", "rangefilter");
+			const sel = el("select");
+			sel.setAttribute("aria-label", "Filter column");
+			sel.appendChild(new Option("— column —", ""));
+			for (const c of numericColumns()) {
+				sel.appendChild(new Option(c.label || c.key, c.key));
+			}
+			sel.value = r.key || "";
+			sel.addEventListener("change", () => { r.key = sel.value; commit(); });
+			grp.appendChild(sel);
+			const box = (which, ph) => {
+				const inp = el("input");
+				inp.type = "number";
+				inp.step = "any";
+				inp.className = "rangebox";
+				inp.placeholder = ph;
+				inp.setAttribute("aria-label", ph + " for " + (r.key || "the chosen column"));
+				inp.value = Number.isFinite(r[which]) ? String(r[which]) : "";
+				const apply = () => {
+					r[which] = inp.value === "" ? undefined : Number(inp.value);
+					commit();
+				};
+				inp.addEventListener("change", apply);
+				grp.appendChild(inp);
+			};
+			box("min", "min");
+			box("max", "max");
+			const rm = el("button", "tiny", "×");
+			rm.title = "Remove this filter";
+			rm.setAttribute("aria-label", "Remove the " + (r.key || "empty") + " filter");
+			rm.addEventListener("click", () => { rows.splice(i, 1); commit(); });
+			grp.appendChild(rm);
+			bar.appendChild(grp);
+		});
+		const add = el("button", "tiny", "+ range filter");
+		add.title = "Filter on a number — “PPG over 18”, “ovr 45 to 55”";
+		add.addEventListener("click", () => { rows.push({ key: "", min: undefined, max: undefined }); commit(); });
+		bar.appendChild(add);
+		if (rows.length) {
+			const clear = el("button", "tiny", "Clear ranges");
+			clear.addEventListener("click", () => { st.filter.ranges = []; commit(); });
+			bar.appendChild(clear);
+		}
+		return bar;
 	}
 
 	/* The search box used to call render() on every keystroke, which rebuilt
@@ -328,11 +590,19 @@
 		};
 		preset("Everything", COLUMNS.map((c) => c.key));
 		preset("Scouting", ["pos", "year", "board", "move", "newOvr", "newPot",
-			"archetype", "college", "conf", "mpg", "ppg", "rpg", "apg", "ts", "awards"]);
+			"archetype", "college", "conf", "hgtInches", "weight",
+			"mpg", "ppg", "rpg", "apg", "ts", "awards"]);
 		preset("Box score", ["pos", "college", "gp", "mpg", "ppg", "rpg", "apg",
 			"spg", "bpg", "topg", "pfpg", "fgp", "tpp", "ftp", "ts"]);
+		// "35% from three" means nothing without "on 7.8 attempts".
+		preset("Shooting", ["pos", "college", "mpg", "ppg", "fga", "tpa", "fta",
+			"tpar", "ftr", "fgp", "efg", "tpp", "ftp", "ts", "usg"]);
+		preset("Efficiency", ["pos", "college", "mpg", "usg", "ts", "efg", "ortg",
+			"drtg", "astTo", "prod", "ppg", "apg", "topg"]);
 		preset("Defence", ["pos", "college", "mpg", "drpg", "spg", "bpg", "cspg",
 			"deflpg", "chgpg", "drtg", "pfpg", "awards"]);
+		preset("Team context", ["pos", "college", "conf", "record", "apRank", "seed",
+			"newOvr", "mpg", "ppg", "usg", "ts", "awards"]);
 		box.appendChild(el("h4", null, "Presets"));
 		box.appendChild(presets);
 		A().modal("Columns", box, () => { A().persist(); A().render(); });
@@ -359,6 +629,7 @@
 		for (const t of pills) summary.appendChild(el("span", "pill", t));
 		view.appendChild(summary);
 		view.appendChild(filterBar(res));
+		view.appendChild(rangeBar(res));
 		view.appendChild(bulkBar(res));
 
 		const columns = visibleColumns();
@@ -373,13 +644,24 @@
 			if (st.selected[p.key]) cls.push("picked");
 			tr.className = cls.join(" ");
 			tr.tabIndex = 0;
+			tr.dataset.pkey = p.key;
+			if (st.editing === p.key) tr.classList.add("editing");
 			const open = () => A().openEditor(p);
 			tr.addEventListener("click", (e) => {
 				if (e.target.tagName === "BUTTON" || e.target.tagName === "INPUT") return;
 				open();
 			});
+			/* Row navigation. The editor opened on click and there was no way to
+			   walk the class from the keyboard, so reviewing seventy prospects
+			   meant seventy round trips to the mouse. j/k and the arrow keys
+			   move; if the editor is open it follows you down the table. */
 			tr.addEventListener("keydown", (e) => {
-				if (e.key === "Enter") { e.preventDefault(); open(); }
+				if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); return; }
+				const d = (e.key === "j" || e.key === "ArrowDown") ? 1
+					: (e.key === "k" || e.key === "ArrowUp") ? -1 : 0;
+				if (!d) return;
+				e.preventDefault();
+				moveRow(tr, d, st.editing !== null);
 			});
 			const sortVals = {};
 			for (const col of columns) {
@@ -401,10 +683,16 @@
 					sortVals.pick = st.selected[p.key] ? 1 : 0;
 					break;
 				}
-				case "lock":
-					td = el("td", null, st.overrides[p.key] ? "🔒" : "");
-					sortVals.lock = st.overrides[p.key] ? 1 : 0;
+				case "lock": {
+					/* WHAT is locked, not merely that something is. A padlock
+					   with no detail meant opening the editor to find out
+					   whether you had pinned his overall or only his school. */
+					const ov = st.overrides[p.key];
+					td = el("td", null, ov ? lockBadge(ov) : "");
+					if (ov) td.title = lockSummary(ov);
+					sortVals.lock = ov ? Object.keys(ov).length : 0;
 					break;
+				}
 				case "name":
 					td = el("td", "sticky");
 					td.appendChild(document.createTextNode(p.name));
@@ -440,6 +728,11 @@
 					td = el("td", "num");
 					td.appendChild(document.createTextNode(String(p.newPot)));
 					td.appendChild(delta(p.newPot, p.origPot));
+					/* p.potFactors carries the whole reason a player has upside
+					   — archetype, age, age within the class, shooting touch,
+					   frame, role against production — and only the editor
+					   showed it. It belongs on the number it explains. */
+					td.title = potTooltip(p);
 					sortVals.newPot = p.newPot;
 					break;
 				case "archetype":
@@ -466,12 +759,50 @@
 					td = wrapCell((p.awards || []).join("; "));
 					sortVals.awards = (p.awards || []).length;
 					break;
+				case "record":
+					td = el("td", null, team ? team.w + "-" + team.l : "");
+					sortVals.record = team ? team.w - team.l : undefined;
+					break;
+				case "apRank":
+					td = el("td", "num", team && team.apRank ? "#" + team.apRank : "");
+					// Unranked sorts below every ranked team, not above them.
+					sortVals.apRank = team && team.apRank ? -team.apRank : -999;
+					break;
+				case "seed":
+					td = el("td", "num", team && team.ncaaSeed ? String(team.ncaaSeed) : "");
+					sortVals.seed = team && team.ncaaSeed ? -team.ncaaSeed : -99;
+					break;
+				case "hgtInches":
+					td = el("td", "num", feet(p.newHgtInches));
+					sortVals.hgtInches = p.newHgtInches;
+					break;
+				case "weight":
+					td = el("td", "num",
+						Number.isFinite(p.newWeight) ? String(p.newWeight) : "");
+					sortVals.weight = p.newWeight;
+					break;
 				default: {
-					const v = PCT_KEYS[col.key] ? s[col.key] : statValue(p, col.key, mode);
-					td = el("td", "num", v === undefined ? ""
+					const v = cellValue(p, col.key, res, mode);
+					const base = v === undefined ? ""
 						: PCT_KEYS[col.key] ? pc(v)
-						: col.key === "gp" || (mode === "totals" && col.key !== "drtg")
-							? String(Math.round(v)) : n1(v));
+						// Rate ratios read as .381, the way every box score prints them.
+						: (col.key === "tpar" || col.key === "ftr") ? v.toFixed(3)
+						: col.key === "gp" ||
+							(mode === "totals" && !col.derived && col.key !== "drtg")
+							? String(Math.round(v)) : n1(v);
+					td = el("td", "num", base);
+					/* A small delta against the pinned class, so Pin is useful
+					   from the main table and not only from the Compare tab.
+					   delta() already existed and was used on two columns. */
+					const before = pinnedValue(p.key, col.key);
+					if (Number.isFinite(before) && Number.isFinite(v)) {
+						const d = v - before;
+						const shown = PCT_KEYS[col.key] ? (d * 100).toFixed(1) : d.toFixed(1);
+						if (Math.abs(Number(shown)) >= 0.05) {
+							td.appendChild(el("span", d > 0 ? "up" : "down",
+								" " + (d > 0 ? "+" : "") + shown));
+						}
+					}
 					sortVals[col.key] = v;
 				}
 				}
@@ -484,6 +815,7 @@
 			shown.length + " of " + res.players.length + " prospects shown · " +
 			"click a row to edit and lock, click a column to sort " +
 			"(shift-click for a second level)"));
+		view.appendChild(sortStack());
 		const wrap = el("div", "scroll");
 		wrap.appendChild(buildTable(rows, columns));
 		view.appendChild(wrap);
@@ -1328,11 +1660,18 @@
 		view.appendChild(wrap);
 	}
 
+	/* Derived columns, for anything outside this file that needs the same
+	   arithmetic (the CSV export, so a file and the screen cannot disagree). */
+	function derived(key, stats) {
+		return DERIVED[key] ? DERIVED[key](stats) : undefined;
+	}
+
 	global.Views = {
 		players: viewPlayers, teams: viewTeams, bracket: viewBracket, bulkBar,
 		awards: viewAwards, board: viewBoard, distribution: viewDistribution,
 		notes: viewNotes, gamelog: viewGameLog, compare: viewCompare,
-		COLUMNS, STAT_MODES, PCT_KEYS, statValue, matchesFilter, histogram,
+		COLUMNS, STAT_MODES, PCT_KEYS, DERIVED, derived, cellValue, statValue,
+		matchesFilter, numericColumns, histogram, feet,
 		el, n1, pc, wrapCell,
 	};
 })(window);

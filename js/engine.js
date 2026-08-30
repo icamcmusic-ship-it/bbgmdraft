@@ -17,6 +17,7 @@
 	const S = global.StatsSim;
 	const TN = global.Tournament;
 	const AW = global.Awards;
+	const CAL = global.Calibration;
 
 	/* Season length per non-NCAA destination. */
 	const PRO_GAMES = {
@@ -170,6 +171,34 @@
 		return Math.round(66 + (hgtRating / 100) * 24);
 	}
 
+	/* Where a BBGM export can keep the season, in the order worth trying. */
+	function findSeason(lf) {
+		const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 1900 &&
+			Number(v) < 3000 ? Number(v) : null);
+		const direct = num(lf.startingSeason) !== null ? num(lf.startingSeason) : num(lf.season);
+		if (direct !== null) return direct;
+		const ga = lf.gameAttributes;
+		if (ga) {
+			// Either { season: 2026 } or the array-of-rows form BBGM also writes.
+			const rows = Array.isArray(ga) ? ga : Object.keys(ga).map((k) => ({ key: k, value: ga[k] }));
+			for (const key of ["season", "startingSeason"]) {
+				for (const row of rows) {
+					if (!row || row.key !== key) continue;
+					const v = row.value && typeof row.value === "object" && "value" in row.value
+						? row.value.value : row.value;
+					const n = num(Array.isArray(v) && v.length ? v[v.length - 1].value : v);
+					if (n !== null) return n;
+				}
+			}
+		}
+		// Last resort: the draft year the players themselves carry.
+		for (const p of lf.players || []) {
+			const n = num(p && p.draft && p.draft.year);
+			if (n !== null) return n;
+		}
+		return null;
+	}
+
 	/* Reject a malformed file with a sentence a human can act on, instead of
 	   letting a TypeError out of the middle of the pipeline.
 
@@ -182,12 +211,21 @@
 		if (!Array.isArray(leagueFile.players) || !leagueFile.players.length) {
 			throw new Error("No players array in this file (or it is empty).");
 		}
-		if (!Number.isFinite(Number(leagueFile.startingSeason))) {
+		/* The season the class belongs to. BBGM has shipped exports where it is
+		   not at the top level — it can sit in gameAttributes (as a plain value
+		   or as one of the {start, value} history rows BBGM writes) or as a
+		   bare `season` — and a hard throw rejected files that carry it
+		   perfectly well, just somewhere else. Look for it before giving up,
+		   and only then ask the user. */
+		const season = findSeason(leagueFile);
+		if (season === null) {
 			throw new Error(
 				"This file has no startingSeason, so the season the stats belong to " +
 				"is unknown. Export the draft class from BBGM again, or add " +
 				'"startingSeason": <year> to the file.');
 		}
+		const seasonRecovered = !Number.isFinite(Number(leagueFile.startingSeason));
+		leagueFile.startingSeason = season;
 		const bad = [];
 		let missingPid = 0;
 		const seenPid = new Set();
@@ -222,6 +260,12 @@
 				bad.slice(0, 4).join("; ") + (bad.length > 4 ? "; …" : ""));
 		}
 		const warnings = [];
+		if (seasonRecovered) {
+			warnings.push("This file has no top-level startingSeason. " + season +
+				" was read from the file instead (gameAttributes, or the draft year " +
+				"on the players). If that is the wrong year, add " +
+				'"startingSeason": <year> to the file.');
+		}
 		if (missingPid) {
 			warnings.push(missingPid + " of " + leagueFile.players.length +
 				" players have no pid. Their position in the file is used instead, " +
@@ -234,6 +278,16 @@
 				"Row order is used to tell them apart.");
 		}
 		return { ok: true, warnings };
+	}
+
+	/* A per-player salt for the RNG streams. `reroll` re-draws ONE prospect:
+	   every stream in the generator is keyed off the player's key, so salting
+	   his key changes his draw and leaves every other player's stream
+	   untouched — which is the difference between "look at this guy again" and
+	   "reroll the class and hope the other sixty-nine come back the same". */
+	function rerollSalt(p) {
+		const n = Number(p && p.override && p.override.reroll);
+		return n ? "~" + Math.round(n) : "";
 	}
 
 	/* The stable per-player key every RNG stream and every lock is derived
@@ -308,7 +362,8 @@
 			// the exported file.
 			if (ov.name && String(ov.name).trim()) p.name = String(ov.name).trim();
 			p.newCollege = ov.college ||
-				assignCollege(rng.child("college:" + p.key), p.src, cfg);
+				assignCollege(
+					rng.child("college:" + p.key + rerollSalt(p)), p.src, cfg);
 			p.collegeChanged = p.newCollege !== p.origCollege;
 			// Professional (a EuroLeague club) as against amateur (DII, an NBA
 			// Academy). The UI tags the two differently and the award bar
@@ -323,8 +378,13 @@
 		if (cfg.ovrMode === "curve") curve = RB.classCurve(rng, players.length, cfg);
 
 		order.forEach((p, i) => {
-			const prng = rng.child("build:" + p.key);
 			const ov = p.override || {};
+			/* `reroll` re-draws ONE prospect. Every stream in the generator is
+			   keyed off the player's key, so salting his key changes his draw
+			   and leaves every other player's stream untouched — which is the
+			   difference between "look at this guy again" and "reroll the class
+			   and hope the other sixty-nine come back the same". */
+			const prng = rng.child("build:" + p.key + rerollSalt(p));
 			const targetOvr = Number.isFinite(ov.ovr)
 				? clamp(Math.round(ov.ovr), 0, 100)
 				: (curve ? curve[i] : p.origOvr);
@@ -507,14 +567,20 @@
 	function phaseStats(state) {
 		const { cfg, teams, bySchool } = state;
 		const statRng = state.rng.child("stats");
+		/* Which era's empirical anchors every rate in the stat model targets.
+		   Set once, here, so a run is internally consistent; see the header of
+		   js/calibration.js for why the answer is not always "2009-2021". */
+		CAL.setEra(cfg.era);
 
 		/* What each program's opponents actually looked like defensively. This
 		   is the channel that lets a conference of rim protectors hold everyone
 		   under their season rim percentage — before it, team defence affected
 		   nothing but the scoreboard. */
 		const profiles = {};
+		const shooting = {};
 		for (const name of Object.keys(teams)) {
 			profiles[name] = S.rosterDefenseProfile(teams[name]);
+			shooting[name] = S.rosterShooting(teams[name]);
 		}
 		for (const name of Object.keys(teams)) {
 			const t = teams[name];
@@ -522,6 +588,7 @@
 			let per = 0;
 			let ovr = 0;
 			let press = 0;
+			let fg = 0;
 			let n = 0;
 			for (const g of t.log) {
 				const pr = profiles[g.opp];
@@ -529,12 +596,17 @@
 				if (!pr) continue;
 				rim += pr.rim; per += pr.perimeter; ovr += pr.overall;
 				press += (opp && opp.style ? opp.style.press : 0);
+				fg += shooting[g.opp];
 				n++;
 			}
 			t.oppDefense = n
 				? { rim: rim / n, perimeter: per / n, overall: ovr / n }
 				: { rim: 0, perimeter: 0, overall: 0 };
 			t.oppPress = n ? press / n : 0;
+			// How well the schedule shot, so this team's defensive rebound pool
+			// answers to who it played rather than to a constant.
+			t.teamFg = shooting[name];
+			t.oppFg = n ? fg / n : shooting[name];
 		}
 
 		/* Every program in the country, not only the forty that happen to have
@@ -552,6 +624,8 @@
 				oppStrength: (team.sosAvg + conf.strength * 0.35) / 1.35,
 				oppDefense: team.oppDefense,
 				oppPress: team.oppPress,
+				teamFg: team.teamFg,
+				oppFg: team.oppFg,
 				games: Math.round(team.games),
 				league: S.NCAA_ENV,
 				pro: false,
@@ -694,7 +768,11 @@
 		},
 		{ name: "regular", deps: ["pace", "scoringEnv"], run: phaseRegular },
 		{ name: "postseason", deps: ["upsetFactor"], run: phasePostseason },
-		{ name: "stats", deps: ["pace", "scoringEnv", "statNoise"], run: phaseStats },
+		{
+			name: "stats",
+			deps: ["era", "pace", "scoringEnv", "efficiencyEnv", "statNoise"],
+			run: phaseStats,
+		},
 		{ name: "pot", deps: ["potBias", "potSpread"], run: phasePot },
 		{
 			name: "awards",
@@ -860,8 +938,11 @@
 			const games = PRO_GAMES[lgName] || 30;
 			T.pairUp(lrng, clubs, games, null, (A, B) => {
 				const when = lrng.random();
-				const sc = T.playGameScore(lrng, A, B, lrng.random() < 0.5 ? 1 : -1, cfg, when);
-				T.recordPostseason(A, B, sc, "reg", when, null);
+				// Which side was at home has to reach the log, or a prospect
+				// abroad never plays a home game.
+				const homeForA = lrng.random() < 0.5 ? 1 : -1;
+				const sc = T.playGameScore(lrng, A, B, homeForA, cfg, when);
+				T.recordPostseason(A, B, sc, "reg", when, null, homeForA);
 			});
 			for (const c of clubs) {
 				c.pct = c.games ? c.w / c.games : 0;
@@ -886,8 +967,9 @@
 				for (let i = 0; i < Math.floor(alive.length / 2); i++) {
 					const A = alive[i];
 					const B = alive[alive.length - 1 - i];
+					// Higher seed hosts, in the playoffs as on the scoreboard.
 					const sc = T.playGameScore(lrng, A, B, 1, cfg, 1, true);
-					T.recordPostseason(A, B, sc, "playoff", 1.05 + ri * 0.01, roundName);
+					T.recordPostseason(A, B, sc, "playoff", 1.05 + ri * 0.01, roundName, 1);
 					const winner = sc.won ? A : B;
 					gamesLog.push({
 						a: A, b: B, winner, round: roundName,
@@ -1266,7 +1348,8 @@
 
 	global.Engine = {
 		run, createRunner, exportFile, exportSeason, buildNote, classYear,
-		assignClassYears, inchesFromHgtRating, validateLeagueFile, playerKey,
+		assignClassYears, inchesFromHgtRating, validateLeagueFile, findSeason, playerKey,
+		rerollSalt,
 		signatureGame, simulateProLeagues, assignRecruiting,
 		NOTE_LINES, DEFAULT_NOTE_LINES, PHASES, PRO_GAMES,
 	};

@@ -45,7 +45,15 @@
 	   against 17.1 at a low major for the same ovr, when the real gap is 4-7. */
 	function makeFiller(rng, level, i) {
 		const mean = 0.60 * level + 12.6;
-		const talent = clamp(rng.normal(mean, 8.5) - Math.pow(i, 1.35) * 1.9, 6, 95);
+		/* The decay was steepened again (1.9 -> 2.4). At 1.9 a level-90 blue
+		   blood's returning core still averaged 66.6 against a prospect at
+		   about 76 — so four teammates sat within twelve points of the man who
+		   was supposed to lead the team, and usage and minutes were shared four
+		   ways. Measured: a high-major prospect played 29.2 minutes and scored
+		   13.4 against a low-major's 35.5 and 19.9 at the same overall rating,
+		   and where a prospect played predicted his scoring better than how
+		   good he was. */
+		const talent = clamp(rng.normal(mean, 8.5) - Math.pow(i, 1.35) * 2.4, 6, 95);
 		// Endurance drives how much of a rotation spot a player can actually
 		// hold, and it is the one rating that never fed the minutes model.
 		return {
@@ -217,13 +225,22 @@
 		});
 	}
 
-	/* A postseason game, recorded on both teams at once. `when` is deliberately
-	   above 1 so the chronological sort puts March after February. */
-	function recordPostseason(A, B, sc, stage, when, round) {
+	/* A game recorded on both teams at once. `when` is deliberately above 1 for
+	   postseason rounds so the chronological sort puts March after February.
+
+	   `homeForA` was hardcoded to 0 for both sides, which is right for a
+	   neutral-court bracket and wrong for the professional regular seasons,
+	   which route through here too (simulateProLeagues). Every abroad game
+	   therefore logged home: 0, and the home-court lift in the game-log
+	   generator — `g.home > 0 ? 0.055 : 0` — could never fire for a EuroLeague
+	   or G League prospect, so their game logs were flatter than college ones
+	   by construction. */
+	function recordPostseason(A, B, sc, stage, when, round, homeForA) {
+		const h = homeForA || 0;
 		record(A, B, sc.won, false,
-			{ us: sc.a, them: sc.b, ot: sc.ot, round }, 0, when, stage);
+			{ us: sc.a, them: sc.b, ot: sc.ot, round }, h, when, stage);
 		record(B, A, !sc.won, false,
-			{ us: sc.b, them: sc.a, ot: sc.ot, round }, 0, when, stage);
+			{ us: sc.b, them: sc.a, ot: sc.ot, round }, -h, when, stage);
 	}
 
 	/* Chronological order, once every game has been played.
@@ -274,11 +291,20 @@
 			const a = avail[0];
 			const rest = avail.slice(1);
 			let b = null;
-			// Prefer an opponent the filter likes, but never at the cost of
-			// leaving the schedule short.
+			/* Prefer an opponent the filter likes, but never at the cost of
+			   leaving the schedule short.
+
+			   The acceptance draw is made HERE and handed to the filter, rather
+			   than being taken inside the filter's own predicate. The
+			   non-conference filter used to call rng.random() inside itself, up
+			   to fourteen times per pairing, which left the schedule sensitive
+			   to loop order in a way nothing tested — and which is exactly the
+			   hazard the rng.child() comment in js/rng.js exists to warn about.
+			   Determinism held; reasoning about it did not. */
 			for (let tries = 0; tries < 14 && !b; tries++) {
 				const cand = rest[Math.floor(rng.random() * Math.min(rest.length, 24))];
-				if (cand && (!filterFn || filterFn(a, cand))) b = cand;
+				const roll = rng.random();
+				if (cand && (!filterFn || filterFn(a, cand, roll))) b = cand;
 			}
 			if (!b) b = rest[Math.floor(rng.random() * rest.length)];
 			onGame(a, b);
@@ -321,8 +347,8 @@
 		for (const t of all) shortfall.set(t, CONF_GAMES + NON_CONF_GAMES - t.games);
 		const nonConfTarget = NON_CONF_GAMES;
 		pairUp(rng, all, nonConfTarget,
-			(a, b) => a.conf !== b.conf &&
-				rng.random() < Math.exp(-Math.abs(a.rating - b.rating) / 24) + 0.06,
+			(a, b, roll) => a.conf !== b.conf &&
+				roll < Math.exp(-Math.abs(a.rating - b.rating) / 24) + 0.06,
 			(A, B) => {
 				play(A, B, A.prestige > B.prestige ? 1 : -1, false);
 			});
