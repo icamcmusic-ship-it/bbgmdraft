@@ -38,7 +38,7 @@
 		// --- blank colleges ----------------------------------------------
 		// Legacy headline sliders. They still work (and old shareable links
 		// still decode) but they are folded into leagueWeights below, which is
-		// the single source of truth now that there are thirteen destinations
+		// the single source of truth now that there are twenty-four destinations
 		// rather than three.
 		wEuroLeague: null,
 		wGLeague: null,
@@ -91,7 +91,7 @@
 		// How far into the national field the honours reach. Kept separate
 		// from the two things it used to silently also control.
 		awardStrictness: 1.0,
-		// Conference honours are their own dial: 31 conferences hand out far
+		// Conference honours are their own dial: 32 conferences hand out far
 		// more hardware than the national voters do, and wanting a realistic
 		// number of one is not wanting fewer of the other.
 		confAwardStrictness: 1.0,

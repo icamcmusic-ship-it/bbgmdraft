@@ -222,7 +222,7 @@
 	   name to the rebuilt draft prospects who play there. */
 	function buildPrograms(prospectsBySchool, rng) {
 		const teams = {};
-		// Colleges outside the built-in 353 (league files drift across BBGM
+		// Colleges outside the built-in 368 (league files drift across BBGM
 		// versions) become independent mid-level programs instead of crashing.
 		const extra = Object.keys(prospectsBySchool).filter((n) => !C.COLLEGES[n]);
 		const confStrength = conferenceDrift(rng.child("confdrift"));
@@ -569,7 +569,7 @@
 	}
 
 	/* Conference -> its teams, the single place that decides where programs
-	   outside the built-in 353 play.
+	   outside the built-in 368 play.
 
 	   Two or more of them form a synthetic "Independent" league. Exactly one
 	   used to fall through every branch — a conference of one cannot play

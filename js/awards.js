@@ -342,7 +342,7 @@
 
 	function assign(prospects, teams, tourney, cfg, rng) {
 		const strict = clamp(cfg.awardStrictness, 0.2, 3);
-		// Conference hardware is its own dial. 31 conferences hand out far more
+		// Conference hardware is its own dial. 32 conferences hand out far more
 		// of it than the national voters do, and wanting a realistic number of
 		// one was never a reason to get fewer of the other — but one slider
 		// used to drive both, plus the pro-league score bar on top.

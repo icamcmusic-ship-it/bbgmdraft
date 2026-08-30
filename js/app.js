@@ -1006,7 +1006,7 @@
 						   the season it recovered is applied here. */
 						data.startingSeason = check.season;
 						/* A full league export is 5,000+ players. Rebuilding all
-						   of them and simulating 353 programs with hundreds of
+						   of them and simulating 368 programs with hundreds of
 						   prospects apiece locks the tab with no progress bar and
 						   no way out, so take the draft class inside the file
 						   when there is one and say so. */
@@ -1158,7 +1158,7 @@
 
 	/* The engine is staged: a runner only redoes the phases whose settings
 	   changed. Moving the note template or an award dial used to re-simulate
-	   353 programs, 11,000 games and every stat line in the country — about
+	   368 programs, 11,000 games and every stat line in the country — about
 	   200ms of blocking work every 140ms while a slider was moving. */
 	function run() {
 		if (!state.files.length) return;

@@ -4,7 +4,7 @@
    run() is a thin wrapper over a staged pipeline (see PHASES). Each stage
    declares which settings it depends on, so the UI can re-run only what a
    given slider actually changed: moving "Award strictness" or the note
-   template no longer re-simulates 353 programs, 11,000 games and 3,500 stat
+   template no longer re-simulates 368 programs, 11,000 games and 3,500 stat
    lines to change one line of text. */
 (function (global) {
 	"use strict";
@@ -306,7 +306,7 @@
 		/* How many of these players actually belong to the draft class.
 
 		   Dropping a full BBGM league export (5,000+ players) instead of a
-		   draft class rebuilt every player and simulated 353 programs with
+		   draft class rebuilt every player and simulated 368 programs with
 		   hundreds of prospects apiece: the tab locked with no progress and no
 		   way out, and nothing in here checked the count. The class is the
 		   players whose draft year is this season; if that leaves a plausible
@@ -1170,7 +1170,7 @@
 
 	/* Which settings each phase reads. The UI uses this to re-run only what a
 	   given change actually invalidates: the note template and the award dials
-	   used to cost a full 353-program season simulation each time they moved. */
+	   used to cost a full 368-program season simulation each time they moved. */
 	const PHASES = [
 		{
 			name: "build",
