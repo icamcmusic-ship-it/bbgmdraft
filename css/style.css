@@ -532,3 +532,7 @@ table.mini { border-collapse: collapse; font-size: 12px; width: 100%; }
 table.mini th, table.mini td { padding: 3px 6px; border-bottom: 1px solid var(--line); }
 table.mini td.num { text-align: right; font-variant-numeric: tabular-nums; }
 table.mini tr.now { font-weight: 600; }
+
+/* Two prospects side by side: the better number in each row is marked with a
+   glyph as well as a colour. */
+table.compare td.num.up::after { content: " ▲"; font-size: .8em; }

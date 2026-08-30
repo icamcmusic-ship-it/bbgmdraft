@@ -310,6 +310,33 @@ function ok(name, condition, detail) {
 	});
 	await page.waitForTimeout(800);
 
+	/* The team page and the conference standings, both of which are new views
+	   over data the sim has always produced. */
+	await page.locator("#tabs button", { hasText: "AP Poll" }).first().click();
+	await page.waitForTimeout(250);
+	ok("the conference standings render",
+		(await page.locator("#view").innerText()).indexOf("Conference standings") !== -1);
+	await page.locator("#view table tbody tr td button.linky").first().click();
+	await page.waitForTimeout(300);
+	const teamText = await page.locator("#view").innerText();
+	ok("a team page opens with its coach, its splits and its schedule",
+		/Coach/.test(teamText) && /Home . away . neutral/.test(teamText) &&
+		/Schedule/.test(teamText), teamText.slice(0, 90));
+	await page.locator('#view button:has-text("All teams")').click();
+	await page.waitForTimeout(250);
+
+	/* Two prospects side by side. */
+	await page.locator("#tabs button", { hasText: "Compare" }).first().click();
+	await page.waitForTimeout(250);
+	await page.selectOption('#view select[aria-label="Prospect 1"]', { index: 1 });
+	await page.waitForTimeout(300);
+	await page.selectOption('#view select[aria-label="Prospect 2"]', { index: 2 });
+	await page.waitForTimeout(300);
+	ok("two prospects compare side by side",
+		(await page.locator("#view table.compare").innerText()).indexOf("True shooting") !== -1);
+	await page.locator("#tabs button", { hasText: "Prospects" }).first().click();
+	await page.waitForTimeout(250);
+
 	console.log("\nBatch");
 	await page.evaluate(() => {
 		// The sidebar groups are collapsible and remember their state.
@@ -328,6 +355,32 @@ function ok(name, condition, detail) {
 		/p5/.test(batchText) && /p95/.test(batchText) && /batch seed/.test(batchText));
 	ok("the batch says which population its per-player rows cover",
 		/NCAA prospects per class/.test(batchText));
+	const withWorker = batchText;
+
+	/* The main-thread fallback, which nothing tested.
+
+	   Opening index.html straight off the disk blocks workers in most
+	   browsers, and that is the documented way to use this tool — so the path
+	   most users are on was the one path with no coverage at all. Forced by
+	   making the Worker constructor throw, which is exactly what a file://
+	   browser does. */
+	await page.evaluate(() => {
+		window.Worker = function () { throw new Error("workers are blocked"); };
+	});
+	await page.locator("#btnBatch").click();
+	await page.waitForFunction(
+		() => document.getElementById("batchProgress").hidden === true,
+		null, { timeout: 120000 });
+	await page.waitForTimeout(250);
+	const inlineText = await page.locator("#view").innerText();
+	ok("batch falls back to the main thread when a worker cannot start",
+		/mean ovr/.test(inlineText) && /batch seed/.test(inlineText));
+	// Both paths derive each class's seed from the batch seed the same way, so
+	// the same batch seed has to produce the same table either way.
+	const strip = (t) => t.replace(/batch seed [^\n]*/, "");
+	ok("the fallback produces the same batch the worker does",
+		strip(inlineText) === strip(withWorker),
+		strip(inlineText) === strip(withWorker) ? "" : "worker and inline disagree");
 
 	console.log("\nNo errors");
 	ok("no console or page errors", errors.length === 0, errors.join("\n         "));

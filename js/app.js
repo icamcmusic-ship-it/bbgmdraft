@@ -41,6 +41,11 @@
 		statMode: "perGame",
 		density: "normal",
 		redo: [],
+		// The two prospects the Compare tab is holding side by side.
+		compare: [null, null],
+		// The programme whose page the Teams tab is showing, if any.
+		team: null,
+		standingsConf: null,
 		compactBracket: false,
 		theme: "system",
 		logPlayer: null,
@@ -75,6 +80,8 @@
 				customPresets: state.customPresets,
 				hiddenColumns: state.hiddenColumns,
 				statMode: state.statMode,
+				compare: state.compare,
+				standingsConf: state.standingsConf,
 				density: state.density,
 				compactBracket: state.compactBracket,
 				theme: state.theme,
@@ -127,6 +134,8 @@
 		if (saved.customPresets) state.customPresets = saved.customPresets;
 		if (saved.hiddenColumns) state.hiddenColumns = saved.hiddenColumns;
 		if (saved.statMode) state.statMode = saved.statMode;
+		if (Array.isArray(saved.compare)) state.compare = saved.compare.slice(0, 2);
+		if (saved.standingsConf) state.standingsConf = saved.standingsConf;
 		if (saved.density) state.density = saved.density;
 		state.compactBracket = !!saved.compactBracket;
 		if (saved.theme) state.theme = saved.theme;

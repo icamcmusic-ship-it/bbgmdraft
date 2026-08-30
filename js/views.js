@@ -1076,12 +1076,20 @@
 	/* ---------------------------------------------------------- team views */
 
 	function viewTeams(view, res) {
+		/* A team page. You could follow a programme through the bracket and
+		   never see its roster, its style, its coach, its four prospects and
+		   its schedule in one place. */
+		if (A().state.team) {
+			view.appendChild(teamPage(view, res, A().state.team));
+			return;
+		}
 		view.appendChild(el("h3", null, "AP Top 25"));
 		view.appendChild(el("p", "legendline",
 			"Rankings come from record, strength of schedule and roster quality. " +
 			"Program strength starts from each school's BBGM draft frequency, then " +
-			"this year's prospects are layered on top. Every one of the 353 " +
-			"programs plays a full season, so the ratings below are real."));
+			"this year's prospects are layered on top. Every one of the 368 " +
+			"programs plays a full season, so the ratings below are real. " +
+			"Click a team for its page."));
 		const wrap = el("div", "scroll");
 		const table = el("table");
 		const thead = el("thead");
@@ -1098,7 +1106,7 @@
 		res.poll.forEach((t, i) => {
 			const tr = el("tr");
 			tr.appendChild(el("td", "num", String(i + 1)));
-			tr.appendChild(el("td", null, t.name));
+			tr.appendChild(el("td", null, "")).appendChild(teamLink(t.name));
 			tr.appendChild(el("td", null, t.conf));
 			tr.appendChild(el("td", null, t.w + "-" + t.l + (t.confRegularChamp ? " ★" : "")));
 			tr.appendChild(el("td", null, t.cw + "-" + t.cl));
@@ -1144,6 +1152,8 @@
 			cards.appendChild(c);
 		}
 		view.appendChild(cards);
+
+		view.appendChild(conferenceStandings(res));
 
 		const leagues = res.proLeagues || {};
 		for (const name of Object.keys(leagues)) {
@@ -1753,6 +1763,11 @@
 	/* --------------------------------------------------------------- compare */
 
 	function viewCompare(view, res) {
+		/* Two verbs, not one. Pin gives you class-versus-class, which is what
+		   this tab did; the obvious missing one is player-versus-player, which
+		   is the comparison a draft board is actually made of and which the
+		   tool could not do at all. */
+		view.appendChild(playerCompare(res));
 		const pinned = A().state.pinned;
 		if (!pinned) {
 			view.appendChild(el("p", "legendline",
@@ -1839,6 +1854,314 @@
 		table.appendChild(tb);
 		wrap.appendChild(table);
 		view.appendChild(wrap);
+	}
+
+	function teamLink(name) {
+		const b = el("button", "linky", name);
+		b.addEventListener("click", () => {
+			A().state.team = name;
+			A().state.tab = "teams";
+			A().persist();
+			A().render();
+		});
+		return b;
+	}
+
+	/* Conference standings. The data has always been there — cw/cl, conference
+	   tournaments, an auto bid — and was never shown as a table, so "how did
+	   the Big East go this year" was a question the tool could not answer. */
+	function conferenceStandings(res) {
+		const box = el("div");
+		box.appendChild(el("h3", null, "Conference standings"));
+		const byConf = {};
+		for (const t of Object.values(res.teams)) {
+			(byConf[t.conf] = byConf[t.conf] || []).push(t);
+		}
+		const st = A().state;
+		const bar = el("div", "filters");
+		const sel = el("select");
+		sel.setAttribute("aria-label", "Conference");
+		sel.setAttribute("data-focus", "confpick");
+		const names = Object.keys(byConf).sort((a, b) => {
+			const sa = (C.CONFERENCES[a] || {}).strength || 0;
+			const sb = (C.CONFERENCES[b] || {}).strength || 0;
+			return sb - sa || a.localeCompare(b);
+		});
+		for (const n of names) sel.appendChild(new Option(n, n));
+		if (!st.standingsConf || names.indexOf(st.standingsConf) === -1) {
+			st.standingsConf = names[0];
+		}
+		sel.value = st.standingsConf;
+		sel.addEventListener("change", () => {
+			st.standingsConf = sel.value;
+			A().persist();
+			A().render();
+		});
+		bar.appendChild(sel);
+		box.appendChild(bar);
+		const pool = (byConf[st.standingsConf] || []).slice()
+			.sort((a, b) => (b.cw - b.cl) - (a.cw - a.cl) || b.rating - a.rating);
+		const meta = C.CONFERENCES[st.standingsConf];
+		if (meta) {
+			const drift = pool.length && Number.isFinite(pool[0].confStrength)
+				? pool[0].confStrength : meta.strength;
+			box.appendChild(el("p", "legendline",
+				"Strength " + drift.toFixed(0) + " this season, against a baseline of " +
+				meta.strength + " — conference strength drifts from year to year."));
+		}
+		const wrap = el("div", "scroll");
+		const table = el("table");
+		const hr = el("tr");
+		for (const h of ["Team", "Conf", "Overall", "SOS", "ORtg", "DRtg", "Postseason"]) {
+			const th = el("th", ["SOS", "ORtg", "DRtg"].indexOf(h) >= 0 ? "num" : "", h);
+			th.scope = "col";
+			hr.appendChild(th);
+		}
+		const thead = el("thead");
+		thead.appendChild(hr);
+		table.appendChild(thead);
+		const tb = el("tbody");
+		for (const t of pool) {
+			const tr = el("tr");
+			const td = el("td", "sticky");
+			td.appendChild(teamLink(t.name));
+			if (t.confRegularChamp) td.appendChild(document.createTextNode(" ★"));
+			if (t.confTourneyChamp) td.appendChild(document.createTextNode(" 🏆"));
+			tr.appendChild(td);
+			tr.appendChild(el("td", null, t.cw + "-" + t.cl));
+			tr.appendChild(el("td", null, t.w + "-" + t.l));
+			tr.appendChild(el("td", "num", t.sosAvg.toFixed(1)));
+			tr.appendChild(el("td", "num", t.offRtg ? t.offRtg.toFixed(1) : "—"));
+			tr.appendChild(el("td", "num", t.defRtg ? t.defRtg.toFixed(1) : "—"));
+			tr.appendChild(el("td", null, t.ncaaSeed ? "No. " + t.ncaaSeed + " seed, " +
+				t.ncaaResult : (t.nitResult || "—")));
+			tb.appendChild(tr);
+		}
+		table.appendChild(tb);
+		wrap.appendChild(table);
+		box.appendChild(wrap);
+		return box;
+	}
+
+	/* One programme: who coaches it, how it plays, who is on it, and every game
+	   it played. */
+	function teamPage(view, res, name) {
+		const t = res.teams[name];
+		const box = el("div");
+		const back = el("button", "tiny", "← All teams");
+		back.addEventListener("click", () => {
+			A().state.team = null;
+			A().persist();
+			A().render();
+		});
+		box.appendChild(back);
+		if (!t) {
+			box.appendChild(el("p", "hint", "No such programme in this class."));
+			return box;
+		}
+		box.appendChild(el("h3", null, t.name + " — " + t.w + "-" + t.l +
+			(t.apRank ? "  (AP #" + t.apRank + ")" : "")));
+		const dl = el("dl", "shortcuts");
+		const row = (k, v) => {
+			dl.appendChild(el("dt", null, k));
+			dl.appendChild(el("dd", null, v));
+		};
+		row("Conference", t.conf + " " + t.cw + "-" + t.cl +
+			(t.confRegularChamp ? " · regular-season champion" : "") +
+			(t.confTourneyChamp ? " · tournament champion" : ""));
+		if (t.coach) {
+			row("Coach", t.coach.name + ", year " + t.coach.tenure +
+				" — plays " + t.style.name);
+		}
+		row("Programme level", Math.round(t.level) + " (rating " +
+			t.rating.toFixed(1) + ")");
+		if (Number.isFinite(t.pace)) row("Tempo", t.pace.toFixed(1) + " possessions a game");
+		if (t.offRtg) {
+			row("Efficiency", "ORtg " + t.offRtg.toFixed(1) +
+				" · DRtg " + t.defRtg.toFixed(1) + " · SOS " + t.sosAvg.toFixed(1));
+		}
+		row("Postseason", t.ncaaSeed ? "No. " + t.ncaaSeed + " seed, " + t.ncaaResult
+			: (t.nitResult || "Did not make the field"));
+		// Home and away. The schedule has always carried it and the game log
+		// used it for a lift; no split was ever shown.
+		const home = t.log.filter((g) => g.home > 0);
+		const away = t.log.filter((g) => g.home < 0);
+		const neutral = t.log.filter((g) => !g.home);
+		const rec = (l) => l.filter((g) => g.won).length + "-" +
+			l.filter((g) => !g.won).length;
+		row("Home / away / neutral",
+			rec(home) + " at home · " + rec(away) + " on the road · " +
+			rec(neutral) + " on neutral floors");
+		if ((t.outages || []).length) {
+			row("Injuries", t.outages.map((o) => {
+				const who = t.prospects.filter((p) => p.key === o.who)[0];
+				return (who ? who.name : "a starter") + " (" + o.kind + ")";
+			}).join(", "));
+		}
+		box.appendChild(dl);
+
+		box.appendChild(el("h4", null, "Prospects"));
+		const plist = el("div", "cards");
+		for (const p of t.prospects) {
+			const c = el("div", "card");
+			const h = el("h4");
+			const b = el("button", "linky", p.name);
+			b.addEventListener("click", () => {
+				A().state.team = null;
+				A().state.tab = "players";
+				A().openEditor(p);
+			});
+			h.appendChild(b);
+			c.appendChild(h);
+			c.appendChild(el("div", "note",
+				p.newPos + " " + p.newOvr + "/" + p.newPot + " · " + p.archetype +
+				(p.stats ? "\n" + n1(p.stats.mpg) + " mpg, " + n1(p.stats.ppg) + "/" +
+					n1(p.stats.rpg) + "/" + n1(p.stats.apg) : "\nNo season")));
+			plist.appendChild(c);
+		}
+		box.appendChild(plist);
+
+		box.appendChild(el("h4", null, "Schedule"));
+		const wrap = el("div", "scroll");
+		const table = el("table");
+		const hr = el("tr");
+		for (const h of ["#", "Opponent", "Where", "Result", "Score", "Stage"]) {
+			const th = el("th", h === "#" ? "num" : "", h);
+			th.scope = "col";
+			hr.appendChild(th);
+		}
+		const thead = el("thead");
+		thead.appendChild(hr);
+		table.appendChild(thead);
+		const tb = el("tbody");
+		t.log.forEach((g, i) => {
+			const tr = el("tr", g.won ? "" : "down");
+			tr.appendChild(el("td", "num", String(i + 1)));
+			const td = el("td", "sticky");
+			td.appendChild(teamLink(g.opp));
+			tr.appendChild(td);
+			tr.appendChild(el("td", null,
+				g.home > 0 ? "home" : g.home < 0 ? "away" : "neutral"));
+			tr.appendChild(el("td", null, g.won ? "W" : "L"));
+			tr.appendChild(el("td", null, g.pf !== null
+				? g.pf + "-" + g.pa + (g.ot ? " (" + g.ot + "OT)" : "") : "—"));
+			tr.appendChild(el("td", null,
+				g.round || (g.conference ? "conference" : g.stage)));
+			tb.appendChild(tr);
+		});
+		table.appendChild(tb);
+		wrap.appendChild(table);
+		box.appendChild(wrap);
+		return box;
+	}
+
+	/* Two prospects side by side, on every row that has a number in it. */
+	const COMPARE_ROWS = [
+		["newOvr", "Overall", 0], ["newPot", "Potential", 0],
+		["hgtInches", "Height", 0], ["weight", "Weight", 0],
+		["gp", "Games", 0], ["mpg", "Minutes", 1], ["ppg", "Points", 1],
+		["rpg", "Rebounds", 1], ["apg", "Assists", 1], ["spg", "Steals", 1],
+		["bpg", "Blocks", 1], ["topg", "Turnovers", 1, true],
+		["fga", "Field goals", 1], ["tpa", "Threes", 1], ["fta", "Free throws", 1],
+		["usg", "Usage", 1], ["ts", "True shooting", 1], ["tpp", "3P%", 1],
+		["ftp", "FT%", 1], ["drtg", "Defensive rating", 1, true],
+		["board", "Board position", 0, true],
+	];
+
+	function playerCompare(res) {
+		const st = A().state;
+		if (!st.compare) st.compare = [null, null];
+		const box = el("div", "card");
+		box.appendChild(el("h4", null, "Two prospects, side by side"));
+		const bar = el("div", "filters");
+		const sorted = res.players.slice()
+			.sort((a, b) => (a.boardRank || 999) - (b.boardRank || 999));
+		[0, 1].forEach((slot) => {
+			const sel = el("select");
+			sel.setAttribute("aria-label", "Prospect " + (slot + 1));
+			sel.setAttribute("data-focus", "compare" + slot);
+			sel.appendChild(new Option("— pick a prospect —", ""));
+			for (const p of sorted) {
+				sel.appendChild(new Option(
+					(p.boardRank ? p.boardRank + ". " : "") + p.name +
+						" (" + p.newPos + " " + p.newOvr + ")", p.key));
+			}
+			sel.value = st.compare[slot] || "";
+			sel.addEventListener("change", () => {
+				st.compare[slot] = sel.value || null;
+				A().persist();
+				A().render();
+			});
+			bar.appendChild(sel);
+		});
+		const swap = el("button", "tiny", "Swap");
+		swap.addEventListener("click", () => {
+			st.compare = [st.compare[1], st.compare[0]];
+			A().persist();
+			A().render();
+		});
+		bar.appendChild(swap);
+		box.appendChild(bar);
+
+		const find = (k) => res.players.filter((p) => p.key === k)[0] || null;
+		const a = find(st.compare[0]);
+		const b = find(st.compare[1]);
+		if (!a || !b) {
+			box.appendChild(el("p", "hint",
+				"Pick two prospects to see every number they differ on."));
+			return box;
+		}
+		const valueOf = (p, key) => {
+			if (key === "board") return p.boardRank;
+			if (key === "hgtInches") return p.newHgtInches;
+			if (key === "weight") return p.newWeight;
+			if (key === "newOvr" || key === "newPot") return p[key];
+			if (!p.stats) return undefined;
+			if (key === "usg" || key === "ts" || key === "tpp" || key === "ftp") {
+				return p.stats[key] * 100;
+			}
+			return p.stats[key];
+		};
+		const table = el("table", "mini compare");
+		const head = el("tr");
+		head.appendChild(el("th", null, ""));
+		head.appendChild(el("th", "num", a.name));
+		head.appendChild(el("th", "num", b.name));
+		table.appendChild(head);
+		const meta = (label, x, y) => {
+			const tr = el("tr");
+			tr.appendChild(el("td", null, label));
+			tr.appendChild(el("td", null, x));
+			tr.appendChild(el("td", null, y));
+			table.appendChild(tr);
+		};
+		meta("Position", a.newPos, b.newPos);
+		meta("Archetype", a.archetype, b.archetype);
+		meta("Year", a.classYear, b.classYear);
+		meta("School", a.proClub || a.newCollege, b.proClub || b.newCollege);
+		for (const [key, label, digits, lowerBetter] of COMPARE_ROWS) {
+			const x = valueOf(a, key);
+			const y = valueOf(b, key);
+			if (!Number.isFinite(x) && !Number.isFinite(y)) continue;
+			const tr = el("tr");
+			tr.appendChild(el("td", null, label));
+			const cell = (v, other) => {
+				const td = el("td", "num",
+					Number.isFinite(v) ? v.toFixed(digits) : "—");
+				if (Number.isFinite(v) && Number.isFinite(other) && v !== other) {
+					const better = lowerBetter ? v < other : v > other;
+					// A glyph as well as the class, because colour alone is not
+					// a channel everyone has.
+					if (better) td.classList.add("up");
+				}
+				return td;
+			};
+			tr.appendChild(cell(x, y));
+			tr.appendChild(cell(y, x));
+			table.appendChild(tr);
+		}
+		box.appendChild(table);
+		return box;
 	}
 
 	/* Derived columns, for anything outside this file that needs the same
