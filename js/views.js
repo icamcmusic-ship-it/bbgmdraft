@@ -244,19 +244,44 @@
 
 	/* Multi-column sort. shift-click adds a key rather than replacing it, so
 	   "tier, then PPG" is expressible. */
+	/* Multi-key comparison with one rule for missing values: they sort LAST,
+	   in whichever direction the column is sorted.
+
+	   `(va || 0) - (vb || 0)` made a player with no stat line indistinguishable
+	   from one who genuinely averaged 0.0, so sorting by PPG put the
+	   international prospects who never played among the men who played and
+	   scored nothing. The string branch fired if EITHER value was a string, so
+	   a column with mixed types compared as text or as numbers depending on
+	   which pair the sort happened to reach first, which is not a total order
+	   and can leave the result in any arrangement at all. Now the type of the
+	   comparison is decided by the column, once. */
+	function isBlank(v) {
+		return v === undefined || v === null || v === "" ||
+			(typeof v === "number" && !Number.isFinite(v));
+	}
+
 	function sortRows(rows) {
 		const keys = A().state.sort;
+		const numeric = {};
+		for (const { key } of keys) {
+			const col = COLUMNS.filter((c) => c.key === key)[0];
+			numeric[key] = col ? col.num !== false : true;
+		}
 		return rows.slice().sort((a, b) => {
 			for (const { key, dir } of keys) {
 				const va = a.sortVals[key];
 				const vb = b.sortVals[key];
-				let cmp;
-				if (typeof va === "string" || typeof vb === "string") {
-					cmp = String(va === undefined ? "" : va)
-						.localeCompare(String(vb === undefined ? "" : vb));
-				} else {
-					cmp = (va || 0) - (vb || 0);
+				const ba = isBlank(va);
+				const bb = isBlank(vb);
+				// Missing sorts last either way, so reversing a column never
+				// fills the top of the table with players who have no value.
+				if (ba || bb) {
+					if (ba && bb) continue;
+					return (ba ? 1 : -1) * dir;
 				}
+				const cmp = numeric[key]
+					? Number(va) - Number(vb)
+					: String(va).localeCompare(String(vb));
 				if (cmp) return cmp * dir;
 			}
 			return 0;
@@ -353,6 +378,11 @@
 		const i = rows.indexOf(from);
 		const next = rows[i + dir];
 		if (!next) return;
+		// Roving tabindex: the row with focus is the one row in the tab order.
+		from.tabIndex = -1;
+		from.removeAttribute("data-focus");
+		next.tabIndex = 0;
+		next.setAttribute("data-focus", "row");
 		if (follow && next.dataset.pkey) {
 			A().state.editing = next.dataset.pkey;
 			A().render();
@@ -387,7 +417,19 @@
 		for (const r of f.ranges || []) {
 			if (!r.key) continue;
 			const raw = cellValue(p, r.key, res, A().state.statMode);
-			if (raw === undefined || !Number.isFinite(raw)) return false;
+			/* A player with no value for the column is EXCLUDED and counted,
+			   not silently deleted.
+
+			   apRank and seed only exist for D-I players, so adding a range
+			   filter on either made every EuroLeague, G League and DII prospect
+			   vanish from the table with nothing on screen to say why — the
+			   count line said "41 of 70 shown" and the missing 29 had no
+			   attribute in common the user could see. It is the same outcome,
+			   but the row count now names it (see rangeBar). */
+			if (raw === undefined || !Number.isFinite(raw)) {
+				p.rangeNoValue = true;
+				return false;
+			}
 			// Percentages are entered the way they are displayed.
 			const v = PCT_KEYS[r.key] ? raw * 100 : raw;
 			if (Number.isFinite(r.min) && v < r.min) return false;
@@ -434,6 +476,18 @@
 			};
 			box("min", "min");
 			box("max", "max");
+			/* The scale a value is entered on. "PPG over 18" and "TS% over 55"
+			   are two different scales — PCT_KEYS multiplies by 100 for entry —
+			   and nothing on screen said so, so "TS% over 0.55" quietly matched
+			   nobody. */
+			if (r.key) {
+				const unit = PCT_KEYS[r.key] ? "%"
+					: (r.key === "tpar" || r.key === "ftr") ? "rate 0-1"
+					: r.key === "hgtInches" ? "inches"
+					: r.key === "weight" ? "lb"
+					: "";
+				if (unit) grp.appendChild(el("span", "unit", unit));
+			}
 			const rm = el("button", "tiny", "×");
 			rm.title = "Remove this filter";
 			rm.setAttribute("aria-label", "Remove the " + (r.key || "empty") + " filter");
@@ -462,17 +516,20 @@
 		q.placeholder = placeholder;
 		q.value = getter();
 		q.setAttribute("aria-label", label);
+		/* The re-render restores focus and the caret by itself (see
+		   App.render), so this no longer reaches for `the first search input in
+		   the document` — which grabbed the wrong box on any tab with two of
+		   them — and no longer forces the caret to the end of the value 180ms
+		   after every keystroke, which made editing the middle of a query
+		   impossible: type "pointguard", click between the words to add a
+		   space, and the caret snapped back to the end. */
+		q.setAttribute("data-focus", "search:" + label);
 		let t = null;
 		q.addEventListener("input", () => {
 			clearTimeout(t);
 			t = setTimeout(() => {
 				setter(q.value);
 				A().render();
-				const next = document.querySelector('input[type=search]');
-				if (next) {
-					next.focus();
-					next.setSelectionRange(next.value.length, next.value.length);
-				}
 			}, 180);
 		});
 		return q;
@@ -613,12 +670,18 @@
 		const summary = el("div", "rowflex");
 		const ncaa = res.players.filter((p) => !p.nonNcaa);
 		const conv = res.players.filter((p) => p.collegeChanged);
-		const avgOvr = res.players.reduce((a, p) => a + p.newOvr, 0) / res.players.length;
-		const avgOld = res.players.reduce((a, p) => a + p.origOvr, 0) / res.players.length;
+		/* Every one of these divided or Math.max'd over a list that validation
+		   makes non-empty for a whole class — but the same helpers run over
+		   filtered sets and over classes with no D-I players at all, where
+		   Math.max.apply(null, []) is -Infinity and a mean is NaN. */
+		const n = res.players.length || 1;
+		const avgOvr = res.players.reduce((a, p) => a + p.newOvr, 0) / n;
+		const avgOld = res.players.reduce((a, p) => a + p.origOvr, 0) / n;
 		const pills = [
 			res.players.length + " prospects",
 			"avg ovr " + avgOld.toFixed(1) + " → " + avgOvr.toFixed(1),
-			"top ovr " + Math.max.apply(null, res.players.map((p) => p.newOvr)),
+			"top ovr " + (res.players.length
+				? Math.max.apply(null, res.players.map((p) => p.newOvr)) : "—"),
 			conv.length + " colleges reassigned",
 			ncaa.length + " in NCAA D-I",
 			Object.keys(st.overrides).length + " locked",
@@ -626,14 +689,37 @@
 		if (res.flavor && res.flavor.name !== "balanced") {
 			pills.push("this class is " + res.flavor.label);
 		}
+		/* What makes THIS class this one. The class is drawn from a pool of
+		   builds and given two to four forced anomalies, and both were
+		   invisible: a user rerolling had no way to see that the year was a
+		   stretch-big year, only to feel that it was not. */
+		if (res.archetypePool && res.archetypePool.length) {
+			pills.push(res.archetypePool.length + " builds in this class");
+		}
 		for (const t of pills) summary.appendChild(el("span", "pill", t));
 		view.appendChild(summary);
+		if (res.surprises && res.surprises.length) {
+			const line = el("p", "legendline");
+			line.appendChild(document.createTextNode("Story of the class: "));
+			res.surprises.forEach((sp, i) => {
+				if (i) line.appendChild(document.createTextNode(" · "));
+				const b = el("button", "linky", sp.player + ", " + sp.label);
+				b.addEventListener("click", () => {
+					const who = res.players.filter((x) => x.key === sp.key)[0];
+					if (who) A().openEditor(who);
+				});
+				line.appendChild(b);
+			});
+			view.appendChild(line);
+		}
 		view.appendChild(filterBar(res));
 		view.appendChild(rangeBar(res));
 		view.appendChild(bulkBar(res));
 
 		const columns = visibleColumns();
+		for (const p of res.players) p.rangeNoValue = false;
 		const shown = res.players.filter((p) => matchesFilter(p, res));
+		const noValue = res.players.filter((p) => p.rangeNoValue).length;
 		const mode = st.statMode;
 		const rows = shown.map((p) => {
 			const s = p.stats || {};
@@ -643,7 +729,12 @@
 			if (st.overrides[p.key]) cls.push("locked");
 			if (st.selected[p.key]) cls.push("picked");
 			tr.className = cls.join(" ");
-			tr.tabIndex = 0;
+			/* Roving tabindex. Every row used to be tabIndex 0, so reaching the
+			   editor below a 70-man table meant seventy tab stops. One row is
+			   in the tab order — the one being edited, or the first — and the
+			   arrow keys move between rows from there, which is how a grid is
+			   supposed to behave. */
+			tr.tabIndex = -1;
 			tr.dataset.pkey = p.key;
 			if (st.editing === p.key) tr.classList.add("editing");
 			const open = () => A().openEditor(p);
@@ -688,8 +779,22 @@
 					   with no detail meant opening the editor to find out
 					   whether you had pinned his overall or only his school. */
 					const ov = st.overrides[p.key];
-					td = el("td", null, ov ? lockBadge(ov) : "");
-					if (ov) td.title = lockSummary(ov);
+					td = el("td", null, "");
+					if (ov) {
+						/* Clearing a lock meant a round trip into the editor and
+						   back for something the badge is already showing you.
+						   The badge is a button: click (or long-press) it and
+						   the lock is gone, without opening the row. */
+						const btn = el("button", "lockbadge", lockBadge(ov));
+						btn.title = lockSummary(ov) + " — click to clear";
+						btn.setAttribute("aria-label",
+							"Clear the locks on " + p.name + ": " + lockSummary(ov));
+						btn.addEventListener("click", (e) => {
+							e.stopPropagation();
+							A().clearLock(p);
+						});
+						td.appendChild(btn);
+					}
 					sortVals.lock = ov ? Object.keys(ov).length : 0;
 					break;
 				}
@@ -735,11 +840,34 @@
 					td.title = potTooltip(p);
 					sortVals.newPot = p.newPot;
 					break;
-				case "archetype":
+				case "archetype": {
 					td = el("td");
-					td.appendChild(el("span", "tag arch", p.archetype));
+					/* The build's signature ratings, on the row.
+
+					   The offsets were on a `title` attribute only, which is
+					   invisible on a touch device and unreliable to a screen
+					   reader — so on a phone the archetype was a name and
+					   nothing else. The three ratings the build leans on are
+					   printed beside it, and the full vector stays on the title
+					   and in aria-label for anyone who wants all of it. */
+					const tag = el("span", "tag arch", p.archetype);
+					const raw = (RB.RAW_OFFSETS || {})[p.archetype] || {};
+					const keys = Object.keys(raw)
+						.sort((x, y) => Math.abs(raw[y]) - Math.abs(raw[x]));
+					const full = keys.length
+						? keys.map((k) => k + " " + (raw[k] > 0 ? "+" : "") + raw[k]).join(", ")
+						: "no offsets — the build BBGM would have produced";
+					tag.title = p.archetype + ": " + full;
+					tag.setAttribute("aria-label", p.archetype + ", " + full);
+					td.appendChild(tag);
+					const top = keys.filter((k) => raw[k] > 0).slice(0, 3);
+					if (top.length) {
+						td.appendChild(el("span", "offsets",
+							" " + top.map((k) => k + "+" + raw[k]).join(" ")));
+					}
 					sortVals.archetype = p.archetype;
 					break;
+				}
 				case "college":
 					td = el("td");
 					if (p.nonNcaa) {
@@ -806,6 +934,12 @@
 					sortVals[col.key] = v;
 				}
 				}
+				/* The label the card layout prints beside the value on a phone
+				   (see the max-width: 700px block in css/style.css). A
+				   forty-column horizontal scroll is unusable however it is
+				   arranged, so under 700px each row becomes a card — which
+				   needs every cell to be able to say what it is. */
+				if (col.label && !col.fixed) td.setAttribute("data-label", col.label);
 				tr.appendChild(td);
 			}
 			return { node: tr, sortVals };
@@ -813,16 +947,81 @@
 
 		view.appendChild(el("p", "legendline",
 			shown.length + " of " + res.players.length + " prospects shown · " +
+			(noValue ? noValue + " excluded for having no value in a filtered " +
+				"column (AP rank and seed only exist for D-I players) · " : "") +
 			"click a row to edit and lock, click a column to sort " +
 			"(shift-click for a second level)"));
 		view.appendChild(sortStack());
+		if (!shown.length) {
+			/* An empty table with no explanation is the worst possible answer
+			   to a filter that matched nothing: it looks like the tool broke. */
+			view.appendChild(emptyState(res));
+			return;
+		}
+		/* The editor used to be appended AFTER the table, so clicking row 4 of
+		   70 put the panel you were meant to edit in sixty-six rows below the
+		   fold. It is a drawer beside the table now (and above it on a narrow
+		   screen), so the row and its editor are visible at the same time. */
+		const split = el("div", "tablesplit");
 		const wrap = el("div", "scroll");
-		wrap.appendChild(buildTable(rows, columns));
-		view.appendChild(wrap);
+		const table = buildTable(rows, columns);
+		wrap.appendChild(table);
+		// The single row in the tab order: the one being edited if it is shown,
+		// otherwise the first.
+		const body = table.querySelector("tbody");
+		const first = body &&
+			(body.querySelector('tr[data-pkey="' + st.editing + '"]') ||
+				body.querySelector("tr"));
+		if (first) {
+			first.tabIndex = 0;
+			first.setAttribute("data-focus", "row");
+		}
+		split.appendChild(wrap);
 		if (st.editing !== null) {
 			const p = res.players.filter((x) => x.key === st.editing)[0];
-			if (p) view.appendChild(A().editorPanel(p, res));
+			if (p) {
+				const drawer = el("aside", "drawer");
+				drawer.setAttribute("aria-label", "Editing " + p.name);
+				drawer.appendChild(A().editorPanel(p, res));
+				split.appendChild(drawer);
+				split.classList.add("open");
+			}
 		}
+		view.appendChild(split);
+	}
+
+	/* Nothing matched. Say which filters are on and offer to clear them. */
+	function emptyState(res) {
+		const st = A().state;
+		const f = st.filter;
+		const box = el("div", "card empty-state");
+		box.appendChild(el("h4", null, "No prospects match"));
+		const on = [];
+		if (f.q) on.push('search "' + f.q + '"');
+		if (f.pos) on.push("position " + f.pos);
+		if (f.conf) on.push("conference " + f.conf);
+		if (f.changedOnly) on.push("reassigned colleges only");
+		if (f.lockedOnly) on.push("locked players only");
+		for (const r of f.ranges || []) {
+			if (!r.key) continue;
+			const col = COLUMNS.filter((c) => c.key === r.key)[0];
+			const label = (col && col.label) || r.key;
+			on.push(label +
+				(Number.isFinite(r.min) ? " ≥ " + r.min : "") +
+				(Number.isFinite(r.max) ? " ≤ " + r.max : ""));
+		}
+		box.appendChild(el("p", "hint", on.length
+			? "Active filters: " + on.join(" · ")
+			: "Every prospect in this class is hidden."));
+		const clear = el("button", "tiny", "Clear all filters");
+		clear.addEventListener("click", () => {
+			st.filter = { q: "", pos: "", conf: "", changedOnly: false,
+				lockedOnly: false, ranges: [] };
+			A().persist();
+			A().render();
+		});
+		box.appendChild(clear);
+		return box;
 	}
 
 	/* ------------------------------------------------------------ bulk edit */
@@ -900,12 +1099,20 @@
 	/* ---------------------------------------------------------- team views */
 
 	function viewTeams(view, res) {
+		/* A team page. You could follow a programme through the bracket and
+		   never see its roster, its style, its coach, its four prospects and
+		   its schedule in one place. */
+		if (A().state.team) {
+			view.appendChild(teamPage(view, res, A().state.team));
+			return;
+		}
 		view.appendChild(el("h3", null, "AP Top 25"));
 		view.appendChild(el("p", "legendline",
 			"Rankings come from record, strength of schedule and roster quality. " +
 			"Program strength starts from each school's BBGM draft frequency, then " +
-			"this year's prospects are layered on top. Every one of the 353 " +
-			"programs plays a full season, so the ratings below are real."));
+			"this year's prospects are layered on top. Every one of the 368 " +
+			"programs plays a full season, so the ratings below are real. " +
+			"Click a team for its page."));
 		const wrap = el("div", "scroll");
 		const table = el("table");
 		const thead = el("thead");
@@ -922,7 +1129,7 @@
 		res.poll.forEach((t, i) => {
 			const tr = el("tr");
 			tr.appendChild(el("td", "num", String(i + 1)));
-			tr.appendChild(el("td", null, t.name));
+			tr.appendChild(el("td", null, "")).appendChild(teamLink(t.name));
 			tr.appendChild(el("td", null, t.conf));
 			tr.appendChild(el("td", null, t.w + "-" + t.l + (t.confRegularChamp ? " ★" : "")));
 			tr.appendChild(el("td", null, t.cw + "-" + t.cl));
@@ -968,6 +1175,8 @@
 			cards.appendChild(c);
 		}
 		view.appendChild(cards);
+
+		view.appendChild(conferenceStandings(res));
 
 		const leagues = res.proLeagues || {};
 		for (const name of Object.keys(leagues)) {
@@ -1341,7 +1550,12 @@
 	function histogram(title, values, buckets, fmt) {
 		const box = el("div", "card");
 		box.appendChild(el("h4", null, title));
-		if (!values.length) return box;
+		const finite = values.filter((v) => Number.isFinite(v));
+		if (!finite.length) {
+			box.appendChild(el("p", "hint", "No values to plot."));
+			return box;
+		}
+		values = finite;
 		const lo = Math.min.apply(null, values);
 		const hi = Math.max.apply(null, values);
 		const n = buckets || 12;
@@ -1572,6 +1786,11 @@
 	/* --------------------------------------------------------------- compare */
 
 	function viewCompare(view, res) {
+		/* Two verbs, not one. Pin gives you class-versus-class, which is what
+		   this tab did; the obvious missing one is player-versus-player, which
+		   is the comparison a draft board is actually made of and which the
+		   tool could not do at all. */
+		view.appendChild(playerCompare(res));
 		const pinned = A().state.pinned;
 		if (!pinned) {
 			view.appendChild(el("p", "legendline",
@@ -1658,6 +1877,314 @@
 		table.appendChild(tb);
 		wrap.appendChild(table);
 		view.appendChild(wrap);
+	}
+
+	function teamLink(name) {
+		const b = el("button", "linky", name);
+		b.addEventListener("click", () => {
+			A().state.team = name;
+			A().state.tab = "teams";
+			A().persist();
+			A().render();
+		});
+		return b;
+	}
+
+	/* Conference standings. The data has always been there — cw/cl, conference
+	   tournaments, an auto bid — and was never shown as a table, so "how did
+	   the Big East go this year" was a question the tool could not answer. */
+	function conferenceStandings(res) {
+		const box = el("div");
+		box.appendChild(el("h3", null, "Conference standings"));
+		const byConf = {};
+		for (const t of Object.values(res.teams)) {
+			(byConf[t.conf] = byConf[t.conf] || []).push(t);
+		}
+		const st = A().state;
+		const bar = el("div", "filters");
+		const sel = el("select");
+		sel.setAttribute("aria-label", "Conference");
+		sel.setAttribute("data-focus", "confpick");
+		const names = Object.keys(byConf).sort((a, b) => {
+			const sa = (C.CONFERENCES[a] || {}).strength || 0;
+			const sb = (C.CONFERENCES[b] || {}).strength || 0;
+			return sb - sa || a.localeCompare(b);
+		});
+		for (const n of names) sel.appendChild(new Option(n, n));
+		if (!st.standingsConf || names.indexOf(st.standingsConf) === -1) {
+			st.standingsConf = names[0];
+		}
+		sel.value = st.standingsConf;
+		sel.addEventListener("change", () => {
+			st.standingsConf = sel.value;
+			A().persist();
+			A().render();
+		});
+		bar.appendChild(sel);
+		box.appendChild(bar);
+		const pool = (byConf[st.standingsConf] || []).slice()
+			.sort((a, b) => (b.cw - b.cl) - (a.cw - a.cl) || b.rating - a.rating);
+		const meta = C.CONFERENCES[st.standingsConf];
+		if (meta) {
+			const drift = pool.length && Number.isFinite(pool[0].confStrength)
+				? pool[0].confStrength : meta.strength;
+			box.appendChild(el("p", "legendline",
+				"Strength " + drift.toFixed(0) + " this season, against a baseline of " +
+				meta.strength + " — conference strength drifts from year to year."));
+		}
+		const wrap = el("div", "scroll");
+		const table = el("table");
+		const hr = el("tr");
+		for (const h of ["Team", "Conf", "Overall", "SOS", "ORtg", "DRtg", "Postseason"]) {
+			const th = el("th", ["SOS", "ORtg", "DRtg"].indexOf(h) >= 0 ? "num" : "", h);
+			th.scope = "col";
+			hr.appendChild(th);
+		}
+		const thead = el("thead");
+		thead.appendChild(hr);
+		table.appendChild(thead);
+		const tb = el("tbody");
+		for (const t of pool) {
+			const tr = el("tr");
+			const td = el("td", "sticky");
+			td.appendChild(teamLink(t.name));
+			if (t.confRegularChamp) td.appendChild(document.createTextNode(" ★"));
+			if (t.confTourneyChamp) td.appendChild(document.createTextNode(" 🏆"));
+			tr.appendChild(td);
+			tr.appendChild(el("td", null, t.cw + "-" + t.cl));
+			tr.appendChild(el("td", null, t.w + "-" + t.l));
+			tr.appendChild(el("td", "num", t.sosAvg.toFixed(1)));
+			tr.appendChild(el("td", "num", t.offRtg ? t.offRtg.toFixed(1) : "—"));
+			tr.appendChild(el("td", "num", t.defRtg ? t.defRtg.toFixed(1) : "—"));
+			tr.appendChild(el("td", null, t.ncaaSeed ? "No. " + t.ncaaSeed + " seed, " +
+				t.ncaaResult : (t.nitResult || "—")));
+			tb.appendChild(tr);
+		}
+		table.appendChild(tb);
+		wrap.appendChild(table);
+		box.appendChild(wrap);
+		return box;
+	}
+
+	/* One programme: who coaches it, how it plays, who is on it, and every game
+	   it played. */
+	function teamPage(view, res, name) {
+		const t = res.teams[name];
+		const box = el("div");
+		const back = el("button", "tiny", "← All teams");
+		back.addEventListener("click", () => {
+			A().state.team = null;
+			A().persist();
+			A().render();
+		});
+		box.appendChild(back);
+		if (!t) {
+			box.appendChild(el("p", "hint", "No such programme in this class."));
+			return box;
+		}
+		box.appendChild(el("h3", null, t.name + " — " + t.w + "-" + t.l +
+			(t.apRank ? "  (AP #" + t.apRank + ")" : "")));
+		const dl = el("dl", "shortcuts");
+		const row = (k, v) => {
+			dl.appendChild(el("dt", null, k));
+			dl.appendChild(el("dd", null, v));
+		};
+		row("Conference", t.conf + " " + t.cw + "-" + t.cl +
+			(t.confRegularChamp ? " · regular-season champion" : "") +
+			(t.confTourneyChamp ? " · tournament champion" : ""));
+		if (t.coach) {
+			row("Coach", t.coach.name + ", year " + t.coach.tenure +
+				" — plays " + t.style.name);
+		}
+		row("Programme level", Math.round(t.level) + " (rating " +
+			t.rating.toFixed(1) + ")");
+		if (Number.isFinite(t.pace)) row("Tempo", t.pace.toFixed(1) + " possessions a game");
+		if (t.offRtg) {
+			row("Efficiency", "ORtg " + t.offRtg.toFixed(1) +
+				" · DRtg " + t.defRtg.toFixed(1) + " · SOS " + t.sosAvg.toFixed(1));
+		}
+		row("Postseason", t.ncaaSeed ? "No. " + t.ncaaSeed + " seed, " + t.ncaaResult
+			: (t.nitResult || "Did not make the field"));
+		// Home and away. The schedule has always carried it and the game log
+		// used it for a lift; no split was ever shown.
+		const home = t.log.filter((g) => g.home > 0);
+		const away = t.log.filter((g) => g.home < 0);
+		const neutral = t.log.filter((g) => !g.home);
+		const rec = (l) => l.filter((g) => g.won).length + "-" +
+			l.filter((g) => !g.won).length;
+		row("Home / away / neutral",
+			rec(home) + " at home · " + rec(away) + " on the road · " +
+			rec(neutral) + " on neutral floors");
+		if ((t.outages || []).length) {
+			row("Injuries", t.outages.map((o) => {
+				const who = t.prospects.filter((p) => p.key === o.who)[0];
+				return (who ? who.name : "a starter") + " (" + o.kind + ")";
+			}).join(", "));
+		}
+		box.appendChild(dl);
+
+		box.appendChild(el("h4", null, "Prospects"));
+		const plist = el("div", "cards");
+		for (const p of t.prospects) {
+			const c = el("div", "card");
+			const h = el("h4");
+			const b = el("button", "linky", p.name);
+			b.addEventListener("click", () => {
+				A().state.team = null;
+				A().state.tab = "players";
+				A().openEditor(p);
+			});
+			h.appendChild(b);
+			c.appendChild(h);
+			c.appendChild(el("div", "note",
+				p.newPos + " " + p.newOvr + "/" + p.newPot + " · " + p.archetype +
+				(p.stats ? "\n" + n1(p.stats.mpg) + " mpg, " + n1(p.stats.ppg) + "/" +
+					n1(p.stats.rpg) + "/" + n1(p.stats.apg) : "\nNo season")));
+			plist.appendChild(c);
+		}
+		box.appendChild(plist);
+
+		box.appendChild(el("h4", null, "Schedule"));
+		const wrap = el("div", "scroll");
+		const table = el("table");
+		const hr = el("tr");
+		for (const h of ["#", "Opponent", "Where", "Result", "Score", "Stage"]) {
+			const th = el("th", h === "#" ? "num" : "", h);
+			th.scope = "col";
+			hr.appendChild(th);
+		}
+		const thead = el("thead");
+		thead.appendChild(hr);
+		table.appendChild(thead);
+		const tb = el("tbody");
+		t.log.forEach((g, i) => {
+			const tr = el("tr", g.won ? "" : "down");
+			tr.appendChild(el("td", "num", String(i + 1)));
+			const td = el("td", "sticky");
+			td.appendChild(teamLink(g.opp));
+			tr.appendChild(td);
+			tr.appendChild(el("td", null,
+				g.home > 0 ? "home" : g.home < 0 ? "away" : "neutral"));
+			tr.appendChild(el("td", null, g.won ? "W" : "L"));
+			tr.appendChild(el("td", null, g.pf !== null
+				? g.pf + "-" + g.pa + (g.ot ? " (" + g.ot + "OT)" : "") : "—"));
+			tr.appendChild(el("td", null,
+				g.round || (g.conference ? "conference" : g.stage)));
+			tb.appendChild(tr);
+		});
+		table.appendChild(tb);
+		wrap.appendChild(table);
+		box.appendChild(wrap);
+		return box;
+	}
+
+	/* Two prospects side by side, on every row that has a number in it. */
+	const COMPARE_ROWS = [
+		["newOvr", "Overall", 0], ["newPot", "Potential", 0],
+		["hgtInches", "Height", 0], ["weight", "Weight", 0],
+		["gp", "Games", 0], ["mpg", "Minutes", 1], ["ppg", "Points", 1],
+		["rpg", "Rebounds", 1], ["apg", "Assists", 1], ["spg", "Steals", 1],
+		["bpg", "Blocks", 1], ["topg", "Turnovers", 1, true],
+		["fga", "Field goals", 1], ["tpa", "Threes", 1], ["fta", "Free throws", 1],
+		["usg", "Usage", 1], ["ts", "True shooting", 1], ["tpp", "3P%", 1],
+		["ftp", "FT%", 1], ["drtg", "Defensive rating", 1, true],
+		["board", "Board position", 0, true],
+	];
+
+	function playerCompare(res) {
+		const st = A().state;
+		if (!st.compare) st.compare = [null, null];
+		const box = el("div", "card");
+		box.appendChild(el("h4", null, "Two prospects, side by side"));
+		const bar = el("div", "filters");
+		const sorted = res.players.slice()
+			.sort((a, b) => (a.boardRank || 999) - (b.boardRank || 999));
+		[0, 1].forEach((slot) => {
+			const sel = el("select");
+			sel.setAttribute("aria-label", "Prospect " + (slot + 1));
+			sel.setAttribute("data-focus", "compare" + slot);
+			sel.appendChild(new Option("— pick a prospect —", ""));
+			for (const p of sorted) {
+				sel.appendChild(new Option(
+					(p.boardRank ? p.boardRank + ". " : "") + p.name +
+						" (" + p.newPos + " " + p.newOvr + ")", p.key));
+			}
+			sel.value = st.compare[slot] || "";
+			sel.addEventListener("change", () => {
+				st.compare[slot] = sel.value || null;
+				A().persist();
+				A().render();
+			});
+			bar.appendChild(sel);
+		});
+		const swap = el("button", "tiny", "Swap");
+		swap.addEventListener("click", () => {
+			st.compare = [st.compare[1], st.compare[0]];
+			A().persist();
+			A().render();
+		});
+		bar.appendChild(swap);
+		box.appendChild(bar);
+
+		const find = (k) => res.players.filter((p) => p.key === k)[0] || null;
+		const a = find(st.compare[0]);
+		const b = find(st.compare[1]);
+		if (!a || !b) {
+			box.appendChild(el("p", "hint",
+				"Pick two prospects to see every number they differ on."));
+			return box;
+		}
+		const valueOf = (p, key) => {
+			if (key === "board") return p.boardRank;
+			if (key === "hgtInches") return p.newHgtInches;
+			if (key === "weight") return p.newWeight;
+			if (key === "newOvr" || key === "newPot") return p[key];
+			if (!p.stats) return undefined;
+			if (key === "usg" || key === "ts" || key === "tpp" || key === "ftp") {
+				return p.stats[key] * 100;
+			}
+			return p.stats[key];
+		};
+		const table = el("table", "mini compare");
+		const head = el("tr");
+		head.appendChild(el("th", null, ""));
+		head.appendChild(el("th", "num", a.name));
+		head.appendChild(el("th", "num", b.name));
+		table.appendChild(head);
+		const meta = (label, x, y) => {
+			const tr = el("tr");
+			tr.appendChild(el("td", null, label));
+			tr.appendChild(el("td", null, x));
+			tr.appendChild(el("td", null, y));
+			table.appendChild(tr);
+		};
+		meta("Position", a.newPos, b.newPos);
+		meta("Archetype", a.archetype, b.archetype);
+		meta("Year", a.classYear, b.classYear);
+		meta("School", a.proClub || a.newCollege, b.proClub || b.newCollege);
+		for (const [key, label, digits, lowerBetter] of COMPARE_ROWS) {
+			const x = valueOf(a, key);
+			const y = valueOf(b, key);
+			if (!Number.isFinite(x) && !Number.isFinite(y)) continue;
+			const tr = el("tr");
+			tr.appendChild(el("td", null, label));
+			const cell = (v, other) => {
+				const td = el("td", "num",
+					Number.isFinite(v) ? v.toFixed(digits) : "—");
+				if (Number.isFinite(v) && Number.isFinite(other) && v !== other) {
+					const better = lowerBetter ? v < other : v > other;
+					// A glyph as well as the class, because colour alone is not
+					// a channel everyone has.
+					if (better) td.classList.add("up");
+				}
+				return td;
+			};
+			tr.appendChild(cell(x, y));
+			tr.appendChild(cell(y, x));
+			table.appendChild(tr);
+		}
+		box.appendChild(table);
+		return box;
 	}
 
 	/* Derived columns, for anything outside this file that needs the same

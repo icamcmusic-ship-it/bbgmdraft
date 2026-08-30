@@ -4,7 +4,7 @@
    run() is a thin wrapper over a staged pipeline (see PHASES). Each stage
    declares which settings it depends on, so the UI can re-run only what a
    given slider actually changed: moving "Award strictness" or the note
-   template no longer re-simulates 353 programs, 11,000 games and 3,500 stat
+   template no longer re-simulates 368 programs, 11,000 games and 3,500 stat
    lines to change one line of text. */
 (function (global) {
 	"use strict";
@@ -67,6 +67,27 @@
 		{ kind: "JUCO transfer", w: 1.2, from: "juco" },
 		{ kind: "fifth-year transfer", w: 1.1, from: "high", fifthYear: true },
 		{ kind: "low-major jump", w: 1.4, from: "low" },
+		/* Five kinds could not describe a transfer portal that produces all of
+		   these every single year. A service academy releases players who
+		   cannot commit to the service obligation; a man who signed abroad at
+		   eighteen and came back is a recognisable draft-class character; the
+		   NAIA-to-D-I jump is the classic late riser; and the walk-on who
+		   earned a scholarship is the one the arena stands up for. */
+		{ kind: "service academy transfer", w: 0.45, from: "academy" },
+		{ kind: "returned from overseas", w: 0.55, from: "overseas" },
+		{ kind: "NAIA transfer", w: 0.5, from: "naia" },
+		{ kind: "walk-on turned starter", w: 0.5, from: "walkon", sameSchool: true },
+		{ kind: "grad transfer", w: 1.0, from: "mid", fifthYear: true },
+	];
+	const ACADEMIES = ["Army", "Navy", "Air Force", "VMI", "The Citadel", "Merchant Marine"];
+	const OVERSEAS_ORIGINS = [
+		"Real Madrid's academy", "FC Barcelona's academy", "Ratiopharm Ulm",
+		"KK Mega Basket", "Zalgiris Kaunas", "the NBA Global Academy",
+		"Overtime Elite", "the Australian NBL's Next Stars",
+	];
+	const NAIA_ORIGINS = [
+		"Indiana Wesleyan", "Talladega", "Georgetown (KY)", "Arizona Christian",
+		"Freed-Hardeman", "Ottawa (AZ)", "Bethel (IN)", "Xavier (LA)",
 	];
 
 	function assignClassYears(players, cfg, rng, ageIsInformative) {
@@ -89,10 +110,18 @@
 			(conf.tier === "high" ? highMajors : conf.tier === "mid" ? midMajors : lowMajors)
 				.push(name);
 		}
+		/* Nine schools was the entire junior-college world, so every JUCO
+		   transfer in every class came from the same nine names. */
 		const JUCO = [
 			"Chipola College", "Northwest Florida State", "Salt Lake CC",
 			"Hutchinson CC", "Vincennes University", "Indian Hills CC",
 			"Ranger College", "South Plains College", "Trinity Valley CC",
+			"Odessa College", "Coffeyville CC", "Moberly Area CC",
+			"Eastern Florida State", "Northwest Kansas Tech", "Casper College",
+			"Western Nebraska CC", "Mineral Area College", "Iowa Western CC",
+			"John A. Logan College", "Southeastern CC", "Panola College",
+			"Wabash Valley College", "Cochise College", "Barton CC",
+			"Snow College", "Southern Idaho", "Tallahassee CC", "Gillette College",
 		];
 
 		order.forEach((p, i) => {
@@ -139,11 +168,16 @@
 			if (yearIdx >= 1 && r.random() < transferShare * (0.55 + 0.55 * yearIdx)) {
 				const kind = r.weighted(TRANSFER_KINDS);
 				const pool = kind.from === "juco" ? JUCO
+					: kind.from === "academy" ? ACADEMIES
+					: kind.from === "overseas" ? OVERSEAS_ORIGINS
+					: kind.from === "naia" ? NAIA_ORIGINS
 					: kind.from === "high" ? highMajors
 					: kind.from === "mid" ? midMajors : lowMajors;
 				p.transfer = {
 					kind: kind.kind,
-					from: pool.length ? r.pick(pool) : "junior college",
+					// A walk-on did not come from anywhere: he was already here.
+					from: kind.sameSchool ? null
+						: (pool.length ? r.pick(pool) : "junior college"),
 					fifthYear: !!kind.fifthYear,
 				};
 				if (kind.fifthYear) p.classYear = "Graduate";
@@ -204,6 +238,9 @@
 
 	   Returns {warnings: [...]} — problems that do not stop the run but that
 	   the user needs to be told about, chief among them a missing pid. */
+	/* Above this, a file is a league export and not a draft class. */
+	const MAX_CLASS = 250;
+
 	function validateLeagueFile(leagueFile) {
 		if (!leagueFile || typeof leagueFile !== "object") {
 			throw new Error("That file is not a BBGM league or draft-class export.");
@@ -225,7 +262,13 @@
 				'"startingSeason": <year> to the file.');
 		}
 		const seasonRecovered = !Number.isFinite(Number(leagueFile.startingSeason));
-		leagueFile.startingSeason = season;
+		/* The season is REPORTED, not written back.
+
+		   This used to do `leagueFile.startingSeason = season`, quietly editing
+		   the caller's object as a side effect of checking it — so a validator
+		   left the thing it validated in a different state than it found it,
+		   and any caller that revalidated got a different `seasonRecovered`
+		   answer the second time. The callers apply it themselves now. */
 		const bad = [];
 		let missingPid = 0;
 		const seenPid = new Set();
@@ -260,6 +303,28 @@
 				bad.slice(0, 4).join("; ") + (bad.length > 4 ? "; …" : ""));
 		}
 		const warnings = [];
+		/* How many of these players actually belong to the draft class.
+
+		   Dropping a full BBGM league export (5,000+ players) instead of a
+		   draft class rebuilt every player and simulated 368 programs with
+		   hundreds of prospects apiece: the tab locked with no progress and no
+		   way out, and nothing in here checked the count. The class is the
+		   players whose draft year is this season; if that leaves a plausible
+		   class, the caller is told it can take that subset instead of the
+		   whole file. */
+		const inClass = leagueFile.players.filter((p) =>
+			p && p.draft && Number(p.draft.year) === Number(season));
+		const oversized = leagueFile.players.length > MAX_CLASS;
+		if (oversized) {
+			warnings.push(leagueFile.players.length + " players in this file — a draft " +
+				"class is usually 60-80. This looks like a full league export rather " +
+				"than a draft class, and simulating a season for all of them will " +
+				"take a very long time." +
+				(inClass.length && inClass.length <= MAX_CLASS
+					? " " + inClass.length + " of them are drafted in " + season +
+						", which is almost certainly the class you meant."
+					: ""));
+		}
 		if (seasonRecovered) {
 			warnings.push("This file has no top-level startingSeason. " + season +
 				" was read from the file instead (gameAttributes, or the draft year " +
@@ -277,7 +342,20 @@
 			warnings.push(duplicatePid + " players share a pid with another player. " +
 				"Row order is used to tell them apart.");
 		}
-		return { ok: true, warnings };
+		return {
+			ok: true,
+			warnings,
+			season,
+			seasonRecovered,
+			total: leagueFile.players.length,
+			oversized,
+			// The subset the caller can offer to load instead, when the file is
+			// a whole league rather than a class.
+			classPids: oversized && inClass.length && inClass.length <= MAX_CLASS
+				? inClass.map((p, i) => (Number.isFinite(Number(p.pid)) ? Number(p.pid) : -1 - i))
+				: null,
+			classCount: inClass.length,
+		};
 	}
 
 	/* A per-player salt for the RNG streams. `reroll` re-draws ONE prospect:
@@ -285,9 +363,19 @@
 	   his key changes his draw and leaves every other player's stream
 	   untouched — which is the difference between "look at this guy again" and
 	   "reroll the class and hope the other sixty-nine come back the same". */
-	function rerollSalt(p) {
-		const n = Number(p && p.override && p.override.reroll);
-		return n ? "~" + Math.round(n) : "";
+	function rerollSalt(p, axis) {
+		const ov = (p && p.override) || {};
+		/* Axis-wise rerolls. "Reroll just him" redraws everything about a
+		   prospect at once, and the thing you usually want is narrower: this
+		   build at a different school, or this school with a different build,
+		   or the same player with the stat noise redrawn. Each axis carries its
+		   own counter so the streams it does not name are untouched.
+
+		   The whole-player counter still salts every axis, so "reroll him"
+		   keeps meaning what it meant. */
+		const n = Number(ov.reroll) || 0;
+		const a = axis ? Number(ov["reroll_" + axis]) || 0 : 0;
+		return (n ? "~" + Math.round(n) : "") + (a ? "@" + axis + Math.round(a) : "");
 	}
 
 	/* The stable per-player key every RNG stream and every lock is derived
@@ -298,10 +386,48 @@
 
 	/* ------------------------------------------------------------- phase 1 */
 
+	/* Apply a flavour's config bend to the settings the user has left alone.
+	   Compared against Config.DEFAULTS key by key: a value the user moved is
+	   theirs and is not touched. */
+	function applyFlavorConfig(cfg, flavor) {
+		const bend = RB.flavorConfig(flavor);
+		if (!bend) return cfg;
+		const out = Object.assign({}, cfg);
+		const D = global.Config.DEFAULTS;
+		let moved = false;
+		for (const k of Object.keys(bend)) {
+			if (cfg[k] !== D[k]) continue;
+			out[k] = bend[k];
+			moved = true;
+		}
+		return moved ? out : cfg;
+	}
+
 	function phaseBuild(state) {
-		const { leagueFile, cfg } = state;
+		const { leagueFile } = state;
 		const rng = state.rng;
 		const season = leagueFile.startingSeason;
+
+		/* This year's flavour, drawn before anything is built because some
+		   flavours bend the class itself and not only its archetype mix.
+
+		   "A weak year", "one-and-done heavy" and "a transfer-portal class" are
+		   the things a draft class is actually remembered as, and none of them
+		   is expressible as a tilt on archetype weights: they are statements
+		   about how good the top of the class is, how old it is, and how it got
+		   where it is. So a flavour carries a config bend, applied here.
+
+		   A user's own setting always wins. The bend is applied only to
+		   settings still sitting at their default, so a flavour moves what the
+		   user has not decided and never overrules what they have. */
+		const flavor = RB.pickFlavor(rng.child("flavor"), state.cfg);
+		state.flavor = flavor;
+		const cfg = applyFlavorConfig(state.cfg, flavor);
+		state.effectiveCfg = cfg;
+		/* The builds this class is made of. Drawing the pool before the players
+		   is what turns "one of everything, every class" into "the year of the
+		   stretch bigs" — see pickClassPool. */
+		state.archetypePool = RB.pickClassPool(rng.child("pool"), cfg, flavor);
 
 		const raw = leagueFile.players || [];
 		const players = raw.map((p, idx) => {
@@ -344,10 +470,6 @@
 		state.classAge = ageMean;
 		assignClassYears(players, cfg, rng.child("classyears"), ageSd >= 0.75);
 
-		// This year's flavour: guard-heavy, big-heavy, defence-first…
-		const flavor = RB.pickFlavor(rng.child("flavor"), cfg);
-		state.flavor = flavor;
-
 		// --- colleges -------------------------------------------------
 		// Per-player overrides ("lock this guy at 55 ovr / to Duke / as a Rim
 		// Protector") survive rerolls: they are read here, not re-rolled.
@@ -363,7 +485,7 @@
 			if (ov.name && String(ov.name).trim()) p.name = String(ov.name).trim();
 			p.newCollege = ov.college ||
 				assignCollege(
-					rng.child("college:" + p.key + rerollSalt(p)), p.src, cfg);
+					rng.child("college:" + p.key + rerollSalt(p, "school")), p.src, cfg);
 			p.collegeChanged = p.newCollege !== p.origCollege;
 			// Professional (a EuroLeague club) as against amateur (DII, an NBA
 			// Academy). The UI tags the two differently and the award bar
@@ -384,7 +506,7 @@
 			   and leaves every other player's stream untouched — which is the
 			   difference between "look at this guy again" and "reroll the class
 			   and hope the other sixty-nine come back the same". */
-			const prng = rng.child("build:" + p.key + rerollSalt(p));
+			const prng = rng.child("build:" + p.key + rerollSalt(p, "build"));
 			const targetOvr = Number.isFinite(ov.ovr)
 				? clamp(Math.round(ov.ovr), 0, 100)
 				: (curve ? curve[i] : p.origOvr);
@@ -422,8 +544,17 @@
 
 			const built = RB.rebuild(
 				prng, baseRatings, targetOvr, targetOvr + gap, cfg,
-				ov.archetype || null, state.flavor, ov.ratings || null);
+				ov.archetype || null, state.flavor, ov.ratings || null,
+				state.archetypePool);
 			p.newRatings = built.ratings;
+			// The pre-solve base and the pinned vector, so a forced size later
+			// in the pipeline can be re-solved to the same overall instead of
+			// leaving ovr disagreeing with the ratings beside it.
+			// Carried onto the player so the stat model can salt its own stream
+			// without knowing anything about overrides.
+			p.statSalt = rerollSalt(p, "stats");
+			p.buildBase = built.base;
+			p.buildPinned = ov.ratings || null;
 			p.newOvr = built.ovr;
 			p.ovrRange = built.ovrRange;
 			p.builtPot = built.pot;
@@ -461,7 +592,145 @@
 		state.players = players;
 		state.season = season;
 		assignRecruiting(players, rng.child("recruiting"));
+		state.surprises = assignSurprises(players, rng.child("surprises"), cfg);
 		return state;
+	}
+
+	/* ------------------------------------------------------------ surprises */
+
+	/* Every class gets two to four forced anomalies.
+
+	   The class-level knobs were flavour and nothing else, and a class made
+	   entirely of things the sliders predict is a class with no story in it:
+	   measured over 24 rerolls, the class's mean scoring varied by a standard
+	   deviation of 0.45 points and the distinct-archetype count by 2.7. At the
+	   aggregate level every class was the same class, so there was nothing to
+	   remember one by and no reason to reroll.
+
+	   These are cheap — each is a bend on data the model already carries — and
+	   they are the kind of thing a draft class IS remembered for. Each names
+	   itself on the player, so the note and the table can say what happened.
+
+	   `apply` runs after ratings, colleges, class years and recruiting, so a
+	   surprise can contradict any of them, which is the point. */
+	const SURPRISES = [
+		{
+			name: "five-star bust", w: 2.0,
+			label: "a five-star recruit whose game never arrived",
+			pick: (p) => !p.nonNcaa && p.recruiting && p.newOvr <= 44,
+			apply: (p, r) => {
+				p.recruiting.rank = r.int(1, 9);
+				p.recruiting.stars = 5;
+				p.recruiting.bust = true;
+			},
+		},
+		{
+			name: "unranked riser", w: 2.0,
+			label: "unranked out of high school",
+			pick: (p) => !p.nonNcaa && p.recruiting && p.newOvr >= 48,
+			apply: (p, r) => {
+				p.recruiting.rank = r.int(240, 320);
+				p.recruiting.stars = 2;
+				p.recruiting.unranked = true;
+			},
+		},
+		{
+			name: "old JUCO scorer", w: 1.4,
+			label: "a 24-year-old who took the long road here",
+			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman",
+			apply: (p, r) => {
+				p.age = 24;
+				p.classYear = "Graduate";
+				p.transfer = {
+					kind: "JUCO transfer",
+					from: r.pick(["Chipola College", "Indian Hills CC", "Salt Lake CC",
+						"Hutchinson CC", "Odessa College"]),
+					fifthYear: true,
+				};
+				p.oldRoad = true;
+			},
+		},
+		{
+			name: "physical outlier", w: 1.6,
+			label: "a physical outlier",
+			pick: (p) => true,
+			apply: (p, r) => {
+				const tall = r.random() < 0.66;
+				const inches = tall ? r.int(87, 89) : r.int(66, 68);
+				/* Height feeds BBGM's overall formula more heavily than any
+				   other rating, so moving it means re-solving: changing the
+				   vector and leaving ovr alone would put the number in the
+				   table at odds with the ratings it was computed from, and the
+				   export round-trip test says so. */
+				const base = Object.assign({}, p.buildBase || p.newRatings, {
+					hgt: clamp(Math.round((p.buildBase || p.newRatings).hgt +
+						(inches - p.newHgtInches) * (100 / 24)), 0, 100),
+				});
+				const re = RB.resolveTo(base, p.newOvr, p.archetype,
+					p.origRatings.fuzz, p.buildPinned);
+				p.newHgtInches = inches;
+				p.buildBase = re.base;
+				p.newRatings = re.ratings;
+				p.newOvr = re.ovr;
+				p.newPos = re.pos;
+				p.newSkills = re.skills;
+				p.ovrRange = re.ovrRange;
+				p.newWeight = tall ? r.int(215, 245) : r.int(155, 175);
+				p.sizeOutlier = tall ? "tall" : "small";
+			},
+		},
+		{
+			name: "reclassified prodigy", w: 1.1,
+			label: "the youngest player in the class",
+			pick: (p) => !p.nonNcaa && p.classYear === "Freshman" && p.newOvr >= 44,
+			apply: (p) => {
+				p.age = 17;
+				p.reclassified = "reclassified up a year";
+				p.prodigy = true;
+			},
+		},
+		{
+			name: "lost season", w: 1.2,
+			label: "coming back off a lost season",
+			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman",
+			apply: (p) => {
+				p.redshirt = "medical redshirt";
+				p.lostSeason = true;
+			},
+		},
+		{
+			name: "walk-on", w: 0.9,
+			label: "a walk-on who ended up a draft pick",
+			pick: (p) => !p.nonNcaa && p.recruiting,
+			apply: (p) => {
+				p.recruiting.rank = 320;
+				p.recruiting.stars = 2;
+				p.transfer = { kind: "walk-on turned starter", from: null, fifthYear: false };
+				p.walkOn = true;
+			},
+		},
+	];
+
+	function assignSurprises(players, rng, cfg) {
+		const budget = clamp(
+			cfg && cfg.surpriseBudget !== undefined ? cfg.surpriseBudget : 3, 0, 8);
+		if (!budget || !players.length) return [];
+		const n = Math.max(0, Math.round(rng.uniform(budget - 1, budget + 1)));
+		const used = new Set();
+		const kinds = SURPRISES.slice();
+		const out = [];
+		for (let i = 0; i < n && kinds.length; i++) {
+			const kind = rng.weighted(kinds);
+			kinds.splice(kinds.indexOf(kind), 1);
+			const options = players.filter((p) => !used.has(p.key) && kind.pick(p));
+			if (!options.length) continue;
+			const who = options[Math.floor(rng.random() * options.length)];
+			used.add(who.key);
+			kind.apply(who, rng.child("sp:" + kind.name));
+			who.surprise = { name: kind.name, label: kind.label };
+			out.push({ name: kind.name, label: kind.label, player: who.name, key: who.key });
+		}
+		return out;
 	}
 
 	/* --------------------------------------------------- recruiting context */
@@ -488,7 +757,7 @@
 				stars,
 				// A transfer was recruited somewhere else; a freshman was
 				// recruited here.
-				committed: p.transfer ? p.transfer.from : p.newCollege,
+				committed: (p.transfer && p.transfer.from) || p.newCollege,
 			};
 		});
 		// Who the headline signing was at each program, and who shared a class.
@@ -506,6 +775,74 @@
 
 	/* ------------------------------------------------------------- phase 2 */
 
+	/* Who was hurt, and when — drawn BEFORE a game is played.
+
+	   The tool used to invent an injury after the season had been simulated:
+	   gameLog picked a contiguous block of games to blank out and rescaled the
+	   log to match, so a player who missed fourteen games with a knee had
+	   exactly the same effect on his team's record as if he had played every
+	   night. The injury was a sentence in the note and nothing else.
+
+	   Drawn here, an absence is a window on the season's own `when` axis, and
+	   ratingOn() takes the missing player out of his team for the games inside
+	   it — so the team loses games it would have won, the resume the selection
+	   committee reads is the resume the injury produced, and the stat model
+	   downstream reads the same window instead of inventing a second one.
+
+	   Durations follow the injury. A concussion and a stress reaction drew the
+	   same game count out of one uniform table, which is why every absence read
+	   the same length whatever it was called. */
+	const INJURIES = [
+		{ kind: "a sprained ankle", w: 3.0, lo: 1, hi: 5 },
+		{ kind: "a hand injury", w: 1.4, lo: 2, hi: 8 },
+		{ kind: "a knee sprain", w: 1.6, lo: 4, hi: 14 },
+		{ kind: "a stress reaction in his foot", w: 1.0, lo: 6, hi: 18 },
+		{ kind: "concussion protocol", w: 1.2, lo: 1, hi: 4 },
+		{ kind: "a back strain", w: 1.1, lo: 2, hi: 7 },
+		{ kind: "a shoulder injury", w: 1.0, lo: 3, hi: 11 },
+		{ kind: "a broken hand", w: 0.7, lo: 8, hi: 20 },
+		{ kind: "a high ankle sprain", w: 0.9, lo: 5, hi: 13 },
+	];
+	const ABSENCES = [
+		{ kind: "illness", w: 2.2, lo: 1, hi: 3 },
+		{ kind: "a coach's decision", w: 1.3, lo: 1, hi: 3 },
+		{ kind: "a minor knock", w: 2.0, lo: 1, hi: 2 },
+		{ kind: "a one-game suspension", w: 1.0, lo: 1, hi: 1 },
+		{ kind: "load management", w: 0.5, lo: 1, hi: 3 },
+		{ kind: "a personal matter", w: 0.8, lo: 1, hi: 4 },
+	];
+	// A season's worth of `when`, matching the schedule's own axis.
+	const SEASON_GAMES = T.CONF_GAMES + T.NON_CONF_GAMES;
+
+	function assignAvailability(players, rng, cfg) {
+		const rate = clamp(
+			cfg && cfg.injuryRate !== undefined ? cfg.injuryRate : 1, 0, 3);
+		for (const p of players) {
+			p.availability = null;
+			if (p.nonNcaa || p.idleYear) continue;
+			const r = rng.child("inj:" + p.key);
+			// The draft-year games-played mean is 33.5 against a ~35-game
+			// schedule, so a bit over half a class misses something.
+			if (r.random() >= 0.54 * rate) continue;
+			const hurt = r.random() < 0.55 * rate;
+			const table = hurt ? INJURIES : ABSENCES;
+			const pickKind = r.weighted(table);
+			const games = Math.max(1, Math.round(
+				r.uniform(pickKind.lo, pickKind.hi + 0.999)));
+			const span = games / SEASON_GAMES;
+			// A run of games for an injury; scattered nights for everything
+			// else, which is what "illness" and "a coach's decision" are.
+			const from = hurt ? r.uniform(0, Math.max(0, 1 - span)) : null;
+			p.availability = {
+				games: Math.min(games, SEASON_GAMES - 5),
+				kind: pickKind.kind,
+				injury: hurt,
+				from,
+				to: hurt ? from + span : null,
+			};
+		}
+	}
+
 	function phaseRegular(state) {
 		const { cfg } = state;
 		const rng = state.rng;
@@ -515,7 +852,9 @@
 			(bySchool[p.newCollege] = bySchool[p.newCollege] || []).push(p);
 		}
 		state.bySchool = bySchool;
+		assignAvailability(state.players, rng.child("availability"), cfg);
 		const teams = T.buildPrograms(bySchool, rng.child("programs"));
+		T.applyOutages(teams);
 		T.simulateRegularSeason(teams, cfg, rng.child("season"));
 		// Snapshot, so the postseason can be re-run on its own (changing
 		// "March upsets" must not re-play November).
@@ -645,7 +984,85 @@
 			p.gameLog = S.gameLog(p, home, logRng.child("gl:" + p.key));
 			p.signature = p.gameLog ? p.gameLog.best : null;
 		}
+		buildPriorSeasons(state.players, state.season, state.rng.child("prior"));
 		return state;
+	}
+
+	/* The seasons before this one.
+
+	   The tool simulates one year and the README lists multi-year progression
+	   as a known limit — but a junior HAS a freshman year, and its absence is
+	   the single biggest hole in a scouting note: "he averaged 16 a game" reads
+	   completely differently from "he averaged 4, then 9, then 16". These are
+	   fabricated, exactly as the recruiting rank and the transfer history
+	   already are, and they are labelled as the model's own reconstruction
+	   rather than as simulated seasons — nothing downstream ranks on them.
+
+	   The shape is the ordinary one: minutes arrive before production, a
+	   freshman year is a fraction of a senior year, and a transfer's earlier
+	   seasons happened at the school he transferred from. */
+	const PRIOR_CURVE = [
+		// [minutes share, production share] of his draft-year line, by how many
+		// years before it the season was.
+		{ back: 1, mins: 0.82, prod: 0.72 },
+		{ back: 2, mins: 0.60, prod: 0.45 },
+		{ back: 3, mins: 0.44, prod: 0.29 },
+		{ back: 4, mins: 0.34, prod: 0.20 },
+	];
+
+	function priorYears(classYear) {
+		const y = String(classYear || "");
+		const base = y.indexOf("Sophomore") !== -1 ? 1
+			: y.indexOf("Junior") !== -1 ? 2
+			: y.indexOf("Graduate") !== -1 ? 4
+			: y.indexOf("Senior") !== -1 ? 3 : 0;
+		// A redshirt year is a year on campus with no season in it, and it is
+		// why a "redshirt sophomore" is in his third year at the school.
+		return base;
+	}
+
+	function buildPriorSeasons(players, season, rng) {
+		for (const p of players) {
+			p.priorSeasons = null;
+			const n = priorYears(p.classYear);
+			if (!n || !p.stats) continue;
+			const r = rng.child("prior:" + p.key);
+			const rows = [];
+			for (let i = n; i >= 1; i--) {
+				const c = PRIOR_CURVE[Math.min(PRIOR_CURVE.length - 1, i - 1)];
+				// A developing player is not a scaled copy of himself: the
+				// jitter is what makes a leap or a plateau readable.
+				const m = clamp(p.stats.mpg * c.mins * (1 + r.normal(0, 0.13)), 3, 38);
+				const k = c.prod * (1 + r.normal(0, 0.16));
+				rows.push({
+					season: season - i,
+					// Before a transfer he was somewhere else. A walk-on and a
+					// non-transfer were always here.
+					team: (p.transfer && p.transfer.from && i >= 1)
+						? p.transfer.from : p.newCollege,
+					classYear: CLASS_YEARS[Math.max(0, priorYears(p.classYear) - i)],
+					gp: Math.max(4, Math.round(p.stats.gp * (0.88 + r.uniform(0, 0.2)))),
+					mpg: m,
+					ppg: Math.max(0, p.stats.ppg * k),
+					rpg: Math.max(0, p.stats.rpg * (c.mins + (k - c.prod) * 0.5)),
+					apg: Math.max(0, p.stats.apg * (c.mins + (k - c.prod) * 0.5)),
+					ts: clamp(p.stats.ts - (1 - k) * 0.09 + r.normal(0, 0.012), 0.35, 0.72),
+					// The one that is not fabricated production: a redshirt year
+					// really is a year with no games in it.
+					redshirt: false,
+				});
+			}
+			if (p.redshirt) {
+				rows.unshift({
+					season: season - n - 1,
+					team: rows.length ? rows[0].team : p.newCollege,
+					classYear: "Redshirt",
+					redshirt: true,
+					reason: p.redshirt,
+				});
+			}
+			p.priorSeasons = rows;
+		}
 	}
 
 	/* ------------------------------------------------------------- phase 5 */
@@ -753,7 +1170,7 @@
 
 	/* Which settings each phase reads. The UI uses this to re-run only what a
 	   given change actually invalidates: the note template and the award dials
-	   used to cost a full 353-program season simulation each time they moved. */
+	   used to cost a full 368-program season simulation each time they moved. */
 	const PHASES = [
 		{
 			name: "build",
@@ -763,10 +1180,13 @@
 				"archetypeWeights", "classFlavor", "freshmanShare", "transferShare",
 				"redshirtShare", "reclassShare", "leagueWeights", "wEuroLeague",
 				"wGLeague", "wNBL", "pDII", "overrides",
+				"archetypePool", "surpriseBudget",
 			],
 			run: phaseBuild,
 		},
-		{ name: "regular", deps: ["pace", "scoringEnv"], run: phaseRegular },
+		// injuryRate is read by assignAvailability, which runs here — before a
+		// game is played, which is the whole point of it.
+		{ name: "regular", deps: ["pace", "scoringEnv", "injuryRate"], run: phaseRegular },
 		{ name: "postseason", deps: ["upsetFactor"], run: phasePostseason },
 		{
 			name: "stats",
@@ -793,6 +1213,9 @@
 	   with slightly different settings only redo the phases that changed. */
 	function createRunner(leagueFile) {
 		const validation = validateLeagueFile(leagueFile);
+		// validateLeagueFile no longer writes to its input (it is a check, not
+		// a migration), so the season it recovered is applied here.
+		leagueFile.startingSeason = validation.season;
 		let state = null;
 		let keys = null;
 
@@ -839,6 +1262,11 @@
 				risers: state.risers,
 				fallers: state.fallers,
 				flavor: state.flavor,
+				// The builds this class was drawn from, and the anomalies it
+				// was given, so the UI can say what makes this class this one.
+				archetypePool: state.archetypePool
+					? state.archetypePool.map((a) => a.name) : null,
+				surprises: state.surprises || [],
 				warnings: validation.warnings,
 				phasesRun: ran,
 				leagueFile,
@@ -864,6 +1292,22 @@
 		}
 		for (const lgName of Object.keys(byLeague)) {
 			const lg = C.NON_NCAA[lgName];
+			/* A year with no season in it. A redshirt, a visa that never came,
+			   an ACL in October: the tool could only ever put a man in a
+			   league, so a real and common draft-class outcome was
+			   inexpressible. These players get no club, no schedule and no stat
+			   line — which is the point, and which everything downstream
+			   already tolerates, because a stat line has always been optional
+			   (`p.stats ? ... : ...`) for a player the engine could not
+			   simulate. */
+			if (lg.idle) {
+				for (const p of byLeague[lgName]) {
+					p.proClub = null;
+					p.idleYear = true;
+					p.proDeal = "and did not play a competitive season";
+				}
+				continue;
+			}
 			const env = S.leagueEnv(lgName);
 			const lrng = rng.child("lg:" + lgName);
 			const roster = C.PRO_CLUBS[lgName] ||
@@ -1115,7 +1559,10 @@
 				if (p.recruiting.headliner) bits.push("headline signing of his class");
 			}
 			if (p.transfer) {
-				bits.push(p.transfer.kind + " from " + p.transfer.from);
+				// A walk-on turned starter has no previous school to name.
+				bits.push(p.transfer.from
+					? p.transfer.kind + " from " + p.transfer.from
+					: p.transfer.kind);
 			}
 			if (p.redshirt) bits.push(p.redshirt);
 			if (p.reclassified) bits.push(p.reclassified);
@@ -1349,6 +1796,7 @@
 	global.Engine = {
 		run, createRunner, exportFile, exportSeason, buildNote, classYear,
 		assignClassYears, inchesFromHgtRating, validateLeagueFile, findSeason, playerKey,
+		MAX_CLASS,
 		rerollSalt,
 		signatureGame, simulateProLeagues, assignRecruiting,
 		NOTE_LINES, DEFAULT_NOTE_LINES, PHASES, PRO_GAMES,

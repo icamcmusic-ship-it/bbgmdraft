@@ -82,6 +82,7 @@ function syntheticClass(seed, n) {
 /* The named national player-of-the-year trophies replaced a single generic
    "National Player of the Year" string. */
 const POY_RE = /^(Naismith Trophy|John R\. Wooden Award|Oscar Robertson Trophy|AP Player of the Year|NABC Player of the Year|Sporting News Player of the Year)$/;
+const FINALIST_RE = /finalist|Late Season Top|honourable mention|watch list/;
 const NATIONAL_RE = /All-American|All-Freshman Team|NABC All-Defensive|^(Naismith|John R\.|Oscar Robertson|AP Player|NABC Player|Sporting News|Lefty Driesell|Bob Cousy|Jerry West|Julius Erving|Karl Malone|Kareem|Pete Newell|Lute Olson|Wayman Tisdale|Consensus National)/;
 
 function pct(vals, p) {
@@ -101,8 +102,63 @@ function collect(nSeeds, cfgOverrides) {
 	   to whichever era it was written in. */
 	const pace = (cfgOverrides && cfgOverrides.pace) || global.Config.DEFAULTS.pace;
 	const paceK = pace / era.team.poss;
-	const near = (v, pct_) => [v * (1 - pct_), v * (1 + pct_)];
-	const within = (v, d) => [v - d, v + d];
+	/* Bands have to know how many seeds they are being judged on.
+
+	   Every band here was drawn against the 20 seeds CI runs, so `node
+	   tools/validate.js 3` — the invocation the README documents — failed "POY
+	   in class (rate)" and `... 6` failed "PPG, bigs minus guards" purely on
+	   sampling noise, and a developer following the documentation got a red
+	   build for no reason.
+
+	   `within`/`near` describe a MEAN, whose standard error goes as 1/sqrt(n),
+	   so their half-width is scaled by sqrt(REF_SEEDS / n): unchanged at 20,
+	   1.8x as wide at 6. `extreme` describes a MAXIMUM over the pooled sample,
+	   whose expected value grows with the sample rather than converging, so
+	   both of its bounds drift outward with n instead. */
+	const REF_SEEDS = 20;
+	/* Only ever WIDER, never narrower. These bands are modelling tolerances
+	   against an anchor, not confidence intervals around a sample mean: how far
+	   the simulated true-shooting percentage may sit from the era's own figure
+	   is a statement about the model, and running more seeds does not make it
+	   stricter. Scaling in both directions turned every band into a moving
+	   target — a run at 40 seeds failed rows a run at 20 passed, which is the
+	   same "the harness disagrees with itself depending on how you invoke it"
+	   fault this scaling exists to fix. */
+	const noiseK = Math.max(1, Math.sqrt(REF_SEEDS / Math.max(1, nSeeds)));
+	const near = (v, pct_) => [v * (1 - pct_ * noiseK), v * (1 + pct_ * noiseK)];
+	const within = (v, d) => [v - d * noiseK, v + d * noiseK];
+	/* A band on an extreme value. The expected maximum of a sample grows like
+	   log(n), so a band fixed at one seed count is wrong at every other one:
+	   the assist leader over 1121 player-seasons is not the assist leader over
+	   170. Both bounds move with log2(n / REF_SEEDS), by a tenth of the band's
+	   own width per doubling. */
+	const drift = 0.10 * Math.log2(Math.max(1, nSeeds) / REF_SEEDS);
+	/* A maximum's LOWER bound falls with a smaller sample, because the expected
+	   maximum of a small sample is smaller. Its upper bound does not: the
+	   model's ceiling is a property of the model, not of how many draws were
+	   taken from it, so a small sample can still contain the largest value the
+	   model produces and that is not a failure. The upper bound only ever
+	   drifts up, for a sample big enough to reach further into the tail. */
+	const extreme = (lo, hi) =>
+		[lo + (hi - lo) * drift, hi + (hi - lo) * Math.max(0, drift)];
+	/* A band on a per-class count or rate, which is a mean over nSeeds classes
+	   and so is far noisier at 3 seeds than at 20. Rates are clamped to [0, 1]
+	   because a proportion cannot leave it. */
+	const perClass = (lo, hi) => {
+		const mid = (lo + hi) / 2;
+		const half = ((hi - lo) / 2) * noiseK;
+		return [mid - half, mid + half];
+	};
+	/* A correlation's standard error goes as 1/sqrt(N) too, and N here is the
+	   pooled player count, which is proportional to the seed count. */
+	const corrBand = (lo, hi) => {
+		const b = perClass(lo, hi);
+		return [Math.max(-1, b[0]), Math.min(1, b[1])];
+	};
+	const rateBand = (lo, hi) => {
+		const b = perClass(lo, hi);
+		return [Math.max(0, b[0]), Math.min(1, b[1])];
+	};
 	const all = [];
 	const field = [];
 	const leaders = [];
@@ -126,6 +182,7 @@ function collect(nSeeds, cfgOverrides) {
 	const maxBlkShare = [];
 	const nonNcaaAwards = [];
 	const natAwards = [];
+	const finalistAwards = [];
 	const poyClasses = [];
 	const firstTeam = [];
 	const confFirst = [];
@@ -134,6 +191,9 @@ function collect(nSeeds, cfgOverrides) {
 	const gamesSpread = [];
 	const postseasonInRecord = [];
 	const outOfOrder = [];
+	const bottomThird = [];
+	const paceOfHonoured = [];
+	const paceOfAll = [];
 	for (let s = 0; s < nSeeds; s++) {
 		const lf = syntheticClass(s, 70);
 		const res = global.Engine.run(
@@ -145,7 +205,15 @@ function collect(nSeeds, cfgOverrides) {
 			p.vConfStrength = conf && global.Colleges.CONFERENCES[conf]
 				? global.Colleges.CONFERENCES[conf].strength : 50;
 			p.vComps = BB.composites(p.newRatings);
+			p.vLevel = t ? t.level : 50;
 			all.push(p);
+		}
+		/* Class rank is the draft-slot proxy the audit ranks on: the bottom
+		   third of a class is picks ~47-70, and what that group's scoring floor
+		   looks like is the single most-felt symptom of the minutes model. */
+		const byRank = ncaa.slice().sort((a, b) => b.newOvr - a.newOvr);
+		for (const p of byRank.slice(Math.floor((byRank.length * 2) / 3))) {
+			bottomThird.push(p.stats.ppg);
 		}
 		leaders.push(Math.max.apply(null, ncaa.map((p) => p.stats.ppg)));
 		astLeaders.push(Math.max.apply(null, ncaa.map((p) => p.stats.apg)));
@@ -186,6 +254,17 @@ function collect(nSeeds, cfgOverrides) {
 				if (t.log[i].when < t.log[i - 1].when - 1e-9) outOfOrder.push(1);
 			}
 		}
+		/* Tempo must not buy honours. productionScore is raw counting volume,
+		   and PROGRAM_STYLES moves a team's possessions by +/-5.5 a game, so a
+		   run-and-gun program handed its best player about 8% more of
+		   everything for nothing he had done — and that score is what both the
+		   award model and the draft board rank on. */
+		for (const p of ncaa) {
+			const t = res.teams[p.newCollege];
+			if (!t || !Number.isFinite(t.pace)) continue;
+			paceOfAll.push(t.pace);
+			if ((p.awards || []).length) paceOfHonoured.push(t.pace);
+		}
 		const regGames = Object.values(res.teams).map((t) => t.regGames);
 		gamesSpread.push(Math.max.apply(null, regGames) - Math.min.apply(null, regGames));
 		// A team's displayed record has to include the games it played in
@@ -198,11 +277,22 @@ function collect(nSeeds, cfgOverrides) {
 		// DII/pro players must never win a D-I national award. "Division II
 		// All-American" and "Division II Player of the Year" are their OWN
 		// awards (previously unreachable dead code) and are not leaks.
-		const d1Only = (a) => NATIONAL_RE.test(a) && !/^Division II/.test(a);
+		/* A league's OWN honours are not a leak, however they are spelled.
+		   "Division II All-American", "NAIA All-American" and "Prep
+		   All-American" all match the national regex because they are all
+		   All-American teams — of a different division. */
+		const OWN_AWARD = /^(Division II|NAIA|Prep|National Prep)/;
+		const d1Only = (a) => NATIONAL_RE.test(a) && !OWN_AWARD.test(a);
 		nonNcaaAwards.push(res.players.filter((p) =>
 			p.nonNcaa && (p.awards || []).some(d1Only)).length);
+		/* A finalist is not a winner. The finalist tier reuses the trophy's own
+		   name, so it matches NATIONAL_RE — counting those as national awards
+		   would triple this row for a change that hands out no new trophies. */
 		natAwards.push(res.players.reduce((a, p) => a +
-			(p.awards || []).filter((x) => NATIONAL_RE.test(x)).length, 0));
+			(p.awards || []).filter((x) => NATIONAL_RE.test(x) && !FINALIST_RE.test(x))
+				.length, 0));
+		finalistAwards.push(res.players.reduce((a, p) => a +
+			(p.awards || []).filter((x) => FINALIST_RE.test(x)).length, 0));
 		poyClasses.push(res.players.some((p) =>
 			(p.awards || []).some((a) => POY_RE.test(a))) ? 1 : 0);
 		firstTeam.push(res.players.filter((p) =>
@@ -248,6 +338,15 @@ function collect(nSeeds, cfgOverrides) {
 	const bigMinusGuard = mGuards.length && mBigs.length
 		? mean(mBigs.map((p) => p.stats.ppg)) - mean(mGuards.map((p) => p.stats.ppg))
 		: 0;
+	/* This row's noise is set by the size of the two matched subgroups, not by
+	   the seed count: it compares ovr 44-52 guards against ovr 44-52
+	   seven-footers, and at 8 seeds that can be a dozen players a side. Scaling
+	   its band by nSeeds like every other row therefore under-widened it, and
+	   the row failed at 6 and 8 seeds while passing at 3, 12 and 20 — noise
+	   masquerading as a finding, which is exactly what this harness exists not
+	   to do. Widen it by its own smallest subgroup instead. */
+	const matchedN = Math.max(1, Math.min(mGuards.length, mBigs.length));
+	const matchedK = Math.max(1, Math.sqrt(80 / matchedN));
 	const bigApg = all.filter((p) => p.newRatings.hgt >= 60).map((p) => p.stats.apg);
 
 	// [name, value, lo, hi]. Every band that describes "what a season looks
@@ -258,12 +357,12 @@ function collect(nSeeds, cfgOverrides) {
 		   pooled all-seasons figure the file used to target. See that file's
 		   header: the pooled figure is the average season a future draftee
 		   played, including 12-minute freshman years. */
-		["MPG mean", mean(g((p) => p.stats.mpg)), 29.5, 34],
-		["MPG p95", pct(g((p) => p.stats.mpg), 0.95), 34.5, 37.4],
-		["MPG p5", pct(g((p) => p.stats.mpg), 0.05), 15, 29],
+		["MPG mean", mean(g((p) => p.stats.mpg))].concat(within(31.75, 2.25)),
+		["MPG p95", pct(g((p) => p.stats.mpg), 0.95)].concat(within(35.95, 1.45)),
+		["MPG p5", pct(g((p) => p.stats.mpg), 0.05)].concat(within(22, 7)),
 		["USG% mean", mean(usg) * 100].concat(within(dy.usg.mean * 100, 2.5)),
 		["USG% p95", pct(usg, 0.95) * 100].concat(within(dy.usg.p95 * 100, 3)),
-		["USG% max", Math.max.apply(null, usg) * 100, 32, 37],
+		["USG% max", Math.max.apply(null, usg) * 100].concat(extreme(32, 37)),
 		["PPG mean", mean(g((p) => p.stats.ppg))].concat(within(dy.ppg.mean, 1.6)),
 		["PPG p95", pct(g((p) => p.stats.ppg), 0.95)].concat(within(dy.ppg.p95, 2.6)),
 		// A per-seed maximum is noisy, so the band has to be wider than the
@@ -271,28 +370,32 @@ function collect(nSeeds, cfgOverrides) {
 		// ignore it.
 		["PPG leader (avg/seed)", mean(leaders)].concat(within(dy.ppg.p95 * 1.12, 3.5)),
 		["PPG max", Math.max.apply(null, g((p) => p.stats.ppg))].concat(
-			within(dy.ppg.p95 * 1.32, 5.5)),
-		["RPG max", Math.max.apply(null, g((p) => p.stats.rpg)), 10.5, 17],
-		["ORPG mean", mean(g((p) => p.stats.orpg)), 1.0, 2.4],
-		["APG p95", pct(apg, 0.95), 5.0, 7.6],
+			extreme(dy.ppg.p95 * 1.32 - 5.5, dy.ppg.p95 * 1.32 + 5.5)),
+		["RPG max", Math.max.apply(null, g((p) => p.stats.rpg))].concat(extreme(10.5, 17)),
+		["ORPG mean", mean(g((p) => p.stats.orpg))].concat(within(1.7, 0.7)),
+		["APG p95", pct(apg, 0.95)].concat(within(6.3, 1.3)),
 		/* The assist floor. At AST_EXP 4.1 the 10th percentile of the whole
 		   class was 0.15 assists a game and the bigs' floor was 0.31 — nobody
 		   plays 25 minutes a night and finishes there. */
-		["APG p10", pct(apg, 0.10), 0.5, 1.6],
-		["APG p10 (bigs)", pct(bigApg, 0.10), 0.4, 1.5],
-		["APG leader (avg/seed)", mean(astLeaders), 6.0, 8.8],
-		["APG max", Math.max.apply(null, apg), 7.0, 10.5],
-		["BPG p95", pct(g((p) => p.stats.bpg), 0.95), 1.4, 3.0],
+		["APG p10", pct(apg, 0.10)].concat(within(1.05, 0.55)),
+		["APG p10 (bigs)", pct(bigApg, 0.10)].concat(within(0.95, 0.55)),
+		["APG leader (avg/seed)", mean(astLeaders)].concat(within(7.6, 1.6)),
+		/* Widened from 10.5 when the per-class archetype pool went in: a class
+		   drawn from 14 builds can genuinely be a class of playmakers, and its
+		   best passer is then a different animal from the best passer in a
+		   class of one of everything. The D-I single-season record is 13.3. */
+		["APG max", Math.max.apply(null, apg)].concat(extreme(7.0, 12.0)),
+		["BPG p95", pct(g((p) => p.stats.bpg), 0.95)].concat(within(2.2, 0.8)),
 		// Real shot-blockers reach 3.5-4.6 (Kessler 4.6, Chet 3.7).
-		["BPG max", Math.max.apply(null, g((p) => p.stats.bpg)), 2.8, 5.0],
-		["SPG max", Math.max.apply(null, g((p) => p.stats.spg)), 2.0, 4.2],
-		["PF mean", mean(g((p) => p.stats.pfpg)), 1.7, 3.4],
+		["BPG max", Math.max.apply(null, g((p) => p.stats.bpg))].concat(extreme(2.8, 5.0)),
+		["SPG max", Math.max.apply(null, g((p) => p.stats.spg))].concat(extreme(2.0, 4.2)),
+		["PF mean", mean(g((p) => p.stats.pfpg))].concat(within(2.55, 0.85)),
 		["TS% mean", mean(g((p) => p.stats.ts)) * 100].concat(within(dy.ts.mean * 100, 2)),
 		["3P% mean", mean(g((p) => p.stats.tpp)) * 100].concat(
 			within(dy.tpPct.median * 100, 2.6)),
 		["FT% mean", mean(g((p) => p.stats.ftp)) * 100].concat(within(dy.ftPct.mean * 100, 3.5)),
-		["FG% mean", mean(g((p) => p.stats.fgp)) * 100, 44, 52],
-		["FTA mean", mean(g((p) => p.stats.fta)), 3.0, 5.4],
+		["FG% mean", mean(g((p) => p.stats.fgp)) * 100].concat(within(48, 4)),
+		["FTA mean", mean(g((p) => p.stats.fta))].concat(within(4.2, 1.2)),
 		["GP mean", mean(g((p) => p.stats.gp))].concat(within(dy.gp.mean, 2.5)),
 
 		/* Team rows, against the era's own league averages, scaled to the pace
@@ -336,24 +439,64 @@ function collect(nSeeds, cfgOverrides) {
 		   is a distribution, so none of them was checked, and two were broken:
 		   athleticism drove blocks and not steals, and the documented
 		   talent-to-efficiency gradient was exported and never called. */
+		/* Tightened from [-0.62, -0.15]. This row was the only one that could
+		   see the location bias at all, and at -0.49 to -0.58 it sat one bad
+		   commit from the edge of a tolerance drawn wide enough to hide it. */
 		["corr(conference strength, PPG)",
-			corr(g((p) => p.vConfStrength), g((p) => p.stats.ppg)), -0.62, -0.15],
-		["corr(ovr, PPG)", corr(g((p) => p.newOvr), g((p) => p.stats.ppg)), 0.30, 0.75],
+			corr(g((p) => p.vConfStrength), g((p) => p.stats.ppg))].concat(corrBand(-0.50, -0.15)),
+		["corr(ovr, PPG)", corr(g((p) => p.newOvr), g((p) => p.stats.ppg))].concat(
+			corrBand(0.30, 0.75)),
 		["corr(3PT rating, FG%)",
-			corr(g((p) => p.newRatings.tp), g((p) => p.stats.fgp)), -0.80, -0.20],
+			corr(g((p) => p.newRatings.tp), g((p) => p.stats.fgp))].concat(corrBand(-0.80, -0.20)),
 		["corr(3PT rating, 3P%)",
-			corr(g((p) => p.newRatings.tp), g((p) => p.stats.tpp)), 0.60, 0.95],
+			corr(g((p) => p.newRatings.tp), g((p) => p.stats.tpp))].concat(corrBand(0.60, 0.95)),
 		["corr(athleticism, BPG)",
-			corr(g((p) => p.vComps.athleticism), g((p) => p.stats.bpg)), 0.35, 0.80],
+			corr(g((p) => p.vComps.athleticism), g((p) => p.stats.bpg))].concat(corrBand(0.35, 0.80)),
 		["corr(athleticism, SPG)",
-			corr(g((p) => p.vComps.athleticism), g((p) => p.stats.spg)), 0.18, 0.60],
+			corr(g((p) => p.vComps.athleticism), g((p) => p.stats.spg))].concat(corrBand(0.18, 0.60)),
 		["corr(passing, APG)",
-			corr(g((p) => p.vComps.passing), g((p) => p.stats.apg)), 0.60, 0.95],
-		["corr(ovr, TS%)", corr(g((p) => p.newOvr), g((p) => p.stats.ts)), 0.28, 0.70],
+			corr(g((p) => p.vComps.passing), g((p) => p.stats.apg))].concat(corrBand(0.60, 0.95)),
+		["corr(ovr, TS%)", corr(g((p) => p.newOvr), g((p) => p.stats.ts))].concat(
+			corrBand(0.28, 0.70)),
+		/* Where a prospect played must not decide how long he played.
+
+		   These three rows exist because nothing in the harness could see the
+		   structural fault the minutes model had: every per-stat distribution
+		   passed while a program's strength predicted a prospect's minutes
+		   (-0.78) two and a half times better than his own rating did (+0.30).
+		   corr(conference strength, PPG) came closest and its band had been
+		   drawn wide enough to hide it. */
+		["corr(program level, MPG)",
+			corr(g((p) => p.vLevel), g((p) => p.stats.mpg))].concat(corrBand(-0.45, -0.02)),
+		["corr(ovr, MPG)", corr(g((p) => p.newOvr), g((p) => p.stats.mpg))].concat(
+			corrBand(0.30, 0.80)),
+		/* Talent has to beat address. This is the whole claim of the minutes
+		   model in one number, and it is the one that cannot be satisfied by
+		   widening a band. */
+		["|corr(ovr, MPG)| - |corr(level, MPG)|",
+			Math.abs(corr(g((p) => p.newOvr), g((p) => p.stats.mpg))) -
+				Math.abs(corr(g((p) => p.vLevel), g((p) => p.stats.mpg)))].concat(
+			corrBand(0.10, 1)),
+		/* The scoring floor of the back of a class. A second-rounder out of
+		   D-I averaged roughly 13-15 points in his draft year; sub-8 seasons
+		   are almost non-existent and belong to elite defensive bigs. */
+		["PPG p10, bottom third of class", pct(bottomThird, 0.10), 7.8, 14],
+		/* Build must not decide scoring the way quality does. At equal overall
+		   rating the spread ran from -4.9 points (Defensive Pest) to +4.9
+		   (Score-First Point) — 9.8 points, against 7.0 across the whole
+		   ovr 30-60 range. */
+		["max |archetype PPG residual|", archResidual(all)].concat(
+			perClass(-2.4, 2.4).map((v, i) => (i ? v : 0))),
+
 		/* Scoring by size, at equal overall rating. A draft class's guards are
 		   its volume scorers; the sim had seven-footers as the highest-scoring
 		   group even after matching on quality. */
-		["PPG, bigs minus guards (ovr-matched)", bigMinusGuard, -1.6, 1.2],
+		["PPG, bigs minus guards (ovr-matched)", bigMinusGuard,
+			-0.1 - 1.3 * matchedK, -0.1 + 1.3 * matchedK],
+
+		["Pace of honoured minus pace of all",
+			(paceOfHonoured.length ? mean(paceOfHonoured) : 0) -
+				(paceOfAll.length ? mean(paceOfAll) : 0), -1.2, 1.2],
 
 		/* Schedule integrity. */
 		["Regular-season game spread", Math.max.apply(null, gamesSpread), 0, 1],
@@ -363,19 +506,58 @@ function collect(nSeeds, cfgOverrides) {
 		/* Award volume. Prospects are ranked against every returning player in
 		   Division I — against their actual simulated seasons rather than a
 		   regression on talent — so these are the rows that matter. */
-		["National awards/class", mean(natAwards), 2, 26],
-		["POY in class (rate)", mean(poyClasses), 0.05, 0.85],
-		["Consensus 1st Team/class", mean(firstTeam), 0.2, 3],
-		["All-conference 1st/class", mean(confFirst), 8, 26],
-		["All-conference 2nd/class", mean(confSecond), 3, 18],
-		["Defensive awards/class", mean(defAwards), 4, 26],
-		["Honoured players/class", mean(honouredCount), 25, 58],
+		["National awards/class", mean(natAwards)].concat(perClass(2, 26)),
+		/* The finalist tier: named shortlists a class should land on more often
+		   than it wins the trophies themselves, and never so often that being a
+		   finalist stops meaning anything. */
+		["Finalist honours/class", mean(finalistAwards)].concat(perClass(2, 40)),
+		/* Recentred from [0.05, 0.85]. Now that every program in the country is
+		   simulated and a prospect's minutes are decided by how good he is
+		   rather than by where he plays, the best player in a 70-man draft
+		   class is the best player in the country in 57-75% of seasons — which
+		   is about right: the national player of the year is usually, but not
+		   always, a future draft pick. */
+		["POY in class (rate)", mean(poyClasses)].concat(rateBand(0.25, 0.95)),
+		["Consensus 1st Team/class", mean(firstTeam)].concat(perClass(0.2, 3)),
+		["All-conference 1st/class", mean(confFirst)].concat(perClass(8, 26)),
+		["All-conference 2nd/class", mean(confSecond)].concat(perClass(3, 18)),
+		["Defensive awards/class", mean(defAwards)].concat(perClass(4, 26)),
+		["Honoured players/class", mean(honouredCount)].concat(perClass(25, 58)),
 		// Dominated by conference honours across ~31 conferences, which future
 		// draft picks legitimately win a lot of.
-		["Awards/class (all)", mean(awardsCount), 70, 190],
+		["Awards/class (all)", mean(awardsCount)].concat(perClass(70, 190)),
 		["Non-D1 D-I awards", mean(nonNcaaAwards), 0, 0],
 	];
 	return { rows, all, field, leaders, awardsCount };
+}
+
+/* The worst mean scoring residual of any archetype against the class's own
+   ovr fit — i.e. how much of a player's scoring is decided by his build rather
+   than by how good he is. Builds with too few seasons to measure are skipped
+   rather than allowed to fail the check on noise. */
+function archResidual(all) {
+	const xs = all.map((p) => p.newOvr);
+	const ys = all.map((p) => p.stats.ppg);
+	const mx = mean(xs);
+	const my = mean(ys);
+	let num = 0;
+	let den = 0;
+	for (let i = 0; i < xs.length; i++) {
+		num += (xs[i] - mx) * (ys[i] - my);
+		den += (xs[i] - mx) * (xs[i] - mx);
+	}
+	if (den <= 0) return 0;
+	const slope = num / den;
+	const icpt = my - slope * mx;
+	const by = {};
+	for (const p of all) (by[p.archetype] = by[p.archetype] || []).push(p);
+	let worst = 0;
+	for (const k of Object.keys(by)) {
+		if (by[k].length < 12) continue;
+		worst = Math.max(worst,
+			Math.abs(mean(by[k].map((p) => p.stats.ppg - (icpt + slope * p.newOvr)))));
+	}
+	return worst;
 }
 
 /* The stat line printed in a note must reconcile with itself: recomputing

@@ -391,3 +391,152 @@ tbody tr.editing td.sticky { background: rgba(9,105,218,.14); }
 	th.sticky, td.sticky { max-width: 120px; }
 	.editgrid, .ratinggrid { grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); }
 }
+
+/* ---- an explanation where an empty table would be ------------------------ */
+/* A filter that matched nothing used to render an empty table and nothing
+   else, which reads as a broken tool rather than as an empty result. */
+.empty-state { text-align: center; padding: 28px 18px; }
+.empty-state h4 { margin: 0 0 6px; }
+.empty-state .hint { margin: 0 0 12px; }
+
+/* ---- risers, fallers, locks: not colour alone ---------------------------- */
+/* Movement and lock state were encoded in colour only, which is invisible to
+   the eight percent of men with a colour vision deficiency and to anyone
+   reading a screenshot in greyscale. The glyph carries the same information. */
+.up::before { content: "▲ "; font-size: .85em; }
+.down::before { content: "▼ "; font-size: .85em; }
+tr.locked td.sticky::after { content: " 🔒"; font-size: .85em; }
+tr.picked td.sticky::after { content: " ✓"; font-size: .9em; }
+
+/* ---- phones: one prospect per card --------------------------------------- */
+/* Forty columns is a horizontal scroll on a phone however it is arranged, so
+   below 700px the table stops being a table. Each row becomes a card and each
+   cell prints its own column label, which is what data-label is for. The six
+   pinned columns stay on one line at the top; everything else stacks. */
+@media (max-width: 700px) {
+	.cardtable table, .cardtable tbody, .cardtable tr, .cardtable td {
+		display: block;
+		width: auto;
+	}
+	/* Visually hidden rather than moved off-canvas: `left: -9999px` on a thead
+	   inside a block-level table expands the table's scroll width by ten
+	   thousand pixels. */
+	.cardtable thead {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip: rect(0 0 0 0);
+		white-space: nowrap;
+	}
+	.cardtable .scroll { overflow-x: visible; max-height: none; }
+	.cardtable tr {
+		border: 1px solid var(--line);
+		border-radius: 8px;
+		margin: 0 0 8px;
+		padding: 8px 10px;
+		background: var(--panel);
+	}
+	.cardtable td {
+		display: flex;
+		justify-content: space-between;
+		gap: 10px;
+		border: 0;
+		padding: 2px 0;
+		text-align: right;
+		max-width: none;
+	}
+	.cardtable td.sticky {
+		position: static;
+		font-weight: 600;
+		font-size: 15px;
+		text-align: left;
+		border-bottom: 1px solid var(--line);
+		padding-bottom: 6px;
+		margin-bottom: 4px;
+	}
+	.cardtable td[data-label]::before {
+		content: attr(data-label);
+		color: var(--dim);
+		font-weight: 500;
+		text-align: left;
+	}
+	.cardtable td:empty { display: none; }
+}
+
+/* ---- the editor sits beside the table, not below it ---------------------- */
+/* Appending the editor after a 70-row table put the panel you were about to
+   use sixty-six rows below the fold. It is a drawer now: beside the table when
+   there is room, above it when there is not, and sticky either way. */
+/* width/min-width are load-bearing: #view is a flex child, so a grid inside it
+   shrink-to-fits to zero and the table overflows sideways out of a
+   zero-width column instead of scrolling inside it. minmax(0, ...) is the
+   same guard on the column itself. */
+.tablesplit {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: 12px;
+	width: 100%;
+	min-width: 0;
+}
+.tablesplit.open { grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); }
+.tablesplit .drawer {
+	align-self: start;
+	position: sticky;
+	top: 8px;
+	max-height: calc(100vh - 24px);
+	overflow: auto;
+}
+@media (max-width: 1100px) {
+	/* Not enough width for two columns: the drawer goes above the table, which
+	   still keeps it on screen with the row that opened it. */
+	.tablesplit.open { grid-template-columns: 1fr; }
+	.tablesplit .drawer { order: -1; position: static; max-height: none; }
+}
+
+/* ---- the keyboard sheet -------------------------------------------------- */
+.shortcuts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+.shortcuts dt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.shortcuts dd { margin: 0; color: var(--dim); }
+
+/* ---- range-filter units and the clickable lock badge --------------------- */
+.rangefilter .unit { color: var(--dim); font-size: 11px; align-self: center; }
+button.lockbadge {
+	font: inherit;
+	background: none;
+	border: 0;
+	padding: 0 2px;
+	cursor: pointer;
+	color: inherit;
+}
+button.lockbadge:hover, button.lockbadge:focus-visible { text-decoration: underline; }
+
+/* A run of text that acts as a link but is a button, because it does something
+   in the page rather than going anywhere. */
+button.linky {
+	font: inherit;
+	background: none;
+	border: 0;
+	padding: 0;
+	color: var(--accent);
+	cursor: pointer;
+	text-decoration: underline;
+}
+
+/* ---- the explain panels -------------------------------------------------- */
+details.explain { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+details.explain summary { cursor: pointer; font-weight: 600; }
+details.explain > * { margin-top: 8px; }
+details.explain .shortcuts dt { font-family: inherit; font-weight: 600; }
+table.mini { border-collapse: collapse; font-size: 12px; width: 100%; }
+table.mini th, table.mini td { padding: 3px 6px; border-bottom: 1px solid var(--line); }
+table.mini td.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.mini tr.now { font-weight: 600; }
+
+/* Two prospects side by side: the better number in each row is marked with a
+   glyph as well as a colour. */
+table.compare td.num.up::after { content: " ▲"; font-size: .8em; }
+
+/* The build's signature ratings, printed on the row rather than hidden in a
+   title attribute that a touch device never shows. */
+.offsets { color: var(--dim); font-size: 11px; white-space: nowrap; }

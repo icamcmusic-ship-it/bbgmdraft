@@ -233,7 +233,15 @@
 
 	/* The era is a whole-run setting, read by every rate in js/stats.js. The
 	   engine sets it once at the top of the stats phase, so a run is internally
-	   consistent even though the state lives here. */
+	   consistent even though the state lives here.
+
+	   The module-level `era` is a hazard for anything reading a rate OUTSIDE a
+	   run: it is whatever the last setEra() call left behind, so with two files
+	   loaded at different eras a helper called from the view layer answers for
+	   the wrong one. `forEra(name)` returns an era-bound object exposing the
+	   same surface, so a caller that knows which era it means can say so and
+	   never touch the shared state. The globals stay for the run path, which
+	   sets the era once and is checked by tools/test.js. */
 	function setEra(name) {
 		eraName = ERAS[name] ? name : DEFAULT_ERA;
 		era = ERAS[eraName];
@@ -242,12 +250,30 @@
 	function currentEra() { return eraName; }
 	function eraInfo(name) { return ERAS[name || eraName]; }
 
+	function forEra(name) {
+		const e = ERAS[name] || ERAS[DEFAULT_ERA];
+		return {
+			name: ERAS[name] ? name : DEFAULT_ERA,
+			info: e,
+			DRAFTED: e.draftYear,
+			DRAFT_YEAR: e.draftYear,
+			ROTATION: e.rotation,
+			TEAM: e.team,
+			byHeight: (key, b) => byHeightIn(e, key, b),
+			effShift: (key) => effShiftIn(e, key),
+			chanceShape: () => chanceShapeIn(e),
+			threeShare,
+			talentUsageMult,
+			talentEffAdj,
+		};
+	}
+
 	/* Piecewise-linear interpolation over the height table, with the era's
 	   level shift applied to the rates that actually moved between eras. */
-	function byHeight(key, bigness) {
+	function byHeightIn(e, key, bigness) {
 		const t = HEIGHT_TABLE;
 		const b = clamp(bigness, 0, 1);
-		const s = era.shift[key] === undefined ? 1 : era.shift[key];
+		const s = e.shift[key] === undefined ? 1 : e.shift[key];
 		let raw;
 		if (b <= t[0].b) raw = t[0][key];
 		else {
@@ -262,6 +288,7 @@
 		}
 		return raw * s;
 	}
+	function byHeight(key, bigness) { return byHeightIn(era, key, bigness); }
 
 	/* The shape of a scoring chance in this era, derived from the era's own
 	   team averages rather than from constants that drift away from them:
@@ -274,8 +301,8 @@
 	   rebound pools and the assist pool consistent with one another. They used
 	   to be three hardcoded numbers (0.172 / 0.402 / 0.465) that no longer
 	   matched anything the sim produced. */
-	function chanceShape() {
-		const t = era.team;
+	function chanceShapeIn(e) {
+		const t = e.team;
 		const chances = t.fga + 0.44 * t.fta + t.tov;
 		return {
 			chances,
@@ -286,12 +313,14 @@
 			fgp: t.fgp,
 		};
 	}
+	function chanceShape() { return chanceShapeIn(era); }
 
 	/* Additive efficiency offsets for the era, in points of percentage. */
-	function effShift(key) {
-		const v = era.shift[key];
+	function effShiftIn(e, key) {
+		const v = e.shift[key];
 		return Number.isFinite(v) ? v : 0;
 	}
+	function effShift(key) { return effShiftIn(era, key); }
 
 	/* Better prospects use a few more possessions and finish them slightly
 	   better (lottery vs pick-41+ gradient above). talent is 0-100. */
@@ -342,7 +371,7 @@
 
 	global.Calibration = {
 		HEIGHT_TABLE, ALL_SEASONS, ERAS, DEFAULT_ERA,
-		setEra, currentEra, eraInfo, chanceShape,
+		setEra, currentEra, eraInfo, forEra, chanceShape,
 		byHeight, effShift, threeShare, talentUsageMult, talentEffAdj,
 		// Live views of the selected era, for callers that want the numbers.
 		get DRAFTED() { return era.draftYear; },

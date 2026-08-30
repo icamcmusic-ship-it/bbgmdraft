@@ -16,6 +16,13 @@ jobs:
         run: node tools/test.js
       - name: Calibration bands
         run: node tools/validate.js 20
+      # Every band scales with the seed count, so the documented low-seed
+      # invocation has to pass too — it used to fail on sampling noise alone,
+      # which is how a developer learns to ignore the harness.
+      - name: Calibration bands (low seed count)
+        run: node tools/validate.js 4
+      - name: Staged-pipeline timings
+        run: node tools/bench.js 5
       - name: Calibration report (JSON, for diffing across runs)
         if: always()
         run: node tools/validate.js 20 --json > calibration.json || true

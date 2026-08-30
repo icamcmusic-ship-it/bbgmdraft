@@ -109,7 +109,10 @@ function ok(name, condition, detail) {
 	}
 	const page = await browser.newPage({ viewport: { width: 1500, height: 980 } });
 	const errors = [];
-	page.on("pageerror", (e) => errors.push("pageerror: " + e.message));
+	// The stack, not just the message: "Cannot read properties of undefined" with
+	// no frames is not something anybody can act on.
+	page.on("pageerror", (e) => errors.push("pageerror: " +
+		String(e.stack || e.message).split("\n").slice(0, 4).join(" | ")));
 	page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
 	page.on("response", (r) => { if (r.status() >= 400) errors.push("http " + r.status() + " " + r.url()); });
 
@@ -146,6 +149,43 @@ function ok(name, condition, detail) {
 	});
 	ok("a lock stores only the fields that were ticked",
 		lock && Object.keys(lock).length === 1 && lock.archetype, JSON.stringify(lock));
+
+	/* The panels that explain the model to the user. Each is a <details> in the
+	   editor, and each reads numbers the sim already computed — so a broken
+	   reference in one of them is invisible until somebody opens it. */
+	for (const [label, needle] of [
+		["Where this stat line comes from", "Share of the offence"],
+		["Why he is at No.", "Overall rating"],
+		// A freshman has no earlier seasons, so this one is checked on the
+		// row the panel always has: the season just played.
+		["Career to date", "MPG"],
+	]) {
+		const box = page.locator(".editor details", { hasText: label }).first();
+		await box.locator("summary").click();
+		await page.waitForTimeout(120);
+		ok("the editor explains: " + label,
+			(await box.innerText()).indexOf(needle) !== -1);
+	}
+	// A lock can be cleared without opening the editor.
+	await page.locator("table tbody tr td button.lockbadge").first().click();
+	await page.waitForTimeout(600);
+	ok("a lock clears from its badge in the table",
+		(await page.evaluate(() => Object.keys(window.App.state.overrides).length)) === 0);
+	// Undo puts it back, and redo takes it away again.
+	await page.locator("#btnUndo").click();
+	await page.waitForTimeout(700);
+	ok("undo restores a cleared lock",
+		(await page.evaluate(() => Object.keys(window.App.state.overrides).length)) === 1);
+	await page.locator("#btnRedo").click();
+	await page.waitForTimeout(700);
+	ok("redo re-applies it",
+		(await page.evaluate(() => Object.keys(window.App.state.overrides).length)) === 0);
+	await page.locator("#btnKeys").click();
+	await page.waitForTimeout(200);
+	ok("the keyboard sheet opens",
+		(await page.locator("#modal").innerText()).indexOf("Undo") !== -1);
+	await page.locator("#modalCancel, #modalOk").first().click();
+	await page.waitForTimeout(150);
 
 	console.log("\nTable controls");
 	// Numeric range filters. For a 70-man class this is the main missing verb:
@@ -270,6 +310,47 @@ function ok(name, condition, detail) {
 	});
 	await page.waitForTimeout(800);
 
+	/* The team page and the conference standings, both of which are new views
+	   over data the sim has always produced. */
+	await page.locator("#tabs button", { hasText: "AP Poll" }).first().click();
+	await page.waitForTimeout(250);
+	ok("the conference standings render",
+		(await page.locator("#view").innerText()).indexOf("Conference standings") !== -1);
+	await page.locator("#view table tbody tr td button.linky").first().click();
+	await page.waitForTimeout(300);
+	const teamText = await page.locator("#view").innerText();
+	ok("a team page opens with its coach, its splits and its schedule",
+		/Coach/.test(teamText) && /Home . away . neutral/.test(teamText) &&
+		/Schedule/.test(teamText), teamText.slice(0, 90));
+	await page.locator('#view button:has-text("All teams")').click();
+	await page.waitForTimeout(250);
+
+	/* Two prospects side by side. */
+	await page.locator("#tabs button", { hasText: "Compare" }).first().click();
+	await page.waitForTimeout(250);
+	await page.selectOption('#view select[aria-label="Prospect 1"]', { index: 1 });
+	await page.waitForTimeout(300);
+	await page.selectOption('#view select[aria-label="Prospect 2"]', { index: 2 });
+	await page.waitForTimeout(300);
+	ok("two prospects compare side by side",
+		(await page.locator("#view table.compare").innerText()).indexOf("True shooting") !== -1);
+	await page.locator("#tabs button", { hasText: "Prospects" }).first().click();
+	await page.waitForTimeout(250);
+
+	/* The export menu, which is also where the new verbs live. */
+	await page.locator("#btnExportMenu").click();
+	await page.waitForTimeout(250);
+	const menuText = await page.locator("#modal").innerText();
+	ok("the export menu offers Markdown notes, a message history and a preset diff",
+		/Markdown/.test(menuText) && /Message history/.test(menuText) &&
+		/Compare two presets/.test(menuText), menuText.replace(/\n/g, " · ").slice(0, 140));
+	await page.locator('#modal button:has-text("Compare two presets")').click();
+	await page.waitForTimeout(250);
+	ok("two presets can be compared",
+		(await page.locator("#modal").innerText()).length > 30);
+	await page.locator("#modalCancel, #modalOk").first().click();
+	await page.waitForTimeout(200);
+
 	console.log("\nBatch");
 	await page.evaluate(() => {
 		// The sidebar groups are collapsible and remember their state.
@@ -288,6 +369,32 @@ function ok(name, condition, detail) {
 		/p5/.test(batchText) && /p95/.test(batchText) && /batch seed/.test(batchText));
 	ok("the batch says which population its per-player rows cover",
 		/NCAA prospects per class/.test(batchText));
+	const withWorker = batchText;
+
+	/* The main-thread fallback, which nothing tested.
+
+	   Opening index.html straight off the disk blocks workers in most
+	   browsers, and that is the documented way to use this tool — so the path
+	   most users are on was the one path with no coverage at all. Forced by
+	   making the Worker constructor throw, which is exactly what a file://
+	   browser does. */
+	await page.evaluate(() => {
+		window.Worker = function () { throw new Error("workers are blocked"); };
+	});
+	await page.locator("#btnBatch").click();
+	await page.waitForFunction(
+		() => document.getElementById("batchProgress").hidden === true,
+		null, { timeout: 120000 });
+	await page.waitForTimeout(250);
+	const inlineText = await page.locator("#view").innerText();
+	ok("batch falls back to the main thread when a worker cannot start",
+		/mean ovr/.test(inlineText) && /batch seed/.test(inlineText));
+	// Both paths derive each class's seed from the batch seed the same way, so
+	// the same batch seed has to produce the same table either way.
+	const strip = (t) => t.replace(/batch seed [^\n]*/, "");
+	ok("the fallback produces the same batch the worker does",
+		strip(inlineText) === strip(withWorker),
+		strip(inlineText) === strip(withWorker) ? "" : "worker and inline disagree");
 
 	console.log("\nNo errors");
 	ok("no console or page errors", errors.length === 0, errors.join("\n         "));

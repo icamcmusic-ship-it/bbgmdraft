@@ -24,11 +24,29 @@
 	const C = global.Colleges;
 	const T = global.TeamsSim;
 
+	/* A production resume, normalised for PACE.
+
+	   The counting half of this is raw per-game volume, and PROGRAM_STYLES
+	   moves a team's possessions by +/-5.5 a game — so a run-and-gun program
+	   handed its best player about 8% more of everything than a pack-line
+	   program did, for nothing he had done. This score is what the award model
+	   and the draft board rank on, so that was a systematic tilt of the whole
+	   honours list towards fast schools.
+
+	   The counting terms are scaled to a reference tempo and the rate term
+	   (true shooting) is left alone, because a percentage is already
+	   pace-free. A player whose team's pace is unknown is scored as if he
+	   played at the reference, which is what the old formula did for
+	   everybody. */
+	const REF_PACE = 68;
 	function productionScore(p) {
 		const s = p.stats;
+		const pace = Number.isFinite(p.teamPace) && p.teamPace > 40 ? p.teamPace : REF_PACE;
+		const k = REF_PACE / pace;
 		return (
-			s.ppg + 1.2 * s.rpg + 1.7 * s.apg + 2.6 * s.spg + 2.6 * s.bpg -
-			0.8 * s.topg + 55 * (s.ts - 0.52)
+			(s.ppg + 1.2 * s.rpg + 1.7 * s.apg + 2.6 * s.spg + 2.6 * s.bpg -
+				0.8 * s.topg) * k +
+			55 * (s.ts - 0.52)
 		);
 	}
 
@@ -178,7 +196,7 @@
 			for (const fp of t.fieldPlayers) {
 				if (fp.mpg < 8) continue;
 				const stats = fp.line;
-				const holder = { stats };
+				const holder = { stats, teamPace: t.pace };
 				const prod = productionScore(holder);
 				// A returner's defensive composites are not stored, so the
 				// composite half of the defensive score is approximated from
@@ -324,7 +342,7 @@
 
 	function assign(prospects, teams, tourney, cfg, rng) {
 		const strict = clamp(cfg.awardStrictness, 0.2, 3);
-		// Conference hardware is its own dial. 31 conferences hand out far more
+		// Conference hardware is its own dial. 32 conferences hand out far more
 		// of it than the national voters do, and wanting a realistic number of
 		// one was never a reason to get fewer of the other — but one slider
 		// used to drive both, plus the pro-league score bar on top.
@@ -536,6 +554,38 @@
 		freshmen.slice(0, slots(1)).forEach((x) => giveNat(x, "Wayman Tisdale Award"));
 		freshmen.slice(0, slots(5)).forEach((x) => giveNat(x, "All-Freshman Team"));
 
+		/* Finalists.
+
+		   Ninety awards, every one of them binary: you won it or your season
+		   does not appear. That is not how the honours actually work and it
+		   throws away most of the resolution the model already has — the
+		   difference between the ninth-best player in the country and the
+		   fortieth is real, and both of them finished the year with nothing to
+		   show for it.
+
+		   These are real, they are cheap (they are the same ranked list, read
+		   further down), and they roughly triple the number of distinguishable
+		   outcomes without adding a single winner. Named after the trophy, and
+		   never given to somebody who already won the thing itself. */
+		const finalist = (list, from, to, label) => {
+			for (const x of list.slice(from, to)) {
+				if (x.filler || !x.awards) continue;
+				if (x.stats && x.stats.mpg < 20) continue;
+				if (x.awards.some((a) => a.indexOf(label.split(" finalist")[0]) === 0)) continue;
+				x.awards.push(label);
+			}
+		};
+		finalist(nation, 0, slots(4), "Naismith Trophy finalist");
+		finalist(nation, 0, slots(20), "Wooden Award Late Season Top 20");
+		finalist(nation, slots(15), slots(30), "Associated Press honourable mention");
+		finalist(natDef.filter((x) => GATES.defensive(x)), 0, slots(4),
+			"Naismith Defensive Player of the Year finalist");
+		finalist(freshmen, slots(5), slots(10), "Wayman Tisdale Award watch list");
+		for (const pa of POSITION_AWARDS) {
+			const pool = nation.filter((x) => pa.pos.indexOf(x.pos) !== -1);
+			finalist(pool, 0, slots(4), pa.name + " finalist");
+		}
+
 		/* Academic All-America. BBGM has no academics, so this is rolled from
 		   the player's own seed and gated on basketball IQ and production —
 		   which at least makes it deterministic, rare, and never a surprise on
@@ -663,6 +713,21 @@
 			"Overtime Elite": ["Overtime Elite MVP", "OTE Defensive Player of the Year", "All-OTE First Team"],
 			"NBA Academy": ["NBA Academy Games MVP", "NBA Academy Player of the Year", "Academy All-Star"],
 			"DII NCAA": ["Division II Player of the Year", "Division II All-American", "Division II Freshman of the Year"],
+			/* The destinations added alongside these had no honours at all, so
+			   a prospect who spent his year in Turkey or the BAL finished it
+			   with an empty award list whatever he averaged — and the award
+			   list is most of what a note about an overseas prospect has to
+			   say. */
+			"Basketball Champions League": ["BCL Rising Star", "BCL Best Young Player", "All-BCL Second Team"],
+			"Turkish BSL": ["BSL Best Young Player", "BSL Rising Star", "All-BSL Second Team"],
+			"Greek Basket League": ["GBL Best Young Player", "GBL Rising Star", "All-GBL Second Team"],
+			"Israeli Premier League": ["Israeli League Rising Star", "Israeli League Best Young Player", "All-Israeli League Second Team"],
+			"Japan B.League": ["B.League Rookie of the Year", "B.League Best Young Player", "All-B.League Second Team"],
+			"Brazil NBB": ["NBB Revelation of the Year", "NBB Best Young Player", "All-NBB Second Team"],
+			"Basketball Africa League": ["BAL Rising Star", "BAL Best Young Player", "All-BAL Second Team"],
+			"CEBL": ["CEBL Canadian of the Year", "CEBL Rookie of the Year", "All-CEBL Second Team"],
+			"Prep / Postgrad": ["National Prep Player of the Year", "Prep All-American", "Prep Showcase MVP"],
+			"NAIA": ["NAIA Player of the Year", "NAIA All-American", "NAIA Freshman of the Year"],
 		};
 		const byLeague = {};
 		for (const p of pros) {
@@ -712,6 +777,7 @@
 
 	global.Awards = {
 		assign, productionScore, defenseScore, fieldDefenseScore, resumeScore,
+		REF_PACE,
 		buildField, fitScores, fitTalentToScore, awardRank, sortAwards,
 		NATIONAL_POY, NATIONAL_DPOY, POSITION_AWARDS, AWARD_TIERS,
 		NCAA_BONUS, NIT_BONUS, GATES,

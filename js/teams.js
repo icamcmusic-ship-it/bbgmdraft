@@ -18,12 +18,54 @@
 		return clamp(30 + ovr * 0.92 + (pot - ovr) * 0.15, 20, 97);
 	}
 
-	function programLevel(name, rng) {
+	/* `confStrength` is this season's strength for the conference, which drifts
+	   from year to year (see conferenceDrift) rather than being the constant in
+	   the table. The Big East being down and the Mountain West being up is an
+	   ordinary year-to-year fact and it moves the whole AP poll, the bracket
+	   and the award distribution for free. */
+	function programLevel(name, rng, confStrength) {
 		const conf = C.CONFERENCES[C.conferenceOf(name)] || C.CONFERENCES.Independent;
-		const base = 0.45 * C.prestige(name) + 0.4 * conf.strength;
-		// Year-to-year variance: good programs are steadier than bad ones.
-		const vol = 9 - 0.03 * C.prestige(name);
-		return clamp(base + rng.normal(0, vol), 12, 95);
+		const strength = Number.isFinite(confStrength) ? confStrength : conf.strength;
+		const base = 0.45 * C.prestige(name) + 0.4 * strength;
+		/* Year-to-year variance. The slope used to be `9 - 0.03 * prestige`,
+		   which shrank the noise exactly where you would most want it:
+		   Kentucky drew sigma 5.5 around a high base and Wagner sigma 9 around
+		   a low one, so the blue bloods were pinned. Measured over 24 rerolls,
+		   the AP No. 1 was one of six teams and the national champion one of
+		   eleven. A blue blood's floor IS higher — that is what the base is for
+		   — but Duke going 17-15 is a thing that happens and the model could
+		   not express it. The slope is flat now, and a rare down year (or a
+		   breakout) is drawn on top. */
+		let level = base + rng.normal(0, PROGRAM_VOL);
+		if (rng.random() < DOWN_YEAR_RATE) {
+			// It falls apart: transfers out, an injury in November, a freshman
+			// class that did not arrive. Bigger for a program with more to lose.
+			level -= 6 + 0.14 * C.prestige(name) + rng.uniform(0, 6);
+		} else if (rng.random() < BREAKOUT_RATE) {
+			// The other direction: a mid-major that keeps everybody.
+			level += 5 + 0.10 * (100 - C.prestige(name)) + rng.uniform(0, 5);
+		}
+		return clamp(level, 12, 95);
+	}
+
+	const PROGRAM_VOL = 7.0;
+	const DOWN_YEAR_RATE = 0.09;
+	const BREAKOUT_RATE = 0.09;
+
+	/* This season's conference strengths. CONFERENCES[x].strength is a constant
+	   and a conference's real strength moves several points a year; a static
+	   table is why every simulated season had the same eight teams at the top
+	   of it. Returns a name -> strength map for one run. */
+	function conferenceDrift(rng) {
+		const out = {};
+		for (const name of Object.keys(C.CONFERENCES)) {
+			const base = C.CONFERENCES[name].strength;
+			// A strong conference is steadier, because it is strong for
+			// structural reasons; a one-bid league swings on two rosters.
+			const sd = 2.0 + 0.055 * (95 - base);
+			out[name] = clamp(base + rng.child("conf:" + name).normal(0, sd), 30, 96);
+		}
+		return out;
 	}
 
 	/* Returning players are good, but not "NBA draft prospect" good: a top
@@ -62,6 +104,37 @@
 		};
 	}
 
+	/* A program that landed a future draft pick usually landed him because it
+	   did not already have two of them.
+
+	   Without this, `makeFiller` and `prospectTalent` sit on incompatible
+	   scales at the top of the country: a level-85 program's three best
+	   returning players synthesise to 63.6 / 61.2 / 57.5, while an ovr-30
+	   second-rounder is talent 59.9 — so a drafted NBA player was routinely the
+	   fourth option on his own college team, fell to ~25 minutes and printed
+	   seven points. Measured, where a prospect played predicted his minutes
+	   (-0.76) two and a half times better than how good he was (+0.30), and
+	   28% of late second-rounders finished under 10 points a game.
+
+	   So the two best returning players on a roster that carries a prospect are
+	   capped just below the best prospect on it. Rosters with no prospect are
+	   untouched, and a roster whose prospect is a genuine lottery talent is
+	   untouched too, because the cap is not binding there. */
+	const FILLER_GAP = 4;
+	function capFillers(fillers, prospects) {
+		if (!prospects.length || !fillers.length) return;
+		let best = -Infinity;
+		for (const p of prospects) best = Math.max(best, p.talent);
+		const cap = best - FILLER_GAP;
+		// The cap applies to the two best returners as realised, not to the two
+		// nominal slots: the draw has sd 8.5, so slot 3 routinely out-rolls
+		// slot 0 and capping by slot index would miss the player it is for.
+		const order = fillers.slice().sort((a, b) => b.talent - a.talent);
+		for (let i = 0; i < Math.min(2, order.length); i++) {
+			order[i].talent = Math.min(order[i].talent, cap);
+		}
+	}
+
 	function rotationWeights(n) {
 		const w = [1, 0.96, 0.9, 0.84, 0.76, 0.6, 0.45, 0.3, 0.18, 0.1];
 		return w.slice(0, n);
@@ -97,16 +170,65 @@
 		{ name: "lob city", w: 1.0, three: -0.04, pace: 1.5, rim: 0.08, press: 0 },
 	];
 
+	/* Coaches.
+
+	   A program had a strength and a playing style drawn independently at
+	   random every run, which is the cheapest possible source of program
+	   identity left on the table: in reality the style IS the coach, the
+	   coach is the same man next season, and "a first-year coach at a blue
+	   blood" and "a thirty-year fixture at a mid-major" are two completely
+	   different teams at the same rating.
+
+	   The name is synthetic (this tool ships no real coaches, and inventing a
+	   real one's results is not something a draft-class generator should do),
+	   but everything attached to it is used: `style` replaces the free-floating
+	   style roll, `dev` moves how much a young roster improves over the season,
+	   and `tenure` and `hot` feed Coach of the Year. Drawn from the program's
+	   own RNG child, so a given program gets a stable coach for a given seed. */
+	const COACH_FIRST = [
+		"Ray", "Dan", "Marcus", "Tom", "Bruce", "Leon", "Chris", "Pat", "Ed",
+		"Kevin", "Andre", "Mike", "Steve", "Wes", "Hal", "Dennis", "Craig",
+		"Tony", "Grant", "Sam", "Vince", "Nate", "Curtis", "Joel", "Roland",
+	];
+	const COACH_LAST = [
+		"Aldrich", "Beauchamp", "Calloway", "Duvall", "Espinoza", "Fenwick",
+		"Garrity", "Hollis", "Ingersoll", "Jessup", "Kowalczyk", "Lindqvist",
+		"Marchetti", "Nakamura", "Okafor", "Prendergast", "Quaranta", "Rasmussen",
+		"Stallworth", "Thibault", "Underwood", "Vandermeer", "Whitlock", "Yarbrough",
+		"Zabala", "Baptiste", "Cifuentes", "Donnelly", "Ferrara", "Gundersen",
+	];
+
+	function makeCoach(rng, level, prestige) {
+		// A better program usually has a longer-tenured coach, because a coach
+		// who wins keeps his job and a coach who wins is hired by better
+		// programs. The tail is what makes a first-year man at a blue blood
+		// possible without being ordinary.
+		const tenure = Math.max(1, Math.round(
+			rng.uniform(0, 3) + Math.abs(rng.normal(0, 2 + prestige * 0.09))));
+		return {
+			name: rng.pick(COACH_FIRST) + " " + rng.pick(COACH_LAST),
+			tenure,
+			style: rng.weighted(PROGRAM_STYLES),
+			// How much this staff develops a roster across a season. Feeds the
+			// team's `form`, which is its March rating against its November one.
+			dev: rng.normal(0, 2.6),
+			// Reputation, for Coach of the Year: it is voted on against
+			// expectations, and expectations follow the name on the door.
+			rep: clamp(0.35 * prestige + 0.35 * level + rng.normal(0, 10), 5, 95),
+		};
+	}
+
 	/* Build every NCAA program for the season. prospectsBySchool maps a college
 	   name to the rebuilt draft prospects who play there. */
 	function buildPrograms(prospectsBySchool, rng) {
 		const teams = {};
-		// Colleges outside the built-in 353 (league files drift across BBGM
+		// Colleges outside the built-in 368 (league files drift across BBGM
 		// versions) become independent mid-level programs instead of crashing.
 		const extra = Object.keys(prospectsBySchool).filter((n) => !C.COLLEGES[n]);
+		const confStrength = conferenceDrift(rng.child("confdrift"));
 		for (const name of C.names.concat(extra)) {
 			const trng = rng.child("prog:" + name);
-			const level = programLevel(name, trng);
+			const level = programLevel(name, trng, confStrength[C.conferenceOf(name)]);
 			const prospects = prospectsBySchool[name] || [];
 			const members = prospects.map((p) => ({
 				filler: false,
@@ -114,11 +236,21 @@
 				talent: prospectTalent(p.newOvr, p.newPot),
 			}));
 			const nFill = Math.max(6, 10 - members.length);
-			for (let i = 0; i < nFill; i++) members.push(makeFiller(trng, level, i));
+			const fillers = [];
+			for (let i = 0; i < nFill; i++) fillers.push(makeFiller(trng, level, i));
+			capFillers(fillers, members);
+			for (const f of fillers) members.push(f);
 
+			const coach = makeCoach(trng.child("coach"), level, C.prestige(name));
 			teams[name] = {
 				name,
-				style: trng.weighted(PROGRAM_STYLES),
+				coach,
+				// This season's conference strength, so anything that reads it
+				// (selection, the note, the harness) reads the same number the
+				// program was built from.
+				confStrength: confStrength[C.conferenceOf(name)],
+				// The style IS the coach; it used to be an independent roll.
+				style: coach.style,
 				conf: C.conferenceOf(name) || "Independent",
 				prestige: C.prestige(name),
 				level,
@@ -130,7 +262,9 @@
 				log: [],
 				// How much better (or worse) this team is in March than in
 				// November. Young rosters improve most.
-				form: trng.normal(2.0, 4.5),
+				// A staff that develops players is a team that is better in
+				// March than in November, which is what `form` means.
+				form: trng.normal(2.0, 4.5) + coach.dev,
 			};
 		}
 		return teams;
@@ -147,7 +281,39 @@
 	   basketball. `when` is 0 (first game) to 1 (last). */
 	function ratingOn(t, when) {
 		const w = when === undefined ? 0.5 : clamp(when, 0, 1);
-		return t.rating + (t.form || 0) * (w - 0.5) * 2;
+		let r = t.rating + (t.form || 0) * (w - 0.5) * 2;
+		/* Whoever is hurt right now is not playing. Before this, an absence was
+		   invented after the season had been simulated, so a player who missed
+		   fourteen games with a knee had exactly the same effect on his team's
+		   record as if he had played every night. */
+		for (const o of t.outages || []) {
+			if (w >= o.from && w <= o.to) r -= o.drop;
+		}
+		return r;
+	}
+
+	/* Turn the availability drawn on each prospect into a list of dated rating
+	   drops on his team. The drop is the difference the roster's own rating
+	   makes without him, so losing a lottery pick costs a team far more than
+	   losing its fourth-best prospect — and losing either costs nothing at all
+	   on a roster deep enough to cover. */
+	function applyOutages(teams) {
+		for (const name of Object.keys(teams)) {
+			const t = teams[name];
+			t.outages = [];
+			for (const m of t.members) {
+				if (m.filler || !m.player) continue;
+				const av = m.player.availability;
+				if (!av || !av.injury || av.from === null) continue;
+				const without = t.members.filter((x) => x !== m);
+				const drop = without.length
+					? Math.max(0, t.rating - teamRating(without))
+					: 0;
+				t.outages.push({
+					from: av.from, to: av.to, drop, who: m.player.key, kind: av.kind,
+				});
+			}
+		}
 	}
 
 	/* Play one game and produce an actual score. The margin is drawn from the
@@ -403,7 +569,7 @@
 	}
 
 	/* Conference -> its teams, the single place that decides where programs
-	   outside the built-in 353 play.
+	   outside the built-in 368 play.
 
 	   Two or more of them form a synthetic "Independent" league. Exactly one
 	   used to fall through every branch — a conference of one cannot play
@@ -486,6 +652,8 @@
 	global.TeamsSim = {
 		buildPrograms, simulateRegularSeason, simulateConferenceTournaments,
 		prospectTalent, teamRating, winProb, playGame, playGameScore, ratingOn,
+		capFillers, FILLER_GAP, conferenceDrift, programLevel, applyOutages,
+		PROGRAM_VOL, DOWN_YEAR_RATE, BREAKOUT_RATE, makeCoach,
 		rotationWeights, pairUp, record, recordPostseason, finalizeSchedule,
 		REGULAR_NOISE,
 		label, adoptConference, conferencePools, PROGRAM_STYLES,

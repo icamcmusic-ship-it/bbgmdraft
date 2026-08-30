@@ -22,11 +22,23 @@
 		// big-heavy, defensive, shooting-rich, …). 0 = every class has the same
 		// archetype mix, 2 = a class is unmistakably one thing.
 		classFlavor: 1.0,
+		/* How many specialist builds one class may contain, before height
+		   coverage tops the pool up. 0 turns the pool off, which restores the
+		   pre-2026 behaviour of one of everything in every class. */
+		archetypePool: 14,
+		/* How many forced anomalies a class gets: a five-star bust, an
+		   unranked recruit who turns into a lottery pick, a 24-year-old JUCO,
+		   a 7'4" project. Cheap, memorable, and the reason to reroll. 0 turns
+		   them off. */
+		surpriseBudget: 3,
+		/* How injury-prone this season is. Drawn before a game is played, so it
+		   moves records and resumes and not only the note text. */
+		injuryRate: 1,
 
 		// --- blank colleges ----------------------------------------------
 		// Legacy headline sliders. They still work (and old shareable links
 		// still decode) but they are folded into leagueWeights below, which is
-		// the single source of truth now that there are thirteen destinations
+		// the single source of truth now that there are twenty-four destinations
 		// rather than three.
 		wEuroLeague: null,
 		wGLeague: null,
@@ -79,7 +91,7 @@
 		// How far into the national field the honours reach. Kept separate
 		// from the two things it used to silently also control.
 		awardStrictness: 1.0,
-		// Conference honours are their own dial: 31 conferences hand out far
+		// Conference honours are their own dial: 32 conferences hand out far
 		// more hardware than the national voters do, and wanting a realistic
 		// number of one is not wanting fewer of the other.
 		confAwardStrictness: 1.0,
@@ -127,9 +139,17 @@
 
 	function make(overrides) {
 		const cfg = Object.assign({}, DEFAULTS, overrides || {});
-		// noteLines is the one array in here; copy it so presets and the URL
-		// hash cannot alias the shared default.
+		/* Copy every container the UI can write into, so a preset or a URL
+		   payload can never be mutated in place by the editor that displays it.
+
+		   noteLines was copied and archetypeWeights was not, even though the
+		   archetype-frequency editor writes straight into
+		   state.cfg.archetypeWeights: editing a weight after loading a preset
+		   (or a shared link) rewrote the preset itself, silently and
+		   permanently. leagueWeights is rebuilt below, but from an object the
+		   caller still owns. */
 		cfg.noteLines = (cfg.noteLines || DEFAULTS.noteLines).slice();
+		cfg.archetypeWeights = Object.assign({}, cfg.archetypeWeights || {});
 		// Destination weights: start from the built-ins, apply anything the
 		// caller set, then fold in the three legacy sliders so old presets and
 		// old shareable links still mean what they meant.

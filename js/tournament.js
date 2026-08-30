@@ -63,7 +63,7 @@
 		   at-large bids play for two 11 seeds.
 
 		   Everything below assumed at least 68 eligible programs and at least
-		   four teams in each play-in pool, which is true of the built-in 353
+		   four teams in each play-in pool, which is true of the built-in 368
 		   and not true of a modded colleges.js or a class whose schools map to
 		   a small custom set: splice(-4, 4) on a two-team pool takes both of
 		   them, and the hardcoded field64 slice offsets then produced a

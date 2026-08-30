@@ -788,9 +788,26 @@ console.log("\nDistributions");
 	   rating in the twenties still launched about two a game. */
 	const nonShooters = ncaa.filter((p) => p.newRatings.tp <= 25 && p.stats.mpg >= 20);
 	if (nonShooters.length) {
-		const worstTpa = Math.max.apply(null, nonShooters.map((p) => p.stats.tpa));
-		ok("a non-shooter does not launch threes", worstTpa < 2.2,
-			"most attempts by a tp<=25 player: " + worstTpa.toFixed(2));
+		/* Checked as a SHARE of his own attempts, which is what the model
+		   actually floors and what the claim actually means. A raw count is a
+		   count of minutes as much as of shot selection: the same player at 37
+		   minutes takes more of everything than at 30, and a threshold on the
+		   count fails when the minutes model is corrected without shot
+		   selection having changed at all. */
+		/* Scoped to the population the claim is about. A guard who cannot
+		   shoot still takes a fifth of his shots from three — that is what bad
+		   shooting guards do — and it is the seven-footer floored at 8.5% who
+		   was launching two a game that this exists to catch. */
+		const bigNonShooters = nonShooters.filter((p) => p.newRatings.hgt >= 65);
+		const share = (l) => Math.max.apply(null,
+			l.map((p) => (p.stats.fga > 0 ? p.stats.tpa / p.stats.fga : 0)).concat([0]));
+		if (bigNonShooters.length) {
+			ok("a non-shooting big does not launch threes", share(bigNonShooters) < 0.13,
+				"largest 3PA share by a tall tp<=25 player: " +
+					share(bigNonShooters).toFixed(3));
+		}
+		ok("no non-shooter is a volume three-point shooter", share(nonShooters) < 0.26,
+			"largest 3PA share by any tp<=25 player: " + share(nonShooters).toFixed(3));
 	}
 }
 
@@ -881,11 +898,19 @@ console.log("\nPer-player reroll");
 	};
 	const a = byKey(before);
 	const b = byKey(after);
+	// Same identity as the assertion below: the whole rating vector, so a
+	// reroll that happens to land on the same build still counts as moved.
+	const vec = (p) => BB.RATING_KEYS.map((k) => p.newRatings[k]).join(",");
 	const moved = Object.keys(a).filter((k) =>
-		a[k].archetype !== b[k].archetype || a[k].newCollege !== b[k].newCollege ||
-		a[k].newOvr !== b[k].newOvr);
+		vec(a[k]) !== vec(b[k]) || a[k].newCollege !== b[k].newCollege);
+	/* Compared on his whole rating vector, not only on archetype and school.
+	   A class is drawn from a pool of about fourteen builds, so a reroll
+	   landing on the same build and the same school is an ordinary outcome
+	   (one in fourteen, not one in sixty) — and it is still a different
+	   player, because every rating under it was redrawn. Asserting on the
+	   labels made this a probabilistic test of the pool size. */
 	ok("rerolling one prospect changes that prospect",
-		a[target].archetype !== b[target].archetype ||
+		vec(a[target]) !== vec(b[target]) ||
 		a[target].newCollege !== b[target].newCollege,
 		a[target].archetype + "/" + a[target].newCollege + " -> " +
 			b[target].archetype + "/" + b[target].newCollege);
@@ -910,12 +935,105 @@ console.log("\nLeague file season");
 	];
 	for (const [what, file, want] of cases) {
 		let got = null;
+		let mutated = false;
 		try {
-			global.Engine.validateLeagueFile(file);
-			got = file.startingSeason;
+			got = global.Engine.validateLeagueFile(file).season;
+			// A validator checks; it does not edit what it was handed.
+			mutated = Object.prototype.hasOwnProperty.call(file, "startingSeason");
 		} catch (e) { got = "threw: " + e.message; }
 		ok("the season is found in " + what, got === want, String(got));
+		ok("validating " + what + " leaves the file alone", !mutated);
 	}
+	// A full league export is a warning with a way out, not a locked tab.
+	{
+		const big = { startingSeason: 2026, players: [] };
+		for (let i = 0; i < 400; i++) {
+			const src = base.players[i % base.players.length];
+			const p = JSON.parse(JSON.stringify(src));
+			p.pid = i;
+			p.draft = { year: i < 70 ? 2026 : 2029, round: 1, pick: 1 };
+			big.players.push(p);
+		}
+		const v = global.Engine.validateLeagueFile(big);
+		ok("a league-sized file warns", v.oversized === true &&
+			v.warnings.some((w) => /full league export/.test(w)));
+		ok("and offers the draft class inside it", v.classPids !== null &&
+			v.classPids.length === 70, String(v.classCount));
+		const small = global.Engine.validateLeagueFile(V.syntheticClass(5, 70));
+		ok("a normal class does not warn", small.oversized === false &&
+			small.classPids === null);
+	}
+}
+
+/* --------------------------------------------------- every setting re-runs */
+console.log("\nStaged pipeline coverage");
+{
+	/* A setting that no phase declares is a setting that changes nothing: the
+	   runner compares phase keys, finds them identical and returns the cached
+	   result, so the slider moves and the class does not. Nothing caught that,
+	   and three settings added in one sitting all had it. */
+	const declared = new Set();
+	for (const p of global.Engine.PHASES) for (const d of p.deps) declared.add(d);
+	// Settings that genuinely feed no phase, with the reason each is exempt.
+	const EXEMPT = {
+		seed: "declared by build",
+		era: "declared by stats",
+	};
+	const missing = Object.keys(global.Config.DEFAULTS)
+		.filter((k) => !declared.has(k) && !EXEMPT[k]);
+	ok("every setting is declared by some phase", missing.length === 0,
+		missing.join(", "));
+
+	/* And the stronger claim: moving each one actually changes the output. */
+	const lf = V.syntheticClass(6, 40);
+	const probes = {
+		archetypePool: 4, surpriseBudget: 6, injuryRate: 0,
+		classFlavor: 0, specialization: 2.4, pace: 78, statNoise: 2,
+	};
+	const runner = global.Engine.createRunner(lf);
+	const fingerprint = (res) => res.players.map((p) =>
+		p.newOvr + "/" + p.archetype + "/" + (p.stats ? p.stats.ppg.toFixed(2) : "-")).join("|");
+	const baseline = fingerprint(runner.run(global.Config.make({ seed: "deps" })));
+	for (const key of Object.keys(probes)) {
+		const cfg = global.Config.make({ seed: "deps" });
+		cfg[key] = probes[key];
+		ok("moving " + key + " changes the class",
+			fingerprint(runner.run(cfg)) !== baseline);
+	}
+}
+
+/* ------------------------------------------------------- ovr weight drift */
+console.log("\nOVR weights against BBGM's own formula");
+{
+	/* OVR_W is a hand-transcribed copy of the linear weights inside BB.ovr(),
+	   and it is what makes every archetype's offset vector ovr-neutral. If BBGM
+	   ever re-fits those weights, BB.ovr() keeps passing every test it has —
+	   it is the source of truth — while every archetype silently stops being
+	   ovr-neutral and the specialisation slider starts meaning something
+	   different per build. Nothing could see that.
+
+	   So derive the weights numerically by finite differences and check them
+	   against the table. This runs against BB.ovrRaw — the linear half, before
+	   the piecewise fudge and the rounding — because against ovr() itself a
+	   single rating's contribution disappears into the quantisation: endu moves
+	   the result by 1.3 points over the whole difference and the rounding is
+	   half a point. ovrRaw is what ovr() is built from, so there is still only
+	   one copy of these weights inside BBGM to drift away from. */
+	const RB = global.RatingsBuilder;
+	const base = {};
+	for (const k of BB.RATING_KEYS) base[k] = 50;
+	base.fuzz = 0;
+	const h = 10;
+	let worst = 0;
+	let worstKey = "";
+	for (const k of BB.RATING_KEYS) {
+		const up = Object.assign({}, base, { [k]: 50 + h });
+		const dn = Object.assign({}, base, { [k]: 50 - h });
+		const d = Math.abs((BB.ovrRaw(up) - BB.ovrRaw(dn)) / (2 * h) - RB.OVR_W[k]);
+		if (d > worst) { worst = d; worstKey = k; }
+	}
+	ok("OVR_W matches BBGM's own ovr formula", worst < 1e-6,
+		"worst " + worstKey + " off by " + worst.toFixed(8));
 }
 
 /* ------------------------------------------------- small-field tournament */

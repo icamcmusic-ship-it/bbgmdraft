@@ -26,6 +26,8 @@
 		<button id="btnReroll" class="warn" disabled title="New seed, same settings">Reroll</button>
 		<button id="btnRerun" disabled title="Re-apply the current settings with the same seed">Re-apply</button>
 		<button id="btnUndo" disabled title="Undo the last settings or lock change (Ctrl+Z)">Undo</button>
+		<button id="btnRedo" disabled title="Redo (Ctrl+Shift+Z)">Redo</button>
+		<button id="btnKeys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
 	</div>
 	<div class="btngroup" role="group" aria-label="Share and export">
 		<button id="btnPin" disabled title="Keep this class as a comparison baseline">Pin</button>
@@ -75,6 +77,8 @@
 		<div class="ctl"><label for="specialization">Specialisation <b></b></label><input type="range" id="specialization" min="0" max="2.5" step="0.05"></div>
 		<div class="ctl"><label for="archetypeDiversity">Archetype diversity <b></b></label><input type="range" id="archetypeDiversity" min="0" max="100" step="1"></div>
 		<div class="ctl"><label for="classFlavor">Class flavour <b></b></label><input type="range" id="classFlavor" min="0" max="2" step="0.05"></div>
+		<div class="ctl"><label for="archetypePool">Builds per class <b></b></label><input type="range" id="archetypePool" min="0" max="40" step="1"></div>
+		<div class="ctl"><label for="surpriseBudget">Anomalies per class <b></b></label><input type="range" id="surpriseBudget" min="0" max="6" step="1"></div>
 		<div class="ctl"><label for="buildNoise">Build noise <b></b></label><input type="range" id="buildNoise" min="0" max="14" step="0.5"></div>
 		<div class="ctl"><label><input type="checkbox" id="varySize"> Let height &amp; weight drift with the build</label></div>
 		<p class="hint">Every rebuilt player is re-solved against BBGM's own ovr formula, so specialising a build never changes his overall.</p>
@@ -107,6 +111,7 @@
 		<div class="ctl"><label for="scoringEnv">Scoring environment <b></b></label><input type="range" id="scoringEnv" min="-3" max="3" step="0.5"></div>
 		<div class="ctl"><label for="efficiencyEnv">Shooting efficiency <b></b></label><input type="range" id="efficiencyEnv" min="-3" max="3" step="0.5"></div>
 		<div class="ctl"><label for="statNoise">Stat randomness <b></b></label><input type="range" id="statNoise" min="0" max="2.5" step="0.05"></div>
+		<div class="ctl"><label for="injuryRate">Injuries <b></b></label><input type="range" id="injuryRate" min="0" max="2" step="0.05"></div>
 		<div class="ctl"><label for="upsetFactor">March upsets <b></b></label><input type="range" id="upsetFactor" min="0" max="2" step="0.05"></div>
 		<p class="hint">Pace and scoring environment move possessions; shooting efficiency moves what a possession is worth. Pace, both environment dials and stat randomness apply to Division I only — every professional league abroad has its own pace and game length.</p>
 	</details>

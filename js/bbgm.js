@@ -16,8 +16,20 @@
 		"fg", "tp", "oiq", "diq", "drb", "pss", "reb",
 	];
 
-	function ovr(r) {
-		const x =
+	/* The linear half of BBGM's overall rating, before the piecewise fudge and
+	   before rounding.
+
+	   Split out because it is the only exact view of the rating WEIGHTS, and
+	   those weights are transcribed a second time in js/ratings.js (as OVR_W)
+	   to make every archetype's offset vector ovr-neutral. tools/test.js
+	   derives OVR_W from this by finite differences and asserts the two agree,
+	   which is impossible against ovr() itself: the fudge is piecewise and the
+	   result is rounded to an integer, so a single rating's contribution
+	   disappears into the quantisation. Keeping one copy of the weights in this
+	   file means the check compares ratings.js against BBGM, and not against
+	   a stale second copy of BBGM. */
+	function ovrRaw(r) {
+		return (
 			0.159 * (r.hgt - 47.5) +
 			0.0777 * (r.stre - 50.2) +
 			0.123 * (r.spd - 50.8) +
@@ -33,7 +45,12 @@
 			0.062 * (r.pss - 51.3) +
 			0.01 * (r.fg - 47.0) +
 			0.01 * (r.reb - 51.4) +
-			48.5;
+			48.5
+		);
+	}
+
+	function ovr(r) {
+		const x = ovrRaw(r);
 
 		// Fudge factor, kept in sync with the game.
 		let f;
@@ -185,7 +202,7 @@
 	}
 
 	global.BBGM = {
-		RATING_KEYS, ovr, pos, skills, composites, compositeRating,
+		RATING_KEYS, ovr, ovrRaw, pos, skills, composites, compositeRating,
 		COMPOSITE_WEIGHTS, fuzzRating,
 	};
 })(typeof window !== "undefined" ? window : self);

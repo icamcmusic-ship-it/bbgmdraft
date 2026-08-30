@@ -40,6 +40,12 @@
 		hiddenColumns: {},
 		statMode: "perGame",
 		density: "normal",
+		redo: [],
+		// The two prospects the Compare tab is holding side by side.
+		compare: [null, null],
+		// The programme whose page the Teams tab is showing, if any.
+		team: null,
+		standingsConf: null,
 		compactBracket: false,
 		theme: "system",
 		logPlayer: null,
@@ -55,9 +61,16 @@
 	   lost unless you happened to have copied the link first. The loaded FILE
 	   cannot be stored (it is megabytes and it is the user's data), so it is
 	   the one thing that has to be dropped in again. */
+	/* Bumped whenever the shape of the persisted payload changes. STORE_KEY was
+	   versioned and the payload inside it was not, so a future settings change
+	   would read stale keys out of an old blob and silently half-apply them. */
+	const STORE_VERSION = 2;
+	let quotaWarned = false;
+
 	function persist() {
 		try {
 			localStorage.setItem(STORE_KEY, JSON.stringify({
+				v: STORE_VERSION,
 				cfg: state.cfg,
 				overrides: state.overrides,
 				overrideFingerprint: state.overrideFingerprint,
@@ -67,6 +80,8 @@
 				customPresets: state.customPresets,
 				hiddenColumns: state.hiddenColumns,
 				statMode: state.statMode,
+				compare: state.compare,
+				standingsConf: state.standingsConf,
 				density: state.density,
 				compactBracket: state.compactBracket,
 				theme: state.theme,
@@ -80,13 +95,36 @@
 					: null,
 				open: openGroups(),
 			}));
-		} catch (e) { /* private browsing, quota, or no storage at all */ }
+		} catch (e) {
+			/* Private browsing and "no storage at all" are nothing to say
+			   anything about — the tool works, settings just do not survive a
+			   refresh. A full quota is different: it happens gradually, as
+			   custom presets and pinned classes and a seed history accumulate,
+			   and it is the user's own data that stops being saved. Say so
+			   once. */
+			const quota = e && (e.name === "QuotaExceededError" ||
+				e.name === "NS_ERROR_DOM_QUOTA_REACHED" || e.code === 22);
+			if (quota && !quotaWarned) {
+				quotaWarned = true;
+				setStatus("Browser storage is full, so settings will not survive a " +
+					"refresh. Clearing some saved presets or pinned classes will fix it.",
+					true);
+			}
+		}
 	}
 
 	function restore() {
 		let saved = null;
 		try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) { saved = null; }
 		if (!saved) return null;
+		/* A payload from a different schema is discarded rather than
+		   half-applied. Only `theme` is carried across, because it is a
+		   preference about the browser rather than about a draft class and
+		   losing it is pure annoyance. */
+		if (Number(saved.v || 1) !== STORE_VERSION) {
+			if (saved.theme) state.theme = saved.theme;
+			return null;
+		}
 		if (saved.cfg) state.cfg = CFG.make(saved.cfg);
 		if (saved.overrides) state.overrides = saved.overrides;
 		if (saved.overrideFingerprint) state.overrideFingerprint = saved.overrideFingerprint;
@@ -96,6 +134,8 @@
 		if (saved.customPresets) state.customPresets = saved.customPresets;
 		if (saved.hiddenColumns) state.hiddenColumns = saved.hiddenColumns;
 		if (saved.statMode) state.statMode = saved.statMode;
+		if (Array.isArray(saved.compare)) state.compare = saved.compare.slice(0, 2);
+		if (saved.standingsConf) state.standingsConf = saved.standingsConf;
 		if (saved.density) state.density = saved.density;
 		state.compactBracket = !!saved.compactBracket;
 		if (saved.theme) state.theme = saved.theme;
@@ -123,33 +163,74 @@
 
 	/* "Reset to defaults" and "Clear lock" were both irreversible, and the word
 	   undo appeared nowhere in the codebase. */
-	function pushUndo(label) {
-		state.undo.push({
+	/* Named for what it is, and not `snapshot`: there is already a snapshot()
+	   further down for the class-comparison panel, and a duplicate function
+	   declaration silently hands both call sites the later one. */
+	function undoSnapshot(label) {
+		return {
 			label,
 			cfg: JSON.parse(JSON.stringify(state.cfg)),
 			overrides: JSON.parse(JSON.stringify(state.overrides)),
-		});
+		};
+	}
+
+	function pushUndo(label) {
+		state.undo.push(undoSnapshot(label));
 		if (state.undo.length > 40) state.undo.shift();
+		// A new action forks the history: whatever was undone is no longer
+		// reachable, which is what every undo stack does.
+		state.redo = [];
 		paintUndo();
+	}
+
+	function applySnapshot(snap, verb) {
+		state.cfg = CFG.make(snap.cfg);
+		state.overrides = snap.overrides;
+		paintUndo();
+		paintConfig();
+		setStatus(verb + ": " + snap.label);
+		run();
 	}
 
 	function undo() {
 		const prev = state.undo.pop();
 		if (!prev) return;
-		state.cfg = CFG.make(prev.cfg);
-		state.overrides = prev.overrides;
-		paintUndo();
-		paintConfig();
-		setStatus("Undid: " + prev.label);
-		run();
+		// Ctrl+Z existed and Ctrl+Shift+Z did not, so an undo was a one-way
+		// trip: the state you were in a moment ago was simply gone.
+		state.redo.push(undoSnapshot(prev.label));
+		if (state.redo.length > 40) state.redo.shift();
+		applySnapshot(prev, "Undid");
+	}
+
+	function redo() {
+		const next = state.redo.pop();
+		if (!next) return;
+		state.undo.push(undoSnapshot(next.label));
+		applySnapshot(next, "Redid");
 	}
 
 	function paintUndo() {
 		const b = $("btnUndo");
 		b.disabled = !state.undo.length;
+		// pushUndo("imported locks from a CSV") wrote a label that nothing ever
+		// displayed. The button says what it will undo.
+		b.textContent = state.undo.length
+			? "Undo " + short(state.undo[state.undo.length - 1].label)
+			: "Undo";
 		b.title = state.undo.length
 			? "Undo: " + state.undo[state.undo.length - 1].label + " (Ctrl+Z)"
 			: "Nothing to undo";
+		const r = $("btnRedo");
+		if (!r) return;
+		r.disabled = !state.redo.length;
+		r.title = state.redo.length
+			? "Redo: " + state.redo[state.redo.length - 1].label + " (Ctrl+Shift+Z)"
+			: "Nothing to redo";
+	}
+
+	function short(text) {
+		const t = String(text || "");
+		return t.length > 22 ? t.slice(0, 21) + "…" : t;
 	}
 
 	/* ---------------------------------------------------------------- config */
@@ -159,6 +240,7 @@
 		"specialization", "archetypeDiversity", "classFlavor", "buildNoise",
 		"freshmanShare", "transferShare", "redshirtShare", "reclassShare", "pDII",
 		"pace", "scoringEnv", "efficiencyEnv", "statNoise", "upsetFactor",
+		"archetypePool", "surpriseBudget", "injuryRate",
 		"awardStrictness", "confAwardStrictness", "proAwardStrictness",
 	];
 
@@ -176,11 +258,24 @@
 		transferShare: (v) => v + "%",
 		redshirtShare: (v) => v + "%",
 		reclassShare: (v) => v + "%",
+		injuryRate: (v) => v.toFixed(2) + "x",
+		archetypePool: (v) => (v ? v + " builds" : "off"),
+		surpriseBudget: (v) => (v ? "about " + v : "none"),
 	};
 
 	/* What each slider actually does, in units. "Class quality 2" means nothing
 	   on its own; "top prospect ~48 ovr" is a reference point. */
 	const SLIDER_HINT = {
+		archetypePool: (v) => (v
+			? "this class is drawn from about " + v + " of the 72 builds — " +
+				"lower is more distinctive, higher is one of everything"
+			: "off: every build is eligible in every class"),
+		surpriseBudget: (v) => (v
+			? "a five-star bust, an unranked riser, a 24-year-old JUCO, a 7'4\" project…"
+			: "no forced anomalies"),
+		injuryRate: (v) => (v === 0
+			? "nobody misses a game"
+			: "drawn before the season, so a team's record responds to them"),
 		classQuality: (v) => "top prospect ≈ " + Math.round(43 + v * 2.6) +
 			" ovr, back of the class ≈ " + Math.round(18 + v * 2.0),
 		classDepth: (v) => (v < 0 ? "top-heavy: stars, then a cliff"
@@ -283,7 +378,12 @@
 		paintNoteLines();
 		paintArchWeights();
 		paintLeagueWeights();
-		document.body.className = "density-" + state.density;
+		/* `cardtable` turns the prospect table into one card per prospect below
+		   700px (see css/style.css). It is a body class rather than a media
+		   query alone so the card layout only applies to the table that has the
+		   data-label attributes for it. */
+		document.body.className = "density-" + state.density +
+			(state.tab === "players" ? " cardtable" : "");
 	}
 
 	/* The era selector. The stat model targets one of the anchor sets in
@@ -383,17 +483,61 @@
 	function presetDiff() {
 		const preset = CFG.PRESETS[state.presetName] || state.customPresets[state.presetName];
 		if (!preset) return [];
-		const base = CFG.make(preset);
+		return diffConfigs(CFG.make(preset), state.cfg);
+	}
+
+	/* The settings two configurations differ on, as "name: was → is".
+	   Object-valued settings (the archetype and destination weight tables) are
+	   summarised rather than dumped. */
+	function diffConfigs(a, b) {
 		const out = [];
 		for (const k of Object.keys(CFG.DEFAULTS)) {
 			if (k === "seed") continue;
-			const a = base[k];
-			const b = state.cfg[k];
-			if (JSON.stringify(a) === JSON.stringify(b)) continue;
-			if (a && typeof a === "object") { out.push(k + " (edited)"); continue; }
-			out.push(k + " " + a + " → " + b);
+			const x = a[k];
+			const y = b[k];
+			if (JSON.stringify(x) === JSON.stringify(y)) continue;
+			if (x && typeof x === "object") { out.push(k + " (edited)"); continue; }
+			out.push(k + " " + x + " → " + y);
 		}
 		return out;
+	}
+
+	/* Any two presets against each other. The dropdown told you what the
+	   CURRENT settings changed from the selected preset, which answers one
+	   question; "what is the difference between these two presets I saved" was
+	   the other one, and it had no answer at all. */
+	function comparePresets() {
+		const names = Object.keys(CFG.PRESETS).concat(Object.keys(state.customPresets));
+		const box = el("div");
+		const bar = el("div", "filters");
+		const pick = (which) => {
+			const sel = el("select");
+			sel.setAttribute("aria-label", "Preset " + which);
+			for (const n of names) {
+				sel.appendChild(new Option(n === "default" ? "Defaults" : n, n));
+			}
+			bar.appendChild(sel);
+			return sel;
+		};
+		const left = pick("A");
+		const right = pick("B");
+		left.value = "default";
+		right.value = state.presetName in CFG.PRESETS ||
+			state.presetName in state.customPresets ? state.presetName : names[0];
+		box.appendChild(bar);
+		const out = el("div", "note");
+		box.appendChild(out);
+		const paint = () => {
+			const cfgOf = (n) => CFG.make(CFG.PRESETS[n] || state.customPresets[n] || {});
+			const rows = diffConfigs(cfgOf(left.value), cfgOf(right.value));
+			out.textContent = rows.length
+				? rows.join("\n")
+				: "These two presets are identical.";
+		};
+		left.addEventListener("change", paint);
+		right.addEventListener("change", paint);
+		paint();
+		modal("Compare presets", box, null, "Close");
 	}
 
 	function cssEscape(s) {
@@ -747,13 +891,35 @@
 		return out;
 	}
 
+	/* Roughly where browsers and the things people paste links into start
+	   truncating. A class with 70 fully-locked players clears it easily, and a
+	   silently truncated link is worse than no link: it opens, parses as far as
+	   it got, and applies the wrong settings. */
+	const HASH_LIMIT = 8000;
+	let hashWarned = false;
+
 	function writeHash() {
 		try {
 			const payload = encodeConfig();
-			const s = Object.keys(payload).length
-				? "#c=" + encodeURIComponent(JSON.stringify(payload))
-				: "#";
-			history.replaceState(null, "", s);
+			let body = Object.keys(payload).length
+				? encodeURIComponent(JSON.stringify(payload))
+				: "";
+			if (body.length > HASH_LIMIT && payload.overrides) {
+				/* Drop the locks rather than the settings: the settings are what
+				   a shared link is usually for, and the locks are the part that
+				   grows without bound. */
+				const lean = Object.assign({}, payload);
+				delete lean.overrides;
+				delete lean.fp;
+				body = encodeURIComponent(JSON.stringify(lean));
+				if (!hashWarned) {
+					hashWarned = true;
+					setStatus("This class has too many locked players to fit in a " +
+						"shareable link, so the link carries the settings only. " +
+						"Export the locks as CSV to share those.", true);
+				}
+			}
+			history.replaceState(null, "", body ? "#c=" + body : "#");
 		} catch (e) { /* a hash that will not fit is not worth an error banner */ }
 	}
 
@@ -775,6 +941,21 @@
 			showError(new Error("Could not read the settings in this link."));
 			return false;
 		}
+	}
+
+	/* A short, stable identity for one GENERATED class. Built from what the
+	   user actually sees — who each player is, what he was built into, where he
+	   plays and what he averaged — so any difference that matters shows up and
+	   a difference that does not (the order of a tab, a theme) does not. */
+	function classFingerprint(res) {
+		const parts = [];
+		for (const p of res.players.slice().sort((a, b) => (a.key < b.key ? -1 : 1))) {
+			parts.push(p.key + ":" + p.newOvr + "/" + p.newPot + ":" + p.archetype +
+				":" + (p.proClub || p.newCollege) +
+				":" + (p.stats ? p.stats.ppg.toFixed(1) : "-"));
+		}
+		const h = global.BBGMRng.hashSeed(parts.join("|"));
+		return (h() >>> 0).toString(36).slice(0, 6);
 	}
 
 	/* A short, stable identity for one draft class file. */
@@ -821,6 +1002,19 @@
 						// with a sentence instead of throwing a raw TypeError
 						// out of the middle of the sim.
 						const check = global.Engine.validateLeagueFile(data);
+						/* validateLeagueFile is a check now, not a migration, so
+						   the season it recovered is applied here. */
+						data.startingSeason = check.season;
+						/* A full league export is 5,000+ players. Rebuilding all
+						   of them and simulating 368 programs with hundreds of
+						   prospects apiece locks the tab with no progress bar and
+						   no way out, so take the draft class inside the file
+						   when there is one and say so. */
+						if (check.oversized && check.classPids) {
+							const keep = new Set(check.classPids);
+							data.players = data.players.filter((p, i) =>
+								keep.has(Number.isFinite(Number(p.pid)) ? Number(p.pid) : -1 - i));
+						}
 						resolve({ name: f.name, data, warnings: check.warnings });
 					} catch (e) {
 						problems.push(f.name + ": " + e.message);
@@ -923,14 +1117,18 @@
 	function showError(err) {
 		const b = $("errBanner");
 		b.hidden = false;
-		b.querySelector(".bannertext").textContent =
-			err && err.message ? err.message : String(err);
+		const text = err && err.message ? err.message : String(err);
+		b.querySelector(".bannertext").textContent = text;
+		// Banners are dismissible and a dismissed banner used to be gone for
+		// good; everything said this session is kept (Tools → Message history).
+		remember("Error: " + text);
 	}
 	function clearError() { $("errBanner").hidden = true; }
 	function showWarning(text) {
 		const b = $("warnBanner");
 		b.hidden = false;
 		b.querySelector(".bannertext").textContent = text;
+		remember("Warning: " + text);
 	}
 
 	/* The settings actually handed to the engine.
@@ -960,7 +1158,7 @@
 
 	/* The engine is staged: a runner only redoes the phases whose settings
 	   changed. Moving the note template or an award dial used to re-simulate
-	   353 programs, 11,000 games and every stat line in the country — about
+	   368 programs, 11,000 games and every stat line in the country — about
 	   200ms of blocking work every 140ms while a slider was moving. */
 	function run() {
 		if (!state.files.length) return;
@@ -978,9 +1176,16 @@
 		}
 		const ms = performance.now() - t0;
 		$("seedPill").hidden = false;
-		$("seedPill").textContent = "seed " + res.seed;
+		/* A short hash OF THE CLASS, not of the seed. Two people can share a
+		   seed and still be looking at different classes — a different source
+		   file, a lock one of them set, a version of the tool with a different
+		   model in it — and had no way to notice. Matching fingerprints mean
+		   the same seventy players. */
+		$("seedPill").textContent = "seed " + res.seed + " · " + classFingerprint(res);
 		$("seedPill").dataset.seed = res.seed;
-		$("seedPill").title = "Click to copy · " + Math.round(ms) + "ms (" +
+		$("seedPill").title = "Seed and class fingerprint — two people with the same " +
+			"fingerprint are looking at the same seventy players. " +
+			"Click to copy the seed, shift-click or right-click to paste one · " + Math.round(ms) + "ms (" +
 			(res.phasesRun.length ? res.phasesRun.join(" → ") : "nothing to redo") + ")";
 		if (state.history[0] !== res.seed) {
 			state.history.unshift(res.seed);
@@ -1063,6 +1268,21 @@
 			tabs.appendChild(b);
 		});
 		const view = $("view");
+		/* Every interaction rebuilds this view from scratch — clicking a row to
+		   open the editor, ticking a sort level, typing in a filter. With a
+		   sticky name column and forty columns that threw the user back to the
+		   left edge of the table on every single edit, which was the most-felt
+		   defect in the tool.
+
+		   Rebuilding is kept (it is what makes the render function simple and
+		   correct), but the two pieces of state a rebuild destroys and the
+		   browser cannot restore — where the scroll containers were, and what
+		   was focused with what selected — are carried across it. Scroll
+		   positions are keyed by the container's position in the view, so they
+		   survive a rebuild that produces the same shape and are simply not
+		   found when it does not. */
+		const scrolls = captureScroll(view);
+		const focus = captureFocus(view);
 		view.innerHTML = "";
 		const res = ensureResult(state.active);
 		if (!res) return;
@@ -1070,6 +1290,71 @@
 		// it has to be repainted when there is a new run to report.
 		paintArchWeights();
 		(V[state.tab] || V.players)(view, res);
+		restoreScroll(view, scrolls);
+		restoreFocus(view, focus);
+	}
+
+	const SCROLLERS = ".scroll, .tablewrap, .drawer";
+
+	function captureScroll(view) {
+		const out = [];
+		view.querySelectorAll(SCROLLERS).forEach((n, i) => {
+			if (n.scrollLeft || n.scrollTop) out.push([i, n.scrollLeft, n.scrollTop]);
+		});
+		return { list: out, page: view.scrollTop, win: global.scrollY || 0 };
+	}
+
+	function restoreScroll(view, saved) {
+		if (!saved) return;
+		const nodes = view.querySelectorAll(SCROLLERS);
+		for (const [i, left, top] of saved.list) {
+			const n = nodes[i];
+			if (!n) continue;
+			n.scrollLeft = left;
+			n.scrollTop = top;
+		}
+		if (saved.page) view.scrollTop = saved.page;
+		if (saved.win) global.scrollTo(0, saved.win);
+	}
+
+	/* What was focused, and where the caret was in it.
+
+	   Identified by an explicit data-focus key when the element has one and by
+	   its index among focusables otherwise, so a rebuilt node gets the focus
+	   back rather than the document body taking it — which is what made every
+	   filter keystroke a fight. */
+	function captureFocus(view) {
+		const a = document.activeElement;
+		if (!a || !view.contains(a)) return null;
+		const key = a.getAttribute("data-focus");
+		const all = Array.prototype.slice.call(
+			view.querySelectorAll("input, select, textarea, button, [tabindex]"));
+		const sel = {};
+		try {
+			if (a.selectionStart !== undefined && a.selectionStart !== null) {
+				sel.start = a.selectionStart;
+				sel.end = a.selectionEnd;
+			}
+		} catch (e) { /* selection is not available on every input type */ }
+		return { key, index: all.indexOf(a), sel };
+	}
+
+	function restoreFocus(view, saved) {
+		if (!saved) return;
+		let node = null;
+		if (saved.key) node = view.querySelector('[data-focus="' + saved.key + '"]');
+		if (!node && saved.index >= 0) {
+			node = view.querySelectorAll(
+				"input, select, textarea, button, [tabindex]")[saved.index] || null;
+		}
+		if (!node) return;
+		try {
+			node.focus({ preventScroll: true });
+			if (saved.sel && saved.sel.start !== undefined &&
+				node.setSelectionRange && node.type !== "number") {
+				node.setSelectionRange(saved.sel.start, saved.sel.end);
+			}
+		} catch (e) { /* focus can be refused; not worth an error */ }
 	}
 
 	/* The selection count lives in the bulk bar, so ticking a row has to
@@ -1083,6 +1368,15 @@
 	}
 
 	/* ----------------------------------------------------- per-player editor */
+
+	/* Shared with the lock badge in the table, so clearing a lock does not
+	   require a round trip into the editor and back. */
+	function clearLock(p) {
+		if (!state.overrides[p.key]) return;
+		pushUndo("cleared the lock on " + p.name);
+		delete state.overrides[p.key];
+		run();
+	}
 
 	function openEditor(p) {
 		state.editing = state.editing === p.key ? null : p.key;
@@ -1277,11 +1571,7 @@
 		});
 		buttons.appendChild(apply);
 		const clear = el("button", null, "Clear lock");
-		clear.addEventListener("click", () => {
-			pushUndo("cleared the lock on " + p.name);
-			delete state.overrides[p.key];
-			run();
-		});
+		clear.addEventListener("click", () => clearLock(p));
 		buttons.appendChild(clear);
 		/* Reroll one player. It was the whole class or nothing: if you liked
 		   sixty-nine of them and wanted one more look at the seventieth, the
@@ -1290,18 +1580,44 @@
 		   The trick is that every RNG stream is keyed off the player's key, so
 		   giving him a salt gives him a different draw and leaves everybody
 		   else's stream untouched. */
-		const again = el("button", null, "Reroll just him");
-		again.title = "Draw this prospect again. Nobody else in the class moves.";
-		again.addEventListener("click", () => {
-			pushUndo("rerolled " + p.name);
-			const cur = state.overrides[p.key] || {};
-			const next = Object.assign({}, cur);
-			next.reroll = (Number(cur.reroll) || 0) + 1;
-			state.overrides[p.key] = next;
-			state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
-			run();
-		});
-		buttons.appendChild(again);
+		const rerollAxis = (key, label, title) => {
+			const b = el("button", null, label);
+			b.title = title;
+			b.addEventListener("click", () => {
+				pushUndo(key ? "rerolled " + p.name + "'s " + key : "rerolled " + p.name);
+				const cur = state.overrides[p.key] || {};
+				const next = Object.assign({}, cur);
+				const field = key ? "reroll_" + key : "reroll";
+				next[field] = (Number(cur[field]) || 0) + 1;
+				state.overrides[p.key] = next;
+				state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
+				run();
+			});
+			buttons.appendChild(b);
+			return b;
+		};
+		rerollAxis(null, "Reroll just him",
+			"Draw this prospect again. Nobody else in the class moves.");
+		/* One axis at a time. Rerolling the whole player is a blunt instrument:
+		   the thing you usually want is this build at a different school, or
+		   this school with a different build, or the same player with the stat
+		   noise redrawn. Each axis has its own counter, so the streams it does
+		   not name are untouched. */
+		rerollAxis("build", "↻ build",
+			"Redraw his archetype and ratings. Same school, same season.");
+		/* Only where the tool actually chooses the school. A player whose
+		   college is in the league file keeps it — that is the whole point of
+		   the college assignment — so the button would be a no-op, and a button
+		   that does nothing is worse than no button. */
+		const schoolIsOurs = !p.origCollege || !String(p.origCollege).trim();
+		const sb = rerollAxis("school", "↻ school",
+			schoolIsOurs
+				? "Send him somewhere else. Same build."
+				: "His school comes from the league file, so there is nothing to redraw. " +
+					"Lock a school in the field above to move him.");
+		if (!schoolIsOurs) sb.disabled = true;
+		rerollAxis("stats", "↻ season",
+			"Same player, a different set of nights.");
 		panel.appendChild(buttons);
 
 		panel.appendChild(el("h4", null, "Why this player looks like this"));
@@ -1367,7 +1683,156 @@
 		dt.appendChild(db);
 		dw.appendChild(dt);
 		panel.appendChild(dw);
+		panel.appendChild(explainStats(p, res));
+		panel.appendChild(explainBoard(p));
+		panel.appendChild(priorSeasonsPanel(p, res));
 		return panel;
+	}
+
+	/* Where this stat line came from.
+
+	   Every input already existed on teamCtx and none of it surfaced, so the
+	   answer to "why does this 45-overall prospect score seven points" was
+	   unavailable inside the tool that produced the seven points — you had to
+	   instrument the engine to find out. It is minutes, then share of the
+	   offence, then the pace of the team he plays for, then the defences he
+	   faced, and every one of those is a number the sim already computed. */
+	function explainStats(p, res) {
+		const box = el("details", "explain");
+		box.appendChild(el("summary", null, "Where this stat line comes from"));
+		const s = p.stats;
+		if (!s) {
+			box.appendChild(el("p", "hint", "He did not play a season."));
+			return box;
+		}
+		const t = res.teams[p.newCollege];
+		const dl = el("dl", "shortcuts");
+		const row = (k, v) => {
+			dl.appendChild(el("dt", null, k));
+			dl.appendChild(el("dd", null, v));
+		};
+		const n1 = (x) => (Number.isFinite(x) ? x.toFixed(1) : "—");
+		row("Minutes", n1(s.mpg) + " a game over " + Math.round(s.gp) + " games" +
+			(p.availability ? ", missing " + p.availability.games + " with " +
+				p.availability.kind : ""));
+		row("Share of the offence", (s.usg * 100).toFixed(1) + "% of his team's " +
+			"chances while on the floor (" + (s.usgShare * 100).toFixed(1) +
+			"% of all of them)");
+		if (t) {
+			row("Team tempo", n1(t.pace) + " possessions a game" +
+				(t.style ? " — " + t.style.name : ""));
+			row("Programme", t.name + ", level " + Math.round(t.level) +
+				", " + t.w + "-" + t.l +
+				(t.coach ? " under " + t.coach.name + " (year " + t.coach.tenure + ")" : ""));
+			if (t.oppDefense) {
+				const d = t.oppDefense;
+				const say = (v) => (v > 0.01 ? "tougher" : v < -0.01 ? "softer" : "average");
+				row("Defences faced", "at the rim " + say(d.rim) +
+					", on the perimeter " + say(d.perimeter) +
+					" than an average schedule");
+			}
+		}
+		row("Shot mix", n1(s.fga) + " field goals, " + n1(s.tpa) + " of them threes, " +
+			n1(s.fta) + " free throws");
+		row("Efficiency", (s.ts * 100).toFixed(1) + "% true shooting on " +
+			(s.fgp * 100).toFixed(1) + "% from the floor");
+		row("The arithmetic", n1(s.fga - s.tpa) + " twos at " +
+			(((s.fgp * s.fga - s.tpa * s.tpp) / Math.max(0.01, s.fga - s.tpa)) * 100)
+				.toFixed(1) + "%, " +
+			n1(s.tpa) + " threes at " + (s.tpp * 100).toFixed(1) + "%, " +
+			n1(s.fta) + " free throws at " + (s.ftp * 100).toFixed(1) + "% = " +
+			n1(s.ppg) + " points");
+		box.appendChild(dl);
+		return box;
+	}
+
+	/* Why he is where he is on the board. stockScore is six terms and the board
+	   showed only the answer, so a prospect twelve places above where his
+	   production said he should be had no explanation attached to him — the
+	   potential tooltip already does exactly this for potential. */
+	function explainBoard(p) {
+		const box = el("details", "explain");
+		box.appendChild(el("summary", null,
+			"Why he is at No. " + (p.boardRank || "—") + " on the board"));
+		if (!Number.isFinite(p.stockScore)) {
+			box.appendChild(el("p", "hint", "No board score for this player."));
+			return box;
+		}
+		const prod = p.stats ? (global.Awards.productionScore(p) || 0) : 0;
+		const march = p.gameLog && p.gameLog.postseason
+			? p.gameLog.postseason.ppg * 0.16 * Math.min(6, p.gameLog.postseason.gp)
+			: 0;
+		const terms = [
+			["Overall rating", p.newOvr * 1.25],
+			["Room to grow (pot − ovr)", (p.newPot - p.newOvr) * 0.65],
+			["Production", prod * 0.30],
+			["Awards (" + (p.awards || []).length + ")", (p.awards || []).length * 0.55],
+			["March", march],
+			["Played outside D-I", p.nonNcaa ? -1.2 : 0],
+		];
+		const known = terms.reduce((a, [, v]) => a + v, 0);
+		terms.push(["Scouting noise", p.stockScore - known]);
+		const dl = el("dl", "shortcuts");
+		for (const [k, v] of terms) {
+			if (Math.abs(v) < 0.05) continue;
+			dl.appendChild(el("dt", null, (v > 0 ? "+" : "") + v.toFixed(1)));
+			dl.appendChild(el("dd", null, k));
+		}
+		box.appendChild(dl);
+		box.appendChild(el("p", "hint",
+			"Total " + p.stockScore.toFixed(1) + ". Preseason he was No. " +
+			p.preseasonRank + "; he has moved " +
+			(p.stockMove > 0 ? "up " + p.stockMove : p.stockMove < 0
+				? "down " + -p.stockMove : "not at all") + "."));
+		return box;
+	}
+
+	/* The seasons before this one. Fabricated, and labelled as such — but "he
+	   averaged 4, then 9, then 16" is a completely different scouting report
+	   from "he averaged 16", and the tool had no way to say the first one. */
+	function priorSeasonsPanel(p, res) {
+		const box = el("details", "explain");
+		box.appendChild(el("summary", null, "Career to date"));
+		const rows = p.priorSeasons || [];
+		if (!rows.length && !p.stats) {
+			box.appendChild(el("p", "hint", "No season to show."));
+			return box;
+		}
+		const table = el("table", "mini");
+		const head = el("tr");
+		for (const h of ["Season", "Team", "GP", "MPG", "PPG", "RPG", "APG", "TS%"]) {
+			head.appendChild(el("th", null, h));
+		}
+		table.appendChild(head);
+		const line = (season, team, r, now) => {
+			const tr = el("tr", now ? "now" : "");
+			tr.appendChild(el("td", null, String(season)));
+			tr.appendChild(el("td", null, team));
+			if (r.redshirt) {
+				const td = el("td", null, r.reason || "redshirt");
+				td.colSpan = 6;
+				tr.appendChild(td);
+				return tr;
+			}
+			tr.appendChild(el("td", "num", String(Math.round(r.gp))));
+			for (const k of ["mpg", "ppg", "rpg", "apg"]) {
+				tr.appendChild(el("td", "num", r[k].toFixed(1)));
+			}
+			tr.appendChild(el("td", "num", (r.ts * 100).toFixed(1)));
+			return tr;
+		};
+		for (const r of rows) table.appendChild(line(r.season, r.team, r, false));
+		if (p.stats) {
+			table.appendChild(line(res.season, p.proClub || p.newCollege, p.stats, true));
+		}
+		box.appendChild(table);
+		if (rows.length) {
+			box.appendChild(el("p", "hint",
+				"Earlier seasons are reconstructed by the model, not simulated — " +
+				"the same way the recruiting ranking and the transfer history are. " +
+				"Nothing in the tool ranks on them."));
+		}
+		return box;
 	}
 
 	function potExplain(p) {
@@ -1466,15 +1931,51 @@
 
 	/* --------------------------------------------------------------- export */
 
+	/* Everything the status line has said this session. Warnings and messages
+	   were dismissible banners with no history, so a warning you dismissed — or
+	   one that timed out while you were looking elsewhere — was simply gone.
+	   Tools → Message history brings them back. */
+	const messages = [];
+
+	function remember(text) {
+		messages.push({ at: new Date(), text: String(text) });
+		if (messages.length > 200) messages.shift();
+	}
+
 	function setStatus(text, sticky) {
 		const s = $("status");
 		s.textContent = text;
 		s.hidden = !text;
+		if (text) remember(text);
 		if (!sticky) setTimeout(() => { if (s.textContent === text) s.hidden = true; }, 3500);
 	}
 
+	function messageHistory() {
+		const box = el("div");
+		if (!messages.length) {
+			box.appendChild(el("p", "hint", "Nothing has been reported yet."));
+		} else {
+			const list = el("dl", "shortcuts");
+			for (const m of messages.slice().reverse()) {
+				list.appendChild(el("dt", null, m.at.toLocaleTimeString()));
+				list.appendChild(el("dd", null, m.text));
+			}
+			box.appendChild(list);
+		}
+		modal("Message history", box, null, "Close");
+	}
+
+	/* CSV gets a byte-order mark for the same reason the JSON export does:
+	   Excel reads a BOM-less UTF-8 file as the system code page, so Doncic,
+	   Saric, Jokic and Wembanyama all come out as mojibake in the one file
+	   people actually open in a spreadsheet. text/csv is the only type that
+	   needs it — JSON exports add their own at the call site. */
 	function download(name, text, type) {
-		const blob = new Blob([text], { type: type || "text/plain" });
+		const t = type || "text/plain";
+		const body = t === "text/csv" && text.charAt(0) !== "\ufeff"
+			? "\ufeff" + text
+			: text;
+		const blob = new Blob([body], { type: t });
 		const a = document.createElement("a");
 		a.href = URL.createObjectURL(blob);
 		a.download = name;
@@ -1507,9 +2008,19 @@
 		"fga", "tpa", "fta", "tpar", "ftr", "efg", "astTo", "ortg", "prod",
 		"usg", "fgp", "tpp", "ftp", "ts", "awards"];
 
+	/* A field beginning =, +, - or @ is executed as a FORMULA when the file is
+	   opened in Excel or Sheets. Names come from BBGM, but the lock-import
+	   round trip means a user-authored CSV can come back in, and "it is only
+	   our own data" is exactly the assumption that makes this class of bug
+	   ship. A leading apostrophe is the standard neutraliser and is invisible
+	   in the spreadsheet.
+
+	   The escape test also missed a bare carriage return: a field containing
+	   one (possible in a note, or in an imported name) broke the row. */
 	function esc(v) {
-		const s = v === undefined || v === null ? "" : String(v);
-		return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+		let s = v === undefined || v === null ? "" : String(v);
+		if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+		return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 	}
 
 	function exportCsv(res, everyone) {
@@ -1589,16 +2100,100 @@
 		setStatus("Notes exported.");
 	}
 
+	/* The same notes as Markdown, so they survive a paste into a forum post or
+	   an issue instead of arriving as one run-on paragraph per player. */
+	function exportNotesMarkdown(res) {
+		const out = ["# Draft class " + res.season + " — seed `" + res.seed + "`", ""];
+		if (res.flavor && res.flavor.name !== "balanced") {
+			out.push("_This class is " + res.flavor.label + "._", "");
+		}
+		if (res.surprises && res.surprises.length) {
+			out.push("**Story of the class:** " +
+				res.surprises.map((s) => s.player + ", " + s.label).join("; "), "");
+		}
+		const board = res.players.slice()
+			.sort((a, b) => (a.boardRank || 999) - (b.boardRank || 999));
+		for (const p of board) {
+			out.push("## " + (p.boardRank ? p.boardRank + ". " : "") + p.name);
+			out.push("");
+			out.push("`" + p.newPos + "` **" + p.newOvr + "/" + p.newPot + "** · " +
+				p.archetype + " · " + p.classYear + " · " +
+				(p.proClub || p.newCollege));
+			out.push("");
+			for (const line of String(p.note || "").split("\n")) {
+				if (line.trim()) out.push(line.trim());
+			}
+			out.push("");
+		}
+		download("notes.md", out.join("\n"), "text/markdown");
+		setStatus("Notes exported as Markdown.");
+	}
+
 	/* Re-apply locks in bulk from a CSV. The natural workflow — export the
 	   table, edit ovr/archetype/college in a spreadsheet, bring it back — had
 	   no return path at all. */
 	function importLocksCsv(text) {
+		/* A preview first. This applied everything and reported the dropped
+		   rows afterwards, so the way to find out what a spreadsheet was about
+		   to do to a class was to let it. */
+		const plan = planLockImport(text);
+		if (!plan) return;
+		if (!plan.applied.length) {
+			showError(new Error("Nothing in that CSV matched a player in this class." +
+				(plan.unmatched.length
+					? " " + plan.unmatched.length + " row(s) named somebody else." : "")));
+			return;
+		}
+		const box = el("div");
+		box.appendChild(el("p", "hint",
+			plan.applied.length + " of " + plan.total + " rows will lock settings on " +
+			"this class" +
+			(plan.unmatched.length
+				? "; " + plan.unmatched.length + " matched nobody and will be skipped"
+				: "") + "."));
+		const wrap = el("div", "scroll");
+		const table = el("table", "mini");
+		const hr = el("tr");
+		for (const h of ["Player", "Will lock"]) hr.appendChild(el("th", null, h));
+		table.appendChild(hr);
+		for (const a of plan.applied.slice(0, 200)) {
+			const tr = el("tr");
+			tr.appendChild(el("td", null, a.player.name));
+			tr.appendChild(el("td", null, Object.keys(a.patch)
+				.map((k) => k + " = " + a.patch[k]).join(", ")));
+			table.appendChild(tr);
+		}
+		wrap.appendChild(table);
+		box.appendChild(wrap);
+		if (plan.unmatched.length) {
+			box.appendChild(el("p", "hint",
+				"Not matched: " + plan.unmatched.slice(0, 12).join(", ") +
+				(plan.unmatched.length > 12 ? ", …" : "")));
+		}
+		modal("Import locks — preview", box, () => applyLockImport(plan), "Apply");
+	}
+
+	function applyLockImport(plan) {
+		pushUndo("imported locks from a CSV");
+		for (const a of plan.applied) {
+			state.overrides[a.player.key] =
+				Object.assign({}, state.overrides[a.player.key] || {}, a.patch);
+		}
+		state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
+		run();
+		setStatus("Applied " + plan.applied.length + " lock" +
+			(plan.applied.length === 1 ? "" : "s") +
+			(plan.unmatched.length
+				? "; " + plan.unmatched.length + " row(s) matched nobody." : "."));
+	}
+
+	function planLockImport(text) {
 		const rows = parseCsv(text);
-		if (!rows.length) { showError(new Error("That CSV has no rows.")); return; }
+		if (!rows.length) { showError(new Error("That CSV has no rows.")); return null; }
 		const head = rows[0].map((h) => h.trim().toLowerCase());
 		const idx = (name) => head.indexOf(name);
 		const res = state.results[state.active];
-		if (!res) return;
+		if (!res) return null;
 		const byKey = {};
 		const byName = {};
 		for (const p of res.players) {
@@ -1611,14 +2206,15 @@
 		};
 		if (cols.key < 0 && cols.name < 0) {
 			showError(new Error("The CSV needs a `key` or `name` column to match players."));
-			return;
+			return null;
 		}
-		let applied = 0;
+		const applied = [];
 		const unmatched = [];
-		pushUndo("imported locks from a CSV");
+		let total = 0;
 		for (let i = 1; i < rows.length; i++) {
 			const r = rows[i];
 			if (!r.length || r.every((c) => !c.trim())) continue;
+			total++;
 			const k = cols.key >= 0 ? String(r[cols.key]).trim() : null;
 			const nm = cols.name >= 0 ? String(r[cols.name]).trim().toLowerCase() : null;
 			const p = (k && byKey[k]) || (nm && byName[nm]);
@@ -1637,13 +2233,9 @@
 				patch.college = String(r[cols.college]).trim();
 			}
 			if (!Object.keys(patch).length) continue;
-			state.overrides[p.key] = Object.assign({}, state.overrides[p.key] || {}, patch);
-			applied++;
+			applied.push({ player: p, patch });
 		}
-		state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
-		run();
-		setStatus("Applied " + applied + " lock" + (applied === 1 ? "" : "s") +
-			(unmatched.length ? "; " + unmatched.length + " row(s) matched nobody." : "."));
+		return { applied, unmatched, total };
 	}
 
 	function parseCsv(text) {
@@ -1705,7 +2297,10 @@
 		item("Season as JSON — records, bracket, awards, board", () => exportSeasonJson(res));
 		item("Season as CSV", () => exportSeasonCsv(res));
 		item("Note text only, for a spreadsheet", () => exportNotes(res));
+		item("Notes as Markdown, for a forum post", () => exportNotesMarkdown(res));
 		item("Import locks from a CSV…", () => $("csvFile").click());
+		item("Message history", messageHistory);
+		item("Compare two presets…", comparePresets);
 		box.appendChild(list);
 		modal("Export and import", box, null, "Close");
 	}
@@ -1774,11 +2369,33 @@
 		setStatus("");
 	}
 
+	/* The previous batch, held for comparison. The whole point of running a
+	   calibration sweep is the diff between two settings, and a batch was a
+	   distribution with nothing to hold it against: you read one panel, changed
+	   a slider, ran again, and compared from memory. */
+	let heldBatch = null;
+
 	function renderBatch(rows) {
 		const B = global.BatchStats;
 		const view = $("view");
 		view.innerHTML = "";
-		view.appendChild(el("h3", null, rows.length + " classes with these settings"));
+		const head = el("div", "rowflex");
+		head.appendChild(el("h3", null, rows.length + " classes with these settings"));
+		const hold = el("button", "tiny",
+			heldBatch ? "Hold this as A (replacing the held batch)" : "Hold this as A");
+		hold.title = "Keep this batch as a baseline; the next one is compared against it.";
+		hold.addEventListener("click", () => {
+			heldBatch = { rows: rows.slice(), seed: batchBaseSeed, cfg: effectiveCfg() };
+			setStatus("Batch held as A. Change a setting and run another.");
+			renderBatch(rows);
+		});
+		head.appendChild(hold);
+		if (heldBatch) {
+			const drop = el("button", "tiny", "Forget A");
+			drop.addEventListener("click", () => { heldBatch = null; renderBatch(rows); });
+			head.appendChild(drop);
+		}
+		view.appendChild(head);
 		const col = (k) => rows.map((r) => r[k]);
 		/* A batch of fifty classes exists to show a distribution, and the panel
 		   showed one row of averages. p5 / p50 / p95 answers "how unusual was
@@ -1824,6 +2441,7 @@
 				"  (class i of this batch is seed “" + (batchBaseSeed || "") + "#i”)",
 			"seeds: " + rows.map((r) => r.seed).join(", "),
 		].join("\n")));
+		if (heldBatch && heldBatch.rows.length) view.appendChild(batchDiff(heldBatch, rows));
 		const cards = el("div", "cards");
 		cards.appendChild(V.histogram("Scoring leader per class", col("topPpg"), 10));
 		cards.appendChild(V.histogram("Awards per class", col("awards"), 10));
@@ -1905,6 +2523,61 @@
 		setTimeout(step, 0);
 	}
 
+	/* A against B, on every row the batch panel reports, plus which settings
+	   differ between the two — because "the scoring leader moved 1.4 points"
+	   only means something next to "because I moved pace and specialisation". */
+	const BATCH_ROWS = [
+		["mean ovr", "ovr", 2], ["mean pot", "pot", 2], ["mean MPG", "mpg", 2],
+		["mean PPG", "ppg", 2], ["mean RPG", "rpg", 2], ["mean APG", "apg", 2],
+		["mean USG%", "usg", 2], ["mean TS%", "ts", 2],
+		["team PPG", "teamPpg", 2], ["team AST", "teamAst", 2],
+		["scoring leader", "topPpg", 2], ["assist leader", "topApg", 2],
+		["block leader", "topBpg", 2], ["awards/class", "awards", 1],
+		["honoured players", "honoured", 1], ["distinct archetypes", "archetypes", 1],
+	];
+
+	function batchDiff(held, rows) {
+		const B = global.BatchStats;
+		const box = el("div", "card");
+		box.appendChild(el("h4", null,
+			"A (seed " + (held.seed || "—") + ", " + held.rows.length + " classes)" +
+			"  vs  B (seed " + (batchBaseSeed || "—") + ", " + rows.length + " classes)"));
+		const now = effectiveCfg();
+		const changed = Object.keys(now).filter((k) => {
+			if (k === "seed" || k === "overrides" || k === "leagueWeights" ||
+				k === "archetypeWeights" || k === "noteLines") return false;
+			return String(held.cfg[k]) !== String(now[k]);
+		});
+		box.appendChild(el("p", "hint", changed.length
+			? "Settings that differ: " +
+				changed.map((k) => k + " " + held.cfg[k] + " → " + now[k]).join(", ")
+			: "Same settings — the difference below is sampling noise."));
+		const table = el("table", "mini");
+		const hr = el("tr");
+		for (const h of ["", "A", "B", "B − A"]) {
+			hr.appendChild(el("th", h ? "num" : "", h));
+		}
+		table.appendChild(hr);
+		for (const [label, key, digits] of BATCH_ROWS) {
+			const a = B.mean(held.rows.map((r) => r[key]));
+			const b = B.mean(rows.map((r) => r[key]));
+			if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+			const tr = el("tr");
+			tr.appendChild(el("td", null, label));
+			tr.appendChild(el("td", "num", a.toFixed(digits)));
+			tr.appendChild(el("td", "num", b.toFixed(digits)));
+			const d = b - a;
+			const td = el("td", "num");
+			td.appendChild(el("span", Math.abs(d) < Math.pow(10, -digits) ? ""
+				: d > 0 ? "up" : "down",
+				(d > 0 ? "+" : "") + d.toFixed(digits)));
+			tr.appendChild(td);
+			table.appendChild(tr);
+		}
+		box.appendChild(table);
+		return box;
+	}
+
 	function cancelBatch() {
 		batchCancel = true;
 		if (batchWorker) {
@@ -1936,6 +2609,7 @@
 
 	Object.assign(global.App, {
 		state, render, run, persist, openEditor, editorPanel, modal, closeModal,
+		clearLock,
 		copyText, bulkApply, bulkShiftOvr, bulkClear, refreshBulkBar, snapshot,
 		exportCsv, setStatus, showError, indexSnapshot,
 	});
@@ -1998,6 +2672,41 @@
 		p.textContent = "seed copied ✓";
 		setTimeout(() => { p.textContent = was; }, 1200);
 	});
+	/* You could share a seed and not receive one: taking somebody else's meant
+	   opening the settings panel and finding the field by hand. Shift-click (or
+	   right-click) the pill and paste. */
+	const pasteSeed = (e) => {
+		e.preventDefault();
+		const take = (text) => {
+			const seed = String(text || "").trim();
+			if (!seed) return;
+			pushUndo("pasted a seed");
+			state.cfg.seed = seed;
+			$("seed").value = seed;
+			state.presetDirty = true;
+			run();
+		};
+		if (navigator.clipboard && navigator.clipboard.readText) {
+			navigator.clipboard.readText().then(take, () => promptSeed(take));
+		} else promptSeed(take);
+	};
+	$("seedPill").addEventListener("contextmenu", pasteSeed);
+	$("seedPill").addEventListener("click", (e) => { if (e.shiftKey) pasteSeed(e); }, true);
+
+	/* Clipboard read needs a permission the copy path does not, and it is
+	   refused outright on file:// in most browsers — which is the documented
+	   way to use this tool. Ask for the seed instead of failing silently. */
+	function promptSeed(take) {
+		const box = el("div");
+		box.appendChild(el("p", "hint", "Paste a seed to load the class it produces."));
+		const input = el("input");
+		input.type = "text";
+		input.value = "";
+		input.setAttribute("aria-label", "Seed");
+		box.appendChild(input);
+		modal("Use a seed", box, () => take(input.value));
+		setTimeout(() => input.focus(), 0);
+	}
 	$("btnCopyLink").addEventListener("click", () => {
 		writeHash();
 		copyText(location.href, $("btnCopyLink"), "Link");
@@ -2007,6 +2716,8 @@
 		runBatch(Math.max(2, Math.min(200, Number($("batchN").value) || 10)));
 	});
 	$("btnBatchCancel").addEventListener("click", cancelBatch);
+	$("btnRedo").addEventListener("click", redo);
+	$("btnKeys").addEventListener("click", shortcutSheet);
 	$("modalOk").addEventListener("click", () => {
 		const fn = modalOk;
 		closeModal();
@@ -2016,11 +2727,44 @@
 	$("modal").addEventListener("click", (e) => { if (e.target === $("modal")) closeModal(); });
 	document.addEventListener("keydown", (e) => {
 		if (e.key === "Escape" && !$("modal").hidden) closeModal();
-		if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
-			const tag = (e.target.tagName || "").toLowerCase();
-			if (tag === "input" || tag === "textarea" || tag === "select") return;
+		const tag = (e.target.tagName || "").toLowerCase();
+		const typing = tag === "input" || tag === "textarea" || tag === "select";
+		if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+			if (typing) return;
 			e.preventDefault();
-			undo();
+			if (e.shiftKey) redo(); else undo();
+		}
+		if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y" && !typing) {
+			e.preventDefault();
+			redo();
+		}
+		// The shortcuts were documented in the README and nowhere the user
+		// could see them.
+		if (e.key === "?" && !typing && !e.ctrlKey && !e.metaKey) {
+			e.preventDefault();
+			shortcutSheet();
 		}
 	});
+
+	const SHORTCUTS = [
+		["?", "Show this list"],
+		["Ctrl / Cmd + Z", "Undo the last settings or lock change"],
+		["Ctrl / Cmd + Shift + Z", "Redo it"],
+		["j / ↓", "Next prospect in the table"],
+		["k / ↑", "Previous prospect"],
+		["Enter or Space", "Open the editor for the focused row"],
+		["Escape", "Close the editor or a dialog"],
+		["Tab", "Into the table, then arrow keys between rows"],
+	];
+
+	function shortcutSheet() {
+		const box = el("div");
+		const dl = el("dl", "shortcuts");
+		for (const [keys, what] of SHORTCUTS) {
+			dl.appendChild(el("dt", null, keys));
+			dl.appendChild(el("dd", null, what));
+		}
+		box.appendChild(dl);
+		modal("Keyboard shortcuts", box);
+	}
 })(window);
