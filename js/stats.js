@@ -208,19 +208,28 @@
 		/* The usage composite a synthesised returning teammate scores. See
 		   simulateTeamStats for why this number decides the whole class's
 		   scoring level. */
-		FILLER_USAGE: 0.320,
-		/* How far a realistically shaped draft class's composites sit below the
-		   reference points the efficiency and pool models were written against.
-		   See statLine.
+		FILLER_USAGE: 0.280,
+		/* How far this draft class's composites sit below the reference points
+		   the efficiency and pool models were written against.
 
-		   ONE scalar, because the gap is close to uniform. Measured across the
-		   two fixtures: three-point 0.049, low post 0.053, mid-range 0.061,
-		   rebounding 0.050, passing 0.059, stealing 0.054, drawing fouls 0.059,
-		   turnovers 0.033. The outlier is shooting at the rim (0.028), which is
-		   hgt-weighted and hgt is the one rating the fixtures share, so the
-		   correction slightly over-shoots there; the field-goal and true
-		   shooting bands are the check on that and both are comfortable. */
-		PROSPECT_COMP_REF: 0.048,
+		   It USED TO be one fixed scalar (0.048), measured once as the average
+		   composite gap between a synthetic N(45,13) fixture and a realistic
+		   draft-slot-curve fixture. That broke in both directions: on a
+		   synthetic class the correction inflated TS% three points above the
+		   anchor because the gap was zero and the correction was not, and on a
+		   realistic class it under-corrected the volume channels (usage,
+		   passing, rebounding) where the gap is 0.06, not 0.05.
+
+		   Now computed per-class in simulateTeamStats from the actual mean
+		   usage composite of the prospects, scaled so that a class whose
+		   composites already sit at the calibration reference gets ref = 0.
+
+		   PROSPECT_COMP_BASE: the usage composite of the calibration reference
+		   class (synthetic N(45,13), mean usage composite ~0.45).
+		   PROSPECT_COMP_SCALE: amplification, because the ref feeds into
+		   channels whose sensitivity differs from the raw composite gap. */
+		PROSPECT_COMP_BASE: 0.450,
+		PROSPECT_COMP_SCALE: 1.65,
 	};
 
 	/* The shape of a college rotation's minutes, by slot. Measured off D-I
@@ -786,7 +795,7 @@
 
 		   Returning rotation players are synthesised from talent and already
 		   sit on the reference, so the shift is the prospect's alone. */
-		const ref = me.filler ? 0 : TUNING.PROSPECT_COMP_REF;
+		const ref = me.filler ? 0 : (ctx.classRef || 0);
 
 		// Turnovers: draft-year mean 17.2% of possessions (p5 10.7, p95 24.5),
 		// essentially flat across sizes. A ball-pressure defence forces more.
@@ -1235,7 +1244,7 @@
 		   cannot — see ROLE_USAGE in js/ratings.js. Fillers have no archetype
 		   and take 1. */
 		const rawUsg = members.map((m, i) =>
-			Math.pow(comps[i].usage, TUNING.USG_EXP) *
+			Math.pow(comps[i].usage + (m.filler ? 0 : (ctx.classRef || 0)), TUNING.USG_EXP) *
 				Math.pow(0.35 + 1.3 * (m.talent / 100), TUNING.USG_TALENT_EXP) *
 				(1 + TUNING.USG_SIZE_TILT * (0.42 - bignessOf(i))) *
 				CAL.talentUsageMult(m.talent) *
@@ -1423,7 +1432,7 @@
 			const ms = mins[i] / gameMinutes;
 			// Same reference the line itself will use, or the shares would not
 			// sum to the pool.
-			const cr = members[i].filler ? 0 : TUNING.PROSPECT_COMP_REF;
+			const cr = members[i].filler ? 0 : (ctx.classRef || 0);
 			teamCtx.rebDen += rebWeight(comps[i], ms, false, cr);
 			teamCtx.orbDen += rebWeight(comps[i], ms, true, cr);
 			teamCtx.astDen += astWeight(comps[i], ratingRows[i], ms, cr);
