@@ -414,17 +414,30 @@ tr.picked td.sticky::after { content: " ✓"; font-size: .9em; }
    cell prints its own column label, which is what data-label is for. The six
    pinned columns stay on one line at the top; everything else stacks. */
 @media (max-width: 700px) {
-	.cards table, .cards tbody, .cards tr, .cards td { display: block; width: auto; }
-	.cards thead { position: absolute; left: -9999px; }
-	.cards .scroll { overflow-x: visible; max-height: none; }
-	.cards tr {
+	.cardtable table, .cardtable tbody, .cardtable tr, .cardtable td {
+		display: block;
+		width: auto;
+	}
+	/* Visually hidden rather than moved off-canvas: `left: -9999px` on a thead
+	   inside a block-level table expands the table's scroll width by ten
+	   thousand pixels. */
+	.cardtable thead {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip: rect(0 0 0 0);
+		white-space: nowrap;
+	}
+	.cardtable .scroll { overflow-x: visible; max-height: none; }
+	.cardtable tr {
 		border: 1px solid var(--line);
 		border-radius: 8px;
 		margin: 0 0 8px;
 		padding: 8px 10px;
 		background: var(--card);
 	}
-	.cards td {
+	.cardtable td {
 		display: flex;
 		justify-content: space-between;
 		gap: 10px;
@@ -433,7 +446,7 @@ tr.picked td.sticky::after { content: " ✓"; font-size: .9em; }
 		text-align: right;
 		max-width: none;
 	}
-	.cards td.sticky {
+	.cardtable td.sticky {
 		position: static;
 		font-weight: 600;
 		font-size: 15px;
@@ -442,20 +455,30 @@ tr.picked td.sticky::after { content: " ✓"; font-size: .9em; }
 		padding-bottom: 6px;
 		margin-bottom: 4px;
 	}
-	.cards td[data-label]::before {
+	.cardtable td[data-label]::before {
 		content: attr(data-label);
 		color: var(--muted);
 		font-weight: 500;
 		text-align: left;
 	}
-	.cards td:empty { display: none; }
+	.cardtable td:empty { display: none; }
 }
 
 /* ---- the editor sits beside the table, not below it ---------------------- */
 /* Appending the editor after a 70-row table put the panel you were about to
    use sixty-six rows below the fold. It is a drawer now: beside the table when
    there is room, above it when there is not, and sticky either way. */
-.tablesplit { display: grid; grid-template-columns: 1fr; gap: 12px; }
+/* width/min-width are load-bearing: #view is a flex child, so a grid inside it
+   shrink-to-fits to zero and the table overflows sideways out of a
+   zero-width column instead of scrolling inside it. minmax(0, ...) is the
+   same guard on the column itself. */
+.tablesplit {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: 12px;
+	width: 100%;
+	min-width: 0;
+}
 .tablesplit.open { grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); }
 .tablesplit .drawer {
 	align-self: start;
@@ -499,3 +522,13 @@ button.linky {
 	cursor: pointer;
 	text-decoration: underline;
 }
+
+/* ---- the explain panels -------------------------------------------------- */
+details.explain { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+details.explain summary { cursor: pointer; font-weight: 600; }
+details.explain > * { margin-top: 8px; }
+details.explain .shortcuts dt { font-family: inherit; font-weight: 600; }
+table.mini { border-collapse: collapse; font-size: 12px; width: 100%; }
+table.mini th, table.mini td { padding: 3px 6px; border-bottom: 1px solid var(--line); }
+table.mini td.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.mini tr.now { font-weight: 600; }

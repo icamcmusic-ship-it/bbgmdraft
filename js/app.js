@@ -154,7 +154,10 @@
 
 	/* "Reset to defaults" and "Clear lock" were both irreversible, and the word
 	   undo appeared nowhere in the codebase. */
-	function snapshot(label) {
+	/* Named for what it is, and not `snapshot`: there is already a snapshot()
+	   further down for the class-comparison panel, and a duplicate function
+	   declaration silently hands both call sites the later one. */
+	function undoSnapshot(label) {
 		return {
 			label,
 			cfg: JSON.parse(JSON.stringify(state.cfg)),
@@ -163,7 +166,7 @@
 	}
 
 	function pushUndo(label) {
-		state.undo.push(snapshot(label));
+		state.undo.push(undoSnapshot(label));
 		if (state.undo.length > 40) state.undo.shift();
 		// A new action forks the history: whatever was undone is no longer
 		// reachable, which is what every undo stack does.
@@ -185,7 +188,7 @@
 		if (!prev) return;
 		// Ctrl+Z existed and Ctrl+Shift+Z did not, so an undo was a one-way
 		// trip: the state you were in a moment ago was simply gone.
-		state.redo.push(snapshot(prev.label));
+		state.redo.push(undoSnapshot(prev.label));
 		if (state.redo.length > 40) state.redo.shift();
 		applySnapshot(prev, "Undid");
 	}
@@ -193,7 +196,7 @@
 	function redo() {
 		const next = state.redo.pop();
 		if (!next) return;
-		state.undo.push(snapshot(next.label));
+		state.undo.push(undoSnapshot(next.label));
 		applySnapshot(next, "Redid");
 	}
 
@@ -352,12 +355,12 @@
 		paintNoteLines();
 		paintArchWeights();
 		paintLeagueWeights();
-		/* `cards` turns the prospect table into one card per prospect below
+		/* `cardtable` turns the prospect table into one card per prospect below
 		   700px (see css/style.css). It is a body class rather than a media
 		   query alone so the card layout only applies to the table that has the
 		   data-label attributes for it. */
 		document.body.className = "density-" + state.density +
-			(state.tab === "players" ? " cards" : "");
+			(state.tab === "players" ? " cardtable" : "");
 	}
 
 	/* The era selector. The stat model targets one of the anchor sets in
@@ -1561,7 +1564,156 @@
 		dt.appendChild(db);
 		dw.appendChild(dt);
 		panel.appendChild(dw);
+		panel.appendChild(explainStats(p, res));
+		panel.appendChild(explainBoard(p));
+		panel.appendChild(priorSeasonsPanel(p, res));
 		return panel;
+	}
+
+	/* Where this stat line came from.
+
+	   Every input already existed on teamCtx and none of it surfaced, so the
+	   answer to "why does this 45-overall prospect score seven points" was
+	   unavailable inside the tool that produced the seven points — you had to
+	   instrument the engine to find out. It is minutes, then share of the
+	   offence, then the pace of the team he plays for, then the defences he
+	   faced, and every one of those is a number the sim already computed. */
+	function explainStats(p, res) {
+		const box = el("details", "explain");
+		box.appendChild(el("summary", null, "Where this stat line comes from"));
+		const s = p.stats;
+		if (!s) {
+			box.appendChild(el("p", "hint", "He did not play a season."));
+			return box;
+		}
+		const t = res.teams[p.newCollege];
+		const dl = el("dl", "shortcuts");
+		const row = (k, v) => {
+			dl.appendChild(el("dt", null, k));
+			dl.appendChild(el("dd", null, v));
+		};
+		const n1 = (x) => (Number.isFinite(x) ? x.toFixed(1) : "—");
+		row("Minutes", n1(s.mpg) + " a game over " + Math.round(s.gp) + " games" +
+			(p.availability ? ", missing " + p.availability.games + " with " +
+				p.availability.kind : ""));
+		row("Share of the offence", (s.usg * 100).toFixed(1) + "% of his team's " +
+			"chances while on the floor (" + (s.usgShare * 100).toFixed(1) +
+			"% of all of them)");
+		if (t) {
+			row("Team tempo", n1(t.pace) + " possessions a game" +
+				(t.style ? " — " + t.style.name : ""));
+			row("Programme", t.name + ", level " + Math.round(t.level) +
+				", " + t.w + "-" + t.l +
+				(t.coach ? " under " + t.coach.name + " (year " + t.coach.tenure + ")" : ""));
+			if (t.oppDefense) {
+				const d = t.oppDefense;
+				const say = (v) => (v > 0.01 ? "tougher" : v < -0.01 ? "softer" : "average");
+				row("Defences faced", "at the rim " + say(d.rim) +
+					", on the perimeter " + say(d.perimeter) +
+					" than an average schedule");
+			}
+		}
+		row("Shot mix", n1(s.fga) + " field goals, " + n1(s.tpa) + " of them threes, " +
+			n1(s.fta) + " free throws");
+		row("Efficiency", (s.ts * 100).toFixed(1) + "% true shooting on " +
+			(s.fgp * 100).toFixed(1) + "% from the floor");
+		row("The arithmetic", n1(s.fga - s.tpa) + " twos at " +
+			(((s.fgp * s.fga - s.tpa * s.tpp) / Math.max(0.01, s.fga - s.tpa)) * 100)
+				.toFixed(1) + "%, " +
+			n1(s.tpa) + " threes at " + (s.tpp * 100).toFixed(1) + "%, " +
+			n1(s.fta) + " free throws at " + (s.ftp * 100).toFixed(1) + "% = " +
+			n1(s.ppg) + " points");
+		box.appendChild(dl);
+		return box;
+	}
+
+	/* Why he is where he is on the board. stockScore is six terms and the board
+	   showed only the answer, so a prospect twelve places above where his
+	   production said he should be had no explanation attached to him — the
+	   potential tooltip already does exactly this for potential. */
+	function explainBoard(p) {
+		const box = el("details", "explain");
+		box.appendChild(el("summary", null,
+			"Why he is at No. " + (p.boardRank || "—") + " on the board"));
+		if (!Number.isFinite(p.stockScore)) {
+			box.appendChild(el("p", "hint", "No board score for this player."));
+			return box;
+		}
+		const prod = p.stats ? (global.Awards.productionScore(p) || 0) : 0;
+		const march = p.gameLog && p.gameLog.postseason
+			? p.gameLog.postseason.ppg * 0.16 * Math.min(6, p.gameLog.postseason.gp)
+			: 0;
+		const terms = [
+			["Overall rating", p.newOvr * 1.25],
+			["Room to grow (pot − ovr)", (p.newPot - p.newOvr) * 0.65],
+			["Production", prod * 0.30],
+			["Awards (" + (p.awards || []).length + ")", (p.awards || []).length * 0.55],
+			["March", march],
+			["Played outside D-I", p.nonNcaa ? -1.2 : 0],
+		];
+		const known = terms.reduce((a, [, v]) => a + v, 0);
+		terms.push(["Scouting noise", p.stockScore - known]);
+		const dl = el("dl", "shortcuts");
+		for (const [k, v] of terms) {
+			if (Math.abs(v) < 0.05) continue;
+			dl.appendChild(el("dt", null, (v > 0 ? "+" : "") + v.toFixed(1)));
+			dl.appendChild(el("dd", null, k));
+		}
+		box.appendChild(dl);
+		box.appendChild(el("p", "hint",
+			"Total " + p.stockScore.toFixed(1) + ". Preseason he was No. " +
+			p.preseasonRank + "; he has moved " +
+			(p.stockMove > 0 ? "up " + p.stockMove : p.stockMove < 0
+				? "down " + -p.stockMove : "not at all") + "."));
+		return box;
+	}
+
+	/* The seasons before this one. Fabricated, and labelled as such — but "he
+	   averaged 4, then 9, then 16" is a completely different scouting report
+	   from "he averaged 16", and the tool had no way to say the first one. */
+	function priorSeasonsPanel(p, res) {
+		const box = el("details", "explain");
+		box.appendChild(el("summary", null, "Career to date"));
+		const rows = p.priorSeasons || [];
+		if (!rows.length && !p.stats) {
+			box.appendChild(el("p", "hint", "No season to show."));
+			return box;
+		}
+		const table = el("table", "mini");
+		const head = el("tr");
+		for (const h of ["Season", "Team", "GP", "MPG", "PPG", "RPG", "APG", "TS%"]) {
+			head.appendChild(el("th", null, h));
+		}
+		table.appendChild(head);
+		const line = (season, team, r, now) => {
+			const tr = el("tr", now ? "now" : "");
+			tr.appendChild(el("td", null, String(season)));
+			tr.appendChild(el("td", null, team));
+			if (r.redshirt) {
+				const td = el("td", null, r.reason || "redshirt");
+				td.colSpan = 6;
+				tr.appendChild(td);
+				return tr;
+			}
+			tr.appendChild(el("td", "num", String(Math.round(r.gp))));
+			for (const k of ["mpg", "ppg", "rpg", "apg"]) {
+				tr.appendChild(el("td", "num", r[k].toFixed(1)));
+			}
+			tr.appendChild(el("td", "num", (r.ts * 100).toFixed(1)));
+			return tr;
+		};
+		for (const r of rows) table.appendChild(line(r.season, r.team, r, false));
+		if (p.stats) {
+			table.appendChild(line(res.season, p.proClub || p.newCollege, p.stats, true));
+		}
+		box.appendChild(table);
+		if (rows.length) {
+			box.appendChild(el("p", "hint",
+				"Earlier seasons are reconstructed by the model, not simulated — " +
+				"the same way the recruiting ranking and the transfer history are. " +
+				"Nothing in the tool ranks on them."));
+		}
+		return box;
 	}
 
 	function potExplain(p) {

@@ -971,7 +971,85 @@
 			p.gameLog = S.gameLog(p, home, logRng.child("gl:" + p.key));
 			p.signature = p.gameLog ? p.gameLog.best : null;
 		}
+		buildPriorSeasons(state.players, state.season, state.rng.child("prior"));
 		return state;
+	}
+
+	/* The seasons before this one.
+
+	   The tool simulates one year and the README lists multi-year progression
+	   as a known limit — but a junior HAS a freshman year, and its absence is
+	   the single biggest hole in a scouting note: "he averaged 16 a game" reads
+	   completely differently from "he averaged 4, then 9, then 16". These are
+	   fabricated, exactly as the recruiting rank and the transfer history
+	   already are, and they are labelled as the model's own reconstruction
+	   rather than as simulated seasons — nothing downstream ranks on them.
+
+	   The shape is the ordinary one: minutes arrive before production, a
+	   freshman year is a fraction of a senior year, and a transfer's earlier
+	   seasons happened at the school he transferred from. */
+	const PRIOR_CURVE = [
+		// [minutes share, production share] of his draft-year line, by how many
+		// years before it the season was.
+		{ back: 1, mins: 0.82, prod: 0.72 },
+		{ back: 2, mins: 0.60, prod: 0.45 },
+		{ back: 3, mins: 0.44, prod: 0.29 },
+		{ back: 4, mins: 0.34, prod: 0.20 },
+	];
+
+	function priorYears(classYear) {
+		const y = String(classYear || "");
+		const base = y.indexOf("Sophomore") !== -1 ? 1
+			: y.indexOf("Junior") !== -1 ? 2
+			: y.indexOf("Graduate") !== -1 ? 4
+			: y.indexOf("Senior") !== -1 ? 3 : 0;
+		// A redshirt year is a year on campus with no season in it, and it is
+		// why a "redshirt sophomore" is in his third year at the school.
+		return base;
+	}
+
+	function buildPriorSeasons(players, season, rng) {
+		for (const p of players) {
+			p.priorSeasons = null;
+			const n = priorYears(p.classYear);
+			if (!n || !p.stats) continue;
+			const r = rng.child("prior:" + p.key);
+			const rows = [];
+			for (let i = n; i >= 1; i--) {
+				const c = PRIOR_CURVE[Math.min(PRIOR_CURVE.length - 1, i - 1)];
+				// A developing player is not a scaled copy of himself: the
+				// jitter is what makes a leap or a plateau readable.
+				const m = clamp(p.stats.mpg * c.mins * (1 + r.normal(0, 0.13)), 3, 38);
+				const k = c.prod * (1 + r.normal(0, 0.16));
+				rows.push({
+					season: season - i,
+					// Before a transfer he was somewhere else. A walk-on and a
+					// non-transfer were always here.
+					team: (p.transfer && p.transfer.from && i >= 1)
+						? p.transfer.from : p.newCollege,
+					classYear: CLASS_YEARS[Math.max(0, priorYears(p.classYear) - i)],
+					gp: Math.max(4, Math.round(p.stats.gp * (0.88 + r.uniform(0, 0.2)))),
+					mpg: m,
+					ppg: Math.max(0, p.stats.ppg * k),
+					rpg: Math.max(0, p.stats.rpg * (c.mins + (k - c.prod) * 0.5)),
+					apg: Math.max(0, p.stats.apg * (c.mins + (k - c.prod) * 0.5)),
+					ts: clamp(p.stats.ts - (1 - k) * 0.09 + r.normal(0, 0.012), 0.35, 0.72),
+					// The one that is not fabricated production: a redshirt year
+					// really is a year with no games in it.
+					redshirt: false,
+				});
+			}
+			if (p.redshirt) {
+				rows.unshift({
+					season: season - n - 1,
+					team: rows.length ? rows[0].team : p.newCollege,
+					classYear: "Redshirt",
+					redshirt: true,
+					reason: p.redshirt,
+				});
+			}
+			p.priorSeasons = rows;
+		}
 	}
 
 	/* ------------------------------------------------------------- phase 5 */
