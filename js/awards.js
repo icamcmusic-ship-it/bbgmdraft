@@ -713,6 +713,21 @@
 			"Overtime Elite": ["Overtime Elite MVP", "OTE Defensive Player of the Year", "All-OTE First Team"],
 			"NBA Academy": ["NBA Academy Games MVP", "NBA Academy Player of the Year", "Academy All-Star"],
 			"DII NCAA": ["Division II Player of the Year", "Division II All-American", "Division II Freshman of the Year"],
+			/* The destinations added alongside these had no honours at all, so
+			   a prospect who spent his year in Turkey or the BAL finished it
+			   with an empty award list whatever he averaged — and the award
+			   list is most of what a note about an overseas prospect has to
+			   say. */
+			"Basketball Champions League": ["BCL Rising Star", "BCL Best Young Player", "All-BCL Second Team"],
+			"Turkish BSL": ["BSL Best Young Player", "BSL Rising Star", "All-BSL Second Team"],
+			"Greek Basket League": ["GBL Best Young Player", "GBL Rising Star", "All-GBL Second Team"],
+			"Israeli Premier League": ["Israeli League Rising Star", "Israeli League Best Young Player", "All-Israeli League Second Team"],
+			"Japan B.League": ["B.League Rookie of the Year", "B.League Best Young Player", "All-B.League Second Team"],
+			"Brazil NBB": ["NBB Revelation of the Year", "NBB Best Young Player", "All-NBB Second Team"],
+			"Basketball Africa League": ["BAL Rising Star", "BAL Best Young Player", "All-BAL Second Team"],
+			"CEBL": ["CEBL Canadian of the Year", "CEBL Rookie of the Year", "All-CEBL Second Team"],
+			"Prep / Postgrad": ["National Prep Player of the Year", "Prep All-American", "Prep Showcase MVP"],
+			"NAIA": ["NAIA Player of the Year", "NAIA All-American", "NAIA Freshman of the Year"],
 		};
 		const byLeague = {};
 		for (const p of pros) {

@@ -965,6 +965,43 @@ console.log("\nLeague file season");
 	}
 }
 
+/* --------------------------------------------------- every setting re-runs */
+console.log("\nStaged pipeline coverage");
+{
+	/* A setting that no phase declares is a setting that changes nothing: the
+	   runner compares phase keys, finds them identical and returns the cached
+	   result, so the slider moves and the class does not. Nothing caught that,
+	   and three settings added in one sitting all had it. */
+	const declared = new Set();
+	for (const p of global.Engine.PHASES) for (const d of p.deps) declared.add(d);
+	// Settings that genuinely feed no phase, with the reason each is exempt.
+	const EXEMPT = {
+		seed: "declared by build",
+		era: "declared by stats",
+	};
+	const missing = Object.keys(global.Config.DEFAULTS)
+		.filter((k) => !declared.has(k) && !EXEMPT[k]);
+	ok("every setting is declared by some phase", missing.length === 0,
+		missing.join(", "));
+
+	/* And the stronger claim: moving each one actually changes the output. */
+	const lf = V.syntheticClass(6, 40);
+	const probes = {
+		archetypePool: 4, surpriseBudget: 6, injuryRate: 0,
+		classFlavor: 0, specialization: 2.4, pace: 78, statNoise: 2,
+	};
+	const runner = global.Engine.createRunner(lf);
+	const fingerprint = (res) => res.players.map((p) =>
+		p.newOvr + "/" + p.archetype + "/" + (p.stats ? p.stats.ppg.toFixed(2) : "-")).join("|");
+	const baseline = fingerprint(runner.run(global.Config.make({ seed: "deps" })));
+	for (const key of Object.keys(probes)) {
+		const cfg = global.Config.make({ seed: "deps" });
+		cfg[key] = probes[key];
+		ok("moving " + key + " changes the class",
+			fingerprint(runner.run(cfg)) !== baseline);
+	}
+}
+
 /* ------------------------------------------------------- ovr weight drift */
 console.log("\nOVR weights against BBGM's own formula");
 {

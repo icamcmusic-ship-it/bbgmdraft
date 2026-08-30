@@ -277,7 +277,12 @@ function collect(nSeeds, cfgOverrides) {
 		// DII/pro players must never win a D-I national award. "Division II
 		// All-American" and "Division II Player of the Year" are their OWN
 		// awards (previously unreachable dead code) and are not leaks.
-		const d1Only = (a) => NATIONAL_RE.test(a) && !/^Division II/.test(a);
+		/* A league's OWN honours are not a leak, however they are spelled.
+		   "Division II All-American", "NAIA All-American" and "Prep
+		   All-American" all match the national regex because they are all
+		   All-American teams — of a different division. */
+		const OWN_AWARD = /^(Division II|NAIA|Prep|National Prep)/;
+		const d1Only = (a) => NATIONAL_RE.test(a) && !OWN_AWARD.test(a);
 		nonNcaaAwards.push(res.players.filter((p) =>
 			p.nonNcaa && (p.awards || []).some(d1Only)).length);
 		/* A finalist is not a winner. The finalist tier reuses the trophy's own

@@ -310,14 +310,43 @@
 		   it is drawn — independently of where he plays, so it widens the
 		   distribution without putting the location bias back. Freshmen draw it
 		   most often; a senior who is still a reserve has usually transferred. */
+		/* Fit, which the biography generated and then did nothing with.
+
+		   A transfer, a redshirt and a reclassification moved the note text and
+		   the award eligibility and nothing else — `transferShare: 34` changed
+		   a sentence. But arriving somewhere new in June is a real fact about a
+		   season: a transfer who fits gets the ball immediately and one who does
+		   not spends November working it out. A returning player has no such
+		   question, which is the whole difference between the two. */
+		const fitOf = (m) => {
+			const p = m.player;
+			if (!p) return 1;
+			let f = 1;
+			if (p.transfer) {
+				// Two-sided and wide: the point of a transfer is that it can go
+				// either way, and a mid-major jump is a bigger bet than a
+				// lateral move.
+				const bet = p.transfer.kind === "mid-major jump" ||
+					p.transfer.kind === "low-major jump" ||
+					p.transfer.kind === "JUCO transfer" ? 0.16 : 0.10;
+				f *= Math.exp(rng.normal(0, bet));
+			}
+			// A year of practice and no games: he knows the system, and he has
+			// not played in one.
+			if (p.redshirt) f *= 1 + rng.normal(0.03, 0.06);
+			// Playing a year young against older players is hard.
+			if (p.reclassified && p.reclassified.indexOf("up") !== -1) f *= 0.94;
+			return clamp(f, 0.5, 1.6);
+		};
 		const roleOf = (m) => {
 			if (m.filler) return 1;
 			const year = m.player && m.player.classYear;
 			const rate = TUNING.RESERVE_RATE *
 				(year === "Freshman" ? 1.6 : year === "Sophomore" ? 1.0
 					: year === "Junior" ? 0.6 : 0.45);
-			if (rng.random() < rate) return rng.uniform(0.34, 0.68);
-			return Math.exp(rng.normal(0, 0.11));
+			const fit = fitOf(m);
+			if (rng.random() < rate) return rng.uniform(0.34, 0.68) * fit;
+			return Math.exp(rng.normal(0, 0.11)) * fit;
 		};
 		const talentShares = shareFromWeights(members.map((m, i) => shapeAt(slotOf[i]) *
 			stamina[i] * roleOf(m) * Math.max(0.05, relTilt(m.talent) + absTilt(m))), 1);

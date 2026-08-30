@@ -1180,10 +1180,13 @@
 				"archetypeWeights", "classFlavor", "freshmanShare", "transferShare",
 				"redshirtShare", "reclassShare", "leagueWeights", "wEuroLeague",
 				"wGLeague", "wNBL", "pDII", "overrides",
+				"archetypePool", "surpriseBudget",
 			],
 			run: phaseBuild,
 		},
-		{ name: "regular", deps: ["pace", "scoringEnv"], run: phaseRegular },
+		// injuryRate is read by assignAvailability, which runs here — before a
+		// game is played, which is the whole point of it.
+		{ name: "regular", deps: ["pace", "scoringEnv", "injuryRate"], run: phaseRegular },
 		{ name: "postseason", deps: ["upsetFactor"], run: phasePostseason },
 		{
 			name: "stats",

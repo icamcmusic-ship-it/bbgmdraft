@@ -240,6 +240,7 @@
 		"specialization", "archetypeDiversity", "classFlavor", "buildNoise",
 		"freshmanShare", "transferShare", "redshirtShare", "reclassShare", "pDII",
 		"pace", "scoringEnv", "efficiencyEnv", "statNoise", "upsetFactor",
+		"archetypePool", "surpriseBudget", "injuryRate",
 		"awardStrictness", "confAwardStrictness", "proAwardStrictness",
 	];
 
@@ -257,11 +258,24 @@
 		transferShare: (v) => v + "%",
 		redshirtShare: (v) => v + "%",
 		reclassShare: (v) => v + "%",
+		injuryRate: (v) => v.toFixed(2) + "x",
+		archetypePool: (v) => (v ? v + " builds" : "off"),
+		surpriseBudget: (v) => (v ? "about " + v : "none"),
 	};
 
 	/* What each slider actually does, in units. "Class quality 2" means nothing
 	   on its own; "top prospect ~48 ovr" is a reference point. */
 	const SLIDER_HINT = {
+		archetypePool: (v) => (v
+			? "this class is drawn from about " + v + " of the 72 builds — " +
+				"lower is more distinctive, higher is one of everything"
+			: "off: every build is eligible in every class"),
+		surpriseBudget: (v) => (v
+			? "a five-star bust, an unranked riser, a 24-year-old JUCO, a 7'4\" project…"
+			: "no forced anomalies"),
+		injuryRate: (v) => (v === 0
+			? "nobody misses a game"
+			: "drawn before the season, so a team's record responds to them"),
 		classQuality: (v) => "top prospect ≈ " + Math.round(43 + v * 2.6) +
 			" ovr, back of the class ≈ " + Math.round(18 + v * 2.0),
 		classDepth: (v) => (v < 0 ? "top-heavy: stars, then a cliff"
