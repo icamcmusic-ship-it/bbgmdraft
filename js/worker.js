@@ -24,14 +24,20 @@ self.onmessage = function (e) {
 	try {
 		const runner = self.Engine.createRunner(msg.leagueFile);
 		const out = [];
+		/* Every class in a batch used to draw Math.random() (`cfg.seed = ""`),
+		   so a batch could not be re-run, an anomaly in it could not be
+		   bisected, and a batch result could not be shared. Each iteration is
+		   derived from the batch's own seed instead, so "class 37 of this
+		   batch" is a reproducible thing. */
+		const base = self.BatchStats.batchSeed(msg.cfg, msg.baseSeed);
 		for (let i = 0; i < msg.n; i++) {
 			const cfg = self.Config.make(msg.cfg);
-			cfg.seed = "";
+			cfg.seed = base + "#" + i;
 			cfg.overrides = msg.cfg.overrides || {};
 			out.push(self.BatchStats.summarise(runner.run(cfg)));
 			self.postMessage({ type: "progress", done: i + 1, total: msg.n });
 		}
-		self.postMessage({ type: "done", rows: out });
+		self.postMessage({ type: "done", rows: out, baseSeed: base });
 	} catch (err) {
 		self.postMessage({ type: "error", message: err && err.message ? err.message : String(err) });
 	}

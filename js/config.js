@@ -58,8 +58,20 @@
 		noteLines: ["team", "stats", "shooting", "signature", "awards"],
 
 		// --- college season ----------------------------------------------
+		// Which era's empirical anchors the stat model targets. See the header
+		// of js/calibration.js: the tool was originally fitted to a 2009-2021
+		// dataset that contains the lowest-scoring season since 1952, and
+		// reproduced it faithfully, which is why every line read low for a
+		// class meant to represent this year.
+		era: "modern",
 		pace: 68,              // team possessions per 40 minutes
 		scoringEnv: 0,         // -3 (grind) .. +3 (track meet)
+		// Efficiency, as distinct from possessions. pace and scoringEnv are
+		// both possession dials — moving scoringEnv from -3 to +3 changed team
+		// points 66 -> 75 and left true shooting at 0.572 in every single
+		// configuration — so there was no way at all to ask for a class that
+		// scores its points more (or less) efficiently.
+		efficiencyEnv: 0,      // -3 (bricks) .. +3 (everything falls)
 		statNoise: 1.0,        // 0 = deterministic from ratings, 2 = wild
 
 		// --- postseason ---------------------------------------------------
@@ -96,6 +108,7 @@
 		"Vanilla builds": { specialization: 0.2, archetypeDiversity: 20 },
 		"One-and-done era": { freshmanShare: 78 },
 		"Veteran-heavy class": { freshmanShare: 16 },
+		"2015 scoring drought": { era: "2009-2021", pace: 64, efficiencyEnv: -1 },
 		"Chalk March": { upsetFactor: 0.35 },
 		"Total madness": { upsetFactor: 1.9 },
 	};

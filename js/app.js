@@ -1286,10 +1286,11 @@
 		return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 	}
 
-	function exportCsv(res) {
+	function exportCsv(res, everyone) {
 		const lines = [CSV_COLS.join(",")];
+		let skipped = 0;
 		for (const p of res.players) {
-			if (!V.matchesFilter(p, res)) continue;
+			if (!everyone && !V.matchesFilter(p, res)) { skipped++; continue; }
 			const s = p.stats || {};
 			const t = res.teams[p.newCollege];
 			lines.push([
@@ -1302,8 +1303,18 @@
 				(p.awards || []).join("; "),
 			].map((v) => esc(typeof v === "number" ? Number(v.toFixed(3)) : v)).join(","));
 		}
-		download("prospects.csv", lines.join("\n"), "text/csv");
-		setStatus("CSV exported.");
+		/* The export silently obeyed the table filter and was still called
+		   prospects.csv, so "Export CSV" on a filtered table quietly produced a
+		   file missing most of the class with nothing to say so. The name now
+		   tells the truth and the status line says how many rows were left
+		   out. */
+		download(skipped ? "prospects_filtered.csv" : "prospects.csv",
+			lines.join("\n"), "text/csv");
+		setStatus(skipped
+			? "CSV exported — " + (res.players.length - skipped) + " of " +
+				res.players.length + " prospects (the current filter). " +
+				"Use “Prospect table as CSV (whole class)” for all of them."
+			: "CSV exported — all " + res.players.length + " prospects.");
 	}
 
 	/* The whole simulated season was throwaway except for the note strings. */
@@ -1456,7 +1467,8 @@
 			b.addEventListener("click", () => { closeModal(); fn(); });
 			list.appendChild(b);
 		};
-		item("Prospect table as CSV (respects the current filter)", () => exportCsv(res));
+		item("Prospect table as CSV (the current filter)", () => exportCsv(res));
+		item("Prospect table as CSV (whole class)", () => exportCsv(res, true));
 		item("Season as JSON — records, bracket, awards, board", () => exportSeasonJson(res));
 		item("Season as CSV", () => exportSeasonCsv(res));
 		item("Note text only, for a spreadsheet", () => exportNotes(res));
@@ -1492,6 +1504,8 @@
 
 	let batchCancel = false;
 	let batchWorker = null;
+	// The seed the current batch was generated from, so it can be re-run.
+	let batchBaseSeed = null;
 
 	function batchProgress(done, total) {
 		$("batchProgress").hidden = false;
@@ -1515,13 +1529,23 @@
 		view.innerHTML = "";
 		view.appendChild(el("h3", null, rows.length + " classes with these settings"));
 		const col = (k) => rows.map((r) => r[k]);
-		const line = (label, k, digits) =>
-			label.padEnd(18) + B.mean(col(k)).toFixed(digits === undefined ? 2 : digits);
+		/* A batch of fifty classes exists to show a distribution, and the panel
+		   showed one row of averages. p5 / p50 / p95 answers "how unusual was
+		   the class I just generated?", which is the actual question. */
+		const d = (k) => (k === "awards" || k === "honoured" || k === "archetypes" ? 1 : 2);
+		const line = (label, k) => {
+			const v = col(k);
+			const f = (x) => x.toFixed(d(k)).padStart(7);
+			return label.padEnd(20) + f(B.mean(v)) + "   " + f(B.pct(v, 0.05)) +
+				f(B.pct(v, 0.50)) + f(B.pct(v, 0.95));
+		};
 		view.appendChild(el("div", "note", [
+			"".padEnd(20) + "   mean       p5     p50     p95",
 			line("mean ovr", "ovr"),
 			line("mean pot", "pot"),
 			line("mean MPG", "mpg"),
 			line("mean PPG", "ppg"),
+			line("mean RPG", "rpg"),
 			line("mean APG", "apg"),
 			line("mean USG%", "usg"),
 			line("mean TS%", "ts"),
@@ -1530,10 +1554,23 @@
 			line("scoring leader", "topPpg"),
 			line("assist leader", "topApg"),
 			line("block leader", "topBpg"),
-			line("awards/class", "awards", 1),
-			line("honoured players", "honoured", 1),
-			line("distinct archetypes", "archetypes", 1),
+			line("awards/class", "awards"),
+			line("honoured players", "honoured"),
+			line("distinct archetypes", "archetypes"),
 			"",
+			/* Which population each row describes. The per-player rows are the
+			   NCAA prospects only; a teenager on a 22-minute cap at Real Madrid
+			   is not comparable and used to be averaged in silently. */
+			"Per-player rows cover the " + B.mean(col("nNcaa")).toFixed(1) +
+				" NCAA prospects per class." +
+				(B.mean(col("nAbroad")) >= 0.05
+					? " The " + B.mean(col("nAbroad")).toFixed(1) + " playing abroad " +
+						"averaged " + B.mean(col("abroadPpg")).toFixed(1) + " PPG and are " +
+						"not included."
+					: ""),
+			"",
+			"batch seed: " + (batchBaseSeed || "—") +
+				"  (class i of this batch is seed “" + (batchBaseSeed || "") + "#i”)",
 			"seeds: " + rows.map((r) => r.seed).join(", "),
 		].join("\n")));
 		const cards = el("div", "cards");
@@ -1560,6 +1597,8 @@
 		$("btnBatchCancel").hidden = false;
 		batchProgress(0, n);
 		const cfg = effectiveCfg();
+		// One seed for the whole batch, so the batch itself is reproducible.
+		batchBaseSeed = global.BatchStats.batchSeed(cfg, null);
 
 		/* A worker keeps the tab responsive. Opening index.html straight off
 		   the disk blocks workers in most browsers, and that is the documented
@@ -1581,7 +1620,9 @@
 				if (batchWorker) { batchWorker.terminate(); batchWorker = null; }
 				runBatchInline(file, cfg, n);
 			};
-			batchWorker.postMessage({ type: "batch", leagueFile: file.data, cfg, n });
+			batchWorker.postMessage({
+				type: "batch", leagueFile: file.data, cfg, n, baseSeed: batchBaseSeed,
+			});
 		} catch (cannotStartWorker) {
 			batchWorker = null;
 			runBatchInline(file, cfg, n);
@@ -1596,7 +1637,8 @@
 			if (batchCancel) { batchDone(null); return; }
 			if (i >= n) { batchDone(rows); return; }
 			const c = CFG.make(cfg);
-			c.seed = "";
+			// Same derivation the worker uses, so the two paths agree.
+			c.seed = batchBaseSeed + "#" + i;
 			c.overrides = cfg.overrides || {};
 			try {
 				rows.push(global.BatchStats.summarise(runner.run(c)));

@@ -1,35 +1,44 @@
 /* Empirical calibration targets for the college season simulator.
 
-   Derived from the uploaded 2009-2021 college dataset:
+   TWO THINGS LIVE HERE, and they used to be conflated:
+
+     1. The empirical anchors — what a real college season looks like.
+     2. The ERA those anchors describe.
+
+   The file was written against one dataset:
      - 61,061 D-I player-seasons (CollegeBasketballPlayers20092021.csv)
      - 1,435 player-seasons belonging to players who were eventually drafted
        (matched via the pick column / DraftedPlayers xlsx)
 
-   IMPORTANT — the pooled figure is the wrong anchor for this tool.
+   and the sim reproduced it almost exactly (measured field ORtg 102.30 against
+   a target of 102.6). That is the problem. 2009-2021 contains the 2014-15
+   scoring nadir — 67.6 points a game, the lowest since 1952 — and predates
+   almost all of the three-point and rim-pressure inflation since. The model
+   was not broken; it was right about 2015 and wrong about now, and a BBGM
+   draft class is implicitly "this year's class", so every row read low:
 
-   1,435 cannot be 1,435 distinct drafted players: 2009-2021 is 13 drafts x 60
-   picks = 780 selections, a large share of them international players with no
-   D-I season at all. So those rows are every college season a future draftee
-   played — roughly 1.8 seasons each — and the distribution says so: MPG p5
-   12.6, GP p5 22, Min% p5 23.5%. Nobody is drafted off a 12-minute, 22-game
-   season. Those are the freshman and sophomore years of players drafted two or
-   three years later.
+     stat / game       sim     modern D-I    gap
+     points            70.3        73.6      -4.5%
+     assists           12.6        13.5      -6.7%
+     turnovers         13.4        11.6     +15.5%
+     free throws       19.6        17.5     +12.0%
+     offensive rating 102.4       109        -6.0%
 
-   A BBGM draft class represents each prospect in his DRAFT YEAR: his final,
-   best, highest-usage college season. Calibrating to the pooled all-seasons
-   mean therefore deflates every volume statistic by the gap between "the
-   average season a future draftee played" and "the season he was drafted off",
-   which is what made the output feel low for an NBA draft class.
+   So the anchors are now an ERA TABLE, and the era is a setting. Moving the
+   anchor and the model together is the only correct fix: patching the model
+   while leaving the anchor in 2015 just breaks the calibration harness.
 
-   Both anchor sets are kept below. ALL_SEASONS is the pooled figure as
-   originally derived; DRAFT_YEAR is the final-season anchor the sim actually
-   uses, obtained by applying the documented last-season shift (+9% on volume,
-   +2.2 points of usage, +0.5 points of TS, and a compressed lower tail — the
-   12-minute freshman seasons are gone). If the source CSV is ever re-run,
-   replace DRAFT_YEAR wholesale with `season == draft_year - 1` rows and delete
-   the shift.
+   ERAS:
+     "2009-2021"  the original pooled dataset, unchanged. Pick it to reproduce
+                  the output this tool produced before the era switch existed.
+     "modern"     2023-2026. Anchored on NCAA official Division I team averages
+                  for 2023-24 and 2024-25 (73.6 ppg on 57.5 FGA, 13.5 assists,
+                  11.6 turnovers, 17.5 free-throw attempts, 16.6 fouls, 33.3
+                  rebounds, 6.3 steals, 3.5 blocks), with the drafted-player
+                  distributions shifted by the same measured deltas. Default.
 
-   Pooled aggregates (all seasons of eventually-drafted players):
+   -------------------------------------------------------------------------
+   2009-2021 pooled aggregates (all seasons of eventually-drafted players):
 
      stat        mean    p5     p25    p50    p75    p95
      Min%        66.5    23.5   56.8   72.2   80.5   88.6
@@ -43,16 +52,22 @@
      3P%         34.6 (median, players with attempts)
      2P%         52.0    41.4   47.8   51.7   56.1   63.5
 
-   By listed height (drafted players):
+   1,435 cannot be 1,435 distinct drafted players: 2009-2021 is 13 drafts x 60
+   picks = 780 selections, a large share of them international players with no
+   D-I season at all. So those rows are every college season a future draftee
+   played — roughly 1.8 seasons each — and the distribution says so: MPG p5
+   12.6, GP p5 22, Min% p5 23.5%. Nobody is drafted off a 12-minute, 22-game
+   season. Those are the freshman and sophomore years of players drafted two or
+   three years later.
 
-     bucket   share3  FTr   FT%    rim%   mid%   TO%    AST%  STL%  BLK%
-     <=6'3"   .389    .367  .779   .588   .365   17.8   24.9  2.55  0.8
-     6'4-6'7  .370    .362  .738   .640   .358   16.8   15.8  2.25  1.9
-     6'8-6'10 .177    .431  .684   .690   .371   17.4    9.6  1.75  4.8
-     6'11"+   .085    .511  .665   .715   .396   17.2    7.5  1.41  7.4
-
-   Whole-D-I rotation baseline (Min% > 40, n = 27,998): USG 20.2, TS 53.4,
-   TO% 18.7, FTr 36.6, FT% 70.6, 3P% 33.8, 2P% 48.0, ORtg 102.6.
+   A BBGM draft class represents each prospect in his DRAFT YEAR: his final,
+   best, highest-usage college season. Calibrating to the pooled all-seasons
+   mean therefore deflates every volume statistic by the gap between "the
+   average season a future draftee played" and "the season he was drafted off".
+   Both anchor sets are kept below. ALL_SEASONS is the pooled figure as
+   originally derived; DRAFT_YEAR is the final-season anchor the sim actually
+   uses, obtained by applying the documented last-season shift (+9% on volume,
+   +2.2 points of usage, +0.5 points of TS, and a compressed lower tail).
 
    Draft-tier gradient: lottery picks averaged USG 24.3 / TS 58.0 vs
    USG 22.4 / TS 55.9 for picks 41+, i.e. better prospects carry a little
@@ -64,27 +79,16 @@
 
 	/* Height buckets keyed by "bigness" (0 = smallest guards, 1 = 7-footers),
 	   matching the bigness scale used by the stat model. Bucket centres sit at
-	   roughly bigness 0.05 / 0.35 / 0.7 / 0.95. */
+	   roughly bigness 0.05 / 0.35 / 0.7 / 0.95.
+
+	   The shape (guards shoot more threes, bigs finish better and draw more
+	   fouls) is stable across eras; the era table below shifts its LEVEL. */
 	const HEIGHT_TABLE = [
 		{ b: 0.05, share3: 0.389, ftr: 0.367, ftPct: 0.779, rimPct: 0.588, midPct: 0.365, tov: 0.178 },
 		{ b: 0.35, share3: 0.370, ftr: 0.362, ftPct: 0.738, rimPct: 0.640, midPct: 0.358, tov: 0.168 },
 		{ b: 0.70, share3: 0.177, ftr: 0.431, ftPct: 0.684, rimPct: 0.690, midPct: 0.371, tov: 0.174 },
 		{ b: 0.95, share3: 0.085, ftr: 0.511, ftPct: 0.665, rimPct: 0.715, midPct: 0.396, tov: 0.172 },
 	];
-
-	/* Piecewise-linear interpolation over the height table. */
-	function byHeight(key, bigness) {
-		const t = HEIGHT_TABLE;
-		const b = clamp(bigness, 0, 1);
-		if (b <= t[0].b) return t[0][key];
-		for (let i = 1; i < t.length; i++) {
-			if (b <= t[i].b) {
-				const f = (b - t[i - 1].b) / (t[i].b - t[i - 1].b);
-				return t[i - 1][key] + f * (t[i][key] - t[i - 1][key]);
-			}
-		}
-		return t[t.length - 1][key];
-	}
 
 	/* Pooled anchor: every college season of an eventually-drafted player.
 	   Kept for reference and for the validate.js commentary; NOT what the sim
@@ -101,15 +105,13 @@
 		twoPct: { mean: 0.520, sd: 0.070, p5: 0.414, p95: 0.635 },
 	};
 
-	/* Draft-year anchor: the final college season each prospect was drafted off.
-	   This is the population a BBGM draft class actually represents, and it is
-	   what every rate and volume target in the sim is fitted to.
-
-	   Volume moves (MPG +9%, GP +1.2 games, USG +2.2 points) and the lower tail
-	   contracts hard: the p5 season is now a rotation player's year, not a
-	   freshman's. Efficiency barely moves (+0.5 TS) — players get more of the
-	   offence in their draft year, they do not become far more efficient. */
-	const DRAFT_YEAR = {
+	/* Draft-year anchor for 2009-2021: the final college season each prospect
+	   was drafted off. Volume moves (MPG +9%, GP +1.2 games, USG +2.2 points)
+	   and the lower tail contracts hard: the p5 season is now a rotation
+	   player's year, not a freshman's. Efficiency barely moves (+0.5 TS) —
+	   players get more of the offence in their draft year, they do not become
+	   far more efficient. */
+	const DRAFT_YEAR_2009 = {
 		mpg: { mean: 30.6, p5: 19.5, p95: 36.6 },
 		gp: { mean: 33.5, p5: 26, p95: 39 },
 		usg: { mean: 0.250, sd: 0.046, p5: 0.178, p95: 0.325 },
@@ -124,22 +126,197 @@
 		ppg: { mean: 15.0, p95: 22.5 },
 	};
 
-	/* What the sim targets. */
-	const DRAFTED = DRAFT_YEAR;
+	/* Draft-year anchor for the modern game. Same population, shifted by the
+	   measured league-level deltas between 2009-2021 and 2023-2026: efficiency
+	   up (two-point percentage +3 points, TS +1.5), free-throw volume down
+	   (FTr -9%), turnovers down (TO% -1.5 points), scoring up. */
+	const DRAFT_YEAR_MODERN = {
+		mpg: { mean: 30.6, p5: 19.5, p95: 36.6 },
+		gp: { mean: 33.5, p5: 26, p95: 39 },
+		usg: { mean: 0.250, sd: 0.046, p5: 0.178, p95: 0.325 },
+		ts: { mean: 0.585, sd: 0.055, p5: 0.502, p95: 0.670 },
+		tov: { mean: 0.157, sd: 0.041, p5: 0.098, p95: 0.224 },
+		ftr: { mean: 0.366, sd: 0.138, p5: 0.173, p95: 0.617 },
+		ftPct: { mean: 0.730, sd: 0.105, p5: 0.534, p95: 0.872 },
+		tpPct: { median: 0.352 },
+		/* PPG is not in any source aggregate; it is implied by the others —
+		   pace x chances x usage x minutes x true shooting — and it is the
+		   headline number the sim is judged on, so it is stated explicitly.
 
-	/* D-I rotation-player baseline (the environment the fillers live in). */
-	const ROTATION = {
-		usg: 0.202, ts: 0.534, tov: 0.187, ftr: 0.366,
-		ftPct: 0.706, tpPct: 0.338, twoPct: 0.480, ortg: 102.6,
+		   The audit that prompted this era table proposed 16.8 / 25.0. That is
+		   what its own patched simulation produced, not an independent
+		   measurement, and it is not consistent with the rest of this anchor
+		   set: 30.6 minutes at 25.0% usage and .585 true shooting on 67.4
+		   possessions comes to about 15.5, and the 2024 and 2025 drafted-player
+		   final college seasons average nearer 15 than 17 (Knecht 21.7 and Edey
+		   25.2 sit at the top of a distribution whose middle is 13-16). 16.0 is
+		   the figure the other anchors imply, and it is still a 7-8% lift on
+		   what this tool produced against the 2009-2021 anchor, which is the
+		   complaint the era table exists to answer. */
+		ppg: { mean: 16.0, p95: 24.0 },
 	};
+
+	/* ------------------------------------------------------------- the eras */
+
+	/* An era is the empirical anchor set PLUS the shifts the model applies to
+	   reach it. The `shift` block is what actually moves the simulation:
+
+	     ftr        multiplies the height table's free-throw rate
+	     tov        multiplies the height table's turnover rate
+	     inside     added to two-point finishing at the rim
+	     mid        added to mid-range finishing
+	     three      added to the three-point intercept
+	     fieldEff   added on top of all three, for RETURNING rotation players
+	                only. The two anchor sets describe two different
+	                populations, and they did not move by the same amount
+	                between eras: the drafted-prospect distribution gained about
+	                1.5 points of true shooting while the whole-D-I rotation
+	                baseline gained nearer 2. The filler composites were fitted
+	                once to make the field land on the 2009-2021 rotation
+	                anchor, so an era needs a handle that moves the field
+	                without moving the class.
+
+	   The 2009-2021 era's efficiency shifts are all zero: it IS the anchor the
+	   model was fitted to. Its turnover shift is not, because the model used to
+	   apply a per-possession turnover rate to scoring chances (see js/stats.js)
+	   and 1.09 is what the pooled dataset actually implies once that is fixed. */
+	const ERAS = {
+		"2009-2021": {
+			label: "2009-2021 (the source dataset)",
+			note: "The pooled 61,061-season D-I dataset this tool was first fitted " +
+				"to. Contains the 2014-15 scoring nadir; roughly 5% lower scoring " +
+				"and 6% lower offensive efficiency than the game played now.",
+			draftYear: DRAFT_YEAR_2009,
+			rotation: {
+				usg: 0.202, ts: 0.534, tov: 0.187, ftr: 0.366,
+				ftPct: 0.706, tpPct: 0.338, twoPct: 0.480, ortg: 102.6,
+			},
+			team: {
+				pts: 70.0, fga: 55.5, poss: 68.5, ast: 12.6, tov: 13.3,
+				fta: 19.5, pf: 16.8, trb: 33.4, blk: 3.9, stl: 6.4, fgp: 0.435,
+			},
+			/* inside/mid stay at zero: this era IS the anchor the finishing model
+			   was fitted to. `three` and `fieldEff` are not zero because two
+			   model fixes moved the field off that anchor without moving the
+			   era: the three-point slope was flattened (a 43.7% cohort average
+			   for the Sharpshooter archetype is not a shooting specialist, it
+			   is the best shooter in the country), and the talent-to-efficiency
+			   gradient that js/calibration.js documented but never applied
+			   costs a returning rotation player about a point of true shooting.
+			   These two put the field back on 2009-2021's own ORtg of 102.6. */
+			shift: { ftr: 1, tov: 1.09, inside: 0, mid: 0, three: 0.015, fieldEff: -0.005 },
+		},
+		modern: {
+			label: "2023-2026 (the modern game)",
+			note: "NCAA official Division I team averages for 2023-24 and 2024-25: " +
+				"73.6 points on 57.5 attempts, 13.5 assists, 11.6 turnovers, 17.5 " +
+				"free-throw attempts, 16.6 fouls, 33.3 rebounds. This is what a " +
+				"draft class generated today should look like.",
+			draftYear: DRAFT_YEAR_MODERN,
+			rotation: {
+				usg: 0.202, ts: 0.552, tov: 0.167, ftr: 0.318,
+				ftPct: 0.715, tpPct: 0.341, twoPct: 0.510, ortg: 108.5,
+			},
+			team: {
+				pts: 73.6, fga: 57.5, poss: 67.4, ast: 13.5, tov: 11.6,
+				fta: 17.5, pf: 16.6, trb: 33.3, blk: 3.5, stl: 6.3, fgp: 0.451,
+			},
+			/* Measured, not guessed. Each shift was fitted by sweeping it alone
+			   against the modern team targets above; see tools/validate.js,
+			   which checks every one of them. */
+			shift: { ftr: 0.845, tov: 0.96, inside: 0.021, mid: 0.017, three: 0.004, fieldEff: 0.010 },
+		},
+	};
+	const DEFAULT_ERA = "modern";
+	let eraName = DEFAULT_ERA;
+	let era = ERAS[DEFAULT_ERA];
+
+	/* The era is a whole-run setting, read by every rate in js/stats.js. The
+	   engine sets it once at the top of the stats phase, so a run is internally
+	   consistent even though the state lives here. */
+	function setEra(name) {
+		eraName = ERAS[name] ? name : DEFAULT_ERA;
+		era = ERAS[eraName];
+		return eraName;
+	}
+	function currentEra() { return eraName; }
+	function eraInfo(name) { return ERAS[name || eraName]; }
+
+	/* Piecewise-linear interpolation over the height table, with the era's
+	   level shift applied to the rates that actually moved between eras. */
+	function byHeight(key, bigness) {
+		const t = HEIGHT_TABLE;
+		const b = clamp(bigness, 0, 1);
+		const s = era.shift[key] === undefined ? 1 : era.shift[key];
+		let raw;
+		if (b <= t[0].b) raw = t[0][key];
+		else {
+			raw = t[t.length - 1][key];
+			for (let i = 1; i < t.length; i++) {
+				if (b <= t[i].b) {
+					const f = (b - t[i - 1].b) / (t[i].b - t[i - 1].b);
+					raw = t[i - 1][key] + f * (t[i][key] - t[i - 1][key]);
+					break;
+				}
+			}
+		}
+		return raw * s;
+	}
+
+	/* The shape of a scoring chance in this era, derived from the era's own
+	   team averages rather than from constants that drift away from them:
+
+	     chances  = FGA + 0.44*FTA + TOV       (a possession, plus its putbacks)
+	     fgaShare = FGA / chances
+	     missShare= 1 - FG%
+
+	   The stat model needs all three to keep the possession identity, the
+	   rebound pools and the assist pool consistent with one another. They used
+	   to be three hardcoded numbers (0.172 / 0.402 / 0.465) that no longer
+	   matched anything the sim produced. */
+	function chanceShape() {
+		const t = era.team;
+		const chances = t.fga + 0.44 * t.fta + t.tov;
+		return {
+			chances,
+			fgaShare: t.fga / chances,
+			missShare: 1 - t.fgp,
+			tovShare: t.tov / chances,
+			ftr: t.fta / t.fga,
+			fgp: t.fgp,
+		};
+	}
+
+	/* Additive efficiency offsets for the era, in points of percentage. */
+	function effShift(key) {
+		const v = era.shift[key];
+		return Number.isFinite(v) ? v : 0;
+	}
 
 	/* Better prospects use a few more possessions and finish them slightly
 	   better (lottery vs pick-41+ gradient above). talent is 0-100. */
 	function talentUsageMult(talent) {
 		return 1 + 0.0022 * (clamp(talent, 0, 100) - 55);
 	}
+	/* The efficiency half of the same gradient. This was written, documented
+	   and exported — and never called by anything, so "skilled players finish
+	   better" was simply not in the model: the measured correlation between
+	   overall rating and true shooting was 0.20, almost all of it coming in
+	   through usage rather than skill. The slope is steeper than the pooled
+	   lottery-vs-second-round gap (0.00055) because the pooled gap averages
+	   over every season a prospect played, and the draft-year gradient is
+	   sharper; 0.0009 turns the realistic 55-90 prospect talent span into a
+	   3.2-point swing in true shooting, which is what a draft board shows.
+
+	   Centred on the mean DRAFT PROSPECT (talent ~72), not on the middle of the
+	   0-100 scale, and applied only to prospects: it describes the draft-tier
+	   spread inside a class, so it must redistribute efficiency within the
+	   class without moving the class mean off the empirical anchor, and without
+	   moving the whole-D-I baseline at all (that comes from the filler
+	   composites and from the era's fieldEff shift). */
+	const PROSPECT_TALENT_MEAN = 72;
 	function talentEffAdj(talent) {
-		return 0.00055 * (clamp(talent, 0, 100) - 55);
+		return 0.0009 * (clamp(talent, 0, 100) - PROSPECT_TALENT_MEAN);
 	}
 
 	/* Expected 3PA share of FGA given size and shooting talent. Anchored to
@@ -153,11 +330,24 @@
 		// At 0.0062 a Stretch Big with a 75 three still only got to a third of
 		// his attempts from range, so the Stretch Big and Pick-and-Pop
 		// archetypes never separated from ordinary bigs.
-		return clamp(base + 0.0085 * (tpRating - typicalTp), 0, 0.72);
+		let share = base + 0.0085 * (tpRating - typicalTp);
+		/* A player who cannot shoot does not shoot. The height table floors a
+		   seven-footer at an 8.5% three-point rate, so a Post Scorer with a tp
+		   rating in the twenties still launched about two a game and made a
+		   quarter of them; real post-only bigs take 0.2 a game. Below a tp of
+		   30 the share is scaled down towards zero rather than floored. */
+		if (tpRating < 30) share *= Math.max(0, tpRating) / 30;
+		return clamp(share, 0, 0.72);
 	}
 
 	global.Calibration = {
-		HEIGHT_TABLE, DRAFTED, DRAFT_YEAR, ALL_SEASONS, ROTATION,
-		byHeight, threeShare, talentUsageMult, talentEffAdj,
+		HEIGHT_TABLE, ALL_SEASONS, ERAS, DEFAULT_ERA,
+		setEra, currentEra, eraInfo, chanceShape,
+		byHeight, effShift, threeShare, talentUsageMult, talentEffAdj,
+		// Live views of the selected era, for callers that want the numbers.
+		get DRAFTED() { return era.draftYear; },
+		get DRAFT_YEAR() { return era.draftYear; },
+		get ROTATION() { return era.rotation; },
+		get TEAM() { return era.team; },
 	};
 })(typeof window !== "undefined" ? window : self);

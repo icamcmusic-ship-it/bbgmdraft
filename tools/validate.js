@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 /* Headless calibration check: runs the full engine on a synthetic BBGM-shaped
    draft class and verifies the simulated stat distributions land near the
-   empirical 2009-21 drafted-player anchors in js/calibration.js.
+   empirical anchors in js/calibration.js — for EVERY era defined there, since
+   the model and the anchors move together and an era nobody checks is an era
+   that quietly rots.
 
-   Usage: node tools/validate.js [nSeeds] [--json]
+   Usage: node tools/validate.js [nSeeds] [--json] [--era=modern]
    Exits non-zero if any check falls outside its tolerance band.
 
    Also importable: require("./validate.js") exposes syntheticClass/loadEngine
@@ -90,6 +92,17 @@ const mean = (v) => v.reduce((a, b) => a + b, 0) / v.length;
 
 /* Run nSeeds classes and return every check row plus the raw samples. */
 function collect(nSeeds, cfgOverrides) {
+	const CAL = global.Calibration;
+	const era = CAL.eraInfo(
+		(cfgOverrides && cfgOverrides.era) || global.Config.DEFAULTS.era);
+	/* Bands are DERIVED from the era anchor rather than typed in, so switching
+	   era moves the model and the harness together — which is the whole point
+	   of the era table. A band typed in by hand is a band that silently belongs
+	   to whichever era it was written in. */
+	const pace = (cfgOverrides && cfgOverrides.pace) || global.Config.DEFAULTS.pace;
+	const paceK = pace / era.team.poss;
+	const near = (v, pct_) => [v * (1 - pct_), v * (1 + pct_)];
+	const within = (v, d) => [v - d, v + d];
 	const all = [];
 	const field = [];
 	const leaders = [];
@@ -104,6 +117,10 @@ function collect(nSeeds, cfgOverrides) {
 	const teamBlk = [];
 	const teamStl = [];
 	const teamOrtg = [];
+	const teamTov = [];
+	const teamFta = [];
+	const teamPf = [];
+	const teamFtaPerPf = [];
 	const maxAstShare = [];
 	const maxRebShare = [];
 	const maxBlkShare = [];
@@ -122,7 +139,14 @@ function collect(nSeeds, cfgOverrides) {
 		const res = global.Engine.run(
 			lf, global.Config.make(Object.assign({ seed: "v" + s }, cfgOverrides)));
 		const ncaa = res.players.filter((p) => !p.nonNcaa && p.stats);
-		for (const p of ncaa) all.push(p);
+		for (const p of ncaa) {
+			const t = res.teams[p.newCollege];
+			const conf = t ? t.conf : null;
+			p.vConfStrength = conf && global.Colleges.CONFERENCES[conf]
+				? global.Colleges.CONFERENCES[conf].strength : 50;
+			p.vComps = BB.composites(p.newRatings);
+			all.push(p);
+		}
 		leaders.push(Math.max.apply(null, ncaa.map((p) => p.stats.ppg)));
 		astLeaders.push(Math.max.apply(null, ncaa.map((p) => p.stats.apg)));
 		awardsCount.push(res.players.reduce((a, p) => a + (p.awards ? p.awards.length : 0), 0));
@@ -139,6 +163,10 @@ function collect(nSeeds, cfgOverrides) {
 			teamTrb.push(tt.trb);
 			teamBlk.push(tt.blk);
 			teamStl.push(tt.stl);
+			teamTov.push(tt.tov);
+			teamFta.push(tt.fta);
+			teamPf.push(tt.pf);
+			if (tt.pf > 0) teamFtaPerPf.push(tt.fta / tt.pf);
 			if (tt.poss > 0) teamOrtg.push((100 * tt.pts) / tt.poss);
 			// Every program plays the same regular season; only the postseason
 			// varies.
@@ -191,68 +219,112 @@ function collect(nSeeds, cfgOverrides) {
 
 	const g = (f) => all.map(f);
 	const usg = g((p) => p.stats.usg);
-	// [name, value, lo, hi] — bands sit within ~10% of the drafted-player
-	// anchors in js/calibration.js. Team-level rows are the ones that catch a
-	// broken possession model, which per-player rate bands cannot.
+	const apg = g((p) => p.stats.apg);
+	const dy = era.draftYear;
+	const rot = era.rotation;
+	const tm = era.team;
+	/* Correlation, for the relationships the tool is judged on: a class where
+	   where you played predicts your scoring better than how good you are is a
+	   broken class, and no per-stat band can see that. */
+	function corr(xs, ys) {
+		const mx = mean(xs);
+		const my = mean(ys);
+		let n = 0;
+		let dx = 0;
+		let dy2 = 0;
+		for (let i = 0; i < xs.length; i++) {
+			n += (xs[i] - mx) * (ys[i] - my);
+			dx += (xs[i] - mx) * (xs[i] - mx);
+			dy2 += (ys[i] - my) * (ys[i] - my);
+		}
+		return dx > 0 && dy2 > 0 ? n / Math.sqrt(dx * dy2) : 0;
+	}
+	// Overall-matched, so a size comparison is a comparison of size and not of
+	// quality: taller players carry a higher ovr by construction (hgt is the
+	// joint-heaviest term in BBGM's formula).
+	const matched = all.filter((p) => p.newOvr >= 44 && p.newOvr <= 52);
+	const mGuards = matched.filter((p) => p.newRatings.hgt < 32);
+	const mBigs = matched.filter((p) => p.newRatings.hgt >= 73);
+	const bigMinusGuard = mGuards.length && mBigs.length
+		? mean(mBigs.map((p) => p.stats.ppg)) - mean(mGuards.map((p) => p.stats.ppg))
+		: 0;
+	const bigApg = all.filter((p) => p.newRatings.hgt >= 60).map((p) => p.stats.apg);
+
+	// [name, value, lo, hi]. Every band that describes "what a season looks
+	// like" is derived from the selected era's anchors in js/calibration.js.
 	const rows = [
-		/* Prospect rows are checked against the DRAFT_YEAR anchor in
-		   js/calibration.js — a prospect's final, highest-usage college season
-		   — not against the pooled all-seasons figure the file used to target.
-		   See that file's header: the pooled figure is the average season a
-		   future draftee played, including 12-minute freshman years, and
-		   calibrating to it deflated every volume statistic by about 9%. */
-		["MPG mean", mean(g((p) => p.stats.mpg)), 28.5, 32.5],
+		/* Prospect rows are checked against the DRAFT_YEAR anchor for this era
+		   — a prospect's final, highest-usage college season — not against the
+		   pooled all-seasons figure the file used to target. See that file's
+		   header: the pooled figure is the average season a future draftee
+		   played, including 12-minute freshman years. */
+		["MPG mean", mean(g((p) => p.stats.mpg)), 29.5, 34],
 		["MPG p95", pct(g((p) => p.stats.mpg), 0.95), 34.5, 37.4],
-		["MPG p5", pct(g((p) => p.stats.mpg), 0.05), 15, 26],
-		["USG% mean", mean(usg) * 100, 23, 27.5],
-		["USG% p95", pct(usg, 0.95) * 100, 30, 35],
+		["MPG p5", pct(g((p) => p.stats.mpg), 0.05), 15, 29],
+		["USG% mean", mean(usg) * 100].concat(within(dy.usg.mean * 100, 2.5)),
+		["USG% p95", pct(usg, 0.95) * 100].concat(within(dy.usg.p95 * 100, 3)),
 		["USG% max", Math.max.apply(null, usg) * 100, 32, 37],
-		["PPG mean", mean(g((p) => p.stats.ppg)), 13, 16.5],
-		// Derived, not chosen: with USG p95 ~32, MPG p95 ~36.5 and TS ~57,
-		// 2*TS*(chances*(1-TO%)) puts the 95th percentile scorer near 22.
-		["PPG p95", pct(g((p) => p.stats.ppg), 0.95), 19.5, 25],
+		["PPG mean", mean(g((p) => p.stats.ppg))].concat(within(dy.ppg.mean, 1.6)),
+		["PPG p95", pct(g((p) => p.stats.ppg), 0.95)].concat(within(dy.ppg.p95, 2.6)),
 		// A per-seed maximum is noisy, so the band has to be wider than the
 		// point estimate or the harness fails at random and everyone learns to
 		// ignore it.
-		["PPG leader (avg/seed)", mean(leaders), 22, 29],
-		["PPG max", Math.max.apply(null, g((p) => p.stats.ppg)), 26, 36],
+		["PPG leader (avg/seed)", mean(leaders)].concat(within(dy.ppg.p95 * 1.12, 3.5)),
+		["PPG max", Math.max.apply(null, g((p) => p.stats.ppg))].concat(
+			within(dy.ppg.p95 * 1.32, 5.5)),
 		["RPG max", Math.max.apply(null, g((p) => p.stats.rpg)), 10.5, 17],
 		["ORPG mean", mean(g((p) => p.stats.orpg)), 1.0, 2.4],
-		["APG p95", pct(g((p) => p.stats.apg), 0.95), 5.0, 7.6],
-		["APG leader (avg/seed)", mean(astLeaders), 6.5, 10.5],
-		["APG max", Math.max.apply(null, g((p) => p.stats.apg)), 7.5, 13],
-		["BPG p95", pct(g((p) => p.stats.bpg), 0.95), 1.6, 3.2],
-		// Real shot-blockers reach 3.5-4.6 (Kessler 4.6, Chet 3.7). The old
-		// 0.50 share cap made the top of this band unreachable by construction.
-		["BPG max", Math.max.apply(null, g((p) => p.stats.bpg)), 3.0, 5.5],
-		["SPG max", Math.max.apply(null, g((p) => p.stats.spg)), 2.0, 4.0],
-		["PF mean", mean(g((p) => p.stats.pfpg)), 1.7, 3.1],
-		["TS% mean", mean(g((p) => p.stats.ts)) * 100, 54.5, 59],
-		["3P% mean", mean(g((p) => p.stats.tpp)) * 100, 32, 37],
-		["FT% mean", mean(g((p) => p.stats.ftp)) * 100, 69, 76],
-		["FG% mean", mean(g((p) => p.stats.fgp)) * 100, 44, 50],
-		["FTA mean", mean(g((p) => p.stats.fta)), 3.4, 5.4],
-		["GP mean", mean(g((p) => p.stats.gp)), 31, 36],
+		["APG p95", pct(apg, 0.95), 5.0, 7.6],
+		/* The assist floor. At AST_EXP 4.1 the 10th percentile of the whole
+		   class was 0.15 assists a game and the bigs' floor was 0.31 — nobody
+		   plays 25 minutes a night and finishes there. */
+		["APG p10", pct(apg, 0.10), 0.5, 1.6],
+		["APG p10 (bigs)", pct(bigApg, 0.10), 0.4, 1.5],
+		["APG leader (avg/seed)", mean(astLeaders), 6.0, 8.8],
+		["APG max", Math.max.apply(null, apg), 7.0, 10.5],
+		["BPG p95", pct(g((p) => p.stats.bpg), 0.95), 1.4, 3.0],
+		// Real shot-blockers reach 3.5-4.6 (Kessler 4.6, Chet 3.7).
+		["BPG max", Math.max.apply(null, g((p) => p.stats.bpg)), 2.8, 5.0],
+		["SPG max", Math.max.apply(null, g((p) => p.stats.spg)), 2.0, 4.2],
+		["PF mean", mean(g((p) => p.stats.pfpg)), 1.7, 3.4],
+		["TS% mean", mean(g((p) => p.stats.ts)) * 100].concat(within(dy.ts.mean * 100, 2)),
+		["3P% mean", mean(g((p) => p.stats.tpp)) * 100].concat(
+			within(dy.tpPct.median * 100, 2.6)),
+		["FT% mean", mean(g((p) => p.stats.ftp)) * 100].concat(within(dy.ftPct.mean * 100, 3.5)),
+		["FG% mean", mean(g((p) => p.stats.fgp)) * 100, 44, 52],
+		["FTA mean", mean(g((p) => p.stats.fta)), 3.0, 5.4],
+		["GP mean", mean(g((p) => p.stats.gp))].concat(within(dy.gp.mean, 2.5)),
 
-		/* Team rows. These are what catches a broken possession model, which
-		   per-player rate bands cannot. Assists and rebounds are here because
-		   they were not: team assists sat 24% high (16.8 against a real 13.5)
-		   with every per-player band passing. */
-		["Team PPG", mean(teamPts), 66, 74],
-		["Team FGA", mean(teamFga), 52, 59],
-		["Team poss", mean(teamPoss), 63, 73],
-		["Team AST", mean(teamAst), 12, 15],
-		["Team TRB", mean(teamTrb), 32, 37],
-		["Team BLK", mean(teamBlk), 3.5, 6.5],
-		["Team STL", mean(teamStl), 5, 8.5],
+		/* Team rows, against the era's own league averages, scaled to the pace
+		   the run was made at. These are what catches a broken possession
+		   model, which per-player rate bands cannot. */
+		["Team PPG", mean(teamPts)].concat(near(tm.pts * paceK, 0.06)),
+		["Team FGA", mean(teamFga)].concat(near(tm.fga * paceK, 0.06)),
+		["Team poss", mean(teamPoss)].concat(near(tm.poss * paceK, 0.06)),
+		["Team AST", mean(teamAst)].concat(near(tm.ast * paceK, 0.10)),
+		["Team TRB", mean(teamTrb)].concat(near(tm.trb * paceK, 0.07)),
+		["Team BLK", mean(teamBlk)].concat(near(tm.blk, 0.30)),
+		["Team STL", mean(teamStl)].concat(near(tm.stl, 0.22)),
+		/* Turnovers, free throws and fouls had no band at all, which is how
+		   turnovers drifted 15% high, free throws 12% high and fouls 9% low
+		   with every other check passing. */
+		["Team TOV", mean(teamTov)].concat(near(tm.tov * paceK, 0.12)),
+		["Team FTA", mean(teamFta)].concat(near(tm.fta * paceK, 0.13)),
+		["Team PF", mean(teamPf)].concat(near(tm.pf, 0.09)),
+		/* Fouls and free throws are the same event seen from two sides, and
+		   they are produced by two entirely independent code paths with nothing
+		   reconciling them: the sim used to commit fewer fouls than real D-I
+		   while awarding more free throws than real D-I. The league ratio is
+		   about 1.05 free-throw attempts per personal foul. */
+		["Team FTA per PF", mean(teamFtaPerPf), 0.88, 1.28],
 
 		/* The whole simulated field, against the D-I rotation-player baseline
-		   in js/calibration.js. Every program is simulated now, so "is the
-		   average Division I player right?" is a question with an answer. */
-		["Field TS%", mean(field.map((l) => l.ts)) * 100, 51.5, 55.5],
-		["Field 3P%", mean(field.map((l) => l.tpp)) * 100, 32, 36],
-		["Field FT%", mean(field.map((l) => l.ftp)) * 100, 68, 73],
-		["Field ORtg", mean(teamOrtg), 99, 106],
+		   for this era. Every program is simulated, so "is the average Division
+		   I player right?" is a question with an answer. */
+		["Field TS%", mean(field.map((l) => l.ts)) * 100].concat(within(rot.ts * 100, 2)),
+		["Field 3P%", mean(field.map((l) => l.tpp)) * 100].concat(within(rot.tpPct * 100, 2)),
+		["Field FT%", mean(field.map((l) => l.ftp)) * 100].concat(within(rot.ftPct * 100, 2.5)),
+		["Field ORtg", mean(teamOrtg)].concat(within(rot.ortg, 3)),
 
 		/* The documented per-player share ceilings, measured the way a reader
 		   would check them: against the team total, not against the pool. */
@@ -260,14 +332,37 @@ function collect(nSeeds, cfgOverrides) {
 		["Max share of team TRB", Math.max.apply(null, maxRebShare), 0, 0.401],
 		["Max share of team BLK", Math.max.apply(null, maxBlkShare), 0, 0.681],
 
+		/* The four things a user expects a draft class to express. None of them
+		   is a distribution, so none of them was checked, and two were broken:
+		   athleticism drove blocks and not steals, and the documented
+		   talent-to-efficiency gradient was exported and never called. */
+		["corr(conference strength, PPG)",
+			corr(g((p) => p.vConfStrength), g((p) => p.stats.ppg)), -0.62, -0.15],
+		["corr(ovr, PPG)", corr(g((p) => p.newOvr), g((p) => p.stats.ppg)), 0.30, 0.75],
+		["corr(3PT rating, FG%)",
+			corr(g((p) => p.newRatings.tp), g((p) => p.stats.fgp)), -0.80, -0.20],
+		["corr(3PT rating, 3P%)",
+			corr(g((p) => p.newRatings.tp), g((p) => p.stats.tpp)), 0.60, 0.95],
+		["corr(athleticism, BPG)",
+			corr(g((p) => p.vComps.athleticism), g((p) => p.stats.bpg)), 0.35, 0.80],
+		["corr(athleticism, SPG)",
+			corr(g((p) => p.vComps.athleticism), g((p) => p.stats.spg)), 0.18, 0.60],
+		["corr(passing, APG)",
+			corr(g((p) => p.vComps.passing), g((p) => p.stats.apg)), 0.60, 0.95],
+		["corr(ovr, TS%)", corr(g((p) => p.newOvr), g((p) => p.stats.ts)), 0.28, 0.70],
+		/* Scoring by size, at equal overall rating. A draft class's guards are
+		   its volume scorers; the sim had seven-footers as the highest-scoring
+		   group even after matching on quality. */
+		["PPG, bigs minus guards (ovr-matched)", bigMinusGuard, -1.6, 1.2],
+
 		/* Schedule integrity. */
 		["Regular-season game spread", Math.max.apply(null, gamesSpread), 0, 1],
 		["Champion record includes March", mean(postseasonInRecord), 1, 1],
 		["Games logged out of order", outOfOrder.length, 0, 0],
 
 		/* Award volume. Prospects are ranked against every returning player in
-		   Division I — now against their actual simulated seasons rather than
-		   a regression on talent — so these are the rows that matter. */
+		   Division I — against their actual simulated seasons rather than a
+		   regression on talent — so these are the rows that matter. */
 		["National awards/class", mean(natAwards), 2, 26],
 		["POY in class (rate)", mean(poyClasses), 0.05, 0.85],
 		["Consensus 1st Team/class", mean(firstTeam), 0.2, 3],
@@ -300,16 +395,28 @@ function main() {
 	const args = process.argv.slice(2);
 	const asJson = args.includes("--json");
 	const nSeeds = Number(args.filter((a) => !a.startsWith("--"))[0]) || 12;
+	/* Which era to check. Both are checked by default: the model and the
+	   anchors move together, so an era whose bands nobody runs is an era that
+	   quietly rots. */
+	const eraArg = (args.filter((a) => a.startsWith("--era="))[0] || "").slice(6);
+	const eras = eraArg ? [eraArg] : Object.keys(global.Calibration.ERAS);
 
-	const { rows, all } = collect(nSeeds);
-	const recon = reconcileError(all);
-	const checks = rows.map(([name, v, lo, hi]) => ({
-		name, value: v, lo, hi, ok: v >= lo && v <= hi,
-	}));
-	checks.push({
-		name: "Stat line reconciles", value: recon, lo: 0, hi: 0.02, ok: recon <= 0.02,
+	const perEra = eras.map((era) => {
+		const { rows, all } = collect(nSeeds, { era });
+		const recon = reconcileError(all);
+		const checks = rows.map(([name, v, lo, hi]) => ({
+			name, value: v, lo, hi, ok: v >= lo && v <= hi,
+		}));
+		checks.push({
+			name: "Stat line reconciles", value: recon, lo: 0, hi: 0.02, ok: recon <= 0.02,
+		});
+		return { era, checks, seasons: all.length };
 	});
 
+	const { rows, all } = { rows: perEra[0].checks.map((c) => [c.name, c.value, c.lo, c.hi]),
+		all: [] };
+	void rows; void all;
+	const checks = [];
 	// Solver exactness across the usable target range.
 	let miss = 0;
 	const rng = new Rng("solver");
@@ -324,18 +431,30 @@ function main() {
 	}
 	checks.push({ name: "Solver off-target /2000", value: miss, lo: 0, hi: 0, ok: miss === 0 });
 
-	const fail = checks.filter((c) => !c.ok).length;
+	const fail = perEra.reduce((a, e) => a + e.checks.filter((c) => !c.ok).length, 0) +
+		checks.filter((c) => !c.ok).length;
+	const fmt = (x) => (Math.abs(x) >= 1000 || Number.isInteger(x) ? String(x) : x.toFixed(2));
 	if (asJson) {
 		console.log(JSON.stringify({
-			seeds: nSeeds, seasons: all.length, failures: fail, checks,
+			seeds: nSeeds, failures: fail, eras: perEra, global: checks,
 		}, null, 2));
 	} else {
-		console.log("Calibration check over " + nSeeds + " seeds, " +
-			all.length + " NCAA player-seasons\n");
+		for (const e of perEra) {
+			console.log("Era " + e.era + " — " + nSeeds + " seeds, " +
+				e.seasons + " NCAA player-seasons\n");
+			for (const c of e.checks) {
+				console.log(
+					(c.ok ? "  ok   " : "  FAIL ") + c.name.padEnd(38) +
+					c.value.toFixed(2).padStart(8) +
+					"   [" + fmt(c.lo) + ", " + fmt(c.hi) + "]",
+				);
+			}
+			console.log("");
+		}
 		for (const c of checks) {
 			console.log(
-				(c.ok ? "  ok   " : "  FAIL ") + c.name.padEnd(24) +
-				c.value.toFixed(2).padStart(8) + "   [" + c.lo + ", " + c.hi + "]",
+				(c.ok ? "  ok   " : "  FAIL ") + c.name.padEnd(38) +
+				c.value.toFixed(2).padStart(8) + "   [" + fmt(c.lo) + ", " + fmt(c.hi) + "]",
 			);
 		}
 		console.log("\n" + (fail ? fail + " check(s) failed" : "all checks passed"));

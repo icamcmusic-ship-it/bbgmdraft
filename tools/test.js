@@ -189,7 +189,10 @@ console.log("\nMalformed input");
 	const cases = [
 		["no players", { startingSeason: 2026 }],
 		["empty players", { startingSeason: 2026, players: [] }],
-		["no startingSeason", { players: V.syntheticClass(1, 3).players }],
+		["no season anywhere", {
+			players: V.syntheticClass(1, 3).players.map((p) =>
+				Object.assign({}, p, { draft: { round: 1, pick: 1 } })),
+		}],
 		["player with no ratings", {
 			startingSeason: 2026,
 			players: [{ pid: 0, firstName: "A", lastName: "B", born: { year: 2007 }, ratings: [] }],

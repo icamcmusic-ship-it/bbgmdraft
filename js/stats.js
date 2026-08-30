@@ -33,22 +33,50 @@
 		USG_CAP: 0.365,     // share of team possessions while on the floor
 		USG_FLOOR: 0.155,   // a drafted player never vanishes from the offence
 		USG_EXP: 2.35,      // steepness of the usage composite -> volume curve
-		AST_EXP: 4.1,       // elite college PGs take 40-60% of team assists
-		REB_EXP: 1.25,
+		/* Assists. At 4.1 the exponent produced a physically impossible floor:
+		   a centre's 10th-percentile line was 0.15 assists per game and the Rim
+		   Protector archetype averaged 0.42, which is not what a man playing 25
+		   minutes a night finishes a season with (the real floor for a
+		   non-passing D-I big is 0.6-0.8). It also made the distribution
+		   bimodal rather than smoothly right-skewed, and pushed the class's
+		   best passer to 8.6 a game when a draft class's best passer is usually
+		   6.5-7.5. AST_FLOOR is a floor on the passing composite used only for
+		   sharing out the pool: everybody on a basketball court makes the
+		   occasional dump-off, and a weight of zero is what produces impossible
+		   lines. AST_PSS is how much of the share is read off the raw passing
+		   rating rather than the composite, which is 0.4*drb + 1.0*pss +
+		   0.5*oiq and therefore rewards every guard build for handling the
+		   ball — which is why a Sharpshooter finished within 1.7 assists of a
+		   dedicated Floor General. */
+		AST_EXP: 3.0,
+		AST_FLOOR: 0.30,
+		/* Rebounds. At 1.25 a centre out-rebounded a guard by 2.4x; the real
+		   defensive-rebound-rate ratio between those two is 4-5x. */
+		REB_EXP: 1.55,
+		REB_FLOOR: 0.30,
+		AST_PSS: 0.45,
 		STL_EXP: 2.1,
 		BLK_EXP: 2.6,
 		PF_EXP: 1.2,
 		ORB_RATE: 0.29,     // D-I offensive rebound rate
-		TEAM_PF: 16.8,      // team personal fouls per game
-		// Share of made field goals that are assisted. D-I runs ~53%; the old
-		// model multiplied raw chances by 0.46*0.48, which implied ~36 made
-		// field goals on a team that makes ~26, and put team assists 24% high.
-		ASSISTED_SHARE: 0.53,
-		// Nominal rates used only to turn chances into an assist pool. They are
-		// the same anchors the per-player model draws around.
-		NOMINAL_TOV: 0.172,
-		NOMINAL_FTR: 0.402,
-		NOMINAL_FGP: 0.465,
+		/* Missed free throws come off the rim too, so the rebounds available on
+		   a possession exceed the missed field goals by a few percent. */
+		ORB_FT: 1.07,
+		/* Team personal fouls. The model computed this, and reconcileTeamTotals
+		   then fitted assists, steals, blocks and rebounds to their pools and
+		   left fouls alone — so team fouls were unconstrained and drifted to
+		   15.2 against this very target, with no validate.js band to catch it.
+		   Fouls are now fitted like everything else. */
+		TEAM_PF: 16.6,
+		/* Share of MADE field goals that are assisted, measured straight off the
+		   league totals (13.5 assists on 25.9 made field goals in the modern
+		   game, 12.6 on 24.1 in 2009-2021 — the same 0.52 in both eras). The
+		   old 0.53 sat on top of a stale 0.465 field-goal percentage that no
+		   longer matched what the sim shot, so the two errors part-cancelled
+		   and team assists came out 7% light anyway. Everything else the pool
+		   needs — how much of a chance is a shot, how often it misses — now
+		   comes from the era's own team averages via CAL.chanceShape(). */
+		ASSISTED_SHARE: 0.52,
 		// Documented per-player ceilings, now actually enforced (see capNoisy).
 		AST_CAP: 0.62,
 		REB_CAP: 0.40,
@@ -56,10 +84,28 @@
 		// cap forbade by construction the exact season the comment cited.
 		BLK_CAP: 0.68,
 		STL_CAP: 0.42,
-		// Minutes are flatter than talent, but not as flat as they were: 32% of
-		// minutes handed out uniformly made an NBA prospect the fourth option
-		// on his own blue-blood roster.
-		MINUTES_UNIFORM: 0.22,
+		PF_CAP: 0.28,
+		/* Minutes are flatter than talent, but not as flat as they were: 32% of
+		   minutes handed out uniformly made an NBA prospect the fourth option
+		   on his own blue-blood roster, and 22% still had him fourth. At 22%,
+		   high-major prospects averaged 29.2 MPG against the 30-33 a drafted
+		   player actually plays, and the measured correlation between where a
+		   prospect played and how much he scored (-0.50) was stronger than the
+		   correlation between how good he was and how much he scored (+0.42).
+		   Where you play should not predict your scoring better than how good
+		   you are. */
+		MINUTES_UNIFORM: 0.14,
+		/* How much of the class's scoring gradient is allowed to come from
+		   playing at a weak programme rather than from being good. */
+		STL_ATH: 0.60,
+	};
+
+	/* The composite an average D-I rotation actually scores on each pool key,
+	   measured off the filler synthesis in simulateTeamStats and blended the
+	   same way teamPools blends it. Change a filler base and these move too. */
+	const POOL_BASE = {
+		rebounding: 0.443, passing: 0.435, stealing: 0.462,
+		blocking: 0.500, fouling: 0.412,
 	};
 
 	/* Per-league environment. Everything outside D-I used to run on cfg.pace —
@@ -222,8 +268,82 @@
 		};
 	}
 
-	/* ctx: { oppStrength, oppDefense, games, league, pro } */
-	function statLine(rng, ratings, comps, minutes, usgShare, ctx, cfg, teamCtx) {
+	/* The weights that share out a team's assist and steal pools. They live
+	   here rather than inline because statLine and the denominator loop in
+	   simulateTeamStats have to agree on them exactly, and did not have to
+	   before: every extra factor added to one had to be remembered in the
+	   other. */
+	function passSkill(comps, ratings) {
+		const raw = ratings && Number.isFinite(ratings.pss) ? ratings.pss / 100 : comps.passing;
+		return clamp((1 - TUNING.AST_PSS) * comps.passing + TUNING.AST_PSS * raw, 0.02, 1);
+	}
+	function astWeight(comps, ratings, minShare) {
+		return Math.pow(Math.max(TUNING.AST_FLOOR, passSkill(comps, ratings)),
+			TUNING.AST_EXP) * minShare;
+	}
+	function stlWeight(comps, minShare) {
+		return Math.pow(comps.stealing, TUNING.STL_EXP) *
+			(1 + TUNING.STL_ATH * (comps.athleticism - 0.50)) * minShare;
+	}
+	function rebWeight(comps, minShare, offensive) {
+		return Math.pow(Math.max(TUNING.REB_FLOOR, comps.rebounding),
+			TUNING.REB_EXP + (offensive ? 0.35 : 0)) * minShare;
+	}
+
+	/* How well a roster shoots, before a single stat line exists, so the engine
+	   can work out how often each team's OPPONENTS missed — which is what a
+	   defensive rebound total should respond to and previously could not: the
+	   pool was the literal constant 25.2 regardless of who the team played.
+	   Returns an expected field-goal percentage on the era's own anchors. */
+	function rosterShooting(team) {
+		const sorted = team.members.slice().sort((a, b) => b.talent - a.talent).slice(0, 8);
+		let two = 0;
+		let three = 0;
+		let share3 = 0;
+		let w = 0;
+		for (let i = 0; i < sorted.length; i++) {
+			const m = sorted[i];
+			const weight = [1, 0.96, 0.9, 0.84, 0.76, 0.6, 0.45, 0.3][i] || 0.2;
+			let inside;
+			let outside;
+			let bigness;
+			let tp;
+			if (m.filler) {
+				const r = m.talent / 100;
+				inside = clamp(0.50 * (0.55 + 0.9 * r), 0.05, 0.95) + CAL.effShift("fieldEff");
+				outside = clamp(0.505 * (0.55 + 0.9 * r), 0.05, 0.95) + CAL.effShift("fieldEff");
+				bigness = 0.45;
+				tp = 45;
+			} else {
+				const c = BB.composites(m.player.newRatings);
+				inside = (c.shootingAtRim + c.shootingMidRange) / 2;
+				outside = c.shootingThreePointer;
+				bigness = clamp((m.player.newRatings.hgt - 30) / 55, 0, 1);
+				tp = m.player.newRatings.tp;
+			}
+			const b = clamp(bigness, 0, 1);
+			two += weight * (0.5 * CAL.byHeight("rimPct", b) + 0.5 * CAL.byHeight("midPct", b) +
+				0.5 * CAL.effShift("inside") + 0.5 * CAL.effShift("mid") +
+				0.26 * (inside - (0.40 + 0.22 * b)));
+			three += weight * (0.339 + CAL.effShift("three") + 0.40 * (outside - (0.50 - 0.20 * b)));
+			share3 += weight * CAL.threeShare(b, tp);
+			w += weight;
+		}
+		if (!w) return CAL.ROTATION.twoPct;
+		const s3 = share3 / w;
+		return clamp((1 - s3) * (two / w) + s3 * (three / w), 0.34, 0.60);
+	}
+
+	/* ctx:  { oppStrength, oppDefense, games, league, pro }
+	   who:  { talent, filler } — the player himself. Needed because two rate
+	         anchors differ between a drafted prospect and the returning
+	         rotation player beside him, and the model used the DRAFTED anchor
+	         for everybody: the drafted-player free-throw-rate table (.367 for
+	         guards up to .511 for seven-footers) was applied to all of Division
+	         I, when the whole-field rotation baseline is .366 flat. That alone
+	         put team free-throw attempts 12% high. */
+	function statLine(rng, ratings, comps, minutes, usgShare, ctx, cfg, teamCtx, who) {
+		const me = who || { talent: 55, filler: false };
 		const noise = clamp(cfg.statNoise, 0, 3);
 		const env = teamCtx.env || NCAA_ENV;
 		const gameMinutes = env.gameMinutes || 40;
@@ -243,11 +363,32 @@
 		// in playing time and sums to 1 across the rotation; chanceMult converts
 		// possessions into chances (see the header identity).
 		const poss = pace * teamCtx.chanceMult * usgShare;
+		/* Turnovers are denominated in POSSESSIONS, not chances. TO% in the
+		   source data (and in every public college box-score derivation) is
+		   turnovers over possessions, and the model was applying it to chances
+		   — which exceed possessions by the team's offensive rebounds, a factor
+		   of about 1.147. That is the whole of the 15% turnover excess: the
+		   measured team rate was 19.6% of possessions against a real 17.2%, and
+		   19.6 / 1.147 = 17.1. An offensive rebound restarts a chance inside a
+		   possession that has already survived its turnover risk. */
+		const tovPoss = poss / teamCtx.chanceMult;
 		// USG% proper: share of team chances used while actually on the floor.
 		const usgRate = minutes > 0 ? (usgShare * gameMinutes) / minutes : 0;
 
 		// Competition: harder leagues shave efficiency, not volume.
 		const compAdj = -0.0022 * (ctx.oppStrength - 52);
+		/* Talent -> efficiency. js/calibration.js has always documented and
+		   exported this gradient ("better prospects carry a little more volume
+		   at slightly better efficiency") and nothing ever called it, so the
+		   volume half was in the model and the efficiency half was not. The
+		   measured correlation between overall rating and true shooting was
+		   0.20 — almost all of it arriving through usage. */
+		const talentAdj = me.filler ? 0 : CAL.talentEffAdj(me.talent);
+		/* The efficiency dial, which did not exist: pace and scoringEnv are
+		   both possession dials, and moving either left true shooting at 0.572
+		   in every configuration. */
+		const envEff = 0.010 * clamp(cfg.efficiencyEnv || 0, -3, 3) +
+			(me.filler ? CAL.effShift("fieldEff") : 0);
 		// The defences actually faced. `oppDefense` is the minute-weighted
 		// average defensive profile of this team's schedule, so a prospect in a
 		// conference full of shot-blockers finishes worse at the rim than the
@@ -267,15 +408,33 @@
 		// Skill composites are centred at what a typical prospect of this size
 		// actually scores on them (~45 base ratings, hgt = 30+55*bigness), so
 		// only above/below-typical skill moves the rate off its empirical anchor.
+		/* Returning rotation players give the ball away a little more often than
+		   future draft picks do; the drafted table is the prospect's anchor. */
+		const tovAnchor = CAL.byHeight("tov", bigness) * (me.filler ? 1.06 : 1);
 		const tovRate = clamp(
-			CAL.byHeight("tov", bigness) - 0.10 * (comps.turnovers - 0.467) +
-				0.13 * od.perimeter + (ctx.oppPress || 0) + rng.normal(0, 0.014 * noise),
+			tovAnchor - 0.10 * (comps.turnovers - 0.467) +
+				/* Opponent ball pressure. PROGRAM_STYLES gives a full-court
+				   press team press: 0.06, and it was added straight onto a rate
+				   — so a conference stacked with pressing teams could add six
+				   percentage points of turnover rate, larger than the entire
+				   height gradient in the calibration table (17.2% to 17.8%).
+				   Half of a press's effect shows up as a live-ball turnover;
+				   the rest is a rushed shot, which the efficiency terms already
+				   carry. */
+				0.13 * od.perimeter + 0.5 * (ctx.oppPress || 0) +
+				rng.normal(0, 0.014 * noise),
 			0.08, 0.27,
 		);
 		// Free-throw rate climbs steeply with size (FTr .37 guards -> .51
 		// seven-footers); foul-drawing skill moves it around that anchor.
+		/* Fillers are the whole of Division I outside this class, so they take
+		   the flat whole-field rotation baseline rather than the drafted-player
+		   height table, which runs 9% richer and slopes hard with size. */
+		const ftrAnchor = me.filler
+			? CAL.ROTATION.ftr * (0.90 + 0.24 * bigness)
+			: CAL.byHeight("ftr", bigness);
 		const ftRate = clamp(
-			CAL.byHeight("ftr", bigness) + 0.32 * (comps.drawingFouls - (0.42 + 0.11 * bigness)) +
+			ftrAnchor + 0.32 * (comps.drawingFouls - (0.42 + 0.11 * bigness)) +
 				rng.normal(0, 0.045 * noise),
 			0.10, 0.75,
 		);
@@ -283,9 +442,9 @@
 		// Volume jitter is applied to the *inputs*, so that points, FG% and TS%
 		// stay reconcilable with the attempts printed beside them.
 		const jv = (x, sd) => Math.max(0, x * (1 + rng.normal(0, sd * noise)));
-		const fga = jv((poss * (1 - tovRate)) / (1 + 0.44 * ftRate), 0.045);
+		const tov = jv(tovPoss * tovRate, 0.10);
+		const fga = jv((poss - tov) / (1 + 0.44 * ftRate), 0.045);
 		const fta = jv(fga * ftRate, 0.06);
-		const tov = jv(poss * tovRate, 0.10);
 
 		// Shot mix: 3PA share anchored to the height buckets (.39 for guards
 		// down to .085 for 6'11"+), stretched by shooting talent.
@@ -310,10 +469,17 @@
 		// spread used to run 34.8% for guards to 31.1% for centres with almost
 		// nothing between an elite shooting big and a non-shooting guard, when
 		// the real range is 27% to 40% *within* every size band.
-		const tpCeil = clamp(0.465 + 0.09 * Math.max(0, 1 - tpa / 3.5), 0.465, 0.56);
+		/* The ceiling used to allow 56% from three on token volume, which is
+		   not a number, it is a joke line; 50% on low volume is already
+		   generous. The slope was steepened once on purpose (see above) and
+		   over-shot: the Sharpshooter archetype came out at 43.7% from three on
+		   28.4% usage as a COHORT AVERAGE, when the real ceiling for a whole
+		   cohort of shooting specialists is 38-40%. */
+		const tpCeil = clamp(0.435 + 0.08 * Math.max(0, 1 - tpa / 3.5), 0.435, 0.50);
 		const tpp = clamp(
-			0.339 + 0.46 * (comps.shootingThreePointer - (0.50 - 0.20 * bigness)) +
-				compAdj + synergy + loadAdj * 0.6 - 0.055 * od.perimeter +
+			0.339 + CAL.effShift("three") + envEff +
+				0.40 * (comps.shootingThreePointer - (0.50 - 0.20 * bigness)) +
+				compAdj + synergy + talentAdj + loadAdj * 0.6 - 0.055 * od.perimeter +
 				mix(touch, rng.normal(0, 1)) * 0.030 * noise,
 			0.15, tpCeil,
 		);
@@ -326,14 +492,14 @@
 		const rimMix = clamp(0.49 + 0.06 * bigness + style.rim +
 			0.10 * (comps.shootingAtRim - comps.shootingMidRange), 0.30, 0.75);
 		// Interior defence bites hardest exactly where it should: at the rim.
-		const insideEff = CAL.byHeight("rimPct", bigness) +
+		const insideEff = CAL.byHeight("rimPct", bigness) + CAL.effShift("inside") + envEff +
 			0.26 * (comps.shootingAtRim - (0.32 + 0.44 * bigness)) +
 			0.16 * (comps.shootingLowPost - (0.40 + 0.17 * bigness)) -
 			0.16 * od.rim;
-		const midEff = CAL.byHeight("midPct", bigness) + 0.26 * (comps.shootingMidRange - 0.45) -
-			0.05 * od.perimeter;
+		const midEff = CAL.byHeight("midPct", bigness) + CAL.effShift("mid") + envEff +
+			0.26 * (comps.shootingMidRange - 0.45) - 0.05 * od.perimeter;
 		const twoP = clamp(
-			rimMix * insideEff + (1 - rimMix) * midEff + compAdj + synergy + loadAdj +
+			rimMix * insideEff + (1 - rimMix) * midEff + compAdj + synergy + talentAdj + loadAdj +
 				rng.normal(0, 0.026 * noise),
 			0.34, 0.68,
 		);
@@ -356,8 +522,8 @@
 		const sh = (comp, exp) => Math.pow(comp, exp) * minShare;
 		// Offensive rebounds lean a little more on size and effort than the
 		// defensive glass, where everyone boxes out.
-		const orbW = Math.pow(comps.rebounding, TUNING.REB_EXP + 0.35) * minShare;
-		const drbW = sh(comps.rebounding, TUNING.REB_EXP);
+		const orbW = rebWeight(comps, minShare, true);
+		const drbW = rebWeight(comps, minShare, false);
 		// No single player takes an unbounded share of a team total: the record
 		// books top out near 60-70% of team assists and blocks, so saturate the
 		// share smoothly rather than letting one dominant composite run away
@@ -385,10 +551,17 @@
 		const orb = orbRaw * rebScale;
 		const drb = drbRaw * rebScale;
 		const ast = capNoisy(
-			(teamCtx.astPool * sh(comps.passing, TUNING.AST_EXP)) / teamCtx.astDen,
+			(teamCtx.astPool * astWeight(comps, ratings, minShare)) / teamCtx.astDen,
 			0.10, teamCtx.astPool, TUNING.AST_CAP);
+		/* Athleticism finally reaches the steal column. BBGM's stealing
+		   composite is (50 + spd + 2*diq) / 400: defensive IQ outweighs speed
+		   two to one and strength and leaping do not appear at all, so the
+		   athletic freaks swatted shots (athleticism vs blocks correlated 0.54)
+		   and never got into a passing lane (athleticism vs steals, 0.16).
+		   The composite is left alone — half the model reads it — and the share
+		   is tilted here instead. */
 		const stl = capNoisy(
-			(teamCtx.stlPool * sh(comps.stealing, TUNING.STL_EXP)) / teamCtx.stlDen,
+			(teamCtx.stlPool * stlWeight(comps, minShare)) / teamCtx.stlDen,
 			0.13, teamCtx.stlPool, TUNING.STL_CAP);
 		const blk = capNoisy(
 			(teamCtx.blkPool * sh(comps.blocking, TUNING.BLK_EXP)) / teamCtx.blkDen,
@@ -451,8 +624,24 @@
 	   front line of shot-blockers blocks more shots than a team of guards,
 	   rather than the same fixed 4.8 redistributed. `agg` is the
 	   minute-weighted mean composite of the five men on the floor. */
-	function teamPools(comps, mins, pace, chanceMult, gameMinutes) {
+	function teamPools(comps, mins, pace, chanceMult, gameMinutes, env) {
 		const gm = gameMinutes || 40;
+		const e = env || {};
+		/* The share of a team's own shots that come back as rebounds. This was
+		   the literal constant 0.44, written twice in two files, while the
+		   sim's own team field-goal percentage was .472 — a true miss share of
+		   .528, a 20% internal inconsistency in the middle of the offensive
+		   rebound chain. It is read off the model's own shooting now.
+
+		   `oppMissShare` is the same number for the schedule this team faced,
+		   which is what its DEFENSIVE rebound total should respond to: a team
+		   that plays a diet of bad shooters gets more defensive rebounds than
+		   one that plays great shooters, and the old hardcoded 25.2 could not
+		   express that at all. */
+		const missShare = clamp(
+			e.missShare === undefined ? CAL.chanceShape().missShare : e.missShare, 0.42, 0.64);
+		const oppMissShare = clamp(
+			e.oppMissShare === undefined ? missShare : e.oppMissShare, 0.42, 0.64);
 		// Two views of the roster: the minute-weighted average of the five men
 		// on the floor, and the best specialist on it. Team block totals track
 		// the shot-blocker far more than the average (Walker Kessler took 4.6
@@ -471,19 +660,37 @@
 		};
 		const scale = (a, base, exp, lo, hi) =>
 			clamp(Math.pow(Math.max(0.05, a) / base, exp), lo, hi);
+		/* The `base` in each scale() below is meant to be the composite an
+		   AVERAGE D-I rotation scores, so an average roster gets a factor of
+		   exactly 1 and the pool constant beside it means what it says. They
+		   were hand-set and drifted away from the filler bases they mirror: a
+		   returning player's passing composite synthesises to about 0.43 while
+		   the scale was centred on 0.47, so every team in the country was
+		   multiplied by 0.95 and team assists came out 5% light while the pool
+		   constant itself looked correct. See POOL_BASE. */
 
 		// Offensive rebound rate moves with the roster's glass work, which in
 		// turn sets how many extra scoring chances the team creates.
 		const orbRate = clamp(
-			TUNING.ORB_RATE * scale(agg("rebounding", 0.25), 0.48, 0.55, 0.7, 1.35), 0.18, 0.42,
+			TUNING.ORB_RATE * scale(agg("rebounding", 0.25), POOL_BASE.rebounding, 0.55, 0.7, 1.35), 0.18, 0.42,
 		);
 		const chances = pace * chanceMult;
-		// Team rebounds: their own misses (orbRate of them) plus the
-		// opponent's, which arrive at roughly the league-average miss rate.
-		const missShare = 0.44;
-		const orbPool = chances * missShare * orbRate;
-		const drbPool = (25.2 + (pace - 68) * 0.20) *
-			scale(agg("rebounding", 0.25), 0.48, 0.35, 0.8, 1.25);
+		const shape = CAL.chanceShape();
+		/* Rebounds come off MISSED SHOTS, not off scoring chances. The pool was
+		   `chances * missShare * orbRate`, and chances exceed field-goal
+		   attempts by the turnovers and the free-throw split — about 34% — so
+		   every offensive rebound total in the sim was a third too big, which
+		   in turn inflated the chance multiplier that produced them. Team
+		   rebounds measured 36.0 a game against a real 33.3 and the whole
+		   possession chain was carrying the error. */
+		const teamFga = chances * shape.fgaShare;
+		const orbPool = teamFga * missShare * TUNING.ORB_FT * orbRate;
+		/* The defensive glass is the mirror image: the opponent's missed shots,
+		   minus the ones he rebounds himself. It was the constant 25.2, so a
+		   team that played a schedule of bad shooters rebounded exactly as much
+		   as one that played a schedule of great shooters. */
+		const drbPool = teamFga * oppMissShare * TUNING.ORB_FT * (1 - TUNING.ORB_RATE) *
+			scale(agg("rebounding", 0.25), POOL_BASE.rebounding, 0.35, 0.8, 1.25);
 
 		/* Assists track MADE FIELD GOALS, and the old pool did not: it took
 		   `pace * chanceMult` — the team's scoring *chances*, ~78 — and
@@ -497,19 +704,23 @@
 		   term leans on the best passer on the floor (topWeight 0.35), so a
 		   roster with a true point guard assists more of its own baskets than
 		   a team of wings does. */
-		const teamFga = (chances * (1 - TUNING.NOMINAL_TOV)) /
-			(1 + 0.44 * TUNING.NOMINAL_FTR);
 		const assistedShare = TUNING.ASSISTED_SHARE *
-			scale(agg("passing", 0.35), 0.47, 0.55, 0.80, 1.22);
+			scale(agg("passing", 0.35), POOL_BASE.passing, 0.55, 0.80, 1.22);
 
 		return {
 			orbRate,
 			orbPool,
 			drbPool,
-			astPool: teamFga * TUNING.NOMINAL_FGP * assistedShare,
-			stlPool: 6.8 * scale(agg("stealing", 0.30), 0.50, 1.00, 0.70, 1.45),
-			blkPool: 5.3 * scale(agg("blocking", 0.70), 0.50, 1.70, 0.55, 2.80),
-			pfPool: TUNING.TEAM_PF * scale(agg("fouling", 0.20), 0.48, 0.60, 0.80, 1.25),
+			astPool: teamFga * (1 - missShare) * assistedShare,
+			stlPool: 6.8 * scale(agg("stealing", 0.30), POOL_BASE.stealing, 1.00, 0.70, 1.45),
+			/* Team blocks measured 4.57 a game against a real D-I 3.5, 31%
+			   high: a 5.3 base and a 2.80x ceiling on top of a 1.70 exponent
+			   compounded into a shot-blocking league. The shape is right (the
+			   best rim protector on the floor should move his team's total,
+			   which is what the 0.70 top-player weight buys); the level and the
+			   ceiling were not. */
+			blkPool: 4.0 * scale(agg("blocking", 0.70), POOL_BASE.blocking, 1.70, 0.55, 2.20),
+			pfPool: TUNING.TEAM_PF * scale(agg("fouling", 0.20), POOL_BASE.fouling, 0.60, 0.80, 1.25),
 		};
 	}
 
@@ -554,6 +765,10 @@
 				drawingFouls: f(0.47, 0.08), defense: f(0.48, 0.08), fouling: f(0.47, 0.08),
 				defenseInterior: f(0.46, 0.09), defensePerimeter: f(0.46, 0.09),
 				endurance: f(0.50, 0.09),
+				// Athleticism reaches the steal share now, so a filler needs it
+				// too — without it every returning player's steal weight came
+				// out NaN and took the whole team steal pool with it.
+				athleticism: f(0.48, 0.09),
 			};
 		});
 
@@ -593,9 +808,20 @@
 		   the volume scorers. This puts the ordering back without touching the
 		   composite the rest of the model depends on. */
 		const bignessOf = (i) => clamp((comps[i].blocking - 0.18) / 0.55, 0, 1);
+		/* The tilt was strengthened (0.50 -> 0.85). It corrected the ORDERING of
+		   raw usage and then the soft ceiling and the renormalisation absorbed
+		   most of it back: at equal overall rating a seven-footer and a guard
+		   finished on the same 26% usage, so the big won the scoring title on
+		   efficiency alone (58.7% from the floor against 45.2%) and outscored
+		   the guard by 1.7 a game. Efficiency by size is right — real D-I
+		   centres do shoot in the high fifties — so the fix is on the volume
+		   side, where a draft class's guards really do carry more of the
+		   offence than its centres. At 1.05 an overall-matched guard, wing and
+		   centre score within half a point of one another, with the guard
+		   ahead — which is the ordering a draft board shows. */
 		const rawUsg = members.map((m, i) =>
 			Math.pow(comps[i].usage, TUNING.USG_EXP) * Math.pow(0.35 + 1.3 * (m.talent / 100), 1.6) *
-				(1 + 0.50 * (0.42 - bignessOf(i))) *
+				(1 + 1.05 * (0.42 - bignessOf(i))) *
 				CAL.talentUsageMult(m.talent),
 		);
 		let denom = 0;
@@ -616,9 +842,18 @@
 		const bounds = members.map((m, i) => {
 			const ms = mins[i] / gameMinutes;
 			const floor = (m.filler ? 0.10 : TUNING.USG_FLOOR) * ms;
+			/* The ceiling is the player's, not the league's. A universal cap made
+			   every good prospect converge on the same number.
+
+			   The intercept came down (0.268 -> 0.253) because the cap was only
+			   ever binding for one population: a prospect at a weak programme,
+			   where nobody else can take a shot. High-major prospects average
+			   25% usage and never reach it; mid-major ones sat on it, which is
+			   most of why the same overall rating produced 16.7 points a game
+			   in one conference and 21.2 in another. */
 			const personal = clamp(
-				0.268 + 0.50 * (comps[i].usage - 0.42) + 0.075 * ((m.talent - 55) / 45) +
-					0.055 * (0.42 - bignessOf(i)),
+				0.253 + 0.50 * (comps[i].usage - 0.42) + 0.075 * ((m.talent - 55) / 45) +
+					0.105 * (0.42 - bignessOf(i)),
 				0.195, TUNING.USG_CAP,
 			);
 			return { floor, room: Math.max(1e-6, personal * ms - floor) };
@@ -653,11 +888,30 @@
 		// Chances exceed possessions by the team's offensive rebounds; solve
 		// chances = poss + orbRate * missShare * chances for the multiplier.
 		// One pass on a nominal ORB rate, then refine with the roster's own.
-		const missShare = 0.44;
-		let chanceMult = 1 / (1 - TUNING.ORB_RATE * missShare);
-		let pools = teamPools(comps, mins, pace, chanceMult, gameMinutes);
-		chanceMult = clamp(1 / (1 - pools.orbRate * missShare), 1.06, 1.28);
-		pools = teamPools(comps, mins, pace, chanceMult, gameMinutes);
+		/* The share of shots that miss, for this team and for the schedule it
+		   faced. Both were the hardcoded 0.44 while the sim shot .472 from the
+		   floor. `oppFg` is the field-goal percentage of the opponents this
+		   team actually played, which the engine works out from their rosters. */
+		const missShare = clamp(1 - (ctx.teamFg || CAL.chanceShape().fgp), 0.42, 0.64);
+		const oppMissShare = clamp(1 - (ctx.oppFg || (1 - missShare)), 0.42, 0.64);
+		const poolEnv = { missShare, oppMissShare };
+		/* chances = poss + ORB, and an offensive rebound comes off a MISSED FIELD
+		   GOAL, so ORB = orbRate * ORB_FT * missShare * FGA and FGA is the
+		   era's field-goal share of a chance:
+
+		       chanceMult = 1 / (1 - orbRate * fgaShare * missShare * ORB_FT)
+
+		   The old form took offensive rebounds off every chance rather than off
+		   missed shots — turnovers and free-throw trips included — which put
+		   the multiplier at 1.18 where the real ratio is 1.14, and inflated
+		   every rebound total in the sim by a third. */
+		const shape = CAL.chanceShape();
+		const mult = (orbRate) =>
+			clamp(1 / (1 - orbRate * shape.fgaShare * missShare * TUNING.ORB_FT), 1.05, 1.24);
+		let chanceMult = mult(TUNING.ORB_RATE);
+		let pools = teamPools(comps, mins, pace, chanceMult, gameMinutes, poolEnv);
+		chanceMult = mult(pools.orbRate);
+		pools = teamPools(comps, mins, pace, chanceMult, gameMinutes, poolEnv);
 
 		/* Team-level variance lives on the pool, not on the individual draws.
 		   The per-player jitter used to be the only source of it, which meant
@@ -681,12 +935,26 @@
 		teamCtx.pace = env.pace !== null && env.pace !== undefined
 			? clamp(pace + teamCtx.paceAdj, 50, 118)
 			: clamp(pace + teamCtx.paceAdj, 58, 82);
+		/* The rating rows the stat model reads, built once. statLine only needs
+		   hgt, ft, tp and pss off a ratings row (everything else comes from the
+		   composites), so a filler needs just those four — but they have to
+		   exist BEFORE the denominator loop, because the assist share is read
+		   partly off the raw passing rating and the numerator and denominator
+		   have to agree. Height is backed out of the blocking composite, which
+		   is mostly height by construction. */
+		const ratingRows = members.map((m, i) => (m.filler
+			? {
+				hgt: clamp(30 + 55 * comps[i].blocking * 0.8, 5, 95),
+				ft: 43, tp: 45, pss: clamp(comps[i].passing * 100, 5, 95),
+			}
+			: m.player.newRatings));
+
 		for (let i = 0; i < members.length; i++) {
 			const ms = mins[i] / gameMinutes;
-			teamCtx.rebDen += Math.pow(comps[i].rebounding, TUNING.REB_EXP) * ms;
-			teamCtx.orbDen += Math.pow(comps[i].rebounding, TUNING.REB_EXP + 0.35) * ms;
-			teamCtx.astDen += Math.pow(comps[i].passing, TUNING.AST_EXP) * ms;
-			teamCtx.stlDen += Math.pow(comps[i].stealing, TUNING.STL_EXP) * ms;
+			teamCtx.rebDen += rebWeight(comps[i], ms, false);
+			teamCtx.orbDen += rebWeight(comps[i], ms, true);
+			teamCtx.astDen += astWeight(comps[i], ratingRows[i], ms);
+			teamCtx.stlDen += stlWeight(comps[i], ms);
 			teamCtx.blkDen += Math.pow(comps[i].blocking, TUNING.BLK_EXP) * ms;
 			teamCtx.pfDen += Math.pow(comps[i].fouling, TUNING.PF_EXP) * Math.pow(ms, 0.82);
 		}
@@ -707,15 +975,9 @@
 			const seed = m.filler
 				? "fillerstat|" + team.name + "|" + i
 				: "stat:" + m.player.key;
-			// statLine only reads hgt, ft and tp off the ratings row (everything
-			// else comes from the composites), so a filler needs just those
-			// three. Height is backed out of his blocking composite, which is
-			// mostly height by construction.
-			const ratings = m.filler
-				? { hgt: clamp(30 + 55 * comps[i].blocking * 0.8, 5, 95), ft: 43, tp: 45 }
-				: m.player.newRatings;
 			const line = statLine(
-				rng.child(seed), ratings, comps[i], mins[i], usgShare[i], ctx, cfg, teamCtx,
+				rng.child(seed), ratingRows[i], comps[i], mins[i], usgShare[i], ctx, cfg,
+				teamCtx, { talent: m.talent, filler: !!m.filler },
 			);
 			lines.push(line);
 			totals.pts += line.ppg;
@@ -767,12 +1029,13 @@
 		   clipped surplus to the players with room. Below the cap nothing
 		   moves, so the distribution keeps the shape statLine gave it. */
 		reconcileTeamTotals(lines, pools);
-		totals.ast = 0; totals.stl = 0; totals.blk = 0;
+		totals.ast = 0; totals.stl = 0; totals.blk = 0; totals.pf = 0;
 		totals.orb = 0; totals.trb = 0;
 		for (const line of lines) {
 			totals.ast += line.apg;
 			totals.stl += line.spg;
 			totals.blk += line.bpg;
+			totals.pf += line.pfpg;
 			totals.orb += line.orpg;
 			totals.trb += line.rpg;
 		}
@@ -838,6 +1101,10 @@
 		set("bpg", pools.blkPool, TUNING.BLK_CAP);
 		// Rebounds are capped on the total, so the two halves are fitted to
 		// their own pools first and then the combined line is clipped.
+		/* Personal fouls. statLine computed them, totals summed them and this
+		   function fitted everything except them, so team fouls answered to
+		   nothing: measured 15.2 against the model's own 16.6 target. */
+		set("pfpg", pools.pfPool, TUNING.PF_CAP);
 		set("orpg", pools.orbPool, 0.75);
 		set("drpg", pools.drbPool, 0.60);
 		const rebPool = pools.orbPool + pools.drbPool;
@@ -1014,7 +1281,9 @@
 	global.StatsSim = {
 		simulateTeamStats, allocateMinutes, statLine, teamPools, gameLog,
 		fitToPool, reconcileTeamTotals,
-		defenseProfile, rosterDefenseProfile, leagueEnv, LEAGUE_ENV, NCAA_ENV,
+		defenseProfile, rosterDefenseProfile, rosterShooting,
+		astWeight, stlWeight, rebWeight, passSkill,
+		leagueEnv, LEAGUE_ENV, NCAA_ENV,
 		TUNING,
 	};
 })(typeof window !== "undefined" ? window : self);

@@ -59,10 +59,21 @@
 		const autos = sel.autos.slice().sort((a, b) => b.resume - a.resume);
 		const atLarge = sel.atLarge.slice().sort((a, b) => b.resume - a.resume);
 
-		// The four weakest auto bids play for two 16 seeds; the four weakest
-		// at-large bids play for two 11 seeds.
-		const autoPlayIn = autos.splice(-4, 4);
-		const atLargePlayIn = atLarge.splice(-4, 4);
+		/* The four weakest auto bids play for two 16 seeds; the four weakest
+		   at-large bids play for two 11 seeds.
+
+		   Everything below assumed at least 68 eligible programs and at least
+		   four teams in each play-in pool, which is true of the built-in 353
+		   and not true of a modded colleges.js or a class whose schools map to
+		   a small custom set: splice(-4, 4) on a two-team pool takes both of
+		   them, and the hardcoded field64 slice offsets then produced a
+		   silently malformed bracket or threw. The field is sized from what is
+		   actually there. */
+		const playInAuto = Math.min(4, Math.max(0, autos.length - 1));
+		const playInAtLarge = Math.min(4, Math.max(0, atLarge.length - 1));
+		const autoPlayIn = playInAuto >= 2 ? autos.splice(-playInAuto, playInAuto) : [];
+		const atLargePlayIn = playInAtLarge >= 2
+			? atLarge.splice(-playInAtLarge, playInAtLarge) : [];
 		const firstFour = [];
 		const runPlayIn = (list, seed) => {
 			const adv = [];
@@ -96,11 +107,22 @@
 		// seeds and the two 16 seeds), like the real tournament — they are not
 		// re-seeded by resume into better lines.
 		const main = autos.concat(atLarge).sort((a, b) => b.resume - a.resume);
-		const field64 = main.slice(0, 40)          // seed lines 1-10
-			.concat(main.slice(40, 42), advAtLarge)  // 11 line
-			.concat(main.slice(42, 58))              // 12-15 lines
-			.concat(main.slice(58, 60), advAuto)     // 16 line
-			.slice(0, 64);
+		/* The seed-line offsets are derived from the field that exists. In a
+		   full 68-team bracket this is exactly the old arithmetic — 40 teams on
+		   lines 1-10, two on the 11 line plus the two play-in winners, sixteen
+		   on lines 12-15, two on the 16 line plus the two play-in winners — and
+		   in a smaller one it degrades to "seed everyone by resume" instead of
+		   slicing past the end of the array. */
+		const seatsFor = advAtLarge.length + advAuto.length;
+		const full = main.length + seatsFor >= 64 && advAtLarge.length === 2 &&
+			advAuto.length === 2;
+		const field64 = full
+			? main.slice(0, 40)                        // seed lines 1-10
+				.concat(main.slice(40, 42), advAtLarge)  // 11 line
+				.concat(main.slice(42, 58))              // 12-15 lines
+				.concat(main.slice(58, 60), advAuto)     // 16 line
+				.slice(0, 64)
+			: main.concat(advAtLarge, advAuto).slice(0, 64);
 
 		// S-curve: overall 1-4 are the 1 seeds, 5-8 the 2 seeds, and so on, one
 		// of each seed per region.
@@ -111,10 +133,14 @@
 			const order = band % 2 === 0 ? REGIONS : REGIONS.slice().reverse();
 			regions[order[i % 4]].push({ seed, team });
 		});
+		// A field too small to fill four regions leaves some empty; the round
+		// loop below already skips an unpaired team, but an empty region has no
+		// champion at all, so the Final Four has to be drawn from what is left.
+		const liveRegions = REGIONS.filter((r) => regions[r].length);
 
 		const ROUND_NAME = ["Round of 64", "Round of 32", "Sweet 16", "Elite Eight"];
 		const regionResults = {};
-		for (const r of REGIONS) {
+		for (const r of liveRegions) {
 			const bySeed = {};
 			for (const x of regions[r]) bySeed[x.seed] = x;
 			let alive = SEED_ORDER.map((sd) => bySeed[sd]).filter(Boolean);
@@ -148,10 +174,12 @@
 			regionResults[r] = { seeds: regions[r], rounds: regionRounds, champ: alive[0] };
 		}
 
-		const ff = REGIONS.map((r) => regionResults[r].champ);
+		let ff = liveRegions.map((r) => regionResults[r].champ).filter(Boolean);
+		// Pad an under-filled bracket so the Final Four is still four teams.
+		while (ff.length > 1 && ff.length % 2 === 1) ff = ff.slice(0, ff.length - 1);
 		const semis = [];
 		const finalists = [];
-		for (let i = 0; i < 4; i += 2) {
+		for (let i = 0; i + 1 < ff.length; i += 2) {
 			const sc = T.playGameScore(rng, ff[i].team, ff[i + 1].team, 0, cfg, 1, true);
 			T.recordPostseason(ff[i].team, ff[i + 1].team, sc, "ncaa", 1.12, "Final Four");
 			const won = sc.won;
@@ -164,6 +192,7 @@
 			winner.team.ncaaWins = (winner.team.ncaaWins || 0) + 1;
 			finalists.push(winner);
 		}
+		if (finalists.length < 2) finalists.push(finalists[0] || ff[0]);
 		const finalSc = T.playGameScore(rng, finalists[0].team, finalists[1].team, 0, cfg, 1, true);
 		T.recordPostseason(finalists[0].team, finalists[1].team, finalSc, "ncaa", 1.13,
 			"National Championship");
@@ -174,7 +203,7 @@
 			(finalSc.ot ? (finalSc.ot > 1 ? " " + finalSc.ot + "OT" : " OT") : "");
 		champion.team.ncaaWins = (champion.team.ncaaWins || 0) + 1;
 
-		for (const r of REGIONS) {
+		for (const r of liveRegions) {
 			for (const x of regionResults[r].seeds) {
 				const wins = x.team.ncaaWins || 0;
 				x.team.ncaaSeed = x.seed;

@@ -18,9 +18,17 @@
 	   [0.7, 1.0]. After the exposure normalisation that produced a realised
 	   frequency spread of about 5x across 59 specialist builds — one of
 	   everything, every class, with no scarcity and no sense that a class was
-	   guard-heavy or full of stretch bigs. They now span [0.16, 3.6]: a Combo
-	   Guard is more than twenty times more likely than a Point Center, which is
-	   roughly the real ratio. */
+	   guard-heavy or full of stretch bigs. They now span [0.34, 3.6]: a Combo
+	   Guard is about ten times more likely than a Point Center, which is roughly
+	   the real ratio.
+
+	   The floor came up from 0.16. The six builds with no height gate at all
+	   (min 0, max 100) carry an exposure of exactly 1.0 and so get no help from
+	   the exposure divisor, which meant the two most interesting builds in a
+	   draft class were also the two rarest: Raw Project appeared once in 840
+	   players and Athletic Freak nine times. "A Raw Project every twelve
+	   rerolls" is not rarity, it is absence, and a raw, toolsy, nobody-knows
+	   project is the character a draft class is remembered for. */
 	const ARCHETYPES = [
 		// --- guards -------------------------------------------------------
 		{ name: "Floor General", min: 0, max: 46, w: 2.6, t: ["guard", "playmaking"], o: { pss: 22, drb: 16, oiq: 14, ft: 6, spd: 6, ins: -14, dnk: -12, reb: -10, stre: -8 } },
@@ -41,7 +49,7 @@
 		{ name: "Sixth-Man Gunner", min: 0, max: 54, w: 0.8, t: ["guard", "shooting", "scoring"], o: { tp: 16, fg: 14, endu: 8, oiq: -6, pss: -8, diq: -10, reb: -8 } },
 		{ name: "Streaky Volume Scorer", min: 0, max: 56, w: 0.75, t: ["guard", "scoring"], o: { fg: 18, tp: 14, dnk: 8, ft: 6, oiq: -10, diq: -12, pss: -8, reb: -6 } },
 		{ name: "Change-of-Pace Guard", min: 0, max: 46, w: 0.7, t: ["guard", "athletic"], o: { spd: 18, drb: 14, pss: 10, endu: 8, tp: -8, ins: -10, reb: -10, stre: -8 } },
-		{ name: "Post-Up Guard", min: 24, max: 46, w: 0.34, t: ["guard", "scoring"], o: { stre: 16, ins: 14, ft: 8, oiq: 8, spd: -10, tp: -10, drb: -6, jmp: -6 } },
+		{ name: "Post-Up Guard", min: 24, max: 46, w: 0.5, t: ["guard", "scoring"], o: { stre: 16, ins: 14, ft: 8, oiq: 8, spd: -10, tp: -10, drb: -6, jmp: -6 } },
 		{ name: "Free-Throw Merchant", min: 0, max: 54, w: 0.6, t: ["guard", "scoring"], o: { ft: 18, drb: 12, oiq: 10, spd: 6, ins: 6, tp: -10, diq: -12, reb: -8 } },
 		// --- wings --------------------------------------------------------
 		{ name: "3&D Wing", min: 34, max: 64, w: 3.4, t: ["wing", "shooting", "defense"], o: { tp: 18, diq: 16, ft: 8, ins: -12, pss: -10, drb: -6, dnk: -4 } },
@@ -62,11 +70,11 @@
 		{ name: "Glide Athlete", min: 36, max: 66, w: 1.0, t: ["wing", "athletic"], o: { jmp: 20, spd: 14, dnk: 12, tp: -10, ft: -10, oiq: -10, pss: -8, ins: -4 } },
 		// --- everyone -----------------------------------------------------
 		{ name: "Microwave Scorer", min: 0, max: 80, w: 0.9, t: ["scoring"], o: { fg: 16, tp: 12, ins: 10, dnk: 8, diq: -16, pss: -12, oiq: -4 } },
-		{ name: "Athletic Freak", min: 0, max: 100, w: 0.9, t: ["athletic", "raw"], o: { spd: 18, jmp: 20, stre: 12, dnk: 14, oiq: -16, ft: -12, tp: -12, pss: -8 } },
+		{ name: "Athletic Freak", min: 0, max: 100, w: 1.8, t: ["athletic", "raw"], o: { spd: 18, jmp: 20, stre: 12, dnk: 14, oiq: -16, ft: -12, tp: -12, pss: -8 } },
 		{ name: "Glue Guy", min: 0, max: 100, w: 1.6, t: ["defense"], o: { diq: 12, oiq: 10, pss: 8, endu: 12, ins: -8, dnk: -8, fg: -4, tp: -2 } },
 		{ name: "High-IQ Connector", min: 0, max: 100, w: 1.0, t: ["playmaking"], o: { oiq: 16, pss: 12, diq: 8, tp: 4, dnk: -10, jmp: -8, ins: -8, fg: -4 } },
-		{ name: "Raw Project", min: 0, max: 100, w: 0.4, t: ["raw", "athletic"], o: { jmp: 14, spd: 10, stre: 10, endu: 6, oiq: -14, diq: -10, ft: -10, tp: -8, fg: -6 } },
-		{ name: "Iron Man", min: 0, max: 100, w: 0.35, t: [], o: { endu: 20, stre: 8, diq: 6, oiq: 6, dnk: -8, tp: -6, ins: -8, jmp: -6 } },
+		{ name: "Raw Project", min: 0, max: 100, w: 1.7, t: ["raw", "athletic"], o: { jmp: 14, spd: 10, stre: 10, endu: 6, oiq: -14, diq: -10, ft: -10, tp: -8, fg: -6 } },
+		{ name: "Iron Man", min: 0, max: 100, w: 0.7, t: [], o: { endu: 20, stre: 8, diq: 6, oiq: 6, dnk: -8, tp: -6, ins: -8, jmp: -6 } },
 		// --- bigs ---------------------------------------------------------
 		{ name: "Stretch Big", min: 54, max: 100, w: 2.4, t: ["big", "shooting"], o: { tp: 22, ft: 14, reb: 6, oiq: 4, spd: -10, drb: -10, dnk: -6, ins: -8 } },
 		{ name: "Post Scorer", min: 56, max: 100, w: 1.8, t: ["big", "scoring"], o: { ins: 24, stre: 16, reb: 10, dnk: 8, tp: -18, spd: -12, drb: -10, ft: -6 } },
@@ -74,7 +82,7 @@
 		{ name: "Rim Runner", min: 52, max: 100, w: 3.0, t: ["big", "athletic"], o: { dnk: 22, jmp: 16, spd: 10, reb: 8, tp: -18, ft: -14, pss: -10, drb: -12, oiq: -8 } },
 		{ name: "Motor Big", min: 50, max: 100, w: 2.8, t: ["big", "rebounding"], o: { reb: 20, stre: 14, endu: 14, diq: 10, ft: -12, tp: -14, pss: -6 } },
 		{ name: "Skilled Big", min: 54, max: 100, w: 1.8, t: ["big", "playmaking"], o: { ins: 14, pss: 16, oiq: 12, ft: 10, reb: 8, spd: -8, jmp: -6 } },
-		{ name: "Point Center", min: 60, max: 100, w: 0.42, t: ["big", "playmaking"], o: { pss: 22, oiq: 16, drb: 10, ft: 6, dnk: -10, jmp: -8, diq: -8, tp: -6 } },
+		{ name: "Point Center", min: 60, max: 100, w: 0.62, t: ["big", "playmaking"], o: { pss: 22, oiq: 16, drb: 10, ft: 6, dnk: -10, jmp: -8, diq: -8, tp: -6 } },
 		{ name: "Offensive Rebounding Menace", min: 54, max: 100, w: 1.0, t: ["big", "rebounding"], o: { reb: 22, stre: 12, jmp: 10, endu: 8, ft: -14, tp: -12, pss: -10, drb: -6 } },
 		{ name: "Switchable Big", min: 54, max: 100, w: 1.2, t: ["big", "defense"], o: { spd: 14, diq: 14, endu: 8, jmp: 6, ins: -10, ft: -8, pss: -8, tp: -6 } },
 		{ name: "Mobile Shot-Swatter", min: 56, max: 100, w: 1.1, t: ["big", "defense", "athletic"], o: { jmp: 18, diq: 16, spd: 8, reb: 6, oiq: -12, ins: -10, ft: -10, tp: -8 } },
@@ -82,9 +90,9 @@
 		{ name: "Low-Post Bruiser", min: 56, max: 100, w: 0.9, t: ["big", "scoring"], o: { stre: 20, ins: 16, reb: 10, dnk: 6, spd: -14, tp: -14, ft: -10, drb: -8 } },
 		{ name: "Pick-and-Pop Big", min: 52, max: 100, w: 1.7, t: ["big", "shooting"], o: { tp: 18, ft: 12, oiq: 8, fg: 8, drb: -10, spd: -8, reb: -8, ins: -6 } },
 		{ name: "Lob Threat", min: 56, max: 100, w: 1.6, t: ["big", "athletic"], o: { dnk: 20, jmp: 18, endu: 6, tp: -16, ft: -12, drb: -10, pss: -8, fg: -6 } },
-		{ name: "Old-School Center", min: 60, max: 100, w: 0.7, t: ["big", "scoring"], o: { ins: 18, stre: 14, reb: 12, oiq: 6, spd: -14, tp: -16, drb: -10, ft: -8 } },
-		{ name: "Undersized Rebounder", min: 46, max: 64, w: 0.5, t: ["big", "rebounding"], o: { reb: 20, stre: 14, endu: 10, diq: 6, tp: -10, fg: -8, drb: -8, pss: -6 } },
-		{ name: "Foul-Prone Enforcer", min: 54, max: 100, w: 0.4, t: ["big", "defense"], o: { stre: 18, diq: 10, ins: 8, reb: 8, oiq: -14, ft: -10, spd: -8, tp: -8 } },
+		{ name: "Old-School Center", min: 60, max: 100, w: 0.95, t: ["big", "scoring"], o: { ins: 18, stre: 14, reb: 12, oiq: 6, spd: -14, tp: -16, drb: -10, ft: -8 } },
+		{ name: "Undersized Rebounder", min: 46, max: 64, w: 0.75, t: ["big", "rebounding"], o: { reb: 20, stre: 14, endu: 10, diq: 6, tp: -10, fg: -8, drb: -8, pss: -6 } },
+		{ name: "Foul-Prone Enforcer", min: 54, max: 100, w: 0.6, t: ["big", "defense"], o: { stre: 18, diq: 10, ins: 8, reb: 8, oiq: -14, ft: -10, spd: -8, tp: -8 } },
 		{ name: "Balanced", min: 0, max: 100, w: 1.0, t: [], o: {} },
 	];
 
@@ -187,6 +195,18 @@
 		fg: 1, tp: 1, oiq: 1, diq: 1, drb: 1, pss: 1, reb: 1,
 	};
 
+	/* BBGM's usage composite, which decides how much of an offence a player is
+	   given: ins 1.5, dnk 1, fg 1, tp 1, spd 0.5, hgt 0.5, drb 0.5, oiq 0.5.
+	   Normalised to a share so it can be used as a protection weight below. */
+	const USAGE_W = (function () {
+		const raw = { ins: 1.5, dnk: 1, fg: 1, tp: 1, spd: 0.5, hgt: 0.5, drb: 0.5, oiq: 0.5 };
+		let total = 0;
+		for (const k of Object.keys(raw)) total += raw[k];
+		const out = {};
+		for (const k of BB.RATING_KEYS) out[k] = (raw[k] || 0) / total;
+		return out;
+	})();
+
 	// Linear ovr weight of each rating (from BBGM's ovr formula). Used to make
 	// every archetype's offset vector ovr-neutral by construction: without
 	// this, a build loading on diq (.159) forces the solver to gut everything
@@ -197,18 +217,51 @@
 		ins: 0.0126, dnk: 0.0286, ft: 0.0202, fg: 0.01, tp: 0.0726,
 		oiq: 0.133, diq: 0.159, drb: 0.059, pss: 0.062, reb: 0.01,
 	};
+	/* Make every archetype's offset vector ovr-neutral, WITHOUT quietly making
+	   the defensive builds unplayable on offence.
+
+	   The old normaliser subtracted a uniform u * SHIFT_SCALE from every
+	   rating. A build loading on diq (ovr weight .159) and spd (.123) generates
+	   a large positive ovr push, so u was large and negative for the defensive
+	   archetypes — and the ratings that lost most were exactly the ones BBGM's
+	   usage composite reads: ins (weight 1.5), dnk, fg, tp. The build came out
+	   ovr-neutral by construction and offence-negative by side effect.
+	   Measured: Switchable Big had the HIGHEST mean overall in the class (51.6)
+	   and the 14th-highest scoring average (10.5 a game); Defensive Pest ran
+	   9.4 points on 17.8% usage, which is not a rotation player. "The best
+	   defensive big in the class" was a player nobody would draft.
+
+	   So when the normaliser has to take ovr back OUT of a build, it protects
+	   the usage inputs and takes the points out of everything else instead. A
+	   build that has to be lifted is not losing its offence, so the other
+	   direction is left alone. The
+	   shift weights still have to reproduce the same total ovr push, so the
+	   protection is renormalised rather than simply capped. */
+	const USAGE_PROTECT = 0.75;
 	(function normalizeArchetypes() {
+		const baseW = [];
 		let shiftW = 0;
 		for (const k of BB.RATING_KEYS) shiftW += OVR_W[k] * SHIFT_SCALE[k];
+		void baseW;
 		for (const a of ARCHETYPES) {
 			let push = 0;
 			for (const k of Object.keys(a.o)) push += OVR_W[k] * a.o[k];
-			const u = push / shiftW;
-			if (Math.abs(u) < 0.05) continue;
+			if (Math.abs(push / shiftW) < 0.05) continue;
+			/* A positive push means the normaliser has to take ovr back OUT of
+			   the build, which is the case that guts the offence. Spend that
+			   budget away from the usage composite. */
+			const scale = {};
+			let w = 0;
+			for (const k of BB.RATING_KEYS) {
+				const protect = push > 0 ? 1 - USAGE_PROTECT * (USAGE_W[k] / 0.231) : 1;
+				scale[k] = Math.max(0, SHIFT_SCALE[k] * clamp(protect, 0.1, 1));
+				w += OVR_W[k] * scale[k];
+			}
+			const u = push / (w || shiftW);
 			const o = {};
 			for (const k of BB.RATING_KEYS) {
 				if (k === "hgt") continue;
-				const v = (a.o[k] || 0) - u * SHIFT_SCALE[k];
+				const v = (a.o[k] || 0) - u * scale[k];
 				if (Math.abs(v) >= 0.25) o[k] = Math.round(v * 4) / 4;
 			}
 			a.o = o;
