@@ -43,6 +43,7 @@
 		<label for="preset">Preset</label>
 		<select id="preset"></select>
 	</div>
+	<p class="unit" id="presetDiff" hidden></p>
 	<div class="btngroup wide">
 		<button id="btnSavePreset" type="button" title="Save the current settings as a named preset">Save preset…</button>
 		<button id="btnDeletePreset" type="button" title="Delete the selected saved preset">Delete</button>
@@ -97,11 +98,17 @@
 
 	<details class="grp" id="grp-season">
 		<summary>College season</summary>
+		<div class="ctl">
+			<label for="era">Era</label>
+			<select id="era"></select>
+			<p class="unit" id="eraNote"></p>
+		</div>
 		<div class="ctl"><label for="pace">Pace (poss / 40) <b></b></label><input type="range" id="pace" min="58" max="80" step="1"></div>
 		<div class="ctl"><label for="scoringEnv">Scoring environment <b></b></label><input type="range" id="scoringEnv" min="-3" max="3" step="0.5"></div>
+		<div class="ctl"><label for="efficiencyEnv">Shooting efficiency <b></b></label><input type="range" id="efficiencyEnv" min="-3" max="3" step="0.5"></div>
 		<div class="ctl"><label for="statNoise">Stat randomness <b></b></label><input type="range" id="statNoise" min="0" max="2.5" step="0.05"></div>
 		<div class="ctl"><label for="upsetFactor">March upsets <b></b></label><input type="range" id="upsetFactor" min="0" max="2" step="0.05"></div>
-		<p class="hint">Pace, scoring environment and stat randomness apply to Division I only. Every professional league abroad has its own pace and game length.</p>
+		<p class="hint">Pace and scoring environment move possessions; shooting efficiency moves what a possession is worth. Pace, both environment dials and stat randomness apply to Division I only — every professional league abroad has its own pace and game length.</p>
 	</details>
 
 	<details class="grp" id="grp-awards">
@@ -114,7 +121,7 @@
 
 	<details class="grp" id="grp-arch">
 		<summary>Archetype frequencies</summary>
-		<p class="hint">Rarity weight per build (1 = common, 3.6 = the most common, 0.16 = the rarest). Height bands are fixed by the archetype. Hover a name to see what it does to the ratings.</p>
+		<p class="hint">Rarity weight per build (1 = common, 3.6 = the most common, 0.34 = the rarest), and beside it the share of the last generated class that build actually came out as. Height bands are fixed by the archetype. Hover a name to see what it does to the ratings.</p>
 		<div id="archWeights" class="archlist"></div>
 		<button id="btnArchReset" type="button">Reset weights</button>
 	</details>
@@ -136,8 +143,8 @@
 			<button id="btnBatchCancel" hidden class="warn">Cancel</button>
 		</div>
 		<div id="batchProgress" hidden>
-			<div class="progress"><span id="batchBar"></span></div>
-			<p class="hint" id="batchNote"></p>
+			<div class="progress" role="progressbar" id="batchGauge" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="batchBar"></span></div>
+			<p class="hint" id="batchNote" role="status" aria-live="polite"></p>
 		</div>
 	</details>
 
@@ -152,8 +159,14 @@
 		<p class="hint">Everything runs locally in your browser. Nothing is uploaded.</p>
 	</div>
 
-	<div id="errBanner" role="alert" hidden title="Click to dismiss"></div>
-	<div id="warnBanner" role="status" hidden title="Click to dismiss"></div>
+	<div id="errBanner" class="banner" role="alert" hidden>
+		<span class="bannertext"></span>
+		<button type="button" class="bannerclose" id="errClose" aria-label="Dismiss this error">×</button>
+	</div>
+	<div id="warnBanner" class="banner" role="status" hidden>
+		<span class="bannertext"></span>
+		<button type="button" class="bannerclose" id="warnClose" aria-label="Dismiss this warning">×</button>
+	</div>
 	<p id="status" class="status" role="status" hidden></p>
 	<p id="fileSummary" class="legendline" hidden></p>
 

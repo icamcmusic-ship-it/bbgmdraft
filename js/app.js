@@ -23,7 +23,11 @@
 		active: 0,
 		tab: "players",
 		sort: [{ key: "newOvr", dir: -1 }],
-		filter: { q: "", pos: "", conf: "", changedOnly: false, lockedOnly: false },
+		filter: {
+			q: "", pos: "", conf: "", changedOnly: false, lockedOnly: false,
+			// [{key, min, max}] — numeric range filters, see Views.rangeBar.
+			ranges: [],
+		},
 		noteQuery: "",   // the Notes tab has its own search; it used to share one
 		overrides: {},   // player key -> {ovr, pot, archetype, college, ratings, …}
 		overrideFingerprint: null,
@@ -70,7 +74,10 @@
 				tab: state.tab,
 				// Small (a name and six numbers per prospect) and the whole
 				// point of pinning is that it outlives the class you pinned.
-				pinned: state.pinned,
+				// byKey is a lookup index rebuilt on restore, not state worth storing.
+				pinned: state.pinned
+					? Object.assign({}, state.pinned, { byKey: undefined })
+					: null,
 				open: openGroups(),
 			}));
 		} catch (e) { /* private browsing, quota, or no storage at all */ }
@@ -93,7 +100,7 @@
 		state.compactBracket = !!saved.compactBracket;
 		if (saved.theme) state.theme = saved.theme;
 		if (Array.isArray(saved.sort) && saved.sort.length) state.sort = saved.sort;
-		if (saved.pinned) state.pinned = saved.pinned;
+		if (saved.pinned) state.pinned = indexSnapshot(saved.pinned);
 		// Never land on a tab that has nothing to show.
 		if (saved.tab && (saved.tab !== "compare" || state.pinned)) state.tab = saved.tab;
 		return saved;
@@ -151,7 +158,7 @@
 		"classQuality", "classDepth", "eliteCount", "potBias", "potSpread",
 		"specialization", "archetypeDiversity", "classFlavor", "buildNoise",
 		"freshmanShare", "transferShare", "redshirtShare", "reclassShare", "pDII",
-		"pace", "scoringEnv", "statNoise", "upsetFactor",
+		"pace", "scoringEnv", "efficiencyEnv", "statNoise", "upsetFactor",
 		"awardStrictness", "confAwardStrictness", "proAwardStrictness",
 	];
 
@@ -197,10 +204,23 @@
 		reclassShare: (v) => "≈" + v + "% reclassified in or out of their year",
 		pDII: (v) => (v <= 0 ? "no DII conversions" :
 			"about " + (v * 100).toFixed(1) + "% of blank colleges become DII"),
-		// Measured, not asserted: the whole simulated field runs ORtg ~102.5,
-		// so points per game land near pace x 1.025, not pace x 1.05.
-		pace: (v) => "≈" + Math.round(v * 1.025) + " team points per game (Division I only)",
+		/* Derived from the selected era's own offensive rating rather than from
+		   a constant: the hint said "≈70 points" whatever era was chosen,
+		   because it was written when there was only one. */
+		pace: (v) => {
+			const era = global.Calibration.eraInfo(state.cfg.era);
+			return "≈" + Math.round((v * era.rotation.ortg) / 100) +
+				" team points per game (Division I only)";
+		},
 		scoringEnv: (v) => (v >= 0 ? "+" : "") + (v * 1.6).toFixed(1) + " possessions per 40",
+		/* The efficiency dial that did not exist. Measured before it did:
+		   dragging scoringEnv from -3 to +3 moved team points 66 -> 75 and left
+		   true shooting at exactly 0.572 in every configuration, because pace
+		   and scoringEnv are both possession dials and nothing in the tool
+		   moved what a possession was worth. */
+		efficiencyEnv: (v) => (v >= 0 ? "+" : "") + (v * 1.0).toFixed(1) +
+			" points of shooting percentage — roughly " +
+			(v >= 0 ? "+" : "") + (v * 2.2).toFixed(1) + " team points per game",
 		statNoise: (v) => v < 0.3 ? "stat lines follow ratings exactly" : "season-to-season luck",
 		upsetFactor: (v) => v < 0.6 ? "chalk: seeds mostly hold" : v > 1.4 ? "madness" : "a normal March",
 		awardStrictness: (v) => v > 1.2 ? "fewer national honours reach this class"
@@ -257,11 +277,69 @@
 			? "Overalls are re-dealt along a configurable curve; the class can get better or worse."
 			: "Each prospect keeps the overall BBGM gave him. Only his build changes.";
 		$("awardInteractionHint").textContent = awardInteractionHint();
+		paintEra();
+		paintPhaseCosts();
 		paintPresets();
 		paintNoteLines();
 		paintArchWeights();
 		paintLeagueWeights();
 		document.body.className = "density-" + state.density;
+	}
+
+	/* The era selector. The stat model targets one of the anchor sets in
+	   js/calibration.js, and which one it targets used to be a decision made
+	   once, in a file nobody opens, in 2021. */
+	function paintEra() {
+		const sel = $("era");
+		if (!sel) return;
+		const eras = global.Calibration.ERAS;
+		if (!sel.options.length) {
+			for (const name of Object.keys(eras)) {
+				sel.appendChild(new Option(eras[name].label, name));
+			}
+		}
+		sel.value = state.cfg.era;
+		const info = eras[state.cfg.era] || eras[global.Calibration.DEFAULT_ERA];
+		$("eraNote").textContent = info.note + "  Target: " + info.team.pts +
+			" team points per game at offensive rating " + info.rotation.ortg + ".";
+	}
+
+	/* Which phases a setting invalidates, and therefore what moving it costs.
+	   PHASES has always known this exactly and the panel never said, so every
+	   slider looked equally expensive — and a user with a big class learned to
+	   be afraid of all of them rather than of the two that rebuild everything. */
+	const PHASE_COST = {
+		build: "everything (~210 ms)",
+		regular: "the season onward (~180 ms)",
+		postseason: "March onward (~60 ms)",
+		stats: "stats onward (~40 ms)",
+		pot: "potential onward (~3 ms)",
+		awards: "awards onward (~2 ms)",
+		stock: "the draft board (~1 ms)",
+		notes: "notes only (~0.6 ms)",
+	};
+	function phaseCostFor(key) {
+		const phases = global.Engine.PHASES;
+		for (const ph of phases) {
+			if ((ph.deps || []).indexOf(key) !== -1) return PHASE_COST[ph.name] || ph.name;
+		}
+		return null;
+	}
+	function paintPhaseCosts() {
+		for (const key of SLIDERS.concat(["era", "ovrMode", "varySize"])) {
+			const input = $(key);
+			if (!input) continue;
+			const ctl = input.closest(".ctl");
+			if (!ctl) continue;
+			const cost = phaseCostFor(key);
+			if (!cost) continue;
+			let tag = ctl.querySelector(".rerun");
+			if (!tag) {
+				tag = el("p", "rerun");
+				ctl.appendChild(tag);
+			}
+			tag.textContent = "re-runs: " + cost;
+		}
 	}
 
 	function paintPresets() {
@@ -286,6 +364,36 @@
 			preset.value = want;
 		}
 		$("btnDeletePreset").disabled = !state.customPresets[want];
+		/* WHAT is modified. The dropdown said "(modified)" and would not say
+		   from what, so the only way to find out was to re-apply the preset and
+		   watch which numbers jumped. */
+		const diff = presetDiff();
+		const note = $("presetDiff");
+		if (note) {
+			note.textContent = diff.length
+				? "changed from the preset: " + diff.join(", ")
+				: "";
+			note.hidden = !diff.length;
+		}
+	}
+
+	/* Every setting that differs from the selected preset, as "name: was → is".
+	   Object-valued settings (the archetype and destination weight tables) are
+	   summarised rather than dumped. */
+	function presetDiff() {
+		const preset = CFG.PRESETS[state.presetName] || state.customPresets[state.presetName];
+		if (!preset) return [];
+		const base = CFG.make(preset);
+		const out = [];
+		for (const k of Object.keys(CFG.DEFAULTS)) {
+			if (k === "seed") continue;
+			const a = base[k];
+			const b = state.cfg[k];
+			if (JSON.stringify(a) === JSON.stringify(b)) continue;
+			if (a && typeof a === "object") { out.push(k + " (edited)"); continue; }
+			out.push(k + " " + a + " → " + b);
+		}
+		return out;
 	}
 
 	function cssEscape(s) {
@@ -298,8 +406,21 @@
 	function paintArchWeights() {
 		const aw = $("archWeights");
 		if (!aw) return;
+		// Realised frequency from the last run, beside the weight that asked
+		// for it.
+		const res = state.results[state.active];
+		const counts = {};
+		if (res) {
+			for (const p of res.players) counts[p.archetype] = (counts[p.archetype] || 0) + 1;
+		}
+		const n = res ? res.players.length : 0;
+		for (const g of aw.querySelectorAll(".archgot")) {
+			const c = counts[g.dataset.arch] || 0;
+			g.textContent = n ? (c ? (100 * c / n).toFixed(1) + "%" : "—") : "";
+			g.className = "archgot" + (c ? "" : " none");
+		}
 		const custom = state.cfg.archetypeWeights;
-		for (const i of aw.querySelectorAll("input")) {
+		for (const i of aw.querySelectorAll("input[data-arch]")) {
 			const a = RB.ARCHETYPES.filter((x) => x.name === i.dataset.arch)[0];
 			const fallback = a && a.w !== undefined ? a.w : 1;
 			const v = custom && Number.isFinite(custom[i.dataset.arch])
@@ -350,6 +471,13 @@
 			});
 			input.addEventListener("change", () => { pushed = false; persist(); });
 		}
+		$("era").addEventListener("change", () => {
+			pushUndo("changed the era");
+			state.cfg.era = $("era").value;
+			markDirty();
+			paintConfig();
+			scheduleRun();
+		});
 		$("ovrMode").addEventListener("change", () => {
 			pushUndo("changed the overall mode");
 			state.cfg.ovrMode = $("ovrMode").value;
@@ -436,32 +564,76 @@
 			run();
 		});
 
-		// Archetype rarity weights, editable per build.
+		/* Archetype rarity weights, grouped. Sixty ungrouped rows of name-and-a
+		   number is a wall, not an editor: you could not see that you were
+		   looking at the guards, you could not say "half as many bigs this
+		   year" without editing seventeen boxes, and nothing told you whether
+		   the edit you just made had done anything. */
 		const aw = $("archWeights");
-		for (const a of RB.ARCHETYPES) {
-			const row = el("div", "archrow");
-			const name = el("span", "archname", a.name);
-			name.title = archetypeTooltip(a);
-			row.appendChild(name);
-			const inp = el("input");
-			inp.type = "number";
-			inp.step = "0.05";
-			inp.min = "0";
-			inp.max = "8";
-			inp.dataset.arch = a.name;
-			inp.value = a.w === undefined ? 1 : a.w;
-			inp.title = archetypeTooltip(a);
-			inp.setAttribute("aria-label", "Rarity weight for " + a.name);
-			inp.addEventListener("change", () => {
-				pushUndo("changed archetype weights");
-				const w = {};
-				for (const i of aw.querySelectorAll("input")) w[i.dataset.arch] = Number(i.value);
-				state.cfg.archetypeWeights = w;
-				markDirty();
-				scheduleRun();
-			});
-			row.appendChild(inp);
-			aw.appendChild(row);
+		const GROUPS = [
+			["guard", "Guards"], ["wing", "Wings"], ["big", "Bigs"], ["", "Any size"],
+		];
+		const groupOf = (a) => {
+			for (const [tag] of GROUPS) if (tag && (a.t || []).indexOf(tag) !== -1) return tag;
+			return "";
+		};
+		const commitWeights = (label) => {
+			pushUndo(label);
+			const w = {};
+			for (const i of aw.querySelectorAll("input[data-arch]")) {
+				w[i.dataset.arch] = Number(i.value);
+			}
+			state.cfg.archetypeWeights = w;
+			markDirty();
+			scheduleRun();
+		};
+		for (const [tag, label] of GROUPS) {
+			const members = RB.ARCHETYPES.filter((a) => groupOf(a) === tag);
+			if (!members.length) continue;
+			const head = el("div", "archgroup");
+			head.appendChild(el("span", "archname", label + " (" + members.length + ")"));
+			// One multiplier for the whole group, applied to what is on screen.
+			const mult = el("button", "tiny", "×2");
+			mult.title = "Double every weight in this group";
+			const scaleGroup = (k) => {
+				for (const a of members) {
+					const i = aw.querySelector('input[data-arch="' + cssEscape(a.name) + '"]');
+					if (i) i.value = Math.max(0, Math.round(Number(i.value) * k * 100) / 100);
+				}
+				commitWeights("scaled the " + label.toLowerCase() + " weights");
+			};
+			mult.addEventListener("click", () => scaleGroup(2));
+			head.appendChild(mult);
+			const half = el("button", "tiny", "×½");
+			half.title = "Halve every weight in this group";
+			half.addEventListener("click", () => scaleGroup(0.5));
+			head.appendChild(half);
+			aw.appendChild(head);
+			for (const a of members) {
+				const row = el("div", "archrow");
+				const name = el("span", "archname", a.name);
+				name.title = archetypeTooltip(a);
+				row.appendChild(name);
+				/* What this build actually came out at last run, so an edit has
+				   visible consequences. A weight is a target share of the class
+				   and there was no way to see the share. */
+				const got = el("span", "archgot");
+				got.dataset.arch = a.name;
+				got.title = "Share of the last generated class that came out as " + a.name;
+				row.appendChild(got);
+				const inp = el("input");
+				inp.type = "number";
+				inp.step = "0.05";
+				inp.min = "0";
+				inp.max = "8";
+				inp.dataset.arch = a.name;
+				inp.value = a.w === undefined ? 1 : a.w;
+				inp.title = archetypeTooltip(a);
+				inp.setAttribute("aria-label", "Rarity weight for " + a.name);
+				inp.addEventListener("change", () => commitWeights("changed archetype weights"));
+				row.appendChild(inp);
+				aw.appendChild(row);
+			}
 		}
 		$("btnArchReset").addEventListener("click", () => {
 			pushUndo("reset the archetype weights");
@@ -745,17 +917,20 @@
 
 	/* ----------------------------------------------------------------- run */
 
+	/* The banners carry a real close button now. They were dismiss-on-click
+	   with the instruction hidden in a `title` and appended to the message
+	   text, which is neither discoverable nor reachable from the keyboard. */
 	function showError(err) {
 		const b = $("errBanner");
 		b.hidden = false;
-		b.textContent = (err && err.message ? err.message : String(err)) +
-			"\n(Click to dismiss.)";
+		b.querySelector(".bannertext").textContent =
+			err && err.message ? err.message : String(err);
 	}
 	function clearError() { $("errBanner").hidden = true; }
 	function showWarning(text) {
 		const b = $("warnBanner");
 		b.hidden = false;
-		b.textContent = text + "\n(Click to dismiss.)";
+		b.querySelector(".bannertext").textContent = text;
 	}
 
 	/* The settings actually handed to the engine.
@@ -891,6 +1066,9 @@
 		view.innerHTML = "";
 		const res = ensureResult(state.active);
 		if (!res) return;
+		// The archetype editor reports what the last run actually produced, so
+		// it has to be repainted when there is a new run to report.
+		paintArchWeights();
 		(V[state.tab] || V.players)(view, res);
 	}
 
@@ -935,11 +1113,9 @@
 				" inches this build can only reach " + u.range.min + "–" + u.range.max +
 				". He came out at " + u.got + ". Height is never shifted, so a very " +
 				"tall or very short player has a real floor and ceiling."));
-		} else if (p.ovrRange) {
-			panel.appendChild(el("p", "hint",
-				"This build can be solved to any overall from " + p.ovrRange.min +
-				" to " + p.ovrRange.max + "."));
 		}
+		// The achievable range used to live here, as a sentence above the form.
+		// It belongs on the input it constrains — see the Overall field below.
 
 		const grid = el("div", "editgrid");
 		const controls = {};
@@ -947,7 +1123,7 @@
 		   unconditionally, so there was no way to lock only the archetype or
 		   only the school without also freezing two numbers you did not mean
 		   to touch. */
-		const field = (key, label, node, current) => {
+		const field = (key, label, node, current, unit) => {
 			const w = el("div", "ctl");
 			const row = el("div", "lockrow");
 			const cb = el("input");
@@ -960,8 +1136,22 @@
 			l.style.margin = "0";
 			row.appendChild(cb);
 			row.appendChild(l);
+			/* Per-field revert. Ctrl+Z undid the last whole change; there was
+			   no way to say "put this one box back" short of remembering what
+			   was in it. */
+			const revert = el("button", "tiny", "↺");
+			revert.type = "button";
+			revert.title = "Put this field back to what the generator produced";
+			revert.setAttribute("aria-label", "Revert " + label);
+			revert.addEventListener("click", () => {
+				if (node.tagName === "SELECT") node.value = "";
+				else node.value = current === undefined || current === null ? "" : String(current);
+				cb.checked = false;
+			});
+			row.appendChild(revert);
 			w.appendChild(row);
 			w.appendChild(node);
+			if (unit) w.appendChild(el("p", "unit", unit));
 			grid.appendChild(w);
 			node.addEventListener("input", () => { cb.checked = true; });
 			node.addEventListener("change", () => { cb.checked = true; });
@@ -971,17 +1161,28 @@
 
 		const ovrIn = el("input");
 		ovrIn.type = "number";
-		ovrIn.min = 0;
-		ovrIn.max = 100;
+		/* The achievable range, on the input itself and BEFORE you type into
+		   it. engine.js worked it out either way; it was only ever reported
+		   after the fact, once the ask had already been silently clamped. */
+		if (p.ovrRange) {
+			ovrIn.min = p.ovrRange.min;
+			ovrIn.max = p.ovrRange.max;
+		} else {
+			ovrIn.min = 0;
+			ovrIn.max = 100;
+		}
 		ovrIn.value = Number.isFinite(ov.ovr) ? ov.ovr : p.newOvr;
-		field("ovr", "Overall", ovrIn);
+		field("ovr", "Overall", ovrIn, p.newOvr, p.ovrRange
+			? "reaches " + p.ovrRange.min + "–" + p.ovrRange.max +
+				" at " + V.feet(p.newHgtInches)
+			: null);
 
 		const potIn = el("input");
 		potIn.type = "number";
 		potIn.min = 0;
 		potIn.max = 100;
 		potIn.value = Number.isFinite(ov.pot) ? ov.pot : p.newPot;
-		field("pot", "Potential", potIn);
+		field("pot", "Potential", potIn, p.newPot);
 
 		const archSel = el("select");
 		archSel.appendChild(new Option("(roll it)", ""));
@@ -996,7 +1197,7 @@
 			archSel.appendChild(opt);
 		}
 		archSel.value = ov.archetype || "";
-		field("archetype", "Archetype", archSel);
+		field("archetype", "Archetype", archSel, "");
 
 		const colSel = el("select");
 		colSel.appendChild(new Option("(roll it)", ""));
@@ -1004,19 +1205,20 @@
 			colSel.appendChild(new Option(name, name));
 		}
 		colSel.value = ov.college || "";
-		field("college", "School / league", colSel);
+		field("college", "School / league", colSel, "");
 
 		const nameIn = el("input");
 		nameIn.type = "text";
 		nameIn.value = ov.name || p.name;
-		field("name", "Name", nameIn);
+		field("name", "Name", nameIn, p.name);
 
 		const hgtIn = el("input");
 		hgtIn.type = "number";
 		hgtIn.min = 58;
 		hgtIn.max = 96;
 		hgtIn.value = Number.isFinite(ov.hgtInches) ? ov.hgtInches : p.newHgtInches;
-		field("hgtInches", "Listed height (inches)", hgtIn);
+		field("hgtInches", "Listed height (inches)", hgtIn, p.newHgtInches,
+			"listed weight " + p.newWeight + " lb");
 		panel.appendChild(grid);
 
 		/* Individual ratings. Sometimes you just want to bump one guy's tp to
@@ -1066,6 +1268,8 @@
 				if (raw !== "" && Number.isFinite(Number(raw))) ratings[k] = Number(raw);
 			}
 			if (Object.keys(ratings).length) next.ratings = ratings;
+			// A per-player reroll is not a lock, but it is state: keep it.
+			if (Number(ov.reroll)) next.reroll = Number(ov.reroll);
 			if (!Object.keys(next).length) delete state.overrides[p.key];
 			else state.overrides[p.key] = next;
 			state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
@@ -1079,6 +1283,25 @@
 			run();
 		});
 		buttons.appendChild(clear);
+		/* Reroll one player. It was the whole class or nothing: if you liked
+		   sixty-nine of them and wanted one more look at the seventieth, the
+		   only move was to reroll everybody and lock the sixty-nine first.
+
+		   The trick is that every RNG stream is keyed off the player's key, so
+		   giving him a salt gives him a different draw and leaves everybody
+		   else's stream untouched. */
+		const again = el("button", null, "Reroll just him");
+		again.title = "Draw this prospect again. Nobody else in the class moves.";
+		again.addEventListener("click", () => {
+			pushUndo("rerolled " + p.name);
+			const cur = state.overrides[p.key] || {};
+			const next = Object.assign({}, cur);
+			next.reroll = (Number(cur.reroll) || 0) + 1;
+			state.overrides[p.key] = next;
+			state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
+			run();
+		});
+		buttons.appendChild(again);
 		panel.appendChild(buttons);
 
 		panel.appendChild(el("h4", null, "Why this player looks like this"));
@@ -1277,8 +1500,11 @@
 	}
 
 	const CSV_COLS = ["key", "name", "pos", "year", "ovr", "pot", "archetype", "college",
-		"conf", "board", "preseason", "move", "gp", "mpg", "ppg", "rpg", "orpg", "drpg",
+		"conf", "teamRecord", "apRank", "ncaaSeed", "hgtInches", "weight",
+		"board", "preseason", "move", "gp", "mpg", "ppg", "rpg", "orpg", "drpg",
 		"apg", "spg", "bpg", "topg", "pfpg", "cspg", "deflpg", "chgpg", "drtg",
+		// The volume behind every percentage, which the table now shows too.
+		"fga", "tpa", "fta", "tpar", "ftr", "efg", "astTo", "ortg", "prod",
 		"usg", "fgp", "tpp", "ftp", "ts", "awards"];
 
 	function esc(v) {
@@ -1293,12 +1519,19 @@
 			if (!everyone && !V.matchesFilter(p, res)) { skipped++; continue; }
 			const s = p.stats || {};
 			const t = res.teams[p.newCollege];
+			// Derived columns come from the same place the table reads them, so
+			// the file and the screen can never disagree.
+			const d = (k) => (p.stats ? V.derived(k, p.stats) : undefined);
 			lines.push([
 				p.key, p.name, p.newPos, p.classYear, p.newOvr, p.newPot, p.archetype,
 				p.proClub || p.newCollege, t ? t.conf : p.newCollege,
+				t ? t.w + "-" + t.l : "", t ? t.apRank : "", t ? t.ncaaSeed : "",
+				p.newHgtInches, p.newWeight,
 				p.boardRank, p.preseasonRank, p.stockMove,
 				s.gp, s.mpg, s.ppg, s.rpg, s.orpg, s.drpg, s.apg, s.spg, s.bpg,
 				s.topg, s.pfpg, s.cspg, s.deflpg, s.chgpg, s.drtg,
+				s.fga, s.tpa, s.fta, d("tpar"), d("ftr"), d("efg"), d("astTo"),
+				d("ortg"), d("prod"),
 				s.usg, s.fgp, s.tpp, s.ftp, s.ts,
 				(p.awards || []).join("; "),
 			].map((v) => esc(typeof v === "number" ? Number(v.toFixed(3)) : v)).join(","));
@@ -1495,9 +1728,25 @@
 			players: res.players.map((p) => ({
 				key: p.key, name: p.name, ovr: p.newOvr, pot: p.newPot,
 				archetype: p.archetype, college: p.proClub || p.newCollege,
-				ppg: p.stats ? p.stats.ppg : 0, board: p.boardRank || 0,
+				board: p.boardRank || 0,
+				// Enough of the stat line for the main table to show a ± against
+				// the baseline, not only the Compare tab.
+				ppg: p.stats ? p.stats.ppg : 0,
+				rpg: p.stats ? p.stats.rpg : 0,
+				apg: p.stats ? p.stats.apg : 0,
+				mpg: p.stats ? p.stats.mpg : 0,
+				ts: p.stats ? p.stats.ts : 0,
 			})),
 		};
+	}
+
+	/* Index the pinned class by player key once, so the main table can put a
+	   ± against the baseline on every row without an O(n^2) lookup. */
+	function indexSnapshot(snap) {
+		if (!snap) return snap;
+		snap.byKey = {};
+		for (const p of snap.players) snap.byKey[p.key] = p;
+		return snap;
 	}
 
 	/* ----------------------------------------------------------- batch mode */
@@ -1509,7 +1758,9 @@
 
 	function batchProgress(done, total) {
 		$("batchProgress").hidden = false;
-		$("batchBar").style.width = Math.round((100 * done) / total) + "%";
+		const p = Math.round((100 * done) / total);
+		$("batchBar").style.width = p + "%";
+		$("batchGauge").setAttribute("aria-valuenow", String(p));
 		$("batchNote").textContent = done + " of " + total + " classes";
 	}
 
@@ -1686,7 +1937,7 @@
 	Object.assign(global.App, {
 		state, render, run, persist, openEditor, editorPanel, modal, closeModal,
 		copyText, bulkApply, bulkShiftOvr, bulkClear, refreshBulkBar, snapshot,
-		exportCsv, setStatus, showError,
+		exportCsv, setStatus, showError, indexSnapshot,
 	});
 
 	const saved = restore();
@@ -1703,8 +1954,8 @@
 	paintUndo();
 	if (saved) applyOpenGroups(saved.open);
 
-	$("errBanner").addEventListener("click", clearError);
-	$("warnBanner").addEventListener("click", () => { $("warnBanner").hidden = true; });
+	$("errClose").addEventListener("click", clearError);
+	$("warnClose").addEventListener("click", () => { $("warnBanner").hidden = true; });
 	$("btnReroll").addEventListener("click", reroll);
 	$("btnRerun").addEventListener("click", run);
 	$("btnUndo").addEventListener("click", undo);
@@ -1724,7 +1975,7 @@
 	$("btnPin").addEventListener("click", () => {
 		const res = state.results[state.active];
 		if (!res) return;
-		state.pinned = snapshot(res);
+		state.pinned = indexSnapshot(snapshot(res));
 		state.tab = "compare";
 		setStatus("Pinned seed " + res.seed + " as the comparison baseline.");
 		render();

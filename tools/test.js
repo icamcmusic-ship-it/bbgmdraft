@@ -565,6 +565,377 @@ console.log("\nGame logs");
 		signature.length + " prospects peaked in the tournament");
 }
 
+/* -------------------------------------------------- eras and calibration */
+console.log("\nEras");
+{
+	const CAL = global.Calibration;
+	ok("more than one era is defined", Object.keys(CAL.ERAS).length >= 2);
+	ok("the default era exists", !!CAL.ERAS[CAL.DEFAULT_ERA]);
+	ok("the config default and the calibration default agree",
+		global.Config.DEFAULTS.era === CAL.DEFAULT_ERA);
+
+	/* Every era's team block has to satisfy the possession identity it is used
+	   to derive. An anchor set that does not close is an anchor set that will
+	   quietly pull the model somewhere it was never measured. */
+	for (const name of Object.keys(CAL.ERAS)) {
+		const t = CAL.ERAS[name].team;
+		// possessions = FGA - ORB + TOV + 0.44*FTA, and ORB is 29% of the
+		// rebounds available off missed shots.
+		const misses = t.fga * (1 - t.fgp) * 1.07;
+		const implied = t.fga - 0.29 * misses + t.tov + 0.44 * t.fta;
+		ok("era " + name + ": the possession identity closes",
+			Math.abs(implied - t.poss) < 2.0,
+			"implied " + implied.toFixed(1) + " against a stated " + t.poss);
+		const ortg = (100 * t.pts) / t.poss;
+		ok("era " + name + ": points and offensive rating agree",
+			Math.abs(ortg - CAL.ERAS[name].rotation.ortg) < 2.5,
+			"implied " + ortg.toFixed(1) + " against a stated " + CAL.ERAS[name].rotation.ortg);
+	}
+
+	CAL.setEra("modern");
+	const modern = global.Engine.run(V.syntheticClass(7, 60), global.Config.make({
+		seed: "era", era: "modern",
+	}));
+	const old2009 = global.Engine.run(V.syntheticClass(7, 60), global.Config.make({
+		seed: "era", era: "2009-2021",
+	}));
+	const teamPts = (res) => {
+		const t = Object.values(res.teams).filter((x) => x.teamTotals);
+		return t.reduce((a, x) => a + x.teamTotals.pts, 0) / t.length;
+	};
+	ok("the era setting moves the whole scoring environment",
+		teamPts(modern) - teamPts(old2009) > 2,
+		teamPts(modern).toFixed(1) + " against " + teamPts(old2009).toFixed(1));
+	// The era is set inside the stats phase, so a run must not depend on what
+	// the previous run happened to leave behind.
+	const again = global.Engine.run(V.syntheticClass(7, 60), global.Config.make({
+		seed: "era", era: "modern",
+	}));
+	ok("a run sets its own era rather than inheriting the last one",
+		Math.abs(teamPts(again) - teamPts(modern)) < 1e-9);
+}
+
+/* ---------------------------------------------------- the possession chain */
+console.log("\nPossession accounting");
+{
+	const res = global.Engine.run(V.syntheticClass(21, 60), global.Config.make({ seed: "poss" }));
+	const teams = Object.values(res.teams).filter((t) => t.teamTotals);
+	const mean = (f) => teams.reduce((a, t) => a + f(t.teamTotals), 0) / teams.length;
+	// The identity the header of js/stats.js states.
+	let worst = 0;
+	for (const t of teams) {
+		const tt = t.teamTotals;
+		const implied = tt.fga - tt.orb + tt.tov + 0.44 * tt.fta;
+		worst = Math.max(worst, Math.abs(implied - tt.poss));
+	}
+	ok("possessions reconcile with the box score", worst < 1e-6,
+		"worst drift " + worst.toExponential(2));
+
+	/* Turnovers are denominated in possessions, not in scoring chances. The
+	   two differ by the offensive rebounds — about 15% — which is exactly how
+	   far the team turnover rate used to run high. */
+	const tovRate = mean((tt) => tt.tov) / mean((tt) => tt.poss);
+	ok("the team turnover rate is per possession", tovRate > 0.155 && tovRate < 0.19,
+		(100 * tovRate).toFixed(2) + "% of possessions");
+
+	/* Offensive rebounds come off missed field goals. They used to come off
+	   every chance — turnovers and free-throw trips included — which made
+	   every rebound total in the sim a third too big. */
+	const orbPerMiss = mean((tt) => tt.orb) / (mean((tt) => tt.fga) * 0.53);
+	ok("offensive rebounds are a share of missed shots",
+		orbPerMiss > 0.22 && orbPerMiss < 0.38,
+		(100 * orbPerMiss).toFixed(1) + "% of the misses");
+
+	/* Fouls and free throws are the same event seen from two sides, and they
+	   were produced by two independent code paths with nothing reconciling
+	   them: the sim committed fewer fouls than real D-I while awarding more
+	   free throws than real D-I. */
+	ok("team fouls are reconciled to the model's own target",
+		Math.abs(mean((tt) => tt.pf) - global.StatsSim.TUNING.TEAM_PF) < 1.5,
+		mean((tt) => tt.pf).toFixed(2) + " against a target of " +
+			global.StatsSim.TUNING.TEAM_PF);
+	const ftaPerPf = mean((tt) => tt.fta) / mean((tt) => tt.pf);
+	ok("free throws and fouls are consistent with each other",
+		ftaPerPf > 0.88 && ftaPerPf < 1.28,
+		ftaPerPf.toFixed(3) + " free-throw attempts per foul");
+
+	/* The defensive glass answers to who a team played. It used to be the
+	   constant 25.2, so a team that played a schedule of bad shooters rebounded
+	   exactly as much as one that played a schedule of great shooters. Held
+	   directly against the pool, because in a full season the two are
+	   confounded — a good team both rebounds well and plays good opponents. */
+	const t0 = Object.values(res.teams)[0];
+	const comps = t0.members.slice(0, 9).map(() => ({
+		rebounding: 0.45, passing: 0.44, stealing: 0.46, blocking: 0.45, fouling: 0.45,
+	}));
+	const mins = comps.map(() => 22);
+	const poolAt = (oppMissShare) => global.StatsSim.teamPools(
+		comps, mins, 68, 1.14, 40, { missShare: 0.53, oppMissShare }).drbPool;
+	const vsBricks = poolAt(0.58);
+	const vsShooters = poolAt(0.48);
+	ok("defensive rebounds respond to how well the schedule shot",
+		vsBricks > vsShooters * 1.1,
+		vsBricks.toFixed(2) + " against a bad-shooting schedule, " +
+			vsShooters.toFixed(2) + " against a good one");
+}
+
+/* ---------------------------------------------- distributions that matter */
+console.log("\nDistributions");
+{
+	const res = global.Engine.run(V.syntheticClass(31, 70), global.Config.make({ seed: "dist" }));
+	const ncaa = res.players.filter((p) => !p.nonNcaa && p.stats);
+	const apg = ncaa.map((p) => p.stats.apg).sort((a, b) => a - b);
+	/* A man playing 25 minutes a night does not finish a season with 0.15
+	   assists a game, which is what an assist exponent of 4.1 produced. */
+	ok("nobody with real minutes has an impossible assist line",
+		ncaa.filter((p) => p.stats.mpg >= 22).every((p) => p.stats.apg >= 0.25),
+		"lowest " + apg[0].toFixed(2));
+	ok("the class's best passer is a plausible one",
+		apg[apg.length - 1] < 11, "highest " + apg[apg.length - 1].toFixed(2));
+
+	// A big out-rebounds a guard by 4-5x on the defensive glass, not 2.4x.
+	const guards = ncaa.filter((p) => p.newRatings.hgt < 32);
+	const bigs = ncaa.filter((p) => p.newRatings.hgt >= 73);
+	if (guards.length >= 3 && bigs.length >= 3) {
+		const avg = (l, f) => l.reduce((a, p) => a + f(p), 0) / l.length;
+		const ratio = avg(bigs, (p) => p.stats.drpg) / avg(guards, (p) => p.stats.drpg);
+		ok("bigs out-rebound guards by a realistic margin", ratio > 2.4,
+			ratio.toFixed(2) + "x on the defensive glass");
+	}
+
+	/* A player who cannot shoot does not shoot. The height table floors a
+	   seven-footer's three-point share at 8.5%, so a Post Scorer with a tp
+	   rating in the twenties still launched about two a game. */
+	const nonShooters = ncaa.filter((p) => p.newRatings.tp <= 25 && p.stats.mpg >= 20);
+	if (nonShooters.length) {
+		const worstTpa = Math.max.apply(null, nonShooters.map((p) => p.stats.tpa));
+		ok("a non-shooter does not launch threes", worstTpa < 2.2,
+			"most attempts by a tp<=25 player: " + worstTpa.toFixed(2));
+	}
+}
+
+/* ----------------------------------------------------- archetype identity */
+console.log("\nArchetypes");
+{
+	/* An archetype's offset vector is made ovr-neutral before the solver runs.
+	   The old normaliser did that by subtracting uniformly, which took the
+	   points out of exactly the ratings BBGM's usage composite reads — so a
+	   defensive build came out ovr-neutral by construction and offence-negative
+	   by side effect, and "the best defensive big in the class" was a player
+	   nobody would draft. */
+	const usageKeys = ["ins", "dnk", "fg", "tp"];
+	const OVR_W = RB.OVR_W;
+	const SHIFT_SCALE = RB.SHIFT_SCALE;
+	// What the old uniform normaliser would have produced, for comparison.
+	let shiftW = 0;
+	for (const k of BB.RATING_KEYS) shiftW += OVR_W[k] * SHIFT_SCALE[k];
+	const uniformNormalise = (raw) => {
+		let push = 0;
+		for (const k of Object.keys(raw)) push += OVR_W[k] * raw[k];
+		const u = push / shiftW;
+		const out = {};
+		for (const k of BB.RATING_KEYS) {
+			if (k === "hgt") continue;
+			out[k] = (raw[k] || 0) - u * SHIFT_SCALE[k];
+		}
+		return out;
+	};
+	const usageHit = (o) => usageKeys.reduce((x, k) => x + Math.min(0, o[k] || 0), 0);
+	for (const name of ["Switchable Big", "Defensive Pest", "Wing Stopper",
+		"Rim Protector", "Mobile Shot-Swatter"]) {
+		const a = RB.ARCHETYPES.filter((x) => x.name === name)[0];
+		const was = usageHit(uniformNormalise(RB.RAW_OFFSETS[name]));
+		const now = usageHit(a.o);
+		ok(name + " keeps more of its offence than a uniform shift would",
+			now > was + 1.5,
+			"usage ratings shifted " + now.toFixed(1) + ", against " +
+				was.toFixed(1) + " under a uniform shift");
+	}
+	// And it is still ovr-neutral, which is the whole point of normalising.
+	let worstPush = 0;
+	for (const a of RB.ARCHETYPES) {
+		let push = 0;
+		for (const k of Object.keys(a.o)) push += OVR_W[k] * a.o[k];
+		worstPush = Math.max(worstPush, Math.abs(push));
+	}
+	ok("every archetype is still ovr-neutral", worstPush < 0.35,
+		"largest residual push " + worstPush.toFixed(3));
+
+	// The rarest builds have to be reachable. Raw Project appeared once in 840
+	// players, which is not rarity, it is absence.
+	const counts = {};
+	let total = 0;
+	for (let s = 0; s < 8; s++) {
+		const res = global.Engine.run(V.syntheticClass(200 + s, 70),
+			global.Config.make({ seed: "arch" + s }));
+		for (const p of res.players) {
+			counts[p.archetype] = (counts[p.archetype] || 0) + 1;
+			total++;
+		}
+	}
+	for (const name of ["Raw Project", "Athletic Freak"]) {
+		ok(name + " actually turns up", (counts[name] || 0) >= 3,
+			(counts[name] || 0) + " in " + total + " players");
+	}
+	// The Balanced share is a promise the label on the slider makes.
+	const balanced = (counts.Balanced || 0) / total;
+	ok("the Balanced share matches what the diversity slider promises",
+		Math.abs(balanced - 0.15) < 0.035,
+		(100 * balanced).toFixed(1) + "% against a promised 15%");
+}
+
+/* ------------------------------------------------------- per-player reroll */
+console.log("\nPer-player reroll");
+{
+	const cfg = () => global.Config.make({ seed: "reroll" });
+	const before = global.Engine.run(V.syntheticClass(9, 40), cfg());
+	const target = before.players[5].key;
+	const c = cfg();
+	c.overrides = {};
+	c.overrides[target] = { reroll: 1 };
+	const after = global.Engine.run(V.syntheticClass(9, 40), c);
+	const byKey = (res) => {
+		const m = {};
+		for (const p of res.players) m[p.key] = p;
+		return m;
+	};
+	const a = byKey(before);
+	const b = byKey(after);
+	const moved = Object.keys(a).filter((k) =>
+		a[k].archetype !== b[k].archetype || a[k].newCollege !== b[k].newCollege ||
+		a[k].newOvr !== b[k].newOvr);
+	ok("rerolling one prospect changes that prospect",
+		a[target].archetype !== b[target].archetype ||
+		a[target].newCollege !== b[target].newCollege,
+		a[target].archetype + "/" + a[target].newCollege + " -> " +
+			b[target].archetype + "/" + b[target].newCollege);
+	ok("rerolling one prospect leaves the rest of the class alone",
+		moved.length === 1 && moved[0] === target,
+		moved.length + " prospects moved");
+}
+
+/* --------------------------------------------------------- league loading */
+console.log("\nLeague file season");
+{
+	const base = V.syntheticClass(4, 5);
+	const strip = (extra) => {
+		const f = { players: JSON.parse(JSON.stringify(base.players)) };
+		return Object.assign(f, extra || {});
+	};
+	const cases = [
+		["gameAttributes object", strip({ gameAttributes: { season: 2031 } }), 2031],
+		["gameAttributes rows", strip({ gameAttributes: [{ key: "season", value: 2032 }] }), 2032],
+		["a bare season", strip({ season: 2033 }), 2033],
+		["the players' draft year", strip({}), 2026],
+	];
+	for (const [what, file, want] of cases) {
+		let got = null;
+		try {
+			global.Engine.validateLeagueFile(file);
+			got = file.startingSeason;
+		} catch (e) { got = "threw: " + e.message; }
+		ok("the season is found in " + what, got === want, String(got));
+	}
+}
+
+/* ------------------------------------------------- small-field tournament */
+console.log("\nSmall custom college sets");
+{
+	/* The bracket assumed at least 68 eligible programs and four teams in each
+	   play-in pool: splice(-4, 4) on a two-team pool takes both of them, and
+	   the hardcoded seed-line offsets then sliced past the end of the array. */
+	const names = global.Colleges.names.slice(0, 14);
+	const lf = V.syntheticClass(12, 24);
+	lf.players.forEach((p, i) => { p.college = names[i % names.length]; });
+	const savedNames = global.Colleges.names;
+	const savedByConf = global.Colleges.byConference;
+	try {
+		global.Colleges.names = names;
+		const keep = {};
+		for (const conf of Object.keys(savedByConf)) {
+			const members = savedByConf[conf].filter((n) => names.indexOf(n) !== -1);
+			if (members.length) keep[conf] = members;
+		}
+		global.Colleges.byConference = keep;
+		const res = global.Engine.run(lf, global.Config.make({ seed: "tiny" }));
+		ok("a 14-programme season still produces a champion",
+			!!(res.tourney && res.tourney.champion && res.tourney.champion.team));
+		ok("every prospect still gets a stat line",
+			res.players.filter((p) => !p.nonNcaa).every((p) => p.stats));
+	} catch (err) {
+		ok("a 14-programme season still produces a champion", false, err.message);
+		ok("every prospect still gets a stat line", false, err.message);
+	} finally {
+		global.Colleges.names = savedNames;
+		global.Colleges.byConference = savedByConf;
+	}
+}
+
+/* ---------------------------------------------------------- batch mode */
+console.log("\nBatch mode");
+{
+	const B = global.BatchStats;
+	/* Every class in a batch drew Math.random(), so a batch could not be
+	   re-run, an anomaly in it could not be bisected, and a batch result could
+	   not be shared. */
+	const runBatch = () => {
+		const runner = global.Engine.createRunner(V.syntheticClass(5, 40));
+		const rows = [];
+		for (let i = 0; i < 3; i++) {
+			const c = global.Config.make({});
+			c.seed = "fixedbatch#" + i;
+			rows.push(B.summarise(runner.run(c)));
+		}
+		return rows;
+	};
+	const a = runBatch();
+	const b = runBatch();
+	ok("a batch is reproducible from its seed",
+		JSON.stringify(a) === JSON.stringify(b));
+	ok("a batch seed derives from the run's own seed when it has one",
+		B.batchSeed({ seed: "abc" }, null) === "abc" &&
+		B.batchSeed({ seed: "" }, "given") === "given");
+	/* The per-player rows used to be averaged over everybody with a stat line
+	   — a EuroLeague teenager on a 22-minute cap included — while ovr and pot
+	   were averaged over the class, so the panel read a point below the
+	   Prospects tab with nothing on screen to explain it. */
+	const res = global.Engine.run(V.syntheticClass(5, 70), global.Config.make({ seed: "bd" }));
+	const row = B.summarise(res);
+	const ncaa = res.players.filter((p) => p.stats && !p.nonNcaa);
+	const want = ncaa.reduce((x, p) => x + p.stats.ppg, 0) / ncaa.length;
+	ok("batch PPG is the NCAA population the Prospects tab shows",
+		Math.abs(row.ppg - want) < 1e-9,
+		row.ppg.toFixed(3) + " against " + want.toFixed(3));
+	ok("the batch reports how many players each population holds",
+		row.nNcaa === ncaa.length && row.nNcaa + row.nAbroad ===
+			res.players.filter((p) => p.stats).length);
+	ok("percentiles are available for the batch panel",
+		B.pct([1, 2, 3, 4, 5], 0.5) === 3 && B.pct([1, 2, 3, 4, 5], 0) === 1);
+}
+
+/* ------------------------------------------------------------ home courts */
+console.log("\nHome and away");
+{
+	/* recordPostseason hardcoded home: 0 for both sides, and the professional
+	   regular seasons route through it, so every game abroad logged home: 0
+	   and the home-court lift in the game log could never fire for a EuroLeague
+	   or G League prospect. */
+	const res = global.Engine.run(V.syntheticClass(6, 70), global.Config.make({
+		seed: "home",
+		leagueWeights: { "EuroLeague": 60, "NBA G League": 40 },
+	}));
+	const abroad = res.players.filter((p) => p.nonNcaa && p.proTeam);
+	if (abroad.length) {
+		const log = abroad[0].proTeam.log;
+		const homes = log.filter((g) => g.home > 0).length;
+		const aways = log.filter((g) => g.home < 0).length;
+		ok("a professional league plays home and away games",
+			homes > 0 && aways > 0, homes + " home, " + aways + " away");
+	} else {
+		ok("a professional league plays home and away games", true, "no prospects abroad");
+	}
+}
+
 console.log("\n" + (failures ? failures + " of " + checks + " checks failed"
 	: "all " + checks + " checks passed"));
 process.exit(failures ? 1 : 0);

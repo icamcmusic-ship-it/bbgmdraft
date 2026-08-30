@@ -19,7 +19,7 @@ function loadEngine() {
 	if (!global.Engine) {
 		for (const f of [
 			"rng", "bbgm", "colleges", "config", "calibration", "ratings",
-			"teams", "stats", "tournament", "awards", "engine",
+			"teams", "stats", "tournament", "awards", "engine", "batch",
 		]) require(path.join(__dirname, "..", "js", f + ".js"));
 	}
 	return global;
@@ -413,9 +413,8 @@ function main() {
 		return { era, checks, seasons: all.length };
 	});
 
-	const { rows, all } = { rows: perEra[0].checks.map((c) => [c.name, c.value, c.lo, c.hi]),
-		all: [] };
-	void rows; void all;
+	// Checks that are not about a season at all, so they run once rather than
+	// once per era.
 	const checks = [];
 	// Solver exactness across the usable target range.
 	let miss = 0;

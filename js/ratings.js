@@ -238,11 +238,15 @@
 	   shift weights still have to reproduce the same total ovr push, so the
 	   protection is renormalised rather than simply capped. */
 	const USAGE_PROTECT = 0.75;
+	/* The offset vectors as authored, before normalisation. Kept so the tests
+	   can compare what the normaliser does now against what the old uniform
+	   one did, and so the editor's tooltip can show a build's intent rather
+	   than the solver's arithmetic. */
+	const RAW_OFFSETS = {};
+	for (const a of ARCHETYPES) RAW_OFFSETS[a.name] = Object.assign({}, a.o);
 	(function normalizeArchetypes() {
-		const baseW = [];
 		let shiftW = 0;
 		for (const k of BB.RATING_KEYS) shiftW += OVR_W[k] * SHIFT_SCALE[k];
-		void baseW;
 		for (const a of ARCHETYPES) {
 			let push = 0;
 			for (const k of Object.keys(a.o)) push += OVR_W[k] * a.o[k];
@@ -521,7 +525,8 @@
 	}
 
 	global.RatingsBuilder = {
-		ARCHETYPES, rebuild, classCurve, pickArchetype, solveToOvr, shiftScales, ovrRange,
+		ARCHETYPES, RAW_OFFSETS, OVR_W, SHIFT_SCALE, USAGE_W,
+		rebuild, classCurve, pickArchetype, solveToOvr, shiftScales, ovrRange,
 		potAdjust, potFactors, potFromRole, POT_BY_ARCHETYPE,
 		CLASS_FLAVORS, pickFlavor, flavorMultiplier,
 	};

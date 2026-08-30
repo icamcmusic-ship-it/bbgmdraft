@@ -280,6 +280,16 @@
 		return { ok: true, warnings };
 	}
 
+	/* A per-player salt for the RNG streams. `reroll` re-draws ONE prospect:
+	   every stream in the generator is keyed off the player's key, so salting
+	   his key changes his draw and leaves every other player's stream
+	   untouched — which is the difference between "look at this guy again" and
+	   "reroll the class and hope the other sixty-nine come back the same". */
+	function rerollSalt(p) {
+		const n = Number(p && p.override && p.override.reroll);
+		return n ? "~" + Math.round(n) : "";
+	}
+
 	/* The stable per-player key every RNG stream and every lock is derived
 	   from. */
 	function playerKey(p, idx) {
@@ -352,7 +362,8 @@
 			// the exported file.
 			if (ov.name && String(ov.name).trim()) p.name = String(ov.name).trim();
 			p.newCollege = ov.college ||
-				assignCollege(rng.child("college:" + p.key), p.src, cfg);
+				assignCollege(
+					rng.child("college:" + p.key + rerollSalt(p)), p.src, cfg);
 			p.collegeChanged = p.newCollege !== p.origCollege;
 			// Professional (a EuroLeague club) as against amateur (DII, an NBA
 			// Academy). The UI tags the two differently and the award bar
@@ -367,8 +378,13 @@
 		if (cfg.ovrMode === "curve") curve = RB.classCurve(rng, players.length, cfg);
 
 		order.forEach((p, i) => {
-			const prng = rng.child("build:" + p.key);
 			const ov = p.override || {};
+			/* `reroll` re-draws ONE prospect. Every stream in the generator is
+			   keyed off the player's key, so salting his key changes his draw
+			   and leaves every other player's stream untouched — which is the
+			   difference between "look at this guy again" and "reroll the class
+			   and hope the other sixty-nine come back the same". */
+			const prng = rng.child("build:" + p.key + rerollSalt(p));
 			const targetOvr = Number.isFinite(ov.ovr)
 				? clamp(Math.round(ov.ovr), 0, 100)
 				: (curve ? curve[i] : p.origOvr);
@@ -1333,6 +1349,7 @@
 	global.Engine = {
 		run, createRunner, exportFile, exportSeason, buildNote, classYear,
 		assignClassYears, inchesFromHgtRating, validateLeagueFile, findSeason, playerKey,
+		rerollSalt,
 		signatureGame, simulateProLeagues, assignRecruiting,
 		NOTE_LINES, DEFAULT_NOTE_LINES, PHASES, PRO_GAMES,
 	};
