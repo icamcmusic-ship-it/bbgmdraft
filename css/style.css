@@ -391,3 +391,99 @@ tbody tr.editing td.sticky { background: rgba(9,105,218,.14); }
 	th.sticky, td.sticky { max-width: 120px; }
 	.editgrid, .ratinggrid { grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); }
 }
+
+/* ---- an explanation where an empty table would be ------------------------ */
+/* A filter that matched nothing used to render an empty table and nothing
+   else, which reads as a broken tool rather than as an empty result. */
+.empty-state { text-align: center; padding: 28px 18px; }
+.empty-state h4 { margin: 0 0 6px; }
+.empty-state .hint { margin: 0 0 12px; }
+
+/* ---- risers, fallers, locks: not colour alone ---------------------------- */
+/* Movement and lock state were encoded in colour only, which is invisible to
+   the eight percent of men with a colour vision deficiency and to anyone
+   reading a screenshot in greyscale. The glyph carries the same information. */
+.up::before { content: "▲ "; font-size: .85em; }
+.down::before { content: "▼ "; font-size: .85em; }
+tr.locked td.sticky::after { content: " 🔒"; font-size: .85em; }
+tr.picked td.sticky::after { content: " ✓"; font-size: .9em; }
+
+/* ---- phones: one prospect per card --------------------------------------- */
+/* Forty columns is a horizontal scroll on a phone however it is arranged, so
+   below 700px the table stops being a table. Each row becomes a card and each
+   cell prints its own column label, which is what data-label is for. The six
+   pinned columns stay on one line at the top; everything else stacks. */
+@media (max-width: 700px) {
+	.cards table, .cards tbody, .cards tr, .cards td { display: block; width: auto; }
+	.cards thead { position: absolute; left: -9999px; }
+	.cards .scroll { overflow-x: visible; max-height: none; }
+	.cards tr {
+		border: 1px solid var(--line);
+		border-radius: 8px;
+		margin: 0 0 8px;
+		padding: 8px 10px;
+		background: var(--card);
+	}
+	.cards td {
+		display: flex;
+		justify-content: space-between;
+		gap: 10px;
+		border: 0;
+		padding: 2px 0;
+		text-align: right;
+		max-width: none;
+	}
+	.cards td.sticky {
+		position: static;
+		font-weight: 600;
+		font-size: 15px;
+		text-align: left;
+		border-bottom: 1px solid var(--line);
+		padding-bottom: 6px;
+		margin-bottom: 4px;
+	}
+	.cards td[data-label]::before {
+		content: attr(data-label);
+		color: var(--muted);
+		font-weight: 500;
+		text-align: left;
+	}
+	.cards td:empty { display: none; }
+}
+
+/* ---- the editor sits beside the table, not below it ---------------------- */
+/* Appending the editor after a 70-row table put the panel you were about to
+   use sixty-six rows below the fold. It is a drawer now: beside the table when
+   there is room, above it when there is not, and sticky either way. */
+.tablesplit { display: grid; grid-template-columns: 1fr; gap: 12px; }
+.tablesplit.open { grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); }
+.tablesplit .drawer {
+	align-self: start;
+	position: sticky;
+	top: 8px;
+	max-height: calc(100vh - 24px);
+	overflow: auto;
+}
+@media (max-width: 1100px) {
+	/* Not enough width for two columns: the drawer goes above the table, which
+	   still keeps it on screen with the row that opened it. */
+	.tablesplit.open { grid-template-columns: 1fr; }
+	.tablesplit .drawer { order: -1; position: static; max-height: none; }
+}
+
+/* ---- the keyboard sheet -------------------------------------------------- */
+.shortcuts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+.shortcuts dt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.shortcuts dd { margin: 0; color: var(--muted); }
+
+/* ---- range-filter units and the clickable lock badge --------------------- */
+.rangefilter .unit { color: var(--muted); font-size: 11px; align-self: center; }
+button.lockbadge {
+	font: inherit;
+	background: none;
+	border: 0;
+	padding: 0 2px;
+	cursor: pointer;
+	color: inherit;
+}
+button.lockbadge:hover, button.lockbadge:focus-visible { text-decoration: underline; }

@@ -40,6 +40,7 @@
 		hiddenColumns: {},
 		statMode: "perGame",
 		density: "normal",
+		redo: [],
 		compactBracket: false,
 		theme: "system",
 		logPlayer: null,
@@ -153,33 +154,71 @@
 
 	/* "Reset to defaults" and "Clear lock" were both irreversible, and the word
 	   undo appeared nowhere in the codebase. */
-	function pushUndo(label) {
-		state.undo.push({
+	function snapshot(label) {
+		return {
 			label,
 			cfg: JSON.parse(JSON.stringify(state.cfg)),
 			overrides: JSON.parse(JSON.stringify(state.overrides)),
-		});
+		};
+	}
+
+	function pushUndo(label) {
+		state.undo.push(snapshot(label));
 		if (state.undo.length > 40) state.undo.shift();
+		// A new action forks the history: whatever was undone is no longer
+		// reachable, which is what every undo stack does.
+		state.redo = [];
 		paintUndo();
+	}
+
+	function applySnapshot(snap, verb) {
+		state.cfg = CFG.make(snap.cfg);
+		state.overrides = snap.overrides;
+		paintUndo();
+		paintConfig();
+		setStatus(verb + ": " + snap.label);
+		run();
 	}
 
 	function undo() {
 		const prev = state.undo.pop();
 		if (!prev) return;
-		state.cfg = CFG.make(prev.cfg);
-		state.overrides = prev.overrides;
-		paintUndo();
-		paintConfig();
-		setStatus("Undid: " + prev.label);
-		run();
+		// Ctrl+Z existed and Ctrl+Shift+Z did not, so an undo was a one-way
+		// trip: the state you were in a moment ago was simply gone.
+		state.redo.push(snapshot(prev.label));
+		if (state.redo.length > 40) state.redo.shift();
+		applySnapshot(prev, "Undid");
+	}
+
+	function redo() {
+		const next = state.redo.pop();
+		if (!next) return;
+		state.undo.push(snapshot(next.label));
+		applySnapshot(next, "Redid");
 	}
 
 	function paintUndo() {
 		const b = $("btnUndo");
 		b.disabled = !state.undo.length;
+		// pushUndo("imported locks from a CSV") wrote a label that nothing ever
+		// displayed. The button says what it will undo.
+		b.textContent = state.undo.length
+			? "Undo " + short(state.undo[state.undo.length - 1].label)
+			: "Undo";
 		b.title = state.undo.length
 			? "Undo: " + state.undo[state.undo.length - 1].label + " (Ctrl+Z)"
 			: "Nothing to undo";
+		const r = $("btnRedo");
+		if (!r) return;
+		r.disabled = !state.redo.length;
+		r.title = state.redo.length
+			? "Redo: " + state.redo[state.redo.length - 1].label + " (Ctrl+Shift+Z)"
+			: "Nothing to redo";
+	}
+
+	function short(text) {
+		const t = String(text || "");
+		return t.length > 22 ? t.slice(0, 21) + "…" : t;
 	}
 
 	/* ---------------------------------------------------------------- config */
@@ -313,7 +352,12 @@
 		paintNoteLines();
 		paintArchWeights();
 		paintLeagueWeights();
-		document.body.className = "density-" + state.density;
+		/* `cards` turns the prospect table into one card per prospect below
+		   700px (see css/style.css). It is a body class rather than a media
+		   query alone so the card layout only applies to the table that has the
+		   data-label attributes for it. */
+		document.body.className = "density-" + state.density +
+			(state.tab === "players" ? " cards" : "");
 	}
 
 	/* The era selector. The stat model targets one of the anchor sets in
@@ -1045,7 +1089,7 @@
 		$("seedPill").hidden = false;
 		$("seedPill").textContent = "seed " + res.seed;
 		$("seedPill").dataset.seed = res.seed;
-		$("seedPill").title = "Click to copy · " + Math.round(ms) + "ms (" +
+		$("seedPill").title = "Click to copy, shift-click or right-click to paste one · " + Math.round(ms) + "ms (" +
 			(res.phasesRun.length ? res.phasesRun.join(" → ") : "nothing to redo") + ")";
 		if (state.history[0] !== res.seed) {
 			state.history.unshift(res.seed);
@@ -1128,6 +1172,21 @@
 			tabs.appendChild(b);
 		});
 		const view = $("view");
+		/* Every interaction rebuilds this view from scratch — clicking a row to
+		   open the editor, ticking a sort level, typing in a filter. With a
+		   sticky name column and forty columns that threw the user back to the
+		   left edge of the table on every single edit, which was the most-felt
+		   defect in the tool.
+
+		   Rebuilding is kept (it is what makes the render function simple and
+		   correct), but the two pieces of state a rebuild destroys and the
+		   browser cannot restore — where the scroll containers were, and what
+		   was focused with what selected — are carried across it. Scroll
+		   positions are keyed by the container's position in the view, so they
+		   survive a rebuild that produces the same shape and are simply not
+		   found when it does not. */
+		const scrolls = captureScroll(view);
+		const focus = captureFocus(view);
 		view.innerHTML = "";
 		const res = ensureResult(state.active);
 		if (!res) return;
@@ -1135,6 +1194,71 @@
 		// it has to be repainted when there is a new run to report.
 		paintArchWeights();
 		(V[state.tab] || V.players)(view, res);
+		restoreScroll(view, scrolls);
+		restoreFocus(view, focus);
+	}
+
+	const SCROLLERS = ".scroll, .tablewrap, .drawer";
+
+	function captureScroll(view) {
+		const out = [];
+		view.querySelectorAll(SCROLLERS).forEach((n, i) => {
+			if (n.scrollLeft || n.scrollTop) out.push([i, n.scrollLeft, n.scrollTop]);
+		});
+		return { list: out, page: view.scrollTop, win: global.scrollY || 0 };
+	}
+
+	function restoreScroll(view, saved) {
+		if (!saved) return;
+		const nodes = view.querySelectorAll(SCROLLERS);
+		for (const [i, left, top] of saved.list) {
+			const n = nodes[i];
+			if (!n) continue;
+			n.scrollLeft = left;
+			n.scrollTop = top;
+		}
+		if (saved.page) view.scrollTop = saved.page;
+		if (saved.win) global.scrollTo(0, saved.win);
+	}
+
+	/* What was focused, and where the caret was in it.
+
+	   Identified by an explicit data-focus key when the element has one and by
+	   its index among focusables otherwise, so a rebuilt node gets the focus
+	   back rather than the document body taking it — which is what made every
+	   filter keystroke a fight. */
+	function captureFocus(view) {
+		const a = document.activeElement;
+		if (!a || !view.contains(a)) return null;
+		const key = a.getAttribute("data-focus");
+		const all = Array.prototype.slice.call(
+			view.querySelectorAll("input, select, textarea, button, [tabindex]"));
+		const sel = {};
+		try {
+			if (a.selectionStart !== undefined && a.selectionStart !== null) {
+				sel.start = a.selectionStart;
+				sel.end = a.selectionEnd;
+			}
+		} catch (e) { /* selection is not available on every input type */ }
+		return { key, index: all.indexOf(a), sel };
+	}
+
+	function restoreFocus(view, saved) {
+		if (!saved) return;
+		let node = null;
+		if (saved.key) node = view.querySelector('[data-focus="' + saved.key + '"]');
+		if (!node && saved.index >= 0) {
+			node = view.querySelectorAll(
+				"input, select, textarea, button, [tabindex]")[saved.index] || null;
+		}
+		if (!node) return;
+		try {
+			node.focus({ preventScroll: true });
+			if (saved.sel && saved.sel.start !== undefined &&
+				node.setSelectionRange && node.type !== "number") {
+				node.setSelectionRange(saved.sel.start, saved.sel.end);
+			}
+		} catch (e) { /* focus can be refused; not worth an error */ }
 	}
 
 	/* The selection count lives in the bulk bar, so ticking a row has to
@@ -1148,6 +1272,15 @@
 	}
 
 	/* ----------------------------------------------------- per-player editor */
+
+	/* Shared with the lock badge in the table, so clearing a lock does not
+	   require a round trip into the editor and back. */
+	function clearLock(p) {
+		if (!state.overrides[p.key]) return;
+		pushUndo("cleared the lock on " + p.name);
+		delete state.overrides[p.key];
+		run();
+	}
 
 	function openEditor(p) {
 		state.editing = state.editing === p.key ? null : p.key;
@@ -1342,11 +1475,7 @@
 		});
 		buttons.appendChild(apply);
 		const clear = el("button", null, "Clear lock");
-		clear.addEventListener("click", () => {
-			pushUndo("cleared the lock on " + p.name);
-			delete state.overrides[p.key];
-			run();
-		});
+		clear.addEventListener("click", () => clearLock(p));
 		buttons.appendChild(clear);
 		/* Reroll one player. It was the whole class or nothing: if you liked
 		   sixty-nine of them and wanted one more look at the seventieth, the
@@ -2020,6 +2149,7 @@
 
 	Object.assign(global.App, {
 		state, render, run, persist, openEditor, editorPanel, modal, closeModal,
+		clearLock,
 		copyText, bulkApply, bulkShiftOvr, bulkClear, refreshBulkBar, snapshot,
 		exportCsv, setStatus, showError, indexSnapshot,
 	});
@@ -2082,6 +2212,41 @@
 		p.textContent = "seed copied ✓";
 		setTimeout(() => { p.textContent = was; }, 1200);
 	});
+	/* You could share a seed and not receive one: taking somebody else's meant
+	   opening the settings panel and finding the field by hand. Shift-click (or
+	   right-click) the pill and paste. */
+	const pasteSeed = (e) => {
+		e.preventDefault();
+		const take = (text) => {
+			const seed = String(text || "").trim();
+			if (!seed) return;
+			pushUndo("pasted a seed");
+			state.cfg.seed = seed;
+			$("seed").value = seed;
+			state.presetDirty = true;
+			run();
+		};
+		if (navigator.clipboard && navigator.clipboard.readText) {
+			navigator.clipboard.readText().then(take, () => promptSeed(take));
+		} else promptSeed(take);
+	};
+	$("seedPill").addEventListener("contextmenu", pasteSeed);
+	$("seedPill").addEventListener("click", (e) => { if (e.shiftKey) pasteSeed(e); }, true);
+
+	/* Clipboard read needs a permission the copy path does not, and it is
+	   refused outright on file:// in most browsers — which is the documented
+	   way to use this tool. Ask for the seed instead of failing silently. */
+	function promptSeed(take) {
+		const box = el("div");
+		box.appendChild(el("p", "hint", "Paste a seed to load the class it produces."));
+		const input = el("input");
+		input.type = "text";
+		input.value = "";
+		input.setAttribute("aria-label", "Seed");
+		box.appendChild(input);
+		modal("Use a seed", box, () => take(input.value));
+		setTimeout(() => input.focus(), 0);
+	}
 	$("btnCopyLink").addEventListener("click", () => {
 		writeHash();
 		copyText(location.href, $("btnCopyLink"), "Link");
@@ -2091,6 +2256,8 @@
 		runBatch(Math.max(2, Math.min(200, Number($("batchN").value) || 10)));
 	});
 	$("btnBatchCancel").addEventListener("click", cancelBatch);
+	$("btnRedo").addEventListener("click", redo);
+	$("btnKeys").addEventListener("click", shortcutSheet);
 	$("modalOk").addEventListener("click", () => {
 		const fn = modalOk;
 		closeModal();
@@ -2100,11 +2267,44 @@
 	$("modal").addEventListener("click", (e) => { if (e.target === $("modal")) closeModal(); });
 	document.addEventListener("keydown", (e) => {
 		if (e.key === "Escape" && !$("modal").hidden) closeModal();
-		if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
-			const tag = (e.target.tagName || "").toLowerCase();
-			if (tag === "input" || tag === "textarea" || tag === "select") return;
+		const tag = (e.target.tagName || "").toLowerCase();
+		const typing = tag === "input" || tag === "textarea" || tag === "select";
+		if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+			if (typing) return;
 			e.preventDefault();
-			undo();
+			if (e.shiftKey) redo(); else undo();
+		}
+		if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y" && !typing) {
+			e.preventDefault();
+			redo();
+		}
+		// The shortcuts were documented in the README and nowhere the user
+		// could see them.
+		if (e.key === "?" && !typing && !e.ctrlKey && !e.metaKey) {
+			e.preventDefault();
+			shortcutSheet();
 		}
 	});
+
+	const SHORTCUTS = [
+		["?", "Show this list"],
+		["Ctrl / Cmd + Z", "Undo the last settings or lock change"],
+		["Ctrl / Cmd + Shift + Z", "Redo it"],
+		["j / ↓", "Next prospect in the table"],
+		["k / ↑", "Previous prospect"],
+		["Enter or Space", "Open the editor for the focused row"],
+		["Escape", "Close the editor or a dialog"],
+		["Tab", "Into the table, then arrow keys between rows"],
+	];
+
+	function shortcutSheet() {
+		const box = el("div");
+		const dl = el("dl", "shortcuts");
+		for (const [keys, what] of SHORTCUTS) {
+			dl.appendChild(el("dt", null, keys));
+			dl.appendChild(el("dd", null, what));
+		}
+		box.appendChild(dl);
+		modal("Keyboard shortcuts", box);
+	}
 })(window);
