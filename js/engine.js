@@ -238,6 +238,9 @@
 
 	   Returns {warnings: [...]} — problems that do not stop the run but that
 	   the user needs to be told about, chief among them a missing pid. */
+	/* Above this, a file is a league export and not a draft class. */
+	const MAX_CLASS = 250;
+
 	function validateLeagueFile(leagueFile) {
 		if (!leagueFile || typeof leagueFile !== "object") {
 			throw new Error("That file is not a BBGM league or draft-class export.");
@@ -259,7 +262,13 @@
 				'"startingSeason": <year> to the file.');
 		}
 		const seasonRecovered = !Number.isFinite(Number(leagueFile.startingSeason));
-		leagueFile.startingSeason = season;
+		/* The season is REPORTED, not written back.
+
+		   This used to do `leagueFile.startingSeason = season`, quietly editing
+		   the caller's object as a side effect of checking it — so a validator
+		   left the thing it validated in a different state than it found it,
+		   and any caller that revalidated got a different `seasonRecovered`
+		   answer the second time. The callers apply it themselves now. */
 		const bad = [];
 		let missingPid = 0;
 		const seenPid = new Set();
@@ -294,6 +303,28 @@
 				bad.slice(0, 4).join("; ") + (bad.length > 4 ? "; …" : ""));
 		}
 		const warnings = [];
+		/* How many of these players actually belong to the draft class.
+
+		   Dropping a full BBGM league export (5,000+ players) instead of a
+		   draft class rebuilt every player and simulated 353 programs with
+		   hundreds of prospects apiece: the tab locked with no progress and no
+		   way out, and nothing in here checked the count. The class is the
+		   players whose draft year is this season; if that leaves a plausible
+		   class, the caller is told it can take that subset instead of the
+		   whole file. */
+		const inClass = leagueFile.players.filter((p) =>
+			p && p.draft && Number(p.draft.year) === Number(season));
+		const oversized = leagueFile.players.length > MAX_CLASS;
+		if (oversized) {
+			warnings.push(leagueFile.players.length + " players in this file — a draft " +
+				"class is usually 60-80. This looks like a full league export rather " +
+				"than a draft class, and simulating a season for all of them will " +
+				"take a very long time." +
+				(inClass.length && inClass.length <= MAX_CLASS
+					? " " + inClass.length + " of them are drafted in " + season +
+						", which is almost certainly the class you meant."
+					: ""));
+		}
 		if (seasonRecovered) {
 			warnings.push("This file has no top-level startingSeason. " + season +
 				" was read from the file instead (gameAttributes, or the draft year " +
@@ -311,7 +342,20 @@
 			warnings.push(duplicatePid + " players share a pid with another player. " +
 				"Row order is used to tell them apart.");
 		}
-		return { ok: true, warnings };
+		return {
+			ok: true,
+			warnings,
+			season,
+			seasonRecovered,
+			total: leagueFile.players.length,
+			oversized,
+			// The subset the caller can offer to load instead, when the file is
+			// a whole league rather than a class.
+			classPids: oversized && inClass.length && inClass.length <= MAX_CLASS
+				? inClass.map((p, i) => (Number.isFinite(Number(p.pid)) ? Number(p.pid) : -1 - i))
+				: null,
+			classCount: inClass.length,
+		};
 	}
 
 	/* A per-player salt for the RNG streams. `reroll` re-draws ONE prospect:
@@ -827,6 +871,9 @@
 	   with slightly different settings only redo the phases that changed. */
 	function createRunner(leagueFile) {
 		const validation = validateLeagueFile(leagueFile);
+		// validateLeagueFile no longer writes to its input (it is a check, not
+		// a migration), so the season it recovered is applied here.
+		leagueFile.startingSeason = validation.season;
 		let state = null;
 		let keys = null;
 
@@ -1402,6 +1449,7 @@
 	global.Engine = {
 		run, createRunner, exportFile, exportSeason, buildNote, classYear,
 		assignClassYears, inchesFromHgtRating, validateLeagueFile, findSeason, playerKey,
+		MAX_CLASS,
 		rerollSalt,
 		signatureGame, simulateProLeagues, assignRecruiting,
 		NOTE_LINES, DEFAULT_NOTE_LINES, PHASES, PRO_GAMES,

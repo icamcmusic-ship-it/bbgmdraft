@@ -447,7 +447,12 @@
 	   defensive rebound total should respond to and previously could not: the
 	   pool was the literal constant 25.2 regardless of who the team played.
 	   Returns an expected field-goal percentage on the era's own anchors. */
-	function rosterShooting(team) {
+	/* `cal` is an optional era-bound calibration view (CAL.forEra("modern")).
+	   Without it this reads the module-global era, which is whatever the last
+	   run left behind — fine inside a run, a hazard for a view-layer caller
+	   with two files loaded at different eras. */
+	function rosterShooting(team, cal) {
+		const CAL = cal || global.Calibration;
 		const sorted = team.members.slice().sort((a, b) => b.talent - a.talent).slice(0, 8);
 		let two = 0;
 		let three = 0;
@@ -776,7 +781,8 @@
 	   front line of shot-blockers blocks more shots than a team of guards,
 	   rather than the same fixed 4.8 redistributed. `agg` is the
 	   minute-weighted mean composite of the five men on the floor. */
-	function teamPools(comps, mins, pace, chanceMult, gameMinutes, env) {
+	function teamPools(comps, mins, pace, chanceMult, gameMinutes, env, cal) {
+		const CAL = cal || global.Calibration;
 		const gm = gameMinutes || 40;
 		const e = env || {};
 		/* The share of a team's own shots that come back as rebounds. This was

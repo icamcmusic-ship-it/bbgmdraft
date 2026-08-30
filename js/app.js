@@ -55,9 +55,16 @@
 	   lost unless you happened to have copied the link first. The loaded FILE
 	   cannot be stored (it is megabytes and it is the user's data), so it is
 	   the one thing that has to be dropped in again. */
+	/* Bumped whenever the shape of the persisted payload changes. STORE_KEY was
+	   versioned and the payload inside it was not, so a future settings change
+	   would read stale keys out of an old blob and silently half-apply them. */
+	const STORE_VERSION = 2;
+	let quotaWarned = false;
+
 	function persist() {
 		try {
 			localStorage.setItem(STORE_KEY, JSON.stringify({
+				v: STORE_VERSION,
 				cfg: state.cfg,
 				overrides: state.overrides,
 				overrideFingerprint: state.overrideFingerprint,
@@ -80,13 +87,36 @@
 					: null,
 				open: openGroups(),
 			}));
-		} catch (e) { /* private browsing, quota, or no storage at all */ }
+		} catch (e) {
+			/* Private browsing and "no storage at all" are nothing to say
+			   anything about — the tool works, settings just do not survive a
+			   refresh. A full quota is different: it happens gradually, as
+			   custom presets and pinned classes and a seed history accumulate,
+			   and it is the user's own data that stops being saved. Say so
+			   once. */
+			const quota = e && (e.name === "QuotaExceededError" ||
+				e.name === "NS_ERROR_DOM_QUOTA_REACHED" || e.code === 22);
+			if (quota && !quotaWarned) {
+				quotaWarned = true;
+				setStatus("Browser storage is full, so settings will not survive a " +
+					"refresh. Clearing some saved presets or pinned classes will fix it.",
+					true);
+			}
+		}
 	}
 
 	function restore() {
 		let saved = null;
 		try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) { saved = null; }
 		if (!saved) return null;
+		/* A payload from a different schema is discarded rather than
+		   half-applied. Only `theme` is carried across, because it is a
+		   preference about the browser rather than about a draft class and
+		   losing it is pure annoyance. */
+		if (Number(saved.v || 1) !== STORE_VERSION) {
+			if (saved.theme) state.theme = saved.theme;
+			return null;
+		}
 		if (saved.cfg) state.cfg = CFG.make(saved.cfg);
 		if (saved.overrides) state.overrides = saved.overrides;
 		if (saved.overrideFingerprint) state.overrideFingerprint = saved.overrideFingerprint;
@@ -747,13 +777,35 @@
 		return out;
 	}
 
+	/* Roughly where browsers and the things people paste links into start
+	   truncating. A class with 70 fully-locked players clears it easily, and a
+	   silently truncated link is worse than no link: it opens, parses as far as
+	   it got, and applies the wrong settings. */
+	const HASH_LIMIT = 8000;
+	let hashWarned = false;
+
 	function writeHash() {
 		try {
 			const payload = encodeConfig();
-			const s = Object.keys(payload).length
-				? "#c=" + encodeURIComponent(JSON.stringify(payload))
-				: "#";
-			history.replaceState(null, "", s);
+			let body = Object.keys(payload).length
+				? encodeURIComponent(JSON.stringify(payload))
+				: "";
+			if (body.length > HASH_LIMIT && payload.overrides) {
+				/* Drop the locks rather than the settings: the settings are what
+				   a shared link is usually for, and the locks are the part that
+				   grows without bound. */
+				const lean = Object.assign({}, payload);
+				delete lean.overrides;
+				delete lean.fp;
+				body = encodeURIComponent(JSON.stringify(lean));
+				if (!hashWarned) {
+					hashWarned = true;
+					setStatus("This class has too many locked players to fit in a " +
+						"shareable link, so the link carries the settings only. " +
+						"Export the locks as CSV to share those.", true);
+				}
+			}
+			history.replaceState(null, "", body ? "#c=" + body : "#");
 		} catch (e) { /* a hash that will not fit is not worth an error banner */ }
 	}
 
@@ -821,6 +873,19 @@
 						// with a sentence instead of throwing a raw TypeError
 						// out of the middle of the sim.
 						const check = global.Engine.validateLeagueFile(data);
+						/* validateLeagueFile is a check now, not a migration, so
+						   the season it recovered is applied here. */
+						data.startingSeason = check.season;
+						/* A full league export is 5,000+ players. Rebuilding all
+						   of them and simulating 353 programs with hundreds of
+						   prospects apiece locks the tab with no progress bar and
+						   no way out, so take the draft class inside the file
+						   when there is one and say so. */
+						if (check.oversized && check.classPids) {
+							const keep = new Set(check.classPids);
+							data.players = data.players.filter((p, i) =>
+								keep.has(Number.isFinite(Number(p.pid)) ? Number(p.pid) : -1 - i));
+						}
 						resolve({ name: f.name, data, warnings: check.warnings });
 					} catch (e) {
 						problems.push(f.name + ": " + e.message);
@@ -1473,8 +1538,17 @@
 		if (!sticky) setTimeout(() => { if (s.textContent === text) s.hidden = true; }, 3500);
 	}
 
+	/* CSV gets a byte-order mark for the same reason the JSON export does:
+	   Excel reads a BOM-less UTF-8 file as the system code page, so Doncic,
+	   Saric, Jokic and Wembanyama all come out as mojibake in the one file
+	   people actually open in a spreadsheet. text/csv is the only type that
+	   needs it — JSON exports add their own at the call site. */
 	function download(name, text, type) {
-		const blob = new Blob([text], { type: type || "text/plain" });
+		const t = type || "text/plain";
+		const body = t === "text/csv" && text.charAt(0) !== "\ufeff"
+			? "\ufeff" + text
+			: text;
+		const blob = new Blob([body], { type: t });
 		const a = document.createElement("a");
 		a.href = URL.createObjectURL(blob);
 		a.download = name;
@@ -1507,9 +1581,19 @@
 		"fga", "tpa", "fta", "tpar", "ftr", "efg", "astTo", "ortg", "prod",
 		"usg", "fgp", "tpp", "ftp", "ts", "awards"];
 
+	/* A field beginning =, +, - or @ is executed as a FORMULA when the file is
+	   opened in Excel or Sheets. Names come from BBGM, but the lock-import
+	   round trip means a user-authored CSV can come back in, and "it is only
+	   our own data" is exactly the assumption that makes this class of bug
+	   ship. A leading apostrophe is the standard neutraliser and is invisible
+	   in the spreadsheet.
+
+	   The escape test also missed a bare carriage return: a field containing
+	   one (possible in a note, or in an imported name) broke the row. */
 	function esc(v) {
-		const s = v === undefined || v === null ? "" : String(v);
-		return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+		let s = v === undefined || v === null ? "" : String(v);
+		if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+		return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 	}
 
 	function exportCsv(res, everyone) {

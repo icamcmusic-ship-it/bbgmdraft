@@ -910,11 +910,33 @@ console.log("\nLeague file season");
 	];
 	for (const [what, file, want] of cases) {
 		let got = null;
+		let mutated = false;
 		try {
-			global.Engine.validateLeagueFile(file);
-			got = file.startingSeason;
+			got = global.Engine.validateLeagueFile(file).season;
+			// A validator checks; it does not edit what it was handed.
+			mutated = Object.prototype.hasOwnProperty.call(file, "startingSeason");
 		} catch (e) { got = "threw: " + e.message; }
 		ok("the season is found in " + what, got === want, String(got));
+		ok("validating " + what + " leaves the file alone", !mutated);
+	}
+	// A full league export is a warning with a way out, not a locked tab.
+	{
+		const big = { startingSeason: 2026, players: [] };
+		for (let i = 0; i < 400; i++) {
+			const src = base.players[i % base.players.length];
+			const p = JSON.parse(JSON.stringify(src));
+			p.pid = i;
+			p.draft = { year: i < 70 ? 2026 : 2029, round: 1, pick: 1 };
+			big.players.push(p);
+		}
+		const v = global.Engine.validateLeagueFile(big);
+		ok("a league-sized file warns", v.oversized === true &&
+			v.warnings.some((w) => /full league export/.test(w)));
+		ok("and offers the draft class inside it", v.classPids !== null &&
+			v.classPids.length === 70, String(v.classCount));
+		const small = global.Engine.validateLeagueFile(V.syntheticClass(5, 70));
+		ok("a normal class does not warn", small.oversized === false &&
+			small.classPids === null);
 	}
 }
 
