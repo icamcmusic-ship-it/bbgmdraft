@@ -1138,6 +1138,75 @@ console.log("\nHome and away");
 	}
 }
 
+/* ------------------------------------------------- the bugs, kept dead */
+console.log("\nRegressions");
+{
+	/* An archetype with no role-usage entry used to score a silent 1.0, which
+	   made Injury-Prone Talent the highest-scoring build in the class at 24.3
+	   points a game with nothing anywhere to say so. */
+	let threw = false;
+	try { RB.roleUsage("No Such Archetype"); } catch (e) { threw = true; }
+	ok("an unknown archetype throws rather than scoring a silent 1.0", threw);
+	ok("every archetype has a role usage",
+		RB.ARCHETYPES.every((a) => Number.isFinite(RB.ROLE_USAGE[a.name])));
+	/* Twelve of the old table's 72 constants sat on the fit boundary, which is
+	   a fit that failed and was clipped. The soft bound cannot be reached. */
+	const vals = RB.ARCHETYPES.map((a) => RB.ROLE_USAGE[a.name]);
+	ok("no build sits on a role-usage bound",
+		vals.every((v) => v > RB.ROLE_FIT.lo + 1e-6 && v < RB.ROLE_FIT.hi - 1e-6),
+		"min " + Math.min.apply(null, vals).toFixed(3) +
+			" max " + Math.max.apply(null, vals).toFixed(3));
+
+	/* The solvable ovr range was computed on the POST-NOISE base, so it moved
+	   under the user on every reroll while nothing about the player changed. */
+	const orig = {};
+	const r0 = new Rng("range");
+	for (const k of BB.RATING_KEYS) orig[k] = Math.round(r0.uniform(25, 70));
+	orig.fuzz = 0;
+	const cfgNoisy = global.Config.make({ buildNoise: 9, specialization: 1 });
+	const ranges = [];
+	for (let i = 0; i < 12; i++) {
+		ranges.push(RB.rebuild(new Rng("roll" + i), orig, 45, 55, cfgNoisy,
+			"Combo Guard").ovrRange);
+	}
+	ok("the solvable ovr range does not move between rolls",
+		ranges.every((x) => x.min === ranges[0].min && x.max === ranges[0].max),
+		JSON.stringify(ranges.slice(0, 3)));
+	/* And it stays a promise: a target the range calls reachable is reached. */
+	let missed = 0;
+	for (let i = 0; i < 60; i++) {
+		const t = Math.round(new Rng("t" + i).uniform(ranges[0].min, ranges[0].max));
+		const b = RB.rebuild(new Rng("b" + i), orig, t, t + 8, cfgNoisy, "Combo Guard");
+		if (b.ovr !== t) missed++;
+	}
+	ok("every ovr the range calls reachable is reached", missed === 0, missed + " missed");
+
+	/* Class year reached exactly one thing in the stat model, and it was not
+	   usage, minutes, efficiency or turnovers. */
+	const S = global.StatsSim;
+	ok("class year is parsed, redshirts included",
+		S.classYearIndex("Freshman") === 0 && S.classYearIndex("Senior") === 3 &&
+			S.classYearIndex("Graduate") === 4 &&
+			S.classYearIndex("Redshirt Junior") > S.classYearIndex("Junior"),
+		[S.classYearIndex("Freshman"), S.classYearIndex("Redshirt Junior"),
+			S.classYearIndex("Graduate")].join("/"));
+	ok("an upperclassman is given more of the offence than a freshman",
+		S.experienceUsage("Senior") > S.experienceUsage("Junior") &&
+			S.experienceUsage("Junior") > S.experienceUsage("Sophomore") &&
+			S.experienceUsage("Sophomore") > S.experienceUsage("Freshman"));
+
+	/* PPG was typed into the era table and disagreed with the anchors it
+	   claimed to follow. It is derived now, so the two cannot drift apart. */
+	const CAL = global.Calibration;
+	let derivedOk = true;
+	for (const name of Object.keys(CAL.ERAS)) {
+		const e = CAL.ERAS[name];
+		const d = CAL.impliedPpg(e.draftYear, e.team);
+		if (Math.abs(d.mean - e.draftYear.ppg.mean) > 1e-9) derivedOk = false;
+	}
+	ok("the PPG anchor is derived from the era's own numbers", derivedOk);
+}
+
 console.log("\n" + (failures ? failures + " of " + checks + " checks failed"
 	: "all " + checks + " checks passed"));
 process.exit(failures ? 1 : 0);

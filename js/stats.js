@@ -608,16 +608,25 @@
 		const raw = ratings && Number.isFinite(ratings.pss) ? ratings.pss / 100 : comps.passing;
 		return clamp((1 - TUNING.AST_PSS) * comps.passing + TUNING.AST_PSS * raw, 0.02, 1);
 	}
-	function astWeight(comps, ratings, minShare) {
-		return Math.pow(Math.max(TUNING.AST_FLOOR, passSkill(comps, ratings)),
+	/* `ref` is the composite reference shift (see statLine): the assist and
+	   rebound POOLS are team-level and correctly calibrated, so what a prospect
+	   gets out of them is decided entirely by his weight against his
+	   teammates'. Those weights are raw composites, and a realistically shaped
+	   draft class scores about 0.05 below the level these exponents were fitted
+	   at — so a future NBA guard took a SMALLER share of his team's assists
+	   than the returning walk-on beside him, purely because the reference never
+	   moved with the fixture. Median assists came out 1.6 a game against a real
+	   2.5-3.0 and rebounds 4.7 against 5.5. Same correction, same reason. */
+	function astWeight(comps, ratings, minShare, ref) {
+		return Math.pow(Math.max(TUNING.AST_FLOOR, passSkill(comps, ratings) + (ref || 0)),
 			TUNING.AST_EXP) * minShare;
 	}
-	function stlWeight(comps, minShare) {
-		return Math.pow(comps.stealing, TUNING.STL_EXP) *
-			(1 + TUNING.STL_ATH * (comps.athleticism - 0.50)) * minShare;
+	function stlWeight(comps, minShare, ref) {
+		return Math.pow(Math.max(0.02, comps.stealing + (ref || 0)), TUNING.STL_EXP) *
+			(1 + TUNING.STL_ATH * (comps.athleticism + (ref || 0) - 0.50)) * minShare;
 	}
-	function rebWeight(comps, minShare, offensive) {
-		return Math.pow(Math.max(TUNING.REB_FLOOR, comps.rebounding),
+	function rebWeight(comps, minShare, offensive, ref) {
+		return Math.pow(Math.max(TUNING.REB_FLOOR, comps.rebounding + (ref || 0)),
 			TUNING.REB_EXP + (offensive ? 0.35 : 0)) * minShare;
 	}
 
@@ -894,8 +903,8 @@
 		const sh = (comp, exp) => Math.pow(comp, exp) * minShare;
 		// Offensive rebounds lean a little more on size and effort than the
 		// defensive glass, where everyone boxes out.
-		const orbW = rebWeight(comps, minShare, true);
-		const drbW = rebWeight(comps, minShare, false);
+		const orbW = rebWeight(comps, minShare, true, ref);
+		const drbW = rebWeight(comps, minShare, false, ref);
 		// No single player takes an unbounded share of a team total: the record
 		// books top out near 60-70% of team assists and blocks, so saturate the
 		// share smoothly rather than letting one dominant composite run away
@@ -923,7 +932,7 @@
 		const orb = orbRaw * rebScale;
 		const drb = drbRaw * rebScale;
 		const ast = capNoisy(
-			(teamCtx.astPool * astWeight(comps, ratings, minShare)) / teamCtx.astDen,
+			(teamCtx.astPool * astWeight(comps, ratings, minShare, ref)) / teamCtx.astDen,
 			0.10, teamCtx.astPool, TUNING.AST_CAP);
 		/* Athleticism finally reaches the steal column. BBGM's stealing
 		   composite is (50 + spd + 2*diq) / 400: defensive IQ outweighs speed
@@ -933,7 +942,7 @@
 		   The composite is left alone — half the model reads it — and the share
 		   is tilted here instead. */
 		const stl = capNoisy(
-			(teamCtx.stlPool * stlWeight(comps, minShare)) / teamCtx.stlDen,
+			(teamCtx.stlPool * stlWeight(comps, minShare, ref)) / teamCtx.stlDen,
 			0.13, teamCtx.stlPool, TUNING.STL_CAP);
 		const blk = capNoisy(
 			(teamCtx.blkPool * sh(comps.blocking, TUNING.BLK_EXP)) / teamCtx.blkDen,
@@ -1398,10 +1407,13 @@
 
 		for (let i = 0; i < members.length; i++) {
 			const ms = mins[i] / gameMinutes;
-			teamCtx.rebDen += rebWeight(comps[i], ms, false);
-			teamCtx.orbDen += rebWeight(comps[i], ms, true);
-			teamCtx.astDen += astWeight(comps[i], ratingRows[i], ms);
-			teamCtx.stlDen += stlWeight(comps[i], ms);
+			// Same reference the line itself will use, or the shares would not
+			// sum to the pool.
+			const cr = members[i].filler ? 0 : TUNING.PROSPECT_COMP_REF;
+			teamCtx.rebDen += rebWeight(comps[i], ms, false, cr);
+			teamCtx.orbDen += rebWeight(comps[i], ms, true, cr);
+			teamCtx.astDen += astWeight(comps[i], ratingRows[i], ms, cr);
+			teamCtx.stlDen += stlWeight(comps[i], ms, cr);
 			teamCtx.blkDen += Math.pow(comps[i].blocking, TUNING.BLK_EXP) * ms;
 			teamCtx.pfDen += Math.pow(comps[i].fouling, TUNING.PF_EXP) * Math.pow(ms, 0.82);
 		}

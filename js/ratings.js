@@ -759,7 +759,15 @@
 	   to listed height), and every other rating clamps at 0/100, so a very tall
 	   or very short base simply cannot reach every target. Callers — the lock
 	   editor, the tests — need to know which asks are impossible rather than
-	   silently getting the nearest thing. */
+	   silently getting the nearest thing.
+
+	   IMPORTANT: pass the NOISE-FREE base. The range used to be computed on the
+	   post-noise base, which made it a property of the roll rather than of the
+	   player: the editor showed a solvable range that moved under the user on
+	   every reroll while nothing about the prospect had changed, and a lock
+	   that was reachable a moment ago stopped being so. It is a function of the
+	   original ratings, the archetype, the specialisation setting and the
+	   pinned vector, all of which the user can see. */
 	function ovrRange(base, arch, pinned) {
 		const upScales = arch ? shiftScales(arch, true, pinned) : SHIFT_SCALE;
 		const downScales = arch ? shiftScales(arch, false, pinned) : SHIFT_SCALE;
@@ -772,17 +780,18 @@
 	/* Re-solve a built player after one of his base ratings has been changed
 	   outside the builder — a forced height, in practice. Returns the same
 	   shape rebuild() does for the fields that move. */
-	function resolveTo(base, targetOvr, archName, fuzz, pinned) {
+	function resolveTo(base, targetOvr, archName, fuzz, pinned, cleanBase) {
 		const arch = ARCHETYPES.filter((a) => a.name === archName)[0] ||
 			ARCHETYPES[ARCHETYPES.length - 1];
 		const solved = solveToOvr(base, targetOvr, arch, pinned);
 		return {
 			base,
+			cleanBase: cleanBase || base,
 			ratings: solved,
 			ovr: BB.ovr(solved),
 			pos: BB.pos(solved),
 			skills: BB.skills(Object.assign({ fuzz }, solved)),
-			ovrRange: ovrRange(base, arch, pinned),
+			ovrRange: ovrRange(cleanBase || base, arch, pinned),
 		};
 	}
 
@@ -836,24 +845,42 @@
 		const noise = Math.max(0, cfg.buildNoise);
 
 		const base = {};
+		/* The same vector without the per-rating jitter. Only `ovrRange` reads
+		   it, and it reads it so that the range it reports is a fact about the
+		   player rather than about this particular roll. */
+		const cleanBase = {};
 		for (const key of BB.RATING_KEYS) {
 			// A hand-edited rating is taken literally and never shifted. There
 			// was no way at all to say "leave everything else, just bump his tp
 			// to 70"; the editor could only set ovr, pot, archetype and school.
 			if (pinned && Number.isFinite(pinned[key])) {
 				base[key] = clamp(Math.round(pinned[key]), 0, 100);
+				cleanBase[key] = base[key];
 				continue;
 			}
 			const off = arch.o[key] || 0;
-			base[key] = clamp(
-				orig[key] + spec * off + rng.normal(0, noise),
-				key === "hgt" ? orig[key] : 1,
-				key === "hgt" ? orig[key] : 99,
-			);
+			const lo = key === "hgt" ? orig[key] : 1;
+			const hi = key === "hgt" ? orig[key] : 99;
+			base[key] = clamp(orig[key] + spec * off + rng.normal(0, noise), lo, hi);
+			cleanBase[key] = clamp(orig[key] + spec * off, lo, hi);
 		}
 
-		const solved = solveToOvr(base, targetOvr, arch, pinned);
-		const finalOvr = BB.ovr(solved);
+		const range = ovrRange(cleanBase, arch, pinned);
+		let solved = solveToOvr(base, targetOvr, arch, pinned);
+		let finalOvr = BB.ovr(solved);
+		/* The reported range describes the jitter-free build, so it has to be
+		   a promise the solver keeps. Per-rating jitter can push a rating onto
+		   its 1/99 clamp and cost the noisy vector a point of reach at the very
+		   ends of the scale, which would leave the editor offering a lock it
+		   then silently missed. In that rare case the jitter is dropped for
+		   this player rather than the promise. */
+		if (finalOvr !== targetOvr && targetOvr >= range.min && targetOvr <= range.max) {
+			const retry = solveToOvr(cleanBase, targetOvr, arch, pinned);
+			if (Math.abs(BB.ovr(retry) - targetOvr) < Math.abs(finalOvr - targetOvr)) {
+				solved = retry;
+				finalOvr = BB.ovr(retry);
+			}
+		}
 		const pot = clamp(Math.max(targetPot, finalOvr + 1), finalOvr, 100);
 
 		return {
@@ -861,6 +888,9 @@
 			// surprise, say) can be re-solved to the same target rather than
 			// leaving ovr disagreeing with the rating vector it came from.
 			base,
+			// The jitter-free vector, so a later re-solve (a forced height)
+			// can report the same stable range this build did.
+			cleanBase,
 			archetype: arch.name,
 			ratings: solved,
 			ovr: finalOvr,
@@ -869,7 +899,7 @@
 			skills: BB.skills(Object.assign({ fuzz: orig.fuzz }, solved)),
 			// What this player's height actually allows, so an impossible lock
 			// can be reported instead of quietly ignored.
-			ovrRange: ovrRange(base, arch, pinned),
+			ovrRange: range,
 		};
 	}
 

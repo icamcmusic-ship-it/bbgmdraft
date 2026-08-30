@@ -554,6 +554,7 @@
 			// without knowing anything about overrides.
 			p.statSalt = rerollSalt(p, "stats");
 			p.buildBase = built.base;
+			p.buildCleanBase = built.cleanBase;
 			p.buildPinned = ov.ratings || null;
 			p.newOvr = built.ovr;
 			p.ovrRange = built.ovrRange;
@@ -666,10 +667,17 @@
 					hgt: clamp(Math.round((p.buildBase || p.newRatings).hgt +
 						(inches - p.newHgtInches) * (100 / 24)), 0, 100),
 				});
+				/* The height change has to reach the jitter-free vector too, or
+				   the reported ovr range would go back to describing the
+				   player this prospect was before he grew. */
+				const cleanBase = p.buildCleanBase
+					? Object.assign({}, p.buildCleanBase, { hgt: base.hgt })
+					: null;
 				const re = RB.resolveTo(base, p.newOvr, p.archetype,
-					p.origRatings.fuzz, p.buildPinned);
+					p.origRatings.fuzz, p.buildPinned, cleanBase);
 				p.newHgtInches = inches;
 				p.buildBase = re.base;
+				p.buildCleanBase = re.cleanBase;
 				p.newRatings = re.ratings;
 				p.newOvr = re.ovr;
 				p.newPos = re.pos;

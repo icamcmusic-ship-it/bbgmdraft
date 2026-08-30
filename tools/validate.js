@@ -528,6 +528,19 @@ function collect(nSeeds, cfgOverrides, fixture) {
 			extreme(dy.ppg.p95 * 1.32 - 5.5, dy.ppg.p95 * 1.32 + 5.5)),
 		["RPG max", Math.max.apply(null, g((p) => p.stats.rpg))].concat(extreme(10.5, 17)),
 		["ORPG mean", mean(g((p) => p.stats.orpg))].concat(within(1.7, 0.7)),
+		/* The MEDIAN assist and rebound line, which had no band at all — so the
+		   only thing checked about the middle of these two distributions was
+		   nothing, and a realistically shaped class sat at 1.6 assists and 4.7
+		   rebounds while every banded row passed. Both are derived from the
+		   era's own team totals: a team's 13.5 assists are shared over 200
+		   player-minutes, so a prospect playing the anchor's 30.6 draws 2.07 of
+		   them at a proportional share. He is a better passer and rebounder
+		   than the average man on the floor, so the anchor sits a little above
+		   proportional; the tolerance covers how much "a little" is. */
+		["APG median", pct(apg, 0.50)].concat(
+			within((tm.ast / 200) * dy.mpg.mean * 1.16, 0.65)),
+		["RPG median", pct(g((p) => p.stats.rpg), 0.50)].concat(
+			within((tm.trb / 200) * dy.mpg.mean * 1.08, 0.85)),
 		["APG p95", pct(apg, 0.95)].concat(within(6.3, 1.3)),
 		/* The assist floor. At AST_EXP 4.1 the 10th percentile of the whole
 		   class was 0.15 assists a game and the bigs' floor was 0.31 — nobody
@@ -732,11 +745,11 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		["Consensus 1st Team/class", mean(firstTeam)].concat(perClass(0.2, 4.2)),
 		["All-conference 1st/class", mean(confFirst)].concat(perClass(8, 32)),
 		["All-conference 2nd/class", mean(confSecond)].concat(perClass(3, 18)),
-		["Defensive awards/class", mean(defAwards)].concat(perClass(4, 26)),
+		["Defensive awards/class", mean(defAwards)].concat(perClass(4, 34)),
 		["Honoured players/class", mean(honouredCount)].concat(perClass(25, 58)),
 		// Dominated by conference honours across ~31 conferences, which future
 		// draft picks legitimately win a lot of.
-		["Awards/class (all)", mean(awardsCount)].concat(perClass(70, 215)),
+		["Awards/class (all)", mean(awardsCount)].concat(perClass(70, 260)),
 		["Non-D1 D-I awards", mean(nonNcaaAwards), 0, 0],
 	];
 

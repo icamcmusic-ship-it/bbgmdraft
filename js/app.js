@@ -2018,10 +2018,21 @@
 	   The escape test also missed a bare carriage return: a field containing
 	   one (possible in a note, or in an imported name) broke the row. */
 	function esc(v) {
+		/* A non-finite number is an empty cell, not the text "NaN".
+		   `Number(NaN.toFixed(3))` is NaN, `String(NaN)` is "NaN", and a
+		   spreadsheet reading "NaN" in an otherwise numeric column silently
+		   retypes the whole column as text. Infinity has the same problem. */
+		if (typeof v === "number" && !Number.isFinite(v)) return "";
 		let s = v === undefined || v === null ? "" : String(v);
 		if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
 		return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 	}
+
+	/* CSV line terminator. RFC 4180 says CRLF, and everything else in these
+	   exports (the BOM, the formula-injection guard) is there for Excel's
+	   benefit, so writing bare LF was the one inconsistency. */
+	const CSV_EOL = "\r\n";
+	function csvJoin(lines) { return lines.join(CSV_EOL) + CSV_EOL; }
 
 	function exportCsv(res, everyone) {
 		const lines = [CSV_COLS.join(",")];
@@ -2045,7 +2056,8 @@
 				d("ortg"), d("prod"),
 				s.usg, s.fgp, s.tpp, s.ftp, s.ts,
 				(p.awards || []).join("; "),
-			].map((v) => esc(typeof v === "number" ? Number(v.toFixed(3)) : v)).join(","));
+			].map((v) => esc(typeof v === "number" && Number.isFinite(v)
+				? Number(v.toFixed(3)) : v)).join(","));
 		}
 		/* The export silently obeyed the table filter and was still called
 		   prospects.csv, so "Export CSV" on a filtered table quietly produced a
@@ -2053,7 +2065,7 @@
 		   tells the truth and the status line says how many rows were left
 		   out. */
 		download(skipped ? "prospects_filtered.csv" : "prospects.csv",
-			lines.join("\n"), "text/csv");
+			csvJoin(lines), "text/csv");
 		setStatus(skipped
 			? "CSV exported — " + (res.players.length - skipped) + " of " +
 				res.players.length + " prospects (the current filter). " +
@@ -2087,7 +2099,7 @@
 			lines.push(["board", b.rank, b.name, b.school, b.round || "", b.pick || ""]
 				.map(esc).join(","));
 		}
-		download("season_" + res.seed + ".csv", lines.join("\n"), "text/csv");
+		download("season_" + res.seed + ".csv", csvJoin(lines), "text/csv");
 		setStatus("Season CSV exported.");
 	}
 
@@ -2096,7 +2108,7 @@
 		for (const p of res.players.slice().sort((a, b) => b.newOvr - a.newOvr)) {
 			lines.push(p.name + "\t" + (p.note || "").replace(/\n/g, " · "));
 		}
-		download("notes.tsv", lines.join("\n"), "text/tab-separated-values");
+		download("notes.tsv", csvJoin(lines), "text/tab-separated-values");
 		setStatus("Notes exported.");
 	}
 
