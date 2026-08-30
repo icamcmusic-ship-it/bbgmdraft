@@ -11,13 +11,19 @@ Open `index.html` in any browser. Nothing is uploaded and there is no build step
 ## What it does
 
 **1. Fills in the blank colleges.** Every prospect whose college is `""` (shown as
-*None* in game) is sent somewhere real. There are thirteen destinations —
+*None* in game) is sent somewhere real. There are twenty-four destinations —
 **EuroLeague**, the **NBA G League**, **Liga ACB**, the **NBL**, the **Chinese CBA**,
 **LNB Pro A**, the **EuroCup**, the **Basketball Bundesliga**, the **Adriatic
-League**, **NBL1**, **Overtime Elite**, the **NBA Academies** and **DII NCAA** — each
-with its own weight, and each weight scaled by where the player was born. A Serbian
-leans EuroLeague and the Adriatic League, an Australian leans the NBL, a Nigerian
-leans LNB Pro A and the NBA Academy in Senegal.
+League**, the **Basketball Champions League**, the **Turkish BSL**, the **Greek
+Basket League**, the **Israeli Premier League**, **Japan's B.League**, **Brazil's
+NBB**, the **Basketball Africa League**, the Canadian **CEBL**, **NBL1**, **Overtime
+Elite**, the **NBA Academies**, **prep and postgrad**, the **NAIA**, **DII NCAA**,
+and **did not play** — each with its own weight, and each weight scaled by where the
+player was born, across seven regions. A Serbian leans EuroLeague and the Adriatic
+League, an Australian leans the NBL, a Nigerian leans LNB Pro A and the Basketball
+Africa League, a Canadian leans the G League and the CEBL. Every one of them has
+its own pace, game length and youth minutes cap, its own clubs and league table,
+and its own honours.
 
 **2. Rebuilds ratings into varied, specialised builds — without inflating anyone.**
 Each player is assigned one of seventy-two archetypes (Floor General, Heliocentric
@@ -127,9 +133,16 @@ and per conference: Player, Defensive Player, Freshman, Sixth Man and Most Impro
 of the Year, all-conference first and second teams, and all-defensive, all-freshman,
 all-newcomer and all-tournament teams.
 
+There is a **finalist tier** as well as a winners' tier — Naismith finalists, the
+Wooden Late Season Top 20, AP honourable mention, position-award finalists, a
+Tisdale watch list. Ninety awards that are all binary throw away most of the
+resolution the model has: the difference between the ninth-best player in the
+country and the fortieth is real, and both used to finish the year with nothing to
+show for it.
+
 Prospects are ranked against every returning player in Division I — against their
 **actual simulated seasons**, not a formula fitted to talent — so an All-America
-slot has to be earned. A typical 70-man class takes about 12 of the ~31 conference
+slot has to be earned. A typical 70-man class takes about 12 of the 32 conference
 Player of the Year awards and has one or two consensus first-team All-Americans.
 
 **6. Shows the AP Top 25 and the full bracket**, including the First Four, all four
@@ -146,10 +159,14 @@ you the range this build can actually be solved to before you type an impossible
 number into it, and every field has a one-click revert. *Reroll just him* draws a
 single prospect again and leaves the other sixty-nine exactly where they were —
 the RNG streams are keyed per player, so it is one salt, not a re-roll of the
-class. Tick several rows to edit them together. *Pin* keeps the current class as a
+class — and one axis at a time (`↻ build`, `↻ school`, `↻ season`) redraws only
+that, which is usually the thing you actually wanted. Tick several rows to edit them together. *Pin* keeps the current class as a
 baseline; the Compare tab shows what moved and the main table carries a ± against
 it. Settings, locks, column layout and theme survive a refresh; *Link* puts the
-seed, all settings and any locks in the URL.
+seed, all settings and any locks in the URL (and says so if a class has too many
+locks to fit, rather than handing you a silently truncated link). The seed pill
+carries a fingerprint of the generated class, so two people can tell whether they
+are looking at the same seventy players and not merely the same seed.
 
 **8. Tells you what you are looking at.** Search the prospect table, filter by
 position and conference, **filter on any number** ("PPG over 18", "overall 45 to
@@ -164,7 +181,16 @@ totals and per-40, read statistical leaderboards, browse any prospect's game log
 eyeball histograms, follow one team's path through the bracket, read the mock
 draft board with risers and fallers, and run a batch of N classes — reproducible
 from its own seed, reported as a distribution rather than one row of averages —
-in a background worker with a progress bar and a cancel button.
+in a background worker with a progress bar and a cancel button — held beside the
+previous batch, so a calibration sweep is a diff and not two panels read from
+memory.
+
+There is a page for every programme (its coach, its style, its prospects, its
+home/away split and every game it played), conference standings for all 32
+leagues, and a side-by-side comparison of any two prospects. The editor explains
+each player: where his stat line comes from, why he is where he is on the board,
+and the seasons before this one. `?` lists the keyboard shortcuts. Below 700
+pixels the table becomes one card per prospect.
 
 ---
 
@@ -177,7 +203,9 @@ in a background worker with a progress bar and a cancel button.
 | **Potential bias / spread** | How far pot sits above ovr, and how much it varies. These do not re-play the season — potential is computed after it — but they are not cosmetic: the mock draft board scores `(pot − ovr) × 0.65`, so moving them moves the board. |
 | **Specialisation** | 0 = BBGM's fairly uniform builds, 2.5 = extreme specialists. |
 | **Archetype diversity** | Exactly `100 − v`% of the class stays Balanced. |
-| **Class flavour** | How strongly each class leans one way (guard-heavy, defence-first, …). |
+| **Class flavour** | How strongly each class leans one way (guard-heavy, defence-first, a weak year, one-and-done heavy, a transfer-portal year, …). Some flavours also bend the class itself — how old it is, how good the top of it is — but only settings you have left at their default. |
+| **Builds per class** | How many of the 72 archetypes one class is drawn from. Lower is more distinctive ("the year of the stretch bigs"); 0 makes every build eligible in every class, which is one of everything, every time. |
+| **Anomalies per class** | How many forced surprises a class gets: a five-star bust, an unranked riser, a 24-year-old JUCO, a 7'4" project. |
 | **Build noise** | Per-rating jitter. |
 | **Vary size** | Lets listed height and weight drift with the build. |
 | **Freshmen / transfers / redshirts / reclassified** | Who is in what year, and how they got there. |
@@ -186,7 +214,8 @@ in a background worker with a progress bar and a cancel button.
 | **Pace, scoring environment** | How many possessions a Division I game has. |
 | **Shooting efficiency** | What a possession is worth. Pace and scoring environment are both possession dials; without this there was no way to ask for a class that scores its points more (or less) efficiently. |
 | **Stat randomness** | Season-to-season luck. Division I only — every professional league abroad has its own environment. |
-| **March upsets** | 0 = chalk, 2 = total madness. Applies to the postseason only, which is why re-simulating March costs 120ms and not a whole season. |
+| **Injuries** | How injury-prone the season is. Drawn *before* a game is played, so a team's record and its selection resume respond to who was missing and when. |
+| **March upsets** | 0 = chalk, 2 = total madness. Applies to the postseason only, which is why re-simulating March costs about 90ms and not a whole season. |
 | **National / conference / abroad award strictness** | Three separate dials. This used to be one slider driving three different mechanisms. |
 | **Archetype frequencies** | Per-build rarity weights for all 60 archetypes, grouped by guards / wings / bigs / any size with a ×2 and ×½ per group, and showing what share of the last generated class each build actually came out as. Hover a name to see its offset vector. |
 | **Note template** | Which lines are written into each player's exported note. |
