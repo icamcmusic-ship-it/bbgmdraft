@@ -294,13 +294,17 @@ reproduce is a table nobody should believe.
 | Change | Phases re-run | Engine time |
 | --- | --- | --- |
 | Note template | notes | 0.1 ms |
-| Award strictness | awards → stock → notes | 18 ms |
-| Potential bias / spread | pot → awards → stock → notes | 17 ms |
-| March upsets | postseason → stats → … | 88 ms |
-| Pace, stat randomness | regular → postseason → stats → … | 166 ms |
-| Specialisation, archetypes, seed | everything | 172 ms |
+| Award strictness | awards → stock → notes | 25 ms |
+| Potential bias / spread | pot → awards → stock → notes | 24 ms |
+| March upsets | postseason → stats → … | 143 ms |
+| Pace, stat randomness | regular → postseason → stats → … | 269 ms |
+| Specialisation, archetypes, seed | everything | 291 ms |
 
-_Median of 9 runs on Node 22; a cold run of the whole pipeline is about 210 ms._
+_Median of 9 runs on Node 22; a cold run of the whole pipeline is about 330 ms._
+The numbers grew: the stats phase now also simulates each upperclassman's
+earlier seasons (about 220 ms of the total, and `Earlier seasons: reconstruct`
+gets it back), and every programme carries a coach with a situation and a
+conference that may have changed.
 
 Batch mode runs in a Web Worker with a progress bar and a cancel button; where a
 browser refuses to start a worker — which includes opening `index.html` straight

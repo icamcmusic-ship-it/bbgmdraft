@@ -1272,8 +1272,13 @@
 	/* One prior season, simulated. Returns a stat line or null. */
 	function simulatePriorSeason(p, i, teams, season, cfg, rng) {
 		if (!p.buildCleanBase || !RB.resolveTo) return null;
-		const school = (p.transfer && p.transfer.from) ? p.newCollege : p.newCollege;
-		const home = teams[school];
+		/* The rotation is built at his CURRENT programme's level even when the
+		   row names the school he transferred from, because that school is a
+		   string in a biography and not a simulated programme — a JUCO, "a Big
+		   Ten program", a club in Australia. The row still names it; what the
+		   level stands in for is "a place of roughly this quality", which is
+		   the only thing the simulation needs from it. */
+		const home = teams[p.newCollege];
 		if (!home) return null;
 		const targetOvr = ovrYearsAgo(p, i);
 		let re;

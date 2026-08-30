@@ -210,10 +210,16 @@
 		   scoring level. */
 		FILLER_USAGE: 0.320,
 		/* How far a realistically shaped draft class's composites sit below the
-		   reference points the efficiency model was written against. See
-		   statLine. Measured: a class drawn on a draft-slot ovr curve averages
-		   0.346 on the three-point composite where the old N(45,13) fixture
-		   averaged 0.395. */
+		   reference points the efficiency and pool models were written against.
+		   See statLine.
+
+		   ONE scalar, because the gap is close to uniform. Measured across the
+		   two fixtures: three-point 0.049, low post 0.053, mid-range 0.061,
+		   rebounding 0.050, passing 0.059, stealing 0.054, drawing fouls 0.059,
+		   turnovers 0.033. The outlier is shooting at the rim (0.028), which is
+		   hgt-weighted and hgt is the one rating the fixtures share, so the
+		   correction slightly over-shoots there; the field-goal and true
+		   shooting bands are the check on that and both are comfortable. */
 		PROSPECT_COMP_REF: 0.048,
 	};
 
@@ -605,10 +611,11 @@
 	   before: every extra factor added to one had to be remembered in the
 	   other. */
 	function passSkill(comps, ratings) {
+		// The prospect reference shift is applied by astWeight, which knows
+		// whether this is a prospect or a synthesised teammate; this returns
+		// the raw skill.
 		const raw = ratings && Number.isFinite(ratings.pss) ? ratings.pss / 100 : comps.passing;
 		return clamp((1 - TUNING.AST_PSS) * comps.passing + TUNING.AST_PSS * raw, 0.02, 1);
-		// (The reference shift is applied by the caller, which knows whether
-		// this is a prospect or a synthesised teammate.)
 	}
 	/* `ref` is the composite reference shift (see statLine): the assist and
 	   rebound POOLS are team-level and correctly calibrated, so what a prospect
