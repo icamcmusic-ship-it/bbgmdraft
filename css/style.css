@@ -540,3 +540,34 @@ table.compare td.num.up::after { content: " ▲"; font-size: .8em; }
 /* The build's signature ratings, printed on the row rather than hidden in a
    title attribute that a touch device never shows. */
 .offsets { color: var(--dim); font-size: 11px; white-space: nowrap; }
+
+/* Inline season-shape sparkline in the prospect table. Twelve pixels of
+   trend carries what a season average cannot. */
+td.sparkcell { padding: 2px 6px; }
+.spark { display: block; }
+.spark .sparkline {
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.2;
+	stroke-linejoin: round;
+	stroke-linecap: round;
+	opacity: 0.75;
+}
+
+
+/* ---- the settings panel on a narrow screen ------------------------------- */
+/* Below 860px the aside stacks above the table, which put eight fieldsets
+   between the user and the thing they opened the tool to look at. It is a
+   toggle now: hidden by default at that width, shown by the Settings button in
+   the header, and unchanged on a desktop where it has its own column. */
+.narrowonly { display: none; }
+@media (max-width: 860px) {
+	.narrowonly { display: inline-block; }
+	aside { display: none; }
+	body.settings-open aside { display: block; }
+	/* Somewhere to stop scrolling when it is open. */
+	body.settings-open aside {
+		max-height: 70vh;
+		overflow-y: auto;
+	}
+}

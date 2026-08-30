@@ -396,6 +396,126 @@ function ok(name, condition, detail) {
 		strip(inlineText) === strip(withWorker),
 		strip(inlineText) === strip(withWorker) ? "" : "worker and inline disagree");
 
+	console.log("\nKeyboard and table verbs");
+	await page.locator("#tabs button", { hasText: "Prospects" }).click();
+	await page.waitForSelector("table tbody tr", { timeout: 8000 });
+	{
+		// "/" focuses the search, which is where every table shortcut starts.
+		await page.locator("body").click({ position: { x: 5, y: 5 } });
+		await page.keyboard.press("/");
+		ok("slash focuses the prospect search",
+			await page.evaluate(() => document.activeElement &&
+				document.activeElement.id === "prospectSearch"));
+		await page.keyboard.press("Escape");
+		await page.locator("body").click({ position: { x: 5, y: 5 } });
+
+		// A number key is a tab.
+		await page.keyboard.press("2");
+		await page.waitForTimeout(250);
+		ok("a number key jumps to a tab",
+			(await page.locator("#tabs button.active").first().textContent())
+				.indexOf("Draft board") !== -1);
+		await page.keyboard.press("1");
+		await page.waitForTimeout(250);
+
+		// "l" locks the focused row without opening the editor.
+		await page.locator("table tbody tr").nth(2).focus();
+		await page.keyboard.press("l");
+		await page.waitForTimeout(400);
+		ok("l locks the focused row",
+			(await page.locator("table tbody tr.locked").count()) >= 1);
+		await page.locator("table tbody tr.locked").first().focus();
+		await page.keyboard.press("l");
+		await page.waitForTimeout(400);
+		ok("l again unlocks it",
+			(await page.locator("table tbody tr.locked").count()) === 0);
+
+		// The archetype filter, and [ / ] stepping through it.
+		const before = await page.locator("table tbody tr").count();
+		await page.keyboard.press("]");
+		await page.waitForTimeout(300);
+		const after = await page.locator("table tbody tr").count();
+		ok("] filters the table to one build", after < before, before + " -> " + after);
+		await page.keyboard.press("[");
+		await page.waitForTimeout(300);
+		ok("[ steps back to the whole class",
+			(await page.locator("table tbody tr").count()) === before);
+	}
+
+	console.log("\nBulk and layout verbs");
+	{
+		await page.locator("#bulkBar select").first().selectOption("10");
+		await page.waitForTimeout(300);
+		ok("selecting the top of the board ticks rows",
+			(await page.locator("table tbody tr.picked").count()) === 10);
+		// The lock-as-is verb is the last select in the bar once rows are ticked.
+		const locks = page.locator("#bulkBar select");
+		await locks.nth(await locks.count() - 1).selectOption("ovr");
+		await page.waitForTimeout(600);
+		ok("locking the selection as-is locks every ticked row",
+			(await page.locator("table tbody tr.locked").count()) === 10);
+		await page.locator("#bulkBar button", { hasText: "Clear locks" }).click();
+		await page.waitForTimeout(500);
+		await page.locator("#bulkBar button", { hasText: "Clear selection" }).click();
+		await page.waitForTimeout(300);
+
+		// Saved column layouts.
+		await page.locator(".filters button", { hasText: "Columns…" }).click();
+		await page.waitForSelector(".colpicker", { timeout: 5000 });
+		page.once("dialog", (d) => d.accept("my view"));
+		await page.locator("button", { hasText: "Save this layout…" }).click();
+		await page.waitForTimeout(400);
+		ok("a column layout can be saved and comes back by name",
+			(await page.locator("button", { hasText: "my view" }).count()) >= 1);
+		await page.keyboard.press("Escape");
+		await page.waitForTimeout(200);
+	}
+
+	console.log("\nCompare and reroll");
+	{
+		await page.locator("#btnPin").click();
+		await page.waitForTimeout(400);
+		const sels = page.locator("#view .filters select");
+		ok("the compare tab offers four slots", (await sels.count()) >= 4);
+		const keys = await page.evaluate(() =>
+			window.App.state.results[window.App.state.active].players
+				.slice(0, 3).map((p) => p.key));
+		for (let i = 0; i < 3; i++) await sels.nth(i).selectOption(keys[i]);
+		await page.waitForTimeout(400);
+		ok("three prospects compare side by side",
+			(await page.locator("#view table.compare th").count()) === 4);
+
+		await page.locator("#tabs button", { hasText: "Prospects" }).click();
+		await page.waitForTimeout(200);
+		const seedBefore = await page.evaluate(() => window.App.state.lastSeed);
+		await page.locator("#btnReroll").click();
+		await page.waitForTimeout(900);
+		const seedAfter = await page.evaluate(() => window.App.state.lastSeed);
+		ok("a reroll draws a new class", seedBefore !== seedAfter);
+		await page.locator("#btnUndo").click();
+		await page.waitForTimeout(900);
+		ok("undo brings the rerolled class back",
+			(await page.evaluate(() => window.App.state.lastSeed)) === seedBefore,
+			seedBefore + " -> " + (await page.evaluate(() => window.App.state.lastSeed)));
+	}
+
+	console.log("\nNarrow viewport");
+	{
+		await page.setViewportSize({ width: 420, height: 900 });
+		await page.waitForTimeout(300);
+		ok("the settings panel is out of the way on a phone",
+			!(await page.locator("aside").isVisible()));
+		await page.locator("#btnSettings").click();
+		await page.waitForTimeout(300);
+		ok("and the header button brings it back",
+			await page.locator("aside").isVisible());
+		await page.locator("#btnSettings").click();
+		await page.setViewportSize({ width: 1500, height: 980 });
+		await page.waitForTimeout(300);
+		ok("the panel is always there on a desktop",
+			await page.locator("aside").isVisible());
+	}
+
 	console.log("\nNo errors");
 	ok("no console or page errors", errors.length === 0, errors.join("\n         "));
 
