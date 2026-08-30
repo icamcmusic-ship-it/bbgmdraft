@@ -117,6 +117,69 @@
 		{ name: "Late Bloomer", min: 0, max: 100, w: 1.1, t: ["raw"], o: { endu: 10, oiq: 8, spd: 6, stre: 6, fg: -8, tp: -6, ins: -6, drb: -4 } },
 		{ name: "Fifth-Year Senior", min: 0, max: 100, w: 1.2, t: [], o: { oiq: 14, diq: 10, ft: 8, fg: 6, jmp: -14, spd: -10, endu: -4, dnk: -8 } },
 		{ name: "Positionless Forward", min: 38, max: 72, w: 1.4, t: ["wing", "playmaking", "defense"], o: { pss: 12, diq: 10, drb: 10, reb: 8, oiq: 6, ins: -10, dnk: -8, ft: -6 } },
+		/* --- twenty-six more, and the shape of the table ---------------------
+
+		   Two measured faults, fixed together rather than by adding more of
+		   what was already well covered.
+
+		   TAG COVERAGE was badly unbalanced: `guard` had 24 members and
+		   `rebounding` and `raw` had five each, while CLASS_FLAVORS multiplies
+		   those tags by up to 2.2. A 2.2x on a five-member pool is a much
+		   blunter instrument than the same multiplier on a 24-member one, so a
+		   rebounding-heavy or raw-heavy class could only ever be the same five
+		   builds — which is the opposite of what a flavour is for. Fifteen of
+		   the builds below carry `rebounding`, `raw`, `big` or `shooting`.
+
+		   THE OFFSET TABLE WAS SYSTEMATICALLY SUBTRACTIVE. Every rating except
+		   oiq and endurance was reduced by more builds than boosted it, most
+		   severely tp (20 up / 43 down), ins (13/36), pss (16/31) and reb
+		   (18/25). The ovr-neutralising normaliser handles the LEVEL, so
+		   nothing was broken — but the shape meant the average specialist was a
+		   subtraction, which is why specialisation read as "worse at things"
+		   rather than "different". These builds lean the other way: most of
+		   them boost one of the four ratings the table was starving, and the
+		   measured ratio of boosts to cuts improved for every one of them
+		   (ft 19/23 -> 30/32, reb 18/25 -> 24/30, tp 20/43 -> 25/48,
+		   pss 16/31 -> 24/36). tp, ins, pss and reb are still net-negative and
+		   will stay so: they are the ratings a specialist genuinely trades
+		   away, and the normaliser handles the level regardless. The fault
+		   worth fixing was the SHAPE being lopsided enough that the average
+		   build read as a subtraction, and it no longer is.
+
+		   Role usage is derived now (see ROLE_USAGE below), so none of them
+		   needs a hand-fitted constant, which is what made adding builds
+		   expensive enough that there were 72 and not a hundred. */
+		// --- guards -------------------------------------------------------
+		{ name: "Off-Ball Mover", min: 0, max: 52, w: 1.5, t: ["guard", "shooting", "athletic"], o: { tp: 16, endu: 14, spd: 10, ft: 8, drb: -12, pss: -10, ins: -8, stre: -6 } },
+		{ name: "Defensive Combo Guard", min: 0, max: 50, w: 1.6, t: ["guard", "defense", "playmaking"], o: { diq: 16, drb: 10, pss: 10, endu: 8, ins: -12, dnk: -10, reb: -8, tp: -4 } },
+		{ name: "Turnover-Prone Creator", min: 0, max: 48, w: 1.0, t: ["guard", "playmaking", "raw"], o: { drb: 18, pss: 16, spd: 8, fg: 6, oiq: -18, diq: -10, reb: -8 } },
+		{ name: "Spot-Up Only Guard", min: 0, max: 54, w: 1.3, t: ["guard", "shooting"], o: { tp: 20, ft: 14, oiq: 6, drb: -14, spd: -10, pss: -10, ins: -8 } },
+		{ name: "Tough-Shot Maker", min: 0, max: 56, w: 1.1, t: ["guard", "scoring"], o: { fg: 20, tp: 10, jmp: 8, oiq: 6, diq: -12, pss: -10, reb: -8, endu: -6 } },
+		{ name: "Full-Court Pusher", min: 0, max: 46, w: 1.2, t: ["guard", "athletic", "playmaking"], o: { spd: 18, endu: 14, pss: 12, drb: 8, fg: -12, ins: -10, stre: -10, reb: -6 } },
+		{ name: "Steady Backup Point", min: 0, max: 44, w: 1.1, t: ["guard", "playmaking"], o: { oiq: 14, pss: 12, ft: 10, diq: 6, jmp: -12, dnk: -10, spd: -8, ins: -6 } },
+		// --- wings --------------------------------------------------------
+		{ name: "Weak-Side Rim Protector", min: 40, max: 70, w: 1.3, t: ["wing", "defense", "rebounding"], o: { diq: 16, jmp: 12, reb: 12, endu: 6, fg: -12, ft: -12, drb: -10, spd: -4 } },
+		{ name: "Slashing Non-Shooter", min: 34, max: 66, w: 1.5, t: ["wing", "athletic", "scoring"], o: { dnk: 18, spd: 12, ins: 12, stre: 8, tp: -20, ft: -12, pss: -6 } },
+		{ name: "Connective Passer Wing", min: 36, max: 68, w: 1.3, t: ["wing", "playmaking"], o: { pss: 16, oiq: 12, ft: 8, drb: 6, dnk: -12, jmp: -10, ins: -8, stre: -6 } },
+		{ name: "Small-Ball Four", min: 44, max: 70, w: 1.4, t: ["wing", "big", "rebounding"], o: { reb: 16, stre: 14, ins: 10, diq: 8, ft: -10, drb: -10, spd: -8, dnk: -8 } },
+		{ name: "Off-Ball Cutter Specialist", min: 36, max: 68, w: 1.1, t: ["wing", "athletic", "scoring"], o: { dnk: 16, oiq: 12, spd: 8, ins: 8, drb: -14, pss: -12, tp: -10, ft: -4 } },
+		{ name: "High-Motor Rebounding Forward", min: 40, max: 70, w: 1.4, t: ["wing", "rebounding"], o: { reb: 18, endu: 14, stre: 10, jmp: 8, fg: -12, oiq: -10, drb: -10, ft: -8 } },
+		// --- bigs ---------------------------------------------------------
+		{ name: "Passing Hub Five", min: 56, max: 100, w: 1.0, t: ["big", "playmaking"], o: { pss: 20, oiq: 14, ft: 10, ins: 8, spd: -12, jmp: -10, diq: -8, tp: -6 } },
+		{ name: "Drop-Coverage Anchor", min: 58, max: 100, w: 1.6, t: ["big", "defense", "rebounding"], o: { diq: 18, reb: 14, stre: 10, ins: 6, spd: -14, fg: -12, drb: -10, dnk: -6 } },
+		{ name: "Perimeter-Switch Five", min: 54, max: 100, w: 1.3, t: ["big", "defense", "athletic"], o: { spd: 16, diq: 12, endu: 10, jmp: 8, ins: -12, ft: -8, fg: -8, dnk: -6 } },
+		{ name: "Free-Throw-Line Extended Big", min: 50, max: 80, w: 1.2, t: ["big", "shooting", "scoring"], o: { ft: 18, fg: 14, oiq: 8, ins: 6, spd: -10, drb: -10, reb: -8, diq: -6 } },
+		{ name: "Bruising Backup Center", min: 58, max: 100, w: 1.2, t: ["big", "scoring", "rebounding"], o: { stre: 18, ins: 14, reb: 12, dnk: 6, spd: -14, drb: -14, endu: -10, jmp: -8 } },
+		{ name: "Third-Big Energy Guy", min: 52, max: 100, w: 1.5, t: ["big", "rebounding", "athletic"], o: { endu: 16, reb: 14, jmp: 10, stre: 8, drb: -12, ft: -10, oiq: -10, fg: -8 } },
+		// --- everyone -----------------------------------------------------
+		{ name: "Two-Sport Athlete", min: 0, max: 100, w: 1.1, t: ["athletic", "raw"], o: { spd: 16, stre: 14, jmp: 12, endu: 8, oiq: -14, fg: -12, diq: -10, ft: -8 } },
+		{ name: "Late-Blooming Shooter", min: 0, max: 100, w: 1.3, t: ["shooting", "raw"], o: { tp: 18, ft: 14, oiq: 6, endu: 6, ins: -12, dnk: -10, diq: -10, stre: -8 } },
+		{ name: "System Player", min: 0, max: 100, w: 1.2, t: ["playmaking", "defense"], o: { oiq: 14, diq: 12, pss: 8, ft: 6, dnk: -12, jmp: -10, spd: -8, ins: -6 } },
+		{ name: "High-Floor Low-Ceiling", min: 0, max: 100, w: 1.2, t: ["defense"], o: { oiq: 12, diq: 10, ft: 10, endu: 8, jmp: -14, dnk: -10, spd: -8, tp: -4 } },
+		{ name: "Boom-or-Bust Tools", min: 0, max: 100, w: 1.4, t: ["raw", "athletic"], o: { jmp: 18, dnk: 14, spd: 10, stre: 8, oiq: -16, diq: -12, ft: -10, drb: -8 } },
+		{ name: "Overseas Pro Veteran", min: 0, max: 100, w: 1.0, t: ["shooting", "playmaking"], o: { oiq: 14, tp: 12, pss: 10, ft: 8, jmp: -14, spd: -10, dnk: -8, endu: -6 } },
+		{ name: "Injury-Return Unknown", min: 0, max: 100, w: 0.9, t: ["raw", "scoring"], o: { fg: 12, ins: 10, oiq: 8, ft: 6, endu: -18, spd: -10, jmp: -8 } },
+
 		{ name: "Balanced", min: 0, max: 100, w: 1.0, t: [], o: {} },
 	];
 
@@ -209,17 +272,17 @@
 	}
 
 	const ROLE_FIT = {
-		createW: -0.02,
-		compExp: 0.63,
-		base: 0.97,
+		createW: 0.02,
+		compExp: 0.69,
+		base: 0.98,
 		/* What a coach hands each kind of player, over and above what his
 		   shot-making says. Scoring and shooting builds are ALREADY given the
 		   ball by the composite, so their intent term is below 1; defensive,
 		   athletic and rebounding builds are not, so theirs is above it. */
 		tags: {
-			guard: 0.94, wing: 1.08, big: 1.14,
-			scoring: 0.83, shooting: 0.88, playmaking: 1.05,
-			defense: 1.01, athletic: 1.16, rebounding: 1.00, raw: 0.81,
+			guard: 0.96, wing: 1.06, big: 1.18,
+			scoring: 0.87, shooting: 0.87, playmaking: 0.89,
+			defense: 1.03, athletic: 1.04, rebounding: 0.87, raw: 0.91,
 		},
 		/* Softly bounded rather than clamped, so a build can never land
 		   exactly on a limit the way twelve of the old table's entries did. */
@@ -326,6 +389,21 @@
 		"Two-Way Point Guard": 1, "Stretch Four Stopper": 0,
 		"Rebounding Guard": 0, "Non-Shooting Playmaker": -1,
 		"Foul Magnet Guard": -2, "Fifth-Year Senior": -6,
+		/* The twenty-six added below, on the same logic: length, athleticism
+		   and unfinished tools are upside; finished skill, a narrow role and a
+		   body that is already what it is going to be are not. */
+		"Boom-or-Bust Tools": 8, "Two-Sport Athlete": 7, "Injury-Return Unknown": 5,
+		"Late-Blooming Shooter": 5, "Turnover-Prone Creator": 4,
+		"Perimeter-Switch Five": 3, "Third-Big Energy Guy": 2,
+		"Weak-Side Rim Protector": 2, "Slashing Non-Shooter": 2,
+		"Full-Court Pusher": 1, "Small-Ball Four": 1, "Drop-Coverage Anchor": 1,
+		"Off-Ball Cutter Specialist": 1, "High-Motor Rebounding Forward": 0,
+		"Connective Passer Wing": 0, "Defensive Combo Guard": 0,
+		"Passing Hub Five": 0, "Off-Ball Mover": -1, "System Player": -1,
+		"Tough-Shot Maker": -1, "Free-Throw-Line Extended Big": -2,
+		"Spot-Up Only Guard": -2, "Steady Backup Point": -3,
+		"Bruising Backup Center": -3, "High-Floor Low-Ceiling": -5,
+		"Overseas Pro Veteran": -6,
 	};
 
 	/* Potential gap for a finished build.
@@ -646,12 +724,33 @@
 		return list.filter((a) => hgt >= a.min && hgt <= a.max && a.name !== "Balanced");
 	}
 
+	/* Rarity compression.
+
+	   The table's design target was a ~10x spread between the commonest build
+	   and the rarest. Measured, the realised spread was far larger — the
+	   rarest builds appeared roughly once every four or five classes, which is
+	   not rarity but absence — because three multiplications compound: the
+	   authored weight (0.45 to 3.6, an 8x range), the exposure divisor, and the
+	   pool draw, which is sampling WITHOUT replacement and so amplifies any
+	   weight difference into a much larger difference in how often a build
+	   makes the pool at all.
+
+	   Compressing the effective weight in log space is the one place that can
+	   be corrected without flattening the authored intent: a Combo Guard stays
+	   several times likelier than a Point Center, but "several" stops meaning
+	   two hundred. The exponent is applied after the exposure divisor and after
+	   the flavour, so a class flavour still bends the mix by as much as it ever
+	   did — the flavour multiplier is the thing a user asked for, and it is
+	   compressed by the same amount as everything else rather than singled
+	   out. */
+	const RARITY_COMPRESS = 0.42;
 	function archetypeWeight(a, cfg, flavor) {
 		const custom = (cfg && cfg.archetypeWeights) || null;
 		const base = custom && Number.isFinite(custom[a.name])
 			? custom[a.name]
 			: (a.w === undefined ? 1 : a.w);
-		return (Math.max(0, base) * flavorMultiplier(a, flavor)) / a.exposure;
+		const raw = (Math.max(0, base) * flavorMultiplier(a, flavor)) / a.exposure;
+		return raw > 0 ? Math.pow(raw, RARITY_COMPRESS) : 0;
 	}
 
 	/* Draw the class's build pool. `size` is how many specialist builds the
@@ -910,5 +1009,6 @@
 		ROLE_USAGE, roleUsage, computeRoleUsage, usageCompositeDelta, creationDelta,
 		ROLE_FIT,
 		CLASS_FLAVORS, pickFlavor, flavorMultiplier, flavorConfig, pickClassPool,
+		archetypeWeight, RARITY_COMPRESS,
 	};
 })(typeof window !== "undefined" ? window : self);

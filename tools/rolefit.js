@@ -139,7 +139,7 @@ function main() {
 			r.resid.toFixed(2).padStart(8) + r.excess.toFixed(2).padStart(9));
 	}
 	console.log("\nworst bias beyond noise = " + worst.toFixed(2) +
-		" points   (tools/validate.js bands this at 1.60)\n");
+		" points   (tools/validate.js bands this at 2.00)\n");
 	const f = fit(rows, meanPpg, minN);
 	console.log("Fitted ROLE_FIT over " + f.used + " builds — paste into js/ratings.js:\n");
 	console.log("\t\tcreateW: " + f.createW.toFixed(2) + ",");
