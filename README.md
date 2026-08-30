@@ -131,7 +131,7 @@ mid-major taking 30% of his team's shots — the single most common profile of a
 draft class's leading scorer — was a player the model could not construct. The
 measured correlation between overall rating and college scoring was 0.72 on a
 realistically shaped class; real draft classes run 0.25–0.35, because Zach Edey
-outscored every lottery pick in his and Bronny James averaged 4.8. It is 0.42
+outscored every lottery pick in his and Bronny James averaged 4.8. It is 0.44
 now, and upperclassmen finish better and turn it over less.
 
 **No player lands on a bound.** Two clamps used to hold about 29% of every class
@@ -483,11 +483,11 @@ tools/golden.json   recorded output hashes
   is eligible for; they are not read from the file, because BBGM does not store them.
 * Where a prospect plays still moves his stat line, and it should: a good player
   on a bad team really does take more of the shots. But it no longer moves his
-  MINUTES much, which is what was wrong. Measured over 891 simulated seasons,
-  where a prospect plays correlates with his minutes at −0.18 and how good he is
-  at +0.45 (it used to be −0.78 against +0.29), and with his scoring at −0.37
-  against +0.48. `tools/validate.js` bands all four, plus the margin between
-  them, so it cannot drift back.
+  MINUTES much, which is what was wrong. Measured over 1,162 simulated seasons
+  on a realistically shaped class, where a prospect plays correlates with his
+  minutes at −0.20 and how good he is at +0.43 (it used to be −0.78 against
+  +0.29), and with his scoring at −0.12 against +0.44. `tools/validate.js` bands
+  all four, plus the margin between them, so it cannot drift back.
 * The scoring floor of the back of a class is still the softest number in the
   model. On a realistically shaped class the bottom third has a 10th-percentile
   scoring average near 7 points; the last ten men on the board average about 11,

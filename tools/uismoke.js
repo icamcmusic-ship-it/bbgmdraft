@@ -396,6 +396,23 @@ function ok(name, condition, detail) {
 		strip(inlineText) === strip(withWorker),
 		strip(inlineText) === strip(withWorker) ? "" : "worker and inline disagree");
 
+	console.log("\nSettings coverage");
+	{
+		/* Every setting needs a control, or it is a setting nobody can reach.
+		   The engine-side test asserts each one is declared by a phase; this is
+		   the other half of the same claim. The exceptions are the containers
+		   with their own editors and the three legacy sliders folded into
+		   leagueWeights. */
+		const EXEMPT = ["seed", "overrides", "leagueWeights", "archetypeWeights",
+			"noteLines", "wEuroLeague", "wGLeague", "wNBL"];
+		const missing = await page.evaluate((exempt) =>
+			Object.keys(window.Config.DEFAULTS)
+				.filter((k) => exempt.indexOf(k) === -1)
+				.filter((k) => !document.getElementById(k)), EXEMPT);
+		ok("every setting has a control in the panel", missing.length === 0,
+			missing.join(", "));
+	}
+
 	console.log("\nKeyboard and table verbs");
 	await page.locator("#tabs button", { hasText: "Prospects" }).click();
 	await page.waitForSelector("table tbody tr", { timeout: 8000 });

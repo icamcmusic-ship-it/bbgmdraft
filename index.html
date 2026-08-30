@@ -118,6 +118,16 @@
 		<div class="ctl"><label for="statNoise">Stat randomness <b></b></label><input type="range" id="statNoise" min="0" max="2.5" step="0.05"></div>
 		<div class="ctl"><label for="injuryRate">Injuries <b></b></label><input type="range" id="injuryRate" min="0" max="2" step="0.05"></div>
 		<div class="ctl"><label for="upsetFactor">March upsets <b></b></label><input type="range" id="upsetFactor" min="0" max="2" step="0.05"></div>
+		<div class="ctl"><label for="realignmentRate">Conference realignment <b></b></label><input type="range" id="realignmentRate" min="0" max="1" step="0.05"></div>
+		<div class="ctl"><label for="bluebloodDownYears">Blue bloods having a down year <b></b></label><input type="range" id="bluebloodDownYears" min="0" max="6" step="1"></div>
+		<div class="ctl"><label for="midMajorLift">Mid-major surge <b></b></label><input type="range" id="midMajorLift" min="0" max="12" step="1"></div>
+		<div class="ctl">
+			<label for="priorSeasons">Earlier seasons</label>
+			<select id="priorSeasons">
+				<option value="simulate">simulated through the stat model</option>
+				<option value="reconstruct">reconstructed from the draft year</option>
+			</select>
+		</div>
 		<p class="hint">Pace and scoring environment move possessions; shooting efficiency moves what a possession is worth. Pace, both environment dials and stat randomness apply to Division I only — every professional league abroad has its own pace and game length.</p>
 	</details>
 

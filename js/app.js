@@ -257,6 +257,7 @@
 		"freshmanShare", "transferShare", "redshirtShare", "reclassShare", "pDII",
 		"pace", "scoringEnv", "efficiencyEnv", "statNoise", "upsetFactor",
 		"archetypePool", "surpriseBudget", "injuryRate",
+		"realignmentRate", "bluebloodDownYears", "midMajorLift",
 		"awardStrictness", "confAwardStrictness", "proAwardStrictness",
 	];
 
@@ -277,18 +278,35 @@
 		injuryRate: (v) => v.toFixed(2) + "x",
 		archetypePool: (v) => (v ? v + " builds" : "off"),
 		surpriseBudget: (v) => (v ? "about " + v : "none"),
+		realignmentRate: (v) => (v ? Math.round(v * 100) + "%" : "off"),
+		bluebloodDownYears: (v) => (v ? v + " programme" + (v === 1 ? "" : "s") : "none"),
+		midMajorLift: (v) => (v ? "+" + v : "off"),
 	};
 
 	/* What each slider actually does, in units. "Class quality 2" means nothing
 	   on its own; "top prospect ~48 ovr" is a reference point. */
 	const SLIDER_HINT = {
 		archetypePool: (v) => (v
-			? "this class is drawn from about " + v + " of the 72 builds — " +
+			? "this class is drawn from about " + v + " of the " +
+				(global.RatingsBuilder ? global.RatingsBuilder.ARCHETYPES.length : 98) +
+				" builds — " +
 				"lower is more distinctive, higher is one of everything"
 			: "off: every build is eligible in every class"),
 		surpriseBudget: (v) => (v
-			? "a five-star bust, an unranked riser, a 24-year-old JUCO, a 7'4\" project…"
+			? "drawn from twenty-three kinds: a five-star bust, a 24-year-old JUCO, " +
+				"the coach's son, a season that ended in February…"
 			: "no forced anomalies"),
+		realignmentRate: (v) => (v
+			? "the chance this season's map differs from last season's; a " +
+				"realignment moves two to five programmes one rung up"
+			: "conference membership never changes"),
+		bluebloodDownYears: (v) => (v
+			? v + " of the twenty-four biggest programmes has a bad year on top " +
+				"of the ordinary roll"
+			: "no forced down years"),
+		midMajorLift: (v) => (v
+			? "every programme outside the power leagues is stronger by up to " + v
+			: "the mid-majors are where the table says"),
 		injuryRate: (v) => (v === 0
 			? "nobody misses a game"
 			: "drawn before the season, so a team's record responds to them"),
@@ -377,6 +395,7 @@
 			}
 		}
 		$("ovrMode").value = state.cfg.ovrMode;
+		$("priorSeasons").value = state.cfg.priorSeasons;
 		$("varySize").checked = !!state.cfg.varySize;
 		$("seed").value = state.cfg.seed;
 		const curve = state.cfg.ovrMode === "curve";
@@ -442,7 +461,7 @@
 		return null;
 	}
 	function paintPhaseCosts() {
-		for (const key of SLIDERS.concat(["era", "ovrMode", "varySize"])) {
+		for (const key of SLIDERS.concat(["era", "ovrMode", "varySize", "priorSeasons"])) {
 			const input = $(key);
 			if (!input) continue;
 			const ctl = input.closest(".ctl");
@@ -636,6 +655,12 @@
 			state.cfg.era = $("era").value;
 			markDirty();
 			paintConfig();
+			scheduleRun();
+		});
+		$("priorSeasons").addEventListener("change", () => {
+			pushUndo("changed how earlier seasons are produced");
+			state.cfg.priorSeasons = $("priorSeasons").value;
+			markDirty();
 			scheduleRun();
 		});
 		$("ovrMode").addEventListener("change", () => {
