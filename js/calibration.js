@@ -121,9 +121,7 @@
 		ftPct: { mean: 0.726, sd: 0.105, p5: 0.530, p95: 0.868 },
 		tpPct: { median: 0.348 },
 		twoPct: { mean: 0.523, sd: 0.070, p5: 0.417, p95: 0.638 },
-		// PPG is not in the source aggregate; it is implied by the rest and is
-		// the headline number the sim is judged on, so it is stated explicitly.
-		ppg: { mean: 15.0, p95: 22.5 },
+		/* PPG is DERIVED, not typed in. See impliedPpg() below. */
 	};
 
 	/* Draft-year anchor for the modern game. Same population, shifted by the
@@ -139,21 +137,7 @@
 		ftr: { mean: 0.366, sd: 0.138, p5: 0.173, p95: 0.617 },
 		ftPct: { mean: 0.730, sd: 0.105, p5: 0.534, p95: 0.872 },
 		tpPct: { median: 0.352 },
-		/* PPG is not in any source aggregate; it is implied by the others —
-		   pace x chances x usage x minutes x true shooting — and it is the
-		   headline number the sim is judged on, so it is stated explicitly.
-
-		   The audit that prompted this era table proposed 16.8 / 25.0. That is
-		   what its own patched simulation produced, not an independent
-		   measurement, and it is not consistent with the rest of this anchor
-		   set: 30.6 minutes at 25.0% usage and .585 true shooting on 67.4
-		   possessions comes to about 15.5, and the 2024 and 2025 drafted-player
-		   final college seasons average nearer 15 than 17 (Knecht 21.7 and Edey
-		   25.2 sit at the top of a distribution whose middle is 13-16). 16.0 is
-		   the figure the other anchors imply, and it is still a 7-8% lift on
-		   what this tool produced against the 2009-2021 anchor, which is the
-		   complaint the era table exists to answer. */
-		ppg: { mean: 16.0, p95: 24.0 },
+		/* PPG is DERIVED, not typed in. See impliedPpg() below. */
 	};
 
 	/* ------------------------------------------------------------- the eras */
@@ -227,6 +211,46 @@
 			shift: { ftr: 0.845, tov: 0.96, inside: 0.021, mid: 0.017, three: 0.004, fieldEff: 0.010 },
 		},
 	};
+	/* PPG, DERIVED.
+
+	   It used to be typed in — 16.0 for the modern era, 15.0 for 2009-2021 —
+	   with a comment explaining that it was "the figure the other anchors
+	   imply". It was not. Run the identity the rest of this file is built on
+	   and the modern anchor set implies 14.6, not 16.0:
+
+	     chances   = FGA + 0.44*FTA + TOV                  = 76.8
+	     chanceMult= chances / possessions                 = 1.139
+	     tovShare  = TOV / chances                         = 0.151
+	     PPG       = poss * chanceMult * (MPG/40) * USG%
+	                      * (1 - tovShare) * 2 * TS%       = 14.59
+
+	   The gap is the turnover term. A player's usage INCLUDES the possessions
+	   he turns over, and those score nothing; the earlier derivation multiplied
+	   usage straight into true shooting and so paid him for them. A stated
+	   anchor that disagrees with the anchors it claims to follow is a stated
+	   anchor that will be defended against the model forever, so it is computed
+	   here instead and can only ever move when the numbers it is computed from
+	   move.
+
+	   The 2024 draft's college players bear the derived figure out: the
+	   twenty-one first- and second-rounders who played a D-I season that year
+	   averaged 14.3 points in it, from Edey's 25.2 down to Carter's 7.4.
+
+	   p95 keeps the 1.50 ratio to the mean that the old stated pair carried
+	   (24.0 / 16.0): the LEVEL was wrong, the SHAPE of the distribution around
+	   it was not what was being disputed. */
+	function impliedPpg(dy, team) {
+		const chances = team.fga + 0.44 * team.fta + team.tov;
+		const chanceMult = chances / team.poss;
+		const tovShare = team.tov / chances;
+		const mean = team.poss * chanceMult * (dy.mpg.mean / 40) * dy.usg.mean *
+			(1 - tovShare) * 2 * dy.ts.mean;
+		return { mean, p95: mean * 1.50 };
+	}
+	for (const key of Object.keys(ERAS)) {
+		ERAS[key].draftYear.ppg = impliedPpg(ERAS[key].draftYear, ERAS[key].team);
+	}
+
 	const DEFAULT_ERA = "modern";
 	let eraName = DEFAULT_ERA;
 	let era = ERAS[DEFAULT_ERA];
@@ -371,7 +395,7 @@
 
 	global.Calibration = {
 		HEIGHT_TABLE, ALL_SEASONS, ERAS, DEFAULT_ERA,
-		setEra, currentEra, eraInfo, forEra, chanceShape,
+		setEra, currentEra, eraInfo, forEra, chanceShape, impliedPpg,
 		byHeight, effShift, threeShare, talentUsageMult, talentEffAdj,
 		// Live views of the selected era, for callers that want the numbers.
 		get DRAFTED() { return era.draftYear; },

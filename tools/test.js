@@ -6,6 +6,10 @@
    Exit code is non-zero if anything fails. */
 "use strict";
 
+/* Unknown archetypes must throw here rather than silently scoring 1.0.
+   Set before the engine loads; js/ratings.js reads it once. */
+process.env.BBGM_STRICT_ROLES = "1";
+
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");

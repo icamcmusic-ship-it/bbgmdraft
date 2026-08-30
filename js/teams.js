@@ -15,7 +15,7 @@
 	// lottery talent (~81) clearly leads any roster. No saturation until the
 	// clamp at ovr ~73, so the top of a class stays ordered.
 	function prospectTalent(ovr, pot) {
-		return clamp(30 + ovr * 0.92 + (pot - ovr) * 0.15, 20, 97);
+		return clamp(36 + ovr * 0.80 + (pot - ovr) * 0.15, 20, 97);
 	}
 
 	/* `confStrength` is this season's strength for the conference, which drifts

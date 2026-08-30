@@ -37,12 +37,84 @@
 		   clamping onto it. The hard clamp piled 3.7% of the whole class on
 		   exactly 15.5% usage — a wall, which is the artefact the soft CEILING
 		   was introduced to remove, left in place at the other end. */
-		USG_FLOOR: 0.175,
+		/* The floor is the PLAYER's, not the class's. A single shared constant
+		   is a wall wherever it binds however softly it is approached: the
+		   asymptote at USG_FLOOR * (1 - USG_FLOOR_BAND) = 13.65% collected
+		   11.5% of a realistic class into one percentage point of usage, which
+		   is the "everyone's stats feel the same" artefact seen from the
+		   inside. A bound cannot be un-piled by moving it — raising the floor
+		   to 0.190 pinned a quarter of the class on 17.1% instead — so the
+		   floor is now a function of how good the player is, which spreads the
+		   binding population across a range rather than onto a point, and the
+		   raw distribution above it is widened (see ROLE_DRAW_SD) so that far
+		   fewer players reach it at all. */
+		USG_FLOOR: 0.178,
+		USG_FLOOR_TALENT: 0.075,   // span of the floor across the talent range
+		USG_FLOOR_ROLE: 0.050,     // and across the college-role latent
 		USG_FLOOR_FILLER: 0.10,
 		// How far below the floor the softened curve may reach, as a fraction
 		// of it. The floor becomes an asymptote instead of a clamp.
-		USG_FLOOR_BAND: 0.22,
-		USG_EXP: 2.35,      // steepness of the usage composite -> volume curve
+		USG_FLOOR_BAND: 0.35,
+		/* The lower bound on a player's PERSONAL ceiling was a hard
+		   clamp(..., 0.195, USG_CAP), and a hard bound at the bottom of a
+		   saturating curve is a wall: everyone whose computed ceiling fell
+		   below it got exactly 0.195 and then saturated towards it, piling
+		   12.5% of a class into [18.5, 20.0]. It is a softplus now, so the
+		   ceiling approaches USG_CEIL_MIN asymptotically and no two players
+		   share it. */
+		USG_CEIL_MIN: 0.150,
+		USG_CAP_BAND: 0.022,
+		USG_CEIL_BAND: 0.038,
+		/* Steepness of the usage composite -> volume curve. Came down from
+		   2.35. Three multiplicative terms all scaled with overall rating —
+		   this one, the talent term below, and prospectTalent's own slope —
+		   which stacked into corr(ovr, PPG) = 0.72 on a realistically shaped
+		   class. Real draft classes run 0.25-0.35: Zach Edey outscored every
+		   lottery pick in his class and Bronny James averaged 4.8. College
+		   production is not a ramp on NBA overall. */
+		USG_EXP: 1.85,
+		/* The talent half of the same stack, previously the inline exponent
+		   1.6 on (0.35 + 1.3 * talent/100). */
+		USG_TALENT_EXP: 1.20,
+		/* Size tilt on raw usage: a draft class's guards carry more of the
+		   offence than its centres, which BBGM's usage composite (ins 1.5,
+		   hgt 0.5) gets backwards. Was an inline 1.05. */
+		USG_SIZE_TILT: 1.30,
+		/* COLLEGE ROLE, the variable that did not exist.
+
+		   `classYear` appeared exactly once in this file, to set a reserve-year
+		   probability, so experience had no effect on usage, minutes,
+		   efficiency or turnovers — and the single most common profile of a
+		   draft class's leading scorer, a 22-year-old senior at a mid-major
+		   taking 30% of his team's shots, was a player the model could not
+		   construct. A college role is not an NBA overall rating: it is what a
+		   coach hands a player, and it depends on how long he has been in the
+		   programme, what kind of player he is (ROLE_USAGE), and a genuine
+		   independent draw that no rating predicts. */
+		EXP_USG: {
+			Freshman: 0.90, Sophomore: 1.04, Junior: 1.12,
+			Senior: 1.20, Graduate: 1.24,
+		},
+		/* The independent half of the role. Log-normal, so the multiplier is
+		   centred on 1 and right-skewed the way "how big a role did he get"
+		   actually is. This is what widens the raw usage distribution enough
+		   that the bounds above stop binding for most of the class, and it is
+		   the term that breaks college production loose from NBA overall. */
+		ROLE_DRAW_SD: 0.44,
+		CEIL_COMP: 0.20,
+		CEIL_TALENT: 0.030,
+		CEIL_ROLE: 0.110,
+		/* How much of the role latent reaches MINUTES. Minutes are far flatter
+		   than usage — the gap between a 20-minute man and a 33-minute one is
+		   not the gap between a 14% and a 30% usage — so the same latent is
+		   damped hard on its way in. */
+		MIN_ROLE_EXP: 0.45,
+		/* Upperclassmen finish better and turn it over less: an extra year in
+		   a college programme is worth real efficiency, which is most of why
+		   the senior-mid-major-scorer archetype exists at all. Per class-year
+		   step, centred on a sophomore. */
+		EXP_EFF: 0.0045,
+		EXP_TOV: 0.030,
 		/* Assists. At 4.1 the exponent produced a physically impossible floor:
 		   a centre's 10th-percentile line was 0.15 assists per game and the Rim
 		   Protector archetype averaged 0.42, which is not what a man playing 25
@@ -133,6 +205,16 @@
 		/* How much of the class's scoring gradient is allowed to come from
 		   playing at a weak programme rather than from being good. */
 		STL_ATH: 0.60,
+		/* The usage composite a synthesised returning teammate scores. See
+		   simulateTeamStats for why this number decides the whole class's
+		   scoring level. */
+		FILLER_USAGE: 0.320,
+		/* How far a realistically shaped draft class's composites sit below the
+		   reference points the efficiency model was written against. See
+		   statLine. Measured: a class drawn on a draft-slot ovr curve averages
+		   0.346 on the three-point composite where the old N(45,13) fixture
+		   averaged 0.395. */
+		PROSPECT_COMP_REF: 0.048,
 	};
 
 	/* The shape of a college rotation's minutes, by slot. Measured off D-I
@@ -196,6 +278,58 @@
 		return LEAGUE_ENV[name] || NCAA_ENV;
 	}
 
+	/* Class year as a number, 0 = freshman. The string carries decorations —
+	   "Redshirt Junior", "Graduate" — so it cannot be looked up directly, and
+	   a redshirt year IS an extra year in the programme even though it is not
+	   an extra year of eligibility used. */
+	const CLASS_YEAR_INDEX = {
+		Freshman: 0, Sophomore: 1, Junior: 2, Senior: 3, Graduate: 4,
+	};
+	function classYearIndex(classYear) {
+		const s = String(classYear || "Sophomore");
+		for (const k of Object.keys(CLASS_YEAR_INDEX)) {
+			if (s.indexOf(k) !== -1) {
+				// A redshirt has been in the building a year longer than his
+				// eligibility says.
+				return CLASS_YEAR_INDEX[k] + (s.indexOf("Redshirt") === 0 ? 0.6 : 0);
+			}
+		}
+		return 1;
+	}
+	function experienceUsage(classYear) {
+		const s = String(classYear || "Sophomore");
+		for (const k of Object.keys(TUNING.EXP_USG)) {
+			if (s.indexOf(k) !== -1) return TUNING.EXP_USG[k];
+		}
+		return 1;
+	}
+
+	/* The college role a coach hands a player, as a multiplier on raw usage.
+
+	   Deliberately NOT a function of overall rating: ovr already enters raw
+	   usage twice (through the composite and through the talent term) and
+	   through prospectTalent a third time, and that triple count is what made
+	   college scoring a near-deterministic ramp on NBA overall. What decides a
+	   college role instead is how long he has been here, what kind of player
+	   he is, and a large amount of nothing anyone can predict. */
+	function collegeRole(m, cfg, rng) {
+		if (m.filler) return 1;
+		const p = m.player;
+		const RB = global.RatingsBuilder;
+		const arch = RB && p ? RB.roleUsage(p.archetype) : 1;
+		/* The independent draw. Scaled by the stat-noise slider, but floored:
+		   a college role is a latent fact about a player and his programme,
+		   not a rounding error, so "deterministic from ratings" still leaves
+		   room for two identical prospects to be used differently. */
+		const noise = clamp(Number.isFinite(cfg.statNoise) ? cfg.statNoise : 1, 0, 3);
+		const sd = TUNING.ROLE_DRAW_SD * Math.max(0.4, noise);
+		/* Median 1, not mean 1: the draw is a role, and roles are
+		   right-skewed. The level it implies for the class as a whole is set
+		   by FILLER_USAGE, which is the only place a class's scoring level can
+		   come from at all (usage renormalises to 1 inside a roster). */
+		return experienceUsage(p && p.classYear) * arch * Math.exp(rng.normal(0, sd));
+	}
+
 	function shareFromWeights(vals, exp) {
 		const p = vals.map((v) => Math.pow(Math.max(0.001, v), exp));
 		const s = p.reduce((a, b) => a + b, 0);
@@ -204,7 +338,7 @@
 
 	/* Allocate minutes across a rotation by talent, then clamp to something a
 	   real rotation looks like and renormalise back to the team's minutes. */
-	function allocateMinutes(members, rng, comps, env) {
+	function allocateMinutes(members, rng, comps, env, roleMult) {
 		const e = env || NCAA_ENV;
 		const gameMinutes = e.gameMinutes || 40;
 		const teamMinutes = 5 * gameMinutes;
@@ -348,8 +482,18 @@
 			if (rng.random() < rate) return rng.uniform(0.34, 0.68) * fit;
 			return Math.exp(rng.normal(0, 0.11)) * fit;
 		};
+		/* The college-role latent reaches minutes too, flattened by
+		   MIN_ROLE_EXP. A coach who hands a player the ball also plays him, and
+		   the man who came back for a fifth year to be the guy is on the floor
+		   for it — but minutes are a much flatter quantity than usage, so the
+		   same latent enters at well under its full strength. Without this the
+		   role variable moved usage only, and usage alone could not break
+		   college scoring loose from NBA overall. */
+		const roleMin = (i) => (roleMult && Number.isFinite(roleMult[i])
+			? Math.pow(Math.max(0.05, roleMult[i]), TUNING.MIN_ROLE_EXP) : 1);
 		const talentShares = shareFromWeights(members.map((m, i) => shapeAt(slotOf[i]) *
-			stamina[i] * roleOf(m) * Math.max(0.05, relTilt(m.talent) + absTilt(m))), 1);
+			stamina[i] * roleOf(m) * roleMin(i) *
+			Math.max(0.05, relTilt(m.talent) + absTilt(m))), 1);
 		// Real rotations are flatter than raw talent: fouls, matchups, blowouts
 		// and coaching spread minutes around. But not as flat as they were.
 		const uniform = 1 / members.length;
@@ -584,6 +728,13 @@
 		   measured correlation between overall rating and true shooting was
 		   0.20 — almost all of it arriving through usage. */
 		const talentAdj = me.filler ? 0 : CAL.talentEffAdj(me.talent);
+		/* Experience -> efficiency. A fourth-year player in a college
+		   programme finishes better than a freshman with the same NBA rating,
+		   and until now class year touched nothing but a reserve-year
+		   probability. Centred on a sophomore so the class mean does not move
+		   off the empirical anchor. */
+		const expAdj = me.filler || !Number.isFinite(me.year)
+			? 0 : TUNING.EXP_EFF * clamp(me.year - 1, -1.2, 3.2);
 		/* The efficiency dial, which did not exist: pace and scoringEnv are
 		   both possession dials, and moving either left true shooting at 0.572
 		   in every configuration. */
@@ -602,6 +753,22 @@
 		const loadAdj = -0.30 * (usgRate - 0.245);
 
 		const bigness = clamp((ratings.hgt - 30) / 55, 0, 1);
+		/* THE COMPOSITE REFERENCE.
+
+		   Every skill term below is written as "how far this composite sits
+		   from what a typical player of this size scores on it", and every one
+		   of those reference points was read off a class whose ratings averaged
+		   45 — the shape of the old calibration fixture, not the shape of a
+		   BBGM draft class. A real export averages nearer 38, which puts every
+		   prospect composite about 0.05 low against a reference that never
+		   moved, and a class that is by assumption made of NBA draft picks then
+		   shot 55.4% true against an anchor of 58.5 and 31.8% from three
+		   against 35.2 — a three-point-per-attempt error caused entirely by
+		   measuring the class against the wrong reference player.
+
+		   Returning rotation players are synthesised from talent and already
+		   sit on the reference, so the shift is the prospect's alone. */
+		const ref = me.filler ? 0 : TUNING.PROSPECT_COMP_REF;
 
 		// Turnovers: draft-year mean 17.2% of possessions (p5 10.7, p95 24.5),
 		// essentially flat across sizes. A ball-pressure defence forces more.
@@ -610,9 +777,13 @@
 		// only above/below-typical skill moves the rate off its empirical anchor.
 		/* Returning rotation players give the ball away a little more often than
 		   future draft picks do; the drafted table is the prospect's anchor. */
-		const tovAnchor = CAL.byHeight("tov", bigness) * (me.filler ? 1.06 : 1);
+		/* And experience -> ball security, the other half of the same fact.
+		   A fourth-year guard gives it away less than a freshman does. */
+		const tovAnchor = CAL.byHeight("tov", bigness) * (me.filler ? 1.06 : 1) *
+			(me.filler || !Number.isFinite(me.year)
+				? 1 : 1 - TUNING.EXP_TOV * clamp(me.year - 1, -1.2, 3.2));
 		const tovRate = clamp(
-			tovAnchor - 0.10 * (comps.turnovers - 0.467) +
+			tovAnchor - 0.10 * (comps.turnovers - 0.467 + ref) +
 				/* Opponent ball pressure. PROGRAM_STYLES gives a full-court
 				   press team press: 0.06, and it was added straight onto a rate
 				   — so a conference stacked with pressing teams could add six
@@ -634,7 +805,7 @@
 			? CAL.ROTATION.ftr * (0.90 + 0.24 * bigness)
 			: CAL.byHeight("ftr", bigness);
 		const ftRate = clamp(
-			ftrAnchor + 0.32 * (comps.drawingFouls - (0.42 + 0.11 * bigness)) +
+			ftrAnchor + 0.32 * (comps.drawingFouls - (0.42 + 0.11 * bigness) + ref) +
 				rng.normal(0, 0.045 * noise),
 			0.10, 0.75,
 		);
@@ -678,8 +849,8 @@
 		const tpCeil = clamp(0.435 + 0.08 * Math.max(0, 1 - tpa / 3.5), 0.435, 0.50);
 		const tpp = clamp(
 			0.339 + CAL.effShift("three") + envEff +
-				0.40 * (comps.shootingThreePointer - (0.50 - 0.20 * bigness)) +
-				compAdj + synergy + talentAdj + loadAdj * 0.6 - 0.055 * od.perimeter +
+				0.40 * (comps.shootingThreePointer - (0.50 - 0.20 * bigness) + ref) +
+				compAdj + synergy + talentAdj + expAdj + loadAdj * 0.6 - 0.055 * od.perimeter +
 				mix(touch, rng.normal(0, 1)) * 0.030 * noise,
 			0.15, tpCeil,
 		);
@@ -693,13 +864,14 @@
 			0.10 * (comps.shootingAtRim - comps.shootingMidRange), 0.30, 0.75);
 		// Interior defence bites hardest exactly where it should: at the rim.
 		const insideEff = CAL.byHeight("rimPct", bigness) + CAL.effShift("inside") + envEff +
-			0.26 * (comps.shootingAtRim - (0.32 + 0.44 * bigness)) +
-			0.16 * (comps.shootingLowPost - (0.40 + 0.17 * bigness)) -
+			0.26 * (comps.shootingAtRim - (0.32 + 0.44 * bigness) + ref) +
+			0.16 * (comps.shootingLowPost - (0.40 + 0.17 * bigness) + ref) -
 			0.16 * od.rim;
 		const midEff = CAL.byHeight("midPct", bigness) + CAL.effShift("mid") + envEff +
-			0.26 * (comps.shootingMidRange - 0.45) - 0.05 * od.perimeter;
+			0.26 * (comps.shootingMidRange - 0.45 + ref) - 0.05 * od.perimeter;
 		const twoP = clamp(
-			rimMix * insideEff + (1 - rimMix) * midEff + compAdj + synergy + talentAdj + loadAdj +
+			rimMix * insideEff + (1 - rimMix) * midEff + compAdj + synergy + talentAdj +
+				expAdj + loadAdj +
 				rng.normal(0, 0.026 * noise),
 			0.34, 0.68,
 		);
@@ -959,7 +1131,16 @@
 			   itself put the average program 2.3 points of offensive
 			   efficiency light. */
 			return {
-				usage: f(0.485, 0.07), passing: f(0.45, 0.09), turnovers: f(0.47, 0.07),
+				/* 0.485 was fitted so the whole simulated field landed on the
+				   D-I rotation anchor — but it was fitted while the prospects
+				   being tested were drawn from a class averaging 0.450 on the
+				   same composite. A realistically shaped draft class averages
+				   0.394, and the 23% gap in the filler's favour is amplified by
+				   USG_EXP into a large weight gap: real prospects were losing
+				   possessions to invented teammates, which is the whole of the
+				   class-level scoring shortfall. Usage is zero-sum inside a
+				   roster, so the level of a class can only be raised here. */
+				usage: f(TUNING.FILLER_USAGE, 0.07), passing: f(0.45, 0.09), turnovers: f(0.47, 0.07),
 				shootingAtRim: f(0.515, 0.09), shootingLowPost: f(0.45, 0.09),
 				shootingMidRange: f(0.455, 0.08), shootingThreePointer: f(0.505, 0.10),
 				rebounding: f(0.47, 0.10), stealing: f(0.48, 0.07), blocking: f(0.45, 0.10),
@@ -973,7 +1154,13 @@
 			};
 		});
 
-		const mins = allocateMinutes(members, rng, comps, env);
+		/* One role draw per player, on its own rng stream so that changing
+		   anything else about the run does not reshuffle who got the ball. The
+		   same latent decides minutes and usage, because it is one fact about
+		   the player and not two. */
+		const roleMult = members.map((m, i) =>
+			collegeRole(m, cfg, rng.child("role|" + team.name + "|" + i)));
+		const mins = allocateMinutes(members, rng, comps, env, roleMult);
 		/* A 19-year-old at Real Madrid does not play 30 minutes, whatever his
 		   talent says. Cap the prospects, hand the freed minutes back to the
 		   senior professionals around them. */
@@ -1024,12 +1211,12 @@
 		   coach hands a player, so the archetype says what the composite
 		   cannot — see ROLE_USAGE in js/ratings.js. Fillers have no archetype
 		   and take 1. */
-		const RB = global.RatingsBuilder;
 		const rawUsg = members.map((m, i) =>
-			Math.pow(comps[i].usage, TUNING.USG_EXP) * Math.pow(0.35 + 1.3 * (m.talent / 100), 1.6) *
-				(1 + 1.05 * (0.42 - bignessOf(i))) *
+			Math.pow(comps[i].usage, TUNING.USG_EXP) *
+				Math.pow(0.35 + 1.3 * (m.talent / 100), TUNING.USG_TALENT_EXP) *
+				(1 + TUNING.USG_SIZE_TILT * (0.42 - bignessOf(i))) *
 				CAL.talentUsageMult(m.talent) *
-				(m.filler || !RB ? 1 : RB.roleUsage(m.player.archetype)),
+				roleMult[i],
 		);
 		let denom = 0;
 		for (let i = 0; i < members.length; i++) denom += rawUsg[i] * mins[i];
@@ -1048,7 +1235,23 @@
 		// every good prospect converge on the same number.
 		const bounds = members.map((m, i) => {
 			const ms = mins[i] / gameMinutes;
-			const floor = (m.filler ? TUNING.USG_FLOOR_FILLER : TUNING.USG_FLOOR) * ms;
+			/* A personal floor. A class's 65th-best prospect really does floor
+			   lower than its best, and giving every prospect the same one made
+			   the asymptote a wall that 11.5% of a realistic class sat on. */
+			/* The floor moves with the ROLE as well as with talent. Talent
+			   alone spans barely three points of usage across a draft class,
+			   so a talent-only floor is still one number to within a rounding
+			   error and still piles a tenth of the class onto it — and making
+			   it steeper in talent would buy the spread back by re-adding the
+			   ovr ramp this whole change exists to remove. The role latent is
+			   independent of overall rating by construction, so it widens the
+			   floor without steepening anything. */
+			const floorRate = m.filler
+				? TUNING.USG_FLOOR_FILLER
+				: TUNING.USG_FLOOR +
+					TUNING.USG_FLOOR_TALENT * clamp((m.talent - 55) / 40, -0.5, 0.9) +
+					TUNING.USG_FLOOR_ROLE * clamp(Math.log(Math.max(0.15, roleMult[i])), -1, 1);
+			const floor = floorRate * ms;
 			/* The ceiling is the player's, not the league's. A universal cap made
 			   every good prospect converge on the same number.
 
@@ -1058,10 +1261,31 @@
 			   25% usage and never reach it; mid-major ones sat on it, which is
 			   most of why the same overall rating produced 16.7 points a game
 			   in one conference and 21.2 in another. */
-			const personal = clamp(
-				0.253 + 0.50 * (comps[i].usage - 0.42) + 0.075 * ((m.talent - 55) / 45) +
-					0.105 * (0.42 - bignessOf(i)),
-				0.195, TUNING.USG_CAP,
+			/* Softplus at the bottom rather than a clamp. The old
+			   clamp(..., 0.195, USG_CAP) gave every player whose computed
+			   ceiling fell below 0.195 exactly 0.195, and the saturating curve
+			   then pushed them all towards it: 12.5% of a class landed in
+			   [18.5, 20.0] on that one bound. Softplus has the same asymptote
+			   and no two players on it. */
+			const raw = 0.253 + TUNING.CEIL_COMP * (comps[i].usage - 0.42) +
+				TUNING.CEIL_TALENT * ((m.talent - 55) / 45) + 0.105 * (0.42 - bignessOf(i)) +
+				TUNING.CEIL_ROLE * Math.log(Math.max(0.15, roleMult[i]));
+			const band = TUNING.USG_CEIL_BAND;
+			const soft = (x, edge, w, up) => {
+				// Smooth one-sided bound: softplus above `edge` when up, its
+				// mirror below when not. Approaches the bound asymptotically,
+				// so nobody ever lands exactly on it.
+				const z = (up ? x - edge : edge - x) / w;
+				const v = w * (z > 30 ? z : Math.log1p(Math.exp(z)));
+				return up ? edge + v : edge - v;
+			};
+			/* Both bounds are soft. USG_CAP was still a hard clamp, and a hard
+			   clamp is a wall wherever it binds: once the personal ceiling
+			   picked up enough spread to be worth having, 5.2% of the class
+			   landed on exactly 36.5% usage. */
+			const personal = soft(
+				soft(raw, TUNING.USG_CEIL_MIN, band, true),
+				TUNING.USG_CAP, TUNING.USG_CAP_BAND, false,
 			);
 			return {
 				floor,
@@ -1205,6 +1429,7 @@
 				teamCtx, {
 					talent: m.talent,
 					filler: !!m.filler,
+					year: m.filler ? null : classYearIndex(m.player.classYear),
 					availability: m.filler ? null : m.player.availability,
 				},
 			);
@@ -1520,6 +1745,6 @@
 		defenseProfile, rosterDefenseProfile, rosterShooting,
 		astWeight, stlWeight, rebWeight, passSkill,
 		leagueEnv, LEAGUE_ENV, NCAA_ENV,
-		TUNING, ROTATION_SHAPE,
+		TUNING, ROTATION_SHAPE, classYearIndex, experienceUsage, collegeRole,
 	};
 })(typeof window !== "undefined" ? window : self);

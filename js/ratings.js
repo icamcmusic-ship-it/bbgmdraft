@@ -139,39 +139,150 @@
 	   guessed: each value is the multiplier that brings its build's mean
 	   scoring residual against the class's own ovr fit inside +/-2 points, and
 	   tools/validate.js bands the worst of them so it cannot drift back. */
-	const ROLE_USAGE = {
-		"Floor General": 1.22, "Combo Guard": 0.46, "Sharpshooter": 0.54,
-		"Slasher": 0.92, "Defensive Pest": 2.30, "Heliocentric Guard": 0.86,
-		"Pick-and-Roll Maestro": 0.74, "Movement Shooter": 0.70,
-		"Pull-Up Artist": 0.42, "Downhill Attacker": 0.79,
-		"Crafty Finisher": 0.58, "Pass-First Sparkplug": 1.70, "Ball Hawk": 2.30,
-		"Pesky On-Ball Stopper": 2.30, "Score-First Point": 0.48,
-		"Sixth-Man Gunner": 0.32, "Streaky Volume Scorer": 0.32,
-		"Change-of-Pace Guard": 1.32, "Post-Up Guard": 0.32,
-		"Free-Throw Merchant": 0.92, "3&D Wing": 0.83, "Two-Way Wing": 1.22,
-		"Point Forward": 1.62, "Wing Sniper": 0.58, "Shot-Creating Wing": 0.54,
-		"Transition Wing": 1.78, "Cutter / Finisher": 1.12, "Wing Stopper": 2.30,
-		"Rebounding Wing": 0.96, "Corner Specialist": 0.74,
-		"Midrange Operator": 0.68, "Jumbo Playmaker": 0.59, "Energy Wing": 2.30,
-		"Do-It-All Forward": 1.27, "Bully Slasher": 0.61, "Glide Athlete": 1.60,
-		"Microwave Scorer": 0.50, "Athletic Freak": 1.31, "Glue Guy": 1.38,
-		"High-IQ Connector": 0.80, "Raw Project": 1.03, "Iron Man": 2.02,
-		"Stretch Big": 0.74, "Post Scorer": 0.63, "Rim Protector": 1.88,
-		"Rim Runner": 1.19, "Motor Big": 0.97, "Skilled Big": 0.57,
-		"Point Center": 0.78, "Offensive Rebounding Menace": 1.60,
-		"Switchable Big": 2.12, "Mobile Shot-Swatter": 2.30,
-		"Face-Up Four": 0.68, "Low-Post Bruiser": 0.54, "Pick-and-Pop Big": 0.89,
-		"Lob Threat": 1.16, "Old-School Center": 0.77,
-		"Undersized Rebounder": 1.16, "Foul-Prone Enforcer": 0.76,
-		"Low-Motor Talent": 0.34, "Foul Magnet Guard": 0.33,
-		"Non-Shooting Playmaker": 1.09, "Rebounding Guard": 2.07,
-		"Two-Way Point Guard": 1.36, "Small-Ball Five": 2.30,
-		"Stretch Four Stopper": 0.80, "Rim-Running Wing": 1.25,
-		"Late Bloomer": 1.10, "Positionless Forward": 0.91, "Balanced": 0.79,
+	/* THE TABLE IS GONE. This is now DERIVED.
+
+	   It used to be 72 hand-fitted constants, one per build, each of them the
+	   multiplier that happened to bring its build's mean scoring residual
+	   inside +/-2 points on the day it was measured. Three things were wrong
+	   with that:
+
+	     - Two builds had no entry at all (Injury-Prone Talent and Fifth-Year
+	       Senior) and silently defaulted to 1.0, which made Injury-Prone Talent
+	       the highest-scoring build in the class at 24.3 points a game. A
+	       lookup that answers 1.0 for a name it has never seen cannot be
+	       tested, because there is nothing to see.
+	     - Twelve of the 72 sat on the fit boundary — seven pinned at exactly
+	       2.30 and five at 0.32-0.34 — which means the fit failed for those
+	       builds and was clipped. It worked, but only just, and only for the
+	       exact model it was fitted against.
+	     - Every new build needed a hand-fitted constant, which is the real
+	       reason there were 72 builds and not 120.
+
+	   What the table was actually compensating for is a known quantity. BBGM's
+	   usage composite is 1.5*ins + dnk + fg + tp + 0.5*(spd + hgt + drb + oiq),
+	   over 650 — a description of a player's SHOT-MAKING. An archetype that
+	   loads on fg and tp raises that composite and takes volume it was never
+	   given; one that loads on diq and reb lowers it and loses volume it never
+	   should have lost. Both of those are computable straight off the build's
+	   own (ovr-neutralised) offset vector.
+
+	   So:
+
+	     compensation = (U0 / (U0 + compositeDelta)) ^ ROLE_COMP_EXP
+
+	   undoes what the composite over- or under-reads, and a small per-tag
+	   INTENT term says what a coach does on purpose: a creator gets the ball
+	   whether or not his ins rating agrees, and a rim protector does not.
+
+	   Fitted, not guessed: tools/rolefit.js measures every build's mean scoring
+	   residual against the class's own ovr fit and reports the constants that
+	   minimise them, and tools/validate.js bands the worst residual so this
+	   cannot drift. Adding a build no longer requires adding a constant. */
+	const ROLE_USAGE_W = { ins: 1.5, dnk: 1, fg: 1, tp: 1, spd: 0.5, hgt: 0.5, drb: 0.5, oiq: 0.5 };
+	const ROLE_USAGE_DENOM = 650;
+	/* The usage composite a typical drafted prospect scores. Measured on a
+	   draft-slot-shaped class, which is the population this has to be right
+	   for; the old fixture's 0.45 is what made the filler baseline wrong too. */
+	const ROLE_U0 = 0.394;
+	/* Self-creation. The usage composite counts drb and oiq at 0.5 and pss not
+	   at all, because it is measuring who can MAKE a shot, not who makes his
+	   own. A build that loads on handle and vision is given the ball more than
+	   its shot-making says: that is the difference between a Slasher and a
+	   Cutter, who do the same damage but only one of whom creates it. Weighted
+	   the way a creation role actually splits: handle first, then passing, then
+	   feel.
+
+	   The fit currently puts almost no weight on it (createW is near zero): the
+	   playmaking and guard tags between them already absorb what it measures on
+	   the present table. It is kept because it is a real and separable term —
+	   the tags are a proxy for it and a new build can easily be a creator
+	   without carrying either tag — and because a regressor the fit can decide
+	   is worth nothing is exactly what a fitted model should contain. */
+	const ROLE_CREATE_W = { drb: 0.6, pss: 1.0, oiq: 0.5 };
+	function creationDelta(arch) {
+		let d = 0;
+		for (const k of Object.keys(ROLE_CREATE_W)) d += ROLE_CREATE_W[k] * (arch.o[k] || 0);
+		// Scaled so the term has roughly unit spread across the table, which
+		// is what keeps tools/rolefit.js's ridge from shrinking it to nothing
+		// purely because its column was small.
+		return d / 25;
+	}
+
+	const ROLE_FIT = {
+		createW: -0.02,
+		compExp: 0.63,
+		base: 0.97,
+		/* What a coach hands each kind of player, over and above what his
+		   shot-making says. Scoring and shooting builds are ALREADY given the
+		   ball by the composite, so their intent term is below 1; defensive,
+		   athletic and rebounding builds are not, so theirs is above it. */
+		tags: {
+			guard: 0.94, wing: 1.08, big: 1.14,
+			scoring: 0.83, shooting: 0.88, playmaking: 1.05,
+			defense: 1.01, athletic: 1.16, rebounding: 1.00, raw: 0.81,
+		},
+		/* Softly bounded rather than clamped, so a build can never land
+		   exactly on a limit the way twelve of the old table's entries did. */
+		lo: 0.30, hi: 2.60, band: 0.18,
 	};
+
+	/* The delta an archetype's offsets make to BBGM's usage composite. Read
+	   off the NORMALISED offsets, which is what actually reaches the ratings. */
+	function usageCompositeDelta(arch) {
+		let d = 0;
+		for (const k of Object.keys(arch.o)) d += (ROLE_USAGE_W[k] || 0) * arch.o[k];
+		return d / ROLE_USAGE_DENOM;
+	}
+
+	function softBound(x, lo, hi, band) {
+		// Softplus up from lo, mirrored down from hi. Monotone, and never
+		// exactly equal to either bound.
+		const up = (v, e) => {
+			const z = (v - e) / band;
+			return e + band * (z > 30 ? z : Math.log1p(Math.exp(z)));
+		};
+		const down = (v, e) => {
+			const z = (e - v) / band;
+			return e - band * (z > 30 ? z : Math.log1p(Math.exp(z)));
+		};
+		return down(up(x, lo), hi);
+	}
+
+	function computeRoleUsage(arch) {
+		const du = usageCompositeDelta(arch);
+		let v = ROLE_FIT.base *
+			Math.pow(ROLE_U0 / Math.max(0.05, ROLE_U0 + du), ROLE_FIT.compExp) *
+			Math.exp(ROLE_FIT.createW * creationDelta(arch));
+		for (const t of arch.t || []) {
+			if (Number.isFinite(ROLE_FIT.tags[t])) v *= ROLE_FIT.tags[t];
+		}
+		return softBound(v, ROLE_FIT.lo, ROLE_FIT.hi, ROLE_FIT.band);
+	}
+
+	/* Computed once, exposed as an object so the editor and the tests can read
+	   the whole table the way they always could. */
+	const ROLE_USAGE = {};
+	for (const a of ARCHETYPES) ROLE_USAGE[a.name] = computeRoleUsage(a);
+
+	/* An unknown build is now an ERROR, not a silent 1.0.
+
+	   Both builds that fell through the old table did so invisibly, and the
+	   only reason anyone noticed is that one of them came out as the
+	   highest-scoring archetype in the class. In a browser the sim must not
+	   die on a name it does not recognise, so a fallback is still returned —
+	   but under a test harness (BBGM_STRICT_ROLES, set by tools/test.js and
+	   tools/validate.js) it throws, which is where a missing build should be
+	   found. */
+	const STRICT_ROLES = typeof process !== "undefined" && process.env &&
+		process.env.BBGM_STRICT_ROLES === "1";
 	function roleUsage(name) {
 		const v = ROLE_USAGE[name];
-		return Number.isFinite(v) ? v : 1;
+		if (Number.isFinite(v)) return v;
+		if (STRICT_ROLES) {
+			throw new Error("roleUsage: unknown archetype " + JSON.stringify(name) +
+				" — every build must be in ARCHETYPES");
+		}
+		return 1;
 	}
 
 	/* How much room to grow each build implies, in ovr→pot gap points. A Raw
@@ -766,7 +877,8 @@
 		ARCHETYPES, RAW_OFFSETS, OVR_W, SHIFT_SCALE, USAGE_W,
 		rebuild, classCurve, pickArchetype, solveToOvr, shiftScales, ovrRange, resolveTo,
 		potAdjust, potFactors, potFromRole, POT_BY_ARCHETYPE,
-		ROLE_USAGE, roleUsage,
+		ROLE_USAGE, roleUsage, computeRoleUsage, usageCompositeDelta, creationDelta,
+		ROLE_FIT,
 		CLASS_FLAVORS, pickFlavor, flavorMultiplier, flavorConfig, pickClassPool,
 	};
 })(typeof window !== "undefined" ? window : self);
