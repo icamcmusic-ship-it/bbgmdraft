@@ -679,6 +679,86 @@ console.log("\nPossession accounting");
 			vsShooters.toFixed(2) + " against a good one");
 }
 
+/* ----------------------------------------------- opponent pressure, bounded */
+console.log("\nOpponent pressure");
+{
+	/* PROGRAM_STYLES gives a full-court press team press: 0.06, and it was
+	   added straight onto a turnover rate — so a conference stacked with
+	   pressing teams could add six percentage points, larger than the entire
+	   height gradient in the calibration table (17.2% to 17.8%). Nothing
+	   covered it. */
+	const styles = global.TeamsSim.PROGRAM_STYLES;
+	const maxPress = Math.max.apply(null, styles.map((x) => x.press));
+	const comps = {
+		usage: 0.47, passing: 0.44, turnovers: 0.467, shootingAtRim: 0.5,
+		shootingLowPost: 0.45, shootingMidRange: 0.45, shootingThreePointer: 0.5,
+		rebounding: 0.45, stealing: 0.46, blocking: 0.45, drawingFouls: 0.47,
+		defense: 0.48, fouling: 0.45, defenseInterior: 0.46, defensePerimeter: 0.46,
+		endurance: 0.5, athleticism: 0.48,
+	};
+	const teamCtx = {
+		games: 31, pace: 68, chanceMult: 1.14, support: 55,
+		env: global.StatsSim.NCAA_ENV, style: { three: 0, rim: 0, press: 0, pace: 0 },
+		orbPool: 9.5, drbPool: 24, astPool: 13.5, stlPool: 6.3, blkPool: 3.5, pfPool: 16.6,
+		rebDen: 1, orbDen: 1, astDen: 1, stlDen: 1, blkDen: 1, pfDen: 1,
+	};
+	const cfg = global.Config.make({ statNoise: 0 });
+	const ratings = { hgt: 45, ft: 55, tp: 50, pss: 50 };
+	const lineAt = (press) => global.StatsSim.statLine(
+		new Rng("press" + press), ratings, comps, 30, 0.2,
+		{ oppStrength: 52, oppDefense: { rim: 0, perimeter: 0, overall: 0 }, oppPress: press },
+		cfg, teamCtx, { talent: 72, filler: false });
+	const flat = lineAt(0);
+	const pressed = lineAt(maxPress);
+	const lift = pressed.topg / flat.topg - 1;
+	ok("a pressing schedule forces more turnovers", lift > 0.05,
+		(100 * lift).toFixed(1) + "% more against the heaviest press in the table");
+	/* Half of a press's effect is a live-ball turnover; the rest is a rushed
+	   shot, which the efficiency terms already carry. A whole conference of
+	   pressing teams must not double a prospect's turnovers. */
+	ok("a pressing schedule does not swamp the height gradient", lift < 0.28,
+		(100 * lift).toFixed(1) + "% lift");
+}
+
+/* -------------------------------------------------------- schedule making */
+console.log("\nSchedule");
+{
+	/* pairUp drew its acceptance value inside the caller's filter predicate,
+	   up to fourteen times per pairing, which left the schedule sensitive to
+	   loop order in a way nothing tested. The draw is made by pairUp and
+	   handed in. */
+	const rng = new Rng("sched");
+	const pool = [];
+	for (let i = 0; i < 40; i++) {
+		pool.push({ name: "t" + i, games: 0, conf: "c" + (i % 5), rating: 30 + i });
+	}
+	let sawRoll = 0;
+	global.TeamsSim.pairUp(rng, pool, 12, (a, b, roll) => {
+		if (Number.isFinite(roll)) sawRoll++;
+		return a.conf !== b.conf && roll < 0.9;
+	}, (A, B) => { A.games++; B.games++; });
+	ok("pairUp hands the acceptance draw to the filter", sawRoll > 0,
+		sawRoll + " candidates offered a roll");
+	const counts = pool.map((t) => t.games);
+	ok("every team finishes on the target number of games",
+		Math.max.apply(null, counts) === 12 && Math.min.apply(null, counts) === 12,
+		Math.min.apply(null, counts) + "-" + Math.max.apply(null, counts));
+	// And it is still deterministic from the seed.
+	const rerun = () => {
+		const r = new Rng("sched");
+		const p2 = [];
+		for (let i = 0; i < 40; i++) {
+			p2.push({ name: "t" + i, games: 0, conf: "c" + (i % 5), rating: 30 + i });
+		}
+		const log = [];
+		global.TeamsSim.pairUp(r, p2, 12,
+			(a, b, roll) => a.conf !== b.conf && roll < 0.9,
+			(A, B) => log.push(A.name + "-" + B.name));
+		return log.join(",");
+	};
+	ok("the schedule is reproducible from the seed", rerun() === rerun());
+}
+
 /* ---------------------------------------------- distributions that matter */
 console.log("\nDistributions");
 {

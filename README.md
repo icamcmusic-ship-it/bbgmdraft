@@ -266,8 +266,10 @@ shot, that no rotation player finishes with an impossible assist line, that a
 non-shooter does not launch threes, that the defensive archetypes keep more of
 their offence than a uniform ovr-neutralising shift would leave them, that the
 rarest builds actually turn up, that rerolling one prospect moves exactly one
-prospect, that a season on fourteen programmes still produces a champion, and
-that a batch is reproducible from its seed.
+prospect, that a season on fourteen programmes still produces a champion, that a
+pressing schedule forces more turnovers without swamping the height gradient,
+that every team still finishes on the same number of games, and that a batch is
+reproducible from its seed.
 
 Both run on every push (`.github/workflows/ci.yml`), along with a
 headless-browser smoke test that loads a class, renders every tab, exercises the
