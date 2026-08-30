@@ -106,6 +106,14 @@
 		// scores its points more (or less) efficiently.
 		efficiencyEnv: 0,      // -3 (bricks) .. +3 (everything falls)
 		statNoise: 1.0,        // 0 = deterministic from ratings, 2 = wild
+		/* How a prospect's earlier college seasons are produced.
+
+		   "simulate" runs each of them through the same stat model the draft
+		   year goes through — the player at the ratings he had then, with that
+		   year's class year, in a rotation rebuilt around him. "reconstruct" is
+		   the older behaviour: a backward-scaled copy of the draft-year line,
+		   which reads fine and is not a season. */
+		priorSeasons: "simulate",   // "simulate" | "reconstruct"
 
 		// --- postseason ---------------------------------------------------
 		upsetFactor: 1.0,      // 0 = chalk, 2 = madness

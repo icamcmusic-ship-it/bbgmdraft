@@ -1214,6 +1214,56 @@ console.log("\nSeason story");
 		Object.values(down.teams).filter((t) => t.downYear).length + " programmes");
 }
 
+console.log("\nEarlier seasons");
+{
+	/* They used to be a backward-scaled copy of the draft year. They are
+	   simulated now, which is only worth doing if the progression it produces
+	   is a progression. */
+	/* Three classes, because a single one holds only a couple of dozen
+	   sophomore seasons and the comparison below is between two means. */
+	const runs = [4, 5, 6].map((i) => global.Engine.run(V.realisticClass(i, 70),
+		global.Config.make({ seed: "prior" + i })));
+	const res = runs[0];
+	const everyone = runs.reduce((a, r) => a.concat(r.players), []);
+	const by = { Freshman: [], Sophomore: [], Junior: [], Senior: [] };
+	let simulated = 0;
+	let reconstructed = 0;
+	for (const p of everyone) {
+		for (const r of p.priorSeasons || []) {
+			if (r.redshirt) continue;
+			if (r.simulated) simulated++; else reconstructed++;
+			if (by[r.classYear]) by[r.classYear].push(r);
+		}
+	}
+	ok("earlier seasons are simulated for D-I prospects", simulated > reconstructed,
+		simulated + " simulated, " + reconstructed + " reconstructed");
+	const mean = (a, f) => (a.length ? a.reduce((x, y) => x + f(y), 0) / a.length : 0);
+	const fr = mean(by.Freshman, (r) => r.mpg);
+	const so = mean(by.Sophomore, (r) => r.mpg);
+	ok("a freshman year is a freshman year", by.Freshman.length > 30 && fr < so - 1,
+		"freshman " + fr.toFixed(1) + " MPG against sophomore " + so.toFixed(1));
+	/* The failure this replaced: with nobody in front of him on a synthetic
+	   roster, a prospect's freshman year came out BETTER than his draft year. */
+	let inverted = 0;
+	let checked = 0;
+	for (const p of everyone) {
+		const first = (p.priorSeasons || []).filter((r) => !r.redshirt)[0];
+		if (!first || !first.simulated || !p.stats) continue;
+		checked++;
+		if (first.ppg > p.stats.ppg + 4) inverted++;
+	}
+	ok("almost nobody's first year outscores his draft year",
+		checked > 10 && inverted <= Math.ceil(checked * 0.12),
+		inverted + " of " + checked);
+	ok("turning simulation off restores the reconstruction",
+		global.Engine.run(V.realisticClass(4, 70), global.Config.make({
+			seed: "prior", priorSeasons: "reconstruct",
+		})).players.some((p) => (p.priorSeasons || []).some((r) => !r.redshirt)) &&
+		!global.Engine.run(V.realisticClass(4, 70), global.Config.make({
+			seed: "prior", priorSeasons: "reconstruct",
+		})).players.some((p) => (p.priorSeasons || []).some((r) => r.simulated)));
+}
+
 console.log("\nRegressions");
 {
 	/* An archetype with no role-usage entry used to score a silent 1.0, which

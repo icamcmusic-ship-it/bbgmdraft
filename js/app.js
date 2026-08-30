@@ -1816,7 +1816,9 @@
 		}
 		const table = el("table", "mini");
 		const head = el("tr");
-		for (const h of ["Season", "Team", "GP", "MPG", "PPG", "RPG", "APG", "TS%"]) {
+		// Overall is on the earlier rows now, because a simulated prior season
+		// is a season of a DIFFERENT player: the number is the point.
+		for (const h of ["Season", "Team", "Ovr", "GP", "MPG", "PPG", "RPG", "APG", "TS%"]) {
 			head.appendChild(el("th", null, h));
 		}
 		table.appendChild(head);
@@ -1826,10 +1828,12 @@
 			tr.appendChild(el("td", null, team));
 			if (r.redshirt) {
 				const td = el("td", null, r.reason || "redshirt");
-				td.colSpan = 6;
+				td.colSpan = 7;
 				tr.appendChild(td);
 				return tr;
 			}
+			tr.appendChild(el("td", "num",
+				Number.isFinite(r.ovr) ? String(r.ovr) : (now ? String(p.newOvr) : "—")));
 			tr.appendChild(el("td", "num", String(Math.round(r.gp))));
 			for (const k of ["mpg", "ppg", "rpg", "apg"]) {
 				tr.appendChild(el("td", "num", r[k].toFixed(1)));
@@ -1843,10 +1847,14 @@
 		}
 		box.appendChild(table);
 		if (rows.length) {
-			box.appendChild(el("p", "hint",
-				"Earlier seasons are reconstructed by the model, not simulated — " +
-				"the same way the recruiting ranking and the transfer history are. " +
-				"Nothing in the tool ranks on them."));
+			const simulated = rows.some((r) => r.simulated);
+			box.appendChild(el("p", "hint", simulated
+				? "Earlier seasons are simulated: the same stat model, the player " +
+					"at the ratings he had then, and a rotation with the men he " +
+					"was behind actually on it. Nothing in the tool ranks on them."
+				: "Earlier seasons are reconstructed by the model, not simulated — " +
+					"the same way the recruiting ranking and the transfer history " +
+					"are. Nothing in the tool ranks on them."));
 		}
 		return box;
 	}

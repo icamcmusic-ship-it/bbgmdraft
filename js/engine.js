@@ -1212,23 +1212,33 @@
 			p.gameLog = S.gameLog(p, home, logRng.child("gl:" + p.key));
 			p.signature = p.gameLog ? p.gameLog.best : null;
 		}
-		buildPriorSeasons(state.players, state.season, state.rng.child("prior"));
+		buildPriorSeasons(state.players, state.season, state.rng.child("prior"),
+			teams, cfg);
 		return state;
 	}
 
 	/* The seasons before this one.
 
-	   The tool simulates one year and the README lists multi-year progression
-	   as a known limit — but a junior HAS a freshman year, and its absence is
-	   the single biggest hole in a scouting note: "he averaged 16 a game" reads
-	   completely differently from "he averaged 4, then 9, then 16". These are
-	   fabricated, exactly as the recruiting rank and the transfer history
-	   already are, and they are labelled as the model's own reconstruction
-	   rather than as simulated seasons — nothing downstream ranks on them.
+	   These used to be a backward-scaled copy of the draft year: multiply the
+	   minutes by 0.60 and the production by 0.45 and call that a sophomore
+	   season. It reads fine and it is not a season — the shape of a prior year
+	   is set by the SAME things that shape this one (how good he was, which
+	   build he is, where he sat in a rotation that contained an older player,
+	   what a coach gives a sophomore) and a scalar cannot express any of them.
+	   A 22-point senior year scaled back to a 10-point sophomore year is a
+	   different claim from a sophomore who was the fourth option and took 14%
+	   of the shots, and only one of them is a story.
 
-	   The shape is the ordinary one: minutes arrive before production, a
-	   freshman year is a fraction of a senior year, and a transfer's earlier
-	   seasons happened at the school he transferred from. */
+	   So a prior season is SIMULATED, through the same stat model the draft
+	   year goes through: the prospect at the ratings he had then, with that
+	   year's class year (so the experience curve and the college-role draw
+	   apply), in a rotation rebuilt at his programme's level for that year.
+	   The cost is one team simulation per prior season — a few hundred against
+	   the 368 the season itself runs — and `cfg.priorSeasons` turns it off,
+	   which restores the old reconstruction exactly.
+
+	   A transfer's earlier seasons still happen at the school he came from, and
+	   a redshirt year is still a year with no games in it. */
 	const PRIOR_CURVE = [
 		// [minutes share, production share] of his draft-year line, by how many
 		// years before it the season was.
@@ -1249,7 +1259,93 @@
 		return base;
 	}
 
-	function buildPriorSeasons(players, season, rng) {
+	/* How much worse a prospect was, in overall rating, i seasons ago. A
+	   freshman year is a long way below a draft year and the gap closes as the
+	   player arrives; the ovr→pot gap says how fast, because a high-upside
+	   player is one who was further back. */
+	function ovrYearsAgo(p, i) {
+		const room = Math.max(2, (p.newPot || p.newOvr) - p.newOvr);
+		const step = 2.6 + 0.32 * room;
+		return clamp(Math.round(p.newOvr - step * Math.pow(i, 0.85)), 8, 90);
+	}
+
+	/* One prior season, simulated. Returns a stat line or null. */
+	function simulatePriorSeason(p, i, teams, season, cfg, rng) {
+		if (!p.buildCleanBase || !RB.resolveTo) return null;
+		const school = (p.transfer && p.transfer.from) ? p.newCollege : p.newCollege;
+		const home = teams[school];
+		if (!home) return null;
+		const targetOvr = ovrYearsAgo(p, i);
+		let re;
+		try {
+			re = RB.resolveTo(p.buildCleanBase, targetOvr, p.archetype,
+				p.origRatings ? p.origRatings.fuzz : 0, p.buildPinned, p.buildCleanBase);
+		} catch (e) {
+			return null;
+		}
+		const younger = {
+			key: p.key + "|y" + i,
+			name: p.name,
+			archetype: p.archetype,
+			classYear: CLASS_YEARS[clamp(priorYears(p.classYear) - i, 0, 3)],
+			newRatings: re.ratings,
+			newOvr: re.ovr,
+			availability: null,
+			statSalt: "|prior" + i,
+		};
+		/* A rotation rebuilt at the programme's level for that year, with the
+		   men he was BEHIND actually on it.
+
+		   Without them a freshman year came out better than the draft year:
+		   nine synthesised role players leave the one real prospect all the
+		   minutes and all the shots, so a 45-overall sophomore's freshman
+		   season read 32 minutes and 15 points and his actual sophomore season
+		   read 32 and 13. The thing that makes a freshman year a freshman year
+		   is not a scalar on his production, it is the senior in front of him,
+		   and that senior is cheap to put on the floor. Fewer of them each year
+		   as he becomes the one they are behind. */
+		const level = clamp((home.level || 50) + rng.normal(0, 3), 5, 99);
+		const mine = T.prospectTalent(younger.newOvr, p.newPot || younger.newOvr);
+		const members = [{ filler: false, player: younger, talent: mine }];
+		const fillers = [];
+		for (let j = 0; j < 9; j++) fillers.push(T.makeFiller(rng.child("f" + j), level, j));
+		/* How many of them he is behind is a function of WHICH YEAR it was, not
+		   of how many years ago: a freshman is the fifth or sixth option
+		   whether he turns into a lottery pick or a fifth-year senior, and
+		   using the distance back instead made a sophomore's freshman year and
+		   a senior's freshman year two different seasons. */
+		const AHEAD_BY_YEAR = [4.4, 2.9, 1.7, 0.9];
+		const yearIdx = clamp(priorYears(p.classYear) - i, 0, 3);
+		const ahead = clamp(
+			Math.round(rng.normal(AHEAD_BY_YEAR[yearIdx], 1.1)), 0, 7);
+		for (let j = 0; j < ahead && j < fillers.length; j++) {
+			fillers[j].talent = clamp(mine + rng.uniform(2, 15), 6, 97);
+		}
+		fillers.sort((a, b) => b.talent - a.talent);
+		T.capFillers(fillers, members);
+		for (const f of fillers) members.push(f);
+		const team = {
+			name: home.name + "|" + (season - i),
+			conf: home.conf,
+			style: home.style,
+			members,
+			log: [],
+		};
+		S.simulateTeamStats(team, {
+			oppStrength: home.sosAvg || 50,
+			oppDefense: home.oppDefense || { rim: 0, perimeter: 0, overall: 0 },
+			oppPress: home.oppPress || 0,
+			teamFg: home.teamFg,
+			oppFg: home.oppFg,
+			games: SEASON_GAMES,
+			league: S.NCAA_ENV,
+			pro: false,
+		}, cfg, rng.child("sim"));
+		return younger.stats ? { line: younger.stats, ovr: younger.newOvr } : null;
+	}
+
+	function buildPriorSeasons(players, season, rng, teams, cfg) {
+		const simulate = !cfg || cfg.priorSeasons !== "reconstruct";
 		for (const p of players) {
 			p.priorSeasons = null;
 			const n = priorYears(p.classYear);
@@ -1257,6 +1353,29 @@
 			const r = rng.child("prior:" + p.key);
 			const rows = [];
 			for (let i = n; i >= 1; i--) {
+				const sim = simulate && !p.nonNcaa
+					? simulatePriorSeason(p, i, teams, season, cfg, r.child("y" + i))
+					: null;
+				if (sim) {
+					const L = sim.line;
+					rows.push({
+						season: season - i,
+						team: (p.transfer && p.transfer.from && i >= 1)
+							? p.transfer.from : p.newCollege,
+						classYear: CLASS_YEARS[Math.max(0, priorYears(p.classYear) - i)],
+						ovr: sim.ovr,
+						gp: Math.round(L.gp),
+						mpg: L.mpg,
+						ppg: L.ppg,
+						rpg: L.rpg,
+						apg: L.apg,
+						usg: L.usg,
+						ts: L.ts,
+						simulated: true,
+						redshirt: false,
+					});
+					continue;
+				}
 				const c = PRIOR_CURVE[Math.min(PRIOR_CURVE.length - 1, i - 1)];
 				// A developing player is not a scaled copy of himself: the
 				// jitter is what makes a leap or a plateau readable.
@@ -1423,7 +1542,8 @@
 		{ name: "postseason", deps: ["upsetFactor"], run: phasePostseason },
 		{
 			name: "stats",
-			deps: ["era", "pace", "scoringEnv", "efficiencyEnv", "statNoise"],
+			deps: ["era", "pace", "scoringEnv", "efficiencyEnv", "statNoise",
+				"priorSeasons"],
 			run: phaseStats,
 		},
 		{ name: "pot", deps: ["potBias", "potSpread"], run: phasePot },
