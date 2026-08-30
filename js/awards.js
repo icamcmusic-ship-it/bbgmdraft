@@ -24,11 +24,29 @@
 	const C = global.Colleges;
 	const T = global.TeamsSim;
 
+	/* A production resume, normalised for PACE.
+
+	   The counting half of this is raw per-game volume, and PROGRAM_STYLES
+	   moves a team's possessions by +/-5.5 a game — so a run-and-gun program
+	   handed its best player about 8% more of everything than a pack-line
+	   program did, for nothing he had done. This score is what the award model
+	   and the draft board rank on, so that was a systematic tilt of the whole
+	   honours list towards fast schools.
+
+	   The counting terms are scaled to a reference tempo and the rate term
+	   (true shooting) is left alone, because a percentage is already
+	   pace-free. A player whose team's pace is unknown is scored as if he
+	   played at the reference, which is what the old formula did for
+	   everybody. */
+	const REF_PACE = 68;
 	function productionScore(p) {
 		const s = p.stats;
+		const pace = Number.isFinite(p.teamPace) && p.teamPace > 40 ? p.teamPace : REF_PACE;
+		const k = REF_PACE / pace;
 		return (
-			s.ppg + 1.2 * s.rpg + 1.7 * s.apg + 2.6 * s.spg + 2.6 * s.bpg -
-			0.8 * s.topg + 55 * (s.ts - 0.52)
+			(s.ppg + 1.2 * s.rpg + 1.7 * s.apg + 2.6 * s.spg + 2.6 * s.bpg -
+				0.8 * s.topg) * k +
+			55 * (s.ts - 0.52)
 		);
 	}
 
@@ -178,7 +196,7 @@
 			for (const fp of t.fieldPlayers) {
 				if (fp.mpg < 8) continue;
 				const stats = fp.line;
-				const holder = { stats };
+				const holder = { stats, teamPace: t.pace };
 				const prod = productionScore(holder);
 				// A returner's defensive composites are not stored, so the
 				// composite half of the defensive score is approximated from
@@ -712,6 +730,7 @@
 
 	global.Awards = {
 		assign, productionScore, defenseScore, fieldDefenseScore, resumeScore,
+		REF_PACE,
 		buildField, fitScores, fitTalentToScore, awardRank, sortAwards,
 		NATIONAL_POY, NATIONAL_DPOY, POSITION_AWARDS, AWARD_TIERS,
 		NCAA_BONUS, NIT_BONUS, GATES,

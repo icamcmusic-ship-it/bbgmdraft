@@ -940,6 +940,40 @@ console.log("\nLeague file season");
 	}
 }
 
+/* ------------------------------------------------------- ovr weight drift */
+console.log("\nOVR weights against BBGM's own formula");
+{
+	/* OVR_W is a hand-transcribed copy of the linear weights inside BB.ovr(),
+	   and it is what makes every archetype's offset vector ovr-neutral. If BBGM
+	   ever re-fits those weights, BB.ovr() keeps passing every test it has —
+	   it is the source of truth — while every archetype silently stops being
+	   ovr-neutral and the specialisation slider starts meaning something
+	   different per build. Nothing could see that.
+
+	   So derive the weights numerically by finite differences and check them
+	   against the table. This runs against BB.ovrRaw — the linear half, before
+	   the piecewise fudge and the rounding — because against ovr() itself a
+	   single rating's contribution disappears into the quantisation: endu moves
+	   the result by 1.3 points over the whole difference and the rounding is
+	   half a point. ovrRaw is what ovr() is built from, so there is still only
+	   one copy of these weights inside BBGM to drift away from. */
+	const RB = global.RatingsBuilder;
+	const base = {};
+	for (const k of BB.RATING_KEYS) base[k] = 50;
+	base.fuzz = 0;
+	const h = 10;
+	let worst = 0;
+	let worstKey = "";
+	for (const k of BB.RATING_KEYS) {
+		const up = Object.assign({}, base, { [k]: 50 + h });
+		const dn = Object.assign({}, base, { [k]: 50 - h });
+		const d = Math.abs((BB.ovrRaw(up) - BB.ovrRaw(dn)) / (2 * h) - RB.OVR_W[k]);
+		if (d > worst) { worst = d; worstKey = k; }
+	}
+	ok("OVR_W matches BBGM's own ovr formula", worst < 1e-6,
+		"worst " + worstKey + " off by " + worst.toFixed(8));
+}
+
 /* ------------------------------------------------- small-field tournament */
 console.log("\nSmall custom college sets");
 {

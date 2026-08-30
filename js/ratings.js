@@ -161,6 +161,26 @@
 		"Iron Man": -3, "Floor General": -3, "Pesky On-Ball Stopper": -3,
 		"Old-School Center": -4, "Post-Up Guard": -4, "Undersized Rebounder": -4,
 		"Low-Post Bruiser": -3, "Foul-Prone Enforcer": -2,
+		/* The 28 builds below had no entry and defaulted to 0, so nearly half a
+		   class — including Combo Guard, 3&D Wing, Rim Protector, Stretch Big,
+		   Post Scorer and Motor Big, six of the ten commonest builds in the
+		   table — got no archetype signal in its potential at all. The values
+		   follow the same logic as the ones above: length, athleticism and
+		   youth-coded tools are upside; finished skill, a narrow role and a
+		   build that already needs the ball are not.
+
+		   Positive: the tools are there and the skill is not yet.
+		   Negative: the skill is there and this is what he is. */
+		"Switchable Big": 3, "Rim Protector": 2, "Shot-Creating Wing": 2,
+		"Combo Guard": 1, "3&D Wing": 1, "Point Forward": 1,
+		"Offensive Rebounding Menace": 1, "Motor Big": 1, "Ball Hawk": 1,
+		"Defensive Pest": 0, "Do-It-All Forward": 0, "Change-of-Pace Guard": 0,
+		"Face-Up Four": 0, "Stretch Big": 0, "Rebounding Wing": 0,
+		"Pick-and-Roll Maestro": -1, "Wing Stopper": -1, "High-IQ Connector": -1,
+		"Post Scorer": -1, "Pick-and-Pop Big": -1, "Pull-Up Artist": -1,
+		"Crafty Finisher": -2, "Pass-First Sparkplug": -2, "Wing Sniper": -2,
+		"Score-First Point": -2, "Microwave Scorer": -3,
+		"Streaky Volume Scorer": -3, "Midrange Operator": -3,
 	};
 
 	/* Potential gap for a finished build.

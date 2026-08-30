@@ -357,25 +357,31 @@
 	   front line of rim protectors did not actually reduce anyone's rim FG%.
 	   This is the profile that does it. Values are centred at ~0 for an average
 	   D-I rotation and read in points of percentage. */
-	function defenseProfile(comps, mins, teamMinutes) {
-		const tm = teamMinutes || 200;
+	/* `teamMinutes` is 5 * gameMinutes, so the five men on the floor are
+	   teamMinutes / gameMinutes — which is 5 in every league here and was
+	   written as the literal 5 anyway, alongside a literal 200 for the team
+	   total. Two hardcoded numbers that only agree by coincidence is one
+	   number written twice: derive the divisor. */
+	function defenseProfile(comps, mins, teamMinutes, gameMinutes) {
+		const gm = gameMinutes || 40;
+		const tm = teamMinutes || 5 * gm;
+		const onFloor = tm / gm;
 		let rim = 0;
 		let per = 0;
 		let ovr = 0;
 		let force = 0;
 		for (let i = 0; i < comps.length; i++) {
-			const w = (mins[i] * 5) / tm;
+			const w = (mins[i] * onFloor) / tm;
 			rim += comps[i].defenseInterior * w;
 			per += comps[i].defensePerimeter * w;
 			ovr += comps[i].defense * w;
 			force += comps[i].stealing * w;
 		}
-		const n = 5;
 		return {
-			rim: rim / n - 0.46,
-			perimeter: per / n - 0.46,
-			overall: ovr / n - 0.47,
-			force: force / n - 0.49,
+			rim: rim / onFloor - 0.46,
+			perimeter: per / onFloor - 0.46,
+			overall: ovr / onFloor - 0.47,
+			force: force / onFloor - 0.49,
 		};
 	}
 
@@ -1110,6 +1116,11 @@
 		teamCtx.pace = env.pace !== null && env.pace !== undefined
 			? clamp(pace + teamCtx.paceAdj, 50, 118)
 			: clamp(pace + teamCtx.paceAdj, 58, 82);
+		/* Published, so the award model can normalise a counting-stat resume
+		   for tempo. PROGRAM_STYLES moves possessions by +/-5.5 a game and
+		   productionScore was raw per-game volume, which tilted the entire
+		   honours list towards run-and-gun schools. */
+		team.pace = teamCtx.pace;
 		/* The rating rows the stat model reads, built once. statLine only needs
 		   hgt, ft, tp and pss off a ratings row (everything else comes from the
 		   composites), so a filler needs just those four — but they have to
@@ -1180,6 +1191,7 @@
 				continue;
 			}
 			m.player.stats = line;
+			m.player.teamPace = teamCtx.pace;
 			// Where he sits in his own rotation, which is what makes a Sixth
 			// Man of the Year candidate a reserve rather than a starter.
 			m.player.minutesRank = mins
@@ -1217,7 +1229,7 @@
 		totals.poss = totals.fga - totals.orb + totals.tov + 0.44 * totals.fta;
 		team.teamTotals = totals;
 		team.fieldPlayers = field;
-		team.defense = defenseProfile(comps, mins, teamMinutes);
+		team.defense = defenseProfile(comps, mins, teamMinutes, gameMinutes);
 		// Team defensive efficiency: points allowed per 100 possessions, read
 		// off the scores the team actually gave up.
 		const paAvg = team.log && team.log.length

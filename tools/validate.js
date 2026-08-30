@@ -169,6 +169,8 @@ function collect(nSeeds, cfgOverrides) {
 	const postseasonInRecord = [];
 	const outOfOrder = [];
 	const bottomThird = [];
+	const paceOfHonoured = [];
+	const paceOfAll = [];
 	for (let s = 0; s < nSeeds; s++) {
 		const lf = syntheticClass(s, 70);
 		const res = global.Engine.run(
@@ -228,6 +230,17 @@ function collect(nSeeds, cfgOverrides) {
 			for (let i = 1; i < t.log.length; i++) {
 				if (t.log[i].when < t.log[i - 1].when - 1e-9) outOfOrder.push(1);
 			}
+		}
+		/* Tempo must not buy honours. productionScore is raw counting volume,
+		   and PROGRAM_STYLES moves a team's possessions by +/-5.5 a game, so a
+		   run-and-gun program handed its best player about 8% more of
+		   everything for nothing he had done — and that score is what both the
+		   award model and the draft board rank on. */
+		for (const p of ncaa) {
+			const t = res.teams[p.newCollege];
+			if (!t || !Number.isFinite(t.pace)) continue;
+			paceOfAll.push(t.pace);
+			if ((p.awards || []).length) paceOfHonoured.push(t.pace);
 		}
 		const regGames = Object.values(res.teams).map((t) => t.regGames);
 		gamesSpread.push(Math.max.apply(null, regGames) - Math.min.apply(null, regGames));
@@ -428,6 +441,10 @@ function collect(nSeeds, cfgOverrides) {
 		   group even after matching on quality. */
 		["PPG, bigs minus guards (ovr-matched)", bigMinusGuard].concat(
 			within(-0.2, 1.4)),
+
+		["Pace of honoured minus pace of all",
+			(paceOfHonoured.length ? mean(paceOfHonoured) : 0) -
+				(paceOfAll.length ? mean(paceOfAll) : 0), -1.2, 1.2],
 
 		/* Schedule integrity. */
 		["Regular-season game spread", Math.max.apply(null, gamesSpread), 0, 1],
