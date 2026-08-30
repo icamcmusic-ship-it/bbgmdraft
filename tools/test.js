@@ -6,6 +6,10 @@
    Exit code is non-zero if anything fails. */
 "use strict";
 
+/* Unknown archetypes must throw here rather than silently scoring 1.0.
+   Set before the engine loads; js/ratings.js reads it once. */
+process.env.BBGM_STRICT_ROLES = "1";
+
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
@@ -858,11 +862,22 @@ console.log("\nArchetypes");
 	ok("every archetype is still ovr-neutral", worstPush < 0.35,
 		"largest residual push " + worstPush.toFixed(3));
 
-	// The rarest builds have to be reachable. Raw Project appeared once in 840
-	// players, which is not rarity, it is absence.
+	/* The rarest builds have to be reachable. Raw Project once appeared in one
+	   player out of 840, which is not rarity, it is absence.
+
+	   Naming two builds and asserting each shows up made this a check on those
+	   two, and it went red when the table grew from 72 builds to 98 for no
+	   reason but arithmetic — each build's share of a fixed number of players
+	   fell. The claim worth testing is about the table as a whole: nearly all
+	   of it turns up, and the spread between the commonest specialist build and
+	   the rarest is a rarity gradient rather than a cliff. (Full coverage in
+	   twenty classes is not the claim: a 14-build pool drawn from ninety-eight
+	   is roughly 300 draws against a coupon-collector requirement of 450, so a
+	   handful of builds legitimately miss a run of twenty.) */
 	const counts = {};
 	let total = 0;
-	for (let s = 0; s < 8; s++) {
+	for (const a of RB.ARCHETYPES) counts[a.name] = 0;
+	for (let s = 0; s < 20; s++) {
 		const res = global.Engine.run(V.syntheticClass(200 + s, 70),
 			global.Config.make({ seed: "arch" + s }));
 		for (const p of res.players) {
@@ -870,10 +885,16 @@ console.log("\nArchetypes");
 			total++;
 		}
 	}
-	for (const name of ["Raw Project", "Athletic Freak"]) {
-		ok(name + " actually turns up", (counts[name] || 0) >= 3,
-			(counts[name] || 0) + " in " + total + " players");
-	}
+	const seen = Object.keys(counts).filter((k) => counts[k] > 0);
+	ok("nearly every build in the table turns up",
+		seen.length >= Math.ceil(RB.ARCHETYPES.length * 0.9),
+		seen.length + " of " + RB.ARCHETYPES.length + " builds in " + total + " players");
+	const spec = seen.filter((k) => k !== "Balanced").map((k) => counts[k])
+		.sort((a, b) => b - a);
+	ok("build rarity is a gradient, not a cliff",
+		spec.length > 1 && spec[0] / spec[spec.length - 1] <= 25,
+		"commonest specialist " + spec[0] + ", rarest seen " + spec[spec.length - 1] +
+			" (" + (spec[0] / spec[spec.length - 1]).toFixed(1) + "x)");
 	// The Balanced share is a promise the label on the slider makes.
 	const balanced = (counts.Balanced || 0) / total;
 	ok("the Balanced share matches what the diversity slider promises",
@@ -1132,6 +1153,183 @@ console.log("\nHome and away");
 	} else {
 		ok("a professional league plays home and away games", true, "no prospects abroad");
 	}
+}
+
+/* ------------------------------------------------- the bugs, kept dead */
+console.log("\nSeason story");
+{
+	/* Conference membership never changed, so the map of college basketball
+	   was the one constant in a tool built to make every run different. */
+	let withMoves = 0;
+	let bad = 0;
+	for (let i = 0; i < 14; i++) {
+		const res = global.Engine.run(V.syntheticClass(300 + i, 60),
+			global.Config.make({ seed: "re" + i }));
+		const moves = res.realignment || [];
+		if (moves.length) withMoves++;
+		for (const m of moves) {
+			// The programme must actually be playing where the move says.
+			if (!res.teams[m.school] || res.teams[m.school].conf !== m.to) bad++;
+			// And a raid reaches one rung down, not five.
+			const sf = global.Colleges.CONFERENCES[m.from];
+			const st2 = global.Colleges.CONFERENCES[m.to];
+			if (sf && st2 && st2.strength - sf.strength > 26) bad++;
+		}
+		// Every conference must still be able to play a season.
+		const size = {};
+		for (const t of Object.values(res.teams)) size[t.conf] = (size[t.conf] || 0) + 1;
+		for (const k of Object.keys(size)) if (size[k] < 4) bad++;
+	}
+	ok("conferences realign some years and not others",
+		withMoves >= 2 && withMoves <= 12, withMoves + " of 14 classes");
+	ok("a realignment leaves a schedulable, consistent map", bad === 0, bad + " problems");
+	ok("turning realignment off leaves the map alone",
+		(global.Engine.run(V.syntheticClass(301, 60),
+			global.Config.make({ seed: "re-off", realignmentRate: 0 })).realignment || [])
+			.length === 0);
+
+	/* Coaches had a style, a tenure and a development number, and no
+	   situation — so every staff in the country was in the same year of the
+	   same job. */
+	const res = global.Engine.run(V.syntheticClass(310, 60),
+		global.Config.make({ seed: "coach" }));
+	const sits = {};
+	for (const t of Object.values(res.teams)) {
+		sits[t.coach.situation] = (sits[t.coach.situation] || 0) + 1;
+	}
+	ok("coaches are in different years of different jobs",
+		Object.keys(sits).length >= 4 &&
+			(sits["first year"] || 0) > 0 && (sits.interim || 0) > 0,
+		JSON.stringify(sits));
+	ok("a first-year coach has a first-year tenure",
+		Object.values(res.teams).every((t) =>
+			t.coach.situation !== "first year" || t.coach.tenure === 1));
+
+	/* The narrative flavours bend settings that later phases own, and those
+	   phases used to read the unbent config. */
+	const down = global.Engine.run(V.syntheticClass(311, 60),
+		global.Config.make({ seed: "down", bluebloodDownYears: 3 }));
+	ok("a blue-blood down year actually reaches the programmes",
+		Object.values(down.teams).filter((t) => t.downYear).length === 3,
+		Object.values(down.teams).filter((t) => t.downYear).length + " programmes");
+}
+
+console.log("\nEarlier seasons");
+{
+	/* They used to be a backward-scaled copy of the draft year. They are
+	   simulated now, which is only worth doing if the progression it produces
+	   is a progression. */
+	/* Three classes, because a single one holds only a couple of dozen
+	   sophomore seasons and the comparison below is between two means. */
+	const runs = [4, 5, 6].map((i) => global.Engine.run(V.realisticClass(i, 70),
+		global.Config.make({ seed: "prior" + i })));
+	const res = runs[0];
+	const everyone = runs.reduce((a, r) => a.concat(r.players), []);
+	const by = { Freshman: [], Sophomore: [], Junior: [], Senior: [] };
+	let simulated = 0;
+	let reconstructed = 0;
+	for (const p of everyone) {
+		for (const r of p.priorSeasons || []) {
+			if (r.redshirt) continue;
+			if (r.simulated) simulated++; else reconstructed++;
+			if (by[r.classYear]) by[r.classYear].push(r);
+		}
+	}
+	ok("earlier seasons are simulated for D-I prospects", simulated > reconstructed,
+		simulated + " simulated, " + reconstructed + " reconstructed");
+	const mean = (a, f) => (a.length ? a.reduce((x, y) => x + f(y), 0) / a.length : 0);
+	const fr = mean(by.Freshman, (r) => r.mpg);
+	const so = mean(by.Sophomore, (r) => r.mpg);
+	ok("a freshman year is a freshman year", by.Freshman.length > 30 && fr < so - 1,
+		"freshman " + fr.toFixed(1) + " MPG against sophomore " + so.toFixed(1));
+	/* The failure this replaced: with nobody in front of him on a synthetic
+	   roster, a prospect's freshman year came out BETTER than his draft year. */
+	let inverted = 0;
+	let checked = 0;
+	for (const p of everyone) {
+		const first = (p.priorSeasons || []).filter((r) => !r.redshirt)[0];
+		if (!first || !first.simulated || !p.stats) continue;
+		checked++;
+		if (first.ppg > p.stats.ppg + 4) inverted++;
+	}
+	ok("almost nobody's first year outscores his draft year",
+		checked > 10 && inverted <= Math.ceil(checked * 0.12),
+		inverted + " of " + checked);
+	ok("turning simulation off restores the reconstruction",
+		global.Engine.run(V.realisticClass(4, 70), global.Config.make({
+			seed: "prior", priorSeasons: "reconstruct",
+		})).players.some((p) => (p.priorSeasons || []).some((r) => !r.redshirt)) &&
+		!global.Engine.run(V.realisticClass(4, 70), global.Config.make({
+			seed: "prior", priorSeasons: "reconstruct",
+		})).players.some((p) => (p.priorSeasons || []).some((r) => r.simulated)));
+}
+
+console.log("\nRegressions");
+{
+	/* An archetype with no role-usage entry used to score a silent 1.0, which
+	   made Injury-Prone Talent the highest-scoring build in the class at 24.3
+	   points a game with nothing anywhere to say so. */
+	let threw = false;
+	try { RB.roleUsage("No Such Archetype"); } catch (e) { threw = true; }
+	ok("an unknown archetype throws rather than scoring a silent 1.0", threw);
+	ok("every archetype has a role usage",
+		RB.ARCHETYPES.every((a) => Number.isFinite(RB.ROLE_USAGE[a.name])));
+	/* Twelve of the old table's 72 constants sat on the fit boundary, which is
+	   a fit that failed and was clipped. The soft bound cannot be reached. */
+	const vals = RB.ARCHETYPES.map((a) => RB.ROLE_USAGE[a.name]);
+	ok("no build sits on a role-usage bound",
+		vals.every((v) => v > RB.ROLE_FIT.lo + 1e-6 && v < RB.ROLE_FIT.hi - 1e-6),
+		"min " + Math.min.apply(null, vals).toFixed(3) +
+			" max " + Math.max.apply(null, vals).toFixed(3));
+
+	/* The solvable ovr range was computed on the POST-NOISE base, so it moved
+	   under the user on every reroll while nothing about the player changed. */
+	const orig = {};
+	const r0 = new Rng("range");
+	for (const k of BB.RATING_KEYS) orig[k] = Math.round(r0.uniform(25, 70));
+	orig.fuzz = 0;
+	const cfgNoisy = global.Config.make({ buildNoise: 9, specialization: 1 });
+	const ranges = [];
+	for (let i = 0; i < 12; i++) {
+		ranges.push(RB.rebuild(new Rng("roll" + i), orig, 45, 55, cfgNoisy,
+			"Combo Guard").ovrRange);
+	}
+	ok("the solvable ovr range does not move between rolls",
+		ranges.every((x) => x.min === ranges[0].min && x.max === ranges[0].max),
+		JSON.stringify(ranges.slice(0, 3)));
+	/* And it stays a promise: a target the range calls reachable is reached. */
+	let missed = 0;
+	for (let i = 0; i < 60; i++) {
+		const t = Math.round(new Rng("t" + i).uniform(ranges[0].min, ranges[0].max));
+		const b = RB.rebuild(new Rng("b" + i), orig, t, t + 8, cfgNoisy, "Combo Guard");
+		if (b.ovr !== t) missed++;
+	}
+	ok("every ovr the range calls reachable is reached", missed === 0, missed + " missed");
+
+	/* Class year reached exactly one thing in the stat model, and it was not
+	   usage, minutes, efficiency or turnovers. */
+	const S = global.StatsSim;
+	ok("class year is parsed, redshirts included",
+		S.classYearIndex("Freshman") === 0 && S.classYearIndex("Senior") === 3 &&
+			S.classYearIndex("Graduate") === 4 &&
+			S.classYearIndex("Redshirt Junior") > S.classYearIndex("Junior"),
+		[S.classYearIndex("Freshman"), S.classYearIndex("Redshirt Junior"),
+			S.classYearIndex("Graduate")].join("/"));
+	ok("an upperclassman is given more of the offence than a freshman",
+		S.experienceUsage("Senior") > S.experienceUsage("Junior") &&
+			S.experienceUsage("Junior") > S.experienceUsage("Sophomore") &&
+			S.experienceUsage("Sophomore") > S.experienceUsage("Freshman"));
+
+	/* PPG was typed into the era table and disagreed with the anchors it
+	   claimed to follow. It is derived now, so the two cannot drift apart. */
+	const CAL = global.Calibration;
+	let derivedOk = true;
+	for (const name of Object.keys(CAL.ERAS)) {
+		const e = CAL.ERAS[name];
+		const d = CAL.impliedPpg(e.draftYear, e.team);
+		if (Math.abs(d.mean - e.draftYear.ppg.mean) > 1e-9) derivedOk = false;
+	}
+	ok("the PPG anchor is derived from the era's own numbers", derivedOk);
 }
 
 console.log("\n" + (failures ? failures + " of " + checks + " checks failed"

@@ -24,7 +24,7 @@
 		tab: "players",
 		sort: [{ key: "newOvr", dir: -1 }],
 		filter: {
-			q: "", pos: "", conf: "", changedOnly: false, lockedOnly: false,
+			q: "", pos: "", conf: "", archetype: "", changedOnly: false, lockedOnly: false,
 			// [{key, min, max}] — numeric range filters, see Views.rangeBar.
 			ranges: [],
 		},
@@ -42,7 +42,7 @@
 		density: "normal",
 		redo: [],
 		// The two prospects the Compare tab is holding side by side.
-		compare: [null, null],
+		compare: [null, null, null, null],
 		// The programme whose page the Teams tab is showing, if any.
 		team: null,
 		standingsConf: null,
@@ -81,6 +81,7 @@
 				hiddenColumns: state.hiddenColumns,
 				statMode: state.statMode,
 				compare: state.compare,
+				columnLayouts: state.columnLayouts,
 				standingsConf: state.standingsConf,
 				density: state.density,
 				compactBracket: state.compactBracket,
@@ -134,7 +135,12 @@
 		if (saved.customPresets) state.customPresets = saved.customPresets;
 		if (saved.hiddenColumns) state.hiddenColumns = saved.hiddenColumns;
 		if (saved.statMode) state.statMode = saved.statMode;
-		if (Array.isArray(saved.compare)) state.compare = saved.compare.slice(0, 2);
+		if (Array.isArray(saved.compare)) {
+			state.compare = saved.compare.slice(0, V.COMPARE_MAX || 4);
+		}
+		if (saved.columnLayouts && typeof saved.columnLayouts === "object") {
+			state.columnLayouts = saved.columnLayouts;
+		}
 		if (saved.standingsConf) state.standingsConf = saved.standingsConf;
 		if (saved.density) state.density = saved.density;
 		state.compactBracket = !!saved.compactBracket;
@@ -171,6 +177,12 @@
 			label,
 			cfg: JSON.parse(JSON.stringify(state.cfg)),
 			overrides: JSON.parse(JSON.stringify(state.overrides)),
+			/* The drawn seed, which is NOT in cfg: a reroll blanks cfg.seed and
+			   remembers the seed it drew in state.lastSeed. Without this an
+			   undone reroll restored a blank seed and drew a THIRD class, so
+			   the one thing users most want back — the class they just liked
+			   and replaced — was the one thing undo could not return. */
+			lastSeed: state.lastSeed || null,
 		};
 	}
 
@@ -186,6 +198,10 @@
 	function applySnapshot(snap, verb) {
 		state.cfg = CFG.make(snap.cfg);
 		state.overrides = snap.overrides;
+		if (snap.lastSeed !== undefined) state.lastSeed = snap.lastSeed;
+		// A restored class is a different class, so an editor open on somebody
+		// who may not be in it any more has to close.
+		state.editing = null;
 		paintUndo();
 		paintConfig();
 		setStatus(verb + ": " + snap.label);
@@ -241,6 +257,7 @@
 		"freshmanShare", "transferShare", "redshirtShare", "reclassShare", "pDII",
 		"pace", "scoringEnv", "efficiencyEnv", "statNoise", "upsetFactor",
 		"archetypePool", "surpriseBudget", "injuryRate",
+		"realignmentRate", "bluebloodDownYears", "midMajorLift",
 		"awardStrictness", "confAwardStrictness", "proAwardStrictness",
 	];
 
@@ -261,18 +278,35 @@
 		injuryRate: (v) => v.toFixed(2) + "x",
 		archetypePool: (v) => (v ? v + " builds" : "off"),
 		surpriseBudget: (v) => (v ? "about " + v : "none"),
+		realignmentRate: (v) => (v ? Math.round(v * 100) + "%" : "off"),
+		bluebloodDownYears: (v) => (v ? v + " programme" + (v === 1 ? "" : "s") : "none"),
+		midMajorLift: (v) => (v ? "+" + v : "off"),
 	};
 
 	/* What each slider actually does, in units. "Class quality 2" means nothing
 	   on its own; "top prospect ~48 ovr" is a reference point. */
 	const SLIDER_HINT = {
 		archetypePool: (v) => (v
-			? "this class is drawn from about " + v + " of the 72 builds — " +
+			? "this class is drawn from about " + v + " of the " +
+				(global.RatingsBuilder ? global.RatingsBuilder.ARCHETYPES.length : 98) +
+				" builds — " +
 				"lower is more distinctive, higher is one of everything"
 			: "off: every build is eligible in every class"),
 		surpriseBudget: (v) => (v
-			? "a five-star bust, an unranked riser, a 24-year-old JUCO, a 7'4\" project…"
+			? "drawn from twenty-three kinds: a five-star bust, a 24-year-old JUCO, " +
+				"the coach's son, a season that ended in February…"
 			: "no forced anomalies"),
+		realignmentRate: (v) => (v
+			? "the chance this season's map differs from last season's; a " +
+				"realignment moves two to five programmes one rung up"
+			: "conference membership never changes"),
+		bluebloodDownYears: (v) => (v
+			? v + " of the twenty-four biggest programmes has a bad year on top " +
+				"of the ordinary roll"
+			: "no forced down years"),
+		midMajorLift: (v) => (v
+			? "every programme outside the power leagues is stronger by up to " + v
+			: "the mid-majors are where the table says"),
 		injuryRate: (v) => (v === 0
 			? "nobody misses a game"
 			: "drawn before the season, so a team's record responds to them"),
@@ -361,6 +395,7 @@
 			}
 		}
 		$("ovrMode").value = state.cfg.ovrMode;
+		$("priorSeasons").value = state.cfg.priorSeasons;
 		$("varySize").checked = !!state.cfg.varySize;
 		$("seed").value = state.cfg.seed;
 		const curve = state.cfg.ovrMode === "curve";
@@ -426,7 +461,7 @@
 		return null;
 	}
 	function paintPhaseCosts() {
-		for (const key of SLIDERS.concat(["era", "ovrMode", "varySize"])) {
+		for (const key of SLIDERS.concat(["era", "ovrMode", "varySize", "priorSeasons"])) {
 			const input = $(key);
 			if (!input) continue;
 			const ctl = input.closest(".ctl");
@@ -620,6 +655,12 @@
 			state.cfg.era = $("era").value;
 			markDirty();
 			paintConfig();
+			scheduleRun();
+		});
+		$("priorSeasons").addEventListener("change", () => {
+			pushUndo("changed how earlier seasons are produced");
+			state.cfg.priorSeasons = $("priorSeasons").value;
+			markDirty();
 			scheduleRun();
 		});
 		$("ovrMode").addEventListener("change", () => {
@@ -1800,7 +1841,9 @@
 		}
 		const table = el("table", "mini");
 		const head = el("tr");
-		for (const h of ["Season", "Team", "GP", "MPG", "PPG", "RPG", "APG", "TS%"]) {
+		// Overall is on the earlier rows now, because a simulated prior season
+		// is a season of a DIFFERENT player: the number is the point.
+		for (const h of ["Season", "Team", "Ovr", "GP", "MPG", "PPG", "RPG", "APG", "TS%"]) {
 			head.appendChild(el("th", null, h));
 		}
 		table.appendChild(head);
@@ -1810,10 +1853,12 @@
 			tr.appendChild(el("td", null, team));
 			if (r.redshirt) {
 				const td = el("td", null, r.reason || "redshirt");
-				td.colSpan = 6;
+				td.colSpan = 7;
 				tr.appendChild(td);
 				return tr;
 			}
+			tr.appendChild(el("td", "num",
+				Number.isFinite(r.ovr) ? String(r.ovr) : (now ? String(p.newOvr) : "—")));
 			tr.appendChild(el("td", "num", String(Math.round(r.gp))));
 			for (const k of ["mpg", "ppg", "rpg", "apg"]) {
 				tr.appendChild(el("td", "num", r[k].toFixed(1)));
@@ -1827,10 +1872,14 @@
 		}
 		box.appendChild(table);
 		if (rows.length) {
-			box.appendChild(el("p", "hint",
-				"Earlier seasons are reconstructed by the model, not simulated — " +
-				"the same way the recruiting ranking and the transfer history are. " +
-				"Nothing in the tool ranks on them."));
+			const simulated = rows.some((r) => r.simulated);
+			box.appendChild(el("p", "hint", simulated
+				? "Earlier seasons are simulated: the same stat model, the player " +
+					"at the ratings he had then, and a rotation with the men he " +
+					"was behind actually on it. Nothing in the tool ranks on them."
+				: "Earlier seasons are reconstructed by the model, not simulated — " +
+					"the same way the recruiting ranking and the transfer history " +
+					"are. Nothing in the tool ranks on them."));
 		}
 		return box;
 	}
@@ -1883,6 +1932,35 @@
 				{ ovr: Math.max(0, Math.min(100, base + d)) });
 		}
 		state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
+		run();
+	}
+
+	/* Freeze what the selection already is. `bulkApply` sets a field to a value
+	   the user chose, which cannot express "keep these exactly as they are" —
+	   the value is different for every player. */
+	function bulkLockAsIs(what) {
+		const keys = bulkTargets();
+		if (!keys.length) return;
+		const res = state.results[state.active];
+		if (!res) return;
+		const nameOf = {
+			all: "everything", ovr: "overall", archetype: "the archetype",
+			college: "the school",
+		};
+		pushUndo("locked " + (nameOf[what] || what) + " on " + keys.length + " prospects");
+		for (const key of keys) {
+			const p = res.players.filter((x) => x.key === key)[0];
+			if (!p) continue;
+			const patch = {};
+			if (what === "all" || what === "ovr") patch.ovr = p.newOvr;
+			if (what === "all" || what === "archetype") patch.archetype = p.archetype;
+			if (what === "all" || what === "college") patch.college = p.newCollege;
+			state.overrides[key] = Object.assign({}, state.overrides[key] || {}, patch);
+		}
+		state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
+		setStatus("Locked " + (nameOf[what] || what) + " on " + keys.length +
+			" prospect" + (keys.length === 1 ? "" : "s") +
+			" — a reroll now leaves them alone.");
 		run();
 	}
 
@@ -2018,10 +2096,21 @@
 	   The escape test also missed a bare carriage return: a field containing
 	   one (possible in a note, or in an imported name) broke the row. */
 	function esc(v) {
+		/* A non-finite number is an empty cell, not the text "NaN".
+		   `Number(NaN.toFixed(3))` is NaN, `String(NaN)` is "NaN", and a
+		   spreadsheet reading "NaN" in an otherwise numeric column silently
+		   retypes the whole column as text. Infinity has the same problem. */
+		if (typeof v === "number" && !Number.isFinite(v)) return "";
 		let s = v === undefined || v === null ? "" : String(v);
 		if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
 		return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 	}
+
+	/* CSV line terminator. RFC 4180 says CRLF, and everything else in these
+	   exports (the BOM, the formula-injection guard) is there for Excel's
+	   benefit, so writing bare LF was the one inconsistency. */
+	const CSV_EOL = "\r\n";
+	function csvJoin(lines) { return lines.join(CSV_EOL) + CSV_EOL; }
 
 	function exportCsv(res, everyone) {
 		const lines = [CSV_COLS.join(",")];
@@ -2045,7 +2134,8 @@
 				d("ortg"), d("prod"),
 				s.usg, s.fgp, s.tpp, s.ftp, s.ts,
 				(p.awards || []).join("; "),
-			].map((v) => esc(typeof v === "number" ? Number(v.toFixed(3)) : v)).join(","));
+			].map((v) => esc(typeof v === "number" && Number.isFinite(v)
+				? Number(v.toFixed(3)) : v)).join(","));
 		}
 		/* The export silently obeyed the table filter and was still called
 		   prospects.csv, so "Export CSV" on a filtered table quietly produced a
@@ -2053,7 +2143,7 @@
 		   tells the truth and the status line says how many rows were left
 		   out. */
 		download(skipped ? "prospects_filtered.csv" : "prospects.csv",
-			lines.join("\n"), "text/csv");
+			csvJoin(lines), "text/csv");
 		setStatus(skipped
 			? "CSV exported — " + (res.players.length - skipped) + " of " +
 				res.players.length + " prospects (the current filter). " +
@@ -2087,7 +2177,7 @@
 			lines.push(["board", b.rank, b.name, b.school, b.round || "", b.pick || ""]
 				.map(esc).join(","));
 		}
-		download("season_" + res.seed + ".csv", lines.join("\n"), "text/csv");
+		download("season_" + res.seed + ".csv", csvJoin(lines), "text/csv");
 		setStatus("Season CSV exported.");
 	}
 
@@ -2096,7 +2186,7 @@
 		for (const p of res.players.slice().sort((a, b) => b.newOvr - a.newOvr)) {
 			lines.push(p.name + "\t" + (p.note || "").replace(/\n/g, " · "));
 		}
-		download("notes.tsv", lines.join("\n"), "text/tab-separated-values");
+		download("notes.tsv", csvJoin(lines), "text/tab-separated-values");
 		setStatus("Notes exported.");
 	}
 
@@ -2369,11 +2459,19 @@
 		setStatus("");
 	}
 
-	/* The previous batch, held for comparison. The whole point of running a
-	   calibration sweep is the diff between two settings, and a batch was a
-	   distribution with nothing to hold it against: you read one panel, changed
-	   a slider, ran again, and compared from memory. */
-	let heldBatch = null;
+	/* Held batches, for comparison. The whole point of running a calibration
+	   sweep is the diff between settings, and a batch was a distribution with
+	   nothing to hold it against: you read one panel, changed a slider, ran
+	   again, and compared from memory.
+
+	   There used to be exactly ONE slot, which makes a sweep a sequence of
+	   pairwise comparisons that never meet — you cannot ask "how did those five
+	   values of USG_EXP compare" when holding the third throws away the first.
+	   A stack of up to five named batches turns the same work into one table.
+	   Held in memory only: a batch is fifty simulated seasons and does not
+	   belong in localStorage. */
+	const BATCH_STACK_MAX = 5;
+	let heldBatches = [];
 
 	function renderBatch(rows) {
 		const B = global.BatchStats;
@@ -2381,18 +2479,31 @@
 		view.innerHTML = "";
 		const head = el("div", "rowflex");
 		head.appendChild(el("h3", null, rows.length + " classes with these settings"));
-		const hold = el("button", "tiny",
-			heldBatch ? "Hold this as A (replacing the held batch)" : "Hold this as A");
-		hold.title = "Keep this batch as a baseline; the next one is compared against it.";
+		const hold = el("button", "tiny", "Hold this batch…");
+		hold.title = "Keep this batch under a name; every held batch is compared side by side.";
+		hold.disabled = heldBatches.length >= BATCH_STACK_MAX;
+		if (hold.disabled) {
+			hold.title = "Five batches are already held — drop one first.";
+		}
 		hold.addEventListener("click", () => {
-			heldBatch = { rows: rows.slice(), seed: batchBaseSeed, cfg: effectiveCfg() };
-			setStatus("Batch held as A. Change a setting and run another.");
+			const suggested = String.fromCharCode(65 + heldBatches.length);
+			const name = window.prompt("Name this batch:", suggested);
+			if (name === null) return;
+			const label = (name.trim() || suggested);
+			heldBatches = heldBatches.filter((h) => h.label !== label);
+			heldBatches.push({
+				label, rows: rows.slice(), seed: batchBaseSeed, cfg: effectiveCfg(),
+			});
+			setStatus("Batch held as “" + label + "”. Change a setting and run another.");
 			renderBatch(rows);
 		});
 		head.appendChild(hold);
-		if (heldBatch) {
-			const drop = el("button", "tiny", "Forget A");
-			drop.addEventListener("click", () => { heldBatch = null; renderBatch(rows); });
+		for (const h of heldBatches) {
+			const drop = el("button", "tiny", "Forget " + h.label);
+			drop.addEventListener("click", () => {
+				heldBatches = heldBatches.filter((x) => x !== h);
+				renderBatch(rows);
+			});
 			head.appendChild(drop);
 		}
 		view.appendChild(head);
@@ -2441,7 +2552,7 @@
 				"  (class i of this batch is seed “" + (batchBaseSeed || "") + "#i”)",
 			"seeds: " + rows.map((r) => r.seed).join(", "),
 		].join("\n")));
-		if (heldBatch && heldBatch.rows.length) view.appendChild(batchDiff(heldBatch, rows));
+		if (heldBatches.length) view.appendChild(batchDiff(heldBatches, rows));
 		const cards = el("div", "cards");
 		cards.appendChild(V.histogram("Scoring leader per class", col("topPpg"), 10));
 		cards.appendChild(V.histogram("Awards per class", col("awards"), 10));
@@ -2536,37 +2647,46 @@
 		["honoured players", "honoured", 1], ["distinct archetypes", "archetypes", 1],
 	];
 
+	/* Every held batch beside the current one, in one table. The last column is
+	   the current run's difference from the FIRST held batch, which is the
+	   baseline a sweep is measured against. */
 	function batchDiff(held, rows) {
 		const B = global.BatchStats;
-		const box = el("div", "card");
-		box.appendChild(el("h4", null,
-			"A (seed " + (held.seed || "—") + ", " + held.rows.length + " classes)" +
-			"  vs  B (seed " + (batchBaseSeed || "—") + ", " + rows.length + " classes)"));
 		const now = effectiveCfg();
+		const cols = held.concat([{
+			label: "now", rows, seed: batchBaseSeed, cfg: now,
+		}]);
+		const box = el("div", "card");
+		box.appendChild(el("h4", null, "Held batches, side by side"));
+		/* What actually differs between the runs. With more than two columns
+		   the pairwise "A → B" reading stops working, so each setting that
+		   moves anywhere is listed with its value in every column. */
+		const base = cols[0].cfg;
 		const changed = Object.keys(now).filter((k) => {
 			if (k === "seed" || k === "overrides" || k === "leagueWeights" ||
 				k === "archetypeWeights" || k === "noteLines") return false;
-			return String(held.cfg[k]) !== String(now[k]);
+			return cols.some((c) => String(c.cfg[k]) !== String(base[k]));
 		});
 		box.appendChild(el("p", "hint", changed.length
-			? "Settings that differ: " +
-				changed.map((k) => k + " " + held.cfg[k] + " → " + now[k]).join(", ")
-			: "Same settings — the difference below is sampling noise."));
+			? "Settings that differ: " + changed.map((k) =>
+				k + " " + cols.map((c) => c.cfg[k]).join(" / ")).join(" · ")
+			: "Same settings in every column — the differences below are sampling noise."));
 		const table = el("table", "mini");
 		const hr = el("tr");
-		for (const h of ["", "A", "B", "B − A"]) {
-			hr.appendChild(el("th", h ? "num" : "", h));
+		hr.appendChild(el("th", null, ""));
+		for (const c of cols) {
+			hr.appendChild(el("th", "num",
+				c.label + " (" + c.rows.length + ")"));
 		}
+		hr.appendChild(el("th", "num", "now − " + cols[0].label));
 		table.appendChild(hr);
 		for (const [label, key, digits] of BATCH_ROWS) {
-			const a = B.mean(held.rows.map((r) => r[key]));
-			const b = B.mean(rows.map((r) => r[key]));
-			if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+			const vals = cols.map((c) => B.mean(c.rows.map((r) => r[key])));
+			if (!vals.every(Number.isFinite)) continue;
 			const tr = el("tr");
 			tr.appendChild(el("td", null, label));
-			tr.appendChild(el("td", "num", a.toFixed(digits)));
-			tr.appendChild(el("td", "num", b.toFixed(digits)));
-			const d = b - a;
+			for (const v of vals) tr.appendChild(el("td", "num", v.toFixed(digits)));
+			const d = vals[vals.length - 1] - vals[0];
 			const td = el("td", "num");
 			td.appendChild(el("span", Math.abs(d) < Math.pow(10, -digits) ? ""
 				: d > 0 ? "up" : "down",
@@ -2610,7 +2730,8 @@
 	Object.assign(global.App, {
 		state, render, run, persist, openEditor, editorPanel, modal, closeModal,
 		clearLock,
-		copyText, bulkApply, bulkShiftOvr, bulkClear, refreshBulkBar, snapshot,
+		copyText, bulkApply, bulkShiftOvr, bulkLockAsIs, bulkClear, refreshBulkBar,
+		snapshot,
 		exportCsv, setStatus, showError, indexSnapshot,
 	});
 
@@ -2630,6 +2751,26 @@
 
 	$("errClose").addEventListener("click", clearError);
 	$("warnClose").addEventListener("click", () => { $("warnBanner").hidden = true; });
+	/* The settings panel is a toggle on a narrow screen. It starts CLOSED
+	   there — a phone user's first act is to look at the class, not at the
+	   sliders — and the button reflects the real state either way. */
+	(function bindSettingsToggle() {
+		const btn = $("btnSettings");
+		if (!btn) return;
+		const narrow = () => window.matchMedia("(max-width: 860px)").matches;
+		const paint = () => {
+			const open = !narrow() || document.body.classList.contains("settings-open");
+			btn.setAttribute("aria-expanded", open ? "true" : "false");
+			btn.textContent = open ? "Hide settings" : "Settings";
+		};
+		btn.addEventListener("click", () => {
+			document.body.classList.toggle("settings-open");
+			paint();
+		});
+		window.addEventListener("resize", paint);
+		paint();
+	})();
+
 	$("btnReroll").addEventListener("click", reroll);
 	$("btnRerun").addEventListener("click", run);
 	$("btnUndo").addEventListener("click", undo);
@@ -2744,11 +2885,89 @@
 			e.preventDefault();
 			shortcutSheet();
 		}
+		if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
+		if (!$("modal").hidden) return;
+		/* The verbs. There were six shortcuts and every one of them was a way
+		   to MOVE — j, k, Enter, Escape, Tab — so the things a user does fifty
+		   times an hour (reroll, jump to a tab, search, lock the row in front
+		   of them) all needed the mouse. */
+		const k = e.key;
+		if (k >= "1" && k <= "9") {
+			const t = TABS[Number(k) - 1];
+			if (t && (t[0] !== "compare" || state.pinned)) {
+				e.preventDefault();
+				state.tab = t[0];
+				persist();
+				render();
+			}
+			return;
+		}
+		if (k === "/") {
+			const box = $("prospectSearch");
+			if (box) { e.preventDefault(); box.focus(); box.select(); }
+			return;
+		}
+		if (k === "r" && !$("btnReroll").disabled) { e.preventDefault(); reroll(); return; }
+		if (k === "e" && !$("btnExport").disabled) {
+			e.preventDefault();
+			if (exportOne(state.active)) {
+				setStatus("Exported " + state.files[state.active].name + ".");
+			}
+			return;
+		}
+		if (k === "p" && !$("btnPin").disabled) { e.preventDefault(); $("btnPin").click(); return; }
+		if (k === "l" || k === "L") {
+			const row = document.activeElement && document.activeElement.closest
+				? document.activeElement.closest("tr[data-pkey]") : null;
+			if (!row) return;
+			e.preventDefault();
+			toggleLockFor(row.dataset.pkey);
+			return;
+		}
+		if (k === "[" || k === "]") {
+			const sel = $("archFilter");
+			if (!sel) return;
+			e.preventDefault();
+			const i = sel.selectedIndex + (k === "]" ? 1 : -1);
+			sel.selectedIndex = (i + sel.options.length) % sel.options.length;
+			state.filter.archetype = sel.value;
+			render();
+		}
 	});
+
+	/* Lock (or unlock) one player from the keyboard. Locking is the tool's
+	   central verb and it needed a mouse: open the editor, find the control,
+	   click, close. */
+	function toggleLockFor(key) {
+		const res = state.results[state.active];
+		const p = res && res.players.filter((x) => x.key === key)[0];
+		if (!p) return;
+		if (state.overrides[key]) {
+			pushUndo("cleared the lock on " + p.name);
+			delete state.overrides[key];
+			setStatus("Unlocked " + p.name + ".");
+		} else {
+			pushUndo("locked " + p.name);
+			state.overrides[key] = {
+				ovr: p.newOvr, archetype: p.archetype, college: p.newCollege,
+			};
+			setStatus("Locked " + p.name + " at ovr " + p.newOvr + ", " +
+				p.archetype + ", " + p.newCollege + ".");
+		}
+		state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
+		run();
+	}
 
 	const SHORTCUTS = [
 		["?", "Show this list"],
-		["Ctrl / Cmd + Z", "Undo the last settings or lock change"],
+		["1 – 9", "Jump to a tab"],
+		["r", "Reroll the class"],
+		["/", "Focus the prospect search"],
+		["l", "Lock or unlock the focused row"],
+		["[ / ]", "Previous / next archetype filter"],
+		["p", "Pin this class as the comparison baseline"],
+		["e", "Export the active file"],
+		["Ctrl / Cmd + Z", "Undo the last change — a reroll included"],
 		["Ctrl / Cmd + Shift + Z", "Redo it"],
 		["j / ↓", "Next prospect in the table"],
 		["k / ↑", "Previous prospect"],

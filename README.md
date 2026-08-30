@@ -26,27 +26,43 @@ its own pace, game length and youth minutes cap, its own clubs and league table,
 and its own honours.
 
 **2. Rebuilds ratings into varied, specialised builds — without inflating anyone.**
-Each player is assigned one of seventy-two archetypes (Floor General, Heliocentric
+Each player is assigned one of ninety-eight archetypes (Floor General, Heliocentric
 Guard, Movement Shooter, 3&D Wing, Point Center, Rim Protector, Stretch Big,
-Lob Threat, Athletic Freak, …), gated by their height so a 7-footer never becomes
-a point guard. The archetype pushes some ratings up and others down, then the whole
+Lob Threat, Athletic Freak, Drop-Coverage Anchor, Boom-or-Bust Tools, …), gated by
+their height so a 7-footer never becomes a point guard. The archetype pushes some ratings up and others down, then the whole
 build is re-solved against **BBGM's own `ovr` formula** so the finished player comes
 out at exactly the target overall. Specialising a player makes him lopsided, not
 better.
 
 Rarity weights span 0.34 to 3.6, so a Combo Guard is about ten times more likely
-than a Point Center. A class then draws a **pool** of about fourteen of the
-seventy-two builds and takes its players from the pool — which is what makes a
+than a Point Center — and the *realised* spread now matches that, at 11.6× between
+the commonest specialist build and the rarest, against 281× before the effective
+weight was compressed in log space. A class then draws a **pool** of about
+fourteen of the ninety-eight builds and takes its players from the pool — which is what makes a
 class "the year of the stretch bigs" rather than one of everything, every time.
 It also draws a **flavour** (guard-heavy, defence-first, a weak year,
 one-and-done heavy, a transfer-portal year, …) that tilts which builds enter the
 pool and, for some flavours, bends the class itself: how old it is, how good the
 top of it is, how it got here. A flavour only moves settings you have left alone.
 
-Every class is also given two to four **forced anomalies** — a five-star bust, an
-unranked recruit who turns into a lottery pick, a 24-year-old JUCO who took the
-long road, a 7'4" project, a walk-on who ended up a draft pick. The prospect
-table lists them as the story of the class.
+How much of a team's offence a build is given is **derived, not tabulated**. It
+used to be seventy-two hand-fitted constants, two builds missing entirely
+(Injury-Prone Talent silently scored 1.0 and came out the highest-scoring build
+in the class at 24.3 a game) and twelve clipped at the fit boundary. What that
+table was compensating for is a known quantity: BBGM's usage composite measures
+shot-*making*, so a build that loads on `fg` and `tp` takes volume it was never
+given and one that loads on `diq` and `reb` loses volume it never should have.
+That is computable straight off the build's own offset vector, plus a
+self-creation term and a small per-tag intent — and `tools/rolefit.js` fits it,
+so adding a build no longer costs a constant. An unknown archetype now throws
+under the test harnesses instead of scoring 1.0.
+
+Every class is also given about four **forced anomalies**, drawn from
+twenty-three kinds — a five-star bust, an unranked recruit who turns into a
+lottery pick, a 24-year-old JUCO who took the long road, a 7'4" project, a
+walk-on who ended up a draft pick, the coach's son, a man who never played a high
+school game, a convert from another sport, a season that ended in February. The
+prospect table lists them as the story of the class.
 
 **3. Simulates the season those prospects played.** All 368 colleges are built
 into a real landscape: program strength starts from each school's draft frequency
@@ -56,7 +72,12 @@ across the country, with a rare down year or breakout on top, so a blue blood ca
 actually go 17–15 — plus a **coach**, whose playing style (four-out and
 three-heavy, pack-line, run and gun, inside-out, full-court press, lob city)
 changes what his players' shot charts look like and whose development moves how
-much better the team is in March than in November. Prospects are layered on alongside synthetic returning teammates — capped just
+much better the team is in March than in November — and whose **situation** (first
+year, an interim who took over in December, on the hot seat, a fixture) moves
+that development, the team's form and its strength. Conference membership is a
+per-run fact too: some years a realignment takes two to five good programmes one
+rung up, and the schedule, the conference tournaments and the all-conference
+teams follow it. Prospects are layered on alongside synthetic returning teammates — capped just
 below the best prospect on the roster, because a program that landed a draft pick
 did not already have two of them. Injuries are drawn **before** a game is played,
 so a man who misses fourteen games with a knee costs his team the games it would
@@ -100,6 +121,29 @@ steals, blocks, turnovers, personal fouls, contested shots, deflections, charges
 drawn, a defensive rating, usage and the shooting splits — and it reconciles:
 recomputing points from the attempts and percentages printed beside it returns
 the same PPG.
+
+**A college role is not an NBA rating.** How much of a team's offence a prospect
+gets is decided by how long he has been in the programme, what kind of player he
+is, and a genuine independent draw — not by three multiplicative terms in his
+overall rating, which is what it used to be. `classYear` appeared exactly once in
+the stat model, to set a reserve-year probability, so a 22-year-old senior at a
+mid-major taking 30% of his team's shots — the single most common profile of a
+draft class's leading scorer — was a player the model could not construct. The
+measured correlation between overall rating and college scoring was 0.72 on a
+realistically shaped class; real draft classes run 0.25–0.35, because Zach Edey
+outscored every lottery pick in his and Bronny James averaged 4.8. It is 0.44
+now, and upperclassmen finish better and turn it over less.
+
+**No player lands on a bound.** Two clamps used to hold about 29% of every class
+between them: a soft usage floor whose asymptote collected 11.5% of a class on
+one percentage point, and the lower bound of the personal usage ceiling, which
+gave everyone below it the same number and then saturated them towards it.
+Raising a clamp only moves the pile — setting the floor to 19.0% pinned a quarter
+of the class on 17.1% — so the floor is the *player's* now, moving with his
+talent and his role, both remaining bounds are softplus rather than clamps, and
+the raw distribution above them is wide enough that they rarely bind. The
+harness checks the histogram's shape directly, because no band on a mean or a
+percentile can see a wall.
 
 **Defence is modelled, not implied.** Every team has a defensive profile built from
 BBGM's `defenseInterior` and `defensePerimeter` composites, and it is applied to the
@@ -181,15 +225,19 @@ totals and per-40, read statistical leaderboards, browse any prospect's game log
 eyeball histograms, follow one team's path through the bracket, read the mock
 draft board with risers and fallers, and run a batch of N classes — reproducible
 from its own seed, reported as a distribution rather than one row of averages —
-in a background worker with a progress bar and a cancel button — held beside the
-previous batch, so a calibration sweep is a diff and not two panels read from
-memory.
+in a background worker with a progress bar and a cancel button. Up to five
+batches can be held under names and compared in one table, so a sweep across
+five values of a setting is one reading rather than four pairwise comparisons
+that never meet.
 
 There is a page for every programme (its coach, its style, its prospects, its
 home/away split and every game it played), conference standings for all 32
-leagues, and a side-by-side comparison of any two prospects. The editor explains
+leagues, and a side-by-side comparison of up to four prospects — two is a head-to-head, but tiering a position needs three or four. The editor explains
 each player: where his stat line comes from, why he is where he is on the board,
-and the seasons before this one. `?` lists the keyboard shortcuts. Below 700
+and the seasons before this one. `?` lists the keyboard shortcuts — `r` rerolls,
+`1`–`9` jump to a tab, `/` focuses the search, `l` locks the focused row, `[` and
+`]` step through the class one build at a time — and Ctrl+Z undoes a reroll, not
+only a setting. Below 700
 pixels the table becomes one card per prospect.
 
 ---
@@ -204,8 +252,10 @@ pixels the table becomes one card per prospect.
 | **Specialisation** | 0 = BBGM's fairly uniform builds, 2.5 = extreme specialists. |
 | **Archetype diversity** | Exactly `100 − v`% of the class stays Balanced. |
 | **Class flavour** | How strongly each class leans one way (guard-heavy, defence-first, a weak year, one-and-done heavy, a transfer-portal year, …). Some flavours also bend the class itself — how old it is, how good the top of it is — but only settings you have left at their default. |
-| **Builds per class** | How many of the 72 archetypes one class is drawn from. Lower is more distinctive ("the year of the stretch bigs"); 0 makes every build eligible in every class, which is one of everything, every time. |
-| **Anomalies per class** | How many forced surprises a class gets: a five-star bust, an unranked riser, a 24-year-old JUCO, a 7'4" project. |
+| **Builds per class** | How many of the 98 archetypes one class is drawn from. Lower is more distinctive ("the year of the stretch bigs"); 0 makes every build eligible in every class, which is one of everything, every time. |
+| **Anomalies per class** | How many forced surprises a class gets, drawn from twenty-three kinds: a five-star bust, an unranked riser, a 24-year-old JUCO, a 7'4" project, the coach's son, a man who never played a high school game, a season that ended in February. |
+| **Realignment** | How often the map of college basketball changes. A realignment moves two to five good programmes one rung up, and every conference stays schedulable. |
+| **Earlier seasons** | `Simulate` runs each of a prospect's previous college years through the same stat model the draft year goes through. `Reconstruct` is the older behaviour: a backward-scaled copy of the draft-year line. |
 | **Build noise** | Per-rating jitter. |
 | **Vary size** | Lets listed height and weight drift with the build. |
 | **Freshmen / transfers / redshirts / reclassified** | Who is in what year, and how they got there. |
@@ -217,7 +267,7 @@ pixels the table becomes one card per prospect.
 | **Injuries** | How injury-prone the season is. Drawn *before* a game is played, so a team's record and its selection resume respond to who was missing and when. |
 | **March upsets** | 0 = chalk, 2 = total madness. Applies to the postseason only, which is why re-simulating March costs about 90ms and not a whole season. |
 | **National / conference / abroad award strictness** | Three separate dials. This used to be one slider driving three different mechanisms. |
-| **Archetype frequencies** | Per-build rarity weights for all 60 archetypes, grouped by guards / wings / bigs / any size with a ×2 and ×½ per group, and showing what share of the last generated class each build actually came out as. Hover a name to see its offset vector. |
+| **Archetype frequencies** | Per-build rarity weights for every archetype, grouped by guards / wings / bigs / any size with a ×2 and ×½ per group, and showing what share of the last generated class each build actually came out as. Hover a name to see its offset vector. |
 | **Note template** | Which lines are written into each player's exported note. |
 
 Every control says which phases it re-runs, so a slider that costs 0.6 ms and one
@@ -244,13 +294,17 @@ reproduce is a table nobody should believe.
 | Change | Phases re-run | Engine time |
 | --- | --- | --- |
 | Note template | notes | 0.1 ms |
-| Award strictness | awards → stock → notes | 18 ms |
-| Potential bias / spread | pot → awards → stock → notes | 17 ms |
-| March upsets | postseason → stats → … | 88 ms |
-| Pace, stat randomness | regular → postseason → stats → … | 166 ms |
-| Specialisation, archetypes, seed | everything | 172 ms |
+| Award strictness | awards → stock → notes | 25 ms |
+| Potential bias / spread | pot → awards → stock → notes | 24 ms |
+| March upsets | postseason → stats → … | 143 ms |
+| Pace, stat randomness | regular → postseason → stats → … | 269 ms |
+| Specialisation, archetypes, seed | everything | 291 ms |
 
-_Median of 9 runs on Node 22; a cold run of the whole pipeline is about 210 ms._
+_Median of 9 runs on Node 22; a cold run of the whole pipeline is about 330 ms._
+The numbers grew: the stats phase now also simulates each upperclassman's
+earlier seasons (about 220 ms of the total, and `Earlier seasons: reconstruct`
+gets it back), and every programme carries a coach with a situation and a
+conference that may have changed.
 
 Batch mode runs in a Web Worker with a progress bar and a cancel button; where a
 browser refuses to start a worker — which includes opening `index.html` straight
@@ -268,14 +322,29 @@ tool writes evaluate identically inside the game.
 
 ```
 node tools/validate.js [nSeeds] [--json]   # calibration bands
+node tools/validate.js 20 --fixture=realistic   # the default fixture only, twice as fast
 node tools/test.js [--update-golden]       # regression tests
+node tools/rolefit.js [nSeeds]             # re-fit the derived role-usage model
 node tools/bench.js [reps] [--md|--json]   # staged-pipeline timings
+node tools/uismoke.js                      # headless-browser smoke test
 ```
 
-`validate.js` runs the full engine over synthetic classes for **every era** and
-asserts the outputs land near that era's anchors. The bands are *derived* from
-the anchor set rather than typed in, because a band typed in by hand silently
-belongs to whichever era it was written in. Four groups:
+`validate.js` runs the full engine for **every era** and asserts the outputs
+land near that era's anchors. The bands are *derived* from the anchor set rather
+than typed in, because a band typed in by hand silently belongs to whichever era
+it was written in.
+
+**The fixture is the load-bearing part.** Every band used to be measured against
+a class whose ratings were drawn from N(45, 13) — mean overall 45, half the
+field at 45 or better, one player in a hundred under 30. No BBGM export looks
+like that: a draft class is a ranked list, so a real one runs overall 20–55 with
+a mean near 35 and a large low-overall mass. Every band passed on the synthetic
+class while the same engine, handed a realistically shaped one, produced 12.7
+points a game against an anchor of 14.6 and a quarter of the class under 9
+points. The default fixture is now a draft-slot curve (`53 − 31·slot^0.8` plus
+scouting noise); the old one is kept as a second fixture and rows are tagged by
+scope, so prospect-facing bands run on the realistic class and whole-field and
+structural ones run on both. Four groups:
 
 * **Prospects**, against the era's draft-year anchor: minutes, games, usage, true
   shooting, free-throw and three-point percentage, and the shape of the scoring,
@@ -301,7 +370,13 @@ belongs to whichever era it was written in. Four groups:
   `corr(program level, MPG)`, `corr(ovr, MPG)` and the margin between them are
   banded directly, as is the scoring floor of the bottom third of a class and
   the worst archetype scoring residual — how much of a player's scoring is
-  decided by his build rather than by how good he is.
+  decided by his build rather than by how good he is, reported in points less
+  the sampling error a sample that size carries anyway.
+* **Shape**, because no band on a mean or a percentile can see a WALL. Two
+  clamps used to pin about 29% of every class onto two usage values, which is
+  what "the stats all feel the same" is from the inside, and every distribution
+  band passed throughout. The busiest one-point usage bin is compared against
+  what a smooth distribution of that width would put there.
 
 Every band knows how many seeds it is being judged on. A mean's tolerance widens
 as 1/√n; a per-class count or rate does the same; an extreme value's lower bound
@@ -391,6 +466,7 @@ js/worker.js        batch mode off the main thread
 js/views.js         the tab views
 js/app.js           state, settings, editing, persistence, export
 tools/validate.js   calibration bands against the empirical anchors
+tools/rolefit.js    fits the derived role-usage model and reports per-build residuals
 tools/test.js       golden-file, round-trip, determinism and property tests
 tools/uismoke.js    headless-browser smoke test
 tools/bench.js      staged-pipeline timings, for the performance table
@@ -399,29 +475,44 @@ tools/golden.json   recorded output hashes
 
 ## Known limits
 
-* A draft class is one season. Earlier seasons shown in a player's career panel
-  are **reconstructed**, not simulated — the same way the recruiting ranking and
-  the transfer history are — and nothing in the tool ranks on them.
+* A draft class is one season, but the seasons before it are **simulated** for
+  D-I prospects: the player re-solved to the overall he had then, carrying that
+  year's class year, in a rotation rebuilt at his programme's level with the men
+  he was behind actually on it. Pooled over three classes that runs 24.1 minutes
+  and 9.4 points as a freshman against 31.3 and 15.7 in the draft year. Nothing
+  in the tool ranks on them, and `priorSeasons: "reconstruct"` restores the old
+  backward-scaled line.
 * The recruiting ranking, transfer history and redshirt status are biography
   generated to fit the class. They shape the note and the award categories a player
   is eligible for; they are not read from the file, because BBGM does not store them.
 * Where a prospect plays still moves his stat line, and it should: a good player
   on a bad team really does take more of the shots. But it no longer moves his
-  MINUTES much, which is what was wrong. Measured over 891 simulated seasons,
-  where a prospect plays correlates with his minutes at −0.18 and how good he is
-  at +0.45 (it used to be −0.78 against +0.29), and with his scoring at −0.37
-  against +0.48. `tools/validate.js` bands all four, plus the margin between
-  them, so it cannot drift back.
-* The scoring floor of the back of a class is still a little low. The bottom
-  third of a class has a 10th-percentile scoring average around 9 points where
-  the real figure is 10–11; the class-wide distribution is on its anchors, so
-  closing the last of it means moving the tail without moving the mean.
+  MINUTES much, which is what was wrong. Measured over 1,162 simulated seasons
+  on a realistically shaped class, where a prospect plays correlates with his
+  minutes at −0.20 and how good he is at +0.43 (it used to be −0.78 against
+  +0.29), and with his scoring at −0.12 against +0.44. `tools/validate.js` bands
+  all four, plus the margin between them, so it cannot drift back.
+* The scoring floor of the back of a class is still the softest number in the
+  model. On a realistically shaped class the bottom third has a 10th-percentile
+  scoring average near 7 points; the last ten men on the board average about 11,
+  which is right, so what remains is the shape of the tail rather than its
+  level. `tools/validate.js` bands both.
 * The professional side is thinner than the NCAA side. Clubs, tables, playoffs,
   cups and relegation exist; individual pro awards, international competitions
   and national-team summers do not.
 * Below 700 pixels the prospect table becomes one card per prospect, because a
   forty-column table on a 390-pixel screen is a horizontal scroll however it is
-  arranged. The settings panel is still desktop-first.
-* `ovrRange` in the editor — the floor and ceiling a build can be solved to — is
-  computed on the post-noise base ratings, so it is the range for **this roll**
-  of the build noise, not an invariant of the player. Re-rolling him moves it.
+  arranged. Below 860 the settings panel becomes a toggle in the header rather
+  than eight fieldsets between the user and the table.
+* The field's stars are synthetic. A returning player's talent was drawn from
+  his programme's level and nothing else, so the best player in the country was
+  by construction always somebody in the draft class and the national player of
+  the year came out of the class in 100% of seasons. About a dozen **star
+  returners** now exist across the 368 programmes — the excellent college player
+  who is not an NBA prospect, which several of the 2024 consensus first-team
+  All-Americans were — and the class takes the trophy in 80% of seasons and 2.4
+  of the five consensus first-team spots instead. They are still a rate, not
+  people: nothing gives one of them a name or a story.
+* The professional side has no multi-year history: a prospect abroad still gets
+  the reconstructed career panel rather than a simulated one, because there is
+  no prior-year club roster to put him on.

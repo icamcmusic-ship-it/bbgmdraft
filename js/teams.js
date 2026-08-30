@@ -15,7 +15,7 @@
 	// lottery talent (~81) clearly leads any roster. No saturation until the
 	// clamp at ovr ~73, so the top of a class stays ordered.
 	function prospectTalent(ovr, pot) {
-		return clamp(30 + ovr * 0.92 + (pot - ovr) * 0.15, 20, 97);
+		return clamp(36 + ovr * 0.80 + (pot - ovr) * 0.15, 20, 97);
 	}
 
 	/* `confStrength` is this season's strength for the conference, which drifts
@@ -95,7 +95,22 @@
 		   13.4 against a low-major's 35.5 and 19.9 at the same overall rating,
 		   and where a prospect played predicted his scoring better than how
 		   good he was. */
-		const talent = clamp(rng.normal(mean, 8.5) - Math.pow(i, 1.35) * 2.4, 6, 95);
+		let talent = clamp(rng.normal(mean, 8.5) - Math.pow(i, 1.35) * 2.4, 6, 95);
+		/* The college star who is not a prospect.
+
+		   A returning player's talent was drawn from his programme's level and
+		   nothing else, so the best player in the country was, by construction,
+		   always somebody in the draft class: the national player of the year
+		   came out of the class in 100% of seasons. Real college basketball is
+		   full of men who are excellent college players and not NBA prospects —
+		   several of the 2024 consensus first-team All-Americans went undrafted
+		   — and without them the class has nobody to lose an award to.
+
+		   Rare (about a dozen in the country) and only among the top of a
+		   rotation, because that is what the player is. */
+		if (i <= 2 && rng.random() < STAR_RETURNER_RATE) {
+			talent = clamp(talent + rng.uniform(10, 24), 6, 96);
+		}
 		// Endurance drives how much of a rotation spot a player can actually
 		// hold, and it is the one rating that never fed the minutes model.
 		return {
@@ -121,6 +136,8 @@
 	   untouched, and a roster whose prospect is a genuine lottery talent is
 	   untouched too, because the cap is not binding there. */
 	const FILLER_GAP = 4;
+	/* Per top-three rotation slot, so roughly a dozen across 368 programmes. */
+	const STAR_RETURNER_RATE = 0.012;
 	function capFillers(fillers, prospects) {
 		if (!prospects.length || !fillers.length) return;
 		let best = -Infinity;
@@ -198,6 +215,42 @@
 		"Zabala", "Baptiste", "Cifuentes", "Donnelly", "Ferrara", "Gundersen",
 	];
 
+	/* The carousel.
+
+	   A coach had a style, a tenure and a development number, and no
+	   SITUATION — so every staff in the country was in the same year of the
+	   same job, and the three cheapest and most-felt facts about a college
+	   season were missing: the first-year man installing a system nobody knows
+	   yet, the lame duck whose players have read the same message boards
+	   everyone else has, and the interim who took over in December.
+
+	   Each bends `form` (how much better a team is in March than in November)
+	   and `dev`, both of which the model already carries and both of which are
+	   exactly what a coaching situation moves. `levelAdj` moves the team's
+	   own strength, because a first-year rebuild is not the same team the
+	   previous staff left behind. */
+	const COACH_SITUATIONS = [
+		{
+			name: "first year", label: "in his first season here", w: 0,
+			form: 1.6, dev: 0.8, levelAdj: -1.8,
+		},
+		{
+			name: "interim", label: "took over in December", w: 0,
+			form: -1.4, dev: -1.2, levelAdj: -2.6,
+		},
+		{
+			name: "hot seat", label: "on the hot seat", w: 0,
+			form: -1.2, dev: -0.9, levelAdj: -1.0,
+		},
+		{
+			name: "fixture", label: "a fixture here", w: 0,
+			form: 0.8, dev: 0.7, levelAdj: 0.8,
+		},
+		{ name: "settled", label: null, w: 0, form: 0, dev: 0, levelAdj: 0 },
+	];
+	const SITUATION_BY_NAME = {};
+	for (const c of COACH_SITUATIONS) SITUATION_BY_NAME[c.name] = c;
+
 	function makeCoach(rng, level, prestige) {
 		// A better program usually has a longer-tenured coach, because a coach
 		// who wins keeps his job and a coach who wins is hired by better
@@ -205,30 +258,107 @@
 		// possible without being ordinary.
 		const tenure = Math.max(1, Math.round(
 			rng.uniform(0, 3) + Math.abs(rng.normal(0, 2 + prestige * 0.09))));
+		/* The situation follows from the tenure and from whether the programme
+		   is under-performing its name, which is what actually puts a coach on
+		   a hot seat. */
+		let situation = "settled";
+		const roll = rng.random();
+		if (tenure === 1) situation = roll < 0.22 ? "interim" : "first year";
+		else if (tenure >= 16 && roll < 0.55) situation = "fixture";
+		else if (level < prestige - 12 && roll < 0.40) situation = "hot seat";
+		const sit = SITUATION_BY_NAME[situation];
 		return {
 			name: rng.pick(COACH_FIRST) + " " + rng.pick(COACH_LAST),
 			tenure,
+			situation,
+			situationLabel: sit.label,
+			levelAdj: sit.levelAdj,
 			style: rng.weighted(PROGRAM_STYLES),
 			// How much this staff develops a roster across a season. Feeds the
 			// team's `form`, which is its March rating against its November one.
-			dev: rng.normal(0, 2.6),
+			dev: rng.normal(0, 2.6) + sit.dev,
+			formAdj: sit.form,
 			// Reputation, for Coach of the Year: it is voted on against
-			// expectations, and expectations follow the name on the door.
-			rep: clamp(0.35 * prestige + 0.35 * level + rng.normal(0, 10), 5, 95),
+			// expectations, and expectations follow the name on the door. A
+			// first-year man and an interim carry none of the incumbent's.
+			rep: clamp(0.35 * prestige + 0.35 * level + rng.normal(0, 10) +
+				(situation === "first year" || situation === "interim" ? -12 : 0), 5, 95),
 		};
+	}
+
+	/* Conference realignment.
+
+	   Conference STRENGTH drifted from year to year and membership never did,
+	   so the map of college basketball was the one constant in a tool built to
+	   make every run different — and realignment is the single most
+	   consequential thing that happens to that map in real life.
+
+	   A realignment moves two to five programmes from weaker conferences into
+	   a stronger one that is raiding. It is bounded by two rules that keep the
+	   season schedulable: a conference never falls below MIN_CONF_MEMBERS, and
+	   a raider never takes more than it can fit. Returns the per-run mapping
+	   plus a list of the moves, so the UI can say what happened. */
+	const MIN_CONF_MEMBERS = 7;
+	function realign(rng, cfg) {
+		const confOf = {};
+		for (const name of C.names) confOf[name] = C.conferenceOf(name) || "Independent";
+		const rate = clamp(
+			cfg && cfg.realignmentRate !== undefined ? cfg.realignmentRate : 0.35, 0, 1);
+		const moves = [];
+		if (rate <= 0 || rng.random() >= rate) return { confOf, moves };
+		const members = {};
+		for (const name of C.names) {
+			(members[confOf[name]] = members[confOf[name]] || []).push(name);
+		}
+		const strength = (conf) =>
+			(C.CONFERENCES[conf] ? C.CONFERENCES[conf].strength : 50);
+		// Who is raiding: a strong conference, weighted by how strong.
+		const raiders = Object.keys(members).filter((c) => strength(c) >= 62);
+		if (!raiders.length) return { confOf, moves };
+		const to = rng.weighted(raiders, (c) => Math.pow(strength(c) - 55, 2));
+		const wanted = rng.int(2, 5);
+		/* Who gets taken: a good programme from the tier immediately below.
+		   Without the lower bound on the raided conference's strength the
+		   model produced "LIU, NEC to Big 12", which is not a realignment,
+		   it is a rounding error — real raids reach one rung down, not five. */
+		const candidates = C.names
+			.filter((n) => {
+				if (confOf[n] === to) return false;
+				const sf = strength(confOf[n]);
+				return sf < strength(to) - 4 && sf > strength(to) - 26 &&
+					C.prestige(n) >= 60;
+			})
+			.sort((a, b) => C.prestige(b) - C.prestige(a))
+			.slice(0, 30);
+		for (const name of rng.shuffle(candidates)) {
+			if (moves.length >= wanted) break;
+			const from = confOf[name];
+			if (members[from].length <= MIN_CONF_MEMBERS) continue;
+			members[from].splice(members[from].indexOf(name), 1);
+			members[to].push(name);
+			confOf[name] = to;
+			moves.push({ school: name, from, to });
+		}
+		return { confOf, moves };
 	}
 
 	/* Build every NCAA program for the season. prospectsBySchool maps a college
 	   name to the rebuilt draft prospects who play there. */
-	function buildPrograms(prospectsBySchool, rng) {
+	function buildPrograms(prospectsBySchool, rng, cfg) {
 		const teams = {};
 		// Colleges outside the built-in 368 (league files drift across BBGM
 		// versions) become independent mid-level programs instead of crashing.
 		const extra = Object.keys(prospectsBySchool).filter((n) => !C.COLLEGES[n]);
 		const confStrength = conferenceDrift(rng.child("confdrift"));
+		/* This season's map. Membership is a per-run fact now; everything
+		   downstream reads team.conf, so the schedule, the conference
+		   tournaments and the all-conference teams all follow it for free. */
+		const map = realign(rng.child("realign"), cfg);
+		const confAt = (n) => map.confOf[n] || C.conferenceOf(n) || "Independent";
+		teams.__realignment = map.moves;
 		for (const name of C.names.concat(extra)) {
 			const trng = rng.child("prog:" + name);
-			const level = programLevel(name, trng, confStrength[C.conferenceOf(name)]);
+			const level = programLevel(name, trng, confStrength[confAt(name)]);
 			const prospects = prospectsBySchool[name] || [];
 			const members = prospects.map((p) => ({
 				filler: false,
@@ -242,18 +372,24 @@
 			for (const f of fillers) members.push(f);
 
 			const coach = makeCoach(trng.child("coach"), level, C.prestige(name));
+			/* A first-year rebuild is not the team the previous staff left
+			   behind, and an interim's is less of one still. */
+			const coachedLevel = clamp(level + (coach.levelAdj || 0), 5, 99);
 			teams[name] = {
 				name,
 				coach,
 				// This season's conference strength, so anything that reads it
 				// (selection, the note, the harness) reads the same number the
 				// program was built from.
-				confStrength: confStrength[C.conferenceOf(name)],
+				confStrength: confStrength[confAt(name)],
 				// The style IS the coach; it used to be an independent roll.
 				style: coach.style,
-				conf: C.conferenceOf(name) || "Independent",
+				conf: confAt(name),
+				// Where this programme played last season, when it moved.
+				movedFrom: map.confOf[name] && C.conferenceOf(name) !== map.confOf[name]
+					? C.conferenceOf(name) : null,
 				prestige: C.prestige(name),
-				level,
+				level: coachedLevel,
 				members,
 				rating: teamRating(members),
 				prospects,
@@ -264,8 +400,37 @@
 				// November. Young rosters improve most.
 				// A staff that develops players is a team that is better in
 				// March than in November, which is what `form` means.
-				form: trng.normal(2.0, 4.5) + coach.dev,
+				form: trng.normal(2.0, 4.5) + coach.dev + (coach.formAdj || 0),
 			};
+		}
+		/* Narrative bends, applied after every programme exists because they
+		   are statements about the SEASON rather than about any one team:
+		   "the year three blue bloods all went down" and "the year the
+		   mid-majors won" are the kind of thing a class is remembered for and
+		   the archetype-mix flavours could never express. */
+		const nrng = rng.child("narrative");
+		const down = Math.round(clamp(
+			cfg && cfg.bluebloodDownYears !== undefined ? cfg.bluebloodDownYears : 0, 0, 8));
+		if (down > 0) {
+			const blue = C.names.slice()
+				.sort((a, b) => C.prestige(b) - C.prestige(a)).slice(0, 24);
+			for (const name of nrng.shuffle(blue).slice(0, down)) {
+				const t = teams[name];
+				if (!t) continue;
+				t.level = clamp(t.level - nrng.uniform(9, 16), 5, 99);
+				t.rating = teamRating(t.members);
+				t.downYear = true;
+			}
+		}
+		const lift = clamp(
+			cfg && cfg.midMajorLift !== undefined ? cfg.midMajorLift : 0, 0, 12);
+		if (lift > 0) {
+			for (const name of C.names) {
+				const t = teams[name];
+				if (!t || C.prestige(name) >= 62) continue;
+				t.level = clamp(t.level + lift * nrng.uniform(0.4, 1.0), 5, 99);
+				t.midMajorSurge = true;
+			}
 		}
 		return teams;
 	}
@@ -652,8 +817,9 @@
 	global.TeamsSim = {
 		buildPrograms, simulateRegularSeason, simulateConferenceTournaments,
 		prospectTalent, teamRating, winProb, playGame, playGameScore, ratingOn,
-		capFillers, FILLER_GAP, conferenceDrift, programLevel, applyOutages,
-		PROGRAM_VOL, DOWN_YEAR_RATE, BREAKOUT_RATE, makeCoach,
+		realign, makeCoach, COACH_SITUATIONS,
+		capFillers, FILLER_GAP, conferenceDrift, programLevel, applyOutages, makeFiller,
+		PROGRAM_VOL, DOWN_YEAR_RATE, BREAKOUT_RATE, STAR_RETURNER_RATE,
 		rotationWeights, pairUp, record, recordPostseason, finalizeSchedule,
 		REGULAR_NOISE,
 		label, adoptConference, conferencePools, PROGRAM_STYLES,

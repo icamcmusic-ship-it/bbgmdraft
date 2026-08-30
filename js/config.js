@@ -28,12 +28,33 @@
 		archetypePool: 14,
 		/* How many forced anomalies a class gets: a five-star bust, an
 		   unranked recruit who turns into a lottery pick, a 24-year-old JUCO,
-		   a 7'4" project. Cheap, memorable, and the reason to reroll. 0 turns
-		   them off. */
-		surpriseBudget: 3,
+		   a 7'4" project, the coach's son, the man whose season ended in
+		   February. Cheap, memorable, and the reason to reroll. 0 turns them
+		   off.
+
+		   Raised from 3 when the pool went from seven kinds to twenty-three:
+		   drawing three from seven meant two consecutive classes shared an
+		   anomaly about four times in five, so the one feature most worth
+		   rerolling for was the one that went stale fastest. */
+		surpriseBudget: 4,
 		/* How injury-prone this season is. Drawn before a game is played, so it
 		   moves records and resumes and not only the note text. */
 		injuryRate: 1,
+
+		// --- the season's own story ----------------------------------------
+		/* How often the map of college basketball changes. Conference STRENGTH
+		   already drifted from year to year; membership never did, so the one
+		   constant in a tool built to make every run different was the single
+		   most consequential thing that happens to college basketball in real
+		   life. A realignment moves two to five of the best programmes in
+		   weaker leagues into a conference that is raiding. 0 turns it off. */
+		realignmentRate: 0.35,
+		/* How many blue bloods have a down year, beyond the ordinary
+		   programme-strength roll. "The year three blue bloods all went down"
+		   is a season nobody forgets and nothing could ask for it. */
+		bluebloodDownYears: 0,
+		/* How far the mid-majors are lifted, in programme-strength points. */
+		midMajorLift: 0,
 
 		// --- blank colleges ----------------------------------------------
 		// Legacy headline sliders. They still work (and old shareable links
@@ -85,6 +106,14 @@
 		// scores its points more (or less) efficiently.
 		efficiencyEnv: 0,      // -3 (bricks) .. +3 (everything falls)
 		statNoise: 1.0,        // 0 = deterministic from ratings, 2 = wild
+		/* How a prospect's earlier college seasons are produced.
+
+		   "simulate" runs each of them through the same stat model the draft
+		   year goes through — the player at the ratings he had then, with that
+		   year's class year, in a rotation rebuilt around him. "reconstruct" is
+		   the older behaviour: a backward-scaled copy of the draft-year line,
+		   which reads fine and is not a season. */
+		priorSeasons: "simulate",   // "simulate" | "reconstruct"
 
 		// --- postseason ---------------------------------------------------
 		upsetFactor: 1.0,      // 0 = chalk, 2 = madness

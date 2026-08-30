@@ -117,6 +117,69 @@
 		{ name: "Late Bloomer", min: 0, max: 100, w: 1.1, t: ["raw"], o: { endu: 10, oiq: 8, spd: 6, stre: 6, fg: -8, tp: -6, ins: -6, drb: -4 } },
 		{ name: "Fifth-Year Senior", min: 0, max: 100, w: 1.2, t: [], o: { oiq: 14, diq: 10, ft: 8, fg: 6, jmp: -14, spd: -10, endu: -4, dnk: -8 } },
 		{ name: "Positionless Forward", min: 38, max: 72, w: 1.4, t: ["wing", "playmaking", "defense"], o: { pss: 12, diq: 10, drb: 10, reb: 8, oiq: 6, ins: -10, dnk: -8, ft: -6 } },
+		/* --- twenty-six more, and the shape of the table ---------------------
+
+		   Two measured faults, fixed together rather than by adding more of
+		   what was already well covered.
+
+		   TAG COVERAGE was badly unbalanced: `guard` had 24 members and
+		   `rebounding` and `raw` had five each, while CLASS_FLAVORS multiplies
+		   those tags by up to 2.2. A 2.2x on a five-member pool is a much
+		   blunter instrument than the same multiplier on a 24-member one, so a
+		   rebounding-heavy or raw-heavy class could only ever be the same five
+		   builds — which is the opposite of what a flavour is for. Fifteen of
+		   the builds below carry `rebounding`, `raw`, `big` or `shooting`.
+
+		   THE OFFSET TABLE WAS SYSTEMATICALLY SUBTRACTIVE. Every rating except
+		   oiq and endurance was reduced by more builds than boosted it, most
+		   severely tp (20 up / 43 down), ins (13/36), pss (16/31) and reb
+		   (18/25). The ovr-neutralising normaliser handles the LEVEL, so
+		   nothing was broken — but the shape meant the average specialist was a
+		   subtraction, which is why specialisation read as "worse at things"
+		   rather than "different". These builds lean the other way: most of
+		   them boost one of the four ratings the table was starving, and the
+		   measured ratio of boosts to cuts improved for every one of them
+		   (ft 19/23 -> 30/32, reb 18/25 -> 24/30, tp 20/43 -> 25/48,
+		   pss 16/31 -> 24/36). tp, ins, pss and reb are still net-negative and
+		   will stay so: they are the ratings a specialist genuinely trades
+		   away, and the normaliser handles the level regardless. The fault
+		   worth fixing was the SHAPE being lopsided enough that the average
+		   build read as a subtraction, and it no longer is.
+
+		   Role usage is derived now (see ROLE_USAGE below), so none of them
+		   needs a hand-fitted constant, which is what made adding builds
+		   expensive enough that there were 72 and not a hundred. */
+		// --- guards -------------------------------------------------------
+		{ name: "Off-Ball Mover", min: 0, max: 52, w: 1.5, t: ["guard", "shooting", "athletic"], o: { tp: 16, endu: 14, spd: 10, ft: 8, drb: -12, pss: -10, ins: -8, stre: -6 } },
+		{ name: "Defensive Combo Guard", min: 0, max: 50, w: 1.6, t: ["guard", "defense", "playmaking"], o: { diq: 16, drb: 10, pss: 10, endu: 8, ins: -12, dnk: -10, reb: -8, tp: -4 } },
+		{ name: "Turnover-Prone Creator", min: 0, max: 48, w: 1.0, t: ["guard", "playmaking", "raw"], o: { drb: 18, pss: 16, spd: 8, fg: 6, oiq: -18, diq: -10, reb: -8 } },
+		{ name: "Spot-Up Only Guard", min: 0, max: 54, w: 1.3, t: ["guard", "shooting"], o: { tp: 20, ft: 14, oiq: 6, drb: -14, spd: -10, pss: -10, ins: -8 } },
+		{ name: "Tough-Shot Maker", min: 0, max: 56, w: 1.1, t: ["guard", "scoring"], o: { fg: 20, tp: 10, jmp: 8, oiq: 6, diq: -12, pss: -10, reb: -8, endu: -6 } },
+		{ name: "Full-Court Pusher", min: 0, max: 46, w: 1.2, t: ["guard", "athletic", "playmaking"], o: { spd: 18, endu: 14, pss: 12, drb: 8, fg: -12, ins: -10, stre: -10, reb: -6 } },
+		{ name: "Steady Backup Point", min: 0, max: 44, w: 1.1, t: ["guard", "playmaking"], o: { oiq: 14, pss: 12, ft: 10, diq: 6, jmp: -12, dnk: -10, spd: -8, ins: -6 } },
+		// --- wings --------------------------------------------------------
+		{ name: "Weak-Side Rim Protector", min: 40, max: 70, w: 1.3, t: ["wing", "defense", "rebounding"], o: { diq: 16, jmp: 12, reb: 12, endu: 6, fg: -12, ft: -12, drb: -10, spd: -4 } },
+		{ name: "Slashing Non-Shooter", min: 34, max: 66, w: 1.5, t: ["wing", "athletic", "scoring"], o: { dnk: 18, spd: 12, ins: 12, stre: 8, tp: -20, ft: -12, pss: -6 } },
+		{ name: "Connective Passer Wing", min: 36, max: 68, w: 1.3, t: ["wing", "playmaking"], o: { pss: 16, oiq: 12, ft: 8, drb: 6, dnk: -12, jmp: -10, ins: -8, stre: -6 } },
+		{ name: "Small-Ball Four", min: 44, max: 70, w: 1.4, t: ["wing", "big", "rebounding"], o: { reb: 16, stre: 14, ins: 10, diq: 8, ft: -10, drb: -10, spd: -8, dnk: -8 } },
+		{ name: "Off-Ball Cutter Specialist", min: 36, max: 68, w: 1.1, t: ["wing", "athletic", "scoring"], o: { dnk: 16, oiq: 12, spd: 8, ins: 8, drb: -14, pss: -12, tp: -10, ft: -4 } },
+		{ name: "High-Motor Rebounding Forward", min: 40, max: 70, w: 1.4, t: ["wing", "rebounding"], o: { reb: 18, endu: 14, stre: 10, jmp: 8, fg: -12, oiq: -10, drb: -10, ft: -8 } },
+		// --- bigs ---------------------------------------------------------
+		{ name: "Passing Hub Five", min: 56, max: 100, w: 1.0, t: ["big", "playmaking"], o: { pss: 20, oiq: 14, ft: 10, ins: 8, spd: -12, jmp: -10, diq: -8, tp: -6 } },
+		{ name: "Drop-Coverage Anchor", min: 58, max: 100, w: 1.6, t: ["big", "defense", "rebounding"], o: { diq: 18, reb: 14, stre: 10, ins: 6, spd: -14, fg: -12, drb: -10, dnk: -6 } },
+		{ name: "Perimeter-Switch Five", min: 54, max: 100, w: 1.3, t: ["big", "defense", "athletic"], o: { spd: 16, diq: 12, endu: 10, jmp: 8, ins: -12, ft: -8, fg: -8, dnk: -6 } },
+		{ name: "Free-Throw-Line Extended Big", min: 50, max: 80, w: 1.2, t: ["big", "shooting", "scoring"], o: { ft: 18, fg: 14, oiq: 8, ins: 6, spd: -10, drb: -10, reb: -8, diq: -6 } },
+		{ name: "Bruising Backup Center", min: 58, max: 100, w: 1.2, t: ["big", "scoring", "rebounding"], o: { stre: 18, ins: 14, reb: 12, dnk: 6, spd: -14, drb: -14, endu: -10, jmp: -8 } },
+		{ name: "Third-Big Energy Guy", min: 52, max: 100, w: 1.5, t: ["big", "rebounding", "athletic"], o: { endu: 16, reb: 14, jmp: 10, stre: 8, drb: -12, ft: -10, oiq: -10, fg: -8 } },
+		// --- everyone -----------------------------------------------------
+		{ name: "Two-Sport Athlete", min: 0, max: 100, w: 1.1, t: ["athletic", "raw"], o: { spd: 16, stre: 14, jmp: 12, endu: 8, oiq: -14, fg: -12, diq: -10, ft: -8 } },
+		{ name: "Late-Blooming Shooter", min: 0, max: 100, w: 1.3, t: ["shooting", "raw"], o: { tp: 18, ft: 14, oiq: 6, endu: 6, ins: -12, dnk: -10, diq: -10, stre: -8 } },
+		{ name: "System Player", min: 0, max: 100, w: 1.2, t: ["playmaking", "defense"], o: { oiq: 14, diq: 12, pss: 8, ft: 6, dnk: -12, jmp: -10, spd: -8, ins: -6 } },
+		{ name: "High-Floor Low-Ceiling", min: 0, max: 100, w: 1.2, t: ["defense"], o: { oiq: 12, diq: 10, ft: 10, endu: 8, jmp: -14, dnk: -10, spd: -8, tp: -4 } },
+		{ name: "Boom-or-Bust Tools", min: 0, max: 100, w: 1.4, t: ["raw", "athletic"], o: { jmp: 18, dnk: 14, spd: 10, stre: 8, oiq: -16, diq: -12, ft: -10, drb: -8 } },
+		{ name: "Overseas Pro Veteran", min: 0, max: 100, w: 1.0, t: ["shooting", "playmaking"], o: { oiq: 14, tp: 12, pss: 10, ft: 8, jmp: -14, spd: -10, dnk: -8, endu: -6 } },
+		{ name: "Injury-Return Unknown", min: 0, max: 100, w: 0.9, t: ["raw", "scoring"], o: { fg: 12, ins: 10, oiq: 8, ft: 6, endu: -18, spd: -10, jmp: -8 } },
+
 		{ name: "Balanced", min: 0, max: 100, w: 1.0, t: [], o: {} },
 	];
 
@@ -139,39 +202,150 @@
 	   guessed: each value is the multiplier that brings its build's mean
 	   scoring residual against the class's own ovr fit inside +/-2 points, and
 	   tools/validate.js bands the worst of them so it cannot drift back. */
-	const ROLE_USAGE = {
-		"Floor General": 1.22, "Combo Guard": 0.46, "Sharpshooter": 0.54,
-		"Slasher": 0.92, "Defensive Pest": 2.30, "Heliocentric Guard": 0.86,
-		"Pick-and-Roll Maestro": 0.74, "Movement Shooter": 0.70,
-		"Pull-Up Artist": 0.42, "Downhill Attacker": 0.79,
-		"Crafty Finisher": 0.58, "Pass-First Sparkplug": 1.70, "Ball Hawk": 2.30,
-		"Pesky On-Ball Stopper": 2.30, "Score-First Point": 0.48,
-		"Sixth-Man Gunner": 0.32, "Streaky Volume Scorer": 0.32,
-		"Change-of-Pace Guard": 1.32, "Post-Up Guard": 0.32,
-		"Free-Throw Merchant": 0.92, "3&D Wing": 0.83, "Two-Way Wing": 1.22,
-		"Point Forward": 1.62, "Wing Sniper": 0.58, "Shot-Creating Wing": 0.54,
-		"Transition Wing": 1.78, "Cutter / Finisher": 1.12, "Wing Stopper": 2.30,
-		"Rebounding Wing": 0.96, "Corner Specialist": 0.74,
-		"Midrange Operator": 0.68, "Jumbo Playmaker": 0.59, "Energy Wing": 2.30,
-		"Do-It-All Forward": 1.27, "Bully Slasher": 0.61, "Glide Athlete": 1.60,
-		"Microwave Scorer": 0.50, "Athletic Freak": 1.31, "Glue Guy": 1.38,
-		"High-IQ Connector": 0.80, "Raw Project": 1.03, "Iron Man": 2.02,
-		"Stretch Big": 0.74, "Post Scorer": 0.63, "Rim Protector": 1.88,
-		"Rim Runner": 1.19, "Motor Big": 0.97, "Skilled Big": 0.57,
-		"Point Center": 0.78, "Offensive Rebounding Menace": 1.60,
-		"Switchable Big": 2.12, "Mobile Shot-Swatter": 2.30,
-		"Face-Up Four": 0.68, "Low-Post Bruiser": 0.54, "Pick-and-Pop Big": 0.89,
-		"Lob Threat": 1.16, "Old-School Center": 0.77,
-		"Undersized Rebounder": 1.16, "Foul-Prone Enforcer": 0.76,
-		"Low-Motor Talent": 0.34, "Foul Magnet Guard": 0.33,
-		"Non-Shooting Playmaker": 1.09, "Rebounding Guard": 2.07,
-		"Two-Way Point Guard": 1.36, "Small-Ball Five": 2.30,
-		"Stretch Four Stopper": 0.80, "Rim-Running Wing": 1.25,
-		"Late Bloomer": 1.10, "Positionless Forward": 0.91, "Balanced": 0.79,
+	/* THE TABLE IS GONE. This is now DERIVED.
+
+	   It used to be 72 hand-fitted constants, one per build, each of them the
+	   multiplier that happened to bring its build's mean scoring residual
+	   inside +/-2 points on the day it was measured. Three things were wrong
+	   with that:
+
+	     - Two builds had no entry at all (Injury-Prone Talent and Fifth-Year
+	       Senior) and silently defaulted to 1.0, which made Injury-Prone Talent
+	       the highest-scoring build in the class at 24.3 points a game. A
+	       lookup that answers 1.0 for a name it has never seen cannot be
+	       tested, because there is nothing to see.
+	     - Twelve of the 72 sat on the fit boundary — seven pinned at exactly
+	       2.30 and five at 0.32-0.34 — which means the fit failed for those
+	       builds and was clipped. It worked, but only just, and only for the
+	       exact model it was fitted against.
+	     - Every new build needed a hand-fitted constant, which is the real
+	       reason there were 72 builds and not 120.
+
+	   What the table was actually compensating for is a known quantity. BBGM's
+	   usage composite is 1.5*ins + dnk + fg + tp + 0.5*(spd + hgt + drb + oiq),
+	   over 650 — a description of a player's SHOT-MAKING. An archetype that
+	   loads on fg and tp raises that composite and takes volume it was never
+	   given; one that loads on diq and reb lowers it and loses volume it never
+	   should have lost. Both of those are computable straight off the build's
+	   own (ovr-neutralised) offset vector.
+
+	   So:
+
+	     compensation = (U0 / (U0 + compositeDelta)) ^ ROLE_COMP_EXP
+
+	   undoes what the composite over- or under-reads, and a small per-tag
+	   INTENT term says what a coach does on purpose: a creator gets the ball
+	   whether or not his ins rating agrees, and a rim protector does not.
+
+	   Fitted, not guessed: tools/rolefit.js measures every build's mean scoring
+	   residual against the class's own ovr fit and reports the constants that
+	   minimise them, and tools/validate.js bands the worst residual so this
+	   cannot drift. Adding a build no longer requires adding a constant. */
+	const ROLE_USAGE_W = { ins: 1.5, dnk: 1, fg: 1, tp: 1, spd: 0.5, hgt: 0.5, drb: 0.5, oiq: 0.5 };
+	const ROLE_USAGE_DENOM = 650;
+	/* The usage composite a typical drafted prospect scores. Measured on a
+	   draft-slot-shaped class, which is the population this has to be right
+	   for; the old fixture's 0.45 is what made the filler baseline wrong too. */
+	const ROLE_U0 = 0.394;
+	/* Self-creation. The usage composite counts drb and oiq at 0.5 and pss not
+	   at all, because it is measuring who can MAKE a shot, not who makes his
+	   own. A build that loads on handle and vision is given the ball more than
+	   its shot-making says: that is the difference between a Slasher and a
+	   Cutter, who do the same damage but only one of whom creates it. Weighted
+	   the way a creation role actually splits: handle first, then passing, then
+	   feel.
+
+	   The fit currently puts almost no weight on it (createW is near zero): the
+	   playmaking and guard tags between them already absorb what it measures on
+	   the present table. It is kept because it is a real and separable term —
+	   the tags are a proxy for it and a new build can easily be a creator
+	   without carrying either tag — and because a regressor the fit can decide
+	   is worth nothing is exactly what a fitted model should contain. */
+	const ROLE_CREATE_W = { drb: 0.6, pss: 1.0, oiq: 0.5 };
+	function creationDelta(arch) {
+		let d = 0;
+		for (const k of Object.keys(ROLE_CREATE_W)) d += ROLE_CREATE_W[k] * (arch.o[k] || 0);
+		// Scaled so the term has roughly unit spread across the table, which
+		// is what keeps tools/rolefit.js's ridge from shrinking it to nothing
+		// purely because its column was small.
+		return d / 25;
+	}
+
+	const ROLE_FIT = {
+		createW: 0.02,
+		compExp: 0.69,
+		base: 0.98,
+		/* What a coach hands each kind of player, over and above what his
+		   shot-making says. Scoring and shooting builds are ALREADY given the
+		   ball by the composite, so their intent term is below 1; defensive,
+		   athletic and rebounding builds are not, so theirs is above it. */
+		tags: {
+			guard: 0.96, wing: 1.06, big: 1.18,
+			scoring: 0.87, shooting: 0.87, playmaking: 0.89,
+			defense: 1.03, athletic: 1.04, rebounding: 0.87, raw: 0.91,
+		},
+		/* Softly bounded rather than clamped, so a build can never land
+		   exactly on a limit the way twelve of the old table's entries did. */
+		lo: 0.30, hi: 2.60, band: 0.18,
 	};
+
+	/* The delta an archetype's offsets make to BBGM's usage composite. Read
+	   off the NORMALISED offsets, which is what actually reaches the ratings. */
+	function usageCompositeDelta(arch) {
+		let d = 0;
+		for (const k of Object.keys(arch.o)) d += (ROLE_USAGE_W[k] || 0) * arch.o[k];
+		return d / ROLE_USAGE_DENOM;
+	}
+
+	function softBound(x, lo, hi, band) {
+		// Softplus up from lo, mirrored down from hi. Monotone, and never
+		// exactly equal to either bound.
+		const up = (v, e) => {
+			const z = (v - e) / band;
+			return e + band * (z > 30 ? z : Math.log1p(Math.exp(z)));
+		};
+		const down = (v, e) => {
+			const z = (e - v) / band;
+			return e - band * (z > 30 ? z : Math.log1p(Math.exp(z)));
+		};
+		return down(up(x, lo), hi);
+	}
+
+	function computeRoleUsage(arch) {
+		const du = usageCompositeDelta(arch);
+		let v = ROLE_FIT.base *
+			Math.pow(ROLE_U0 / Math.max(0.05, ROLE_U0 + du), ROLE_FIT.compExp) *
+			Math.exp(ROLE_FIT.createW * creationDelta(arch));
+		for (const t of arch.t || []) {
+			if (Number.isFinite(ROLE_FIT.tags[t])) v *= ROLE_FIT.tags[t];
+		}
+		return softBound(v, ROLE_FIT.lo, ROLE_FIT.hi, ROLE_FIT.band);
+	}
+
+	/* Computed once, exposed as an object so the editor and the tests can read
+	   the whole table the way they always could. */
+	const ROLE_USAGE = {};
+	for (const a of ARCHETYPES) ROLE_USAGE[a.name] = computeRoleUsage(a);
+
+	/* An unknown build is now an ERROR, not a silent 1.0.
+
+	   Both builds that fell through the old table did so invisibly, and the
+	   only reason anyone noticed is that one of them came out as the
+	   highest-scoring archetype in the class. In a browser the sim must not
+	   die on a name it does not recognise, so a fallback is still returned —
+	   but under a test harness (BBGM_STRICT_ROLES, set by tools/test.js and
+	   tools/validate.js) it throws, which is where a missing build should be
+	   found. */
+	const STRICT_ROLES = typeof process !== "undefined" && process.env &&
+		process.env.BBGM_STRICT_ROLES === "1";
 	function roleUsage(name) {
 		const v = ROLE_USAGE[name];
-		return Number.isFinite(v) ? v : 1;
+		if (Number.isFinite(v)) return v;
+		if (STRICT_ROLES) {
+			throw new Error("roleUsage: unknown archetype " + JSON.stringify(name) +
+				" — every build must be in ARCHETYPES");
+		}
+		return 1;
 	}
 
 	/* How much room to grow each build implies, in ovr→pot gap points. A Raw
@@ -215,6 +389,21 @@
 		"Two-Way Point Guard": 1, "Stretch Four Stopper": 0,
 		"Rebounding Guard": 0, "Non-Shooting Playmaker": -1,
 		"Foul Magnet Guard": -2, "Fifth-Year Senior": -6,
+		/* The twenty-six added below, on the same logic: length, athleticism
+		   and unfinished tools are upside; finished skill, a narrow role and a
+		   body that is already what it is going to be are not. */
+		"Boom-or-Bust Tools": 8, "Two-Sport Athlete": 7, "Injury-Return Unknown": 5,
+		"Late-Blooming Shooter": 5, "Turnover-Prone Creator": 4,
+		"Perimeter-Switch Five": 3, "Third-Big Energy Guy": 2,
+		"Weak-Side Rim Protector": 2, "Slashing Non-Shooter": 2,
+		"Full-Court Pusher": 1, "Small-Ball Four": 1, "Drop-Coverage Anchor": 1,
+		"Off-Ball Cutter Specialist": 1, "High-Motor Rebounding Forward": 0,
+		"Connective Passer Wing": 0, "Defensive Combo Guard": 0,
+		"Passing Hub Five": 0, "Off-Ball Mover": -1, "System Player": -1,
+		"Tough-Shot Maker": -1, "Free-Throw-Line Extended Big": -2,
+		"Spot-Up Only Guard": -2, "Steady Backup Point": -3,
+		"Bruising Backup Center": -3, "High-Floor Low-Ceiling": -5,
+		"Overseas Pro Veteran": -6,
 	};
 
 	/* Potential gap for a finished build.
@@ -468,6 +657,31 @@
 		{ name: "veteran", w: 0.7, label: "old and finished",
 			m: { shooting: 1.4, defense: 1.3, raw: 0.35, athletic: 0.7 },
 			c: { freshmanShare: 18, potBias: -1.3, potSpread: 0.7 } },
+
+		/* --- narrative flavours ----------------------------------------------
+
+		   Every flavour above is compositional: it bends WHO IS IN the class.
+		   None of them bends the SEASON, and a class is remembered for its
+		   season at least as often as for its build mix — the year everyone got
+		   hurt, the year three blue bloods went down, the year the mid-majors
+		   won. Those are all things the engine already models (injuryRate,
+		   programme strength, upsetFactor); nothing could ask for them. */
+		{ name: "injury year", w: 0.6, label: "the year everybody got hurt",
+			m: { raw: 1.2, athletic: 1.1 },
+			c: { injuryRate: 2.0 } },
+		{ name: "blue bloods down", w: 0.6, label: "the year the blue bloods fell over",
+			m: {},
+			c: { bluebloodDownYears: 3, upsetFactor: 1.35 } },
+		{ name: "mid-major year", w: 0.5, label: "the year the mid-majors won",
+			m: { shooting: 1.3, defense: 1.2, athletic: 0.85 },
+			c: { midMajorLift: 7, upsetFactor: 1.55 } },
+		{ name: "weak top deep middle", w: 0.6,
+			label: "no top, but deep all the way down",
+			m: { defense: 1.2, playmaking: 1.2, scoring: 0.85 },
+			c: { classDepth: 2.2, eliteCount: 0, classQuality: -0.3, potSpread: 3 } },
+		{ name: "realignment year", w: 0.5, label: "a realignment year",
+			m: {},
+			c: { realignmentRate: 1, transferShare: 52 } },
 	];
 
 	/* The config bend a flavour applies to the whole class. Returned separately
@@ -535,12 +749,33 @@
 		return list.filter((a) => hgt >= a.min && hgt <= a.max && a.name !== "Balanced");
 	}
 
+	/* Rarity compression.
+
+	   The table's design target was a ~10x spread between the commonest build
+	   and the rarest. Measured, the realised spread was far larger — the
+	   rarest builds appeared roughly once every four or five classes, which is
+	   not rarity but absence — because three multiplications compound: the
+	   authored weight (0.45 to 3.6, an 8x range), the exposure divisor, and the
+	   pool draw, which is sampling WITHOUT replacement and so amplifies any
+	   weight difference into a much larger difference in how often a build
+	   makes the pool at all.
+
+	   Compressing the effective weight in log space is the one place that can
+	   be corrected without flattening the authored intent: a Combo Guard stays
+	   several times likelier than a Point Center, but "several" stops meaning
+	   two hundred. The exponent is applied after the exposure divisor and after
+	   the flavour, so a class flavour still bends the mix by as much as it ever
+	   did — the flavour multiplier is the thing a user asked for, and it is
+	   compressed by the same amount as everything else rather than singled
+	   out. */
+	const RARITY_COMPRESS = 0.42;
 	function archetypeWeight(a, cfg, flavor) {
 		const custom = (cfg && cfg.archetypeWeights) || null;
 		const base = custom && Number.isFinite(custom[a.name])
 			? custom[a.name]
 			: (a.w === undefined ? 1 : a.w);
-		return (Math.max(0, base) * flavorMultiplier(a, flavor)) / a.exposure;
+		const raw = (Math.max(0, base) * flavorMultiplier(a, flavor)) / a.exposure;
+		return raw > 0 ? Math.pow(raw, RARITY_COMPRESS) : 0;
 	}
 
 	/* Draw the class's build pool. `size` is how many specialist builds the
@@ -648,7 +883,15 @@
 	   to listed height), and every other rating clamps at 0/100, so a very tall
 	   or very short base simply cannot reach every target. Callers — the lock
 	   editor, the tests — need to know which asks are impossible rather than
-	   silently getting the nearest thing. */
+	   silently getting the nearest thing.
+
+	   IMPORTANT: pass the NOISE-FREE base. The range used to be computed on the
+	   post-noise base, which made it a property of the roll rather than of the
+	   player: the editor showed a solvable range that moved under the user on
+	   every reroll while nothing about the prospect had changed, and a lock
+	   that was reachable a moment ago stopped being so. It is a function of the
+	   original ratings, the archetype, the specialisation setting and the
+	   pinned vector, all of which the user can see. */
 	function ovrRange(base, arch, pinned) {
 		const upScales = arch ? shiftScales(arch, true, pinned) : SHIFT_SCALE;
 		const downScales = arch ? shiftScales(arch, false, pinned) : SHIFT_SCALE;
@@ -661,17 +904,18 @@
 	/* Re-solve a built player after one of his base ratings has been changed
 	   outside the builder — a forced height, in practice. Returns the same
 	   shape rebuild() does for the fields that move. */
-	function resolveTo(base, targetOvr, archName, fuzz, pinned) {
+	function resolveTo(base, targetOvr, archName, fuzz, pinned, cleanBase) {
 		const arch = ARCHETYPES.filter((a) => a.name === archName)[0] ||
 			ARCHETYPES[ARCHETYPES.length - 1];
 		const solved = solveToOvr(base, targetOvr, arch, pinned);
 		return {
 			base,
+			cleanBase: cleanBase || base,
 			ratings: solved,
 			ovr: BB.ovr(solved),
 			pos: BB.pos(solved),
 			skills: BB.skills(Object.assign({ fuzz }, solved)),
-			ovrRange: ovrRange(base, arch, pinned),
+			ovrRange: ovrRange(cleanBase || base, arch, pinned),
 		};
 	}
 
@@ -725,24 +969,42 @@
 		const noise = Math.max(0, cfg.buildNoise);
 
 		const base = {};
+		/* The same vector without the per-rating jitter. Only `ovrRange` reads
+		   it, and it reads it so that the range it reports is a fact about the
+		   player rather than about this particular roll. */
+		const cleanBase = {};
 		for (const key of BB.RATING_KEYS) {
 			// A hand-edited rating is taken literally and never shifted. There
 			// was no way at all to say "leave everything else, just bump his tp
 			// to 70"; the editor could only set ovr, pot, archetype and school.
 			if (pinned && Number.isFinite(pinned[key])) {
 				base[key] = clamp(Math.round(pinned[key]), 0, 100);
+				cleanBase[key] = base[key];
 				continue;
 			}
 			const off = arch.o[key] || 0;
-			base[key] = clamp(
-				orig[key] + spec * off + rng.normal(0, noise),
-				key === "hgt" ? orig[key] : 1,
-				key === "hgt" ? orig[key] : 99,
-			);
+			const lo = key === "hgt" ? orig[key] : 1;
+			const hi = key === "hgt" ? orig[key] : 99;
+			base[key] = clamp(orig[key] + spec * off + rng.normal(0, noise), lo, hi);
+			cleanBase[key] = clamp(orig[key] + spec * off, lo, hi);
 		}
 
-		const solved = solveToOvr(base, targetOvr, arch, pinned);
-		const finalOvr = BB.ovr(solved);
+		const range = ovrRange(cleanBase, arch, pinned);
+		let solved = solveToOvr(base, targetOvr, arch, pinned);
+		let finalOvr = BB.ovr(solved);
+		/* The reported range describes the jitter-free build, so it has to be
+		   a promise the solver keeps. Per-rating jitter can push a rating onto
+		   its 1/99 clamp and cost the noisy vector a point of reach at the very
+		   ends of the scale, which would leave the editor offering a lock it
+		   then silently missed. In that rare case the jitter is dropped for
+		   this player rather than the promise. */
+		if (finalOvr !== targetOvr && targetOvr >= range.min && targetOvr <= range.max) {
+			const retry = solveToOvr(cleanBase, targetOvr, arch, pinned);
+			if (Math.abs(BB.ovr(retry) - targetOvr) < Math.abs(finalOvr - targetOvr)) {
+				solved = retry;
+				finalOvr = BB.ovr(retry);
+			}
+		}
 		const pot = clamp(Math.max(targetPot, finalOvr + 1), finalOvr, 100);
 
 		return {
@@ -750,6 +1012,9 @@
 			// surprise, say) can be re-solved to the same target rather than
 			// leaving ovr disagreeing with the rating vector it came from.
 			base,
+			// The jitter-free vector, so a later re-solve (a forced height)
+			// can report the same stable range this build did.
+			cleanBase,
 			archetype: arch.name,
 			ratings: solved,
 			ovr: finalOvr,
@@ -758,7 +1023,7 @@
 			skills: BB.skills(Object.assign({ fuzz: orig.fuzz }, solved)),
 			// What this player's height actually allows, so an impossible lock
 			// can be reported instead of quietly ignored.
-			ovrRange: ovrRange(base, arch, pinned),
+			ovrRange: range,
 		};
 	}
 
@@ -766,7 +1031,9 @@
 		ARCHETYPES, RAW_OFFSETS, OVR_W, SHIFT_SCALE, USAGE_W,
 		rebuild, classCurve, pickArchetype, solveToOvr, shiftScales, ovrRange, resolveTo,
 		potAdjust, potFactors, potFromRole, POT_BY_ARCHETYPE,
-		ROLE_USAGE, roleUsage,
+		ROLE_USAGE, roleUsage, computeRoleUsage, usageCompositeDelta, creationDelta,
+		ROLE_FIT,
 		CLASS_FLAVORS, pickFlavor, flavorMultiplier, flavorConfig, pickClassPool,
+		archetypeWeight, RARITY_COMPRESS,
 	};
 })(typeof window !== "undefined" ? window : self);

@@ -59,6 +59,12 @@
 		{ key: "gp", label: "GP", num: true, stat: true },
 		{ key: "mpg", label: "MPG", num: true, stat: true },
 		{ key: "ppg", label: "PPG", num: true, stat: true },
+		/* The shape of a season, which no average can carry: a man who scored
+		   14 every night and one who scored 6 until January and 22 after read
+		   as the same row. Off by default — it is a picture, not a number, so
+		   it does not sort and it costs a column. */
+		{ key: "trend", label: "Trend", num: false, off: true, stat: true,
+			title: "Points per game across the season, game by game" },
 		{ key: "rpg", label: "RPG", num: true, stat: true },
 		{ key: "orpg", label: "ORB", num: true, stat: true, off: true },
 		{ key: "drpg", label: "DRB", num: true, stat: true, off: true },
@@ -394,6 +400,81 @@
 		next.focus();
 	}
 
+	/* A twelve-pixel scoring trend for one prospect's season.
+
+	   The Game logs tab has the whole thing, but SHAPE is what a scout reads
+	   off a season and the table could only show a mean: a man who scored 14 a
+	   game every night and one who scored 6 until January and 22 after are the
+	   same row. Inline SVG, no library, and it degrades to nothing when there
+	   is no log to draw. */
+	const SPARK_W = 64;
+	const SPARK_H = 16;
+	function sparkline(p, key) {
+		const games = p.gameLog && p.gameLog.games;
+		if (!games || games.length < 4) return null;
+		const vals = games.map((g) => g[key] || 0);
+		const hi = Math.max.apply(null, vals) || 1;
+		const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+		svg.setAttribute("class", "spark");
+		svg.setAttribute("viewBox", "0 0 " + SPARK_W + " " + SPARK_H);
+		svg.setAttribute("width", String(SPARK_W));
+		svg.setAttribute("height", String(SPARK_H));
+		svg.setAttribute("aria-hidden", "true");
+		svg.setAttribute("focusable", "false");
+		const step = SPARK_W / Math.max(1, vals.length - 1);
+		const y = (v) => SPARK_H - 1.5 - (v / hi) * (SPARK_H - 3);
+		let d = "";
+		vals.forEach((v, i) => { d += (i ? "L" : "M") + (i * step).toFixed(1) + " " + y(v).toFixed(1); });
+		const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+		path.setAttribute("d", d);
+		path.setAttribute("class", "sparkline");
+		svg.appendChild(path);
+		/* A title, because the picture is the point and its scale is not
+		   readable from sixty-four pixels. */
+		const t = document.createElementNS("http://www.w3.org/2000/svg", "title");
+		t.textContent = vals.length + " games, high " + hi;
+		svg.appendChild(t);
+		return svg;
+	}
+
+	/* One line saying where a number came from, for the table's hover text.
+	   Everything here is already on the player or his team; the point is that
+	   reading it required opening a panel. */
+	function explainCell(p, key, res) {
+		const s = p.stats;
+		if (!s) return "";
+		const team = res.teams[p.newCollege];
+		const where = p.proClub || p.newCollege;
+		const who = p.name + " — " + p.archetype + ", " + p.classYear + ", " + where;
+		const pace = team && Number.isFinite(team.pace)
+			? team.pace.toFixed(1) + " possessions" : null;
+		switch (key) {
+		case "ppg":
+			return who + ". " + pc(s.usg) + " of his team's chances over " +
+				n1(s.mpg) + " minutes at " + pc(s.ts) + " true shooting" +
+				(pace ? ", on " + pace + " a game" : "") + ".";
+		case "mpg":
+			return who + ". Rotation slot " + ((p.minutesRank || 0) + 1) +
+				" on a team rated " + (team ? Math.round(team.level) : "—") + ".";
+		case "usg":
+			return who + ". Usage is what a coach gives him: build, class year " +
+				"and his own role, then his share of what his teammates leave.";
+		case "apg":
+		case "rpg":
+		case "spg":
+		case "bpg":
+			return who + ". His share of the team pool, by weight and minutes.";
+		case "ts":
+		case "fgp":
+		case "tpp":
+		case "ftp":
+			return who + ". Shooting composites against a player of his size, " +
+				"the defences he faced, and how much of the offence he carried.";
+		default:
+			return who + ".";
+		}
+	}
+
 	function matchesFilter(p, res) {
 		const f = A().state.filter;
 		if (f.q) {
@@ -403,6 +484,7 @@
 			if (hay.indexOf(f.q.toLowerCase()) === -1) return false;
 		}
 		if (f.pos && p.newPos !== f.pos) return false;
+		if (f.archetype && p.archetype !== f.archetype) return false;
 		if (f.conf) {
 			const t = res.teams[p.newCollege];
 			const conf = t ? t.conf : (p.nonNcaa ? p.newCollege : "");
@@ -538,9 +620,30 @@
 	function filterBar(res) {
 		const st = A().state;
 		const bar = el("div", "filters");
-		bar.appendChild(searchInput(
+		const search = searchInput(
 			"Search name, school, archetype, honour…", "Search prospects",
-			() => st.filter.q, (v) => { st.filter.q = v; }));
+			() => st.filter.q, (v) => { st.filter.q = v; });
+		// So "/" has something to focus.
+		search.id = "prospectSearch";
+		bar.appendChild(search);
+
+		/* Step through the class one build at a time. Reading a class by
+		   archetype — every Rim Protector, then every Stretch Big — is how you
+		   see whether a build is doing what you asked of it, and the only way
+		   to do it was to type the name and retype it. */
+		const archSel = el("select");
+		archSel.id = "archFilter";
+		archSel.setAttribute("aria-label", "Filter by archetype");
+		archSel.appendChild(new Option("all builds", ""));
+		const present = {};
+		for (const p of res.players) if (p.archetype) present[p.archetype] = true;
+		for (const a of Object.keys(present).sort()) archSel.appendChild(new Option(a, a));
+		archSel.value = st.filter.archetype || "";
+		archSel.addEventListener("change", () => {
+			st.filter.archetype = archSel.value;
+			A().render();
+		});
+		bar.appendChild(archSel);
 
 		const posSel = el("select");
 		posSel.setAttribute("aria-label", "Filter by position");
@@ -630,6 +733,48 @@
 			grid.appendChild(lab);
 		}
 		box.appendChild(grid);
+
+		/* Saved layouts. The built-in presets below cover the common views, but
+		   with forty-odd columns everyone ends up with one arrangement they
+		   actually work in, and it had to be rebuilt from the checkbox grid
+		   every time the built-ins were used. These persist with the rest of
+		   the settings. */
+		const saved = st.columnLayouts || (st.columnLayouts = {});
+		const savedRow = el("div", "rowflex");
+		savedRow.appendChild(el("span", "hint", "Your layouts:"));
+		const names = Object.keys(saved).sort();
+		if (!names.length) savedRow.appendChild(el("span", "hint", "none yet"));
+		for (const name of names) {
+			const b = el("button", "tiny", name);
+			b.addEventListener("click", () => {
+				st.hiddenColumns = Object.assign({}, saved[name]);
+				A().closeModal();
+				A().persist();
+				A().render();
+			});
+			savedRow.appendChild(b);
+			const x = el("button", "tiny", "×");
+			x.title = "Delete the layout “" + name + "”";
+			x.setAttribute("aria-label", "Delete the layout " + name);
+			x.addEventListener("click", () => {
+				delete saved[name];
+				A().persist();
+				columnPicker();
+			});
+			savedRow.appendChild(x);
+		}
+		const saveBtn = el("button", "tiny", "Save this layout…");
+		saveBtn.addEventListener("click", () => {
+			const name = window.prompt("Name this column layout:", "");
+			if (!name || !name.trim()) return;
+			saved[name.trim()] = Object.assign({}, st.hiddenColumns);
+			A().persist();
+			A().setStatus("Saved the column layout “" + name.trim() + "”.");
+			columnPicker();
+		});
+		savedRow.appendChild(saveBtn);
+		box.appendChild(savedRow);
+
 		const presets = el("div", "rowflex");
 		const preset = (name, keys) => {
 			const b = el("button", "tiny", name);
@@ -710,6 +855,16 @@
 				});
 				line.appendChild(b);
 			});
+			view.appendChild(line);
+		}
+		/* Realignment. The map of college basketball changing is a thing a
+		   season is remembered for, and it happened silently. */
+		if (res.realignment && res.realignment.length) {
+			const line = el("p", "legendline");
+			line.appendChild(document.createTextNode(
+				"Realignment: " + res.realignment
+					.map((m) => m.school + " leaves the " + m.from + " for the " + m.to)
+					.join(" · ")));
 			view.appendChild(line);
 		}
 		view.appendChild(filterBar(res));
@@ -909,6 +1064,13 @@
 						Number.isFinite(p.newWeight) ? String(p.newWeight) : "");
 					sortVals.weight = p.newWeight;
 					break;
+				case "trend": {
+					td = el("td", "sparkcell");
+					const sp = sparkline(p, "pts");
+					if (sp) td.appendChild(sp);
+					else td.textContent = "—";
+					break;
+				}
 				default: {
 					const v = cellValue(p, col.key, res, mode);
 					const base = v === undefined ? ""
@@ -940,6 +1102,11 @@
 				   arranged, so under 700px each row becomes a card — which
 				   needs every cell to be able to say what it is. */
 				if (col.label && !col.fixed) td.setAttribute("data-label", col.label);
+				/* "Explain this number" without opening the editor. The editor
+				   has explain panels and you had to open a player to reach one,
+				   so scanning a table for a number that looks wrong meant a
+				   round trip per number. */
+				if (!td.title && col.stat && p.stats) td.title = explainCell(p, col.key, res);
 				tr.appendChild(td);
 			}
 			return { node: tr, sortVals };
@@ -1034,6 +1201,27 @@
 		const label = el("span", "pill", count + " selected");
 		bar.appendChild(label);
 
+		/* Selecting the top of the board. "Everything above the fold" is what a
+		   user means and it took a shift-click they did not have. */
+		const topN = el("select");
+		topN.setAttribute("aria-label", "Select the top of the board");
+		topN.appendChild(new Option("select top…", ""));
+		for (const n of [5, 10, 14, 15, 20, 30, 60]) {
+			topN.appendChild(new Option("top " + n, String(n)));
+		}
+		topN.addEventListener("click", (e) => e.stopPropagation());
+		topN.addEventListener("change", () => {
+			const n = Number(topN.value);
+			topN.value = "";
+			if (!n) return;
+			const order = res.players.slice()
+				.sort((a, b) => (a.boardRank || 999) - (b.boardRank || 999));
+			st.selected = {};
+			for (const p of order.slice(0, n)) st.selected[p.key] = true;
+			A().render();
+		});
+		bar.appendChild(topN);
+
 		const all = el("button", "tiny", "Select all shown");
 		all.addEventListener("click", () => {
 			for (const p of res.players) if (matchesFilter(p, res)) st.selected[p.key] = true;
@@ -1089,6 +1277,24 @@
 			A().bulkShiftOvr(d);
 		});
 		bar.appendChild(shiftBtn);
+
+		/* Lock verbs. You could set a field for a selection but not FREEZE what
+		   the selection already had, so "keep the top fifteen exactly as they
+		   are and reroll everything else" — the single most common thing
+		   anyone does with this tool — meant opening fifteen editors. */
+		const lockWhat = el("select");
+		lockWhat.setAttribute("aria-label", "Lock the selection as it is");
+		lockWhat.appendChild(new Option("lock as-is…", ""));
+		lockWhat.appendChild(new Option("everything", "all"));
+		lockWhat.appendChild(new Option("overall only", "ovr"));
+		lockWhat.appendChild(new Option("archetype only", "archetype"));
+		lockWhat.appendChild(new Option("school only", "college"));
+		lockWhat.addEventListener("change", () => {
+			if (!lockWhat.value) return;
+			A().bulkLockAsIs(lockWhat.value);
+			lockWhat.value = "";
+		});
+		bar.appendChild(lockWhat);
 
 		const unlock = el("button", "tiny", "Clear locks");
 		unlock.addEventListener("click", () => A().bulkClear());
@@ -2091,15 +2297,24 @@
 		["board", "Board position", 0, true],
 	];
 
+	/* Four slots, not two. Two players is a head-to-head; TIERING — is this
+	   man the third-best wing in the class or the sixth? — is what anybody
+	   actually does on a draft board, and it needs three or four columns.
+	   Empty slots are simply not rendered, so the two-player case looks
+	   exactly as it did. */
+	const COMPARE_MAX = 4;
+
 	function playerCompare(res) {
 		const st = A().state;
-		if (!st.compare) st.compare = [null, null];
+		if (!Array.isArray(st.compare)) st.compare = [];
+		while (st.compare.length < COMPARE_MAX) st.compare.push(null);
+		st.compare.length = COMPARE_MAX;
 		const box = el("div", "card");
-		box.appendChild(el("h4", null, "Two prospects, side by side"));
+		box.appendChild(el("h4", null, "Prospects side by side"));
 		const bar = el("div", "filters");
 		const sorted = res.players.slice()
 			.sort((a, b) => (a.boardRank || 999) - (b.boardRank || 999));
-		[0, 1].forEach((slot) => {
+		st.compare.forEach((_, slot) => {
 			const sel = el("select");
 			sel.setAttribute("aria-label", "Prospect " + (slot + 1));
 			sel.setAttribute("data-focus", "compare" + slot);
@@ -2117,21 +2332,30 @@
 			});
 			bar.appendChild(sel);
 		});
-		const swap = el("button", "tiny", "Swap");
+		const swap = el("button", "tiny", "Swap first two");
 		swap.addEventListener("click", () => {
-			st.compare = [st.compare[1], st.compare[0]];
+			const c = st.compare.slice();
+			const t = c[0]; c[0] = c[1]; c[1] = t;
+			st.compare = c;
 			A().persist();
 			A().render();
 		});
 		bar.appendChild(swap);
+		const clear = el("button", "tiny", "Clear");
+		clear.addEventListener("click", () => {
+			st.compare = new Array(COMPARE_MAX).fill(null);
+			A().persist();
+			A().render();
+		});
+		bar.appendChild(clear);
 		box.appendChild(bar);
 
 		const find = (k) => res.players.filter((p) => p.key === k)[0] || null;
-		const a = find(st.compare[0]);
-		const b = find(st.compare[1]);
-		if (!a || !b) {
+		const picked = st.compare.map(find).filter(Boolean);
+		if (picked.length < 2) {
 			box.appendChild(el("p", "hint",
-				"Pick two prospects to see every number they differ on."));
+				"Pick two or more prospects to see every number they differ on. " +
+				"Three or four is how you tier a position."));
 			return box;
 		}
 		const valueOf = (p, key) => {
@@ -2148,39 +2372,35 @@
 		const table = el("table", "mini compare");
 		const head = el("tr");
 		head.appendChild(el("th", null, ""));
-		head.appendChild(el("th", "num", a.name));
-		head.appendChild(el("th", "num", b.name));
+		for (const p of picked) head.appendChild(el("th", "num", p.name));
 		table.appendChild(head);
-		const meta = (label, x, y) => {
+		const meta = (label, f) => {
 			const tr = el("tr");
 			tr.appendChild(el("td", null, label));
-			tr.appendChild(el("td", null, x));
-			tr.appendChild(el("td", null, y));
+			for (const p of picked) tr.appendChild(el("td", null, f(p)));
 			table.appendChild(tr);
 		};
-		meta("Position", a.newPos, b.newPos);
-		meta("Archetype", a.archetype, b.archetype);
-		meta("Year", a.classYear, b.classYear);
-		meta("School", a.proClub || a.newCollege, b.proClub || b.newCollege);
+		meta("Position", (p) => p.newPos);
+		meta("Archetype", (p) => p.archetype);
+		meta("Year", (p) => p.classYear);
+		meta("School", (p) => p.proClub || p.newCollege);
 		for (const [key, label, digits, lowerBetter] of COMPARE_ROWS) {
-			const x = valueOf(a, key);
-			const y = valueOf(b, key);
-			if (!Number.isFinite(x) && !Number.isFinite(y)) continue;
+			const vals = picked.map((p) => valueOf(p, key));
+			if (!vals.some(Number.isFinite)) continue;
+			const real = vals.filter(Number.isFinite);
+			/* With more than two columns "better than the other one" is not a
+			   question, so the mark goes on the BEST of the row — which is the
+			   only reading that stays meaningful at three and four. */
+			const best = lowerBetter
+				? Math.min.apply(null, real) : Math.max.apply(null, real);
+			const tie = real.filter((v) => v === best).length === real.length;
 			const tr = el("tr");
 			tr.appendChild(el("td", null, label));
-			const cell = (v, other) => {
-				const td = el("td", "num",
-					Number.isFinite(v) ? v.toFixed(digits) : "—");
-				if (Number.isFinite(v) && Number.isFinite(other) && v !== other) {
-					const better = lowerBetter ? v < other : v > other;
-					// A glyph as well as the class, because colour alone is not
-					// a channel everyone has.
-					if (better) td.classList.add("up");
-				}
-				return td;
-			};
-			tr.appendChild(cell(x, y));
-			tr.appendChild(cell(y, x));
+			for (const v of vals) {
+				const td = el("td", "num", Number.isFinite(v) ? v.toFixed(digits) : "—");
+				if (!tie && Number.isFinite(v) && v === best) td.classList.add("up");
+				tr.appendChild(td);
+			}
 			table.appendChild(tr);
 		}
 		box.appendChild(table);
@@ -2199,6 +2419,6 @@
 		notes: viewNotes, gamelog: viewGameLog, compare: viewCompare,
 		COLUMNS, STAT_MODES, PCT_KEYS, DERIVED, derived, cellValue, statValue,
 		matchesFilter, numericColumns, histogram, feet,
-		el, n1, pc, wrapCell,
+		el, n1, pc, wrapCell, COMPARE_MAX,
 	};
 })(window);
