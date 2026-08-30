@@ -717,11 +717,208 @@
 				p.walkOn = true;
 			},
 		},
+
+		/* --- and sixteen more ------------------------------------------------
+
+		   Seven kinds against a budget of three meant a reroll drew nearly half
+		   the pool every time, so the one feature most worth rerolling for was
+		   also the one that went stale fastest: two classes running would share
+		   an anomaly more often than not. Twenty-three kinds against a budget
+		   of four is a different proposition — the chance that two consecutive
+		   classes share one falls from about 4 in 5 to about 1 in 2.
+
+		   Each is still a bend on data the model already carries, and each
+		   writes a `backstory` line the note renders, so a class can say what
+		   happened rather than only knowing it. */
+		{
+			name: "coach's son", w: 1.2,
+			label: "the coach's son",
+			pick: (p) => !p.nonNcaa && p.recruiting,
+			apply: (p, r) => {
+				p.recruiting.rank = r.int(180, 300);
+				p.recruiting.stars = 3;
+				p.backstory = "son of the head coach";
+			},
+		},
+		{
+			name: "never played high school", w: 1.0,
+			label: "never played a high school game",
+			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman",
+			apply: (p, r) => {
+				p.transfer = {
+					kind: "JUCO transfer",
+					from: r.pick(["Chipola College", "Northwest Florida State",
+						"Indian Hills CC", "Ranger College"]),
+					fifthYear: false,
+				};
+				if (p.recruiting) { p.recruiting.rank = 320; p.recruiting.stars = 2; }
+				p.backstory = "did not play organised basketball until junior college";
+			},
+		},
+		{
+			name: "converted athlete", w: 1.3,
+			label: "a convert from another sport",
+			pick: (p) => !p.nonNcaa,
+			apply: (p, r) => {
+				p.backstory = "came to basketball from " + r.pick([
+					"college football", "the javelin", "volleyball", "handball",
+					"rugby", "track", "swimming", "cricket",
+				]) + " three years ago";
+			},
+		},
+		{
+			name: "three countries", w: 1.1,
+			label: "played in three countries before this one",
+			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman",
+			apply: (p, r) => {
+				const places = r.shuffle(["Spain", "Serbia", "Australia", "Lithuania",
+					"France", "Israel", "Greece", "Turkey", "Canada", "Senegal"]);
+				p.backstory = "played in " + places.slice(0, 3).join(", ") +
+					" before arriving here";
+			},
+		},
+		{
+			name: "eligibility year", w: 1.1,
+			label: "sat out a full year for eligibility",
+			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman",
+			apply: (p) => {
+				p.redshirt = "sat out a season for eligibility";
+				p.backstory = "sat a full year while his transfer waiver was decided";
+			},
+		},
+		{
+			name: "twice decommitted", w: 1.2,
+			label: "decommitted twice before signing",
+			pick: (p) => !p.nonNcaa && p.recruiting,
+			apply: (p, r) => {
+				p.recruiting.decommits = 2;
+				p.backstory = "committed and decommitted twice, signing in " +
+					r.pick(["April", "May", "late June"]);
+			},
+		},
+		{
+			name: "reclassified down", w: 0.9,
+			label: "reclassified back a year and arrived old",
+			pick: (p) => !p.nonNcaa && p.classYear === "Freshman",
+			apply: (p) => {
+				p.age = 20;
+				p.reclassified = "reclassified back a year";
+				p.backstory = "repeated a year of high school and arrived at twenty";
+			},
+		},
+		{
+			name: "boomerang transfer", w: 1.1,
+			label: "left, and came back",
+			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman",
+			apply: (p, r) => {
+				p.transfer = {
+					kind: "returned to his original school",
+					from: null,
+					fifthYear: r.random() < 0.4,
+				};
+				p.backstory = "transferred out after his freshman year and came back";
+			},
+		},
+		{
+			name: "pro sibling", w: 1.0,
+			label: "the younger brother of a pro",
+			pick: (p) => !p.nonNcaa,
+			apply: (p, r) => {
+				p.backstory = "younger brother of " + r.pick([
+					"a ten-year NBA veteran", "a EuroLeague champion",
+					"an All-Star", "a two-time G League call-up",
+					"a WNBA All-Star",
+				]);
+			},
+		},
+		{
+			name: "broken hand", w: 1.3,
+			label: "missed the whole non-conference schedule",
+			pick: (p) => !p.nonNcaa,
+			apply: (p, r) => {
+				p.forcedAvailability = {
+					games: r.int(9, 13), kind: "a broken hand", injury: true,
+					from: 0, to: 0.34,
+				};
+				p.backstory = "broke a hand in October and did not play until January";
+			},
+		},
+		{
+			name: "february injury", w: 1.2,
+			label: "his season ended in February",
+			pick: (p) => !p.nonNcaa,
+			apply: (p, r) => {
+				p.forcedAvailability = {
+					games: r.int(7, 11), kind: "a season-ending knee injury",
+					injury: true, from: 0.72, to: 1,
+				};
+				p.backstory = "went down in February and did not play again";
+			},
+		},
+		{
+			name: "position switch", w: 1.1,
+			label: "changed positions on arrival",
+			pick: (p) => !p.nonNcaa,
+			apply: (p, r) => {
+				p.backstory = "moved to " + r.pick([
+					"point guard", "the wing", "the four", "centre",
+				]) + " for the first time this season";
+			},
+		},
+		{
+			name: "hometown holdout", w: 1.0,
+			label: "turned down the blue bloods to stay home",
+			pick: (p) => !p.nonNcaa && p.recruiting && C.prestige(p.newCollege) < 55,
+			apply: (p, r) => {
+				p.recruiting.rank = r.int(12, 40);
+				p.recruiting.stars = 4;
+				p.backstory = "turned down every blue blood to play twenty minutes from home";
+			},
+		},
+		{
+			name: "third school", w: 1.1,
+			label: "his third school in five years",
+			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman",
+			apply: (p, r) => {
+				p.classYear = "Graduate";
+				p.transfer = {
+					kind: "graduate transfer",
+					from: r.pick(["a Big Ten program", "a mid-major", "a JUCO",
+						"an Ivy League school", "a Mountain West program"]),
+					fifthYear: true,
+				};
+				p.backstory = "his third school in five years";
+			},
+		},
+		{
+			name: "academic redshirt", w: 0.9,
+			label: "ineligible as a freshman",
+			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman",
+			apply: (p) => {
+				p.redshirt = "academic redshirt";
+				p.backstory = "was academically ineligible for his freshman season";
+			},
+		},
+		{
+			name: "went pro and came back", w: 1.0,
+			label: "turned pro abroad, then came back to college",
+			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman",
+			apply: (p, r) => {
+				p.age = Math.max(p.age || 21, 21);
+				p.transfer = {
+					kind: "returned from a professional contract",
+					from: r.pick(["Australia's NBL", "the Spanish second division",
+						"a Serbian club", "Overtime Elite", "the G League Ignite"]),
+					fifthYear: false,
+				};
+				p.backstory = "signed a professional contract, then came back to college";
+			},
+		},
 	];
 
 	function assignSurprises(players, rng, cfg) {
 		const budget = clamp(
-			cfg && cfg.surpriseBudget !== undefined ? cfg.surpriseBudget : 3, 0, 8);
+			cfg && cfg.surpriseBudget !== undefined ? cfg.surpriseBudget : 4, 0, 10);
 		if (!budget || !players.length) return [];
 		const n = Math.max(0, Math.round(rng.uniform(budget - 1, budget + 1)));
 		const used = new Set();
@@ -828,6 +1025,15 @@
 		for (const p of players) {
 			p.availability = null;
 			if (p.nonNcaa || p.idleYear) continue;
+			/* A forced anomaly beats the roll. `assignSurprises` runs before
+			   this, so without the guard "his season ended in February" would
+			   have been silently replaced by an ordinary draw. */
+			if (p.forcedAvailability) {
+				p.availability = Object.assign({}, p.forcedAvailability, {
+					games: Math.min(p.forcedAvailability.games, SEASON_GAMES - 5),
+				});
+				continue;
+			}
 			const r = rng.child("inj:" + p.key);
 			// The draft-year games-played mean is 33.5 against a ~35-game
 			// schedule, so a bit over half a class misses something.
@@ -852,7 +1058,14 @@
 	}
 
 	function phaseRegular(state) {
-		const { cfg } = state;
+		/* The EFFECTIVE config, which is the one the flavour bent. The
+		   narrative flavours ("the year everybody got hurt", "the year the
+		   blue bloods fell over") move settings this phase reads —
+		   injuryRate, the realignment rate, the down-year count — and reading
+		   state.cfg here would have silently discarded every one of them.
+		   Safe against the phase cache: the flavour is drawn in the build
+		   phase, so anything that changes it re-runs this phase too. */
+		const cfg = state.effectiveCfg || state.cfg;
 		const rng = state.rng;
 		const bySchool = {};
 		for (const p of state.players) {
@@ -861,7 +1074,11 @@
 		}
 		state.bySchool = bySchool;
 		assignAvailability(state.players, rng.child("availability"), cfg);
-		const teams = T.buildPrograms(bySchool, rng.child("programs"));
+		const teams = T.buildPrograms(bySchool, rng.child("programs"), cfg);
+		/* buildPrograms returns the season's realignment alongside the teams;
+		   lift it off before anything iterates the map. */
+		state.realignment = teams.__realignment || [];
+		delete teams.__realignment;
 		T.applyOutages(teams);
 		T.simulateRegularSeason(teams, cfg, rng.child("season"));
 		// Snapshot, so the postseason can be re-run on its own (changing
@@ -898,7 +1115,10 @@
 	}
 
 	function phasePostseason(state) {
-		const { cfg, teams } = state;
+		// The bent config, for the same reason phaseRegular reads it: the
+		// narrative flavours move upsetFactor.
+		const { teams } = state;
+		const cfg = state.effectiveCfg || state.cfg;
 		const rng = state.rng;
 		resetPostseason(teams);
 		state.confTourneys = T.simulateConferenceTournaments(teams, cfg, rng.child("conftourney"));
@@ -1194,7 +1414,12 @@
 		},
 		// injuryRate is read by assignAvailability, which runs here — before a
 		// game is played, which is the whole point of it.
-		{ name: "regular", deps: ["pace", "scoringEnv", "injuryRate"], run: phaseRegular },
+		{
+			name: "regular",
+			deps: ["pace", "scoringEnv", "injuryRate", "realignmentRate",
+				"bluebloodDownYears", "midMajorLift"],
+			run: phaseRegular,
+		},
 		{ name: "postseason", deps: ["upsetFactor"], run: phasePostseason },
 		{
 			name: "stats",
@@ -1245,6 +1470,19 @@
 				from = 0;
 			}
 			state.cfg = effective;
+			/* Re-derive the flavour's config bend against the NEW settings.
+
+			   Later phases read `effectiveCfg` because the narrative flavours
+			   bend settings those phases own (injuryRate, upsetFactor, the
+			   realignment rate). `effectiveCfg` was written once, in the build
+			   phase — so a warm re-run that skipped the build phase left the
+			   postseason reading the previous run's upset factor, and a staged
+			   run stopped matching a cold one. The bend itself is a pure
+			   function of the flavour and the settings, so it is cheap to
+			   recompute here whether or not the build phase runs. */
+			if (state.flavor !== undefined) {
+				state.effectiveCfg = applyFlavorConfig(effective, state.flavor);
+			}
 			if (from === 0) {
 				state.rng = new Rng(seed);
 				state.seed = seed;
@@ -1275,6 +1513,7 @@
 				archetypePool: state.archetypePool
 					? state.archetypePool.map((a) => a.name) : null,
 				surprises: state.surprises || [],
+				realignment: state.realignment || [],
 				warnings: validation.warnings,
 				phasesRun: ran,
 				leagueFile,
@@ -1536,6 +1775,7 @@
 		["highs", "Season highs, 20-point games, streaks"],
 		["march", "Postseason splits"],
 		["injury", "Games missed and why"],
+		["coach", "Who coaches him, and what kind of year the staff is having"],
 		["archetype", "Archetype label"],
 		["awards", "Honours"],
 		["stock", "Draft stock and mock position"],
@@ -1554,7 +1794,12 @@
 				lines.push((p.proClub ? p.proClub + " (" + p.newCollege + ")" : p.newCollege) +
 					" · " + p.classYear + (p.proDeal ? " · " + p.proDeal : ""));
 			} else {
-				lines.push(p.newCollege + " (" + team.conf + ") · " + p.classYear +
+				lines.push(p.newCollege + " (" + team.conf +
+					// A programme that moved leagues this year says so, because
+					// "first year in the Big Ten" is half the story of a season.
+					(team.movedFrom ? ", first year after leaving the " +
+						team.movedFrom : "") +
+					") · " + p.classYear +
 					(team.style && team.style.name !== "balanced"
 						? " · " + team.style.name : ""));
 			}
@@ -1574,6 +1819,12 @@
 			}
 			if (p.redshirt) bits.push(p.redshirt);
 			if (p.reclassified) bits.push(p.reclassified);
+			// What the class anomalies write. They were applied to the model
+			// and then had nowhere to be said.
+			if (p.backstory) bits.push(p.backstory);
+			if (p.recruiting && p.recruiting.decommits) {
+				bits.push(p.recruiting.decommits + " decommitments");
+			}
 			if (p.recruiting && p.recruiting.classmates && p.recruiting.classmates.length) {
 				bits.push("shared a roster with " + p.recruiting.classmates.join(" and "));
 			}
@@ -1659,6 +1910,12 @@
 			const inj = p.gameLog.injury;
 			lines.push("Missed " + inj.games + " game" + (inj.games === 1 ? "" : "s") +
 				" with " + inj.kind + ".");
+		}
+		if (on("coach") && team && team.coach) {
+			lines.push("Coach: " + team.coach.name +
+				(team.coach.situationLabel ? ", " + team.coach.situationLabel : "") +
+				" (year " + team.coach.tenure + ")" +
+				(team.downYear ? " · a down year for the programme" : ""));
 		}
 		if (on("archetype") && p.archetype) lines.push("Profile: " + p.archetype);
 		if (on("awards") && p.awards && p.awards.length) {

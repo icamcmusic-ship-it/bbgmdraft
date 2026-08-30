@@ -1156,6 +1156,64 @@ console.log("\nHome and away");
 }
 
 /* ------------------------------------------------- the bugs, kept dead */
+console.log("\nSeason story");
+{
+	/* Conference membership never changed, so the map of college basketball
+	   was the one constant in a tool built to make every run different. */
+	let withMoves = 0;
+	let bad = 0;
+	for (let i = 0; i < 14; i++) {
+		const res = global.Engine.run(V.syntheticClass(300 + i, 60),
+			global.Config.make({ seed: "re" + i }));
+		const moves = res.realignment || [];
+		if (moves.length) withMoves++;
+		for (const m of moves) {
+			// The programme must actually be playing where the move says.
+			if (!res.teams[m.school] || res.teams[m.school].conf !== m.to) bad++;
+			// And a raid reaches one rung down, not five.
+			const sf = global.Colleges.CONFERENCES[m.from];
+			const st2 = global.Colleges.CONFERENCES[m.to];
+			if (sf && st2 && st2.strength - sf.strength > 26) bad++;
+		}
+		// Every conference must still be able to play a season.
+		const size = {};
+		for (const t of Object.values(res.teams)) size[t.conf] = (size[t.conf] || 0) + 1;
+		for (const k of Object.keys(size)) if (size[k] < 4) bad++;
+	}
+	ok("conferences realign some years and not others",
+		withMoves >= 2 && withMoves <= 12, withMoves + " of 14 classes");
+	ok("a realignment leaves a schedulable, consistent map", bad === 0, bad + " problems");
+	ok("turning realignment off leaves the map alone",
+		(global.Engine.run(V.syntheticClass(301, 60),
+			global.Config.make({ seed: "re-off", realignmentRate: 0 })).realignment || [])
+			.length === 0);
+
+	/* Coaches had a style, a tenure and a development number, and no
+	   situation — so every staff in the country was in the same year of the
+	   same job. */
+	const res = global.Engine.run(V.syntheticClass(310, 60),
+		global.Config.make({ seed: "coach" }));
+	const sits = {};
+	for (const t of Object.values(res.teams)) {
+		sits[t.coach.situation] = (sits[t.coach.situation] || 0) + 1;
+	}
+	ok("coaches are in different years of different jobs",
+		Object.keys(sits).length >= 4 &&
+			(sits["first year"] || 0) > 0 && (sits.interim || 0) > 0,
+		JSON.stringify(sits));
+	ok("a first-year coach has a first-year tenure",
+		Object.values(res.teams).every((t) =>
+			t.coach.situation !== "first year" || t.coach.tenure === 1));
+
+	/* The narrative flavours bend settings that later phases own, and those
+	   phases used to read the unbent config. */
+	const down = global.Engine.run(V.syntheticClass(311, 60),
+		global.Config.make({ seed: "down", bluebloodDownYears: 3 }));
+	ok("a blue-blood down year actually reaches the programmes",
+		Object.values(down.teams).filter((t) => t.downYear).length === 3,
+		Object.values(down.teams).filter((t) => t.downYear).length + " programmes");
+}
+
 console.log("\nRegressions");
 {
 	/* An archetype with no role-usage entry used to score a silent 1.0, which

@@ -712,6 +712,16 @@
 			});
 			view.appendChild(line);
 		}
+		/* Realignment. The map of college basketball changing is a thing a
+		   season is remembered for, and it happened silently. */
+		if (res.realignment && res.realignment.length) {
+			const line = el("p", "legendline");
+			line.appendChild(document.createTextNode(
+				"Realignment: " + res.realignment
+					.map((m) => m.school + " leaves the " + m.from + " for the " + m.to)
+					.join(" · ")));
+			view.appendChild(line);
+		}
 		view.appendChild(filterBar(res));
 		view.appendChild(rangeBar(res));
 		view.appendChild(bulkBar(res));

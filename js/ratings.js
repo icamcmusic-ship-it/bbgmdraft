@@ -657,6 +657,31 @@
 		{ name: "veteran", w: 0.7, label: "old and finished",
 			m: { shooting: 1.4, defense: 1.3, raw: 0.35, athletic: 0.7 },
 			c: { freshmanShare: 18, potBias: -1.3, potSpread: 0.7 } },
+
+		/* --- narrative flavours ----------------------------------------------
+
+		   Every flavour above is compositional: it bends WHO IS IN the class.
+		   None of them bends the SEASON, and a class is remembered for its
+		   season at least as often as for its build mix — the year everyone got
+		   hurt, the year three blue bloods went down, the year the mid-majors
+		   won. Those are all things the engine already models (injuryRate,
+		   programme strength, upsetFactor); nothing could ask for them. */
+		{ name: "injury year", w: 0.6, label: "the year everybody got hurt",
+			m: { raw: 1.2, athletic: 1.1 },
+			c: { injuryRate: 2.0 } },
+		{ name: "blue bloods down", w: 0.6, label: "the year the blue bloods fell over",
+			m: {},
+			c: { bluebloodDownYears: 3, upsetFactor: 1.35 } },
+		{ name: "mid-major year", w: 0.5, label: "the year the mid-majors won",
+			m: { shooting: 1.3, defense: 1.2, athletic: 0.85 },
+			c: { midMajorLift: 7, upsetFactor: 1.55 } },
+		{ name: "weak top deep middle", w: 0.6,
+			label: "no top, but deep all the way down",
+			m: { defense: 1.2, playmaking: 1.2, scoring: 0.85 },
+			c: { classDepth: 2.2, eliteCount: 0, classQuality: -0.3, potSpread: 3 } },
+		{ name: "realignment year", w: 0.5, label: "a realignment year",
+			m: {},
+			c: { realignmentRate: 1, transferShare: 52 } },
 	];
 
 	/* The config bend a flavour applies to the whole class. Returned separately
