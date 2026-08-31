@@ -555,6 +555,34 @@ td.sparkcell { padding: 2px 6px; }
 }
 
 
+/* ---- numeric input paired with each slider ------------------------------- */
+.slider-with-number { display: flex; align-items: center; gap: 8px; }
+.slider-with-number input[type=range] { flex: 1; min-width: 0; }
+.slider-with-number input[type=number] {
+	width: 72px; flex: none; padding: 2px 5px; font-size: 12px;
+	font-variant-numeric: tabular-nums; text-align: right;
+}
+
+/* ---- settings search ----------------------------------------------------- */
+#settingsSearch {
+	width: 100%; margin: 0 0 10px; padding: 6px 10px;
+	font-size: 12px;
+}
+.ctl.settings-hidden, details.grp.settings-hidden { display: none; }
+
+/* ---- per-setting modified marker and revert ------------------------------ */
+.ctl .modified-dot {
+	display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+	background: var(--accent); margin-left: 6px; vertical-align: middle;
+	flex-shrink: 0;
+}
+.ctl .revert-btn {
+	background: none; border: none; padding: 0 2px; cursor: pointer;
+	color: var(--dim); font-size: 13px; line-height: 1; margin-left: 2px;
+	flex-shrink: 0; opacity: .7;
+}
+.ctl .revert-btn:hover { color: var(--accent); opacity: 1; }
+
 /* ---- the settings panel on a narrow screen ------------------------------- */
 /* Below 860px the aside stacks above the table, which put eight fieldsets
    between the user and the thing they opened the tool to look at. It is a

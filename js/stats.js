@@ -230,6 +230,7 @@
 		   channels whose sensitivity differs from the raw composite gap. */
 		PROSPECT_COMP_BASE: 0.450,
 		PROSPECT_COMP_SCALE: 1.65,
+		PROSPECT_COMP_SCALE_EFF: 0.55,
 	};
 
 	/* The shape of a college rotation's minutes, by slot. Measured off D-I
@@ -337,7 +338,7 @@
 		   not a rounding error, so "deterministic from ratings" still leaves
 		   room for two identical prospects to be used differently. */
 		const noise = clamp(Number.isFinite(cfg.statNoise) ? cfg.statNoise : 1, 0, 3);
-		const sd = TUNING.ROLE_DRAW_SD * Math.max(0.4, noise);
+		const sd = TUNING.ROLE_DRAW_SD * Math.max(noise > 0 ? 0.4 : 0, noise);
 		/* Median 1, not mean 1: the draw is a role, and roles are
 		   right-skewed. The level it implies for the class as a whole is set
 		   by FILLER_USAGE, which is the only place a class's scoring level can
@@ -635,16 +636,16 @@
 	   than the returning walk-on beside him, purely because the reference never
 	   moved with the fixture. Median assists came out 1.6 a game against a real
 	   2.5-3.0 and rebounds 4.7 against 5.5. Same correction, same reason. */
-	function astWeight(comps, ratings, minShare, ref) {
-		return Math.pow(Math.max(TUNING.AST_FLOOR, passSkill(comps, ratings) + (ref || 0)),
+	function astWeight(comps, ratings, minShare, refVol) {
+		return Math.pow(Math.max(TUNING.AST_FLOOR, passSkill(comps, ratings) + (refVol || 0)),
 			TUNING.AST_EXP) * minShare;
 	}
-	function stlWeight(comps, minShare, ref) {
-		return Math.pow(Math.max(0.02, comps.stealing + (ref || 0)), TUNING.STL_EXP) *
-			(1 + TUNING.STL_ATH * (comps.athleticism + (ref || 0) - 0.50)) * minShare;
+	function stlWeight(comps, minShare, refVol) {
+		return Math.pow(Math.max(0.02, comps.stealing + (refVol || 0)), TUNING.STL_EXP) *
+			(1 + TUNING.STL_ATH * (comps.athleticism + (refVol || 0) - 0.50)) * minShare;
 	}
-	function rebWeight(comps, minShare, offensive, ref) {
-		return Math.pow(Math.max(TUNING.REB_FLOOR, comps.rebounding + (ref || 0)),
+	function rebWeight(comps, minShare, offensive, refVol) {
+		return Math.pow(Math.max(TUNING.REB_FLOOR, comps.rebounding + (refVol || 0)),
 			TUNING.REB_EXP + (offensive ? 0.35 : 0)) * minShare;
 	}
 
@@ -795,7 +796,8 @@
 
 		   Returning rotation players are synthesised from talent and already
 		   sit on the reference, so the shift is the prospect's alone. */
-		const ref = me.filler ? 0 : (ctx.classRef || 0);
+		const refVol = me.filler ? 0 : (ctx.classRefVolume || 0);
+		const refEff = me.filler ? 0 : (ctx.classRefEfficiency || 0);
 
 		// Turnovers: draft-year mean 17.2% of possessions (p5 10.7, p95 24.5),
 		// essentially flat across sizes. A ball-pressure defence forces more.
@@ -810,7 +812,7 @@
 			(me.filler || !Number.isFinite(me.year)
 				? 1 : 1 - TUNING.EXP_TOV * clamp(me.year - 1, -1.2, 3.2));
 		const tovRate = clamp(
-			tovAnchor - 0.10 * (comps.turnovers - 0.467 + ref) +
+			tovAnchor - 0.10 * (comps.turnovers - 0.467 + refVol) +
 				/* Opponent ball pressure. PROGRAM_STYLES gives a full-court
 				   press team press: 0.06, and it was added straight onto a rate
 				   — so a conference stacked with pressing teams could add six
@@ -832,7 +834,7 @@
 			? CAL.ROTATION.ftr * (0.90 + 0.24 * bigness)
 			: CAL.byHeight("ftr", bigness);
 		const ftRate = clamp(
-			ftrAnchor + 0.32 * (comps.drawingFouls - (0.42 + 0.11 * bigness) + ref) +
+			ftrAnchor + 0.32 * (comps.drawingFouls - (0.42 + 0.11 * bigness) + refVol) +
 				rng.normal(0, 0.045 * noise),
 			0.10, 0.75,
 		);
@@ -849,7 +851,7 @@
 		// The system he plays in. A shooter at a four-out programme and the same
 		// shooter in a pack-line offence do not take the same shots.
 		const style = teamCtx.style || { three: 0, rim: 0, press: 0 };
-		let share3 = CAL.threeShare(bigness, ratings.tp + ref * 100) + style.three +
+		let share3 = CAL.threeShare(bigness, ratings.tp + refVol * 100) + style.three +
 			rng.normal(0, 0.045 * noise);
 		share3 = clamp(share3, 0.0, 0.75);
 
@@ -876,7 +878,7 @@
 		const tpCeil = clamp(0.435 + 0.08 * Math.max(0, 1 - tpa / 3.5), 0.435, 0.50);
 		const tpp = clamp(
 			0.339 + CAL.effShift("three") + envEff +
-				0.40 * (comps.shootingThreePointer - (0.50 - 0.20 * bigness) + ref) +
+				0.40 * (comps.shootingThreePointer - (0.50 - 0.20 * bigness) + refEff) +
 				compAdj + synergy + talentAdj + expAdj + loadAdj * 0.6 - 0.055 * od.perimeter +
 				mix(touch, rng.normal(0, 1)) * 0.030 * noise,
 			0.15, tpCeil,
@@ -891,11 +893,11 @@
 			0.10 * (comps.shootingAtRim - comps.shootingMidRange), 0.30, 0.75);
 		// Interior defence bites hardest exactly where it should: at the rim.
 		const insideEff = CAL.byHeight("rimPct", bigness) + CAL.effShift("inside") + envEff +
-			0.26 * (comps.shootingAtRim - (0.32 + 0.44 * bigness) + ref) +
-			0.16 * (comps.shootingLowPost - (0.40 + 0.17 * bigness) + ref) -
+			0.26 * (comps.shootingAtRim - (0.32 + 0.44 * bigness) + refEff) +
+			0.16 * (comps.shootingLowPost - (0.40 + 0.17 * bigness) + refEff) -
 			0.16 * od.rim;
 		const midEff = CAL.byHeight("midPct", bigness) + CAL.effShift("mid") + envEff +
-			0.26 * (comps.shootingMidRange - 0.45 + ref) - 0.05 * od.perimeter;
+			0.26 * (comps.shootingMidRange - 0.45 + refEff) - 0.05 * od.perimeter;
 		const twoP = clamp(
 			rimMix * insideEff + (1 - rimMix) * midEff + compAdj + synergy + talentAdj +
 				expAdj + loadAdj +
@@ -910,7 +912,7 @@
 		   shaped class shoots 69.3% from the line against an anchor of 73.0 for
 		   no reason but the level of the fixture the intercept was fitted on. */
 		const ftp = clamp(
-			0.548 + 0.40 * ((ratings.ft + ref * 100) / 100) - 0.035 * bigness +
+			0.548 + 0.40 * ((ratings.ft + refEff * 100) / 100) - 0.035 * bigness +
 				mix(touch, rng.normal(0, 1)) * 0.035 * noise,
 			0.35, 0.94,
 		);
@@ -926,8 +928,8 @@
 		const sh = (comp, exp) => Math.pow(comp, exp) * minShare;
 		// Offensive rebounds lean a little more on size and effort than the
 		// defensive glass, where everyone boxes out.
-		const orbW = rebWeight(comps, minShare, true, ref);
-		const drbW = rebWeight(comps, minShare, false, ref);
+		const orbW = rebWeight(comps, minShare, true, refVol);
+		const drbW = rebWeight(comps, minShare, false, refVol);
 		// No single player takes an unbounded share of a team total: the record
 		// books top out near 60-70% of team assists and blocks, so saturate the
 		// share smoothly rather than letting one dominant composite run away
@@ -955,7 +957,7 @@
 		const orb = orbRaw * rebScale;
 		const drb = drbRaw * rebScale;
 		const ast = capNoisy(
-			(teamCtx.astPool * astWeight(comps, ratings, minShare, ref)) / teamCtx.astDen,
+			(teamCtx.astPool * astWeight(comps, ratings, minShare, refVol)) / teamCtx.astDen,
 			0.10, teamCtx.astPool, TUNING.AST_CAP);
 		/* Athleticism finally reaches the steal column. BBGM's stealing
 		   composite is (50 + spd + 2*diq) / 400: defensive IQ outweighs speed
@@ -965,7 +967,7 @@
 		   The composite is left alone — half the model reads it — and the share
 		   is tilted here instead. */
 		const stl = capNoisy(
-			(teamCtx.stlPool * stlWeight(comps, minShare, ref)) / teamCtx.stlDen,
+			(teamCtx.stlPool * stlWeight(comps, minShare, refVol)) / teamCtx.stlDen,
 			0.13, teamCtx.stlPool, TUNING.STL_CAP);
 		const blk = capNoisy(
 			(teamCtx.blkPool * sh(comps.blocking, TUNING.BLK_EXP)) / teamCtx.blkDen,
@@ -1244,7 +1246,7 @@
 		   cannot — see ROLE_USAGE in js/ratings.js. Fillers have no archetype
 		   and take 1. */
 		const rawUsg = members.map((m, i) =>
-			Math.pow(comps[i].usage + (m.filler ? 0 : (ctx.classRef || 0)), TUNING.USG_EXP) *
+			Math.pow(comps[i].usage + (m.filler ? 0 : (ctx.classRefVolume || 0)), TUNING.USG_EXP) *
 				Math.pow(0.35 + 1.3 * (m.talent / 100), TUNING.USG_TALENT_EXP) *
 				(1 + TUNING.USG_SIZE_TILT * (0.42 - bignessOf(i))) *
 				CAL.talentUsageMult(m.talent) *
@@ -1432,7 +1434,7 @@
 			const ms = mins[i] / gameMinutes;
 			// Same reference the line itself will use, or the shares would not
 			// sum to the pool.
-			const cr = members[i].filler ? 0 : (ctx.classRef || 0);
+			const cr = members[i].filler ? 0 : (ctx.classRefVolume || 0);
 			teamCtx.rebDen += rebWeight(comps[i], ms, false, cr);
 			teamCtx.orbDen += rebWeight(comps[i], ms, true, cr);
 			teamCtx.astDen += astWeight(comps[i], ratingRows[i], ms, cr);
