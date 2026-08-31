@@ -307,15 +307,15 @@
 
 	const ROLE_FIT = {
 		createW: 0.02,
-		compExp: 0.75,
+		compExp: 0.70,
 		base: 0.98,
 		/* What a coach hands each kind of player, over and above what his
 		   shot-making says. Offensive roles (playmaking, scoring) use more
 		   possessions; defensive and rebounding roles defer on offense. */
 		tags: {
-			guard: 1.02, wing: 1.06, big: 0.94,
-			scoring: 1.15, shooting: 1.10, playmaking: 1.12,
-			defense: 0.88, athletic: 0.96, rebounding: 0.94, raw: 0.91,
+			guard: 1.02, wing: 1.04, big: 0.94,
+			scoring: 1.06, shooting: 1.05, playmaking: 1.06,
+			defense: 0.90, athletic: 0.96, rebounding: 0.94, raw: 0.92,
 		},
 		/* Softly bounded rather than clamped, so a build can never land
 		   exactly on a limit the way twelve of the old table's entries did. */

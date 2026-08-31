@@ -228,9 +228,9 @@
 		   class (synthetic N(45,13), mean usage composite ~0.45).
 		   PROSPECT_COMP_SCALE: amplification, because the ref feeds into
 		   channels whose sensitivity differs from the raw composite gap. */
-		PROSPECT_COMP_BASE: 0.450,
-		PROSPECT_COMP_SCALE: 1.65,
-		PROSPECT_COMP_SCALE_EFF: 0.55,
+		PROSPECT_COMP_BASE: 0.428,
+		PROSPECT_COMP_SCALE: 1.32,
+		PROSPECT_COMP_SCALE_EFF: 0.82,
 	};
 
 	/* The shape of a college rotation's minutes, by slot. Measured off D-I
