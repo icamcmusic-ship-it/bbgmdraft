@@ -1999,6 +1999,43 @@ console.log("\nMechanical anomalies and season narrative");
 }
 
 {
+	/* A flavour's DESTINATION bend reaches assignCollege.
+
+	   Config.make folds the three legacy sliders (wEuroLeague, wGLeague, wNBL)
+	   into `leagueWeights`, which is the only thing assignCollege reads — and
+	   it does that at make() time, before any flavour bend runs. So a flavour
+	   that set wEuroLeague wrote a number nothing read. The "unusually
+	   international" flavour, whose entire purpose is to put more of the class
+	   abroad, produced EuroLeague at 11.9% of non-NCAA prospects against 11.9%
+	   with no flavour at all. */
+	const euroShare = (over) => {
+		let euro = 0;
+		let abroad = 0;
+		for (let s = 0; s < 8; s++) {
+			const res = global.Engine.run(V.realisticClass(s, 70),
+				global.Config.make(Object.assign({ seed: "dest" + s }, over)));
+			for (const p of res.players) {
+				if (!p.nonNcaa) continue;
+				abroad++;
+				if (p.newCollege === "EuroLeague") euro++;
+			}
+		}
+		return abroad ? euro / abroad : 0;
+	};
+	const plain = euroShare({ classFlavor: 0 });
+	const intl = euroShare({ flavorHint: "international" });
+	ok("a flavour's destination bend reaches the college assignment",
+		intl > plain * 1.3,
+		"EuroLeague share: no flavour " + (plain * 100).toFixed(1) +
+			"%, international " + (intl * 100).toFixed(1) + "%");
+	// And a user who edited the destination table is not overruled by it.
+	const mine = euroShare({ flavorHint: "international",
+		leagueWeights: { EuroLeague: 0 } });
+	ok("a destination the user set wins over the flavour", mine === 0,
+		(mine * 100).toFixed(1) + "%");
+}
+
+{
 	// The five new flavours exist and are distinguishable from the old ones by
 	// the tilt they apply, which is the fault they were added to fix.
 	const RBF = RB.CLASS_FLAVORS;

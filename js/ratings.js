@@ -1047,8 +1047,7 @@
 			   range over athleticism — and it lowers buildNoise, because the
 			   thing that reads as a European development system is that the
 			   players are less raw and more finished than their tools. */
-			c: { buildNoise: 3, freshmanShare: 34, leagueWeights: null,
-				wEuroLeague: 34 } },
+			c: { buildNoise: 3, freshmanShare: 34, wEuroLeague: 34 } },
 		{ name: "post-up renaissance", w: 0.7, label: "the year the bigs came back",
 			/* The exact inverse of the small-ball class every other big-leaning
 			   flavour is a version of: big-heavy raises `big` and `rebounding`

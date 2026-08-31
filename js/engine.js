@@ -460,16 +460,49 @@
 	/* Apply a flavour's config bend to the settings the user has left alone.
 	   Compared against Config.DEFAULTS key by key: a value the user moved is
 	   theirs and is not touched. */
+	/* The three legacy destination sliders. Config.make folds these into
+	   `leagueWeights` — which is what assignCollege actually reads — and it does
+	   so at make() time, BEFORE a flavour bend runs. So a flavour that set
+	   wEuroLeague wrote a number nothing read: measured, the "unusually
+	   international" flavour, whose whole purpose is to put more of the class
+	   abroad, produced EuroLeague at 11.9% of non-NCAA prospects against 11.9%
+	   with no flavour at all. Same for every value it set.
+
+	   Folding them again here fixes that, and only when the user has not
+	   touched the destination table themselves — a flavour nudges what the user
+	   has not decided and never overrules what they have, which is the rule the
+	   rest of this function follows. */
+	const LEGACY_LEAGUE = {
+		wEuroLeague: "EuroLeague", wGLeague: "NBA G League", wNBL: "NBL",
+	};
+
+	function untouchedLeagueWeights(cfg) {
+		const built = global.Config.defaultLeagueWeights();
+		const have = cfg.leagueWeights || {};
+		const keys = Object.keys(built);
+		if (Object.keys(have).length !== keys.length) return false;
+		return keys.every((k) => have[k] === built[k]);
+	}
+
 	function applyFlavorConfig(cfg, flavor) {
 		const bend = RB.flavorConfig(flavor);
 		if (!bend) return cfg;
 		const out = Object.assign({}, cfg);
 		const D = global.Config.DEFAULTS;
 		let moved = false;
+		let league = false;
 		for (const k of Object.keys(bend)) {
 			if (cfg[k] !== D[k]) continue;
 			out[k] = bend[k];
 			moved = true;
+			if (LEGACY_LEAGUE[k]) league = true;
+		}
+		if (league && untouchedLeagueWeights(cfg)) {
+			const lw = Object.assign({}, out.leagueWeights);
+			for (const k of Object.keys(LEGACY_LEAGUE)) {
+				if (Number.isFinite(out[k])) lw[LEGACY_LEAGUE[k]] = out[k];
+			}
+			out.leagueWeights = lw;
 		}
 		return moved ? out : cfg;
 	}
