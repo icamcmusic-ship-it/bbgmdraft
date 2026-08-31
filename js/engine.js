@@ -423,7 +423,22 @@
 		const flavor = RB.pickFlavor(rng.child("flavor"), state.cfg);
 		state.flavor = flavor;
 		const cfg = applyFlavorConfig(state.cfg, flavor);
-		state.effectiveCfg = cfg;
+
+		/* Class-level environment jitter. Every class plays in a slightly
+		   different scoring environment — some years run faster, some shoot
+		   better, some are noisier — and without jitter those three sliders
+		   produce identical environments on every reroll. The jitter is small
+		   enough to stay inside the slider's useful range and large enough to
+		   make two classes with the same settings feel different. */
+		const envRng = rng.child("classEnv");
+		const jitteredCfg = Object.assign({}, cfg);
+		jitteredCfg.pace = Math.max(55, cfg.pace + envRng.normal(0, 2.5));
+		jitteredCfg.efficiencyEnv = clamp(
+			(cfg.efficiencyEnv || 0) + envRng.normal(0, 0.6), -3, 3);
+		jitteredCfg.statNoise = Math.max(0,
+			(Number.isFinite(cfg.statNoise) ? cfg.statNoise : 1) + envRng.normal(0, 0.25));
+
+		state.effectiveCfg = jitteredCfg;
 		/* The builds this class is made of. Drawing the pool before the players
 		   is what turns "one of everything, every class" into "the year of the
 		   stretch bigs" — see pickClassPool. */
@@ -547,6 +562,14 @@
 				ov.archetype || null, state.flavor, ov.ratings || null,
 				state.archetypePool);
 			p.newRatings = built.ratings;
+			// Validate: every rating key must be a finite number. A NaN or
+			// Infinity from a degenerate input or a solver edge case must not
+			// propagate into the exported file — clamp to 0 instead.
+			for (const k of BB.RATING_KEYS) {
+				if (!Number.isFinite(p.newRatings[k])) {
+					p.newRatings[k] = 0;
+				}
+			}
 			// The pre-solve base and the pinned vector, so a forced size later
 			// in the pipeline can be re-solved to the same overall instead of
 			// leaving ovr disagreeing with the ratings beside it.
@@ -679,6 +702,11 @@
 				p.buildBase = re.base;
 				p.buildCleanBase = re.cleanBase;
 				p.newRatings = re.ratings;
+				for (const k of BB.RATING_KEYS) {
+					if (!Number.isFinite(p.newRatings[k])) {
+						p.newRatings[k] = 0;
+					}
+				}
 				p.newOvr = re.ovr;
 				p.newPos = re.pos;
 				p.newSkills = re.skills;
@@ -914,6 +942,80 @@
 				p.backstory = "signed a professional contract, then came back to college";
 			},
 		},
+
+		/* --- class-level surprises (task 4.5) --------------------------------
+		   Three rare per-class anomalies that give a draft board something to
+		   argue about. Each bends a prospect's data in a way the normal
+		   pipeline cannot produce. */
+		{
+			name: "late bloomer surge", w: 0.9,
+			label: "a late bloomer who rose from nowhere",
+			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman" && p.newOvr <= 42,
+			apply: (p, r) => {
+				/* A prospect who was a walk-on-calibre player last year and
+				   arrived this year as a genuine draft pick. His recruiting
+				   says nobody, his class year says he has been around, and the
+				   ovr/pot gap is widened because he is still rising. */
+				if (p.recruiting) {
+					p.recruiting.rank = r.int(280, 320);
+					p.recruiting.stars = 2;
+				}
+				p.baseGap = Math.max(p.baseGap || 8, r.int(14, 22));
+				p.backstory = "averaged 3 points a game last year and arrived this season as a different player";
+				p.lateBloomerSurge = true;
+			},
+		},
+		{
+			name: "unexpected transfer splash", w: 1.0,
+			label: "a transfer who nobody saw coming",
+			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman" && p.newOvr >= 40,
+			apply: (p, r) => {
+				/* A mid-major transfer who committed in August, after every
+				   board had been published, and turned out to be the best
+				   player in the conference. */
+				const from = r.pick([
+					"a Summit League school", "a Southland program",
+					"an Ohio Valley school", "a Big South program",
+					"a SWAC school", "a Patriot League school",
+				]);
+				p.transfer = {
+					kind: "late portal entry",
+					from: from,
+					fifthYear: r.random() < 0.4,
+				};
+				if (p.recruiting) {
+					p.recruiting.rank = r.int(200, 300);
+					p.recruiting.stars = r.random() < 0.3 ? 3 : 2;
+				}
+				p.backstory = "entered the portal in August from " + from +
+					" and committed the week before classes started";
+				p.unexpectedTransfer = true;
+			},
+		},
+		{
+			name: "unicorn skillset", w: 0.7,
+			label: "an unusual combination of skills",
+			pick: (p) => !p.nonNcaa && p.newOvr >= 38,
+			apply: (p, r) => {
+				/* A prospect with a genuinely unusual build that does not fit
+				   any archetype cleanly: a 6'10" player who handles the ball
+				   like a guard, or a 6'1" player who blocks shots, or a center
+				   who leads the team in assists. The backstory names the
+				   combination so the note reads as something a scout would
+				   write. */
+				const combos = [
+					{ desc: "a 6'10\" point guard who led his team in assists", trait: "playmaking big" },
+					{ desc: "a center who shot 42% from three on five attempts a game", trait: "shooting big" },
+					{ desc: "a 6'1\" guard who averaged 2 blocks a game", trait: "undersized shot-blocker" },
+					{ desc: "a wing who averaged a triple-double in conference play", trait: "stat-sheet stuffer" },
+					{ desc: "a guard who posted up bigger defenders and shot hook shots", trait: "post-up guard" },
+					{ desc: "a seven-footer who ran the break and threw behind-the-back passes", trait: "unicorn big" },
+				];
+				const combo = r.pick(combos);
+				p.backstory = combo.desc;
+				p.unicornSkillset = combo.trait;
+			},
+		},
 	];
 
 	function assignSurprises(players, rng, cfg) {
@@ -1132,7 +1234,8 @@
 	/* ------------------------------------------------------------- phase 4 */
 
 	function phaseStats(state) {
-		const { cfg, teams, bySchool } = state;
+		const { teams, bySchool } = state;
+		const cfg = state.effectiveCfg || state.cfg;
 		const statRng = state.rng.child("stats");
 		/* Which era's empirical anchors every rate in the stat model targets.
 		   Set once, here, so a run is internally consistent; see the header of
@@ -1151,10 +1254,13 @@
 					prospectComps.push(BB.composites(m.player.newRatings).usage);
 			}
 		}
-		const classRef = prospectComps.length > 0
-			? S.TUNING.PROSPECT_COMP_SCALE * Math.max(0,
-				S.TUNING.PROSPECT_COMP_BASE - (prospectComps.reduce((a, b) => a + b, 0) / prospectComps.length))
+		const meanUsageComposite = prospectComps.length > 0
+			? prospectComps.reduce((a, b) => a + b, 0) / prospectComps.length : 0;
+		const rawRef = prospectComps.length > 0
+			? S.TUNING.PROSPECT_COMP_BASE - meanUsageComposite
 			: 0;
+		const classRefVolume = S.TUNING.PROSPECT_COMP_SCALE * Math.max(0, rawRef);
+		const classRefEfficiency = S.TUNING.PROSPECT_COMP_SCALE_EFF * rawRef;
 
 		/* What each program's opponents actually looked like defensively. This
 		   is the channel that lets a conference of rim protectors hold everyone
@@ -1213,7 +1319,8 @@
 				games: Math.round(team.games),
 				league: S.NCAA_ENV,
 				pro: false,
-				classRef,
+				classRefVolume,
+				classRefEfficiency,
 			}, cfg, statRng.child(school));
 		}
 		void bySchool;
@@ -1231,7 +1338,7 @@
 			p.signature = p.gameLog ? p.gameLog.best : null;
 		}
 		buildPriorSeasons(state.players, state.season, state.rng.child("prior"),
-			teams, cfg, classRef);
+			teams, cfg, classRefVolume, classRefEfficiency);
 		return state;
 	}
 
@@ -1288,7 +1395,7 @@
 	}
 
 	/* One prior season, simulated. Returns a stat line or null. */
-	function simulatePriorSeason(p, i, teams, season, cfg, rng, classRef) {
+	function simulatePriorSeason(p, i, teams, season, cfg, rng, classRefVolume, classRefEfficiency) {
 		if (!p.buildCleanBase || !RB.resolveTo) return null;
 		/* The rotation is built at his CURRENT programme's level even when the
 		   row names the school he transferred from, because that school is a
@@ -1363,12 +1470,13 @@
 			games: SEASON_GAMES,
 			league: S.NCAA_ENV,
 			pro: false,
-			classRef: classRef,
+			classRefVolume: classRefVolume,
+			classRefEfficiency: classRefEfficiency,
 		}, cfg, rng.child("sim"));
 		return younger.stats ? { line: younger.stats, ovr: younger.newOvr } : null;
 	}
 
-	function buildPriorSeasons(players, season, rng, teams, cfg, classRef) {
+	function buildPriorSeasons(players, season, rng, teams, cfg, classRefVolume, classRefEfficiency) {
 		const simulate = !cfg || cfg.priorSeasons !== "reconstruct";
 		for (const p of players) {
 			p.priorSeasons = null;
@@ -1378,7 +1486,7 @@
 			const rows = [];
 			for (let i = n; i >= 1; i--) {
 				const sim = simulate && !p.nonNcaa
-					? simulatePriorSeason(p, i, teams, season, cfg, r.child("y" + i), classRef)
+					? simulatePriorSeason(p, i, teams, season, cfg, r.child("y" + i), classRefVolume, classRefEfficiency)
 					: null;
 				if (sim) {
 					const L = sim.line;
@@ -1625,7 +1733,18 @@
 			   function of the flavour and the settings, so it is cheap to
 			   recompute here whether or not the build phase runs. */
 			if (state.flavor !== undefined) {
-				state.effectiveCfg = applyFlavorConfig(effective, state.flavor);
+				const bent = applyFlavorConfig(effective, state.flavor);
+				/* Re-apply class-level environment jitter (same deterministic
+				   stream the build phase used). Without this a warm re-run that
+				   skips the build phase would lose the jitter. */
+				const envRng = new Rng(seed).child("classEnv");
+				const j = Object.assign({}, bent);
+				j.pace = Math.max(55, bent.pace + envRng.normal(0, 2.5));
+				j.efficiencyEnv = clamp(
+					(bent.efficiencyEnv || 0) + envRng.normal(0, 0.6), -3, 3);
+				j.statNoise = Math.max(0,
+					(Number.isFinite(bent.statNoise) ? bent.statNoise : 1) + envRng.normal(0, 0.25));
+				state.effectiveCfg = j;
 			}
 			if (from === 0) {
 				state.rng = new Rng(seed);
@@ -2117,7 +2236,9 @@
 			if (sized || !Number.isFinite(orig.weight)) out.weight = p.newWeight;
 			const last = out.ratings.length - 1;
 			const r = out.ratings[last];
-			for (const k of BB.RATING_KEYS) r[k] = p.newRatings[k];
+			for (const k of BB.RATING_KEYS) {
+				r[k] = Number.isFinite(p.newRatings[k]) ? p.newRatings[k] : 0;
+			}
 			r.ovr = p.newOvr;
 			r.pot = p.newPot;
 			r.pos = p.newPos;

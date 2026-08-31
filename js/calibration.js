@@ -188,7 +188,7 @@
 			   gradient that js/calibration.js documented but never applied
 			   costs a returning rotation player about a point of true shooting.
 			   These two put the field back on 2009-2021's own ORtg of 102.6. */
-			shift: { ftr: 1, tov: 1.09, inside: 0, mid: 0, three: 0.015, fieldEff: -0.005, ppgBoost: 0.12 },
+			shift: { ftr: 1, tov: 1.09, inside: 0, mid: 0, three: 0.015, fieldEff: -0.005, ppgBoost: 0 },
 		},
 		modern: {
 			label: "2023-2026 (the modern game)",
@@ -208,7 +208,7 @@
 			/* Measured, not guessed. Each shift was fitted by sweeping it alone
 			   against the modern team targets above; see tools/validate.js,
 			   which checks every one of them. */
-			shift: { ftr: 0.845, tov: 0.96, inside: 0.021, mid: 0.017, three: 0.004, fieldEff: 0.010, ppgBoost: 0.10 },
+			shift: { ftr: 0.845, tov: 0.96, inside: 0.021, mid: 0.017, three: 0.004, fieldEff: 0.010, ppgBoost: 0 },
 		},
 	};
 	/* PPG, DERIVED.

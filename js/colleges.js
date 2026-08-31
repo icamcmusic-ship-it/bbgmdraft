@@ -720,7 +720,8 @@
 	   its own pathways (CEBL, U Sports, the OSBA) and mapping it to "usa"
 	   silently gave every Canadian the American destination weighting. */
 	const CANADA_HINTS = ["Canada", "Ontario", "Quebec", "Alberta",
-		"British Columbia", "Manitoba", "Saskatchewan", "Nova Scotia"];
+		"British Columbia", "Manitoba", "Saskatchewan", "Nova Scotia",
+		"AB", "BC", "MB", "NB", "NL", "NS", "NT", "NU", "ON", "PE", "QC", "SK", "YT"];
 
 	function isUSA(loc) {
 		return typeof loc === "string" && /USA$/.test(loc);
@@ -751,6 +752,11 @@
 		"Pennsylvania", "Rhode Island", "South Carolina", "South Dakota",
 		"Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington",
 		"West Virginia", "Wisconsin", "Wyoming", "District of Columbia",
+		"AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+		"HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+		"MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+		"NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+		"SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "DC",
 	];
 	const RE = {
 		georgianCity: hintRe(GEORGIAN_CITIES),

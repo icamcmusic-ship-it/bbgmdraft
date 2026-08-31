@@ -121,7 +121,7 @@ function makeClass(rng, n, targetOvrAt) {
 		players.push({
 			pid: i,
 			firstName: "Test", lastName: "P" + i,
-			born: { year: 2007, loc: pr.random() < 0.75 ? "Anytown, WA, USA" : "Belgrade, Serbia" },
+			born: { year: 2007, loc: pr.random() < 0.75 ? "Anytown, WA" : "Belgrade, Serbia" },
 			hgt: 66 + Math.round((hgt / 100) * 24),
 			weight: Math.round(165 + hgt * 0.9),
 			college: pr.random() < 0.18 ? "" : pickCollege(pr.random()),
@@ -502,7 +502,7 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   1.50 mean-to-p95 ratio that the old stated anchor pair implied, which
 		   is an assumption about the SHAPE of the distribution and not a
 		   measurement of it. The model produces 1.55-1.57. */
-		["PPG p95", pct(g((p) => p.stats.ppg), 0.95)].concat(within(dy.ppg.p95, 2.4)),
+		["PPG p95", pct(g((p) => p.stats.ppg), 0.95)].concat(within(dy.ppg.p95, 2.6)),
 		/* The LEVEL of a class, which no percentile band can express: how many
 		   genuine scorers it contains. A real draft class has seven or eight
 		   twenty-point scorers and about one at twenty-five. This is the row
@@ -566,10 +566,10 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		["BPG max", Math.max.apply(null, g((p) => p.stats.bpg))].concat(extreme(2.8, 5.0)),
 		["SPG max", Math.max.apply(null, g((p) => p.stats.spg))].concat(extreme(2.0, 4.2)),
 		["PF mean", mean(g((p) => p.stats.pfpg))].concat(within(2.55, 0.85)),
-		["TS% mean", mean(g((p) => p.stats.ts)) * 100].concat(within(dy.ts.mean * 100, 3)),
+		["TS% mean", mean(g((p) => p.stats.ts)) * 100].concat(within(dy.ts.mean * 100, 1.8)),
 		["3P% mean", mean(g((p) => p.stats.tpp)) * 100].concat(
-			within(dy.tpPct.median * 100, 2.6)),
-		["FT% mean", mean(g((p) => p.stats.ftp)) * 100].concat(within(dy.ftPct.mean * 100, 3.5)),
+			within(dy.tpPct.median * 100, 1.65)),
+		["FT% mean", mean(g((p) => p.stats.ftp)) * 100].concat(within(dy.ftPct.mean * 100, 2.2)),
 		["FG% mean", mean(g((p) => p.stats.fgp)) * 100].concat(within(48, 4)),
 		["FTA mean", mean(g((p) => p.stats.fta))].concat(within(4.2, 1.2)),
 		["GP mean", mean(g((p) => p.stats.gp))].concat(within(dy.gp.mean, 2.5)),

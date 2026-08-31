@@ -108,14 +108,28 @@
 
 		   Rare (about a dozen in the country) and only among the top of a
 		   rotation, because that is what the player is. */
+		/* Star returner (task 4.6): a returning player who is excellent at the
+		   college level and not an NBA prospect. The kind is drawn from a table
+		   so "returning conference player of the year" and "senior leader who
+		   came back" produce different boosts, and the `starReturner` tag lets
+		   the award model recognise who this player is. */
+		let starReturner = null;
 		if (i <= 2 && rng.random() < STAR_RETURNER_RATE) {
-			talent = clamp(talent + rng.uniform(10, 24), 6, 96);
+			const kind = rng.weighted(STAR_RETURNER_KINDS);
+			talent = clamp(talent + rng.uniform(kind.boostLo, kind.boostHi), 6, 96);
+			starReturner = kind.name;
 		}
 		// Endurance drives how much of a rotation spot a player can actually
 		// hold, and it is the one rating that never fed the minutes model.
+		// Star returners get a modest endurance bump: they have been through
+		// a college season before and their conditioning reflects it.
+		const endu = starReturner
+			? clamp(rng.normal(0.62 - 0.015 * i, 0.08), 0.30, 0.95)
+			: clamp(rng.normal(0.52 - 0.02 * i, 0.10), 0.15, 0.95);
 		return {
 			filler: true, talent, name: "roster" + i,
-			endurance: clamp(rng.normal(0.52 - 0.02 * i, 0.10), 0.15, 0.95),
+			endurance: endu,
+			starReturner,
 		};
 	}
 
@@ -136,8 +150,23 @@
 	   untouched, and a roster whose prospect is a genuine lottery talent is
 	   untouched too, because the cap is not binding there. */
 	const FILLER_GAP = 4;
-	/* Per top-three rotation slot, so roughly a dozen across 368 programmes. */
-	const STAR_RETURNER_RATE = 0.012;
+	/* Per top-three rotation slot, so roughly a dozen across 368 programmes.
+	   Raised from 0.012 (task 4.6): at the old rate about seven programmes in
+	   the country had a star returner, and the uniform talent bump (+10-24)
+	   produced the same kind of player every time. The rate is doubled so a
+	   class has 14-18 star returners — still rare, but enough that the award
+	   model has real competition — and the boost is drawn from a table of
+	   KINDS so that a returning first-team all-conference wing and a returning
+	   shot-blocking center are two different players rather than "filler + 18". */
+	const STAR_RETURNER_RATE = 0.024;
+	const STAR_RETURNER_KINDS = [
+		{ name: "returning all-conference scorer", w: 2.0, boostLo: 14, boostHi: 22 },
+		{ name: "returning defensive anchor", w: 1.5, boostLo: 12, boostHi: 20 },
+		{ name: "preseason all-american", w: 0.8, boostLo: 18, boostHi: 26 },
+		{ name: "returning conference player of the year", w: 0.6, boostLo: 20, boostHi: 28 },
+		{ name: "senior leader who came back", w: 1.4, boostLo: 10, boostHi: 18 },
+		{ name: "returning starter with a year of growth", w: 2.0, boostLo: 8, boostHi: 16 },
+	];
 	function capFillers(fillers, prospects) {
 		if (!prospects.length || !fillers.length) return;
 		let best = -Infinity;
@@ -176,15 +205,34 @@
 	   line. The numbers are shifts applied to the stat model: `three` moves
 	   3PA share, `pace` moves possessions, `rim` moves the rim/mid split and
 	   `press` moves the turnovers a defence forces. */
+	/* `defScheme` is a defensive-scheme axis: switching = a switch-everything
+	   scheme that gives up size to stay in front; zone = a 2-3 or 3-2 zone that
+	   protects the paint; packLine = a pack-line/sagging man scheme that walls
+	   off the rim; pressing = a full-court press that gambles for turnovers.
+	   Each is a multiplier on the stat model's steal/block/turnover channels,
+	   so a prospect at a switching programme steals more and blocks less than
+	   the same prospect at a zone programme — which is what actually happens. */
 	const PROGRAM_STYLES = [
-		{ name: "balanced", w: 3.0, three: 0, pace: 0, rim: 0, press: 0 },
-		{ name: "four-out, three-heavy", w: 2.0, three: 0.09, pace: 1.5, rim: -0.03, press: 0 },
-		{ name: "pack-line, grind it out", w: 1.6, three: -0.02, pace: -4.5, rim: 0.02, press: -0.02 },
-		{ name: "run and gun", w: 1.4, three: 0.05, pace: 5.5, rim: 0.03, press: 0.02 },
-		{ name: "inside-out, post-heavy", w: 1.3, three: -0.08, pace: -1.5, rim: 0.07, press: 0 },
-		{ name: "ball-screen heavy", w: 1.6, three: 0.04, pace: 1.0, rim: 0.02, press: 0 },
-		{ name: "full-court press", w: 0.9, three: 0.02, pace: 4.5, rim: 0.04, press: 0.06 },
-		{ name: "lob city", w: 1.0, three: -0.04, pace: 1.5, rim: 0.08, press: 0 },
+		{ name: "balanced", w: 3.0, three: 0, pace: 0, rim: 0, press: 0, defScheme: "man" },
+		{ name: "four-out, three-heavy", w: 2.0, three: 0.09, pace: 1.5, rim: -0.03, press: 0, defScheme: "switching" },
+		{ name: "pack-line, grind it out", w: 1.6, three: -0.02, pace: -4.5, rim: 0.02, press: -0.02, defScheme: "packLine" },
+		{ name: "run and gun", w: 1.4, three: 0.05, pace: 5.5, rim: 0.03, press: 0.02, defScheme: "man" },
+		{ name: "inside-out, post-heavy", w: 1.3, three: -0.08, pace: -1.5, rim: 0.07, press: 0, defScheme: "zone" },
+		{ name: "ball-screen heavy", w: 1.6, three: 0.04, pace: 1.0, rim: 0.02, press: 0, defScheme: "switching" },
+		{ name: "full-court press", w: 0.9, three: 0.02, pace: 4.5, rim: 0.04, press: 0.06, defScheme: "pressing" },
+		{ name: "lob city", w: 1.0, three: -0.04, pace: 1.5, rim: 0.08, press: 0, defScheme: "man" },
+		/* --- additional styles (task 4.3 & 4.4) ---
+		   The original eight were all offensive identities: a program's defensive
+		   philosophy — switching, zone, pack-line, press — affected nothing. Six
+		   more fill the gap. Each carries `defScheme` so the stat model's
+		   steal/block/turnover channels can read it, and a distinctive offensive
+		   shape so the note reads as something a human would write. */
+		{ name: "switch-everything perimeter", w: 1.4, three: 0.06, pace: 1.0, rim: -0.02, press: 0.01, defScheme: "switching" },
+		{ name: "2-3 zone, protect the paint", w: 1.2, three: -0.03, pace: -2.0, rim: 0.04, press: -0.02, defScheme: "zone" },
+		{ name: "matchup zone", w: 1.0, three: 0.02, pace: -1.0, rim: 0.02, press: 0, defScheme: "zone" },
+		{ name: "press and trap", w: 0.8, three: 0.03, pace: 5.0, rim: 0.02, press: 0.08, defScheme: "pressing" },
+		{ name: "motion offence, pack-line D", w: 1.3, three: 0.04, pace: -2.5, rim: 0, press: -0.02, defScheme: "packLine" },
+		{ name: "dribble-drive, deny the wing", w: 1.1, three: -0.02, pace: 2.0, rim: 0.05, press: 0.01, defScheme: "man" },
 	];
 
 	/* Coaches.
@@ -206,6 +254,8 @@
 		"Ray", "Dan", "Marcus", "Tom", "Bruce", "Leon", "Chris", "Pat", "Ed",
 		"Kevin", "Andre", "Mike", "Steve", "Wes", "Hal", "Dennis", "Craig",
 		"Tony", "Grant", "Sam", "Vince", "Nate", "Curtis", "Joel", "Roland",
+		"Rodney", "Jerome", "Cliff", "Walt", "Terrence", "Darren", "Phil",
+		"Reggie", "Lamont", "Oscar", "Calvin", "Mitch", "Boyd", "Russ", "Dwight",
 	];
 	const COACH_LAST = [
 		"Aldrich", "Beauchamp", "Calloway", "Duvall", "Espinoza", "Fenwick",
@@ -213,6 +263,32 @@
 		"Marchetti", "Nakamura", "Okafor", "Prendergast", "Quaranta", "Rasmussen",
 		"Stallworth", "Thibault", "Underwood", "Vandermeer", "Whitlock", "Yarbrough",
 		"Zabala", "Baptiste", "Cifuentes", "Donnelly", "Ferrara", "Gundersen",
+		"Hargrove", "Iverson", "Kirby", "Langford", "McBride", "Nwosu",
+		"Pettigrew", "Renfroe", "Simmonds", "Tran", "Villarreal", "Worthington",
+	];
+
+	/* Coaching philosophy archetypes (task 4.4).
+
+	   A coach had a style, a tenure and a dev number, but every staff
+	   developed players the same way. In reality, a "player-development
+	   guru" and a "Xs-and-Os tactician" are different staffs with different
+	   effects on the same prospect: one raises his ceiling, the other
+	   maximises what he already has. `devBias` skews how much a roster
+	   improves over the season (form), `usageBias` nudges how much offence
+	   a prospect gets (a stars-and-scrubs coach funnels touches; a
+	   egalitarian one spreads them), and `defEmphasis` weights the
+	   defensive stat channel. */
+	const COACH_PHILOSOPHIES = [
+		{ name: "player-developer", w: 2.0, devBias: 1.8, usageBias: 0, defEmphasis: 0 },
+		{ name: "Xs-and-Os tactician", w: 1.8, devBias: -0.4, usageBias: 0, defEmphasis: 0.5 },
+		{ name: "recruiter-first", w: 1.6, devBias: -0.8, usageBias: 0.3, defEmphasis: 0 },
+		{ name: "defensive-minded", w: 1.5, devBias: 0.4, usageBias: -0.2, defEmphasis: 1.2 },
+		{ name: "uptempo innovator", w: 1.2, devBias: 0.6, usageBias: 0.5, defEmphasis: -0.4 },
+		{ name: "old-school disciplinarian", w: 1.3, devBias: 0.2, usageBias: -0.4, defEmphasis: 0.8 },
+		{ name: "stars-and-scrubs", w: 1.0, devBias: -0.2, usageBias: 1.2, defEmphasis: 0 },
+		{ name: "egalitarian", w: 1.1, devBias: 0.8, usageBias: -0.8, defEmphasis: 0.2 },
+		{ name: "analytics-driven", w: 1.0, devBias: 0.5, usageBias: 0.2, defEmphasis: 0.3 },
+		{ name: "neutral", w: 3.0, devBias: 0, usageBias: 0, defEmphasis: 0 },
 	];
 
 	/* The carousel.
@@ -267,6 +343,12 @@
 		else if (tenure >= 16 && roll < 0.55) situation = "fixture";
 		else if (level < prestige - 12 && roll < 0.40) situation = "hot seat";
 		const sit = SITUATION_BY_NAME[situation];
+		/* Coaching philosophy (task 4.4): how this staff develops players and
+		   distributes usage. A "player-developer" raises ceilings across the
+		   roster; a "stars-and-scrubs" coach funnels touches to his best man;
+		   a "defensive-minded" coach's prospect blocks more shots and steals
+		   more balls. The philosophy is drawn per-coach, not per-season. */
+		const philosophy = rng.weighted(COACH_PHILOSOPHIES);
 		return {
 			name: rng.pick(COACH_FIRST) + " " + rng.pick(COACH_LAST),
 			tenure,
@@ -274,10 +356,16 @@
 			situationLabel: sit.label,
 			levelAdj: sit.levelAdj,
 			style: rng.weighted(PROGRAM_STYLES),
+			philosophy: philosophy.name,
 			// How much this staff develops a roster across a season. Feeds the
 			// team's `form`, which is its March rating against its November one.
-			dev: rng.normal(0, 2.6) + sit.dev,
+			// The philosophy biases this: a player-developer improves a roster
+			// more than a recruiter-first coach does.
+			dev: rng.normal(0, 2.6) + sit.dev + (philosophy.devBias || 0),
 			formAdj: sit.form,
+			// Usage and defensive emphasis, read by the stat model downstream.
+			usageBias: philosophy.usageBias || 0,
+			defEmphasis: philosophy.defEmphasis || 0,
 			// Reputation, for Coach of the Year: it is voted on against
 			// expectations, and expectations follow the name on the door. A
 			// first-year man and an interim carry none of the incumbent's.
@@ -817,7 +905,7 @@
 	global.TeamsSim = {
 		buildPrograms, simulateRegularSeason, simulateConferenceTournaments,
 		prospectTalent, teamRating, winProb, playGame, playGameScore, ratingOn,
-		realign, makeCoach, COACH_SITUATIONS,
+		realign, makeCoach, COACH_SITUATIONS, COACH_PHILOSOPHIES,
 		capFillers, FILLER_GAP, conferenceDrift, programLevel, applyOutages, makeFiller,
 		PROGRAM_VOL, DOWN_YEAR_RATE, BREAKOUT_RATE, STAR_RETURNER_RATE,
 		rotationWeights, pairUp, record, recordPostseason, finalizeSchedule,

@@ -382,6 +382,9 @@
 			const input = $(key);
 			if (!input) continue;
 			input.value = state.cfg[key];
+			// Sync numeric input
+			const num = $(key + "Num");
+			if (num) num.value = state.cfg[key];
 			const ctl = input.closest(".ctl");
 			const b = ctl.querySelector("label b");
 			if (b) b.textContent = (FORMAT[key] || ((v) => String(v)))(Number(input.value));
@@ -393,7 +396,13 @@
 				}
 				hint.textContent = SLIDER_HINT[key](Number(input.value));
 			}
+			// Per-setting modified marker + revert (Part 5C)
+			paintModifiedMarker(ctl, key, Number(input.value));
 		}
+		// Also mark non-slider settings
+		paintModifiedMarkerFor("ovrMode", state.cfg.ovrMode);
+		paintModifiedMarkerFor("priorSeasons", state.cfg.priorSeasons);
+		paintModifiedMarkerFor("varySize", state.cfg.varySize);
 		$("ovrMode").value = state.cfg.ovrMode;
 		$("priorSeasons").value = state.cfg.priorSeasons;
 		$("varySize").checked = !!state.cfg.varySize;
@@ -633,6 +642,144 @@
 			? "\nheight rating " + a.min + "–" + a.max : "\nany height";
 		return a.name + "\n" + body + hgt +
 			"\nrarity weight " + (a.w === undefined ? 1 : a.w);
+	}
+
+	/* ---- settings search (Part 5B) ----------------------------------------- */
+
+	function bindSettingsSearch() {
+		const aside = $("settings");
+		if (!aside) return;
+		const search = el("input");
+		search.type = "search";
+		search.id = "settingsSearch";
+		search.placeholder = "Search settings…";
+		search.setAttribute("aria-label", "Filter settings by name");
+		aside.insertBefore(search, aside.firstChild);
+		search.addEventListener("input", () => {
+			const q = search.value.trim().toLowerCase();
+			// Show/hide individual .ctl elements
+			for (const ctl of aside.querySelectorAll(".ctl")) {
+				const label = ctl.querySelector("label");
+				const text = label ? label.textContent.toLowerCase() : "";
+				ctl.classList.toggle("settings-hidden", q !== "" && text.indexOf(q) === -1);
+			}
+			// Show/hide details groups: hidden if ALL their .ctl children are hidden
+			for (const grp of aside.querySelectorAll("details.grp")) {
+				const ctls = grp.querySelectorAll(".ctl");
+				const allHidden = ctls.length > 0 &&
+					Array.from(ctls).every((c) => c.classList.contains("settings-hidden"));
+				grp.classList.toggle("settings-hidden", q !== "" && allHidden);
+				// Auto-open groups that have matches when searching
+				if (q && !allHidden) grp.open = true;
+			}
+		});
+	}
+
+	/* ---- numeric input for each slider (Part 5A) + modified markers (Part 5C) */
+
+	/* Create a numeric <input> for each slider, placed inside a wrapper div. */
+	function wrapSlidersWithNumbers() {
+		for (const key of SLIDERS) {
+			const range = $(key);
+			if (!range || range.type !== "range") continue;
+			const ctl = range.closest(".ctl");
+			if (!ctl) continue;
+			// Create wrapper
+			const wrapper = el("div", "slider-with-number");
+			range.parentNode.insertBefore(wrapper, range);
+			wrapper.appendChild(range);
+			// Create number input
+			const num = el("input");
+			num.type = "number";
+			num.min = range.min;
+			num.max = range.max;
+			num.step = range.step;
+			num.value = range.value;
+			num.id = key + "Num";
+			num.setAttribute("aria-label", (ctl.querySelector("label") || {}).textContent || key);
+			wrapper.appendChild(num);
+		}
+	}
+
+	/* Per-setting modified marker and revert (Part 5C). */
+	function paintModifiedMarker(ctl, key, currentValue) {
+		if (!ctl) return;
+		const defaults = CFG.DEFAULTS;
+		const defaultValue = defaults[key];
+		const isModified = JSON.stringify(currentValue) !== JSON.stringify(defaultValue);
+		// Remove existing marker elements
+		const existing = ctl.querySelector(".modified-dot");
+		if (existing) existing.remove();
+		const existingBtn = ctl.querySelector(".revert-btn");
+		if (existingBtn) existingBtn.remove();
+		if (isModified) {
+			const label = ctl.querySelector("label");
+			if (label) {
+				const dot = el("span", "modified-dot");
+				dot.title = "Modified from default (" + defaultValue + ")";
+				label.appendChild(dot);
+				const revertBtn = el("button", "revert-btn", "↺");
+				revertBtn.type = "button";
+				revertBtn.title = "Revert to default (" + defaultValue + ")";
+				revertBtn.setAttribute("aria-label", "Revert " + key + " to default");
+				revertBtn.addEventListener("click", (e) => {
+					e.stopPropagation();
+					pushUndo("reverted " + key + " to default");
+					state.cfg[key] = typeof defaultValue === "number" ? Number(defaultValue) : defaultValue;
+					markDirty();
+					// Update checkboxes and selects that paintConfig reads
+					const inp = $(key);
+					if (inp) {
+						if (inp.type === "checkbox") inp.checked = !!defaultValue;
+						else inp.value = defaultValue;
+					}
+					paintConfig();
+					scheduleRun();
+				});
+				label.appendChild(revertBtn);
+			}
+		}
+	}
+
+	function paintModifiedMarkerFor(key, currentValue) {
+		const input = $(key);
+		if (!input) return;
+		const ctl = input.closest(".ctl");
+		if (!ctl) return;
+		paintModifiedMarker(ctl, key, currentValue);
+	}
+
+	/* Bind two-way sync between sliders and their number inputs. */
+	function bindSliderNumbers() {
+		for (const key of SLIDERS) {
+			const range = $(key);
+			const num = $(key + "Num");
+			if (!range || !num) continue;
+			// When slider moves, update number
+			range.addEventListener("input", () => { num.value = range.value; });
+			// When number is typed, update slider and trigger the same pipeline
+			let numPushed = false;
+			num.addEventListener("input", () => {
+				if (!numPushed) { pushUndo("moved " + key); numPushed = true; }
+				const v = Number(num.value);
+				if (!Number.isFinite(v)) return;
+				const clamped = Math.max(Number(range.min), Math.min(Number(range.max), v));
+				range.value = clamped;
+				state.cfg[key] = clamped;
+				markDirty();
+				paintConfig();
+				scheduleRun();
+			});
+			num.addEventListener("change", () => {
+				numPushed = false;
+				// Clamp on blur
+				const v = Number(num.value);
+				if (Number.isFinite(v)) {
+					num.value = Math.max(Number(range.min), Math.min(Number(range.max), v));
+				}
+				persist();
+			});
+		}
 	}
 
 	function bindConfig() {
@@ -1974,17 +2121,61 @@
 
 	/* -------------------------------------------------------------- modal */
 
+	/* Generic focus-trap utility. Returns a cleanup function. */
+	const FOCUSABLE_SEL = 'a[href], button:not(:disabled), input:not(:disabled), ' +
+		'select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
+
+	function trapFocus(container) {
+		function handler(e) {
+			if (e.key !== "Tab") return;
+			const focusables = Array.from(container.querySelectorAll(FOCUSABLE_SEL))
+				.filter((n) => n.offsetParent !== null);
+			if (!focusables.length) return;
+			const first = focusables[0];
+			const last = focusables[focusables.length - 1];
+			if (e.shiftKey) {
+				if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+			} else {
+				if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+			}
+		}
+		container.addEventListener("keydown", handler);
+		return () => container.removeEventListener("keydown", handler);
+	}
+
 	let modalOk = null;
+	let modalTrigger = null;      // the element that opened the modal
+	let modalTrapCleanup = null;  // focus-trap teardown
+
 	function modal(title, body, onOk, okLabel) {
+		modalTrigger = document.activeElement;
 		$("modalTitle").textContent = title;
 		const b = $("modalBody");
 		b.innerHTML = "";
 		b.appendChild(body);
 		$("modalOk").textContent = okLabel || "OK";
 		modalOk = onOk;
-		$("modal").hidden = false;
+		const m = $("modal");
+		m.hidden = false;
+		// Install focus trap
+		if (modalTrapCleanup) modalTrapCleanup();
+		modalTrapCleanup = trapFocus(m.querySelector(".modalbox"));
+		// Move focus to the first focusable element inside the modal
+		requestAnimationFrame(() => {
+			const first = m.querySelector(FOCUSABLE_SEL);
+			if (first) first.focus();
+		});
 	}
-	function closeModal() { $("modal").hidden = true; modalOk = null; }
+	function closeModal() {
+		$("modal").hidden = true;
+		modalOk = null;
+		if (modalTrapCleanup) { modalTrapCleanup(); modalTrapCleanup = null; }
+		// Restore focus to the element that triggered the modal
+		if (modalTrigger && typeof modalTrigger.focus === "function") {
+			try { modalTrigger.focus(); } catch (e) { /* element may be gone */ }
+		}
+		modalTrigger = null;
+	}
 
 	/* ------------------------------------------------------------- clipboard */
 
@@ -2741,7 +2932,10 @@
 	window.addEventListener("resize", syncHeaderHeight);
 	syncHeaderHeight();
 
+	bindSettingsSearch();
+	wrapSlidersWithNumbers();
 	bindConfig();
+	bindSliderNumbers();
 	bindFiles();
 	applyTheme();
 	paintConfig();
@@ -2870,6 +3064,13 @@
 		if (e.key === "Escape" && !$("modal").hidden) closeModal();
 		const tag = (e.target.tagName || "").toLowerCase();
 		const typing = tag === "input" || tag === "textarea" || tag === "select";
+		/* Ctrl+Enter / Cmd+Enter triggers generation (Part 5D). Works even
+		   when typing, since Ctrl+Enter is not a standard text input combo. */
+		if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+			e.preventDefault();
+			if (!$("btnReroll").disabled) reroll();
+			return;
+		}
 		if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
 			if (typing) return;
 			e.preventDefault();
@@ -2960,6 +3161,7 @@
 
 	const SHORTCUTS = [
 		["?", "Show this list"],
+		["Ctrl / Cmd + Enter", "Reroll the class (works anywhere)"],
 		["1 – 9", "Jump to a tab"],
 		["r", "Reroll the class"],
 		["/", "Focus the prospect search"],

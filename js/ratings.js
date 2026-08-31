@@ -6,6 +6,7 @@
 
 	const { clamp } = global.BBGMRng;
 	const BB = global.BBGM;
+	const Cal = global.Calibration;
 
 	/* Rating offsets that define a build. hgt is never touched here: it is tied
 	   to the player's listed height, so archetypes are gated on size instead.
@@ -180,6 +181,39 @@
 		{ name: "Overseas Pro Veteran", min: 0, max: 100, w: 1.0, t: ["shooting", "playmaking"], o: { oiq: 14, tp: 12, pss: 10, ft: 8, jmp: -14, spd: -10, dnk: -8, endu: -6 } },
 		{ name: "Injury-Return Unknown", min: 0, max: 100, w: 0.9, t: ["raw", "scoring"], o: { fg: 12, ins: 10, oiq: 8, ft: 6, endu: -18, spd: -10, jmp: -8 } },
 
+		/* --- shooting-tagged additions (task 4.1) ---
+		   Measured: the `shooting` tag had 14 members against `guard`'s 30+, and
+		   CLASS_FLAVORS multiplies shooting by 2.6 in the shooting-rich class.
+		   Six more fills the tag to ~20 so the multiplier has real diversity to
+		   work with. Each is a recognisable spot in the modern game: off-ball
+		   catch-and-shoot, transition pull-up, a true centre who shoots, a
+		   relocation wing, a handoff-action guard, a floor-spacing four. */
+		// --- guards (shooting) -----------------------------------------------
+		{ name: "Transition Sniper", min: 0, max: 54, w: 1.2, t: ["guard", "shooting", "athletic"], o: { tp: 18, spd: 14, ft: 10, endu: 6, ins: -14, pss: -12, reb: -10, stre: -6 } },
+		{ name: "DHO Specialist", min: 0, max: 52, w: 1.0, t: ["guard", "shooting", "playmaking"], o: { tp: 16, pss: 12, oiq: 10, ft: 8, ins: -14, dnk: -10, reb: -10, stre: -6 } },
+		// --- wings (shooting) ------------------------------------------------
+		{ name: "Catch-and-Shoot Wing", min: 34, max: 64, w: 1.6, t: ["wing", "shooting"], o: { tp: 20, ft: 12, oiq: 8, diq: 4, drb: -14, pss: -10, ins: -10, dnk: -6 } },
+		{ name: "Relocation Shooter", min: 34, max: 66, w: 1.3, t: ["wing", "shooting", "athletic"], o: { tp: 18, spd: 12, endu: 10, ft: 8, drb: -14, pss: -10, ins: -8, stre: -8 } },
+		// --- bigs (shooting) -------------------------------------------------
+		{ name: "Stretch Five", min: 60, max: 100, w: 1.4, t: ["big", "shooting"], o: { tp: 20, ft: 16, oiq: 6, reb: 4, spd: -12, drb: -10, dnk: -8, ins: -10 } },
+		{ name: "Floor-Spacing Four", min: 48, max: 78, w: 1.5, t: ["big", "shooting"], o: { tp: 18, ft: 12, fg: 8, oiq: 6, ins: -12, dnk: -10, stre: -8, reb: -6 } },
+
+		/* --- genuine-centre builds (task 4.2) --------------------------------
+		   No build in the table had min >= 72: every "big" was eligible for a
+		   6'6" wing, so a 7'2" true centre drew from the same pool as a 6'8"
+		   power forward. Nine builds with min 72-78 give a seven-footer his own
+		   identity space — post-up, rim-running, anchoring, paint-bully — without
+		   overlapping the tweener fours. */
+		{ name: "Back-to-Basket Center", min: 76, max: 100, w: 1.3, t: ["big", "scoring"], o: { ins: 22, stre: 18, reb: 12, ft: 6, spd: -16, tp: -16, drb: -12, pss: -8 } },
+		{ name: "Shot-Blocking Anchor", min: 76, max: 100, w: 1.4, t: ["big", "defense"], o: { diq: 24, jmp: 16, reb: 12, stre: 8, oiq: -14, tp: -16, pss: -12, drb: -10 } },
+		{ name: "Glass-Eating Center", min: 76, max: 100, w: 1.3, t: ["big", "rebounding"], o: { reb: 24, stre: 16, endu: 12, diq: 8, tp: -16, drb: -12, fg: -10, pss: -10 } },
+		{ name: "Paint Bully", min: 74, max: 100, w: 1.2, t: ["big", "scoring", "rebounding"], o: { stre: 20, ins: 16, reb: 14, dnk: 8, tp: -18, spd: -14, drb: -12, fg: -8 } },
+		{ name: "Vertical Spacer", min: 74, max: 100, w: 1.1, t: ["big", "athletic"], o: { jmp: 20, dnk: 16, spd: 10, reb: 8, tp: -18, ft: -14, drb: -12, pss: -8 } },
+		{ name: "Hook-Shot Specialist", min: 76, max: 100, w: 0.9, t: ["big", "scoring"], o: { ins: 20, fg: 14, stre: 12, ft: 8, tp: -18, spd: -14, drb: -10, pss: -8 } },
+		{ name: "Screen-and-Roll Center", min: 72, max: 100, w: 1.3, t: ["big", "athletic"], o: { dnk: 18, stre: 14, jmp: 10, endu: 8, tp: -16, ft: -12, drb: -10, pss: -8 } },
+		{ name: "Defensive Pillar", min: 74, max: 100, w: 1.2, t: ["big", "defense", "rebounding"], o: { diq: 20, reb: 16, stre: 12, endu: 8, tp: -16, fg: -12, drb: -10, spd: -10 } },
+		{ name: "Two-Way Center", min: 72, max: 100, w: 1.1, t: ["big", "defense", "scoring"], o: { diq: 16, ins: 14, reb: 10, stre: 8, tp: -14, drb: -12, spd: -10, pss: -8 } },
+
 		{ name: "Balanced", min: 0, max: 100, w: 1.0, t: [], o: {} },
 	];
 
@@ -273,16 +307,15 @@
 
 	const ROLE_FIT = {
 		createW: 0.02,
-		compExp: 0.69,
+		compExp: 0.70,
 		base: 0.98,
 		/* What a coach hands each kind of player, over and above what his
-		   shot-making says. Scoring and shooting builds are ALREADY given the
-		   ball by the composite, so their intent term is below 1; defensive,
-		   athletic and rebounding builds are not, so theirs is above it. */
+		   shot-making says. Offensive roles (playmaking, scoring) use more
+		   possessions; defensive and rebounding roles defer on offense. */
 		tags: {
-			guard: 0.96, wing: 1.06, big: 1.18,
-			scoring: 0.87, shooting: 0.87, playmaking: 0.89,
-			defense: 1.03, athletic: 1.04, rebounding: 0.87, raw: 0.91,
+			guard: 1.02, wing: 1.04, big: 0.94,
+			scoring: 1.06, shooting: 1.05, playmaking: 1.06,
+			defense: 0.90, athletic: 0.96, rebounding: 0.94, raw: 0.92,
 		},
 		/* Softly bounded rather than clamped, so a build can never land
 		   exactly on a limit the way twelve of the old table's entries did. */
@@ -404,6 +437,18 @@
 		"Spot-Up Only Guard": -2, "Steady Backup Point": -3,
 		"Bruising Backup Center": -3, "High-Floor Low-Ceiling": -5,
 		"Overseas Pro Veteran": -6,
+		/* Shooting additions (task 4.1) */
+		"Transition Sniper": 0, "DHO Specialist": -1,
+		"Catch-and-Shoot Wing": -2, "Relocation Shooter": 0,
+		"Stretch Five": 0, "Floor-Spacing Four": -1,
+		/* Genuine-centre builds (task 4.2) — length and athleticism are
+		   upside; narrow post skill and a body that is already what it is
+		   going to be are not. */
+		"Back-to-Basket Center": -3, "Shot-Blocking Anchor": 2,
+		"Glass-Eating Center": -1, "Paint Bully": -2,
+		"Vertical Spacer": 3, "Hook-Shot Specialist": -4,
+		"Screen-and-Roll Center": 2, "Defensive Pillar": -1,
+		"Two-Way Center": 1,
 	};
 
 	/* Potential gap for a finished build.
@@ -431,7 +476,7 @@
 	function potFactors(archetypeName, age, ratings, physical, classAge) {
 		const arch = POT_BY_ARCHETYPE[archetypeName] || 0;
 		// 19 is the modal draft age; every year younger is worth real upside.
-		const ageAdj = Number.isFinite(age) ? clamp((19.5 - age) * 2.4, -7, 7) : 0;
+		const ageAdj = Number.isFinite(age) ? clamp((19.0 - age) * 2.4, -7, 7) : 0;
 		// Age relative to this class, which is what a draft board actually
 		// compares. Only meaningful when the file varies age at all.
 		const ageClass = Number.isFinite(age) && Number.isFinite(classAge)
@@ -446,8 +491,8 @@
 		// for his size = room to fill out.
 		let frame = 0;
 		if (physical && Number.isFinite(physical.hgtInches) && Number.isFinite(physical.weight)) {
-			const expected = 6.6 * physical.hgtInches - 260;
-			frame = clamp((expected - physical.weight) * 0.075, -3.5, 5);
+			const expected = 5.05 * physical.hgtInches - 178;
+			frame = clamp((expected - physical.weight) * 0.075, -4, 4);
 		}
 		const total = arch + ageAdj + ageClass + touch + frame;
 		return { arch, age: ageAdj, ageClass, touch, frame, role: 0, total };
@@ -473,7 +518,7 @@
 		// breakout signal. The same line from a senior is just a good senior.
 		const youth = classYear === "Freshman" ? 1 : classYear === "Sophomore" ? 0.6
 			: classYear === "Junior" ? 0.25 : 0;
-		const efficiency = clamp((stats.ts - 0.565) * 26, -2.5, 3);
+		const efficiency = clamp((stats.ts - Cal.DRAFT_YEAR.ts.mean) * 26, -2.5, 3);
 		const load = clamp((0.245 - usg) * 26, -3, 3.5);
 		const output = clamp((perMinute - 0.55) * 9, -2.5, 3);
 		return clamp((load * 0.55 + output * 0.6 + efficiency * 0.5) * (0.45 + 0.75 * youth),
@@ -537,6 +582,7 @@
 	   shift weights still have to reproduce the same total ovr push, so the
 	   protection is renormalised rather than simply capped. */
 	const USAGE_PROTECT = 0.75;
+	const USAGE_PROTECT_MAX = Math.max(...Object.values(USAGE_W));
 	/* The offset vectors as authored, before normalisation. Kept so the tests
 	   can compare what the normaliser does now against what the old uniform
 	   one did, and so the editor's tooltip can show a build's intent rather
@@ -556,7 +602,7 @@
 			const scale = {};
 			let w = 0;
 			for (const k of BB.RATING_KEYS) {
-				const protect = push > 0 ? 1 - USAGE_PROTECT * (USAGE_W[k] / 0.231) : 1;
+				const protect = push > 0 ? 1 - USAGE_PROTECT * (USAGE_W[k] / USAGE_PROTECT_MAX) : 1;
 				scale[k] = Math.max(0, SHIFT_SCALE[k] * clamp(protect, 0.1, 1));
 				w += OVR_W[k] * scale[k];
 			}
@@ -613,7 +659,7 @@
 	   A flavour is drawn once per run and multiplies the weight of every build
 	   carrying the matching tags. cfg.classFlavor scales how far it bends. */
 	const CLASS_FLAVORS = [
-		{ name: "balanced", w: 2.4, label: "no strong flavour", m: {} },
+		{ name: "balanced", w: 1.4, label: "no strong flavour", m: {} },
 		{ name: "guard-heavy", w: 1.3, label: "guard-heavy",
 			m: { guard: 2.2, wing: 1.0, big: 0.45, playmaking: 1.4 } },
 		{ name: "big-heavy", w: 1.0, label: "big-heavy",
@@ -645,13 +691,13 @@
 		{ name: "portal", w: 0.8, label: "a transfer-portal year",
 			m: { shooting: 1.3, scoring: 1.2, raw: 0.5 },
 			c: { freshmanShare: 24, transferShare: 62, potBias: -0.8 } },
-		{ name: "weak", w: 0.6, label: "a weak year",
+		{ name: "weak", w: 0.85, label: "a weak year",
 			m: { raw: 1.3, athletic: 1.1, shooting: 0.9 },
 			c: { classQuality: -1.4, eliteCount: 0, potSpread: 1.2 } },
 		{ name: "top-heavy cliff", w: 0.7, label: "top-heavy, with a cliff",
 			m: { scoring: 1.3, playmaking: 1.2 },
 			c: { classDepth: -1.6, eliteCount: 5, classQuality: 0.6 } },
-		{ name: "two-man", w: 0.4, label: "a two-man class",
+		{ name: "two-man", w: 0.8, label: "a two-man class",
 			m: { scoring: 1.4, athletic: 1.2 },
 			c: { classDepth: -2.2, eliteCount: 2, classQuality: 0.4 } },
 		{ name: "veteran", w: 0.7, label: "old and finished",
@@ -666,22 +712,40 @@
 		   hurt, the year three blue bloods went down, the year the mid-majors
 		   won. Those are all things the engine already models (injuryRate,
 		   programme strength, upsetFactor); nothing could ask for them. */
-		{ name: "injury year", w: 0.6, label: "the year everybody got hurt",
+		{ name: "injury year", w: 0.9, label: "the year everybody got hurt",
 			m: { raw: 1.2, athletic: 1.1 },
 			c: { injuryRate: 2.0 } },
-		{ name: "blue bloods down", w: 0.6, label: "the year the blue bloods fell over",
+		{ name: "blue bloods down", w: 0.9, label: "the year the blue bloods fell over",
 			m: {},
 			c: { bluebloodDownYears: 3, upsetFactor: 1.35 } },
-		{ name: "mid-major year", w: 0.5, label: "the year the mid-majors won",
+		{ name: "mid-major year", w: 0.9, label: "the year the mid-majors won",
 			m: { shooting: 1.3, defense: 1.2, athletic: 0.85 },
 			c: { midMajorLift: 7, upsetFactor: 1.55 } },
-		{ name: "weak top deep middle", w: 0.6,
+		{ name: "weak top deep middle", w: 0.9,
 			label: "no top, but deep all the way down",
 			m: { defense: 1.2, playmaking: 1.2, scoring: 0.85 },
 			c: { classDepth: 2.2, eliteCount: 0, classQuality: -0.3, potSpread: 3 } },
-		{ name: "realignment year", w: 0.5, label: "a realignment year",
+		{ name: "realignment year", w: 0.85, label: "a realignment year",
 			m: {},
 			c: { realignmentRate: 1, transferShare: 52 } },
+
+		/* --- spread / depth flavours -----------------------------------------
+		   These bend potSpread and eliteCount directly, which shapes how the
+		   talent is DISTRIBUTED rather than what kind it is.  A top-heavy class
+		   concentrates ceiling in two or three names; a deep class spreads it
+		   evenly; a volatile class widens the lottery on every prospect. */
+		{ name: "top-heavy talent", w: 0.8,
+			label: "top-heavy, loaded at the top",
+			m: { scoring: 1.3, athletic: 1.2 },
+			c: { eliteCount: 6, potSpread: 0.5, classDepth: -0.8 } },
+		{ name: "deep talent", w: 0.8,
+			label: "deep and even all the way through",
+			m: { defense: 1.2, playmaking: 1.1 },
+			c: { eliteCount: 0, potSpread: 2.5, classDepth: 1.8, classQuality: 0.2 } },
+		{ name: "volatile", w: 0.7,
+			label: "a volatile year — wide range of outcomes",
+			m: { raw: 1.4, athletic: 1.2, shooting: 0.85 },
+			c: { potSpread: 3.5 } },
 	];
 
 	/* The config bend a flavour applies to the whole class. Returned separately
@@ -945,12 +1009,17 @@
 		const q = cfg.classQuality;
 		const top = 43 + q * 2.6;
 		const bottom = 18 + q * 2.0;
-		const p = Math.exp(cfg.classDepth * 0.28); // >1 = deep, <1 = top heavy
+		const p = 1.55 * Math.exp(cfg.classDepth * 0.28); // >1 = deep, <1 = top heavy
 		const out = [];
 		for (let i = 0; i < n; i++) {
 			const t = n === 1 ? 0 : i / (n - 1);
 			let v = top - (top - bottom) * Math.pow(t, p);
 			if (i < cfg.eliteCount) v += (cfg.eliteCount - i) * 2.2 + rng.uniform(0, 3);
+			// Lottery cliff: steepen the drop from picks ~1-5 to ~10-14.
+			if (i <= 14) {
+				const lotteryBoost = Math.max(0, (14 - i) / 14) * 0.15;
+				v *= (1 + lotteryBoost);
+			}
 			out.push(clamp(Math.round(v + rng.normal(0, 1.6)), 0, 100));
 		}
 		out.sort((a, b) => b - a);
