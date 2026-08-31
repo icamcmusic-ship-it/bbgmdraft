@@ -1562,10 +1562,19 @@
 	/* Renormalise one category to its pool, then clip the tail at `cap` of the
 	   team total and redistribute the surplus to everyone with room. */
 	function fitToPool(values, pool, cap) {
+		/* Clipped first, and the sum taken from the clipped values.
+
+		   A negative input would make its own renormalised share negative and
+		   would also shrink the denominator, inflating everyone else — and a
+		   set that summed to zero because its negatives cancelled its
+		   positives took the early return and came back unchanged, negatives
+		   included. Nothing upstream produces a negative; clipping here means
+		   nothing downstream has to assume that. */
+		const clipped = values.map((v) => (Number.isFinite(v) && v > 0 ? v : 0));
 		let sum = 0;
-		for (const v of values) sum += v;
-		if (sum <= 1e-9 || pool <= 0) return values;
-		const out = values.map((v) => (v * pool) / sum);
+		for (const v of clipped) sum += v;
+		if (sum <= 1e-9 || pool <= 0) return clipped;
+		const out = clipped.map((v) => (v * pool) / sum);
 		const lim = pool * cap;
 		for (let iter = 0; iter < 6; iter++) {
 			let excess = 0;
@@ -1607,6 +1616,16 @@
 			const k = before > 1e-9 ? fitted[i] / before : 1;
 			l.orpg *= k;
 			l.drpg *= k;
+			/* Re-floor after the rescale. statLine floors every stat at zero
+			   and every step between here and there preserves that — fitToPool
+			   only ever scales by a positive factor and redistributes into
+			   headroom — so this cannot currently fire. It is here because
+			   "cannot currently" is a property of five functions agreeing, and
+			   a negative rebound total reaching a BBGM export would be
+			   invisible until somebody imported it. Costs two comparisons per
+			   player per team. */
+			l.orpg = Math.max(0, l.orpg);
+			l.drpg = Math.max(0, l.drpg);
 			l.rpg = l.orpg + l.drpg;
 		});
 	}

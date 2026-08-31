@@ -114,10 +114,53 @@
 		}
 	}
 
+	/* Every structured value read back out of localStorage, checked for the
+	   SHAPE the code that consumes it assumes.
+
+	   STORE_VERSION was the only protection, and a version number only catches
+	   changes somebody remembered to bump it for. It does not catch a payload
+	   truncated by a full quota, an entry a browser extension rewrote, a hand
+	   edit, or a value written by a build that has since been reverted — and
+	   `state.sort` in particular is destructured (`for (const {key, dir} of
+	   keys)`) inside the render path, so a string or a null there is not a
+	   degraded table, it is a TypeError with the whole app behind it and no
+	   way for the user to get back except clearing site data they cannot be
+	   expected to know about.
+
+	   Anything that fails its check is dropped and the built-in default stands,
+	   which is the same outcome as a first visit. */
+	function validSortStack(v) {
+		if (!Array.isArray(v) || !v.length) return null;
+		const cols = {};
+		for (const c of V.COLUMNS) cols[c.key] = true;
+		const out = [];
+		const seen = {};
+		for (const s of v) {
+			if (!s || typeof s !== "object") continue;
+			if (typeof s.key !== "string" || !cols[s.key] || seen[s.key]) continue;
+			const dir = Number(s.dir) < 0 ? -1 : 1;
+			seen[s.key] = true;
+			out.push({ key: s.key, dir });
+		}
+		return out.length ? out : null;
+	}
+
+	// A plain {string: true-ish} map, e.g. hiddenColumns and the saved layouts.
+	function validFlagMap(v) {
+		if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+		const out = {};
+		for (const k of Object.keys(v)) if (v[k]) out[k] = true;
+		return out;
+	}
+
+	function validString(v, allowed) {
+		return typeof v === "string" && (!allowed || allowed.indexOf(v) !== -1) ? v : null;
+	}
+
 	function restore() {
 		let saved = null;
 		try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) { saved = null; }
-		if (!saved) return null;
+		if (!saved || typeof saved !== "object" || Array.isArray(saved)) return null;
 		/* A payload from a different schema is discarded rather than
 		   half-applied. Only `theme` is carried across, because it is a
 		   preference about the browser rather than about a draft class and
@@ -126,27 +169,46 @@
 			if (saved.theme) state.theme = saved.theme;
 			return null;
 		}
-		if (saved.cfg) state.cfg = CFG.make(saved.cfg);
-		if (saved.overrides) state.overrides = saved.overrides;
-		if (saved.overrideFingerprint) state.overrideFingerprint = saved.overrideFingerprint;
-		if (Array.isArray(saved.history)) state.history = saved.history;
-		if (saved.presetName) state.presetName = saved.presetName;
+		if (saved.cfg && typeof saved.cfg === "object") state.cfg = CFG.make(saved.cfg);
+		if (saved.overrides && typeof saved.overrides === "object" &&
+			!Array.isArray(saved.overrides)) state.overrides = saved.overrides;
+		if (validString(saved.overrideFingerprint)) {
+			state.overrideFingerprint = saved.overrideFingerprint;
+		}
+		if (Array.isArray(saved.history)) {
+			state.history = saved.history.filter((h) => typeof h === "string");
+		}
+		if (validString(saved.presetName)) state.presetName = saved.presetName;
 		state.presetDirty = !!saved.presetDirty;
-		if (saved.customPresets) state.customPresets = saved.customPresets;
-		if (saved.hiddenColumns) state.hiddenColumns = saved.hiddenColumns;
-		if (saved.statMode) state.statMode = saved.statMode;
+		if (saved.customPresets && typeof saved.customPresets === "object" &&
+			!Array.isArray(saved.customPresets)) state.customPresets = saved.customPresets;
+		state.hiddenColumns = validFlagMap(saved.hiddenColumns) || state.hiddenColumns;
+		if (validString(saved.statMode, V.STAT_MODES.map((m) => m[0]))) {
+			state.statMode = saved.statMode;
+		}
 		if (Array.isArray(saved.compare)) {
-			state.compare = saved.compare.slice(0, V.COMPARE_MAX || 4);
+			state.compare = saved.compare
+				.map((k) => (typeof k === "string" ? k : null))
+				.slice(0, V.COMPARE_MAX || 4);
 		}
-		if (saved.columnLayouts && typeof saved.columnLayouts === "object") {
-			state.columnLayouts = saved.columnLayouts;
+		if (saved.columnLayouts && typeof saved.columnLayouts === "object" &&
+			!Array.isArray(saved.columnLayouts)) {
+			const layouts = {};
+			for (const name of Object.keys(saved.columnLayouts)) {
+				const m = validFlagMap(saved.columnLayouts[name]);
+				if (m) layouts[name] = m;
+			}
+			state.columnLayouts = layouts;
 		}
-		if (saved.standingsConf) state.standingsConf = saved.standingsConf;
-		if (saved.density) state.density = saved.density;
+		if (validString(saved.standingsConf)) state.standingsConf = saved.standingsConf;
+		if (validString(saved.density, ["normal", "compact", "comfortable"])) state.density = saved.density;
 		state.compactBracket = !!saved.compactBracket;
-		if (saved.theme) state.theme = saved.theme;
-		if (Array.isArray(saved.sort) && saved.sort.length) state.sort = saved.sort;
-		if (saved.pinned) state.pinned = indexSnapshot(saved.pinned);
+		if (validString(saved.theme, ["system", "light", "dark"])) state.theme = saved.theme;
+		const sort = validSortStack(saved.sort);
+		if (sort) state.sort = sort;
+		if (saved.pinned && typeof saved.pinned === "object") {
+			state.pinned = indexSnapshot(saved.pinned);
+		}
 		// Never land on a tab that has nothing to show.
 		if (saved.tab && (saved.tab !== "compare" || state.pinned)) state.tab = saved.tab;
 		return saved;
@@ -1265,7 +1327,46 @@
 				" came from a different draft class and have been dropped. " +
 				"Locks are tied to the file they were made against — applying " +
 				"them by pid alone would silently lock the wrong players.");
+			return;
 		}
+		reportUnmatchedLocks(file);
+	}
+
+	/* Locks whose key names no player in this file.
+
+	   The fingerprint check above catches a lock made against a DIFFERENT
+	   class. It cannot catch the case where there is no fingerprint to compare
+	   — a shareable link written before links carried one, or a payload whose
+	   fp was dropped — and that case has a specific and silent failure mode.
+
+	   Engine.playerKey uses the pid when the file has one and "idx<n>" when it
+	   does not. A link copied out of a session whose file HAD pids carries
+	   keys like "512"; pasted into a session whose file does not, every key in
+	   the class is "idx0", "idx1", … Nothing throws, nothing mismatches, and
+	   nothing is locked: the user watches their locks evaporate on the first
+	   reroll with no indication that anything happened. The validator warns
+	   about the missing pids, which explains why the file is unusual and not
+	   why the locks are gone.
+
+	   So say so, and drop them, which is what happens to them anyway. */
+	function reportUnmatchedLocks(file) {
+		const keys = Object.keys(state.overrides);
+		if (!keys.length || !file || !file.data) return;
+		const players = file.data.players || [];
+		const known = new Set(players.map((p, i) => global.Engine.playerKey(p, i)));
+		const lost = keys.filter((k) => !known.has(k));
+		if (!lost.length) return;
+		for (const k of lost) delete state.overrides[k];
+		const indexed = players.length &&
+			!Number.isFinite(Number(players[0] && players[0].pid));
+		showWarning(lost.length + " lock" + (lost.length === 1 ? "" : "s") +
+			" name" + (lost.length === 1 ? "s" : "") + " a player who is not in " +
+			"this file, and " + (lost.length === 1 ? "has" : "have") + " been dropped." +
+			(indexed
+				? " This file has no player ids, so locks in it are tied to row " +
+					"order rather than to the player — a link copied from a file " +
+					"that does have ids cannot be applied to it."
+				: " They were probably made against a file with different player ids."));
 	}
 
 	function bindFiles() {

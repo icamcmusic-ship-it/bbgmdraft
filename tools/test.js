@@ -1418,6 +1418,147 @@ console.log("\nArchetype rarity ordering");
 			absent.map((a) => a.name).join(", "));
 }
 
+/* ------------------------------------------------------- the bug-fix pass */
+console.log("\nBounds, shapes and guards");
+{
+	/* Rng.int: the guard that folds hi + 1 back onto hi is unreachable, so the
+	   distribution is flat rather than double-weighted at the top. Both claims
+	   are measured, because the argument for them is a floating-point one. */
+	let ones = 0;
+	let twos = 0;
+	let outOfRange = 0;
+	for (let s = 0; s < 200; s++) {
+		const r = new Rng("intbias" + s);
+		for (let i = 0; i < 3000; i++) {
+			const v = r.int(1, 2);
+			if (v < 1 || v > 2) outOfRange++;
+			else if (v === 2) twos++;
+			else ones++;
+		}
+	}
+	const share = twos / (ones + twos);
+	ok("rng.int never leaves its range", outOfRange === 0,
+		outOfRange + " draws outside [1, 2]");
+	ok("rng.int(1, 2) is flat, not 2:1 toward the top",
+		Math.abs(share - 0.5) < 0.005,
+		"share of 2s was " + share.toFixed(5));
+
+	/* The raw formula, without the clamp: if the clamp were load-bearing this
+	   would produce 3s, and the measured share above would be 2/3. */
+	let raw = 0;
+	for (let s = 0; s < 200; s++) {
+		const r = new Rng("intraw" + s);
+		for (let i = 0; i < 3000; i++) if (Math.floor(1 + 2 * r.random()) > 2) raw++;
+	}
+	ok("rng.int's upper clamp is a guard, not a correction", raw === 0,
+		raw + " unclamped draws overflowed");
+
+	// Wider spans, and a reversed range, which used to return lo - 1 or worse.
+	let bad = 0;
+	const r3 = new Rng("intspan");
+	for (let i = 0; i < 200000; i++) {
+		const v = r3.int(0, 320);
+		if (v < 0 || v > 320) bad++;
+	}
+	ok("rng.int is in range for a wide span", bad === 0);
+	ok("rng.int handles a reversed range", new Rng("rev").int(5, 2) === 5);
+}
+
+{
+	/* softBound's two composition orders agree to well under the smallest gap
+	   between two builds' role usage, so applying the lower bound first is not
+	   a double squeeze of the bottom of the range. */
+	const { lo, hi, band } = RB.ROLE_FIT;
+	let worst = 0;
+	let worstAt = 0;
+	for (let x = lo - band; x <= hi + band; x += 0.001) {
+		const e = RB.softBoundOrderError(x, lo, hi, band);
+		if (e > worst) { worst = e; worstAt = x; }
+	}
+	ok("softBound does not depend on which bound is applied first",
+		worst < 1e-5,
+		"worst order disagreement " + worst.toExponential(2) + " at x = " +
+			worstAt.toFixed(3));
+
+	// Monotone, and strictly inside both bounds everywhere.
+	let monotone = true;
+	let inside = true;
+	let prev = -Infinity;
+	for (let x = -2; x <= 6; x += 0.005) {
+		const v = RB.softBound(x, lo, hi, band);
+		if (v <= prev) monotone = false;
+		if (v <= lo - band * 1.0001 || v >= hi) inside = false;
+		prev = v;
+	}
+	ok("softBound is monotone", monotone);
+	ok("softBound never reaches its upper bound", inside);
+}
+
+{
+	// findSeason: the gameAttributes history-row forms, including the ones
+	// that used to fall through to the player scan.
+	const fs2 = global.Engine.findSeason;
+	ok("findSeason reads the newest gameAttributes history row",
+		fs2({ gameAttributes: { season: [{ start: 2024, value: 2024 },
+			{ start: 2026, value: 2026 }] } }) === 2026);
+	ok("findSeason skips a malformed newest history row",
+		fs2({ gameAttributes: { season: [{ start: 2024, value: 2024 },
+			{ start: 2026 }] } }) === 2024);
+	ok("an empty gameAttributes history falls through rather than throwing",
+		fs2({ gameAttributes: { season: [] } }) === null);
+	ok("an empty history still finds the season on the players",
+		fs2({ gameAttributes: { season: [] },
+			players: [{ draft: { year: 2031 } }] }) === 2031);
+	ok("findSeason reads the array-of-rows gameAttributes form",
+		fs2({ gameAttributes: [{ key: "startingSeason", value: 2027 }] }) === 2027);
+}
+
+{
+	/* Team rebounds are re-floored after the two halves are rescaled onto the
+	   combined pool. Feed reconcileTeamTotals a line the rescale would push
+	   negative if the floor were missing. */
+	const S = global.StatsSim;
+	const fit = S.fitToPool([1, -3, 2], 12, 0.6);
+	ok("fitToPool never emits a negative share",
+		fit.every((v) => v >= 0), JSON.stringify(fit));
+	const lines = [
+		{ orpg: 2, drpg: 5, apg: 3, spg: 1, bpg: 1, pfpg: 2, rpg: 7 },
+		{ orpg: 0.02, drpg: 0.01, apg: 1, spg: 0, bpg: 0, pfpg: 1, rpg: 0.03 },
+		{ orpg: 4, drpg: 9, apg: 2, spg: 1, bpg: 2, pfpg: 3, rpg: 13 },
+	];
+	S.reconcileTeamTotals(lines, {
+		astPool: 13, stlPool: 6, blkPool: 3, pfPool: 17,
+		orbPool: 9, drbPool: 24,
+	});
+	ok("no reconciled rebound line is negative",
+		lines.every((l) => l.orpg >= 0 && l.drpg >= 0 && l.rpg >= 0),
+		JSON.stringify(lines.map((l) => [l.orpg, l.drpg])));
+	ok("reconciled rebound halves still sum to the total",
+		lines.every((l) => Math.abs(l.rpg - (l.orpg + l.drpg)) < 1e-9));
+}
+
+{
+	/* exportFile writes hgt/weight only for a size override, and the list of
+	   keys that count as one is declared rather than inferred. */
+	const keys = global.Engine.SIZE_OVERRIDE_KEYS;
+	ok("the size-override key list is declared",
+		Array.isArray(keys) && keys.indexOf("hgtInches") !== -1 &&
+			keys.indexOf("weight") !== -1 && keys.length === 2,
+		JSON.stringify(keys));
+
+	const withSize = (ov) => {
+		const lf = V.syntheticClass(11, 12);
+		for (const p of lf.players) { p.hgt = 78; p.weight = 220; }
+		const cfg = global.Config.make({ seed: "sizeguard" });
+		const res = global.Engine.run(lf, cfg);
+		if (ov) res.players[0].override = ov;
+		return global.Engine.exportFile(res).players[0];
+	};
+	ok("a non-size lock does not rewrite hgt/weight",
+		withSize({ ovr: 55, archetype: "Balanced", name: "A B" }).hgt === 78);
+	ok("a size lock does rewrite hgt", withSize({ hgtInches: 84 }).hgt !== undefined);
+}
+
 console.log("\n" + (failures ? failures + " of " + checks + " checks failed"
 	: "all " + checks + " checks passed"));
 process.exit(failures ? 1 : 0);

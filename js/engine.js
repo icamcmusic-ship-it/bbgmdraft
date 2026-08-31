@@ -220,7 +220,25 @@
 					if (!row || row.key !== key) continue;
 					const v = row.value && typeof row.value === "object" && "value" in row.value
 						? row.value.value : row.value;
-					const n = num(Array.isArray(v) && v.length ? v[v.length - 1].value : v);
+					/* The {start, value} history rows BBGM writes. Walk them
+					   from the newest backwards rather than reading only the
+					   last one: an export whose history array is EMPTY made
+					   v[-1] undefined, and an export whose newest row is
+					   malformed made v[len-1].value undefined — both of which
+					   fell through to the player scan and then reported "this
+					   file has no top-level startingSeason" for a file whose
+					   gameAttributes carried the season perfectly well one row
+					   earlier. */
+					let n = null;
+					if (Array.isArray(v)) {
+						for (let i = v.length - 1; i >= 0 && n === null; i--) {
+							const row2 = v[i];
+							if (!row2 || typeof row2 !== "object") continue;
+							n = num(row2.value);
+						}
+					} else {
+						n = num(v);
+					}
 					if (n !== null) return n;
 				}
 			}
@@ -377,6 +395,12 @@
 		const a = axis ? Number(ov["reroll_" + axis]) || 0 : 0;
 		return (n ? "~" + Math.round(n) : "") + (a ? "@" + axis + Math.round(a) : "");
 	}
+
+	/* The override keys that describe a player's SIZE, and therefore the ones
+	   that make exportFile write hgt/weight back into a file that did not have
+	   them. Declared once so that adding an override key is a decision about
+	   this list rather than an accident. */
+	const SIZE_OVERRIDE_KEYS = ["hgtInches", "weight"];
 
 	/* The stable per-player key every RNG stream and every lock is derived
 	   from. */
@@ -2227,11 +2251,20 @@
 				out.firstName = parts.shift();
 				out.lastName = parts.join(" ");
 			}
-			// The README promises hgt/weight are rewritten only when Vary size
-			// is on or the source file lacked them; the old code wrote both
-			// unconditionally, adding keys to files that never had them.
-			const sized = result.cfg.varySize || Number.isFinite(ov.hgtInches) ||
-				Number.isFinite(ov.weight);
+			/* The README promises hgt/weight are rewritten only when Vary size
+			   is on or the source file lacked them; the old code wrote both
+			   unconditionally, adding keys to files that never had them.
+
+			   Which override keys count as a SIZE override is now stated
+			   rather than inferred. The old expression happened to name the
+			   only two size keys the editor could write, so it was correct —
+			   but it was correct by coincidence, and the next override key
+			   added to `ov` would have had to be checked against this line by
+			   someone who remembered it existed. SIZE_OVERRIDE_KEYS is the
+			   one place that fact lives, and buildOverride() below is checked
+			   against it by tools/test.js. */
+			const sized = result.cfg.varySize ||
+				SIZE_OVERRIDE_KEYS.some((k) => Number.isFinite(ov[k]));
 			if (sized || !Number.isFinite(orig.hgt)) out.hgt = p.newHgtInches;
 			if (sized || !Number.isFinite(orig.weight)) out.weight = p.newWeight;
 			const last = out.ratings.length - 1;
@@ -2326,6 +2359,7 @@
 	global.Engine = {
 		run, createRunner, exportFile, exportSeason, buildNote, classYear,
 		assignClassYears, inchesFromHgtRating, validateLeagueFile, findSeason, playerKey,
+		SIZE_OVERRIDE_KEYS,
 		MAX_CLASS,
 		rerollSalt,
 		signatureGame, simulateProLeagues, assignRecruiting,

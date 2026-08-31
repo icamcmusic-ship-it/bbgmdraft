@@ -330,9 +330,28 @@
 		return d / ROLE_USAGE_DENOM;
 	}
 
+	/* Softplus up from lo, mirrored down from hi. Monotone, and never exactly
+	   equal to either bound.
+
+	   The two halves are composed in one order, and softplus is not its own
+	   inverse, so in principle `down(up(x))` and `up(down(x))` differ. In
+	   practice they do not, and the size of "do not" is worth writing down
+	   because the alternative is trusting it: over the whole of [lo - band,
+	   hi + band] with this table's constants (lo 0.30, hi 2.60, band 0.18) the
+	   two orders differ by at most 1.0e-6, which is four orders of magnitude
+	   below the smallest gap between two builds' role usage. The reason is
+	   that the bounds are 12.8 bands apart: at x = lo the down-half contributes
+	   band * log1p(exp(-12.8)) ≈ 5e-7, so there is no "double squeeze" of the
+	   lower range — the lift the lower softplus applies at 0.30 survives the
+	   upper half intact to within a millionth.
+
+	   softBoundOrderError() below measures that gap and tools/test.js asserts
+	   it stays under 1e-5, so this is a checked property rather than a
+	   remembered one. The order is NOT changed to something symmetric: doing
+	   so would move every build's role usage by ~1e-6, which is invisible in
+	   the output and would still break the "same seed, same class" guarantee
+	   for every shareable link already in the wild. */
 	function softBound(x, lo, hi, band) {
-		// Softplus up from lo, mirrored down from hi. Monotone, and never
-		// exactly equal to either bound.
 		const up = (v, e) => {
 			const z = (v - e) / band;
 			return e + band * (z > 30 ? z : Math.log1p(Math.exp(z)));
@@ -342,6 +361,20 @@
 			return e - band * (z > 30 ? z : Math.log1p(Math.exp(z)));
 		};
 		return down(up(x, lo), hi);
+	}
+
+	/* How far softBound's two composition orders disagree at x. Exported for
+	   the regression test; nothing in the sim calls it. */
+	function softBoundOrderError(x, lo, hi, band) {
+		const up = (v, e) => {
+			const z = (v - e) / band;
+			return e + band * (z > 30 ? z : Math.log1p(Math.exp(z)));
+		};
+		const down = (v, e) => {
+			const z = (e - v) / band;
+			return e - band * (z > 30 ? z : Math.log1p(Math.exp(z)));
+		};
+		return Math.abs(down(up(x, lo), hi) - up(down(x, hi), lo));
 	}
 
 	function computeRoleUsage(arch) {
@@ -1101,7 +1134,7 @@
 		rebuild, classCurve, pickArchetype, solveToOvr, shiftScales, ovrRange, resolveTo,
 		potAdjust, potFactors, potFromRole, POT_BY_ARCHETYPE,
 		ROLE_USAGE, roleUsage, computeRoleUsage, usageCompositeDelta, creationDelta,
-		ROLE_FIT,
+		ROLE_FIT, softBound, softBoundOrderError,
 		CLASS_FLAVORS, pickFlavor, flavorMultiplier, flavorConfig, pickClassPool,
 		archetypeWeight, RARITY_COMPRESS,
 	};
