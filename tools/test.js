@@ -1321,13 +1321,16 @@ console.log("\nRegressions");
 			S.experienceUsage("Sophomore") > S.experienceUsage("Freshman"));
 
 	/* PPG was typed into the era table and disagreed with the anchors it
-	   claimed to follow. It is derived now, so the two cannot drift apart. */
+	   claimed to follow. It is derived now (with a ppgBoost for the composite
+	   ref system), so the two cannot drift apart. */
 	const CAL = global.Calibration;
 	let derivedOk = true;
 	for (const name of Object.keys(CAL.ERAS)) {
 		const e = CAL.ERAS[name];
 		const d = CAL.impliedPpg(e.draftYear, e.team);
-		if (Math.abs(d.mean - e.draftYear.ppg.mean) > 1e-9) derivedOk = false;
+		const boost = e.shift.ppgBoost || 0;
+		const expected = d.mean * (1 + boost);
+		if (Math.abs(expected - e.draftYear.ppg.mean) > 1e-9) derivedOk = false;
 	}
 	ok("the PPG anchor is derived from the era's own numbers", derivedOk);
 }

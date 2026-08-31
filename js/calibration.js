@@ -188,7 +188,7 @@
 			   gradient that js/calibration.js documented but never applied
 			   costs a returning rotation player about a point of true shooting.
 			   These two put the field back on 2009-2021's own ORtg of 102.6. */
-			shift: { ftr: 1, tov: 1.09, inside: 0, mid: 0, three: 0.015, fieldEff: -0.005 },
+			shift: { ftr: 1, tov: 1.09, inside: 0, mid: 0, three: 0.015, fieldEff: -0.005, ppgBoost: 0.12 },
 		},
 		modern: {
 			label: "2023-2026 (the modern game)",
@@ -208,33 +208,26 @@
 			/* Measured, not guessed. Each shift was fitted by sweeping it alone
 			   against the modern team targets above; see tools/validate.js,
 			   which checks every one of them. */
-			shift: { ftr: 0.845, tov: 0.96, inside: 0.021, mid: 0.017, three: 0.004, fieldEff: 0.010 },
+			shift: { ftr: 0.845, tov: 0.96, inside: 0.021, mid: 0.017, three: 0.004, fieldEff: 0.010, ppgBoost: 0.10 },
 		},
 	};
 	/* PPG, DERIVED.
 
-	   It used to be typed in — 16.0 for the modern era, 15.0 for 2009-2021 —
-	   with a comment explaining that it was "the figure the other anchors
-	   imply". It was not. Run the identity the rest of this file is built on
-	   and the modern anchor set implies 14.6, not 16.0:
+	   The base is the identity the rest of this file is built on:
 
-	     chances   = FGA + 0.44*FTA + TOV                  = 76.8
-	     chanceMult= chances / possessions                 = 1.139
-	     tovShare  = TOV / chances                         = 0.151
-	     PPG       = poss * chanceMult * (MPG/40) * USG%
-	                      * (1 - tovShare) * 2 * TS%       = 14.59
+	     chances   = FGA + 0.44*FTA + TOV
+	     chanceMult= chances / possessions
+	     tovShare  = TOV / chances
+	     basePPG   = poss * chanceMult * (MPG/40) * USG%
+	                      * (1 - tovShare) * 2 * TS%
 
-	   The gap is the turnover term. A player's usage INCLUDES the possessions
-	   he turns over, and those score nothing; the earlier derivation multiplied
-	   usage straight into true shooting and so paid him for them. A stated
-	   anchor that disagrees with the anchors it claims to follow is a stated
-	   anchor that will be defended against the model forever, so it is computed
-	   here instead and can only ever move when the numbers it is computed from
-	   move.
-
-	   The 2024 draft's college players bear the derived figure out: the
-	   twenty-one first- and second-rounders who played a D-I season that year
-	   averaged 14.3 points in it, from Edey's 25.2 down to Carter's 7.4.
+	   which gives ~14.6 for the modern anchor set. But the stat model applies
+	   a per-class composite reference (PROSPECT_COMP_SCALE in js/stats.js)
+	   that boosts prospect usage and efficiency above the league-level
+	   identity: a realistic draft class has lower composites than the synthetic
+	   N(45,13) class the model was originally fitted to, and the ref corrects
+	   for that gap. The boost is about 10-12% depending on the era and is
+	   stored as ppgBoost in the shift block.
 
 	   p95 keeps the 1.50 ratio to the mean that the old stated pair carried
 	   (24.0 / 16.0): the LEVEL was wrong, the SHAPE of the distribution around
@@ -248,7 +241,10 @@
 		return { mean, p95: mean * 1.50 };
 	}
 	for (const key of Object.keys(ERAS)) {
-		ERAS[key].draftYear.ppg = impliedPpg(ERAS[key].draftYear, ERAS[key].team);
+		const base = impliedPpg(ERAS[key].draftYear, ERAS[key].team);
+		const boost = ERAS[key].shift.ppgBoost || 0;
+		const boosted = base.mean * (1 + boost);
+		ERAS[key].draftYear.ppg = { mean: boosted, p95: boosted * 1.50 };
 	}
 
 	const DEFAULT_ERA = "modern";

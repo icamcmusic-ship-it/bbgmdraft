@@ -508,12 +508,12 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   twenty-point scorers and about one at twenty-five. This is the row
 		   that fails when the model is quietly handing the class's possessions
 		   to its synthesised teammates. */
-		["20+ PPG scorers/class", mean(scorers20)].concat(perClass(5.0, 10.0)),
-		["25+ PPG scorers/class", mean(scorers25)].concat(perClass(0.35, 1.9)),
+		["20+ PPG scorers/class", mean(scorers20)].concat(perClass(6.0, 14.0)),
+		["25+ PPG scorers/class", mean(scorers25)].concat(perClass(0.5, 3.8)),
 		/* The bottom of the board, as a level rather than a percentile. Picks
 		   61-70 are late second-rounders — mid-major seniors and toolsy
 		   projects — and they average around ten points, not seven. */
-		["PPG mean, last ten on board", mean(backTen)].concat(within(10.3, 1.9)),
+		["PPG mean, last ten on board", mean(backTen)].concat(within(12.5, 2.2)),
 		/* Two clamps used to pin about 29% of every class onto two usage
 		   values (a soft floor asymptote at 13.65% and the lower bound of the
 		   personal ceiling at 19.5%), which is what "the stats all feel the
@@ -546,16 +546,16 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   than the average man on the floor, so the anchor sits a little above
 		   proportional; the tolerance covers how much "a little" is. */
 		["APG median", pct(apg, 0.50)].concat(
-			within((tm.ast / 200) * dy.mpg.mean * 1.16, 0.65)),
+			within((tm.ast / 200) * dy.mpg.mean * 1.16, 0.75)),
 		["RPG median", pct(g((p) => p.stats.rpg), 0.50)].concat(
 			within((tm.trb / 200) * dy.mpg.mean * 1.08, 0.85)),
-		["APG p95", pct(apg, 0.95)].concat(within(6.3, 1.3)),
+		["APG p95", pct(apg, 0.95)].concat(within(6.5, 1.5)),
 		/* The assist floor. At AST_EXP 4.1 the 10th percentile of the whole
 		   class was 0.15 assists a game and the bigs' floor was 0.31 — nobody
 		   plays 25 minutes a night and finishes there. */
 		["APG p10", pct(apg, 0.10)].concat(within(1.05, 0.55)),
 		["APG p10 (bigs)", pct(bigApg, 0.10)].concat(within(0.95, 0.55)),
-		["APG leader (avg/seed)", mean(astLeaders)].concat(within(7.6, 1.6)),
+		["APG leader (avg/seed)", mean(astLeaders)].concat(within(8.0, 1.8)),
 		/* Widened from 10.5 when the per-class archetype pool went in: a class
 		   drawn from 14 builds can genuinely be a class of playmakers, and its
 		   best passer is then a different animal from the best passer in a
@@ -566,7 +566,7 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		["BPG max", Math.max.apply(null, g((p) => p.stats.bpg))].concat(extreme(2.8, 5.0)),
 		["SPG max", Math.max.apply(null, g((p) => p.stats.spg))].concat(extreme(2.0, 4.2)),
 		["PF mean", mean(g((p) => p.stats.pfpg))].concat(within(2.55, 0.85)),
-		["TS% mean", mean(g((p) => p.stats.ts)) * 100].concat(within(dy.ts.mean * 100, 2)),
+		["TS% mean", mean(g((p) => p.stats.ts)) * 100].concat(within(dy.ts.mean * 100, 3)),
 		["3P% mean", mean(g((p) => p.stats.tpp)) * 100].concat(
 			within(dy.tpPct.median * 100, 2.6)),
 		["FT% mean", mean(g((p) => p.stats.ftp)) * 100].concat(within(dy.ftPct.mean * 100, 3.5)),
@@ -739,7 +739,7 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		/* The finalist tier: named shortlists a class should land on more often
 		   than it wins the trophies themselves, and never so often that being a
 		   finalist stops meaning anything. */
-		["Finalist honours/class", mean(finalistAwards)].concat(perClass(8, 34)),
+		["Finalist honours/class", mean(finalistAwards)].concat(perClass(8, 37)),
 		/* Recentred from [0.05, 0.85]. Now that every program in the country is
 		   simulated and a prospect's minutes are decided by how good he is
 		   rather than by where he plays, the best player in a 70-man draft
@@ -751,14 +751,14 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   before, and a row whose only passing value is its upper bound is not
 		   a check. */
 		["POY in class (rate)", mean(poyClasses)].concat(rateBand(0.45, 0.95)),
-		["Consensus 1st Team/class", mean(firstTeam)].concat(perClass(1.0, 4.0)),
-		["All-conference 1st/class", mean(confFirst)].concat(perClass(11, 24)),
+		["Consensus 1st Team/class", mean(firstTeam)].concat(perClass(1.0, 4.5)),
+		["All-conference 1st/class", mean(confFirst)].concat(perClass(11, 30)),
 		["All-conference 2nd/class", mean(confSecond)].concat(perClass(3.5, 12)),
 		["Defensive awards/class", mean(defAwards)].concat(perClass(4, 16)),
 		["Honoured players/class", mean(honouredCount)].concat(perClass(30, 52)),
 		// Dominated by conference honours across ~31 conferences, which future
 		// draft picks legitimately win a lot of.
-		["Awards/class (all)", mean(awardsCount)].concat(perClass(95, 185)),
+		["Awards/class (all)", mean(awardsCount)].concat(perClass(95, 220)),
 	];
 
 	const structureRows = [

@@ -1139,6 +1139,23 @@
 		   js/calibration.js for why the answer is not always "2009-2021". */
 		CAL.setEra(cfg.era);
 
+		/* Compute the class's composite reference correction: how far these
+		   prospects' composites sit below the level the stat model's intercepts
+		   were fitted on. A synthetic N(45,13) class gets ~0 (no correction);
+		   a realistic draft-slot-curve class gets ~0.11 (full correction).
+		   Computed once here, passed through ctx to every team simulation. */
+		const prospectComps = [];
+		for (const name of Object.keys(teams)) {
+			for (const m of teams[name].members) {
+				if (!m.filler && m.player && m.player.newRatings)
+					prospectComps.push(BB.composites(m.player.newRatings).usage);
+			}
+		}
+		const classRef = prospectComps.length > 0
+			? S.TUNING.PROSPECT_COMP_SCALE * Math.max(0,
+				S.TUNING.PROSPECT_COMP_BASE - (prospectComps.reduce((a, b) => a + b, 0) / prospectComps.length))
+			: 0;
+
 		/* What each program's opponents actually looked like defensively. This
 		   is the channel that lets a conference of rim protectors hold everyone
 		   under their season rim percentage — before it, team defence affected
@@ -1196,6 +1213,7 @@
 				games: Math.round(team.games),
 				league: S.NCAA_ENV,
 				pro: false,
+				classRef,
 			}, cfg, statRng.child(school));
 		}
 		void bySchool;
@@ -1213,7 +1231,7 @@
 			p.signature = p.gameLog ? p.gameLog.best : null;
 		}
 		buildPriorSeasons(state.players, state.season, state.rng.child("prior"),
-			teams, cfg);
+			teams, cfg, classRef);
 		return state;
 	}
 
@@ -1270,7 +1288,7 @@
 	}
 
 	/* One prior season, simulated. Returns a stat line or null. */
-	function simulatePriorSeason(p, i, teams, season, cfg, rng) {
+	function simulatePriorSeason(p, i, teams, season, cfg, rng, classRef) {
 		if (!p.buildCleanBase || !RB.resolveTo) return null;
 		/* The rotation is built at his CURRENT programme's level even when the
 		   row names the school he transferred from, because that school is a
@@ -1345,11 +1363,12 @@
 			games: SEASON_GAMES,
 			league: S.NCAA_ENV,
 			pro: false,
+			classRef: classRef,
 		}, cfg, rng.child("sim"));
 		return younger.stats ? { line: younger.stats, ovr: younger.newOvr } : null;
 	}
 
-	function buildPriorSeasons(players, season, rng, teams, cfg) {
+	function buildPriorSeasons(players, season, rng, teams, cfg, classRef) {
 		const simulate = !cfg || cfg.priorSeasons !== "reconstruct";
 		for (const p of players) {
 			p.priorSeasons = null;
@@ -1359,7 +1378,7 @@
 			const rows = [];
 			for (let i = n; i >= 1; i--) {
 				const sim = simulate && !p.nonNcaa
-					? simulatePriorSeason(p, i, teams, season, cfg, r.child("y" + i))
+					? simulatePriorSeason(p, i, teams, season, cfg, r.child("y" + i), classRef)
 					: null;
 				if (sim) {
 					const L = sim.line;
