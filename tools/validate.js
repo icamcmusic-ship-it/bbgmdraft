@@ -166,6 +166,10 @@ function pct(vals, p) {
 	return s[Math.min(s.length - 1, Math.floor(p * s.length))];
 }
 const mean = (v) => v.reduce((a, b) => a + b, 0) / v.length;
+const sd = (v) => {
+	const m = mean(v);
+	return Math.sqrt(mean(v.map((x) => (x - m) * (x - m))));
+};
 
 /* Run nSeeds classes and return every check row plus the raw samples.
 
@@ -567,12 +571,67 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		["SPG max", Math.max.apply(null, g((p) => p.stats.spg))].concat(extreme(2.0, 4.2)),
 		["PF mean", mean(g((p) => p.stats.pfpg))].concat(within(2.55, 0.85)),
 		["TS% mean", mean(g((p) => p.stats.ts)) * 100].concat(within(dy.ts.mean * 100, 1.8)),
-		["3P% mean", mean(g((p) => p.stats.tpp)) * 100].concat(
+		/* THREE-POINT PERCENTAGE, measured against the population the anchor
+		   describes.
+
+		   This row used to be the unfiltered MEAN of every prospect's 3P%
+		   against a MEDIAN anchor, and it passed by 0.01 points — which is not
+		   a passing check, it is a coin flip that any change to the archetype
+		   table would land on either side of. Two things were wrong with the
+		   comparison and they pushed the same way:
+
+		     - Mean against median. dy.tpPct is a median because a per-player
+		       shooting percentage has a long low tail, and averaging it does
+		       not give you the median back.
+		     - The whole class against a population of shooters. About 15% of a
+		       generated class takes under half a three a game, and a 7-footer
+		       who went 4-for-19 all season contributes a 21% to the mean with
+		       the same weight as a guard who took 250. The source dataset's
+		       median is not computed over those players, because a shooting
+		       percentage on nineteen attempts is not a measurement.
+
+		   So: the median, over the prospects who have a real three-point role.
+		   The threshold is one attempt a game, which is the point below which
+		   the percentage stops being a fact about the player. Measured, this
+		   also moves the row off the band edge it was living on — the two eras
+		   now sit +1.1 and -0.4 from their anchors instead of -1.6 and -0.9. */
+		["3P% median (1+ 3PA)", pct(all.filter((p) => p.stats.tpa >= 1)
+			.map((p) => p.stats.tpp), 0.50) * 100].concat(
 			within(dy.tpPct.median * 100, 1.65)),
 		["FT% mean", mean(g((p) => p.stats.ftp)) * 100].concat(within(dy.ftPct.mean * 100, 2.2)),
 		["FG% mean", mean(g((p) => p.stats.fgp)) * 100].concat(within(48, 4)),
 		["FTA mean", mean(g((p) => p.stats.fta))].concat(within(4.2, 1.2)),
 		["GP mean", mean(g((p) => p.stats.gp))].concat(within(dy.gp.mean, 2.5)),
+
+		/* THE POTENTIAL DISTRIBUTION, as an aggregate.
+
+		   POT_BY_ARCHETYPE is 117 hand-tuned constants spanning -6 to +9, and
+		   potFactors adds five more terms on top of them. Every one of those is
+		   defensible on its own and nothing checked what they came to together:
+		   the whole potential model could drift by three points a class, or
+		   collapse to a single value, or invert against the source file, and
+		   every existing row would still pass. Individual stats are banded; the
+		   thing the archetype table is actually FOR was not.
+
+		   Three rows, because a distribution is not one number:
+
+		     - The mean gap, against the file's own mean gap. In "preserve" mode
+		       the tool promises not to inflate the class; a potential model that
+		       adds four points of ceiling to the average prospect breaks that
+		       promise without touching a single ovr.
+		     - The spread of the gap, which is what potSpread is for. A class
+		       where every prospect has the same ceiling is not a draft board.
+		     - The correlation between a build's POT_BY_ARCHETYPE entry and the
+		       gap its players actually come out with. This is the row that says
+		       the table is DOING something: if it drops toward zero, the
+		       archetype signal has been swamped by the five other terms and the
+		       97 constants are decoration. */
+		["Pot gap mean vs source", mean(g((p) => p.newPot - p.newOvr)) -
+			mean(g((p) => p.origPot - p.origOvr))].concat(within(0, 3.2)),
+		["Pot gap sd", sd(g((p) => p.newPot - p.newOvr))].concat(within(6.5, 3.0)),
+		["corr(archetype potential, gap)",
+			corr(g((p) => global.RatingsBuilder.POT_BY_ARCHETYPE[p.archetype] || 0),
+				g((p) => p.newPot - p.newOvr))].concat(corrBand(0.12, 0.70)),
 
 	];
 

@@ -1573,9 +1573,40 @@
 	/* Potential. Split out because none of it feeds the simulation: moving
 	   "Potential bias" or "Potential spread" should recompute two numbers, not
 	   re-play a season. */
+	/* Mean usage per archetype across this class, so potFromRole can ask
+	   whether a prospect used more or less of the offence than others of his
+	   build did — rather than more or less than the class average, which for a
+	   Rim Protector is a question about being a Rim Protector. See potFromRole.
+
+	   A build with too few members in this class has no reference worth having,
+	   so it falls back to the class mean; the threshold is three, below which
+	   the "reference" would mostly be the player himself. */
+	const USAGE_REF_MIN = 3;
+	function archetypeUsageReference(players) {
+		const sums = {};
+		const counts = {};
+		let total = 0;
+		let n = 0;
+		for (const p of players) {
+			if (p.nonNcaa || !p.stats || !Number.isFinite(p.stats.usg)) continue;
+			total += p.stats.usg;
+			n++;
+			const k = p.archetype;
+			sums[k] = (sums[k] || 0) + p.stats.usg;
+			counts[k] = (counts[k] || 0) + 1;
+		}
+		const classMean = n ? total / n : RB.ROLE_USG_CENTRE;
+		const out = { "": classMean };
+		for (const k of Object.keys(sums)) {
+			if (counts[k] >= USAGE_REF_MIN) out[k] = sums[k] / counts[k];
+		}
+		return out;
+	}
+
 	function phasePot(state) {
 		const { cfg } = state;
 		const rng = state.rng.child("pot");
+		const usageRef = archetypeUsageReference(state.players);
 		for (const p of state.players) {
 			const ov = p.override || {};
 			const prng = rng.child("pot:" + p.key);
@@ -1589,7 +1620,8 @@
 			const factors = RB.potFactors(
 				p.archetype, p.age, p.newRatings,
 				{ hgtInches: p.newHgtInches, weight: p.newWeight }, state.classAge);
-			factors.role = RB.potFromRole(p.stats, p.classYear);
+			factors.role = RB.potFromRole(p.stats, p.classYear,
+				Number.isFinite(usageRef[p.archetype]) ? usageRef[p.archetype] : usageRef[""]);
 			factors.bias = bias;
 			factors.noise = prng.normal(0, spread * 0.35);
 			factors.total = factors.arch + factors.age + factors.ageClass +

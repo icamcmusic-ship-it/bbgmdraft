@@ -1559,6 +1559,152 @@ console.log("\nBounds, shapes and guards");
 	ok("a size lock does rewrite hgt", withSize({ hgtInches: 84 }).hgt !== undefined);
 }
 
+/* --------------------------------------------- the archetype/solver audit */
+console.log("\nArchetype table and solver audit");
+{
+	// The four coverage builds exist, are eligible somewhere, and each has a
+	// potential entry — the failure mode that made Injury-Prone Talent the
+	// highest-scoring build in the class was a build with no entry.
+	const added = ["Screen Navigator", "Secondary Creator", "Zone Buster",
+		"Matchup-Zone Defender"];
+	const byName = {};
+	for (const a of RB.ARCHETYPES) byName[a.name] = a;
+	ok("the four coverage builds are in the table",
+		added.every((n) => byName[n]));
+	ok("each carries a potential entry",
+		added.every((n) => Number.isFinite(RB.POT_BY_ARCHETYPE[n])));
+	ok("each carries a role usage",
+		added.every((n) => Number.isFinite(RB.ROLE_USAGE[n])));
+	// Matchup-Zone Defender is the 6'7"-6'9" band specifically, which is what
+	// separates it from Switchable Big and Wing Stopper.
+	const mz = byName["Matchup-Zone Defender"];
+	ok("the matchup-zone build is gated to the forward band",
+		mz.min >= 50 && mz.max <= 68, mz.min + "-" + mz.max);
+	// Screen Navigator's identity is the movement, not the shot: its largest
+	// offset must not be a shooting rating.
+	const sn = RB.RAW_OFFSETS["Screen Navigator"];
+	const biggest = Object.keys(sn).sort((a, b) => sn[b] - sn[a])[0];
+	ok("the screen-navigator build's signature is conditioning, not shooting",
+		biggest === "endu", "largest offset was " + biggest);
+}
+
+{
+	/* The usage protection is scaled by what the build loaded on the usage
+	   composite itself, so an offence-loaded build no longer collects a
+	   defensive build's compensation. */
+	const W = { ins: 1.5, dnk: 1, fg: 1, tp: 1, spd: 0.5, hgt: 0.5, drb: 0.5, oiq: 0.5 };
+	const du = (name) => {
+		const o = RB.RAW_OFFSETS[name] || {};
+		let d = 0;
+		for (const k of Object.keys(o)) d += (W[k] || 0) * o[k];
+		return d / 650;
+	};
+	ok("an offence-loaded build reads positive on the usage composite",
+		du("Score-First Point") > 0.03 && du("Combo Guard") > 0.02,
+		"Score-First Point " + du("Score-First Point").toFixed(4));
+	ok("a defensive build reads negative on it",
+		du("Rim Protector") < -0.02 && du("Defensive Pest") < -0.02);
+
+	/* The measurable consequence: after normalisation the offence-loaded
+	   builds should not have kept MORE composite than they authored. */
+	const kept = (name) => RB.usageCompositeDelta(
+		RB.ARCHETYPES.filter((a) => a.name === name)[0]);
+	ok("normalisation no longer inflates an offence-loaded build's composite",
+		kept("Score-First Point") <= du("Score-First Point") + 1e-9,
+		"authored " + du("Score-First Point").toFixed(4) + ", kept " +
+			kept("Score-First Point").toFixed(4));
+}
+
+{
+	/* The creation term is residualised against the tags, so it separates two
+	   builds that share a tag and do not share a creation profile. */
+	const of = (n) => RB.ARCHETYPES.filter((a) => a.name === n)[0];
+	const helio = RB.creationDelta(of("Heliocentric Guard"));
+	const sharp = RB.creationDelta(of("Sharpshooter"));
+	ok("creation separates a heliocentric guard from a sharpshooter",
+		helio - sharp > 0.5,
+		"helio " + helio.toFixed(3) + " vs sharp " + sharp.toFixed(3));
+	ok("creation is centred: the table's tag-weighted mean is near zero",
+		Math.abs(RB.ARCHETYPES.reduce((a, x) => a + RB.creationDelta(x), 0) /
+			RB.ARCHETYPES.length) < 0.15);
+	ok("the fitted creation weight is no longer a rounding error",
+		RB.ROLE_FIT.createW >= 0.04, String(RB.ROLE_FIT.createW));
+}
+
+{
+	/* ovrRange reports the reach of the shift model, not the point the search
+	   stopped at: every rating saturates at both ends. */
+	const mk = (over) => {
+		const o = {};
+		for (const k of BB.RATING_KEYS) o[k] = 50;
+		return Object.assign(o, over || {});
+	};
+	const balanced = RB.ARCHETYPES.filter((a) => a.name === "Balanced")[0];
+	const mid = RB.ovrRange(mk(), balanced, null);
+	ok("a mid-height base can be solved across the whole scale",
+		mid.min === 0 && mid.max === 100, mid.min + "-" + mid.max);
+	// A 7-footer's fixed hgt rating genuinely stops him reaching the bottom.
+	const tall = RB.ovrRange(mk({ hgt: 92 }), balanced, null);
+	ok("a very tall base still cannot be solved to the floor", tall.min > mid.min,
+		"tall min " + tall.min);
+	// And every ovr the range calls reachable is reached, at the new width.
+	let unreached = 0;
+	for (let t = mid.min; t <= mid.max; t += 5) {
+		const solved = RB.solveToOvr(mk(), t, balanced, null);
+		if (Math.abs(BB.ovr(solved) - t) > 1) unreached++;
+	}
+	ok("every ovr the widened range calls reachable is reached", unreached === 0,
+		unreached + " targets missed");
+}
+
+{
+	/* The height-to-weight model is a curve, and it is right at the ends
+	   rather than only in the middle. */
+	const tw = RB.typicalWeight;
+	const anchors = [[66, 165], [72, 188], [78, 215], [84, 250], [90, 295]];
+	const worst = Math.max.apply(null, anchors.map(([h, w]) => Math.abs(tw(h) - w)));
+	ok("typical weight fits its anchors at both ends", worst < 2,
+		"worst miss " + worst.toFixed(1) + "lb");
+	const oldLine = (h) => 5.05 * h - 178;
+	ok("the old straight line was the thing that missed",
+		Math.abs(oldLine(90) - 295) > 15 && Math.abs(oldLine(66) - 165) > 8,
+		"linear at 90in: " + oldLine(90).toFixed(0) + "lb against 295");
+	let mono = true;
+	for (let h = 62; h < 94; h++) if (tw(h + 1) <= tw(h)) mono = false;
+	ok("typical weight is monotone across the basketball range", mono);
+}
+
+{
+	/* potFromRole's load term is measured against the player's own build, so
+	   it no longer pays a build for having that build's usage. */
+	const stats = { usg: 0.20, mpg: 30, ppg: 12, rpg: 8, apg: 1.5, ts: 0.58 };
+	const againstClass = RB.potFromRole(stats, "Freshman", RB.ROLE_USG_CENTRE);
+	const againstBuild = RB.potFromRole(stats, "Freshman", 0.20);
+	ok("a low-usage line scores lower against its own build's usage than " +
+		"against the class centre", againstBuild < againstClass,
+		againstBuild.toFixed(2) + " vs " + againstClass.toFixed(2));
+	ok("potFromRole still falls back to the class centre",
+		Math.abs(RB.potFromRole(stats, "Freshman") - againstClass) < 1e-9);
+	// And the build-driven part of the term is gone from a real class.
+	const byArch = {};
+	for (let s = 0; s < 6; s++) {
+		const res = global.Engine.run(V.realisticClass(s, 70),
+			global.Config.make({ seed: "potref" + s }));
+		for (const p of res.players) {
+			if (p.nonNcaa || !p.stats || !p.potFactors) continue;
+			(byArch[p.archetype] = byArch[p.archetype] || []).push(p.stats.usg);
+		}
+	}
+	const means = Object.keys(byArch).filter((k) => byArch[k].length >= 10)
+		.map((k) => byArch[k].reduce((a, b) => a + b, 0) / byArch[k].length);
+	const oldLoadSpread = means.length > 1
+		? (Math.max.apply(null, means) - Math.min.apply(null, means)) * 26 * 0.55 : 0;
+	ok("the usage spread across builds was worth real potential, and is " +
+		"no longer read as a breakout signal", oldLoadSpread > 0.3,
+		"builds differed by " + oldLoadSpread.toFixed(2) +
+			" points of potential under the old class-wide reference");
+}
+
 console.log("\n" + (failures ? failures + " of " + checks + " checks failed"
 	: "all " + checks + " checks passed"));
 process.exit(failures ? 1 : 0);

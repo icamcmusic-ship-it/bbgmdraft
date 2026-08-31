@@ -147,6 +147,19 @@
 		   worth fixing was the SHAPE being lopsided enough that the average
 		   build read as a subtraction, and it no longer is.
 
+		   `ins` remains the widest of them — 25 builds boost it against 51 that
+		   cut it — and that is the right ratio rather than a residual fault.
+		   Inside scoring is what a modern specialist actually trades away:
+		   three quarters of the table is guards, wings and stretch bigs, and a
+		   build that loads on ins is by construction a post player. What the
+		   audit correctly identified as the CONSEQUENCE — that ins carries
+		   weight 1.5 in BBGM's usage composite, the highest of any rating, so a
+		   table that is net-negative on it systematically under-reads inside
+		   scoring's claim on the offence — is real, and it is handled where it
+		   arises rather than by adding post builds nobody asked for: see
+		   USAGE_SELF_REF below, which is the fix for the protection mechanism
+		   the audit named as compensating "imperfectly".
+
 		   Role usage is derived now (see ROLE_USAGE below), so none of them
 		   needs a hand-fitted constant, which is what made adding builds
 		   expensive enough that there were 72 and not a hundred. */
@@ -213,6 +226,41 @@
 		{ name: "Screen-and-Roll Center", min: 72, max: 100, w: 1.3, t: ["big", "athletic"], o: { dnk: 18, stre: 14, jmp: 10, endu: 8, tp: -16, ft: -12, drb: -10, pss: -8 } },
 		{ name: "Defensive Pillar", min: 74, max: 100, w: 1.2, t: ["big", "defense", "rebounding"], o: { diq: 20, reb: 16, stre: 12, endu: 8, tp: -16, fg: -12, drb: -10, spd: -10 } },
 		{ name: "Two-Way Center", min: 72, max: 100, w: 1.1, t: ["big", "defense", "scoring"], o: { diq: 16, ins: 14, reb: 10, stre: 8, tp: -14, drb: -12, spd: -10, pss: -8 } },
+
+		/* --- four gaps in the coverage, measured rather than wished for -----
+
+		   Each of these is a role a scout names out loud and the table could
+		   not express, and each is distinguishable from the build it is
+		   nearest to by more than a degree:
+
+		   Screen Navigator is NOT a shooter. Movement Shooter loads tp 20 /
+		   ft 14 and its identity is the shot at the end; this one's identity is
+		   the two seconds before it — the conditioning and the feel to come off
+		   three screens and be open, which is a separable skill and the reason
+		   a 34% shooter can be a starter. It is the only build in the table
+		   whose largest offset is endurance and whose shooting is untouched.
+
+		   Secondary Creator sits between Shot-Creating Wing (fg 16, an iso
+		   scorer) and Connective Passer Wing (pss 16, a swing-swing connector).
+		   Both extremes existed and the two-to-four in the middle — the man who
+		   runs the second side of the action, creates a shot when the first
+		   option dies, and is the reason a good offence has two of them — did
+		   not.
+
+		   Zone Buster is an identity college has and the NBA does not, which is
+		   exactly why a college draft tool should carry it: feel and range
+		   against a set zone, with none of the strength or rebounding that a
+		   man-to-man matchup asks for.
+
+		   Matchup-Zone Defender is the 6'7"-6'9" band specifically (hgt 52-66
+		   maps to about 78.5-81.8 inches). Switchable Big is a five who can
+		   move his feet; Wing Stopper is a pure on-ball stopper who gives up
+		   offence for it. This is the man who guards one through four in a
+		   changing defence and is still on the floor for it. */
+		{ name: "Screen Navigator", min: 0, max: 54, w: 1.3, t: ["guard", "athletic"], o: { endu: 20, spd: 12, oiq: 12, diq: 6, ins: -12, stre: -12, reb: -10, dnk: -8 } },
+		{ name: "Secondary Creator", min: 36, max: 68, w: 1.6, t: ["wing", "playmaking", "scoring"], o: { drb: 14, pss: 12, fg: 10, ins: 8, oiq: 6, reb: -12, diq: -10, stre: -8, jmp: -6 } },
+		{ name: "Zone Buster", min: 0, max: 66, w: 1.1, t: ["shooting", "scoring"], o: { oiq: 18, tp: 16, fg: 10, pss: 6, stre: -16, reb: -14, dnk: -10, diq: -8 } },
+		{ name: "Matchup-Zone Defender", min: 52, max: 66, w: 1.3, t: ["wing", "defense", "athletic"], o: { diq: 18, spd: 12, endu: 10, reb: 8, ins: -10, tp: -8, ft: -8, pss: -6 } },
 
 		{ name: "Balanced", min: 0, max: 100, w: 1.0, t: [], o: {} },
 	];
@@ -296,7 +344,7 @@
 	   without carrying either tag — and because a regressor the fit can decide
 	   is worth nothing is exactly what a fitted model should contain. */
 	const ROLE_CREATE_W = { drb: 0.6, pss: 1.0, oiq: 0.5 };
-	function creationDelta(arch) {
+	function rawCreation(arch) {
 		let d = 0;
 		for (const k of Object.keys(ROLE_CREATE_W)) d += ROLE_CREATE_W[k] * (arch.o[k] || 0);
 		// Scaled so the term has roughly unit spread across the table, which
@@ -305,17 +353,79 @@
 		return d / 25;
 	}
 
+	/* What the TAGS predict about a build's creation, so the creation term can
+	   be the part they do not.
+
+	   The fit put createW at 0.02 — arithmetically present, practically zero —
+	   and the honest reading of that was in the old comment: "the playmaking
+	   and guard tags between them already absorb what it measures". That is a
+	   collinearity, not a finding. Every heavy creator in the table carries the
+	   playmaking or the guard tag, so the two columns of the design matrix
+	   moved together, the ridge split the credit toward the one with more mass,
+	   and the regressor that was supposed to separate a Heliocentric Guard from
+	   a Sharpshooter was left with 2.5% of separation to do it with. The term
+	   was not measured to be worthless; it was measured against a copy of
+	   itself.
+
+	   So creation is residualised against the tags before it is used. Each tag
+	   carries the mean raw creation of the builds that hold it, a build's
+	   predicted creation is the mean of its own tags' means, and
+	   creationDelta() returns the difference. The term now answers a question
+	   the tags cannot: is this build MORE of a creator than a build with its
+	   labels usually is? A Heliocentric Guard (drb 18, pss 18, oiq 16) is; a
+	   Sharpshooter is not; a Cutter / Finisher is markedly less of one than the
+	   average wing. That is a separable fact, and it is one tools/rolefit.js
+	   can now put real weight on because it no longer duplicates a column that
+	   is already in the design.
+
+	   Recomputed after normalisation, since that is what reaches the ratings. */
+	const CREATE_TAG_MEAN = {};
+	let CREATE_GRAND_MEAN = 0;
+	function recomputeCreationBaseline() {
+		const sums = {};
+		const counts = {};
+		let total = 0;
+		for (const a of ARCHETYPES) {
+			const c = rawCreation(a);
+			total += c;
+			for (const t of a.t || []) {
+				sums[t] = (sums[t] || 0) + c;
+				counts[t] = (counts[t] || 0) + 1;
+			}
+		}
+		CREATE_GRAND_MEAN = ARCHETYPES.length ? total / ARCHETYPES.length : 0;
+		for (const k of Object.keys(CREATE_TAG_MEAN)) delete CREATE_TAG_MEAN[k];
+		for (const t of Object.keys(sums)) CREATE_TAG_MEAN[t] = sums[t] / counts[t];
+	}
+
+	function creationDelta(arch) {
+		const tags = (arch.t || []).filter((t) => Number.isFinite(CREATE_TAG_MEAN[t]));
+		let predicted = CREATE_GRAND_MEAN;
+		if (tags.length) {
+			let acc = 0;
+			for (const t of tags) acc += CREATE_TAG_MEAN[t];
+			predicted = acc / tags.length;
+		}
+		return rawCreation(arch) - predicted;
+	}
+
 	const ROLE_FIT = {
-		createW: 0.02,
-		compExp: 0.70,
+		/* Re-fitted by tools/rolefit.js over 70 realistic classes after the
+		   creation term was residualised against the tags (see creationDelta)
+		   and the four coverage builds were added. createW rises from 0.02 to
+		   0.05 — still a small term, and now a small term that is measuring
+		   something the tags are not, rather than a small term measuring a
+		   copy of them. */
+		createW: 0.05,
+		compExp: 0.68,
 		base: 0.98,
 		/* What a coach hands each kind of player, over and above what his
 		   shot-making says. Offensive roles (playmaking, scoring) use more
 		   possessions; defensive and rebounding roles defer on offense. */
 		tags: {
-			guard: 1.02, wing: 1.04, big: 0.94,
-			scoring: 1.06, shooting: 1.05, playmaking: 1.06,
-			defense: 0.90, athletic: 0.96, rebounding: 0.94, raw: 0.92,
+			guard: 0.93, wing: 1.05, big: 1.02,
+			scoring: 1.03, shooting: 0.91, playmaking: 1.00,
+			defense: 0.99, athletic: 1.08, rebounding: 1.00, raw: 0.93,
 		},
 		/* Softly bounded rather than clamped, so a build can never land
 		   exactly on a limit the way twelve of the old table's entries did. */
@@ -389,8 +499,11 @@
 	}
 
 	/* Computed once, exposed as an object so the editor and the tests can read
-	   the whole table the way they always could. */
+	   the whole table the way they always could. The creation baseline has to
+	   be built first: creationDelta is measured against the table it is part
+	   of. */
 	const ROLE_USAGE = {};
+	recomputeCreationBaseline();
 	for (const a of ARCHETYPES) ROLE_USAGE[a.name] = computeRoleUsage(a);
 
 	/* An unknown build is now an ERROR, not a silent 1.0.
@@ -482,7 +595,36 @@
 		"Vertical Spacer": 3, "Hook-Shot Specialist": -4,
 		"Screen-and-Roll Center": 2, "Defensive Pillar": -1,
 		"Two-Way Center": 1,
+		/* The four coverage gaps. Screen Navigator and Matchup-Zone Defender
+		   are conditioning-and-feel builds whose value is already realised;
+		   Secondary Creator has real on-ball room to grow into; Zone Buster is
+		   a college identity that does not transfer, which is a ceiling. */
+		"Screen Navigator": -2, "Secondary Creator": 2,
+		"Zone Buster": -3, "Matchup-Zone Defender": 1,
 	};
+
+	/* What a basketball player of a given listed height typically weighs.
+
+	   This was `5.05 * hgtInches - 178`, a straight line — and weight does not
+	   scale linearly with height for the same reason nothing else does: a body
+	   is three-dimensional and a height is one-dimensional. The line was fitted
+	   through the middle of the distribution, so it was right in the middle and
+	   wrong at both ends in the same direction. At 66 inches it predicted
+	   155lb, about ten light; at 90 inches it predicted 276lb, when a 7'6"
+	   player lists at 290-310. The frame term is clamped at ±4, which stopped
+	   the error becoming absurd and did not stop it becoming systematic: every
+	   very tall prospect read as heavy for his size and lost potential for it,
+	   and every very short one read as light and gained.
+
+	   A quadratic least-squared through listed heights and weights across the
+	   range basketball actually occupies (5'6" to 7'6", nine anchors) fits every
+	   one of them to within 1.1lb and stays sane a little outside it: 160lb at
+	   5'4" and 311lb at 7'8". A power law fits about as well, and a quadratic
+	   is two multiplies. */
+	function typicalWeight(hgtInches) {
+		const h = hgtInches;
+		return 0.103535 * h * h - 10.779293 * h + 425.996970;
+	}
 
 	/* Potential gap for a finished build.
 
@@ -524,8 +666,7 @@
 		// for his size = room to fill out.
 		let frame = 0;
 		if (physical && Number.isFinite(physical.hgtInches) && Number.isFinite(physical.weight)) {
-			const expected = 5.05 * physical.hgtInches - 178;
-			frame = clamp((expected - physical.weight) * 0.075, -4, 4);
+			frame = clamp((typicalWeight(physical.hgtInches) - physical.weight) * 0.075, -4, 4);
 		}
 		const total = arch + ageAdj + ageClass + touch + frame;
 		return { arch, age: ageAdj, ageClass, touch, frame, role: 0, total };
@@ -543,7 +684,34 @@
 
 	   `usg` is his usage rate, `share` his share of team scoring, `year` his
 	   class year. */
-	function potFromRole(stats, classYear) {
+	/* `load` used to be measured against a single class-wide 0.245, which made
+	   the term partly circular. A build's archetype decides how much of an
+	   offence it is given, so a Rim Protector arrives at 18% usage BECAUSE HE
+	   IS A RIM PROTECTOR — and was then paid a large positive `load` for it, on
+	   the reasoning that efficient production on modest usage is a breakout
+	   signal. It is, but only when the modest usage is a fact about his season
+	   rather than a restatement of his build. The mechanism that deflated his
+	   scoring was inflating his potential, out of the same number.
+
+	   The reference is therefore passed in, and the engine measures it: the
+	   mean usage of the players in THIS class who share his build (see
+	   archetypeUsageReference in js/engine.js). "He used less than his build
+	   usually does" is a fact about his season; "he used less than the class
+	   average" was a fact about his build. A Rim Protector who used 18% is now
+	   neutral; one who used 13% and produced anyway still gets the bonus.
+
+	   Deriving the reference from ROLE_USAGE instead would not have worked and
+	   is worth recording as a dead end: that table is a COMPENSATION applied on
+	   top of BBGM's usage composite, not a statement of intent, so a Rim
+	   Protector's entry is above 1 precisely because the composite reads him
+	   too low. Reading it as "how much of the offence this build gets" inverts
+	   half the table.
+
+	   Falls back to the class-wide centre when no reference is supplied, which
+	   is the old behaviour and what the two-argument callers still get. */
+	const ROLE_USG_CENTRE = 0.245;
+
+	function potFromRole(stats, classYear, usageReference) {
 		if (!stats) return 0;
 		const usg = stats.usg;
 		const perMinute = stats.mpg > 0 ? (stats.ppg + 1.2 * stats.rpg + 1.6 * stats.apg) / stats.mpg : 0;
@@ -552,7 +720,9 @@
 		const youth = classYear === "Freshman" ? 1 : classYear === "Sophomore" ? 0.6
 			: classYear === "Junior" ? 0.25 : 0;
 		const efficiency = clamp((stats.ts - Cal.DRAFT_YEAR.ts.mean) * 26, -2.5, 3);
-		const load = clamp((0.245 - usg) * 26, -3, 3.5);
+		const reference = Number.isFinite(usageReference)
+			? clamp(usageReference, 0.16, 0.33) : ROLE_USG_CENTRE;
+		const load = clamp((reference - usg) * 26, -3, 3.5);
 		const output = clamp((perMinute - 0.55) * 9, -2.5, 3);
 		return clamp((load * 0.55 + output * 0.6 + efficiency * 0.5) * (0.45 + 0.75 * youth),
 			-4.5, 6);
@@ -571,6 +741,38 @@
 		hgt: 0, stre: 1, spd: 1, jmp: 1, endu: 0.5, ins: 1, dnk: 1, ft: 1,
 		fg: 1, tp: 1, oiq: 1, diq: 1, drb: 1, pss: 1, reb: 1,
 	};
+	/* How far the solver's search runs, and therefore what `ovrRange` reports.
+
+	   This was 90 — the width of the rating scale, which is the right number
+	   only if every rating moves one-for-one with the shift. They do not.
+	   Endurance moves at SHIFT_SCALE 0.5, and shiftScales() damps a build's
+	   signature ratings by a further factor of 0.45 on the way down, so the
+	   smallest effective scale in play is 0.225: at k = -90 such a rating has
+	   moved 20 points and is nowhere near its floor.
+
+	   So ovrRange.min was not a property of the PLAYER at all. It was the ovr
+	   reached when the ratings that move fastest had bottomed out and the ones
+	   that move slowest had barely started — a statement about where the search
+	   stopped, wearing the name of a bound. Two builds differing only in
+	   endurance reported the same floor because neither had reached one, and
+	   the editor showed a limit that no amount of solving would actually have
+	   been the limit.
+
+	   Moving a rating from 99 to 0 at the slowest effective scale takes
+	   99 / 0.225 = 440 of shift, so 500 saturates every rating at both ends
+	   with headroom. What the range reports now is the genuine reach of the
+	   shift model: for a mid-height base it is the whole scale, because every
+	   target in it really is solvable, and where it is narrower — a 7-footer
+	   cannot be solved below the ovr his fixed hgt rating already implies — the
+	   narrowing is the player's, not the search's. That also removes a real
+	   false negative: targets between the old bound and the true one were
+	   reported unreachable and were not.
+
+	   The bisection cost is unchanged. It is 52 halvings of whatever interval
+	   it is given, and widening the interval by a factor of 5.6 costs under
+	   three of them, so the solved shift is still exact to far below the
+	   rounding threshold. */
+	const SHIFT_RANGE = 500;
 
 	/* BBGM's usage composite, which decides how much of an offence a player is
 	   given: ins 1.5, dnk 1, fg 1, tp 1, spd 0.5, hgt 0.5, drb 0.5, oiq 0.5.
@@ -616,6 +818,41 @@
 	   protection is renormalised rather than simply capped. */
 	const USAGE_PROTECT = 0.75;
 	const USAGE_PROTECT_MAX = Math.max(...Object.values(USAGE_W));
+	/* How much of a build's own usage-composite loading cancels the
+	   protection.
+
+	   The protection above was written for one case and applied to two. It
+	   fires whenever `push > 0` — whenever the normaliser has to take ovr back
+	   OUT of a build — and it then spends that give-back away from the ratings
+	   BBGM's usage composite reads. For a build that loaded on diq (ovr weight
+	   .159) and spd (.123) that is exactly right: the ovr it has to hand back
+	   would otherwise come out of its offence, and a stopper who cannot be
+	   given the ball is not a stopper, he is unplayable.
+
+	   But `push > 0` is not the same question as "is this a defensive build",
+	   and 29 of the 85 builds it fires for are offensive ones. Combo Guard
+	   (fg 14, tp 12, drb 12), Shot-Creating Wing (fg 16, drb 12, tp 8),
+	   Score-First Point, Pull-Up Artist and Skilled Big all raise the usage
+	   composite substantially with their own offsets, deliberately, and were
+	   then handed a defensive build's compensation on top: the give-back was
+	   steered away from the very ratings they had just spent their budget
+	   raising, so they kept volume they had not paid for. Score-First Point
+	   carries a composite delta of +0.072 — more than twice the reference below
+	   — and was protected as hard as a Rim Protector.
+
+	   (The audit that prompted this named Post Scorer, which turns out to be
+	   the one case it is NOT: its raw ovr push is -1.62, so it takes the other
+	   branch and has never been protected at all. The fault is real; it lives
+	   one build over.)
+
+	   So the protection is scaled by how much of the usage composite the build
+	   loaded on itself. A build whose raw offsets push the composite up by
+	   USAGE_SELF_REF or more gets none of it; one that pushes it down — a
+	   stopper, a rim protector, a rebounder — gets all of it; in between it
+	   tapers. USAGE_SELF_REF is the composite delta of a moderately
+	   offence-loaded build, so "he paid for it himself" is measured on the same
+	   scale as the compensation. */
+	const USAGE_SELF_REF = 0.030;
 	/* The offset vectors as authored, before normalisation. Kept so the tests
 	   can compare what the normaliser does now against what the old uniform
 	   one did, and so the editor's tooltip can show a build's intent rather
@@ -631,11 +868,18 @@
 			if (Math.abs(push / shiftW) < 0.05) continue;
 			/* A positive push means the normaliser has to take ovr back OUT of
 			   the build, which is the case that guts the offence. Spend that
-			   budget away from the usage composite. */
+			   budget away from the usage composite — but only to the extent
+			   the build did not load on the usage composite itself. See
+			   USAGE_SELF_REF. */
+			let du = 0;
+			for (const k of Object.keys(a.o)) du += (ROLE_USAGE_W[k] || 0) * a.o[k];
+			du /= ROLE_USAGE_DENOM;
+			const strength = USAGE_PROTECT *
+				clamp(1 - du / USAGE_SELF_REF, 0, 1);
 			const scale = {};
 			let w = 0;
 			for (const k of BB.RATING_KEYS) {
-				const protect = push > 0 ? 1 - USAGE_PROTECT * (USAGE_W[k] / USAGE_PROTECT_MAX) : 1;
+				const protect = push > 0 ? 1 - strength * (USAGE_W[k] / USAGE_PROTECT_MAX) : 1;
 				scale[k] = Math.max(0, SHIFT_SCALE[k] * clamp(protect, 0.1, 1));
 				w += OVR_W[k] * scale[k];
 			}
@@ -993,8 +1237,8 @@
 		const upScales = arch ? shiftScales(arch, true, pinned) : SHIFT_SCALE;
 		const downScales = arch ? shiftScales(arch, false, pinned) : SHIFT_SCALE;
 		return {
-			min: BB.ovr(applyShift(base, -90, downScales)),
-			max: BB.ovr(applyShift(base, 90, upScales)),
+			min: BB.ovr(applyShift(base, -SHIFT_RANGE, downScales)),
+			max: BB.ovr(applyShift(base, SHIFT_RANGE, upScales)),
 		};
 	}
 
@@ -1023,8 +1267,8 @@
 		const upScales = arch ? shiftScales(arch, true, pinned) : SHIFT_SCALE;
 		const downScales = arch ? shiftScales(arch, false, pinned) : SHIFT_SCALE;
 		const shift = (k) => applyShift(base, k, k >= 0 ? upScales : downScales);
-		let lo = -90;
-		let hi = 90;
+		let lo = -SHIFT_RANGE;
+		let hi = SHIFT_RANGE;
 		if (BB.ovr(shift(lo)) > targetOvr) return shift(lo);
 		if (BB.ovr(shift(hi)) < targetOvr) return shift(hi);
 		for (let i = 0; i < 52; i++) {
@@ -1132,8 +1376,9 @@
 	global.RatingsBuilder = {
 		ARCHETYPES, RAW_OFFSETS, OVR_W, SHIFT_SCALE, USAGE_W,
 		rebuild, classCurve, pickArchetype, solveToOvr, shiftScales, ovrRange, resolveTo,
-		potAdjust, potFactors, potFromRole, POT_BY_ARCHETYPE,
+		potAdjust, potFactors, potFromRole, ROLE_USG_CENTRE, POT_BY_ARCHETYPE, typicalWeight,
 		ROLE_USAGE, roleUsage, computeRoleUsage, usageCompositeDelta, creationDelta,
+		rawCreation, CREATE_TAG_MEAN,
 		ROLE_FIT, softBound, softBoundOrderError,
 		CLASS_FLAVORS, pickFlavor, flavorMultiplier, flavorConfig, pickClassPool,
 		archetypeWeight, RARITY_COMPRESS,
