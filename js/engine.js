@@ -514,7 +514,7 @@
 			// what the college season is simulated off (see talentPot), so
 			// moving "Potential bias" never re-simulates a game.
 			let gap = Math.max(1, p.origPot - p.origOvr);
-			if (curve) gap = prng.truncNormal(24, 8, 2, 55);
+			if (curve) gap = prng.truncNormal(17, 7, 2, 45);
 
 			// Size variance happens BEFORE the rebuild so the hgt rating and the
 			// listed height stay in sync (they'd otherwise drift up to 3 inches
@@ -1463,7 +1463,7 @@
 			factors.total = factors.arch + factors.age + factors.ageClass +
 				factors.touch + factors.frame + factors.role;
 			p.potFactors = factors;
-			const gap = Math.max(1, p.baseGap + bias + factors.total + factors.noise);
+			const gap = Math.max(1, p.baseGap + bias + factors.total * 0.55 + factors.noise);
 			p.newPot = clamp(Math.round(p.newOvr + gap), Math.min(p.newOvr + 1, 100), 100);
 		}
 		return state;

@@ -115,7 +115,7 @@ function makeClass(rng, n, targetOvrAt) {
 			r = shifted((lo + hi) / 2);
 		}
 		r.ovr = BB.ovr(r);
-		r.pot = clamp(r.ovr + Math.round(pr.uniform(4, 26)), r.ovr, 90);
+		r.pot = clamp(r.ovr + Math.round(pr.uniform(3, 20)), r.ovr, 90);
 		r.pos = BB.pos(r);
 		r.skills = [];
 		players.push({
