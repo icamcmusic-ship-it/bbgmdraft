@@ -38,7 +38,12 @@
 		<button id="btnPin" disabled title="Keep this class as a comparison baseline">Pin</button>
 		<button id="btnCopyLink" title="Copy a link that reproduces this exact class, settings and locks">Link</button>
 		<button id="btnExport" class="primary" disabled>Export JSON</button>
-		<button id="btnExportMenu" disabled title="Other exports" aria-haspopup="true">▾</button>
+		<!-- The label was a bare ▾. Screen readers got "Other exports" from the
+		     title; a sighted user got a chevron with nothing to say it was a
+		     menu, what was in it, or that it belonged to the button beside it.
+		     A word costs eight pixels. -->
+		<button id="btnExportMenu" disabled aria-haspopup="menu" aria-expanded="false"
+			title="CSV, season data, locked prospects and the settings JSON">More ▾</button>
 		<button id="btnExportAll" disabled hidden>Export all</button>
 	</div>
 	<button id="btnTheme" title="Switch between light and dark" aria-label="Switch colour theme">◐</button>
@@ -81,10 +86,17 @@
 		<summary>Builds</summary>
 		<div class="ctl"><label for="specialization">Specialisation <b></b></label><input type="range" id="specialization" min="0" max="2.5" step="0.05"></div>
 		<div class="ctl"><label for="archetypeDiversity">Archetype diversity <b></b></label><input type="range" id="archetypeDiversity" min="0" max="100" step="1"></div>
-		<div class="ctl"><label for="classFlavor">Class flavour <b></b></label><input type="range" id="classFlavor" min="0" max="2" step="0.05"></div>
+		<div class="ctl"><label for="classFlavor">Flavour strength <b></b></label><input type="range" id="classFlavor" min="0" max="2" step="0.05"></div>
 		<div class="ctl"><label for="archetypePool">Builds per class <b></b></label><input type="range" id="archetypePool" min="0" max="40" step="1"></div>
 		<div class="ctl"><label for="surpriseBudget">Anomalies per class <b></b></label><input type="range" id="surpriseBudget" min="0" max="6" step="1"></div>
 		<div class="ctl"><label for="buildNoise">Build noise <b></b></label><input type="range" id="buildNoise" min="0" max="14" step="0.5"></div>
+		<div class="ctl">
+			<label for="flavorHint">Class flavour</label>
+			<select id="flavorHint"></select>
+			<p class="hint">Leave on “draw one” for the usual behaviour. Picking one keeps the seed and changes what kind of class it is.</p>
+		</div>
+		<div class="ctl"><label for="variation">Variation <b></b></label><input type="range" id="variation" min="0" max="12" step="1"></div>
+		<div class="ctl"><label for="poolMemory">Avoid repeating recent builds <b></b></label><input type="range" id="poolMemory" min="0" max="1" step="0.05"></div>
 		<div class="ctl"><label><input type="checkbox" id="varySize"> Let height &amp; weight drift with the build</label></div>
 		<p class="hint">Every rebuilt player is re-solved against BBGM's own ovr formula, so specialising a build never changes his overall.</p>
 	</details>
@@ -121,6 +133,9 @@
 		<div class="ctl"><label for="realignmentRate">Conference realignment <b></b></label><input type="range" id="realignmentRate" min="0" max="1" step="0.05"></div>
 		<div class="ctl"><label for="bluebloodDownYears">Blue bloods having a down year <b></b></label><input type="range" id="bluebloodDownYears" min="0" max="6" step="1"></div>
 		<div class="ctl"><label for="midMajorLift">Mid-major surge <b></b></label><input type="range" id="midMajorLift" min="0" max="12" step="1"></div>
+		<div class="ctl"><label for="teamMomentum">Hot and cold streaks <b></b></label><input type="range" id="teamMomentum" min="0" max="2.5" step="0.05"></div>
+		<div class="ctl"><label for="seasonEvents">Events during the season <b></b></label><input type="range" id="seasonEvents" min="0" max="14" step="1"></div>
+		<div class="ctl"><label for="draftEvents">Draft-day events <b></b></label><input type="range" id="draftEvents" min="0" max="8" step="1"></div>
 		<div class="ctl">
 			<label for="priorSeasons">Earlier seasons</label>
 			<select id="priorSeasons">
@@ -136,12 +151,18 @@
 		<div class="ctl"><label for="awardStrictness">National awards <b></b></label><input type="range" id="awardStrictness" min="0.4" max="2" step="0.05"></div>
 		<div class="ctl"><label for="confAwardStrictness">Conference awards <b></b></label><input type="range" id="confAwardStrictness" min="0.4" max="2" step="0.05"></div>
 		<div class="ctl"><label for="proAwardStrictness">Awards abroad <b></b></label><input type="range" id="proAwardStrictness" min="0.4" max="2" step="0.05"></div>
+		<div class="ctl"><label for="awardNoise">Voter disagreement <b></b></label><input type="range" id="awardNoise" min="0" max="3" step="0.05"></div>
 		<p class="hint" id="awardInteractionHint"></p>
 	</details>
 
 	<details class="grp" id="grp-arch">
 		<summary>Archetype frequencies</summary>
 		<p class="hint">Rarity weight per build (1 = common, 3.6 = the most common, 0.34 = the rarest), and beside it the share of the last generated class that build actually came out as. Height bands are fixed by the archetype. Hover a name to see what it does to the ratings.</p>
+		<!-- 117 builds in a 230px scroller: finding "Floor-Spacing Four" meant
+		     scrolling past a hundred names. -->
+		<input type="search" id="archSearch" placeholder="Find a build…"
+			aria-label="Filter builds by name or tag">
+		<p class="hint" id="archSearchNote" hidden></p>
 		<div id="archWeights" class="archlist"></div>
 		<button id="btnArchReset" type="button">Reset weights</button>
 	</details>

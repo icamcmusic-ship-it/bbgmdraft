@@ -177,9 +177,88 @@
 		return Math.floor(inches / 12) + "'" + Math.round(inches % 12) + '"';
 	}
 
+	/* --- the phone layout ------------------------------------------------
+
+	   css/style.css has carried a `.cardtable` rule since the table grew past
+	   thirty columns: below 700px each row becomes a card and each cell prints
+	   its own column label. NOTHING EVER ADDED THE CLASS. So the rule was dead
+	   and a phone got the desktop table — forty columns behind a horizontal
+	   scroll with a sticky name column, which is exactly the "you cannot see
+	   more than three columns at once" the audit describes.
+
+	   Two things are needed and only one of them is the class. A card that
+	   stacks forty labelled lines per prospect is not an improvement on a
+	   scroll; it is the same information in a taller shape. So the card layout
+	   also has its own column set — the twelve fields a scout reads first —
+	   independent of whichever columns the user has ticked for the desktop
+	   table, with a control to show everything for the cases where that is what
+	   they want.
+
+	   `auto` follows the viewport, which is what a phone user wants and a
+	   desktop user never notices; `on` and `off` are there because a tablet in
+	   landscape is a genuine judgement call and because a narrow window on a
+	   desktop is not necessarily a phone. */
+	const CARD_COLUMNS = ["pick", "lock", "name", "pos", "year", "board",
+		"newOvr", "newPot", "archetype", "college", "mpg", "ppg", "rpg", "apg",
+		"ts", "awards"];
+	const CARD_BREAKPOINT = 700;
+
+	function cardMode() {
+		const st = A().state;
+		const pref = st.cardView || "auto";
+		if (pref === "on") return true;
+		if (pref === "off") return false;
+		return typeof window !== "undefined" && window.innerWidth <= CARD_BREAKPOINT;
+	}
+
+	/* The table's column ORDER, which used to be the order of the COLUMNS
+	   array and nothing else.
+
+	   Columns could be shown, hidden and saved as a layout, and their order was
+	   fixed by a literal in this file — so a user who wanted PPG next to TS%,
+	   which is a completely ordinary thing to want in a table with forty
+	   columns and two of them relevant to the question in front of them, could
+	   not have it without editing the source. Drag-and-drop reordering is what
+	   every data table does.
+
+	   `state.columnOrder` is a list of keys. It is a PREFERENCE, not a schema:
+	   any key it does not mention keeps its position from COLUMNS, and any key
+	   it mentions that no longer exists is dropped. So a stored order survives
+	   a release that adds or removes a column instead of pinning the table to
+	   whatever the columns were on the day it was saved. */
+	function orderedColumns() {
+		const order = A().state.columnOrder;
+		if (!Array.isArray(order) || !order.length) return COLUMNS.slice();
+		const byKey = {};
+		for (const c of COLUMNS) byKey[c.key] = c;
+		const out = [];
+		const seen = {};
+		for (const k of order) {
+			if (!byKey[k] || seen[k]) continue;
+			seen[k] = true;
+			out.push(byKey[k]);
+		}
+		// Anything the stored order never heard of keeps its place relative to
+		// the columns around it, which is the only behaviour that makes a
+		// partial order safe.
+		COLUMNS.forEach((c, i) => {
+			if (seen[c.key]) return;
+			// Insert after the last already-placed column that precedes it in
+			// the canonical order.
+			let at = out.length;
+			for (let j = i + 1; j < COLUMNS.length; j++) {
+				const idx = out.indexOf(byKey[COLUMNS[j].key]);
+				if (idx !== -1) { at = idx; break; }
+			}
+			out.splice(at, 0, c);
+			seen[c.key] = true;
+		});
+		return out;
+	}
+
 	function visibleColumns() {
 		const hidden = A().state.hiddenColumns || {};
-		return COLUMNS.filter((c) => c.fixed || !hidden[c.key]);
+		return orderedColumns().filter((c) => c.fixed || !hidden[c.key]);
 	}
 
 	/* --------------------------------------------------------------- table */
@@ -332,6 +411,47 @@
 		return bar;
 	}
 
+	/* The column being dragged, if any. One at a time by construction, and
+	   cleared on dragend so an interrupted drag cannot leave the next click
+	   reordering something. */
+	let dragKey = null;
+
+	/* Write a new column order. Always stores the FULL order rather than a
+	   diff, so the stored preference is self-describing; orderedColumns()
+	   handles a stored order that is missing keys or names dead ones. */
+	function setColumnOrder(keys) {
+		A().state.columnOrder = keys;
+		A().persist();
+		A().render();
+	}
+
+	function dropColumn(movedKey, targetKey, after) {
+		const keys = orderedColumns().map((c) => c.key);
+		const from = keys.indexOf(movedKey);
+		if (from === -1) return;
+		keys.splice(from, 1);
+		let at = keys.indexOf(targetKey);
+		if (at === -1) return;
+		if (after) at++;
+		keys.splice(at, 0, movedKey);
+		setColumnOrder(keys);
+	}
+
+	/* One step left or right, skipping the fixed columns so a column can never
+	   be moved in front of the sticky name column. */
+	function moveColumn(key, dir) {
+		const cols = orderedColumns();
+		const keys = cols.map((c) => c.key);
+		const from = keys.indexOf(key);
+		if (from === -1) return;
+		let to = from + dir;
+		while (to >= 0 && to < cols.length && cols[to].fixed) to += dir;
+		if (to < 0 || to >= cols.length) return;
+		keys.splice(from, 1);
+		keys.splice(to, 0, key);
+		setColumnOrder(keys);
+	}
+
 	function buildTable(rows, columns) {
 		const table = el("table");
 		const thead = el("thead");
@@ -359,7 +479,60 @@
 			th.addEventListener("click", (e) => activate(e.shiftKey));
 			th.addEventListener("keydown", (e) => {
 				if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activate(e.shiftKey); }
+				/* Keyboard reordering. Drag-and-drop is the discoverable path
+				   and it is not the only one that has to exist: alt+arrow moves
+				   the column, which is reachable without a pointer and is how
+				   the reorder is testable at all. */
+				if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && e.altKey) {
+					e.preventDefault();
+					moveColumn(col.key, e.key === "ArrowLeft" ? -1 : 1);
+				}
 			});
+			/* Drag to reorder. The fixed columns (selection, lock, name) do not
+			   move: the name is the sticky column the horizontal scroll is
+			   anchored on, and the two controls belong beside it. */
+			if (!col.fixed) {
+				th.draggable = true;
+				th.dataset.colkey = col.key;
+				th.addEventListener("dragstart", (ev) => {
+					dragKey = col.key;
+					th.classList.add("dragging");
+					if (ev.dataTransfer) {
+						ev.dataTransfer.effectAllowed = "move";
+						// Firefox will not start a drag without data set.
+						try { ev.dataTransfer.setData("text/plain", col.key); } catch (x) { /* ok */ }
+					}
+				});
+				th.addEventListener("dragend", () => {
+					dragKey = null;
+					th.classList.remove("dragging");
+					for (const x of table.querySelectorAll("th.dropbefore, th.dropafter")) {
+						x.classList.remove("dropbefore", "dropafter");
+					}
+				});
+				th.addEventListener("dragover", (ev) => {
+					if (!dragKey || dragKey === col.key) return;
+					ev.preventDefault();
+					if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
+					const r = th.getBoundingClientRect();
+					const after = ev.clientX > r.left + r.width / 2;
+					th.classList.toggle("dropbefore", !after);
+					th.classList.toggle("dropafter", after);
+				});
+				th.addEventListener("dragleave", () => {
+					th.classList.remove("dropbefore", "dropafter");
+				});
+				th.addEventListener("drop", (ev) => {
+					ev.preventDefault();
+					if (!dragKey || dragKey === col.key) return;
+					const r = th.getBoundingClientRect();
+					dropColumn(dragKey, col.key, ev.clientX > r.left + r.width / 2);
+					dragKey = null;
+				});
+				th.title = (col.title || col.label) +
+					" — click to sort, shift-click to add a level, " +
+					"drag (or alt+←/→) to reorder";
+			}
 			const si = sort.findIndex((s) => s.key === col.key);
 			if (si >= 0) {
 				th.textContent = col.label + (sort[si].dir < 0 ? " ▾" : " ▴") +
@@ -423,6 +596,18 @@
 		svg.setAttribute("focusable", "false");
 		const step = SPARK_W / Math.max(1, vals.length - 1);
 		const y = (v) => SPARK_H - 1.5 - (v / hi) * (SPARK_H - 3);
+		/* The season average, as a reference line. Sixty-four pixels of trend
+		   with nothing behind it shows only the SHAPE — a man who scored 6 then
+		   22 and a man who scored 16 then 18 draw very similar rising lines,
+		   because each is scaled to its own maximum. The mean says where the
+		   shape sits. Drawn from a theme token rather than an opacity, so it
+		   survives a dark background; see .sparkbase in css/style.css. */
+		const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+		const base = document.createElementNS("http://www.w3.org/2000/svg", "path");
+		base.setAttribute("d", "M0 " + y(mean).toFixed(1) + "L" + SPARK_W + " " +
+			y(mean).toFixed(1));
+		base.setAttribute("class", "sparkbase");
+		svg.appendChild(base);
 		let d = "";
 		vals.forEach((v, i) => { d += (i ? "L" : "M") + (i * step).toFixed(1) + " " + y(v).toFixed(1); });
 		const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
@@ -432,7 +617,8 @@
 		/* A title, because the picture is the point and its scale is not
 		   readable from sixty-four pixels. */
 		const t = document.createElementNS("http://www.w3.org/2000/svg", "title");
-		t.textContent = vals.length + " games, high " + hi;
+		t.textContent = vals.length + " games, high " + hi + ", average " +
+			mean.toFixed(1) + " (the dotted line)";
 		svg.appendChild(t);
 		return svg;
 	}
@@ -704,6 +890,41 @@
 		});
 		bar.appendChild(dens);
 
+		/* The card/table switch. Only shown where it is a real choice — on a
+		   wide desktop the table is obviously right and the control is noise. */
+		if (cardMode() || (typeof window !== "undefined" &&
+			window.innerWidth <= 1100)) {
+			const cv = el("select");
+			cv.setAttribute("aria-label", "Table or card layout");
+			for (const [k, l] of [["auto", "layout: automatic"],
+				["on", "layout: cards"], ["off", "layout: table"]]) {
+				cv.appendChild(new Option(l, k));
+			}
+			cv.value = st.cardView || "auto";
+			cv.addEventListener("change", () => {
+				st.cardView = cv.value;
+				A().persist();
+				A().render();
+			});
+			bar.appendChild(cv);
+			if (cardMode()) {
+				const all = el("label", "check");
+				const cb = el("input");
+				cb.type = "checkbox";
+				cb.checked = !!st.cardAll;
+				cb.addEventListener("change", () => {
+					st.cardAll = cb.checked;
+					A().persist();
+					A().render();
+				});
+				all.appendChild(cb);
+				all.appendChild(document.createTextNode(" all columns"));
+				all.title = "Cards show the twelve fields a scout reads first. " +
+					"Tick to show every column you have enabled.";
+				bar.appendChild(all);
+			}
+		}
+
 		const cols = el("button", null, "Columns…");
 		cols.addEventListener("click", () => columnPicker());
 		bar.appendChild(cols);
@@ -807,6 +1028,27 @@
 			"newOvr", "mpg", "ppg", "usg", "ts", "awards"]);
 		box.appendChild(el("h4", null, "Presets"));
 		box.appendChild(presets);
+
+		/* Order. The picker could show and hide columns and had nothing to say
+		   about the order they came in, because there was no order to say
+		   anything about — it was the order of the COLUMNS literal. This is the
+		   way back from a drag that went wrong, and the place the reorder is
+		   discoverable from for anyone who never tries dragging a header. */
+		box.appendChild(el("h4", null, "Order"));
+		const orderRow = el("div", "rowflex");
+		orderRow.appendChild(el("span", "hint",
+			"Drag a column heading in the table to move it, or focus one and " +
+			"press alt+← / alt+→."));
+		const resetOrder = el("button", "tiny", "Reset the column order");
+		resetOrder.disabled = !Array.isArray(st.columnOrder) || !st.columnOrder.length;
+		resetOrder.addEventListener("click", () => {
+			st.columnOrder = null;
+			A().persist();
+			A().closeModal();
+			A().render();
+		});
+		orderRow.appendChild(resetOrder);
+		box.appendChild(orderRow);
 		A().modal("Columns", box, () => { A().persist(); A().render(); });
 	}
 
@@ -897,7 +1139,14 @@
 		view.appendChild(rangeBar(res));
 		view.appendChild(bulkBar(res));
 
-		const columns = visibleColumns();
+		/* On a phone the card layout picks its own columns (see CARD_COLUMNS):
+		   the desktop selection is a choice about a wide table and applying it
+		   to a stack of labelled lines produces a forty-line card. `cardAll`
+		   opts back in to everything. */
+		const cards = cardMode();
+		const columns = cards && !st.cardAll
+			? orderedColumns().filter((c) => CARD_COLUMNS.indexOf(c.key) !== -1)
+			: visibleColumns();
 		for (const p of res.players) p.rangeNoValue = false;
 		const shown = res.players.filter((p) => matchesFilter(p, res));
 		const noValue = res.players.filter((p) => p.rangeNoValue).length;
@@ -922,6 +1171,15 @@
 			tr.addEventListener("click", (e) => {
 				if (e.target.tagName === "BUTTON" || e.target.tagName === "INPUT") return;
 				open();
+			});
+			/* Right-click a row for the things you want to do TO a prospect as
+			   against edit about him. Adding to the comparison in particular
+			   had no path from the table at all: you read a row, decided you
+			   wanted it beside another one, and then went to a different tab to
+			   find it again in a dropdown of seventy names. */
+			tr.addEventListener("contextmenu", (e) => {
+				e.preventDefault();
+				rowMenu(e, p, res);
 			});
 			/* Row navigation. The editor opened on click and there was no way to
 			   walk the class from the keyboard, so reviewing seventy prospects
@@ -1156,6 +1414,7 @@
 		   fold. It is a drawer beside the table now (and above it on a narrow
 		   screen), so the row and its editor are visible at the same time. */
 		const split = el("div", "tablesplit");
+		if (cards) split.classList.add("cardtable");
 		const wrap = el("div", "scroll");
 		const table = buildTable(rows, columns);
 		wrap.appendChild(table);
@@ -1181,6 +1440,97 @@
 			}
 		}
 		view.appendChild(split);
+	}
+
+	/* The row context menu. Positioned at the pointer, dismissed by the next
+	   click or Escape, and rebuilt each time rather than kept around — it holds
+	   a reference to one prospect and one result, and a stale one pointing at a
+	   rerolled class is worse than no menu. */
+	let openMenu = null;
+	function closeRowMenu() {
+		if (!openMenu) return;
+		if (openMenu.parentNode) openMenu.parentNode.removeChild(openMenu);
+		openMenu = null;
+	}
+
+	function rowMenu(e, p, res) {
+		closeRowMenu();
+		const st = A().state;
+		const menu = el("div", "rowmenu");
+		menu.setAttribute("role", "menu");
+		const item = (label, fn, title) => {
+			const b = el("button", null, label);
+			b.setAttribute("role", "menuitem");
+			if (title) b.title = title;
+			b.addEventListener("click", () => { closeRowMenu(); fn(); });
+			menu.appendChild(b);
+		};
+		item("Open the editor", () => A().openEditor(p));
+		const slot = (st.compare || []).indexOf(p.key);
+		if (slot === -1) {
+			const free = (st.compare || []).indexOf(null);
+			item(free === -1 ? "Add to compare (replaces the first)" : "Add to compare",
+				() => {
+					const c = (st.compare || []).slice();
+					c[free === -1 ? 0 : free] = p.key;
+					st.compare = c;
+					A().persist();
+					A().setStatus(p.name + " added to the comparison.");
+					A().render();
+				},
+				"Hold him beside up to three others on the Compare tab");
+		} else {
+			item("Remove from compare", () => {
+				const c = st.compare.slice();
+				c[slot] = null;
+				st.compare = c;
+				A().persist();
+				A().render();
+			});
+		}
+		item("Compare with the rest of his position",
+			() => {
+				const keys = res.players.filter((x) => x.newPos === p.newPos)
+					.sort((a, b) => (a.boardRank || 999) - (b.boardRank || 999))
+					.slice(0, COMPARE_MAX).map((x) => x.key);
+				// Whoever was right-clicked is always in the comparison, even
+				// if his board rank leaves him outside the best four.
+				if (keys.indexOf(p.key) === -1) keys[keys.length - 1] = p.key;
+				st.compare = keys.concat(new Array(COMPARE_MAX).fill(null))
+					.slice(0, COMPARE_MAX);
+				st.tab = "compare";
+				A().persist();
+				A().render();
+			},
+			"The best " + COMPARE_MAX + " " + (p.newPos || "players") +
+			" in the class, side by side");
+		item("Show his game log", () => {
+			st.logPlayer = p.key;
+			st.tab = "gamelog";
+			A().persist();
+			A().render();
+		});
+		if (p.newCollege) {
+			item("Open " + p.newCollege, () => {
+				st.team = p.newCollege;
+				st.tab = "teams";
+				A().persist();
+				A().render();
+			});
+		}
+		document.body.appendChild(menu);
+		// Kept inside the viewport: a right-click near the bottom right of the
+		// window would otherwise put the menu off the edge of it.
+		const r = menu.getBoundingClientRect();
+		const x = Math.min(e.clientX, window.innerWidth - r.width - 8);
+		const y = Math.min(e.clientY, window.innerHeight - r.height - 8);
+		menu.style.left = Math.max(4, x) + "px";
+		menu.style.top = Math.max(4, y) + "px";
+		openMenu = menu;
+		setTimeout(() => {
+			document.addEventListener("click", closeRowMenu, { once: true });
+			document.addEventListener("contextmenu", closeRowMenu, { once: true });
+		}, 0);
 	}
 
 	/* Nothing matched. Say which filters are on and offer to clear them. */
@@ -1999,9 +2349,36 @@
 		sel.value = st.logPlayer;
 		sel.addEventListener("change", () => { st.logPlayer = sel.value; A().render(); });
 		bar.appendChild(sel);
+
+		/* The way back. Reading a game log was a one-way trip: the prospect's
+		   name was plain text, so opening his editor meant switching to the
+		   Prospects tab, remembering the filter you had left there, finding him
+		   again in seventy rows and clicking him. Everywhere else in the tool a
+		   player's name is a link to his editor; this was the one place it was
+		   not. Both buttons act on the prospect being SHOWN, which is what
+		   "back to the table" has to mean here — an unscoped tab switch is what
+		   the user could already do. */
+		const current = res.players.filter((x) => x.key === st.logPlayer)[0];
+		if (current) {
+			const back = el("button", "tiny", "◂ " + current.name + " in the table");
+			back.title = "Show " + current.name + " in the prospect table, " +
+				"scrolled to and with his editor open";
+			back.addEventListener("click", () => {
+				A().state.tab = "players";
+				A().revealPlayer(current);
+			});
+			bar.appendChild(back);
+			const edit = el("button", "tiny", "Edit " + current.name);
+			edit.addEventListener("click", () => {
+				A().state.tab = "players";
+				A().state.editing = null;
+				A().revealPlayer(current);
+			});
+			bar.appendChild(edit);
+		}
 		view.appendChild(bar);
 
-		const p = res.players.filter((x) => x.key === st.logPlayer)[0];
+		const p = current;
 		if (!p || !p.gameLog) return;
 		const gl = p.gameLog;
 		const head = el("div", "rowflex");
@@ -2427,6 +2804,69 @@
 		bar.appendChild(clear);
 		box.appendChild(bar);
 
+		/* --- filling the slots without four dropdowns ------------------------
+
+		   Every comparison had to be assembled one dropdown at a time from a
+		   seventy-name list, which makes the obvious comparisons — the top of
+		   the board, the wings, the men who scored most — the most tedious
+		   ones. These are the four the tool was already in a position to
+		   answer, plus one that follows whatever the user has done to the
+		   table, which is the general case: filter the table however you like
+		   and take the top four of it. */
+		const fillBar = el("div", "filters");
+		fillBar.appendChild(el("span", "hint", "Fill from:"));
+		const fill = (label, title, list) => {
+			const b = el("button", "tiny", label);
+			b.title = title;
+			b.addEventListener("click", () => {
+				const keys = list().slice(0, COMPARE_MAX).map((p) => p.key);
+				if (!keys.length) { A().setStatus("Nothing matched."); return; }
+				st.compare = keys.concat(new Array(COMPARE_MAX).fill(null))
+					.slice(0, COMPARE_MAX);
+				A().persist();
+				A().render();
+			});
+			fillBar.appendChild(b);
+		};
+		const withStats = (f) => res.players.filter((p) => p.stats && f(p));
+		const byBoard = (a, b) => (a.boardRank || 999) - (b.boardRank || 999);
+		fill("top of the board", "The first four prospects on the mock board",
+			() => sorted.slice());
+		fill("top by PPG", "The four highest scorers in the class",
+			() => withStats(() => true).sort((a, b) => b.stats.ppg - a.stats.ppg));
+		fill("what the table shows",
+			"The first four prospects the prospect table is currently showing, " +
+			"in its current sort — filter the table however you like, then use this",
+			() => (A().visibleRows() || []).slice());
+		/* By position, which is the comparison a draft board is actually made
+		   of: you are not choosing between the best four players, you are
+		   choosing between the wings. */
+		const posSel = el("select");
+		posSel.setAttribute("aria-label", "Compare the best at one position");
+		posSel.appendChild(new Option("best at position…", ""));
+		const positions = [];
+		for (const p of res.players) {
+			if (p.newPos && positions.indexOf(p.newPos) === -1) positions.push(p.newPos);
+		}
+		positions.sort();
+		for (const pos of positions) {
+			const n = res.players.filter((p) => p.newPos === pos).length;
+			posSel.appendChild(new Option(pos + " (" + n + ")", pos));
+		}
+		posSel.addEventListener("change", () => {
+			if (!posSel.value) return;
+			const keys = res.players.filter((p) => p.newPos === posSel.value)
+				.sort(byBoard).slice(0, COMPARE_MAX).map((p) => p.key);
+			posSel.value = "";
+			if (!keys.length) return;
+			st.compare = keys.concat(new Array(COMPARE_MAX).fill(null))
+				.slice(0, COMPARE_MAX);
+			A().persist();
+			A().render();
+		});
+		fillBar.appendChild(posSel);
+		box.appendChild(fillBar);
+
 		const find = (k) => res.players.filter((p) => p.key === k)[0] || null;
 		const picked = st.compare.map(find).filter(Boolean);
 		if (picked.length < 2) {
@@ -2495,7 +2935,9 @@
 		awards: viewAwards, board: viewBoard, distribution: viewDistribution,
 		notes: viewNotes, gamelog: viewGameLog, compare: viewCompare,
 		COLUMNS, STAT_MODES, PCT_KEYS, DERIVED, derived, cellValue, statValue,
-		matchesFilter, numericColumns, histogram, feet,
+		CARD_COLUMNS, CARD_BREAKPOINT, cardMode, orderedColumns, moveColumn,
+		dropColumn, setColumnOrder,
+		matchesFilter, numericColumns, histogram, feet, closeRowMenu,
 		el, n1, pc, wrapCell, COMPARE_MAX,
 	};
 })(window);
