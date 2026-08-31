@@ -251,13 +251,24 @@
 	   different electorates: usually the same player sweeps, occasionally they
 	   split, which is exactly what happens in real seasons. `sd` is how much
 	   that electorate diverges from consensus. */
+	/* `resume` is the electorate's own weighting of what the player's TEAM did,
+	   over and above what scoreTotal already carries.
+
+	   The six trophies diverged only by how noisy each electorate was, so a
+	   split was a coin flip and never an argument: nothing in the model was the
+	   voter who gives it to the best player on the best team, and that voter
+	   decides real player-of-the-year races. The NABC is coaches and the
+	   Sporting News panel is broadcasters, both of whom watch teams; the AP is
+	   writers covering a beat and is the closest of the six to a box score.
+	   A positive `resume` reweights that electorate's ballot toward the
+	   resume; a negative one is the voter who does not care who won. */
 	const NATIONAL_POY = [
-		{ name: "Naismith Trophy", sd: 1.1 },
-		{ name: "John R. Wooden Award", sd: 1.2 },
-		{ name: "Oscar Robertson Trophy", sd: 1.5 },
-		{ name: "AP Player of the Year", sd: 1.0 },
-		{ name: "NABC Player of the Year", sd: 1.4 },
-		{ name: "Sporting News Player of the Year", sd: 1.6 },
+		{ name: "Naismith Trophy", sd: 1.1, resume: 0.10 },
+		{ name: "John R. Wooden Award", sd: 1.2, resume: 0.15 },
+		{ name: "Oscar Robertson Trophy", sd: 1.5, resume: 0.05 },
+		{ name: "AP Player of the Year", sd: 1.0, resume: -0.10 },
+		{ name: "NABC Player of the Year", sd: 1.4, resume: 0.35 },
+		{ name: "Sporting News Player of the Year", sd: 1.6, resume: 0.30 },
 	];
 	const NATIONAL_DPOY = [
 		{ name: "Naismith Defensive Player of the Year", sd: 1.4 },
@@ -350,6 +361,12 @@
 			cfg.confAwardStrictness === undefined ? strict : cfg.confAwardStrictness, 0.2, 3);
 		const proStrict = clamp(
 			cfg.proAwardStrictness === undefined ? strict : cfg.proAwardStrictness, 0.2, 3);
+		/* How much the voters disagree with the arithmetic. The model already
+		   carried a fixed amount of this; it was not adjustable and there was
+		   no way to ask for the year where the award list is exactly what the
+		   numbers say, or for the year with a genuine snub in it. */
+		const noiseScale = clamp(
+			cfg.awardNoise === undefined ? 1 : cfg.awardNoise, 0, 3);
 		// DII NCAA has pro: false, so splitting on leaguePro put DII players in
 		// the D-I pool — they could and did win Consensus All-American, while
 		// the DII award list was unreachable dead code. Split on nonNcaa.
@@ -362,8 +379,8 @@
 			p.scoreProd = productionScore(p);
 			p.scoreDef = defenseScore(p, global.BBGM.composites(p.newRatings));
 			p.scoreResume = resumeScore(team);
-			p.scoreTotal = p.scoreProd + p.scoreResume + rng.normal(0, 1.4);
-			p.scoreDefTotal = p.scoreDef + p.scoreResume * 0.35 + rng.normal(0, 1.2);
+			p.scoreTotal = p.scoreProd + p.scoreResume + rng.normal(0, 1.4 * noiseScale);
+			p.scoreDefTotal = p.scoreDef + p.scoreResume * 0.35 + rng.normal(0, 1.2 * noiseScale);
 			p.isFreshman = p.classYear === "Freshman";
 			p.isNewcomer = p.isFreshman || !!p.transfer;
 			p.isReserve = p.minutesRank !== undefined && p.minutesRank >= 5;
@@ -496,11 +513,20 @@
 		   something. Only a sweep gets the consensus label. */
 		const poyWins = new Map();
 		const top = nation.slice(0, Math.max(6, slots(8)));
+		/* This season's mood. Some years the whole electorate is arguing about
+		   the best player and some years it is arguing about the best team, and
+		   an electorate whose lean is a constant produces the same argument
+		   every season. Drawn once per class, so it is a fact about the year:
+		   at 0 the trophies are decided on the box score alone and at the top
+		   of the range a 26-win one seed's leading scorer beats a better player
+		   on a 19-win team. */
+		const mood = 0.55 + rng.child("voters").uniform(-0.55, 1.15) * noiseScale;
 		for (const award of NATIONAL_POY) {
 			const vrng = rng.child("poy|" + award.name);
-			const winner = top.slice()
-				.sort((a, b) => (b.scoreTotal + vrng.normal(0, award.sd)) -
-					(a.scoreTotal + vrng.normal(0, award.sd)))[0];
+			const lean = (award.resume || 0) * mood;
+			const ballot = (x) => x.scoreTotal + lean * (x.scoreResume || 0) +
+				vrng.normal(0, award.sd * noiseScale);
+			const winner = top.slice().sort((a, b) => ballot(b) - ballot(a))[0];
 			if (!winner) continue;
 			giveNat(winner, award.name);
 			poyWins.set(winner, (poyWins.get(winner) || 0) + 1);

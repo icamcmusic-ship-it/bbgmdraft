@@ -381,6 +381,17 @@
 	   his key changes his draw and leaves every other player's stream
 	   untouched — which is the difference between "look at this guy again" and
 	   "reroll the class and hope the other sixty-nine come back the same". */
+	/* The class-wide variation salt. Appended to every PER-PLAYER stream key
+	   and to nothing else, so cfg.variation re-rolls the sixty-eight men inside
+	   a class whose flavour, build pool, curve and environment are unchanged.
+
+	   Empty at variation 0, which is what keeps every seed and every shareable
+	   link ever made resolving to exactly the class it always did. */
+	function variationSalt(cfg) {
+		const v = Math.round(Number(cfg && cfg.variation) || 0);
+		return v > 0 ? "/v" + v : "";
+	}
+
 	function rerollSalt(p, axis) {
 		const ov = (p && p.override) || {};
 		/* Axis-wise rerolls. "Reroll just him" redraws everything about a
@@ -444,6 +455,10 @@
 		   A user's own setting always wins. The bend is applied only to
 		   settings still sitting at their default, so a flavour moves what the
 		   user has not decided and never overrules what they have. */
+		/* The per-player variation salt. Class-level streams below (flavor,
+		   pool, classEnv) deliberately do NOT take it: that is what makes
+		   variation "the same class, different men" rather than a second seed. */
+		const vsalt = variationSalt(state.cfg);
 		const flavor = RB.pickFlavor(rng.child("flavor"), state.cfg);
 		state.flavor = flavor;
 		const cfg = applyFlavorConfig(state.cfg, flavor);
@@ -507,7 +522,7 @@
 		const ageSd = Math.sqrt(
 			ages.reduce((a, x) => a + (x - ageMean) * (x - ageMean), 0) / ages.length);
 		state.classAge = ageMean;
-		assignClassYears(players, cfg, rng.child("classyears"), ageSd >= 0.75);
+		assignClassYears(players, cfg, rng.child("classyears" + vsalt), ageSd >= 0.75);
 
 		// --- colleges -------------------------------------------------
 		// Per-player overrides ("lock this guy at 55 ovr / to Duke / as a Rim
@@ -524,7 +539,7 @@
 			if (ov.name && String(ov.name).trim()) p.name = String(ov.name).trim();
 			p.newCollege = ov.college ||
 				assignCollege(
-					rng.child("college:" + p.key + rerollSalt(p, "school")), p.src, cfg);
+					rng.child("college:" + p.key + rerollSalt(p, "school") + vsalt), p.src, cfg);
 			p.collegeChanged = p.newCollege !== p.origCollege;
 			// Professional (a EuroLeague club) as against amateur (DII, an NBA
 			// Academy). The UI tags the two differently and the award bar
@@ -545,7 +560,7 @@
 			   and leaves every other player's stream untouched — which is the
 			   difference between "look at this guy again" and "reroll the class
 			   and hope the other sixty-nine come back the same". */
-			const prng = rng.child("build:" + p.key + rerollSalt(p, "build"));
+			const prng = rng.child("build:" + p.key + rerollSalt(p, "build") + vsalt);
 			const targetOvr = Number.isFinite(ov.ovr)
 				? clamp(Math.round(ov.ovr), 0, 100)
 				: (curve ? curve[i] : p.origOvr);
@@ -639,8 +654,8 @@
 
 		state.players = players;
 		state.season = season;
-		assignRecruiting(players, rng.child("recruiting"));
-		state.surprises = assignSurprises(players, rng.child("surprises"), cfg);
+		assignRecruiting(players, rng.child("recruiting" + vsalt));
+		state.surprises = assignSurprises(players, rng.child("surprises" + vsalt), cfg);
 		return state;
 	}
 
@@ -1199,7 +1214,7 @@
 			(bySchool[p.newCollege] = bySchool[p.newCollege] || []).push(p);
 		}
 		state.bySchool = bySchool;
-		assignAvailability(state.players, rng.child("availability"), cfg);
+		assignAvailability(state.players, rng.child("availability" + variationSalt(state.cfg)), cfg);
 		const teams = T.buildPrograms(bySchool, rng.child("programs"), cfg);
 		/* buildPrograms returns the season's realignment alongside the teams;
 		   lift it off before anything iterates the map. */
@@ -1260,7 +1275,7 @@
 	function phaseStats(state) {
 		const { teams, bySchool } = state;
 		const cfg = state.effectiveCfg || state.cfg;
-		const statRng = state.rng.child("stats");
+		const statRng = state.rng.child("stats" + variationSalt(state.cfg));
 		/* Which era's empirical anchors every rate in the stat model targets.
 		   Set once, here, so a run is internally consistent; see the header of
 		   js/calibration.js for why the answer is not always "2009-2021". */
@@ -1355,7 +1370,7 @@
 		// Per-game logs. signatureGame already fabricated one of these and threw
 		// it away; keeping it costs nothing and buys season highs, 20-point-game
 		// counts, streaks, an injury with a reason, and a game log tab.
-		const logRng = state.rng.child("gamelog");
+		const logRng = state.rng.child("gamelog" + variationSalt(state.cfg));
 		for (const p of state.players) {
 			const home = p.nonNcaa ? p.proTeam : teams[p.newCollege];
 			p.gameLog = S.gameLog(p, home, logRng.child("gl:" + p.key));
@@ -1605,7 +1620,7 @@
 
 	function phasePot(state) {
 		const { cfg } = state;
-		const rng = state.rng.child("pot");
+		const rng = state.rng.child("pot" + variationSalt(state.cfg));
 		const usageRef = archetypeUsageReference(state.players);
 		for (const p of state.players) {
 			const ov = p.override || {};
@@ -1648,9 +1663,178 @@
 	   sitting in data that was already there. This turns the simulated season
 	   into a mock draft, with a preseason board to move against, so "helped his
 	   stock in March" is something the tool can actually say. */
+	/* --- draft day ------------------------------------------------------
+
+	   The board was one ordered list: every prospect slotted exactly where his
+	   production and his tools said, with nothing between the last game of the
+	   season and the pick. Real drafts are not that. A player falls ten spots
+	   on a medical nobody will confirm; a team trades up for the specific man
+	   it wants; somebody takes a nineteen-year-old with two tools and no
+	   production at 24 because the alternative is a senior who is what he is.
+	   Those three things are most of what a draft is REMEMBERED for, and a mock
+	   board that cannot produce any of them reads as a ranking rather than as a
+	   draft.
+
+	   Each event names itself on the player, so the note and the board can say
+	   what happened rather than the prospect simply appearing at a rank his
+	   season does not explain. `apply` reorders the board in place before the
+	   ranks are assigned, so every downstream reader — the board rank, the mock
+	   round and pick, the stock move — sees one consistent order. */
+	const DRAFT_EVENTS = [
+		{
+			name: "medical flag", w: 2.0,
+			label: "fell on a medical flag",
+			/* Only worth telling in the first round: a man sliding from 52 to 58
+			   is not a story anyone tells. */
+			pick: (i, n) => i < Math.min(26, n),
+			apply: (board, i, r) => {
+				const drop = r.int(7, 14);
+				const to = Math.min(board.length - 1, i + drop);
+				const p = board[i];
+				p.draftEvent = {
+					kind: "fall",
+					text: "flagged at the combine and slid " + (to - i) + " spots",
+					detail: r.pick([
+						"a stress reaction in the foot",
+						"a back issue teams could not agree on",
+						"a knee that failed two physicals",
+						"a shoulder that had been managed all season",
+					]),
+				};
+				move(board, i, to);
+				return true;
+			},
+		},
+		{
+			name: "workout riser", w: 1.8,
+			label: "rose on the workout circuit",
+			pick: (i, n) => i >= 12 && i < Math.min(48, n),
+			apply: (board, i, r) => {
+				const to = Math.max(0, i - r.int(6, 13));
+				const p = board[i];
+				p.draftEvent = {
+					kind: "rise",
+					text: "rose " + (i - to) + " spots on the workout circuit",
+					detail: r.pick([
+						"measured longer than his listed height",
+						"shot it far better in a gym than he had all season",
+						"was the best athlete at the combine",
+						"tested out of the building and interviewed better still",
+					]),
+				};
+				move(board, i, to);
+				return true;
+			},
+		},
+		{
+			name: "trade up", w: 1.6,
+			label: "a team traded up for him",
+			pick: (i, n) => i >= 4 && i < Math.min(30, n),
+			apply: (board, i, r) => {
+				const to = Math.max(0, i - r.int(3, 9));
+				const p = board[i];
+				p.draftEvent = {
+					kind: "trade",
+					text: "a team moved up " + (i - to) + " spots to take him",
+					detail: "the pick cost a future first",
+				};
+				move(board, i, to);
+				return true;
+			},
+		},
+		{
+			name: "late reach", w: 1.5,
+			label: "a late-first reach on upside",
+			// A reach is a man taken well before his board slot, so he has to
+			// have one well behind the late first.
+			pick: (i, n) => i >= 34 && i < n,
+			apply: (board, i, r) => {
+				const to = r.int(20, 29);
+				if (to >= i) return false;
+				const p = board[i];
+				p.draftEvent = {
+					kind: "reach",
+					text: "taken " + (i - to) + " spots earlier than the board had him",
+					detail: r.pick([
+						"a 19-year-old with two tools and no production",
+						"the youngest player in the class",
+						"a project nobody else was willing to wait on",
+					]),
+				};
+				move(board, i, to);
+				return true;
+			},
+		},
+		{
+			name: "green room slide", w: 1.2,
+			label: "slid out of the lottery",
+			pick: (i, n) => i < Math.min(12, n),
+			apply: (board, i, r) => {
+				const to = Math.min(board.length - 1, r.int(15, 24));
+				if (to <= i) return false;
+				const p = board[i];
+				p.draftEvent = {
+					kind: "fall",
+					text: "sat in the green room until pick " + (to + 1),
+					detail: r.pick([
+						"teams could not agree on the position he plays",
+						"a fit nobody in the lottery wanted to solve",
+						"an off-court question that never went away",
+					]),
+				};
+				move(board, i, to);
+				return true;
+			},
+		},
+	];
+
+	/* Move one entry of an array from `from` to `to`, keeping everything else
+	   in order. Splice-and-insert rather than a swap: a swap would send whoever
+	   is at the destination all the way back to the origin, which is two moves
+	   nobody asked for and would break the second event's assumptions about
+	   where players are. */
+	function move(arr, from, to) {
+		if (from === to) return;
+		const [x] = arr.splice(from, 1);
+		arr.splice(to, 0, x);
+	}
+
+	function applyDraftEvents(board, rng, cfg) {
+		const budget = Math.round(clamp(
+			cfg && cfg.draftEvents !== undefined ? cfg.draftEvents : 4, 0, 8));
+		if (!budget || board.length < 20) return [];
+		const n = Math.max(0, Math.round(rng.uniform(budget - 1, budget + 1)));
+		const kinds = DRAFT_EVENTS.slice();
+		const out = [];
+		for (let k = 0; k < n && kinds.length; k++) {
+			const kind = rng.weighted(kinds);
+			kinds.splice(kinds.indexOf(kind), 1);
+			// Candidates are read off the CURRENT board, after any earlier
+			// event has already moved people.
+			const options = [];
+			for (let i = 0; i < board.length; i++) {
+				if (board[i].draftEvent) continue;
+				if (kind.pick(i, board.length)) options.push(i);
+			}
+			if (!options.length) continue;
+			const at = options[Math.floor(rng.random() * options.length)];
+			const who = board[at];
+			if (!kind.apply(board, at, rng.child("de:" + kind.name))) {
+				delete who.draftEvent;
+				continue;
+			}
+			out.push({
+				name: kind.name, label: kind.label,
+				player: who.name, key: who.key,
+				text: who.draftEvent.text, detail: who.draftEvent.detail,
+			});
+		}
+		return out;
+	}
+
 	function phaseStock(state) {
 		const players = state.players;
-		const rng = state.rng.child("stock");
+		const rng = state.rng.child("stock" + variationSalt(state.cfg));
 		// Preseason board: what he was thought to be before a game was played.
 		const pre = players.slice().sort((a, b) => {
 			const sa = a.newOvr * 1.0 + (a.talentPot - a.newOvr) * 0.55;
@@ -1678,6 +1862,7 @@
 				rng.child("stock:" + p.key).normal(0, 1.8);
 		}
 		const board = players.slice().sort((a, b) => b.stockScore - a.stockScore);
+		state.draftEvents = applyDraftEvents(board, rng.child("draftday"), state.cfg);
 		board.forEach((p, i) => {
 			p.boardRank = i + 1;
 			p.mockRound = i < 30 ? 1 : i < 60 ? 2 : null;
@@ -1716,6 +1901,9 @@
 				"redshirtShare", "reclassShare", "leagueWeights", "wEuroLeague",
 				"wGLeague", "wNBL", "pDII", "overrides",
 				"archetypePool", "surpriseBudget",
+				// See variationSalt / pickClassPool: both reshape the class
+				// from the build phase down.
+				"variation", "flavorHint", "poolMemory", "recentPools",
 			],
 			run: phaseBuild,
 		},
@@ -1724,7 +1912,7 @@
 		{
 			name: "regular",
 			deps: ["pace", "scoringEnv", "injuryRate", "realignmentRate",
-				"bluebloodDownYears", "midMajorLift"],
+				"bluebloodDownYears", "midMajorLift", "teamMomentum"],
 			run: phaseRegular,
 		},
 		{ name: "postseason", deps: ["upsetFactor"], run: phasePostseason },
@@ -1737,10 +1925,11 @@
 		{ name: "pot", deps: ["potBias", "potSpread"], run: phasePot },
 		{
 			name: "awards",
-			deps: ["awardStrictness", "confAwardStrictness", "proAwardStrictness"],
+			deps: ["awardStrictness", "confAwardStrictness", "proAwardStrictness",
+				"awardNoise"],
 			run: phaseAwards,
 		},
-		{ name: "stock", deps: [], run: phaseStock },
+		{ name: "stock", deps: ["draftEvents"], run: phaseStock },
 		{ name: "notes", deps: ["noteLines"], run: phaseNotes },
 	];
 
@@ -1826,6 +2015,7 @@
 				board: state.board,
 				risers: state.risers,
 				fallers: state.fallers,
+				draftEvents: state.draftEvents || [],
 				flavor: state.flavor,
 				// The builds this class was drawn from, and the anomalies it
 				// was given, so the UI can say what makes this class this one.

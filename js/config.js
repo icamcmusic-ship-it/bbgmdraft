@@ -41,6 +41,54 @@
 		   moves records and resumes and not only the note text. */
 		injuryRate: 1,
 
+		/* --- exploring a seed's neighbourhood -------------------------------
+
+		   One seed produced exactly one class, which is the whole point of the
+		   RNG design and also its cost: a user who found a seed they liked
+		   could keep it or throw it away, and nothing in between. There was no
+		   way to say "this class, but roll the players again".
+
+		   `variation` salts the PER-PLAYER streams and leaves the class-level
+		   ones alone. At 0 nothing changes and a seed reproduces exactly what
+		   it always did, so every shareable link ever made still resolves. At
+		   1, 2, 3… the flavour, the build pool, the class curve and the
+		   environment jitter are identical — the class is still "the year of
+		   the stretch bigs, weak at the top" — while every individual player's
+		   build, school, class year, recruiting and potential are drawn afresh.
+		   Same shape, different sixty-eight men. */
+		variation: 0,
+
+		/* Ask for a particular class flavour instead of drawing one.
+
+		   pickFlavor drew from a weighted table and applied the result, and the
+		   only ways to ask for a guard-heavy class were to set classFlavor to 2
+		   and reroll until one came up, or to edit archetype weights by hand.
+		   A flavour is the single most visible thing about a class and it was
+		   the one thing the user had no say in. Empty = draw one, as before;
+		   otherwise the name of a CLASS_FLAVORS entry. */
+		flavorHint: "",
+
+		/* How hard a build that appeared in the last few classes is pushed out
+		   of this one.
+
+		   pickClassPool draws without replacement, so a 14-build pool holds at
+		   most one of each archetype — but it draws by weight, and the heaviest
+		   builds win nearly every time. Measured, Combo Guard made the pool in
+		   about 78% of classes and 3&D Wing, Rim Runner and Slasher were not
+		   far behind, so consecutive classes shared their common builds almost
+		   always. Rarity compression helps and cannot fix it: the ordering is
+		   the point of the weights.
+
+		   So the pool remembers. A build that was in one of the last few pools
+		   has its weight divided down for this one, which costs it its place to
+		   the next build in line rather than banning it — the ordering survives
+		   and the repetition does not. 0 turns the memory off. */
+		poolMemory: 0.6,
+		/* How many previous classes the memory reaches back over. Supplied by
+		   the caller (the UI keeps it across rerolls and persists it); the
+		   engine never writes it. */
+		recentPools: null,
+
 		// --- the season's own story ----------------------------------------
 		/* How often the map of college basketball changes. Conference STRENGTH
 		   already drifted from year to year; membership never did, so the one
@@ -55,6 +103,14 @@
 		bluebloodDownYears: 0,
 		/* How far the mid-majors are lifted, in programme-strength points. */
 		midMajorLift: 0,
+		/* How much a team's season wanders around its own rating.
+
+		   Every game used to be an independent draw, so a season had a trend
+		   (see `form` in js/teams.js) and no shape: no five-game run that put a
+		   bubble team in the field, no 2-8 stretch after the best player went
+		   down. 0 restores that; 1 gives a team on a run about two and a half
+		   rating points, which moves a bubble and does not move a bracket. */
+		teamMomentum: 1,
 
 		// --- blank colleges ----------------------------------------------
 		// Legacy headline sliders. They still work (and old shareable links
@@ -126,6 +182,19 @@
 		confAwardStrictness: 1.0,
 		// The bar a prospect abroad has to clear for a pro-league honour.
 		proAwardStrictness: 1.0,
+		/* How far the voters stray from the arithmetic. 0 hands every trophy to
+		   whoever the production model ranks first, which is a list nobody
+		   needs to look at twice; 1 is the electorate the model was written
+		   with; higher produces genuine splits and the occasional snub. It also
+		   scales the season's voter mood — see NATIONAL_POY in js/awards.js. */
+		awardNoise: 1.0,
+
+		/* How many things happen between the last game and the draft. The mock
+		   board was a single ordered list — every prospect exactly where his
+		   season put him — and a draft with nothing between the season and the
+		   pick is a ranking, not a draft. See DRAFT_EVENTS in js/engine.js.
+		   0 restores the plain ranking. */
+		draftEvents: 4,
 	};
 
 	const PRESETS = {
@@ -178,6 +247,11 @@
 		   permanently. leagueWeights is rebuilt below, but from an object the
 		   caller still owns. */
 		cfg.noteLines = (cfg.noteLines || DEFAULTS.noteLines).slice();
+		// Deep-copied for the same reason noteLines is: the pool memory is a
+		// container the UI writes into between runs.
+		cfg.recentPools = Array.isArray(cfg.recentPools)
+			? cfg.recentPools.filter(Array.isArray).map((a) => a.slice())
+			: null;
 		cfg.archetypeWeights = Object.assign({}, cfg.archetypeWeights || {});
 		// Destination weights: start from the built-ins, apply anything the
 		// caller set, then fold in the three legacy sliders so old presets and

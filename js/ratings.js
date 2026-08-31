@@ -1038,9 +1038,19 @@
 	function pickFlavor(rng, cfg) {
 		const strength = clamp(cfg && cfg.classFlavor !== undefined ? cfg.classFlavor : 1, 0, 3);
 		if (strength <= 0) return null;
-		const f = rng.weighted(CLASS_FLAVORS);
+		/* An asked-for flavour wins over the draw. A user who wants a
+		   guard-heavy class could previously only set classFlavor to 2 and
+		   reroll until one came up, which is a slot machine, not a setting —
+		   and rerolling replaces the whole class, so the thing they were
+		   keeping the seed for went with it. An unknown name falls through to
+		   the draw rather than throwing: cfg comes from URLs and localStorage. */
+		const hint = cfg && cfg.flavorHint ? String(cfg.flavorHint) : "";
+		const asked = hint
+			? CLASS_FLAVORS.filter((x) => x.name === hint)[0] : null;
+		const f = asked || rng.weighted(CLASS_FLAVORS);
 		if (f.name === "balanced") {
-			return { name: f.name, label: f.label, mult: {}, cfg: null, strength };
+			return { name: f.name, label: f.label, mult: {}, cfg: null, strength,
+				asked: !!asked };
 		}
 		const mult = {};
 		for (const tag of Object.keys(f.m)) {
@@ -1048,7 +1058,8 @@
 			// log space, so a 2.2x becomes ~4.8x.
 			mult[tag] = Math.pow(f.m[tag], strength);
 		}
-		return { name: f.name, label: f.label, mult, cfg: f.c || null, strength };
+		return { name: f.name, label: f.label, mult, cfg: f.c || null, strength,
+			asked: !!asked };
 	}
 
 	function flavorMultiplier(arch, flavor) {
@@ -1123,15 +1134,60 @@
 	   class may contain before height coverage tops it up; 0 or a size at or
 	   above the table turns the pool off entirely and restores the old
 	   behaviour exactly. */
+	/* How much a build's weight is divided by for each of the last few pools
+	   it appeared in, at cfg.poolMemory = 1. The most recent class counts
+	   fullest and the memory fades over POOL_MEMORY_DEPTH classes, so a build
+	   that has been absent for three is back to its authored weight.
+
+	   Chosen against the measurement that prompted it: Combo Guard made the
+	   pool in about 78% of classes. A build in the last pool has its weight cut
+	   to a third at poolMemory 1, which drops that to roughly a coin flip and
+	   still leaves it several times likelier than a Point Center. A HARD
+	   exclusion was the obvious alternative and is worse: it inverts the
+	   weights every second class, so the rarest builds would appear in fixed
+	   alternation, which is a different kind of predictable. */
+	const POOL_MEMORY_PENALTY = 3.0;
+	const POOL_MEMORY_DEPTH = 3;
+
+	function poolMemoryFactor(name, recent, strength) {
+		if (!strength || !recent || !recent.length) return 1;
+		const depth = Math.min(recent.length, POOL_MEMORY_DEPTH);
+		let penalty = 0;
+		let most = 0;
+		for (let i = 0; i < depth; i++) {
+			// Newest class first; each step back counts for less.
+			const weight = (depth - i) / depth;
+			most += weight;
+			const names = recent[i];
+			if (names && names.indexOf(name) !== -1) penalty += weight;
+		}
+		if (!penalty || most <= 0) return 1;
+		/* Normalised by the largest penalty available at this depth, so the
+		   exponent runs 0..1 and the intermediate cases stay distinguishable.
+		   A `Math.min(1, penalty)` cap was the first version and flattened
+		   exactly the distinction the memory is for: at depth 3 a build in all
+		   three pools scores 2.0 and one in the newest alone scores 1.0, and
+		   both were clipped to 1, so "in every class lately" and "in the last
+		   one" were penalised identically. */
+		return 1 / Math.pow(POOL_MEMORY_PENALTY, strength * (penalty / most));
+	}
+
 	function pickClassPool(rng, cfg, flavor) {
 		const size = Math.round(clamp(
 			cfg && cfg.archetypePool !== undefined ? cfg.archetypePool : 0, 0, 60));
 		const specialists = ARCHETYPES.filter((a) => a.name !== "Balanced");
 		if (!size || size >= specialists.length) return null;
+		/* The exclusion memory. cfg.recentPools is [newestClassBuildNames, …],
+		   supplied by the caller across rerolls; the engine never writes it. */
+		const strength = clamp(
+			cfg && cfg.poolMemory !== undefined ? cfg.poolMemory : 0, 0, 1);
+		const recent = (cfg && Array.isArray(cfg.recentPools)) ? cfg.recentPools : null;
+		const wOf = (a) => archetypeWeight(a, cfg, flavor) *
+			poolMemoryFactor(a.name, recent, strength);
 		const remaining = specialists.slice();
 		const pool = [];
 		while (pool.length < size && remaining.length) {
-			const pick = rng.weighted(remaining, (a) => archetypeWeight(a, cfg, flavor));
+			const pick = rng.weighted(remaining, wOf);
 			pool.push(pick);
 			remaining.splice(remaining.indexOf(pick), 1);
 		}
@@ -1142,7 +1198,7 @@
 			while (have < MIN_PER_BAND) {
 				const options = eligibleAt(remaining, h);
 				if (!options.length) break;
-				const pick = rng.weighted(options, (a) => archetypeWeight(a, cfg, flavor));
+				const pick = rng.weighted(options, wOf);
 				pool.push(pick);
 				remaining.splice(remaining.indexOf(pick), 1);
 				have++;
@@ -1381,6 +1437,7 @@
 		rawCreation, CREATE_TAG_MEAN,
 		ROLE_FIT, softBound, softBoundOrderError,
 		CLASS_FLAVORS, pickFlavor, flavorMultiplier, flavorConfig, pickClassPool,
+		poolMemoryFactor, POOL_MEMORY_DEPTH,
 		archetypeWeight, RARITY_COMPRESS,
 	};
 })(typeof window !== "undefined" ? window : self);

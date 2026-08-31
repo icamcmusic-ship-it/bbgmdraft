@@ -287,6 +287,12 @@ function collect(nSeeds, cfgOverrides, fixture) {
 	const postseasonInRecord = [];
 	const outOfOrder = [];
 	const bottomThird = [];
+	/* The MIDDLE of a class — ranks 20-50, which is picks ~20 through ~50 and
+	   the part of a board where every name is supposed to be an argument.
+	   Kept separately from the bottom third because the two fail differently:
+	   the bottom third collapses toward zero, the middle collapses toward its
+	   own mean, and a band on either one cannot see the other. */
+	const midClass = [];
 	const backTen = [];
 	const paceOfHonoured = [];
 	const paceOfAll = [];
@@ -313,6 +319,10 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		const byRank = ncaa.slice().sort((a, b) => b.newOvr - a.newOvr);
 		for (const p of byRank.slice(Math.floor((byRank.length * 2) / 3))) {
 			bottomThird.push(p.stats.ppg);
+		}
+		/* Ranks 20-50 of the class by overall rating. */
+		for (const p of byRank.slice(19, 50)) {
+			if (p.stats) midClass.push(p.stats.ppg);
 		}
 		/* The last ten men on the board. The bottom-third percentile row sees
 		   the floor of the class; this sees its LEVEL, which is a different
@@ -745,6 +755,27 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   used to put a quarter of a realistic class under 9 points a game —
 		   not to forbid a late second-rounder having a quiet year. */
 		["PPG p10, bottom third of class", pct(bottomThird, 0.10), 6.0, 11.5],
+		/* THE MIDDLE OF THE CLASS HAS TO STAY AN ARGUMENT.
+
+		   The 30th and 40th prospects reading as interchangeable is the
+		   complaint this row exists to catch, and it is a complaint about a
+		   SPREAD, which no per-stat mean or percentile can see: a class whose
+		   middle all scores 12.5 passes every other row in this file. Real
+		   boards have a ten-point scoring gap among similarly-ranked prospects,
+		   which is what makes ranking them a judgement rather than a sort.
+
+		   Measured on the current model the middle runs 8.8 at the 10th
+		   percentile to 19.8 at the 90th, so the band is set around that with
+		   room either side. Widening ROLE_DRAW_SD and narrowing USG_FLOOR_BAND
+		   was the obvious lever and is the wrong one: it moves the whole
+		   distribution, so it buys 0.3 points of spread in the middle and puts
+		   PPG p95 and the scoring leader outside their own bands, which are
+		   fitted against real D-I seasons. The middle is wide because the role
+		   draw and the soft floor are already doing their job; this row is what
+		   stops that being undone by accident. */
+		["Mid-class PPG spread (p90 - p10)",
+			pct(midClass, 0.90) - pct(midClass, 0.10)].concat(within(11.0, 3.0)),
+		["Mid-class PPG p10", pct(midClass, 0.10)].concat(within(8.8, 2.2)),
 		/* Build must not decide scoring the way quality does. At equal overall
 		   rating the spread once ran from -4.9 points (Defensive Pest) to +4.9
 		   (Score-First Point) — 9.8 points, against 7.0 across the whole

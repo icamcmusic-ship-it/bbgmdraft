@@ -489,6 +489,26 @@
 				// A staff that develops players is a team that is better in
 				// March than in November, which is what `form` means.
 				form: trng.normal(2.0, 4.5) + coach.dev + (coach.formAdj || 0),
+				/* The season's shape, as distinct from its trend.
+
+				   `form` is a straight line from November to March, and a
+				   straight line is not what a season looks like. Every game was
+				   otherwise an independent draw around the team's rating on
+				   that date, so a season had no streaks in it: no five-game run
+				   that put a bubble team in the field, no 2-8 stretch after the
+				   best player went down, nothing a schedule could be read as a
+				   story rather than as a list. Individual STAT LINES already
+				   had autocorrelation (see `form` in gameLog); team results,
+				   the thing a season is actually remembered by, did not.
+
+				   Games are not simulated in date order — they are drawn with a
+				   `when` in [0, 1] and played in whatever order the scheduler
+				   pairs them — so a sequential AR walk is not available. A path
+				   is precomputed instead: ARC_KNOTS knots of an AR(1) process,
+				   interpolated at `when`. Autocorrelation in the calendar is
+				   exactly what that gives, and it does not care what order the
+				   games are played in. */
+				arc: momentumArc(trng, cfg),
 			};
 		}
 		/* Narrative bends, applied after every programme exists because they
@@ -532,9 +552,44 @@
 	   freshmen figure it out, veterans wear down, and a team that is 8 points
 	   better in March than in November is the most ordinary thing in college
 	   basketball. `when` is 0 (first game) to 1 (last). */
+	/* A team's momentum path over the season: ARC_KNOTS knots of an AR(1)
+	   process, centred on zero so the arc moves a season around without moving
+	   its mean. ARC_RHO is the knot-to-knot persistence; at 0.72 over eight
+	   knots a hot stretch lasts about a month of a four-month season, which is
+	   what a streak is. ARC_SD is in rating points, so a team on a run plays
+	   like a team two or three points better — enough to move a bubble, not
+	   enough to make a 12-seed a 3. */
+	const ARC_KNOTS = 8;
+	const ARC_RHO = 0.72;
+	const ARC_SD = 2.6;
+	function momentumArc(rng, cfg) {
+		const strength = clamp(
+			cfg && cfg.teamMomentum !== undefined ? cfg.teamMomentum : 1, 0, 3);
+		if (strength <= 0) return null;
+		const sd = ARC_SD * strength;
+		const knots = [];
+		let x = rng.normal(0, sd);
+		for (let i = 0; i < ARC_KNOTS; i++) {
+			knots.push(x);
+			x = ARC_RHO * x + Math.sqrt(1 - ARC_RHO * ARC_RHO) * rng.normal(0, sd);
+		}
+		// Centred, so the arc is a shape and not a second rating adjustment.
+		const m = knots.reduce((a, b) => a + b, 0) / knots.length;
+		return knots.map((v) => v - m);
+	}
+
+	function arcAt(t, w) {
+		const arc = t.arc;
+		if (!arc || arc.length < 2) return 0;
+		const x = clamp(w, 0, 1) * (arc.length - 1);
+		const i = Math.min(arc.length - 2, Math.floor(x));
+		const f = x - i;
+		return arc[i] * (1 - f) + arc[i + 1] * f;
+	}
+
 	function ratingOn(t, when) {
 		const w = when === undefined ? 0.5 : clamp(when, 0, 1);
-		let r = t.rating + (t.form || 0) * (w - 0.5) * 2;
+		let r = t.rating + (t.form || 0) * (w - 0.5) * 2 + arcAt(t, w);
 		/* Whoever is hurt right now is not playing. Before this, an absence was
 		   invented after the season had been simulated, so a player who missed
 		   fourteen games with a knee had exactly the same effect on his team's
@@ -909,7 +964,7 @@
 		capFillers, FILLER_GAP, conferenceDrift, programLevel, applyOutages, makeFiller,
 		PROGRAM_VOL, DOWN_YEAR_RATE, BREAKOUT_RATE, STAR_RETURNER_RATE,
 		rotationWeights, pairUp, record, recordPostseason, finalizeSchedule,
-		REGULAR_NOISE,
+		REGULAR_NOISE, momentumArc, arcAt, ARC_KNOTS,
 		label, adoptConference, conferencePools, PROGRAM_STYLES,
 		CONF_GAMES, NON_CONF_GAMES,
 	};
