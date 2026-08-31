@@ -1185,7 +1185,10 @@
 				const games = r.int(9, 11);
 				p.forcedAvailability = {
 					games, kind: "an eligibility investigation", injury: true,
-					from: 0, to: games / 32,
+					// SEASON_GAMES, not a hard-coded 32: the schedule is
+					// CONF_GAMES + NON_CONF_GAMES, and a window measured against
+					// the wrong length does not cover the games it names.
+					from: 0, to: games / SEASON_GAMES,
 				};
 				p.backstory = "sat the first " + games + " games while the " +
 					"compliance office worked through his transcript, then " +
@@ -1208,7 +1211,7 @@
 				const games = r.int(6, 9);
 				p.forcedAvailability = {
 					games, kind: "a mid-season transfer", injury: true,
-					from: 0.12, to: 0.12 + games / 32,
+					from: 0.12, to: 0.12 + games / SEASON_GAMES,
 				};
 				p.transfer = {
 					kind: "mid-season transfer",
@@ -1943,7 +1946,8 @@
 				const p = board[i];
 				p.draftEvent = {
 					kind: "fall",
-					text: "flagged at the combine and slid " + (to - i) + " spots",
+					from: i,
+					say: (moved) => "flagged at the combine and slid " + moved + " spots",
 					detail: r.pick([
 						"a stress reaction in the foot",
 						"a back issue teams could not agree on",
@@ -1964,7 +1968,8 @@
 				const p = board[i];
 				p.draftEvent = {
 					kind: "rise",
-					text: "rose " + (i - to) + " spots on the workout circuit",
+					from: i,
+					say: (moved) => "rose " + (-moved) + " spots on the workout circuit",
 					detail: r.pick([
 						"measured longer than his listed height",
 						"shot it far better in a gym than he had all season",
@@ -1985,7 +1990,8 @@
 				const p = board[i];
 				p.draftEvent = {
 					kind: "trade",
-					text: "a team moved up " + (i - to) + " spots to take him",
+					from: i,
+					say: (moved) => "a team moved up " + (-moved) + " spots to take him",
 					detail: "the pick cost a future first",
 				};
 				move(board, i, to);
@@ -2004,7 +2010,9 @@
 				const p = board[i];
 				p.draftEvent = {
 					kind: "reach",
-					text: "taken " + (i - to) + " spots earlier than the board had him",
+					from: i,
+					say: (moved) => "taken " + (-moved) +
+						" spots earlier than the board had him",
 					detail: r.pick([
 						"a 19-year-old with two tools and no production",
 						"the youngest player in the class",
@@ -2025,7 +2033,8 @@
 				const p = board[i];
 				p.draftEvent = {
 					kind: "fall",
-					text: "sat in the green room until pick " + (to + 1),
+					from: i,
+					say: (moved, at) => "sat in the green room until pick " + (at + 1),
 					detail: r.pick([
 						"teams could not agree on the position he plays",
 						"a fit nobody in the lottery wanted to solve",
@@ -2050,6 +2059,21 @@
 	}
 
 	function applyDraftEvents(board, rng, cfg) {
+		/* Clear last run's flags FIRST, and unconditionally.
+
+		   `pick` skips a player who already carries a draftEvent, so that two
+		   events cannot land on one man. Only phaseBuild re-creates the player
+		   objects; every warm re-run that starts at `stock` or later hands this
+		   function the same objects it flagged last time — so a slider with
+		   nothing to do with the draft board (award strictness, say) silently
+		   re-drew all four events from a pool that excluded last run's four,
+		   and a warm run stopped matching a cold one for the same seed. That
+		   is precisely the guarantee a shared link depends on.
+
+		   Before the budget check, because `draftEvents: 0` returning early
+		   with the flags still set would leave those players permanently
+		   ineligible the next time the slider came back up. */
+		for (const p of board) p.draftEvent = null;
 		const budget = Math.round(clamp(
 			cfg && cfg.draftEvents !== undefined ? cfg.draftEvents : 4, 0, 8));
 		if (!budget || board.length < 20) return [];
@@ -2070,14 +2094,36 @@
 			const at = options[Math.floor(rng.random() * options.length)];
 			const who = board[at];
 			if (!kind.apply(board, at, rng.child("de:" + kind.name))) {
-				delete who.draftEvent;
+				who.draftEvent = null;
 				continue;
 			}
 			out.push({
 				name: kind.name, label: kind.label,
 				player: who.name, key: who.key,
-				text: who.draftEvent.text, detail: who.draftEvent.detail,
+				detail: who.draftEvent.detail,
 			});
+		}
+		/* The sentences are written LAST, from where each player actually ended
+		   up.
+
+		   Each event moved a man from one index to another and described the
+		   move as it made it — but a later event's `move()` shifts everyone it
+		   passes by one, so by the time the board is final "slid nine spots" is
+		   describing a slide of eight and "until pick 20" is pointing at pick
+		   21. Bounded by the number of later events, so it was off by a few
+		   rather than wildly wrong, and off by a few is the kind of wrong a user
+		   checks against the rank printed beside it. Each event now records
+		   where it started and asks for its sentence once nothing else is going
+		   to move. */
+		const finalAt = {};
+		board.forEach((p, i) => { finalAt[p.key] = i; });
+		for (const e of out) {
+			const p = board[finalAt[e.key]];
+			const ev = p.draftEvent;
+			const moved = finalAt[e.key] - ev.from;
+			ev.text = ev.say(moved, finalAt[e.key]);
+			e.text = ev.text;
+			delete ev.say;
 		}
 		return out;
 	}

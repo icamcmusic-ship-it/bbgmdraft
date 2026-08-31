@@ -688,6 +688,52 @@ function ok(name, condition, detail) {
 			}));
 	}
 
+	console.log("\nThe busy indicator");
+	{
+		/* run() blocks for a third of a second and now paints a busy state
+		   first. The state has to come back OFF, and it has to not eat a
+		   message the work itself wrote — setStatus's auto-hide guards on the
+		   text still being its own, which a busy message left in place makes
+		   false for the rest of the session. */
+		const status = () => page.evaluate(() => {
+			const s = document.getElementById("status");
+			return { text: s.textContent, hidden: s.hidden,
+				working: s.classList.contains("working"),
+				busy: document.body.classList.contains("busy") };
+		});
+		const idle = await status();
+		ok("the status line is not left saying the class is generating",
+			idle.text.indexOf("Generating") === -1, JSON.stringify(idle));
+		ok("and the busy state is off", !idle.busy && !idle.working);
+
+		await page.locator("#btnReroll").click();
+		await page.waitForTimeout(1200);
+		const afterReroll = await status();
+		ok("a reroll clears the busy state when it finishes",
+			!afterReroll.busy && !afterReroll.working &&
+			afterReroll.text.indexOf("Generating") === -1,
+			JSON.stringify(afterReroll));
+
+		/* A message written by the work survives. bulkLockAsIs writes its
+		   status and then runs, which is the case that was being wiped. */
+		await page.locator("table tbody tr").first().locator("td input[type=checkbox]").check();
+		await page.waitForTimeout(200);
+		const locks = page.locator("#bulkBar select");
+		await locks.nth(await locks.count() - 1).selectOption("ovr");
+		await page.waitForTimeout(1200);
+		const afterLock = await status();
+		ok("a message written around a run survives the busy line",
+			afterLock.text.indexOf("Locked") === 0, JSON.stringify(afterLock));
+		await page.evaluate(() => { window.App.state.selected = {}; window.App.bulkClear(); });
+		await page.waitForTimeout(300);
+		await page.evaluate(() => {
+			window.App.state.overrides = {};
+			window.App.persist();
+			window.App.run();
+		});
+		await page.waitForTimeout(900);
+	}
+
 	console.log("\nThe pool memory across rerolls");
 	{
 		/* The UI owns the pool history — the engine sees one run and cannot

@@ -186,7 +186,10 @@
 	   Team totals, the possession identity, minutes and usage allocation, the
 	   defensive box score — the fillers went through all of it already, and the
 	   lines were being thrown away. */
-	function buildField(teams, rng) {
+	function buildField(teams, rng, noise) {
+		// Defaulted, because buildField is exported and a caller that predates
+		// the dial should get what it always got.
+		const noiseScale = Number.isFinite(noise) ? noise : 1;
 		const field = [];
 		for (const name of Object.keys(teams)) {
 			const t = teams[name];
@@ -220,8 +223,14 @@
 					improvement: trng.normal(0, 1),
 					scoreProd: prod,
 					scoreDef: def,
-					scoreTotal: prod + resume + trng.normal(0, 1.4),
-					scoreDefTotal: def + resume * 0.35 + trng.normal(0, 1.2),
+					/* The same scale the prospects' own scoreTotal uses. It was
+					   a constant here, so at awardNoise 0 the prospects were
+					   deterministic and the FIELD they are ranked against — every
+					   returning rotation player in Division I, which is what
+					   decides an All-America slot — was still randomised. Half a
+					   deterministic comparison is not one. */
+					scoreTotal: prod + resume + trng.normal(0, 1.4 * noiseScale),
+					scoreDefTotal: def + resume * 0.35 + trng.normal(0, 1.2 * noiseScale),
 				});
 			}
 		}
@@ -491,7 +500,7 @@
 		}
 
 		// The rest of Division I, from its own simulated seasons.
-		const field = buildField(teams, rng.child("field"));
+		const field = buildField(teams, rng.child("field"), noiseScale);
 		/* "Improvement" against what a player of this talent typically
 		   produces: there is no previous season to compare with, so
 		   outperforming your own baseline is the proxy, and it is the same
@@ -622,7 +631,15 @@
 		   at 0 the trophies are decided on the box score alone and at the top
 		   of the range a 26-win one seed's leading scorer beats a better player
 		   on a 19-win team. */
-		const mood = 0.55 + rng.child("voters").uniform(-0.55, 1.15) * noiseScale;
+		/* Scaled as a whole, base included. The 0.55 sat OUTSIDE the multiply,
+		   so at awardNoise 0 the resume lean was still 0.55x its full strength
+		   and the two electorates that weight the resume most (the coaches' and
+		   the broadcasters', at 0.35 and 0.30) still split away from the other
+		   four — measured, 1 of 30 classes at noise 0, and it was those two
+		   every time, which is the signature of this rather than of noise. Both
+		   the slider caption and Config.DEFAULTS promise that 0 hands every
+		   trophy to whoever the production model ranks first. */
+		const mood = (0.55 + rng.child("voters").uniform(-0.55, 1.15)) * noiseScale;
 		for (const award of NATIONAL_POY) {
 			const vrng = rng.child("poy|" + award.name);
 			const lean = (award.resume || 0) * mood;

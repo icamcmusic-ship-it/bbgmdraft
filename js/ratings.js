@@ -378,7 +378,15 @@
 	   can now put real weight on because it no longer duplicates a column that
 	   is already in the design.
 
-	   Recomputed after normalisation, since that is what reaches the ratings. */
+	   Measured on the AUTHORED offsets, before normalisation. That is a real
+	   choice and not an oversight: the normaliser's job is to make a build
+	   ovr-neutral, and the amount it has to move a build is a fact about the
+	   ovr weights rather than about how much of a creator the build is — so
+	   reading creation off the post-normalisation vector would mix the author's
+	   intent with the solver's arithmetic. tools/rolefit.js fits ROLE_FIT
+	   against these same pre-normalisation values, so the two agree by
+	   construction; changing which side of normalisation this is measured on
+	   silently invalidates the fitted coefficients and needs a re-fit. */
 	const CREATE_TAG_MEAN = {};
 	let CREATE_GRAND_MEAN = 0;
 	function recomputeCreationBaseline() {

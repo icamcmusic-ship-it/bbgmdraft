@@ -889,13 +889,24 @@
 
 		/* Colour, which changes nothing and is the point: a season with only
 		   consequential events in it reads like a summary. */
+		/* Two DIFFERENT programmes. r.pick(all) twice can return the same one,
+		   and at 368 teams that is about one flavour event in every 368 — which
+		   is often enough to be seen and is "Duke's trip to Duke was postponed
+		   by a snowstorm". */
+		const twoTeams = (r) => {
+			const a = r.pick(all);
+			let b = a;
+			for (let i = 0; i < 8 && b === a; i++) b = r.pick(all);
+			return [a, b];
+		};
 		const flavour = [
 			(r) => {
-				const t = r.pick(all);
+				const [t, host] = twoTeams(r);
+				if (t === host) return null;
 				return ["postponement", t.name + "'s trip to " +
-					r.pick(all).name + " was postponed by " +
+					host.name + " was postponed by " +
 					r.pick(["a snowstorm", "a frozen floor", "an arena roof leak",
-						"a travel failure"]), [t.name]];
+						"a travel failure"]), [t.name, host.name]];
 			},
 			(r) => {
 				const t = r.pick(ranked.slice(0, 60));
@@ -903,8 +914,8 @@
 					"clip of the college season", [t.name]];
 			},
 			(r) => {
-				const a = r.pick(all);
-				const b = r.pick(all);
+				const [a, b] = twoTeams(r);
+				if (a === b) return null;
 				return ["altercation", a.name + " and " + b.name +
 					" cleared the benches with four minutes left", [a.name, b.name]];
 			},
@@ -916,7 +927,11 @@
 		];
 		const picked = rng.shuffle(flavour).slice(0, Math.max(0, budget - events.length));
 		for (const f of picked) {
-			const [kind, text, involved] = f(rng);
+			const drawn = f(rng);
+			// A flavour that could not find two distinct programmes returns
+			// null rather than naming one twice.
+			if (!drawn) continue;
+			const [kind, text, involved] = drawn;
 			add(kind, text, rng.random(), involved);
 		}
 		events.sort((a, b) => (a.when || 0) - (b.when || 0));

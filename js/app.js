@@ -295,8 +295,9 @@
 		state.editing = null;
 		paintUndo();
 		paintConfig();
-		setStatus(verb + ": " + snap.label);
-		run();
+		/* Through `after`: a message written before run() is overwritten by the
+		   busy line a frame later and never seen. See beginBusy. */
+		run(() => setStatus(verb + ": " + snap.label));
 	}
 
 	function undo() {
@@ -1664,25 +1665,55 @@
 
 	   Cheap, correct, and honest about what it is: the page still blocks, it
 	   just no longer lies about blocking. */
+	const BUSY_BUTTONS = ["btnReroll", "btnRerun", "btnExport", "btnExportMenu"];
 	let busyDepth = 0;
+	/* What the status line said before the busy message replaced it, so it can
+	   be put back. Without this the busy text is simply left on screen: nothing
+	   else writes the line on a plain run, and setStatus's own auto-hide timer
+	   guards on `s.textContent === text`, which the busy message has already
+	   made false — so "Generating the class…" stayed up for the rest of the
+	   session, and any message written immediately BEFORE a run (bulkLockAsIs's
+	   "Locked ovr on 3 prospects" is the one that matters) was wiped a frame
+	   later and never seen. */
+	let statusBeforeBusy = null;
+	/* The message beginBusy wrote, so endBusy can tell "the line still says what
+	   I put there" from "the work replaced it with something worth keeping". */
+	let busyMessage = null;
+
 	function beginBusy(what) {
+		const s = $("status");
+		if (!busyDepth) {
+			statusBeforeBusy = { text: s.textContent, hidden: s.hidden };
+		}
 		busyDepth++;
 		document.body.classList.add("busy");
-		const s = $("status");
 		s.textContent = what;
+		busyMessage = what;
 		s.hidden = false;
 		s.classList.add("working");
-		for (const id of ["btnReroll", "btnRerun", "btnExport", "btnExportMenu"]) {
+		for (const id of BUSY_BUTTONS) {
 			const b = $(id);
 			if (b) b.setAttribute("aria-busy", "true");
 		}
 	}
+
 	function endBusy() {
 		busyDepth = Math.max(0, busyDepth - 1);
 		if (busyDepth) return;
 		document.body.classList.remove("busy");
-		$("status").classList.remove("working");
-		for (const id of ["btnReroll", "btnRerun", "btnExport", "btnExportMenu"]) {
+		const s = $("status");
+		s.classList.remove("working");
+		/* Restore, unless the work itself said something. A run that reports an
+		   error, or a caller's `after` that reports a result, has written the
+		   line during fn(); putting the previous message back would throw that
+		   away. So restore only while the line still reads exactly what
+		   beginBusy put on it. */
+		if (statusBeforeBusy && s.textContent === busyMessage) {
+			setStatus(statusBeforeBusy.hidden ? "" : statusBeforeBusy.text);
+		}
+		statusBeforeBusy = null;
+		busyMessage = null;
+		for (const id of BUSY_BUTTONS) {
 			const b = $(id);
 			if (b) b.removeAttribute("aria-busy");
 		}
@@ -2572,10 +2603,9 @@
 			state.overrides[key] = Object.assign({}, state.overrides[key] || {}, patch);
 		}
 		state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
-		setStatus("Locked " + (nameOf[what] || what) + " on " + keys.length +
+		run(() => setStatus("Locked " + (nameOf[what] || what) + " on " + keys.length +
 			" prospect" + (keys.length === 1 ? "" : "s") +
-			" — a reroll now leaves them alone.");
-		run();
+			" — a reroll now leaves them alone."));
 	}
 
 	function bulkClear() {
@@ -3672,20 +3702,22 @@
 		const res = state.results[state.active];
 		const p = res && res.players.filter((x) => x.key === key)[0];
 		if (!p) return;
+		let said;
 		if (state.overrides[key]) {
 			pushUndo("cleared the lock on " + p.name);
 			delete state.overrides[key];
-			setStatus("Unlocked " + p.name + ".");
+			said = "Unlocked " + p.name + ".";
 		} else {
 			pushUndo("locked " + p.name);
 			state.overrides[key] = {
 				ovr: p.newOvr, archetype: p.archetype, college: p.newCollege,
 			};
-			setStatus("Locked " + p.name + " at ovr " + p.newOvr + ", " +
-				p.archetype + ", " + p.newCollege + ".");
+			said = "Locked " + p.name + " at ovr " + p.newOvr + ", " +
+				p.archetype + ", " + p.newCollege + ".";
 		}
 		state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
-		run();
+		// Through `after`, so the busy line does not eat it. See beginBusy.
+		run(() => setStatus(said));
 	}
 
 	const SHORTCUTS = [
