@@ -195,6 +195,13 @@
 		   pick is a ranking, not a draft. See DRAFT_EVENTS in js/engine.js.
 		   0 restores the plain ranking. */
 		draftEvents: 4,
+		/* How many things happen DURING the season, as against to a team's
+		   rating. The season was one pass — build, play, sort — so a schedule
+		   was a list of scores with no top-ten upset in it and no coach fired
+		   in January. Every event is read off results that were already
+		   simulated, so none of them can contradict a box score. See
+		   midSeasonEvents in js/teams.js. 0 turns them off. */
+		seasonEvents: 7,
 	};
 
 	const PRESETS = {

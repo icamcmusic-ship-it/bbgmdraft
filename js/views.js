@@ -867,6 +867,32 @@
 					.join(" · ")));
 			view.appendChild(line);
 		}
+		/* What happened during the season, and what happened on draft day. Both
+		   are read off results the sim already produced (see midSeasonEvents in
+		   js/teams.js and DRAFT_EVENTS in js/engine.js); before this the season
+		   was a list of scores and the board was a sorted list, and neither of
+		   them could say a single thing about itself. */
+		if (res.seasonEvents && res.seasonEvents.length) {
+			const line = el("p", "legendline");
+			line.appendChild(document.createTextNode("The season: " +
+				res.seasonEvents.map((e) => e.text).join(" · ")));
+			view.appendChild(line);
+		}
+		if (res.draftEvents && res.draftEvents.length) {
+			const line = el("p", "legendline");
+			line.appendChild(document.createTextNode("Draft day: "));
+			res.draftEvents.forEach((e, i) => {
+				if (i) line.appendChild(document.createTextNode(" · "));
+				const b = el("button", "linky", e.player + " " + e.text);
+				b.title = e.detail || "";
+				b.addEventListener("click", () => {
+					const who = res.players.filter((x) => x.key === e.key)[0];
+					if (who) A().openEditor(who);
+				});
+				line.appendChild(b);
+			});
+			view.appendChild(line);
+		}
 		view.appendChild(filterBar(res));
 		view.appendChild(rangeBar(res));
 		view.appendChild(bulkBar(res));
@@ -1622,16 +1648,32 @@
 
 	/* --------------------------------------------------------------- awards */
 
-	function leaderTable(res, title, key, fmt) {
+	function leaderTable(res, title, key, fmt, low) {
 		const list = res.players.filter((p) => p.stats && p.stats.mpg >= 15)
-			.sort((a, b) => b.stats[key] - a.stats[key])
+			.sort((a, b) => (low
+				? a.stats[key] - b.stats[key] : b.stats[key] - a.stats[key]))
 			.slice(0, 10);
 		const box = el("div", "card");
 		box.appendChild(el("h4", null, title));
-		box.appendChild(el("div", "note", list.map((p, i) =>
-			(i + 1) + ". " + (fmt ? fmt(p.stats[key]) : n1(p.stats[key])) + "  " +
-			p.name + " (" + (p.proClub || p.newCollege) + ")").join("\n")));
+		box.appendChild(el("div", "note", list.map((p, i) => {
+			/* Where he finished against the WHOLE of Division I, not only
+			   against the other sixty-nine men in this class. A class leader
+			   board answers "who is the best of these"; the rank answers "was
+			   that any good", and only the second one is a scouting fact. */
+			const r = p.statRanks && p.statRanks[key];
+			const nat = r && r.national ? "  (" + ordinalish(r.national) + " nationally)"
+				: r && r.conf ? "  (" + ordinalish(r.conf) + " in the " + r.confName + ")"
+				: "";
+			return (i + 1) + ". " + (fmt ? fmt(p.stats[key]) : n1(p.stats[key])) + "  " +
+				p.name + " (" + (p.proClub || p.newCollege) + ")" + nat;
+		}).join("\n")));
 		return box;
+	}
+
+	function ordinalish(n) {
+		const v = n % 100;
+		if (v >= 11 && v <= 13) return n + "th";
+		return n + (["th", "st", "nd", "rd"][n % 10] || "th");
 	}
 
 	function viewAwards(view, res) {
@@ -1642,14 +1684,49 @@
 		leaders.appendChild(leaderTable(res, "Points", "ppg"));
 		leaders.appendChild(leaderTable(res, "Rebounds", "rpg"));
 		leaders.appendChild(leaderTable(res, "Assists", "apg"));
-		leaders.appendChild(leaderTable(res, "Blocks", "bpg"));
-		leaders.appendChild(leaderTable(res, "Steals", "spg"));
-		leaders.appendChild(leaderTable(res, "Contested shots", "cspg"));
-		leaders.appendChild(leaderTable(res, "Deflections", "deflpg"));
-		leaders.appendChild(leaderTable(res, "Defensive rating", "drtg",
-			(v) => v.toFixed(1)));
 		leaders.appendChild(leaderTable(res, "True shooting", "ts", (v) => pc(v) + "%"));
 		view.appendChild(leaders);
+
+		/* --- the defensive board -------------------------------------------
+
+		   The defensive box score was generated, displayed and never ranked the
+		   way the offensive one is. The award model reads defenseScore() to
+		   decide a defensive player of the year and then discarded the
+		   ordering, so the number the honour was decided on was the one number
+		   the user could not see — and a prospect's 2.7 deflections a game had
+		   nothing beside it to say whether that was remarkable.
+
+		   Every leader here carries its national or conference rank against the
+		   whole of Division I (see rankAgainstField in js/awards.js), which is
+		   the same field the trophies are decided against. */
+		view.appendChild(el("h3", null, "Defensive leaders"));
+		view.appendChild(el("p", "legendline",
+			"Ranks are against every returning rotation player in Division I, " +
+			"simulated through the same model — the field the defensive honours " +
+			"are decided against."));
+		const dLeaders = el("div", "cards");
+		dLeaders.appendChild(leaderTable(res, "Blocks", "bpg"));
+		dLeaders.appendChild(leaderTable(res, "Steals", "spg"));
+		dLeaders.appendChild(leaderTable(res, "Contested shots", "cspg"));
+		dLeaders.appendChild(leaderTable(res, "Deflections", "deflpg"));
+		dLeaders.appendChild(leaderTable(res, "Charges drawn", "chgpg"));
+		dLeaders.appendChild(leaderTable(res, "Defensive rebounds", "drpg"));
+		// Lower is better, which is why this one is sorted the other way and
+		// why it used to sit at the top of the board showing the worst.
+		dLeaders.appendChild(leaderTable(res, "Defensive rating (lowest)", "drtg",
+			(v) => v.toFixed(1), true));
+		// The single number the defensive honours are actually ranked on.
+		const defBox = el("div", "card");
+		defBox.appendChild(el("h4", null, "Defensive score"));
+		const defList = res.players
+			.filter((p) => p.stats && p.stats.mpg >= 15 && Number.isFinite(p.scoreDef))
+			.sort((a, b) => b.scoreDef - a.scoreDef).slice(0, 10);
+		defBox.appendChild(el("div", "note", defList.length
+			? defList.map((p, i) => (i + 1) + ". " + p.scoreDef.toFixed(1) + "  " +
+				p.name + " (" + (p.proClub || p.newCollege) + ")").join("\n")
+			: "No defensive scores in this class."));
+		dLeaders.appendChild(defBox);
+		view.appendChild(dLeaders);
 
 		const teamRows = Object.values(res.teams).filter((t) => t.prospects.length)
 			.sort((a, b) => b.pct - a.pct).slice(0, 15);

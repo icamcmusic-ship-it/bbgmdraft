@@ -1023,6 +1023,63 @@
 			label: "a volatile year — wide range of outcomes",
 			m: { raw: 1.4, athletic: 1.2, shooting: 0.85 },
 			c: { potSpread: 3.5 } },
+
+		/* --- five that are not another shading of an existing one ------------
+
+		   Twenty-four flavours sounds like variety and several of them were
+		   each other with a different label. Measured on the tag multipliers
+		   they apply: "guard-heavy" and "one-and-done" both lean athletic and
+		   raw; "defensive" and "veteran" both lean defence and cut raw; "weak"
+		   and "weak top deep middle" differ mainly in a depth constant. A
+		   flavour whose archetype tilt is another flavour's is not a second
+		   thing a class can be, it is the same class with two names, and it
+		   makes the draw look richer than it is.
+
+		   These five are chosen to be far from every existing entry in the tilt
+		   they apply, and each carries a config bend that no other flavour
+		   carries, so it changes something about the class that the archetype
+		   mix alone could not say. */
+		{ name: "euro-influenced", w: 0.75, label: "European in style",
+			m: { shooting: 1.9, playmaking: 1.8, athletic: 0.5, raw: 0.5, defense: 1.1 },
+			/* Not "international" with different numbers: that flavour changes
+			   where the blank-college players END UP, which is a fact about the
+			   roster. This one is about how the class PLAYS — feel, passing and
+			   range over athleticism — and it lowers buildNoise, because the
+			   thing that reads as a European development system is that the
+			   players are less raw and more finished than their tools. */
+			c: { buildNoise: 3, freshmanShare: 34, leagueWeights: null,
+				wEuroLeague: 34 } },
+		{ name: "post-up renaissance", w: 0.7, label: "the year the bigs came back",
+			/* The exact inverse of the small-ball class every other big-leaning
+			   flavour is a version of: big-heavy raises `big` and `rebounding`
+			   and leaves shooting alone, which in a table where most big builds
+			   shoot is a class of stretch fives. This one cuts shooting hard,
+			   which is what makes it a POST-UP year rather than a tall one. */
+			m: { big: 2.2, scoring: 1.6, rebounding: 1.8, shooting: 0.35, guard: 0.6 },
+			c: { pace: 63, efficiencyEnv: -0.5 } },
+		{ name: "three-and-d only", w: 0.6, label: "3&D wings and rim protectors",
+			/* Extreme specialisation, which no existing flavour asks for: every
+			   other one bends the mix and leaves the SHAPE of a build alone.
+			   The archetype pool is cut to eight so the class really is made of
+			   four or five things, and specialisation is pushed up so each of
+			   them is unmistakably itself. */
+			m: { shooting: 2.2, defense: 2.2, playmaking: 0.4, scoring: 0.45, raw: 0.5 },
+			c: { archetypePool: 8, specialization: 1.7, archetypeDiversity: 96 } },
+		{ name: "feast or famine", w: 0.7, label: "brilliant or nothing",
+			/* Bimodal: a class with no middle. classDepth -3 concentrates the
+			   quality at the top and potSpread 8 widens every prospect's range,
+			   so the board is a handful of names worth arguing about and a long
+			   tail nobody can separate — which is a specific and recognisable
+			   kind of bad year, and not the same thing as "a weak year". */
+			m: { raw: 1.6, athletic: 1.4, scoring: 1.3, defense: 0.7 },
+			c: { classDepth: -3, potSpread: 8, eliteCount: 3, buildNoise: 9 } },
+		{ name: "coaching carousel", w: 0.75, label: "a coaching carousel year",
+			/* The one thing that moves a college season that nothing else in
+			   the table touches: who is coaching. Five blue bloods have a down
+			   year and the portal is full, which is what a carousel year looks
+			   like from the outside. */
+			m: { raw: 1.2, defense: 0.85 },
+			c: { bluebloodDownYears: 5, transferShare: 55, upsetFactor: 1.3 } },
 	];
 
 	/* The config bend a flavour applies to the whole class. Returned separately

@@ -185,6 +185,42 @@
 		});
 	}
 
+	/* Up, sideways or down.
+
+	   A transfer carried a `kind` and a `from`, and the relationship between
+	   where he left and where he landed was never looked at — so a man leaving
+	   Duke for a mid-major and a man leaving a mid-major for Duke produced the
+	   same sentence, when they are close to opposite stories about the same
+	   player. One is a prospect who could not get on the floor at the highest
+	   level and went to go and play; the other is a mid-major star who earned a
+	   move up and now has to prove it against better people. Both are things a
+	   scout says out loud, and the model already knew everything needed to tell
+	   them apart.
+
+	   `direction` is set on the transfer and the note reads it. A named origin
+	   that is not in the college database (a JUCO, an academy, an overseas
+	   club, "a Big Ten program") has no prestige to compare and is left
+	   undirected rather than guessed at. */
+	const TRANSFER_UP = 8;      // prestige points that make a move a step up
+	function describeTransfer(p) {
+		const t = p.transfer;
+		if (!t || !t.from || p.nonNcaa) return;
+		const known = (name) => Object.prototype.hasOwnProperty.call(C.COLLEGES, name);
+		if (!known(t.from) || !known(p.newCollege)) return;
+		const before = C.prestige(t.from);
+		const after = C.prestige(p.newCollege);
+		t.fromPrestige = before;
+		t.toPrestige = after;
+		const step = after - before;
+		t.direction = step >= TRANSFER_UP ? "up"
+			: step <= -TRANSFER_UP ? "down" : "lateral";
+		t.story = t.direction === "up"
+			? "a step up in level from " + t.from
+			: t.direction === "down"
+				? "dropped down a level from " + t.from + " to play"
+				: "a lateral move from " + t.from;
+	}
+
 	function assignCollege(rng, player, cfg) {
 		if (player.college && player.college.trim() !== "") return player.college;
 		if (rng.chance(clamp(cfg.pDII, 0, 1))) return "DII NCAA";
@@ -547,6 +583,9 @@
 			p.leaguePro = !!C.NON_NCAA[p.newCollege] && C.NON_NCAA[p.newCollege].pro;
 			p.nonNcaa = !!C.NON_NCAA[p.newCollege];
 		}
+		/* Which WAY a transfer went. Class years (and therefore transfers) are
+		   assigned before colleges, so the destination is only known here. */
+		for (const p of players) describeTransfer(p);
 
 		// --- ratings ---------------------------------------------------
 		const order = players.slice().sort((a, b) => b.origOvr - a.origOvr);
@@ -1055,6 +1094,168 @@
 				p.unicornSkillset = combo.trait;
 			},
 		},
+
+		/* --- surprises with MECHANICAL effects -------------------------------
+
+		   Of the twenty-three above, three change what happens on the floor —
+		   the physical outlier re-solves a height, the broken hand and the
+		   February injury set an availability window — and the other twenty are
+		   biography applied to data the model already carried. Biography is
+		   most of what a scouting note is made of and none of it is wasted, but
+		   an anomaly a user rerolls FOR is one that changes the numbers he is
+		   looking at, and six of the most recognisable ones were unavailable
+		   because the model had no way to say them.
+
+		   Two of the six are absence patterns the availability system could
+		   always have expressed and nothing asked it to; the other four needed
+		   `statBend`, which is new (see js/stats.js): a per-player bend applied
+		   inside the stat line, so the team reconciliation runs over the bent
+		   numbers and a man who rebounds more takes the boards off his own
+		   teammates rather than conjuring them. */
+		{
+			name: "suspension", w: 1.2,
+			label: "suspended for part of the season",
+			pick: (p) => !p.nonNcaa,
+			apply: (p, r) => {
+				/* Deliberately NOT an injury. `injury: false` means the games
+				   are scattered rather than a block, and — the part that
+				   matters — assignOutages only builds a team rating drop for an
+				   injury, so a suspended player's team does not get to plan
+				   around him the way it plans around a knee. That is the real
+				   difference between the two and it was already in the model,
+				   unused. */
+				const games = r.int(3, 5);
+				p.forcedAvailability = {
+					games, kind: "a team suspension", injury: false,
+					from: null, to: null,
+				};
+				p.backstory = "suspended " + games + " games in " +
+					r.pick(["December", "January", "February"]) + " for " +
+					r.pick([
+						"a violation of team rules",
+						"a locker-room incident",
+						"conduct detrimental to the team",
+					]);
+			},
+		},
+		{
+			name: "academic investigation", w: 0.9,
+			label: "missed the first ten games",
+			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman",
+			apply: (p, r) => {
+				/* A specific absence SHAPE: a block at the very start and then
+				   every game after it. An ordinary injury draw can produce ten
+				   missed games anywhere in the season; only a forced window can
+				   produce ten at the front, which is what makes this a
+				   different thing to evaluate — his team's November record is
+				   not his, and his conference numbers are the whole sample. */
+				const games = r.int(9, 11);
+				p.forcedAvailability = {
+					games, kind: "an eligibility investigation", injury: true,
+					from: 0, to: games / 32,
+				};
+				p.backstory = "sat the first " + games + " games while the " +
+					"compliance office worked through his transcript, then " +
+					"played every game after it";
+				p.eligibilityHold = true;
+			},
+		},
+		{
+			name: "mid-season transfer", w: 0.8,
+			label: "changed schools in December",
+			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman",
+			apply: (p, r) => {
+				/* The model simulates one season at one school, and this is the
+				   honest half of a mid-season move: the games he sat while the
+				   waiver was decided, and the biography that says where he came
+				   from. What it does NOT do is give him a partial line at the
+				   first school — that would need two rosters and two rotations
+				   for one player, which is a larger change than this is worth.
+				   The note says so rather than implying a full season. */
+				const games = r.int(6, 9);
+				p.forcedAvailability = {
+					games, kind: "a mid-season transfer", injury: true,
+					from: 0.12, to: 0.12 + games / 32,
+				};
+				p.transfer = {
+					kind: "mid-season transfer",
+					from: r.pick(["a high-major that had stopped playing him",
+						"a mid-major whose coach was fired in November",
+						"a program that went into a rebuild at Christmas",
+						"a school he had committed to sight unseen"]),
+					fifthYear: false,
+					midSeason: true,
+				};
+				p.backstory = "left " + r.pick(["in December", "over the winter break",
+					"the week after Christmas"]) + " and sat " + games +
+					" games before he was cleared here";
+				p.midSeasonMove = true;
+			},
+		},
+		{
+			name: "double-double machine", w: 1.0,
+			label: "a double-double most nights",
+			/* Only for someone who could plausibly do it: a big, or a guard
+			   with real playmaking. A 6'2" spot-up shooter with fifteen
+			   double-doubles is not an anomaly, it is a broken model.
+
+			   The bend raises the season AVERAGE rather than writing
+			   double-doubles into the log. The log is drawn from the average
+			   and rescaled back onto it, so forcing a count would put the two
+			   in disagreement — which nothing else in this model does. Measured
+			   over 120 classes: a mean of 13.9 double-doubles against a 32-game
+			   season, median 13, and a genuine tail to 21. That is the label,
+			   and the label is what it does rather than what was wished for. */
+			pick: (p) => !p.nonNcaa && p.newRatings &&
+				(p.newRatings.hgt >= 52 || p.newRatings.pss >= 60),
+			apply: (p, r) => {
+				const big = p.newRatings.hgt >= 52;
+				p.statBend = Object.assign({}, p.statBend,
+					big ? { reb: r.uniform(0.45, 0.70) }
+						: { ast: r.uniform(0.40, 0.60), reb: r.uniform(0.15, 0.28) });
+				p.backstory = big
+					? "went for a double-double in more than half his games"
+					: "led the conference in assists and rebounded like a forward";
+				p.doubleDoubleMachine = true;
+			},
+		},
+		{
+			name: "defensive breakout", w: 1.0,
+			label: "an unexpected defensive player of the year case",
+			pick: (p) => !p.nonNcaa,
+			apply: (p, r) => {
+				/* The composites are left alone on purpose: what makes this
+				   worth putting on a board is a season better than the tools
+				   that produced it, which is a judgement the user gets to make
+				   rather than one the ratings have already made for them. */
+				p.statBend = Object.assign({}, p.statBend,
+					{ defense: r.uniform(0.35, 0.60) });
+				p.backstory = "was not a defender a year ago and finished the " +
+					"season " + r.pick([
+						"leading the conference in deflections",
+						"as the best help defender in the league",
+						"guarding the other team's best player every night",
+					]);
+				p.defensiveBreakout = true;
+			},
+		},
+		{
+			name: "shooting slump", w: 1.1,
+			label: "a year-long shooting slump",
+			// Has to be somebody the slump is a slump FOR.
+			pick: (p) => !p.nonNcaa && p.newRatings && p.newRatings.tp >= 50,
+			apply: (p, r) => {
+				const drop = r.uniform(0.06, 0.10);
+				p.statBend = Object.assign({}, p.statBend, { tpp: -drop });
+				p.backstory = "shot " + Math.round(drop * 100) + " points below " +
+					"what his jumper says all year — " + r.pick([
+						"the form never changed",
+						"he never stopped taking them",
+						"and made 84% of his free throws",
+					]);
+				p.shootingSlump = true;
+			},
+		},
 	];
 
 	function assignSurprises(players, rng, cfg) {
@@ -1222,6 +1423,9 @@
 		delete teams.__realignment;
 		T.applyOutages(teams);
 		T.simulateRegularSeason(teams, cfg, rng.child("season"));
+		/* Read off the results the season just produced, so nothing here can
+		   contradict a box score. See midSeasonEvents. */
+		state.seasonEvents = T.midSeasonEvents(teams, rng.child("events"), cfg);
 		// Snapshot, so the postseason can be re-run on its own (changing
 		// "March upsets" must not re-play November).
 		for (const name of Object.keys(teams)) {
@@ -1619,7 +1823,20 @@
 	}
 
 	function phasePot(state) {
-		const { cfg } = state;
+		/* The EFFECTIVE config, for the same reason phaseRegular and phaseStats
+		   read it: the narrative flavours bend settings this phase owns.
+
+		   This read state.cfg, so every flavour's potential bend was computed,
+		   stored on state.effectiveCfg and then never looked at. Four flavours
+		   exist mainly to move these two numbers — "a weak year" sets potSpread
+		   1.2, "old and finished" sets potBias -1.3, "a volatile year" sets
+		   potSpread 3.5, "deep and even" sets 2.5 — and measured, the potential
+		   gap's standard deviation came out at 5.5 under every one of them and
+		   under no flavour at all. The most-advertised effect of four of the
+		   twenty-four flavours did nothing, silently, and nothing could see it
+		   because no row anywhere measured the potential DISTRIBUTION. (One
+		   now does; see tools/validate.js.) */
+		const cfg = state.effectiveCfg || state.cfg;
 		const rng = state.rng.child("pot" + variationSalt(state.cfg));
 		const usageRef = archetypeUsageReference(state.players);
 		for (const p of state.players) {
@@ -1652,7 +1869,7 @@
 
 	function phaseAwards(state) {
 		state.ranked = AW.assign(state.players, state.teams, state.tourney,
-			state.cfg, state.rng.child("awards"));
+			state.effectiveCfg || state.cfg, state.rng.child("awards"));
 		return state;
 	}
 
@@ -1862,7 +2079,8 @@
 				rng.child("stock:" + p.key).normal(0, 1.8);
 		}
 		const board = players.slice().sort((a, b) => b.stockScore - a.stockScore);
-		state.draftEvents = applyDraftEvents(board, rng.child("draftday"), state.cfg);
+		state.draftEvents = applyDraftEvents(board, rng.child("draftday"),
+			state.effectiveCfg || state.cfg);
 		board.forEach((p, i) => {
 			p.boardRank = i + 1;
 			p.mockRound = i < 30 ? 1 : i < 60 ? 2 : null;
@@ -1912,7 +2130,7 @@
 		{
 			name: "regular",
 			deps: ["pace", "scoringEnv", "injuryRate", "realignmentRate",
-				"bluebloodDownYears", "midMajorLift", "teamMomentum"],
+				"bluebloodDownYears", "midMajorLift", "teamMomentum", "seasonEvents"],
 			run: phaseRegular,
 		},
 		{ name: "postseason", deps: ["upsetFactor"], run: phasePostseason },
@@ -2016,6 +2234,7 @@
 				risers: state.risers,
 				fallers: state.fallers,
 				draftEvents: state.draftEvents || [],
+				seasonEvents: state.seasonEvents || [],
 				flavor: state.flavor,
 				// The builds this class was drawn from, and the anomalies it
 				// was given, so the UI can say what makes this class this one.
@@ -2039,6 +2258,114 @@
 	}
 
 	/* A season for every non-NCAA destination that has a prospect in it. */
+	/* --- how a prospect abroad got here ---------------------------------
+
+	   An international prospect had a league, a club, a contract type and a
+	   stat line, and no history. Every NCAA prospect carried a recruiting rank,
+	   a class year, a transfer, a redshirt and a reclassification — five facts
+	   about how he arrived — and the man who came through Real Madrid's academy
+	   had none of them, so the two populations in the same draft class were
+	   described at completely different resolutions. The OVERSEAS_ORIGINS list
+	   existed and was used for exactly one thing: the backstory line of the
+	   "returned from overseas" NCAA transfer.
+
+	   A European prospect's path is a real and well-known shape: a youth
+	   academy, a first senior contract, usually a loan to a lower division to
+	   get minutes, and national-team age-group basketball alongside it. All
+	   four are drawn here from the club and league he is actually in, so the
+	   path is consistent with the rest of his season rather than decoration
+	   printed next to it. */
+	const YOUTH_SYSTEMS = {
+		"EuroLeague": ["the club's own cantera", "an academy in Belgrade",
+			"a Lithuanian youth system", "the Mega Basket production line",
+			"a French INSEP intake"],
+		"Liga ACB": ["the club's cantera", "a Canarian youth system",
+			"a Basque academy", "the Joventut youth side"],
+		"NBL": ["an NBL Next Stars intake", "the Australian Institute of Sport",
+			"a New Zealand academy"],
+		"Adriatic League": ["the Mega Basket production line",
+			"a Belgrade youth system", "a Croatian academy"],
+		"LNB Pro A": ["INSEP", "a Villeurbanne youth side", "a Pau-Orthez academy"],
+		"Basketball Bundesliga": ["a Bundesliga youth programme",
+			"the Ulm youth system", "a Bavarian academy"],
+	};
+	const GENERIC_YOUTH = ["the club's own youth system", "a regional academy",
+		"a national development programme"];
+	const LOAN_TARGETS = ["a second-division side", "a feeder club",
+		"a lower-division team in the same region", "a club two levels down"];
+	const NATIONAL_TEAMS = {
+		"EuroLeague": ["Spain", "Serbia", "France", "Lithuania", "Greece",
+			"Turkey", "Slovenia", "Germany", "Italy", "Israel"],
+		"Liga ACB": ["Spain", "Georgia", "Senegal", "Dominican Republic"],
+		"Adriatic League": ["Serbia", "Croatia", "Slovenia", "Montenegro", "Bosnia"],
+		"LNB Pro A": ["France", "Senegal", "Ivory Coast"],
+		"Basketball Bundesliga": ["Germany", "Austria", "Switzerland"],
+		"NBL": ["Australia", "New Zealand"],
+		"Chinese CBA": ["China"],
+		"Japan B.League": ["Japan"],
+		"Brazil NBB": ["Brazil"],
+	};
+
+	function proPath(p, lgName, club, rng) {
+		const lg = C.NON_NCAA[lgName] || {};
+		// The G League and the American academies are not this story.
+		if (!lg.pro && !lg.youth) return null;
+		if (lgName === "NBA G League" || lgName === "Overtime Elite" ||
+			lgName === "NBA Academy") {
+			return null;
+		}
+		const youth = rng.pick(YOUTH_SYSTEMS[lgName] || GENERIC_YOUTH);
+		const path = { youth, caps: null, loan: null, debutAge: null };
+		/* A first-team debut age. Younger is the signal here in the same way it
+		   is for an NCAA freshman: a seventeen-year-old on a EuroLeague floor
+		   is the whole scouting report. */
+		path.debutAge = rng.int(16, Math.max(17, Math.min(20, (p.age || 19) - 1)));
+		// A loan spell to get minutes, which is the ordinary case for a young
+		// player at a big club and not for one at a small one.
+		if (rng.random() < (club && club.level > 60 ? 0.55 : 0.25)) {
+			path.loan = {
+				where: rng.pick(LOAN_TARGETS),
+				season: rng.int(1, 2),
+			};
+		}
+		const pool = NATIONAL_TEAMS[lgName];
+		if (pool && rng.random() < 0.65) {
+			/* His own country if the file gave him one and the league plays
+			   there, otherwise one of the league's. A man born in Serbia
+			   playing in the Adriatic League should have Serbian age-group caps
+			   and not Montenegrin ones, and the file usually knows. */
+			const born = p.born && p.born.loc ? String(p.born.loc) : "";
+			const own = pool.filter((c) => born.indexOf(c) !== -1)[0];
+			const country = own || rng.pick(pool);
+			const level = rng.weighted([
+				{ w: 3, v: "U18" }, { w: 2.4, v: "U19" },
+				{ w: 1.4, v: "U20" }, { w: 0.5, v: "senior" },
+			]).v;
+			path.caps = {
+				country, level,
+				n: level === "senior" ? rng.int(1, 8) : rng.int(4, 22),
+			};
+		}
+		path.text = describePath(path);
+		return path;
+	}
+
+	function describePath(path) {
+		const bits = ["came through " + path.youth];
+		if (path.debutAge) bits.push("first-team debut at " + path.debutAge);
+		if (path.loan) {
+			bits.push("loaned to " + path.loan.where + " for " +
+				(path.loan.season === 1 ? "a season" : "two seasons"));
+		}
+		if (path.caps) {
+			bits.push(path.caps.n + " caps for " +
+				(path.caps.level === "senior"
+					? "the senior " + path.caps.country + " side"
+					: path.caps.country + " at " + path.caps.level));
+		}
+		return bits.join("; ");
+	}
+
 	function simulateProLeagues(players, cfg, rng) {
 		const out = {};
 		const byLeague = {};
@@ -2132,6 +2459,7 @@
 				} else {
 					p.proDeal = "on a first-team contract";
 				}
+				p.proPath = proPath(p, lgName, club, crng);
 			});
 			for (const c of clubs) c.rating = T.teamRating(c.members);
 
@@ -2288,6 +2616,11 @@
 		["archetype", "Archetype label"],
 		["awards", "Honours"],
 		["stock", "Draft stock and mock position"],
+		/* Where his season places him against the rest of Division I. Every
+		   number on the lines above is a number until something says what it
+		   was worth, and the model already ranked the whole field to hand out
+		   awards. See rankAgainstField in js/awards.js. */
+		["ranks", "Where he finished nationally and in his conference"],
 	];
 	const DEFAULT_NOTE_LINES = ["team", "stats", "shooting", "signature", "awards"];
 
@@ -2320,10 +2653,15 @@
 					p.recruiting.rank + " nationally)");
 				if (p.recruiting.headliner) bits.push("headline signing of his class");
 			}
+			// The international equivalent of a recruiting rank: how he got to
+			// the club he is at. See proPath.
+			if (p.proPath && p.proPath.text) bits.push(p.proPath.text);
 			if (p.transfer) {
-				// A walk-on turned starter has no previous school to name.
+				// A walk-on turned starter has no previous school to name, and
+				// a move between two known programmes says which way it went.
 				bits.push(p.transfer.from
-					? p.transfer.kind + " from " + p.transfer.from
+					? p.transfer.kind + " — " + (p.transfer.story ||
+						("from " + p.transfer.from))
 					: p.transfer.kind);
 			}
 			if (p.redshirt) bits.push(p.redshirt);
@@ -2383,6 +2721,10 @@
 				" deflections, " + n1(s.chgpg) + " charges drawn · DRtg " +
 				s.drtg.toFixed(1),
 			);
+		}
+		if (s && on("ranks") && !p.nonNcaa) {
+			const hi = AW.rankHighlights(p, 3);
+			if (hi.length) lines.push("Finished: " + hi.join("; "));
 		}
 		if (on("signature") && p.signature && p.signature.pts > 0) {
 			const g = p.signature;
@@ -2581,7 +2923,7 @@
 	global.Engine = {
 		run, createRunner, exportFile, exportSeason, buildNote, classYear,
 		assignClassYears, inchesFromHgtRating, validateLeagueFile, findSeason, playerKey,
-		SIZE_OVERRIDE_KEYS,
+		SIZE_OVERRIDE_KEYS, SURPRISES, DRAFT_EVENTS,
 		MAX_CLASS,
 		rerollSalt,
 		signatureGame, simulateProLeagues, assignRecruiting,

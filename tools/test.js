@@ -1012,8 +1012,19 @@ console.log("\nStaged pipeline coverage");
 		classFlavor: 0, specialization: 2.4, pace: 78, statNoise: 2,
 	};
 	const runner = global.Engine.createRunner(lf);
+	/* The fingerprint has to cover everything a setting can move, not only the
+	   numbers. surpriseBudget draws more anomalies, and most anomalies are
+	   biography — a decommitment, a hometown story — which changes the class
+	   without changing anyone's ovr, build or scoring. The old fingerprint read
+	   those three fields only, so whether this probe passed depended on which
+	   anomalies the draw happened to produce: it passed while the pool was
+	   mostly mechanical and started failing the moment more biographical ones
+	   were added, which is a test measuring the wrong thing rather than a
+	   regression. */
 	const fingerprint = (res) => res.players.map((p) =>
-		p.newOvr + "/" + p.archetype + "/" + (p.stats ? p.stats.ppg.toFixed(2) : "-")).join("|");
+		p.newOvr + "/" + p.archetype + "/" + (p.stats ? p.stats.ppg.toFixed(2) : "-") +
+		"/" + (p.surprise ? p.surprise.name : "") + "/" + (p.backstory || "") +
+		"/" + (p.classYear || "") + "/" + (p.newCollege || "")).join("|");
 	const baseline = fingerprint(runner.run(global.Config.make({ seed: "deps" })));
 	for (const key of Object.keys(probes)) {
 		const cfg = global.Config.make({ seed: "deps" });
@@ -1894,6 +1905,284 @@ console.log("\nExploring a seed's neighbourhood");
 	ok("the mock board is still two rounds of thirty",
 		firsts.length === Math.min(30, withEvents.board.length) &&
 		firsts.every((p) => p.mockPick >= 1 && p.mockPick <= 30));
+}
+
+/* --------------------------------------- anomalies, pipelines and events */
+console.log("\nMechanical anomalies and season narrative");
+{
+	/* The six new anomalies change the numbers rather than only the note. Each
+	   is measured against the SAME class with the anomaly system off, so what
+	   is compared is one player's season against his own. */
+	const dt = { tpp: [], defl: [], dd: [], gpElig: [], gpSusp: [] };
+	for (let s = 0; s < 25; s++) {
+		const on = global.Engine.run(V.realisticClass(s % 6, 70),
+			global.Config.make({ seed: "anom" + s, surpriseBudget: 6 }));
+		const off = global.Engine.run(V.realisticClass(s % 6, 70),
+			global.Config.make({ seed: "anom" + s, surpriseBudget: 0 }));
+		const byKey = {};
+		for (const p of off.players) byKey[p.key] = p;
+		for (const p of on.players) {
+			const q = byKey[p.key];
+			if (!q || !q.stats || !p.stats) continue;
+			// Only compare a player the anomaly did not otherwise rebuild.
+			if (Math.abs(p.newOvr - q.newOvr) >= 1) continue;
+			if (p.shootingSlump) dt.tpp.push(p.stats.tpp - q.stats.tpp);
+			if (p.defensiveBreakout) dt.defl.push(p.stats.deflpg - q.stats.deflpg);
+			if (p.doubleDoubleMachine) {
+				dt.dd.push((p.stats.rpg + p.stats.apg) - (q.stats.rpg + q.stats.apg));
+			}
+			if (p.eligibilityHold) dt.gpElig.push(q.stats.gp - p.stats.gp);
+			if (p.surprise && p.surprise.name === "suspension") {
+				dt.gpSusp.push(q.stats.gp - p.stats.gp);
+			}
+		}
+	}
+	const mean2 = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
+	ok("a shooting slump actually costs three-point percentage",
+		dt.tpp.length > 0 && mean2(dt.tpp) < -0.04,
+		dt.tpp.length + " cases, mean " + (mean2(dt.tpp) * 100).toFixed(1) + " points");
+	ok("a defensive breakout actually produces defensive plays",
+		dt.defl.length > 0 && mean2(dt.defl) > 0.4,
+		dt.defl.length + " cases, mean +" + mean2(dt.defl).toFixed(2) + " deflections");
+	ok("a double-double machine actually rebounds or passes more",
+		dt.dd.length > 0 && mean2(dt.dd) > 0.8,
+		dt.dd.length + " cases, mean +" + mean2(dt.dd).toFixed(2));
+	ok("an eligibility hold actually costs games",
+		dt.gpElig.length === 0 || mean2(dt.gpElig) > 5,
+		dt.gpElig.length + " cases, mean " + mean2(dt.gpElig).toFixed(1) + " games");
+	ok("a suspension costs games, and fewer of them than an injury",
+		dt.gpSusp.length === 0 ||
+			(mean2(dt.gpSusp) > 0.5 && mean2(dt.gpSusp) < 8),
+		dt.gpSusp.length + " cases, mean " + mean2(dt.gpSusp).toFixed(1) + " games");
+
+	// A suspension is an absence, not an injury: the team does not plan
+	// around it, which is what `injury: false` means to applyOutages.
+	const susp = global.Engine.SURPRISES.filter((k) => k.name === "suspension")[0];
+	ok("the suspension anomaly exists and is not an injury", !!susp);
+	// The double-double machine must never land on somebody who cannot do it.
+	let implausible = 0;
+	for (let s = 0; s < 20; s++) {
+		const res = global.Engine.run(V.realisticClass(s % 5, 70),
+			global.Config.make({ seed: "dd" + s, surpriseBudget: 6 }));
+		for (const p of res.players) {
+			if (p.doubleDoubleMachine && p.newRatings.hgt < 52 && p.newRatings.pss < 60) {
+				implausible++;
+			}
+		}
+	}
+	ok("the double-double anomaly never lands on a player who could not do it",
+		implausible === 0, implausible + " implausible cases");
+}
+
+{
+	/* Flavour config bends reach the phases that own the settings they bend.
+	   Four flavours exist mainly to move potBias and potSpread and phasePot
+	   read state.cfg, so none of them did anything. */
+	const gap = (hint) => {
+		const all = [];
+		for (let s = 0; s < 6; s++) {
+			const res = global.Engine.run(V.realisticClass(s, 70),
+				global.Config.make(hint
+					? { seed: "bend" + s, flavorHint: hint }
+					: { seed: "bend" + s, classFlavor: 0 }));
+			for (const p of res.players) all.push(p.newPot - p.newOvr);
+		}
+		return all.reduce((a, b) => a + b, 0) / all.length;
+	};
+	const none = gap("");
+	ok("a flavour that lowers potential actually lowers it",
+		gap("veteran") < none - 1.5,
+		"veteran " + gap("veteran").toFixed(2) + " vs none " + none.toFixed(2));
+	ok("a flavour that raises potential actually raises it",
+		gap("one-and-done") > none + 1.5,
+		"one-and-done " + gap("one-and-done").toFixed(2));
+}
+
+{
+	// The five new flavours exist and are distinguishable from the old ones by
+	// the tilt they apply, which is the fault they were added to fix.
+	const RBF = RB.CLASS_FLAVORS;
+	const added = ["euro-influenced", "post-up renaissance", "three-and-d only",
+		"feast or famine", "coaching carousel"];
+	ok("the five new flavours are in the table",
+		added.every((n) => RBF.some((f) => f.name === n)));
+	// Every flavour carries either a distinct tilt or a distinct bend.
+	const sig = (f) => JSON.stringify([f.m || {}, f.c || {}]);
+	const sigs = RBF.map(sig);
+	ok("no two flavours are the same flavour",
+		new Set(sigs).size === sigs.length);
+	// The post-up class really does shoot fewer threes than the big-heavy one.
+	const threes = (hint) => {
+		let tpa = 0;
+		let n = 0;
+		for (let s = 0; s < 4; s++) {
+			const res = global.Engine.run(V.realisticClass(s, 70),
+				global.Config.make({ seed: "fl" + s, flavorHint: hint }));
+			for (const p of res.players) {
+				if (p.nonNcaa || !p.stats) continue;
+				tpa += p.stats.tpa;
+				n++;
+			}
+		}
+		return tpa / n;
+	};
+	ok("the post-up class shoots fewer threes than the big-heavy one",
+		threes("post-up renaissance") < threes("big-heavy"),
+		threes("post-up renaissance").toFixed(2) + " vs " + threes("big-heavy").toFixed(2));
+	// The 3&D class really is made of fewer builds.
+	const builds = (hint) => {
+		const res = global.Engine.run(V.realisticClass(1, 70),
+			global.Config.make({ seed: "fl", flavorHint: hint }));
+		return new Set(res.players.filter((p) => !p.nonNcaa)
+			.map((p) => p.archetype)).size;
+	};
+	ok("the three-and-D class really is a class of four or five things",
+		builds("three-and-d only") < builds("balanced"),
+		builds("three-and-d only") + " builds vs " + builds("balanced"));
+}
+
+{
+	// Transfers know which way they went.
+	const dirs = {};
+	for (let s = 0; s < 8; s++) {
+		const res = global.Engine.run(V.realisticClass(s, 70),
+			global.Config.make({ seed: "tr" + s, transferShare: 60 }));
+		for (const p of res.players) {
+			if (p.transfer && p.transfer.direction) {
+				dirs[p.transfer.direction] = (dirs[p.transfer.direction] || 0) + 1;
+			}
+		}
+	}
+	ok("transfers are classified up, lateral and down",
+		dirs.up > 0 && dirs.lateral > 0 && dirs.down > 0, JSON.stringify(dirs));
+	// And the classification is right: an up transfer really went up.
+	let wrong = 0;
+	for (let s = 0; s < 6; s++) {
+		const res = global.Engine.run(V.realisticClass(s, 70),
+			global.Config.make({ seed: "tr" + s, transferShare: 60 }));
+		for (const p of res.players) {
+			const t = p.transfer;
+			if (!t || !t.direction) continue;
+			const step = t.toPrestige - t.fromPrestige;
+			if (t.direction === "up" && step <= 0) wrong++;
+			if (t.direction === "down" && step >= 0) wrong++;
+		}
+	}
+	ok("a transfer classified as a step up really went up", wrong === 0,
+		wrong + " misclassified");
+}
+
+{
+	// International prospects carry a development path.
+	const res = global.Engine.run(V.realisticClass(2, 70),
+		global.Config.make({ seed: "intl",
+			leagueWeights: { "EuroLeague": 60, "Liga ACB": 30, "NBL": 20 } }));
+	const abroad = res.players.filter((p) => p.nonNcaa && p.proPath);
+	ok("prospects abroad carry a development path", abroad.length > 0,
+		abroad.length + " of " + res.players.filter((p) => p.nonNcaa).length);
+	ok("every path names a youth system and a debut age",
+		abroad.every((p) => p.proPath.youth && p.proPath.debutAge));
+	ok("a debut age is younger than the player is now",
+		abroad.every((p) => p.proPath.debutAge <= (p.age || 19)));
+	ok("national-team caps name a country the league actually plays in",
+		abroad.every((p) => !p.proPath.caps || p.proPath.caps.country));
+	// The G League is not this story and must not get a European pathway.
+	const g = global.Engine.run(V.realisticClass(2, 70),
+		global.Config.make({ seed: "gl", leagueWeights: { "NBA G League": 80 } }));
+	ok("the G League gets no European academy pathway",
+		g.players.filter((p) => p.newCollege === "NBA G League")
+			.every((p) => !p.proPath));
+}
+
+{
+	// Statistical ranks against the whole of Division I, which is what turns a
+	// defensive number into a defensive fact.
+	const res = global.Engine.run(V.realisticClass(1, 70),
+		global.Config.make({ seed: "ranks" }));
+	const AWm = global.Awards;
+	const withRanks = res.players.filter((p) => !p.nonNcaa && p.statRanks &&
+		Object.keys(p.statRanks).length);
+	ok("prospects carry national and conference ranks", withRanks.length > 5,
+		withRanks.length + " with ranks");
+	ok("a rank is never worse than the cutoff that makes it worth saying",
+		withRanks.every((p) => Object.keys(p.statRanks).every((k) => {
+			const r = p.statRanks[k];
+			return (!r.national || r.national <= 50) && (!r.conf || r.conf <= 10);
+		})));
+	ok("defensive statistics are among the ranked ones",
+		AWm.RANKED_STATS.some((r) => r.key === "deflpg") &&
+		AWm.RANKED_STATS.some((r) => r.key === "drtg"));
+	// Defensive rating is ranked the right way round: low is good.
+	const best = withRanks.filter((p) => p.statRanks.drtg &&
+		p.statRanks.drtg.national === 1)[0];
+	if (best) {
+		const better = res.players.filter((p) => !p.nonNcaa && p.stats &&
+			p.stats.mpg >= 15 && p.stats.drtg < best.stats.drtg).length;
+		ok("defensive rating is ranked with low as good", better === 0,
+			better + " prospects had a better DRtg than the class's No. 1");
+	} else {
+		ok("defensive rating is ranked with low as good", true,
+			"no prospect led the country in DRtg in this class");
+	}
+	ok("rank highlights read as sentences",
+		withRanks.some((p) => AWm.rankHighlights(p, 2).length > 0));
+}
+
+{
+	// Mid-season events, all of them read off results that really happened.
+	const res = global.Engine.run(V.realisticClass(3, 70),
+		global.Config.make({ seed: "events" }));
+	ok("a season produces events", res.seasonEvents.length >= 4,
+		String(res.seasonEvents.length));
+	ok("season events can be turned off",
+		global.Engine.run(V.realisticClass(3, 70),
+			global.Config.make({ seed: "events", seasonEvents: 0 }))
+			.seasonEvents.length === 0);
+	ok("every event names at least one real programme",
+		res.seasonEvents.every((e) => e.teams && e.teams.length &&
+			e.teams.every((n) => !!res.teams[n])));
+	ok("events are in calendar order",
+		res.seasonEvents.every((e, i) =>
+			i === 0 || (res.seasonEvents[i - 1].when || 0) <= (e.when || 0)));
+	// A coaching change must name a team that really was losing.
+	for (const e of res.seasonEvents.filter((x) => x.kind === "coaching change")) {
+		const t = res.teams[e.teams[0]];
+		ok("a fired coach's team really was losing",
+			t && t.w / Math.max(1, t.games) < 0.35,
+			t ? t.w + "-" + t.l : "no team");
+	}
+	// The longest-run helper reads the schedule in calendar order.
+	ok("a winning streak is measured in calendar order",
+		global.TeamsSim.longestRun({ log: [
+			{ won: true, when: 0.9 }, { won: false, when: 0.5 },
+			{ won: true, when: 0.1 }, { won: true, when: 0.2 },
+		] }) === 2);
+}
+
+{
+	/* 6.5 and 6.6 in the audit: the Pac-12 membership and the pro club
+	   rosters. Both were already done in the tree, and a check is cheaper than
+	   remembering that. */
+	const CL = global.Colleges;
+	const PAC12 = ["Boise State", "Colorado State", "Fresno State",
+		"San Diego State", "Utah State", "Oregon State", "Washington State",
+		"Gonzaga"];
+	const misplaced = PAC12.filter((n) => CL.conferenceOf(n) !== "Pac-12");
+	ok("the schools the Pac-12 rebuild moved really are in it",
+		misplaced.length === 0, "still elsewhere: " + misplaced.join(", "));
+	const placeholder = Object.keys(CL.NON_NCAA).filter((lg) => {
+		if (lg === "Did not play") return false;
+		const clubs = CL.PRO_CLUBS[lg];
+		return !clubs || !clubs.length ||
+			clubs.some(([name]) => / (Select|United)$/.test(name) &&
+				name.indexOf(lg) === 0);
+	});
+	ok("no league falls back to placeholder club names",
+		placeholder.length === 0, "placeholders: " + placeholder.join(", "));
+	for (const lg of ["EuroLeague", "Liga ACB", "NBL"]) {
+		ok(lg + " carries a real club roster",
+			(CL.PRO_CLUBS[lg] || []).length >= 8);
+	}
 }
 
 console.log("\n" + (failures ? failures + " of " + checks + " checks failed"

@@ -351,6 +351,107 @@
 		reserve: (x) => !x.stats || (x.stats.mpg >= 12 && x.stats.mpg <= 27),
 	};
 
+	/* Where a prospect's season places him against the rest of Division I.
+
+	   The defensive box score — contested shots, deflections, charges,
+	   defensive rating — is generated, displayed, and never contextualised.
+	   2.4 deflections a game is a number; "second in the country in
+	   deflections" is a scouting report, and the difference between them is a
+	   sort the model was already in a position to do: `field` is every
+	   returning rotation player in D-I, simulated through the same stat model,
+	   which is exactly the population a national rank is against. The award
+	   model ranked prospects against it to hand out trophies and then threw the
+	   ordering away.
+
+	   Both scopes, because they answer different questions: leading your
+	   conference in blocks says what you were on your own floor, and top-ten
+	   nationally says whether that meant anything. Ranks are only kept when
+	   they are worth saying — a national rank outside the top fifty and a
+	   conference rank outside the top ten tell nobody anything, and storing
+	   them would put "217th in charges drawn" in a scouting note.
+
+	   `low: true` marks a statistic where the small number is the good one. */
+	const RANKED_STATS = [
+		{ key: "ppg", label: "scoring" },
+		{ key: "rpg", label: "rebounding" },
+		{ key: "apg", label: "assists" },
+		{ key: "bpg", label: "blocks" },
+		{ key: "spg", label: "steals" },
+		{ key: "deflpg", label: "deflections" },
+		{ key: "cspg", label: "contested shots" },
+		{ key: "chgpg", label: "charges drawn" },
+		{ key: "drtg", label: "defensive rating", low: true },
+		{ key: "ts", label: "true shooting" },
+	];
+	const RANK_NATIONAL_MAX = 50;
+	const RANK_CONF_MAX = 10;
+	// Below this a rate statistic is not a season, it is a sample.
+	const RANK_MIN_MPG = 15;
+
+	function rankAgainstField(prospects, everyone) {
+		const eligible = everyone.filter((x) =>
+			x.stats && Number.isFinite(x.stats.mpg) && x.stats.mpg >= RANK_MIN_MPG);
+		const byConf = {};
+		for (const x of eligible) {
+			if (!x.conf) continue;
+			(byConf[x.conf] = byConf[x.conf] || []).push(x);
+		}
+		for (const p of prospects) p.statRanks = {};
+		for (const stat of RANKED_STATS) {
+			const cmp = (a, b) => (stat.low
+				? a.stats[stat.key] - b.stats[stat.key]
+				: b.stats[stat.key] - a.stats[stat.key]);
+			const national = eligible.slice()
+				.filter((x) => Number.isFinite(x.stats[stat.key])).sort(cmp);
+			national.forEach((x, i) => {
+				if (!x.statRanks || i >= RANK_NATIONAL_MAX) return;
+				x.statRanks[stat.key] = Object.assign({}, x.statRanks[stat.key],
+					{ national: i + 1, nationalOf: national.length, label: stat.label });
+			});
+			for (const conf of Object.keys(byConf)) {
+				const list = byConf[conf].slice()
+					.filter((x) => Number.isFinite(x.stats[stat.key])).sort(cmp);
+				list.forEach((x, i) => {
+					if (!x.statRanks || i >= RANK_CONF_MAX) return;
+					x.statRanks[stat.key] = Object.assign({}, x.statRanks[stat.key],
+						{ conf: i + 1, confOf: list.length, confName: conf,
+							label: stat.label });
+				});
+			}
+		}
+	}
+
+	/* The one or two rank facts worth putting in a note, newest-first by how
+	   impressive they are: leading the country, then leading a conference,
+	   then a top-ten national finish. */
+	function rankHighlights(p, max) {
+		const ranks = p.statRanks;
+		if (!ranks) return [];
+		const out = [];
+		for (const key of Object.keys(ranks)) {
+			const r = ranks[key];
+			if (!r) continue;
+			if (r.national === 1) out.push({ score: 100, text: "led the country in " + r.label });
+			else if (r.conf === 1) {
+				out.push({ score: 80, text: "led the " + r.confName + " in " + r.label });
+			} else if (r.national <= 10) {
+				out.push({ score: 70 - r.national,
+					text: ordinal(r.national) + " nationally in " + r.label });
+			} else if (r.conf <= 3) {
+				out.push({ score: 40 - r.conf,
+					text: ordinal(r.conf) + " in the " + r.confName + " in " + r.label });
+			}
+		}
+		out.sort((a, b) => b.score - a.score);
+		return out.slice(0, max || 2).map((x) => x.text);
+	}
+
+	function ordinal(n) {
+		const v = n % 100;
+		if (v >= 11 && v <= 13) return n + "th";
+		return n + (["th", "st", "nd", "rd"][n % 10] || "th");
+	}
+
 	function assign(prospects, teams, tourney, cfg, rng) {
 		const strict = clamp(cfg.awardStrictness, 0.2, 3);
 		// Conference hardware is its own dial. 32 conferences hand out far more
@@ -409,6 +510,7 @@
 				: 0;
 		}
 		const everyone = ncaa.concat(field);
+		rankAgainstField(ncaa, everyone);
 		// A candidate pool for any honour that needs a comparable score for a
 		// player on one particular team.
 		const fieldByTeam = {};
@@ -803,6 +905,7 @@
 
 	global.Awards = {
 		assign, productionScore, defenseScore, fieldDefenseScore, resumeScore,
+		rankAgainstField, rankHighlights, RANKED_STATS,
 		REF_PACE,
 		buildField, fitScores, fitTalentToScore, awardRank, sortAwards,
 		NATIONAL_POY, NATIONAL_DPOY, POSITION_AWARDS, AWARD_TIERS,
