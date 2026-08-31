@@ -186,7 +186,10 @@
 	   Team totals, the possession identity, minutes and usage allocation, the
 	   defensive box score — the fillers went through all of it already, and the
 	   lines were being thrown away. */
-	function buildField(teams, rng) {
+	function buildField(teams, rng, noise) {
+		// Defaulted, because buildField is exported and a caller that predates
+		// the dial should get what it always got.
+		const noiseScale = Number.isFinite(noise) ? noise : 1;
 		const field = [];
 		for (const name of Object.keys(teams)) {
 			const t = teams[name];
@@ -220,8 +223,14 @@
 					improvement: trng.normal(0, 1),
 					scoreProd: prod,
 					scoreDef: def,
-					scoreTotal: prod + resume + trng.normal(0, 1.4),
-					scoreDefTotal: def + resume * 0.35 + trng.normal(0, 1.2),
+					/* The same scale the prospects' own scoreTotal uses. It was
+					   a constant here, so at awardNoise 0 the prospects were
+					   deterministic and the FIELD they are ranked against — every
+					   returning rotation player in Division I, which is what
+					   decides an All-America slot — was still randomised. Half a
+					   deterministic comparison is not one. */
+					scoreTotal: prod + resume + trng.normal(0, 1.4 * noiseScale),
+					scoreDefTotal: def + resume * 0.35 + trng.normal(0, 1.2 * noiseScale),
 				});
 			}
 		}
@@ -251,13 +260,24 @@
 	   different electorates: usually the same player sweeps, occasionally they
 	   split, which is exactly what happens in real seasons. `sd` is how much
 	   that electorate diverges from consensus. */
+	/* `resume` is the electorate's own weighting of what the player's TEAM did,
+	   over and above what scoreTotal already carries.
+
+	   The six trophies diverged only by how noisy each electorate was, so a
+	   split was a coin flip and never an argument: nothing in the model was the
+	   voter who gives it to the best player on the best team, and that voter
+	   decides real player-of-the-year races. The NABC is coaches and the
+	   Sporting News panel is broadcasters, both of whom watch teams; the AP is
+	   writers covering a beat and is the closest of the six to a box score.
+	   A positive `resume` reweights that electorate's ballot toward the
+	   resume; a negative one is the voter who does not care who won. */
 	const NATIONAL_POY = [
-		{ name: "Naismith Trophy", sd: 1.1 },
-		{ name: "John R. Wooden Award", sd: 1.2 },
-		{ name: "Oscar Robertson Trophy", sd: 1.5 },
-		{ name: "AP Player of the Year", sd: 1.0 },
-		{ name: "NABC Player of the Year", sd: 1.4 },
-		{ name: "Sporting News Player of the Year", sd: 1.6 },
+		{ name: "Naismith Trophy", sd: 1.1, resume: 0.10 },
+		{ name: "John R. Wooden Award", sd: 1.2, resume: 0.15 },
+		{ name: "Oscar Robertson Trophy", sd: 1.5, resume: 0.05 },
+		{ name: "AP Player of the Year", sd: 1.0, resume: -0.10 },
+		{ name: "NABC Player of the Year", sd: 1.4, resume: 0.35 },
+		{ name: "Sporting News Player of the Year", sd: 1.6, resume: 0.30 },
 	];
 	const NATIONAL_DPOY = [
 		{ name: "Naismith Defensive Player of the Year", sd: 1.4 },
@@ -340,6 +360,107 @@
 		reserve: (x) => !x.stats || (x.stats.mpg >= 12 && x.stats.mpg <= 27),
 	};
 
+	/* Where a prospect's season places him against the rest of Division I.
+
+	   The defensive box score — contested shots, deflections, charges,
+	   defensive rating — is generated, displayed, and never contextualised.
+	   2.4 deflections a game is a number; "second in the country in
+	   deflections" is a scouting report, and the difference between them is a
+	   sort the model was already in a position to do: `field` is every
+	   returning rotation player in D-I, simulated through the same stat model,
+	   which is exactly the population a national rank is against. The award
+	   model ranked prospects against it to hand out trophies and then threw the
+	   ordering away.
+
+	   Both scopes, because they answer different questions: leading your
+	   conference in blocks says what you were on your own floor, and top-ten
+	   nationally says whether that meant anything. Ranks are only kept when
+	   they are worth saying — a national rank outside the top fifty and a
+	   conference rank outside the top ten tell nobody anything, and storing
+	   them would put "217th in charges drawn" in a scouting note.
+
+	   `low: true` marks a statistic where the small number is the good one. */
+	const RANKED_STATS = [
+		{ key: "ppg", label: "scoring" },
+		{ key: "rpg", label: "rebounding" },
+		{ key: "apg", label: "assists" },
+		{ key: "bpg", label: "blocks" },
+		{ key: "spg", label: "steals" },
+		{ key: "deflpg", label: "deflections" },
+		{ key: "cspg", label: "contested shots" },
+		{ key: "chgpg", label: "charges drawn" },
+		{ key: "drtg", label: "defensive rating", low: true },
+		{ key: "ts", label: "true shooting" },
+	];
+	const RANK_NATIONAL_MAX = 50;
+	const RANK_CONF_MAX = 10;
+	// Below this a rate statistic is not a season, it is a sample.
+	const RANK_MIN_MPG = 15;
+
+	function rankAgainstField(prospects, everyone) {
+		const eligible = everyone.filter((x) =>
+			x.stats && Number.isFinite(x.stats.mpg) && x.stats.mpg >= RANK_MIN_MPG);
+		const byConf = {};
+		for (const x of eligible) {
+			if (!x.conf) continue;
+			(byConf[x.conf] = byConf[x.conf] || []).push(x);
+		}
+		for (const p of prospects) p.statRanks = {};
+		for (const stat of RANKED_STATS) {
+			const cmp = (a, b) => (stat.low
+				? a.stats[stat.key] - b.stats[stat.key]
+				: b.stats[stat.key] - a.stats[stat.key]);
+			const national = eligible.slice()
+				.filter((x) => Number.isFinite(x.stats[stat.key])).sort(cmp);
+			national.forEach((x, i) => {
+				if (!x.statRanks || i >= RANK_NATIONAL_MAX) return;
+				x.statRanks[stat.key] = Object.assign({}, x.statRanks[stat.key],
+					{ national: i + 1, nationalOf: national.length, label: stat.label });
+			});
+			for (const conf of Object.keys(byConf)) {
+				const list = byConf[conf].slice()
+					.filter((x) => Number.isFinite(x.stats[stat.key])).sort(cmp);
+				list.forEach((x, i) => {
+					if (!x.statRanks || i >= RANK_CONF_MAX) return;
+					x.statRanks[stat.key] = Object.assign({}, x.statRanks[stat.key],
+						{ conf: i + 1, confOf: list.length, confName: conf,
+							label: stat.label });
+				});
+			}
+		}
+	}
+
+	/* The one or two rank facts worth putting in a note, newest-first by how
+	   impressive they are: leading the country, then leading a conference,
+	   then a top-ten national finish. */
+	function rankHighlights(p, max) {
+		const ranks = p.statRanks;
+		if (!ranks) return [];
+		const out = [];
+		for (const key of Object.keys(ranks)) {
+			const r = ranks[key];
+			if (!r) continue;
+			if (r.national === 1) out.push({ score: 100, text: "led the country in " + r.label });
+			else if (r.conf === 1) {
+				out.push({ score: 80, text: "led the " + r.confName + " in " + r.label });
+			} else if (r.national <= 10) {
+				out.push({ score: 70 - r.national,
+					text: ordinal(r.national) + " nationally in " + r.label });
+			} else if (r.conf <= 3) {
+				out.push({ score: 40 - r.conf,
+					text: ordinal(r.conf) + " in the " + r.confName + " in " + r.label });
+			}
+		}
+		out.sort((a, b) => b.score - a.score);
+		return out.slice(0, max || 2).map((x) => x.text);
+	}
+
+	function ordinal(n) {
+		const v = n % 100;
+		if (v >= 11 && v <= 13) return n + "th";
+		return n + (["th", "st", "nd", "rd"][n % 10] || "th");
+	}
+
 	function assign(prospects, teams, tourney, cfg, rng) {
 		const strict = clamp(cfg.awardStrictness, 0.2, 3);
 		// Conference hardware is its own dial. 32 conferences hand out far more
@@ -350,6 +471,12 @@
 			cfg.confAwardStrictness === undefined ? strict : cfg.confAwardStrictness, 0.2, 3);
 		const proStrict = clamp(
 			cfg.proAwardStrictness === undefined ? strict : cfg.proAwardStrictness, 0.2, 3);
+		/* How much the voters disagree with the arithmetic. The model already
+		   carried a fixed amount of this; it was not adjustable and there was
+		   no way to ask for the year where the award list is exactly what the
+		   numbers say, or for the year with a genuine snub in it. */
+		const noiseScale = clamp(
+			cfg.awardNoise === undefined ? 1 : cfg.awardNoise, 0, 3);
 		// DII NCAA has pro: false, so splitting on leaguePro put DII players in
 		// the D-I pool — they could and did win Consensus All-American, while
 		// the DII award list was unreachable dead code. Split on nonNcaa.
@@ -362,8 +489,8 @@
 			p.scoreProd = productionScore(p);
 			p.scoreDef = defenseScore(p, global.BBGM.composites(p.newRatings));
 			p.scoreResume = resumeScore(team);
-			p.scoreTotal = p.scoreProd + p.scoreResume + rng.normal(0, 1.4);
-			p.scoreDefTotal = p.scoreDef + p.scoreResume * 0.35 + rng.normal(0, 1.2);
+			p.scoreTotal = p.scoreProd + p.scoreResume + rng.normal(0, 1.4 * noiseScale);
+			p.scoreDefTotal = p.scoreDef + p.scoreResume * 0.35 + rng.normal(0, 1.2 * noiseScale);
 			p.isFreshman = p.classYear === "Freshman";
 			p.isNewcomer = p.isFreshman || !!p.transfer;
 			p.isReserve = p.minutesRank !== undefined && p.minutesRank >= 5;
@@ -373,7 +500,7 @@
 		}
 
 		// The rest of Division I, from its own simulated seasons.
-		const field = buildField(teams, rng.child("field"));
+		const field = buildField(teams, rng.child("field"), noiseScale);
 		/* "Improvement" against what a player of this talent typically
 		   produces: there is no previous season to compare with, so
 		   outperforming your own baseline is the proxy, and it is the same
@@ -392,6 +519,7 @@
 				: 0;
 		}
 		const everyone = ncaa.concat(field);
+		rankAgainstField(ncaa, everyone);
 		// A candidate pool for any honour that needs a comparable score for a
 		// player on one particular team.
 		const fieldByTeam = {};
@@ -496,11 +624,28 @@
 		   something. Only a sweep gets the consensus label. */
 		const poyWins = new Map();
 		const top = nation.slice(0, Math.max(6, slots(8)));
+		/* This season's mood. Some years the whole electorate is arguing about
+		   the best player and some years it is arguing about the best team, and
+		   an electorate whose lean is a constant produces the same argument
+		   every season. Drawn once per class, so it is a fact about the year:
+		   at 0 the trophies are decided on the box score alone and at the top
+		   of the range a 26-win one seed's leading scorer beats a better player
+		   on a 19-win team. */
+		/* Scaled as a whole, base included. The 0.55 sat OUTSIDE the multiply,
+		   so at awardNoise 0 the resume lean was still 0.55x its full strength
+		   and the two electorates that weight the resume most (the coaches' and
+		   the broadcasters', at 0.35 and 0.30) still split away from the other
+		   four — measured, 1 of 30 classes at noise 0, and it was those two
+		   every time, which is the signature of this rather than of noise. Both
+		   the slider caption and Config.DEFAULTS promise that 0 hands every
+		   trophy to whoever the production model ranks first. */
+		const mood = (0.55 + rng.child("voters").uniform(-0.55, 1.15)) * noiseScale;
 		for (const award of NATIONAL_POY) {
 			const vrng = rng.child("poy|" + award.name);
-			const winner = top.slice()
-				.sort((a, b) => (b.scoreTotal + vrng.normal(0, award.sd)) -
-					(a.scoreTotal + vrng.normal(0, award.sd)))[0];
+			const lean = (award.resume || 0) * mood;
+			const ballot = (x) => x.scoreTotal + lean * (x.scoreResume || 0) +
+				vrng.normal(0, award.sd * noiseScale);
+			const winner = top.slice().sort((a, b) => ballot(b) - ballot(a))[0];
 			if (!winner) continue;
 			giveNat(winner, award.name);
 			poyWins.set(winner, (poyWins.get(winner) || 0) + 1);
@@ -777,6 +922,7 @@
 
 	global.Awards = {
 		assign, productionScore, defenseScore, fieldDefenseScore, resumeScore,
+		rankAgainstField, rankHighlights, RANKED_STATS,
 		REF_PACE,
 		buildField, fitScores, fitTalentToScore, awardRank, sortAwards,
 		NATIONAL_POY, NATIONAL_DPOY, POSITION_AWARDS, AWARD_TIERS,

@@ -187,8 +187,28 @@
 			   is the best shooter in the country), and the talent-to-efficiency
 			   gradient that js/calibration.js documented but never applied
 			   costs a returning rotation player about a point of true shooting.
-			   These two put the field back on 2009-2021's own ORtg of 102.6. */
-			shift: { ftr: 1, tov: 1.09, inside: 0, mid: 0, three: 0.015, fieldEff: -0.005, ppgBoost: 0 },
+			   These two put the field back on 2009-2021's own ORtg of 102.6.
+
+			   `three` came down from 0.015 to 0.011. It was fitted against the
+			   FIELD's three-point percentage and its ORtg, and it does move
+			   both onto their anchors — but it is an intercept shared with the
+			   prospect line, so it lifted the prospects by the same amount, and
+			   the prospects did not need lifting. Measured against this era's
+			   own draft-year median of 34.8%, the class was shooting 36.2 — a
+			   premium over its own field of +2.2 points where the anchors say
+			   +1.0. At 0.011 the field lands on 33.6 against an anchor of 33.8
+			   (its most accurate value of the three tried), the class on 35.8,
+			   and ORtg on 101.4 against 102.6.
+
+			   That last number is the cost, and it is worth naming: an
+			   intercept both lines share cannot put both of them on their
+			   anchors when the GAP between them is wrong, and the gap is what
+			   is actually wrong here. The prospect premium is a separate model
+			   fault — it comes out at +2.2 in this era and +0.7 in the modern
+			   one, so it is not even consistent — and fixing it needs a term
+			   that reaches prospects and not the field, which is a larger
+			   change than rebalancing a shared shift. */
+			shift: { ftr: 1, tov: 1.09, inside: 0, mid: 0, three: 0.011, fieldEff: -0.005, ppgBoost: 0 },
 		},
 		modern: {
 			label: "2023-2026 (the modern game)",

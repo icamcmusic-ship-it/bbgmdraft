@@ -166,6 +166,10 @@ function pct(vals, p) {
 	return s[Math.min(s.length - 1, Math.floor(p * s.length))];
 }
 const mean = (v) => v.reduce((a, b) => a + b, 0) / v.length;
+const sd = (v) => {
+	const m = mean(v);
+	return Math.sqrt(mean(v.map((x) => (x - m) * (x - m))));
+};
 
 /* Run nSeeds classes and return every check row plus the raw samples.
 
@@ -283,6 +287,12 @@ function collect(nSeeds, cfgOverrides, fixture) {
 	const postseasonInRecord = [];
 	const outOfOrder = [];
 	const bottomThird = [];
+	/* The MIDDLE of a class — ranks 20-50, which is picks ~20 through ~50 and
+	   the part of a board where every name is supposed to be an argument.
+	   Kept separately from the bottom third because the two fail differently:
+	   the bottom third collapses toward zero, the middle collapses toward its
+	   own mean, and a band on either one cannot see the other. */
+	const midClass = [];
 	const backTen = [];
 	const paceOfHonoured = [];
 	const paceOfAll = [];
@@ -309,6 +319,10 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		const byRank = ncaa.slice().sort((a, b) => b.newOvr - a.newOvr);
 		for (const p of byRank.slice(Math.floor((byRank.length * 2) / 3))) {
 			bottomThird.push(p.stats.ppg);
+		}
+		/* Ranks 20-50 of the class by overall rating. */
+		for (const p of byRank.slice(19, 50)) {
+			if (p.stats) midClass.push(p.stats.ppg);
 		}
 		/* The last ten men on the board. The bottom-third percentile row sees
 		   the floor of the class; this sees its LEVEL, which is a different
@@ -567,12 +581,67 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		["SPG max", Math.max.apply(null, g((p) => p.stats.spg))].concat(extreme(2.0, 4.2)),
 		["PF mean", mean(g((p) => p.stats.pfpg))].concat(within(2.55, 0.85)),
 		["TS% mean", mean(g((p) => p.stats.ts)) * 100].concat(within(dy.ts.mean * 100, 1.8)),
-		["3P% mean", mean(g((p) => p.stats.tpp)) * 100].concat(
+		/* THREE-POINT PERCENTAGE, measured against the population the anchor
+		   describes.
+
+		   This row used to be the unfiltered MEAN of every prospect's 3P%
+		   against a MEDIAN anchor, and it passed by 0.01 points — which is not
+		   a passing check, it is a coin flip that any change to the archetype
+		   table would land on either side of. Two things were wrong with the
+		   comparison and they pushed the same way:
+
+		     - Mean against median. dy.tpPct is a median because a per-player
+		       shooting percentage has a long low tail, and averaging it does
+		       not give you the median back.
+		     - The whole class against a population of shooters. About 15% of a
+		       generated class takes under half a three a game, and a 7-footer
+		       who went 4-for-19 all season contributes a 21% to the mean with
+		       the same weight as a guard who took 250. The source dataset's
+		       median is not computed over those players, because a shooting
+		       percentage on nineteen attempts is not a measurement.
+
+		   So: the median, over the prospects who have a real three-point role.
+		   The threshold is one attempt a game, which is the point below which
+		   the percentage stops being a fact about the player. Measured, this
+		   also moves the row off the band edge it was living on — the two eras
+		   now sit +1.1 and -0.4 from their anchors instead of -1.6 and -0.9. */
+		["3P% median (1+ 3PA)", pct(all.filter((p) => p.stats.tpa >= 1)
+			.map((p) => p.stats.tpp), 0.50) * 100].concat(
 			within(dy.tpPct.median * 100, 1.65)),
 		["FT% mean", mean(g((p) => p.stats.ftp)) * 100].concat(within(dy.ftPct.mean * 100, 2.2)),
 		["FG% mean", mean(g((p) => p.stats.fgp)) * 100].concat(within(48, 4)),
 		["FTA mean", mean(g((p) => p.stats.fta))].concat(within(4.2, 1.2)),
 		["GP mean", mean(g((p) => p.stats.gp))].concat(within(dy.gp.mean, 2.5)),
+
+		/* THE POTENTIAL DISTRIBUTION, as an aggregate.
+
+		   POT_BY_ARCHETYPE is 117 hand-tuned constants spanning -6 to +9, and
+		   potFactors adds five more terms on top of them. Every one of those is
+		   defensible on its own and nothing checked what they came to together:
+		   the whole potential model could drift by three points a class, or
+		   collapse to a single value, or invert against the source file, and
+		   every existing row would still pass. Individual stats are banded; the
+		   thing the archetype table is actually FOR was not.
+
+		   Three rows, because a distribution is not one number:
+
+		     - The mean gap, against the file's own mean gap. In "preserve" mode
+		       the tool promises not to inflate the class; a potential model that
+		       adds four points of ceiling to the average prospect breaks that
+		       promise without touching a single ovr.
+		     - The spread of the gap, which is what potSpread is for. A class
+		       where every prospect has the same ceiling is not a draft board.
+		     - The correlation between a build's POT_BY_ARCHETYPE entry and the
+		       gap its players actually come out with. This is the row that says
+		       the table is DOING something: if it drops toward zero, the
+		       archetype signal has been swamped by the five other terms and the
+		       97 constants are decoration. */
+		["Pot gap mean vs source", mean(g((p) => p.newPot - p.newOvr)) -
+			mean(g((p) => p.origPot - p.origOvr))].concat(within(0, 3.2)),
+		["Pot gap sd", sd(g((p) => p.newPot - p.newOvr))].concat(within(6.5, 3.0)),
+		["corr(archetype potential, gap)",
+			corr(g((p) => global.RatingsBuilder.POT_BY_ARCHETYPE[p.archetype] || 0),
+				g((p) => p.newPot - p.newOvr))].concat(corrBand(0.12, 0.70)),
 
 	];
 
@@ -686,6 +755,27 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   used to put a quarter of a realistic class under 9 points a game —
 		   not to forbid a late second-rounder having a quiet year. */
 		["PPG p10, bottom third of class", pct(bottomThird, 0.10), 6.0, 11.5],
+		/* THE MIDDLE OF THE CLASS HAS TO STAY AN ARGUMENT.
+
+		   The 30th and 40th prospects reading as interchangeable is the
+		   complaint this row exists to catch, and it is a complaint about a
+		   SPREAD, which no per-stat mean or percentile can see: a class whose
+		   middle all scores 12.5 passes every other row in this file. Real
+		   boards have a ten-point scoring gap among similarly-ranked prospects,
+		   which is what makes ranking them a judgement rather than a sort.
+
+		   Measured on the current model the middle runs 8.8 at the 10th
+		   percentile to 19.8 at the 90th, so the band is set around that with
+		   room either side. Widening ROLE_DRAW_SD and narrowing USG_FLOOR_BAND
+		   was the obvious lever and is the wrong one: it moves the whole
+		   distribution, so it buys 0.3 points of spread in the middle and puts
+		   PPG p95 and the scoring leader outside their own bands, which are
+		   fitted against real D-I seasons. The middle is wide because the role
+		   draw and the soft floor are already doing their job; this row is what
+		   stops that being undone by accident. */
+		["Mid-class PPG spread (p90 - p10)",
+			pct(midClass, 0.90) - pct(midClass, 0.10)].concat(within(11.0, 3.0)),
+		["Mid-class PPG p10", pct(midClass, 0.10)].concat(within(8.8, 2.2)),
 		/* Build must not decide scoring the way quality does. At equal overall
 		   rating the spread once ran from -4.9 points (Defensive Pest) to +4.9
 		   (Score-First Point) — 9.8 points, against 7.0 across the whole

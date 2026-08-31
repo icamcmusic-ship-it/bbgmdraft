@@ -251,9 +251,12 @@ pixels the table becomes one card per prospect.
 | **Potential bias / spread** | How far pot sits above ovr, and how much it varies. These do not re-play the season — potential is computed after it — but they are not cosmetic: the mock draft board scores `(pot − ovr) × 0.65`, so moving them moves the board. |
 | **Specialisation** | 0 = BBGM's fairly uniform builds, 2.5 = extreme specialists. |
 | **Archetype diversity** | Exactly `100 − v`% of the class stays Balanced. |
-| **Class flavour** | How strongly each class leans one way (guard-heavy, defence-first, a weak year, one-and-done heavy, a transfer-portal year, …). Some flavours also bend the class itself — how old it is, how good the top of it is — but only settings you have left at their default. |
+| **Class flavour** (the dropdown) | Which of the 29 flavours this class gets, instead of drawing one. Asking for "big-heavy" used to mean setting the strength to 2 and rerolling until it came up — which replaces the class you were keeping the seed for. |
+| **Flavour strength** | How strongly the flavour leans (guard-heavy, defence-first, a weak year, one-and-done heavy, a transfer-portal year, European in style, a post-up renaissance, feast or famine, a coaching carousel year, …). Some flavours also bend the class itself — how old it is, how good the top of it is — but only settings you have left at their default. |
+| **Variation** | The neighbourhood of a seed. 0 is the class that seed has always produced. 1, 2, 3… keep its flavour, its build pool and its curve and re-roll every individual player, so the year is still "the year of the stretch bigs, weak at the top" and the sixty-eight men in it are different. Every shareable link ever made is variation 0, so none of them moved. |
+| **Avoid repeating recent builds** | How hard a build that was in one of the last three classes is pushed out of this one. Measured, the four heaviest builds returned in 14% of pools with this off and 6% with it at full strength — the ordering the weights describe survives, the repetition does not. |
 | **Builds per class** | How many of the 98 archetypes one class is drawn from. Lower is more distinctive ("the year of the stretch bigs"); 0 makes every build eligible in every class, which is one of everything, every time. |
-| **Anomalies per class** | How many forced surprises a class gets, drawn from twenty-three kinds: a five-star bust, an unranked riser, a 24-year-old JUCO, a 7'4" project, the coach's son, a man who never played a high school game, a season that ended in February. |
+| **Anomalies per class** | How many forced surprises a class gets, drawn from twenty-nine kinds: a five-star bust, an unranked riser, a 24-year-old JUCO, a 7'4" project, the coach's son, a man who never played a high school game, a season that ended in February — and six that change the numbers rather than the note: a suspension, an eligibility hold that costs the first ten games, a mid-season transfer, a double-double machine, a defensive breakout, and a year-long shooting slump that costs about seven points of 3P% off what his jumper says. |
 | **Realignment** | How often the map of college basketball changes. A realignment moves two to five good programmes one rung up, and every conference stays schedulable. |
 | **Earlier seasons** | `Simulate` runs each of a prospect's previous college years through the same stat model the draft year goes through. `Reconstruct` is the older behaviour: a backward-scaled copy of the draft-year line. |
 | **Build noise** | Per-rating jitter. |
@@ -266,8 +269,12 @@ pixels the table becomes one card per prospect.
 | **Stat randomness** | Season-to-season luck. Division I only — every professional league abroad has its own environment. |
 | **Injuries** | How injury-prone the season is. Drawn *before* a game is played, so a team's record and its selection resume respond to who was missing and when. |
 | **March upsets** | 0 = chalk, 2 = total madness. Applies to the postseason only, which is why re-simulating March costs about 90ms and not a whole season. |
+| **Hot and cold streaks** | How far a team's season wanders around its own rating. Every game used to be an independent draw, so a season had a trend and no shape — no five-game run that put a bubble team in the field, no 2-8 stretch after the best player went down. |
+| **Events during the season** | A top-ten upset, the game of the year, a coach fired in January, a fourteen-game winning streak, a snowstorm postponement. All of them are read off results the simulation already produced, so none of them can contradict a box score. |
+| **Draft-day events** | What happens between the last game and the pick: a medical flag, a workout riser, a team trading up, a late-first reach, a green-room slide. 0 leaves the board as a plain ranking. |
+| **Voter disagreement** | How far the award voters stray from the arithmetic. The six player-of-the-year trophies have their own electorates, each weighting the team's resume differently — the coaches' and broadcasters' panels lean on it, the writers' lean away — scaled by a mood drawn once per class, so some years the argument is about the best player and some years about the best team. |
 | **National / conference / abroad award strictness** | Three separate dials. This used to be one slider driving three different mechanisms. |
-| **Archetype frequencies** | Per-build rarity weights for every archetype, grouped by guards / wings / bigs / any size with a ×2 and ×½ per group, and showing what share of the last generated class each build actually came out as. Hover a name to see its offset vector. |
+| **Archetype frequencies** | Per-build rarity weights for every archetype, grouped by guards / wings / bigs / any size with a ×2 and ×½ per group, and showing what share of the last generated class each build actually came out as. Searchable by name or by tag ("shooting" finds the twenty builds that shoot, not the one called it), and each group folds. Hover a name to see its offset vector. |
 | **Note template** | Which lines are written into each player's exported note. |
 
 Every control says which phases it re-runs, so a slider that costs 0.6 ms and one
@@ -438,7 +445,7 @@ source file lacked them), and the file is written with a BOM the same way BBGM w
 its own exports (so is the CSV — Excel reads a BOM-less UTF-8 file as the system
 code page, which turns Dončić into mojibake). Load it back with **Tools → Import → Draft class**.
 
-The ▾ button next to it also exports the prospect table as CSV, the whole simulated
+The **More ▾** button next to it also exports the prospect table as CSV, the whole simulated
 season (records, bracket, awards, draft board) as JSON or CSV, the note text alone
 for a spreadsheet, and imports locks back in from a CSV so a round trip through a
 spreadsheet works.
@@ -502,8 +509,21 @@ tools/golden.json   recorded output hashes
   and national-team summers do not.
 * Below 700 pixels the prospect table becomes one card per prospect, because a
   forty-column table on a 390-pixel screen is a horizontal scroll however it is
-  arranged. Below 860 the settings panel becomes a toggle in the header rather
-  than eight fieldsets between the user and the table.
+  arranged — and a card is the twelve fields a scout reads first, not the same
+  forty stacked, because that is a taller version of the same problem. The
+  layout control in the table bar overrides the width, and "all columns" opts
+  back in to everything. Below 860 the settings panel becomes a toggle in the
+  header rather than eight fieldsets between the user and the table.
+* The pro-league side of the international pipeline is biography, not
+  simulation. A prospect abroad carries a youth system, a first-team debut age,
+  a loan spell and age-group national-team caps, drawn from the club and league
+  he is actually in and from his own birth country when the file gives one —
+  the international equivalent of the recruiting rank every NCAA prospect has.
+  None of it is a season that was played.
+* A mid-season transfer is modelled as the games he sat waiting to be cleared,
+  plus the biography. He does not get a partial line at the school he left:
+  that needs two rosters and two rotations for one player, which is a larger
+  change than the anomaly is worth.
 * The field's stars are synthetic. A returning player's talent was drawn from
   his programme's level and nothing else, so the best player in the country was
   by construction always somebody in the draft class and the national player of

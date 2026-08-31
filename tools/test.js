@@ -1012,8 +1012,19 @@ console.log("\nStaged pipeline coverage");
 		classFlavor: 0, specialization: 2.4, pace: 78, statNoise: 2,
 	};
 	const runner = global.Engine.createRunner(lf);
+	/* The fingerprint has to cover everything a setting can move, not only the
+	   numbers. surpriseBudget draws more anomalies, and most anomalies are
+	   biography — a decommitment, a hometown story — which changes the class
+	   without changing anyone's ovr, build or scoring. The old fingerprint read
+	   those three fields only, so whether this probe passed depended on which
+	   anomalies the draw happened to produce: it passed while the pool was
+	   mostly mechanical and started failing the moment more biographical ones
+	   were added, which is a test measuring the wrong thing rather than a
+	   regression. */
 	const fingerprint = (res) => res.players.map((p) =>
-		p.newOvr + "/" + p.archetype + "/" + (p.stats ? p.stats.ppg.toFixed(2) : "-")).join("|");
+		p.newOvr + "/" + p.archetype + "/" + (p.stats ? p.stats.ppg.toFixed(2) : "-") +
+		"/" + (p.surprise ? p.surprise.name : "") + "/" + (p.backstory || "") +
+		"/" + (p.classYear || "") + "/" + (p.newCollege || "")).join("|");
 	const baseline = fingerprint(runner.run(global.Config.make({ seed: "deps" })));
 	for (const key of Object.keys(probes)) {
 		const cfg = global.Config.make({ seed: "deps" });
@@ -1416,6 +1427,911 @@ console.log("\nArchetype rarity ordering");
 		absent.length === 0,
 		absent.length + " builds never drawn: " +
 			absent.map((a) => a.name).join(", "));
+}
+
+/* ------------------------------------------------------- the bug-fix pass */
+console.log("\nBounds, shapes and guards");
+{
+	/* Rng.int: the guard that folds hi + 1 back onto hi is unreachable, so the
+	   distribution is flat rather than double-weighted at the top. Both claims
+	   are measured, because the argument for them is a floating-point one. */
+	let ones = 0;
+	let twos = 0;
+	let outOfRange = 0;
+	for (let s = 0; s < 200; s++) {
+		const r = new Rng("intbias" + s);
+		for (let i = 0; i < 3000; i++) {
+			const v = r.int(1, 2);
+			if (v < 1 || v > 2) outOfRange++;
+			else if (v === 2) twos++;
+			else ones++;
+		}
+	}
+	const share = twos / (ones + twos);
+	ok("rng.int never leaves its range", outOfRange === 0,
+		outOfRange + " draws outside [1, 2]");
+	ok("rng.int(1, 2) is flat, not 2:1 toward the top",
+		Math.abs(share - 0.5) < 0.005,
+		"share of 2s was " + share.toFixed(5));
+
+	/* The raw formula, without the clamp: if the clamp were load-bearing this
+	   would produce 3s, and the measured share above would be 2/3. */
+	let raw = 0;
+	for (let s = 0; s < 200; s++) {
+		const r = new Rng("intraw" + s);
+		for (let i = 0; i < 3000; i++) if (Math.floor(1 + 2 * r.random()) > 2) raw++;
+	}
+	ok("rng.int's upper clamp is a guard, not a correction", raw === 0,
+		raw + " unclamped draws overflowed");
+
+	// Wider spans, and a reversed range, which used to return lo - 1 or worse.
+	let bad = 0;
+	const r3 = new Rng("intspan");
+	for (let i = 0; i < 200000; i++) {
+		const v = r3.int(0, 320);
+		if (v < 0 || v > 320) bad++;
+	}
+	ok("rng.int is in range for a wide span", bad === 0);
+	ok("rng.int handles a reversed range", new Rng("rev").int(5, 2) === 5);
+}
+
+{
+	/* softBound's two composition orders agree to well under the smallest gap
+	   between two builds' role usage, so applying the lower bound first is not
+	   a double squeeze of the bottom of the range. */
+	const { lo, hi, band } = RB.ROLE_FIT;
+	let worst = 0;
+	let worstAt = 0;
+	for (let x = lo - band; x <= hi + band; x += 0.001) {
+		const e = RB.softBoundOrderError(x, lo, hi, band);
+		if (e > worst) { worst = e; worstAt = x; }
+	}
+	ok("softBound does not depend on which bound is applied first",
+		worst < 1e-5,
+		"worst order disagreement " + worst.toExponential(2) + " at x = " +
+			worstAt.toFixed(3));
+
+	// Monotone, and strictly inside both bounds everywhere.
+	let monotone = true;
+	let inside = true;
+	let prev = -Infinity;
+	for (let x = -2; x <= 6; x += 0.005) {
+		const v = RB.softBound(x, lo, hi, band);
+		if (v <= prev) monotone = false;
+		if (v <= lo - band * 1.0001 || v >= hi) inside = false;
+		prev = v;
+	}
+	ok("softBound is monotone", monotone);
+	ok("softBound never reaches its upper bound", inside);
+}
+
+{
+	// findSeason: the gameAttributes history-row forms, including the ones
+	// that used to fall through to the player scan.
+	const fs2 = global.Engine.findSeason;
+	ok("findSeason reads the newest gameAttributes history row",
+		fs2({ gameAttributes: { season: [{ start: 2024, value: 2024 },
+			{ start: 2026, value: 2026 }] } }) === 2026);
+	ok("findSeason skips a malformed newest history row",
+		fs2({ gameAttributes: { season: [{ start: 2024, value: 2024 },
+			{ start: 2026 }] } }) === 2024);
+	ok("an empty gameAttributes history falls through rather than throwing",
+		fs2({ gameAttributes: { season: [] } }) === null);
+	ok("an empty history still finds the season on the players",
+		fs2({ gameAttributes: { season: [] },
+			players: [{ draft: { year: 2031 } }] }) === 2031);
+	ok("findSeason reads the array-of-rows gameAttributes form",
+		fs2({ gameAttributes: [{ key: "startingSeason", value: 2027 }] }) === 2027);
+}
+
+{
+	/* Team rebounds are re-floored after the two halves are rescaled onto the
+	   combined pool. Feed reconcileTeamTotals a line the rescale would push
+	   negative if the floor were missing. */
+	const S = global.StatsSim;
+	const fit = S.fitToPool([1, -3, 2], 12, 0.6);
+	ok("fitToPool never emits a negative share",
+		fit.every((v) => v >= 0), JSON.stringify(fit));
+	const lines = [
+		{ orpg: 2, drpg: 5, apg: 3, spg: 1, bpg: 1, pfpg: 2, rpg: 7 },
+		{ orpg: 0.02, drpg: 0.01, apg: 1, spg: 0, bpg: 0, pfpg: 1, rpg: 0.03 },
+		{ orpg: 4, drpg: 9, apg: 2, spg: 1, bpg: 2, pfpg: 3, rpg: 13 },
+	];
+	S.reconcileTeamTotals(lines, {
+		astPool: 13, stlPool: 6, blkPool: 3, pfPool: 17,
+		orbPool: 9, drbPool: 24,
+	});
+	ok("no reconciled rebound line is negative",
+		lines.every((l) => l.orpg >= 0 && l.drpg >= 0 && l.rpg >= 0),
+		JSON.stringify(lines.map((l) => [l.orpg, l.drpg])));
+	ok("reconciled rebound halves still sum to the total",
+		lines.every((l) => Math.abs(l.rpg - (l.orpg + l.drpg)) < 1e-9));
+}
+
+{
+	/* exportFile writes hgt/weight only for a size override, and the list of
+	   keys that count as one is declared rather than inferred. */
+	const keys = global.Engine.SIZE_OVERRIDE_KEYS;
+	ok("the size-override key list is declared",
+		Array.isArray(keys) && keys.indexOf("hgtInches") !== -1 &&
+			keys.indexOf("weight") !== -1 && keys.length === 2,
+		JSON.stringify(keys));
+
+	const withSize = (ov) => {
+		const lf = V.syntheticClass(11, 12);
+		for (const p of lf.players) { p.hgt = 78; p.weight = 220; }
+		const cfg = global.Config.make({ seed: "sizeguard" });
+		const res = global.Engine.run(lf, cfg);
+		if (ov) res.players[0].override = ov;
+		return global.Engine.exportFile(res).players[0];
+	};
+	ok("a non-size lock does not rewrite hgt/weight",
+		withSize({ ovr: 55, archetype: "Balanced", name: "A B" }).hgt === 78);
+	ok("a size lock does rewrite hgt", withSize({ hgtInches: 84 }).hgt !== undefined);
+}
+
+/* --------------------------------------------- the archetype/solver audit */
+console.log("\nArchetype table and solver audit");
+{
+	// The four coverage builds exist, are eligible somewhere, and each has a
+	// potential entry — the failure mode that made Injury-Prone Talent the
+	// highest-scoring build in the class was a build with no entry.
+	const added = ["Screen Navigator", "Secondary Creator", "Zone Buster",
+		"Matchup-Zone Defender"];
+	const byName = {};
+	for (const a of RB.ARCHETYPES) byName[a.name] = a;
+	ok("the four coverage builds are in the table",
+		added.every((n) => byName[n]));
+	ok("each carries a potential entry",
+		added.every((n) => Number.isFinite(RB.POT_BY_ARCHETYPE[n])));
+	ok("each carries a role usage",
+		added.every((n) => Number.isFinite(RB.ROLE_USAGE[n])));
+	// Matchup-Zone Defender is the 6'7"-6'9" band specifically, which is what
+	// separates it from Switchable Big and Wing Stopper.
+	const mz = byName["Matchup-Zone Defender"];
+	ok("the matchup-zone build is gated to the forward band",
+		mz.min >= 50 && mz.max <= 68, mz.min + "-" + mz.max);
+	// Screen Navigator's identity is the movement, not the shot: its largest
+	// offset must not be a shooting rating.
+	const sn = RB.RAW_OFFSETS["Screen Navigator"];
+	const biggest = Object.keys(sn).sort((a, b) => sn[b] - sn[a])[0];
+	ok("the screen-navigator build's signature is conditioning, not shooting",
+		biggest === "endu", "largest offset was " + biggest);
+}
+
+{
+	/* The usage protection is scaled by what the build loaded on the usage
+	   composite itself, so an offence-loaded build no longer collects a
+	   defensive build's compensation. */
+	const W = { ins: 1.5, dnk: 1, fg: 1, tp: 1, spd: 0.5, hgt: 0.5, drb: 0.5, oiq: 0.5 };
+	const du = (name) => {
+		const o = RB.RAW_OFFSETS[name] || {};
+		let d = 0;
+		for (const k of Object.keys(o)) d += (W[k] || 0) * o[k];
+		return d / 650;
+	};
+	ok("an offence-loaded build reads positive on the usage composite",
+		du("Score-First Point") > 0.03 && du("Combo Guard") > 0.02,
+		"Score-First Point " + du("Score-First Point").toFixed(4));
+	ok("a defensive build reads negative on it",
+		du("Rim Protector") < -0.02 && du("Defensive Pest") < -0.02);
+
+	/* The measurable consequence: after normalisation the offence-loaded
+	   builds should not have kept MORE composite than they authored. */
+	const kept = (name) => RB.usageCompositeDelta(
+		RB.ARCHETYPES.filter((a) => a.name === name)[0]);
+	ok("normalisation no longer inflates an offence-loaded build's composite",
+		kept("Score-First Point") <= du("Score-First Point") + 1e-9,
+		"authored " + du("Score-First Point").toFixed(4) + ", kept " +
+			kept("Score-First Point").toFixed(4));
+}
+
+{
+	/* The creation term is residualised against the tags, so it separates two
+	   builds that share a tag and do not share a creation profile. */
+	const of = (n) => RB.ARCHETYPES.filter((a) => a.name === n)[0];
+	const helio = RB.creationDelta(of("Heliocentric Guard"));
+	const sharp = RB.creationDelta(of("Sharpshooter"));
+	ok("creation separates a heliocentric guard from a sharpshooter",
+		helio - sharp > 0.5,
+		"helio " + helio.toFixed(3) + " vs sharp " + sharp.toFixed(3));
+	ok("creation is centred: the table's tag-weighted mean is near zero",
+		Math.abs(RB.ARCHETYPES.reduce((a, x) => a + RB.creationDelta(x), 0) /
+			RB.ARCHETYPES.length) < 0.15);
+	ok("the fitted creation weight is no longer a rounding error",
+		RB.ROLE_FIT.createW >= 0.04, String(RB.ROLE_FIT.createW));
+}
+
+{
+	/* ovrRange reports the reach of the shift model, not the point the search
+	   stopped at: every rating saturates at both ends. */
+	const mk = (over) => {
+		const o = {};
+		for (const k of BB.RATING_KEYS) o[k] = 50;
+		return Object.assign(o, over || {});
+	};
+	const balanced = RB.ARCHETYPES.filter((a) => a.name === "Balanced")[0];
+	const mid = RB.ovrRange(mk(), balanced, null);
+	ok("a mid-height base can be solved across the whole scale",
+		mid.min === 0 && mid.max === 100, mid.min + "-" + mid.max);
+	// A 7-footer's fixed hgt rating genuinely stops him reaching the bottom.
+	const tall = RB.ovrRange(mk({ hgt: 92 }), balanced, null);
+	ok("a very tall base still cannot be solved to the floor", tall.min > mid.min,
+		"tall min " + tall.min);
+	// And every ovr the range calls reachable is reached, at the new width.
+	let unreached = 0;
+	for (let t = mid.min; t <= mid.max; t += 5) {
+		const solved = RB.solveToOvr(mk(), t, balanced, null);
+		if (Math.abs(BB.ovr(solved) - t) > 1) unreached++;
+	}
+	ok("every ovr the widened range calls reachable is reached", unreached === 0,
+		unreached + " targets missed");
+}
+
+{
+	/* The height-to-weight model is a curve, and it is right at the ends
+	   rather than only in the middle. */
+	const tw = RB.typicalWeight;
+	const anchors = [[66, 165], [72, 188], [78, 215], [84, 250], [90, 295]];
+	const worst = Math.max.apply(null, anchors.map(([h, w]) => Math.abs(tw(h) - w)));
+	ok("typical weight fits its anchors at both ends", worst < 2,
+		"worst miss " + worst.toFixed(1) + "lb");
+	const oldLine = (h) => 5.05 * h - 178;
+	ok("the old straight line was the thing that missed",
+		Math.abs(oldLine(90) - 295) > 15 && Math.abs(oldLine(66) - 165) > 8,
+		"linear at 90in: " + oldLine(90).toFixed(0) + "lb against 295");
+	let mono = true;
+	for (let h = 62; h < 94; h++) if (tw(h + 1) <= tw(h)) mono = false;
+	ok("typical weight is monotone across the basketball range", mono);
+}
+
+{
+	/* potFromRole's load term is measured against the player's own build, so
+	   it no longer pays a build for having that build's usage. */
+	const stats = { usg: 0.20, mpg: 30, ppg: 12, rpg: 8, apg: 1.5, ts: 0.58 };
+	const againstClass = RB.potFromRole(stats, "Freshman", RB.ROLE_USG_CENTRE);
+	const againstBuild = RB.potFromRole(stats, "Freshman", 0.20);
+	ok("a low-usage line scores lower against its own build's usage than " +
+		"against the class centre", againstBuild < againstClass,
+		againstBuild.toFixed(2) + " vs " + againstClass.toFixed(2));
+	ok("potFromRole still falls back to the class centre",
+		Math.abs(RB.potFromRole(stats, "Freshman") - againstClass) < 1e-9);
+	// And the build-driven part of the term is gone from a real class.
+	const byArch = {};
+	for (let s = 0; s < 6; s++) {
+		const res = global.Engine.run(V.realisticClass(s, 70),
+			global.Config.make({ seed: "potref" + s }));
+		for (const p of res.players) {
+			if (p.nonNcaa || !p.stats || !p.potFactors) continue;
+			(byArch[p.archetype] = byArch[p.archetype] || []).push(p.stats.usg);
+		}
+	}
+	const means = Object.keys(byArch).filter((k) => byArch[k].length >= 10)
+		.map((k) => byArch[k].reduce((a, b) => a + b, 0) / byArch[k].length);
+	const oldLoadSpread = means.length > 1
+		? (Math.max.apply(null, means) - Math.min.apply(null, means)) * 26 * 0.55 : 0;
+	ok("the usage spread across builds was worth real potential, and is " +
+		"no longer read as a breakout signal", oldLoadSpread > 0.3,
+		"builds differed by " + oldLoadSpread.toFixed(2) +
+			" points of potential under the old class-wide reference");
+}
+
+/* --------------------------------------- variation, memory and narrative */
+console.log("\nExploring a seed's neighbourhood");
+{
+	const lf = () => V.realisticClass(3, 70);
+	const run = (over) => global.Engine.run(lf(),
+		global.Config.make(Object.assign({ seed: "neighbour" }, over)));
+	const base = run({});
+	const same = run({ variation: 0 });
+	const v1 = run({ variation: 1 });
+	const v2 = run({ variation: 2 });
+	const arch = (r) => r.players.map((p) => p.archetype).join("|");
+
+	ok("variation 0 reproduces the seed exactly", arch(base) === arch(same));
+	ok("the class-level shape survives a variation",
+		base.flavor.name === v1.flavor.name &&
+			JSON.stringify(base.archetypePool) === JSON.stringify(v1.archetypePool));
+	const kept = base.players.filter((p, i) => p.archetype === v1.players[i].archetype).length;
+	ok("a variation re-rolls the individual players",
+		kept < base.players.length * 0.35,
+		kept + " of " + base.players.length + " builds unchanged");
+	ok("two variations differ from each other", arch(v1) !== arch(v2));
+	ok("a variation is itself reproducible",
+		arch(v1) === arch(run({ variation: 1 })));
+	// A variation must not change the class's IDENTITY, only its members.
+	ok("a variation keeps the class's overall level",
+		Math.abs(
+			base.players.reduce((a, p) => a + p.newOvr, 0) / base.players.length -
+			v1.players.reduce((a, p) => a + p.newOvr, 0) / v1.players.length) < 2.5);
+}
+
+{
+	// A flavour can be asked for rather than only drawn.
+	const ask = (name) => global.Engine.run(V.realisticClass(4, 70),
+		global.Config.make({ seed: "hint", flavorHint: name })).flavor;
+	ok("a flavour hint is honoured", ask("big-heavy").name === "big-heavy");
+	ok("an asked-for flavour says so", ask("defensive").asked === true);
+	ok("a hint for a flavour that does not exist falls back to the draw",
+		!!ask("no such flavour").name && ask("no such flavour").asked === false);
+	ok("no hint still draws",
+		global.Engine.run(V.realisticClass(4, 70),
+			global.Config.make({ seed: "hint" })).flavor.asked === false);
+}
+
+{
+	/* Pool exclusion memory: a build that was in the last few pools is pushed
+	   toward the back of the queue rather than banned. */
+	const recent = [["Combo Guard", "Rim Runner"], ["Combo Guard"], ["Combo Guard"]];
+	ok("a build in every recent pool is penalised",
+		RB.poolMemoryFactor("Combo Guard", recent, 1) < 0.4,
+		String(RB.poolMemoryFactor("Combo Guard", recent, 1)));
+	ok("the penalty fades with age",
+		RB.poolMemoryFactor("Combo Guard", recent, 1) <
+			RB.poolMemoryFactor("Rim Runner", recent, 1));
+	ok("a build in no recent pool is untouched",
+		RB.poolMemoryFactor("Point Center", recent, 1) === 1);
+	ok("memory 0 is a no-op",
+		RB.poolMemoryFactor("Combo Guard", recent, 0) === 1);
+	ok("a penalised build is not banned",
+		RB.poolMemoryFactor("Combo Guard", recent, 1) > 0);
+
+	/* End to end, on the thing actually complained about: how often the
+	   heaviest builds come back class after class. Measured on the pool draw
+	   directly rather than through a full season, so the sample is large
+	   enough for the effect to be visible above the noise — the whole point of
+	   the memory is a shift of ten points in a rate, and twenty engine runs
+	   cannot resolve that. */
+	const COMMON = ["Combo Guard", "3&D Wing", "Rim Runner", "Slasher"];
+	const recurrence = (memory) => {
+		const history = COMMON.length
+			? [COMMON.slice(), COMMON.slice(), COMMON.slice()] : [];
+		let hits = 0;
+		const N = 400;
+		for (let s = 0; s < N; s++) {
+			const cfg = global.Config.make({
+				poolMemory: memory, recentPools: memory ? history : null,
+			});
+			const pool = RB.pickClassPool(new Rng("poolmem" + s), cfg, null) || [];
+			const names = pool.map((a) => a.name);
+			hits += COMMON.filter((n) => names.indexOf(n) !== -1).length;
+		}
+		return hits / (N * COMMON.length);
+	};
+	const off = recurrence(0);
+	const on = recurrence(1);
+	ok("the exclusion memory reduces how often the commonest builds recur",
+		on < off * 0.8,
+		"the four heaviest builds returned " + (off * 100).toFixed(0) +
+			"% of the time with the memory off and " + (on * 100).toFixed(0) +
+			"% with it on");
+}
+
+{
+	/* Team momentum: an autocorrelated arc, centred so it moves a season's
+	   shape without moving its level. */
+	const T = global.TeamsSim;
+	const arc = T.momentumArc(new Rng("arc"), { teamMomentum: 1 });
+	ok("the momentum arc has a knot per stretch of the season",
+		arc.length === T.ARC_KNOTS);
+	ok("the arc is centred", Math.abs(arc.reduce((a, b) => a + b, 0)) < 1e-9);
+	ok("momentum can be turned off",
+		T.momentumArc(new Rng("arc"), { teamMomentum: 0 }) === null);
+	// Autocorrelated: neighbouring knots agree more than distant ones do.
+	let near = 0;
+	let far = 0;
+	for (let s = 0; s < 400; s++) {
+		const a = T.momentumArc(new Rng("m" + s), { teamMomentum: 1 });
+		for (let i = 0; i < a.length - 3; i++) {
+			near += a[i] * a[i + 1];
+			far += a[i] * a[i + 3];
+		}
+	}
+	ok("the arc is autocorrelated, so a season has streaks in it",
+		near > far * 1.5 && near > 0,
+		"lag-1 " + near.toFixed(0) + " vs lag-3 " + far.toFixed(0));
+	// Interpolation is continuous and hits the knots.
+	const t = { arc };
+	ok("the arc interpolates through its knots",
+		Math.abs(T.arcAt(t, 0) - arc[0]) < 1e-9 &&
+		Math.abs(T.arcAt(t, 1) - arc[arc.length - 1]) < 1e-9);
+	ok("a team with no arc is unaffected", T.arcAt({}, 0.5) === 0);
+}
+
+{
+	/* Awards: a voter mood that is not the same every season, and electorates
+	   that weight the team's resume differently from one another. */
+	const AW = global.Awards;
+	const leans = AW.NATIONAL_POY.map((a) => a.resume);
+	ok("the electorates do not all weight the resume the same",
+		Math.max.apply(null, leans) - Math.min.apply(null, leans) > 0.3);
+	ok("at least one electorate does not care what the team did",
+		leans.some((v) => v < 0));
+
+	// Turning the noise off should make the trophies agree far more often.
+	const sweeps = (noise) => {
+		let swept = 0;
+		for (let s = 0; s < 10; s++) {
+			const res = global.Engine.run(V.realisticClass(s, 70),
+				global.Config.make({ seed: "vote" + s, awardNoise: noise }));
+			const winners = new Set();
+			for (const p of res.players) {
+				for (const a of p.awards || []) {
+					if (/^(Naismith Trophy|John R\. Wooden Award|Oscar Robertson Trophy|AP Player of the Year|NABC Player of the Year|Sporting News Player of the Year)$/.test(a)) {
+						winners.add(p.key);
+					}
+				}
+			}
+			if (winners.size <= 1) swept++;
+		}
+		return swept;
+	};
+	const quiet = sweeps(0);
+	const loud = sweeps(2);
+	ok("award noise decides whether the trophies split", loud <= quiet,
+		"clean sweeps: noise 0 -> " + quiet + ", noise 2 -> " + loud);
+}
+
+{
+	/* Draft-day events reorder the board and leave it consistent. */
+	const withEvents = global.Engine.run(V.realisticClass(2, 70),
+		global.Config.make({ seed: "draftday" }));
+	const without = global.Engine.run(V.realisticClass(2, 70),
+		global.Config.make({ seed: "draftday", draftEvents: 0 }));
+	ok("a draft produces events", withEvents.draftEvents.length >= 2,
+		String(withEvents.draftEvents.length));
+	ok("draft events can be turned off", without.draftEvents.length === 0);
+	const ranks = withEvents.board.map((p) => p.boardRank);
+	ok("board ranks stay unique and contiguous after the reordering",
+		new Set(ranks).size === ranks.length &&
+		Math.min.apply(null, ranks) === 1 &&
+		Math.max.apply(null, ranks) === ranks.length);
+	ok("the board is still ordered by rank",
+		withEvents.board.every((p, i) => p.boardRank === i + 1));
+	ok("every event names a player who is on the board",
+		withEvents.draftEvents.every((e) =>
+			withEvents.board.some((p) => p.key === e.key)));
+	ok("no player collects two draft-day events",
+		new Set(withEvents.draftEvents.map((e) => e.key)).size ===
+			withEvents.draftEvents.length);
+	// A faller really falls and a riser really rises.
+	const moved = withEvents.draftEvents.every((e) => {
+		const p = withEvents.board.filter((x) => x.key === e.key)[0];
+		return p && p.draftEvent && typeof p.draftEvent.text === "string";
+	});
+	ok("each event is recorded on the player it happened to", moved);
+	// The mock pick numbers still describe two rounds of thirty.
+	const firsts = withEvents.board.filter((p) => p.mockRound === 1);
+	ok("the mock board is still two rounds of thirty",
+		firsts.length === Math.min(30, withEvents.board.length) &&
+		firsts.every((p) => p.mockPick >= 1 && p.mockPick <= 30));
+}
+
+/* --------------------------------------- anomalies, pipelines and events */
+console.log("\nMechanical anomalies and season narrative");
+{
+	/* The six new anomalies change the numbers rather than only the note. Each
+	   is measured against the SAME class with the anomaly system off, so what
+	   is compared is one player's season against his own. */
+	const dt = { tpp: [], defl: [], dd: [], gpElig: [], gpSusp: [] };
+	for (let s = 0; s < 25; s++) {
+		const on = global.Engine.run(V.realisticClass(s % 6, 70),
+			global.Config.make({ seed: "anom" + s, surpriseBudget: 6 }));
+		const off = global.Engine.run(V.realisticClass(s % 6, 70),
+			global.Config.make({ seed: "anom" + s, surpriseBudget: 0 }));
+		const byKey = {};
+		for (const p of off.players) byKey[p.key] = p;
+		for (const p of on.players) {
+			const q = byKey[p.key];
+			if (!q || !q.stats || !p.stats) continue;
+			// Only compare a player the anomaly did not otherwise rebuild.
+			if (Math.abs(p.newOvr - q.newOvr) >= 1) continue;
+			if (p.shootingSlump) dt.tpp.push(p.stats.tpp - q.stats.tpp);
+			if (p.defensiveBreakout) dt.defl.push(p.stats.deflpg - q.stats.deflpg);
+			if (p.doubleDoubleMachine) {
+				dt.dd.push((p.stats.rpg + p.stats.apg) - (q.stats.rpg + q.stats.apg));
+			}
+			if (p.eligibilityHold) dt.gpElig.push(q.stats.gp - p.stats.gp);
+			if (p.surprise && p.surprise.name === "suspension") {
+				dt.gpSusp.push(q.stats.gp - p.stats.gp);
+			}
+		}
+	}
+	const mean2 = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
+	ok("a shooting slump actually costs three-point percentage",
+		dt.tpp.length > 0 && mean2(dt.tpp) < -0.04,
+		dt.tpp.length + " cases, mean " + (mean2(dt.tpp) * 100).toFixed(1) + " points");
+	ok("a defensive breakout actually produces defensive plays",
+		dt.defl.length > 0 && mean2(dt.defl) > 0.4,
+		dt.defl.length + " cases, mean +" + mean2(dt.defl).toFixed(2) + " deflections");
+	ok("a double-double machine actually rebounds or passes more",
+		dt.dd.length > 0 && mean2(dt.dd) > 0.8,
+		dt.dd.length + " cases, mean +" + mean2(dt.dd).toFixed(2));
+	ok("an eligibility hold actually costs games",
+		dt.gpElig.length === 0 || mean2(dt.gpElig) > 5,
+		dt.gpElig.length + " cases, mean " + mean2(dt.gpElig).toFixed(1) + " games");
+	ok("a suspension costs games, and fewer of them than an injury",
+		dt.gpSusp.length === 0 ||
+			(mean2(dt.gpSusp) > 0.5 && mean2(dt.gpSusp) < 8),
+		dt.gpSusp.length + " cases, mean " + mean2(dt.gpSusp).toFixed(1) + " games");
+
+	// A suspension is an absence, not an injury: the team does not plan
+	// around it, which is what `injury: false` means to applyOutages.
+	const susp = global.Engine.SURPRISES.filter((k) => k.name === "suspension")[0];
+	ok("the suspension anomaly exists and is not an injury", !!susp);
+	// The double-double machine must never land on somebody who cannot do it.
+	let implausible = 0;
+	for (let s = 0; s < 20; s++) {
+		const res = global.Engine.run(V.realisticClass(s % 5, 70),
+			global.Config.make({ seed: "dd" + s, surpriseBudget: 6 }));
+		for (const p of res.players) {
+			if (p.doubleDoubleMachine && p.newRatings.hgt < 52 && p.newRatings.pss < 60) {
+				implausible++;
+			}
+		}
+	}
+	ok("the double-double anomaly never lands on a player who could not do it",
+		implausible === 0, implausible + " implausible cases");
+}
+
+{
+	/* Flavour config bends reach the phases that own the settings they bend.
+	   Four flavours exist mainly to move potBias and potSpread and phasePot
+	   read state.cfg, so none of them did anything. */
+	const gap = (hint) => {
+		const all = [];
+		for (let s = 0; s < 6; s++) {
+			const res = global.Engine.run(V.realisticClass(s, 70),
+				global.Config.make(hint
+					? { seed: "bend" + s, flavorHint: hint }
+					: { seed: "bend" + s, classFlavor: 0 }));
+			for (const p of res.players) all.push(p.newPot - p.newOvr);
+		}
+		return all.reduce((a, b) => a + b, 0) / all.length;
+	};
+	const none = gap("");
+	ok("a flavour that lowers potential actually lowers it",
+		gap("veteran") < none - 1.5,
+		"veteran " + gap("veteran").toFixed(2) + " vs none " + none.toFixed(2));
+	ok("a flavour that raises potential actually raises it",
+		gap("one-and-done") > none + 1.5,
+		"one-and-done " + gap("one-and-done").toFixed(2));
+}
+
+{
+	/* A flavour's DESTINATION bend reaches assignCollege.
+
+	   Config.make folds the three legacy sliders (wEuroLeague, wGLeague, wNBL)
+	   into `leagueWeights`, which is the only thing assignCollege reads — and
+	   it does that at make() time, before any flavour bend runs. So a flavour
+	   that set wEuroLeague wrote a number nothing read. The "unusually
+	   international" flavour, whose entire purpose is to put more of the class
+	   abroad, produced EuroLeague at 11.9% of non-NCAA prospects against 11.9%
+	   with no flavour at all. */
+	const euroShare = (over) => {
+		let euro = 0;
+		let abroad = 0;
+		for (let s = 0; s < 8; s++) {
+			const res = global.Engine.run(V.realisticClass(s, 70),
+				global.Config.make(Object.assign({ seed: "dest" + s }, over)));
+			for (const p of res.players) {
+				if (!p.nonNcaa) continue;
+				abroad++;
+				if (p.newCollege === "EuroLeague") euro++;
+			}
+		}
+		return abroad ? euro / abroad : 0;
+	};
+	const plain = euroShare({ classFlavor: 0 });
+	const intl = euroShare({ flavorHint: "international" });
+	ok("a flavour's destination bend reaches the college assignment",
+		intl > plain * 1.3,
+		"EuroLeague share: no flavour " + (plain * 100).toFixed(1) +
+			"%, international " + (intl * 100).toFixed(1) + "%");
+	// And a user who edited the destination table is not overruled by it.
+	const mine = euroShare({ flavorHint: "international",
+		leagueWeights: { EuroLeague: 0 } });
+	ok("a destination the user set wins over the flavour", mine === 0,
+		(mine * 100).toFixed(1) + "%");
+}
+
+{
+	// The five new flavours exist and are distinguishable from the old ones by
+	// the tilt they apply, which is the fault they were added to fix.
+	const RBF = RB.CLASS_FLAVORS;
+	const added = ["euro-influenced", "post-up renaissance", "three-and-d only",
+		"feast or famine", "coaching carousel"];
+	ok("the five new flavours are in the table",
+		added.every((n) => RBF.some((f) => f.name === n)));
+	// Every flavour carries either a distinct tilt or a distinct bend.
+	const sig = (f) => JSON.stringify([f.m || {}, f.c || {}]);
+	const sigs = RBF.map(sig);
+	ok("no two flavours are the same flavour",
+		new Set(sigs).size === sigs.length);
+	// The post-up class really does shoot fewer threes than the big-heavy one.
+	const threes = (hint) => {
+		let tpa = 0;
+		let n = 0;
+		for (let s = 0; s < 4; s++) {
+			const res = global.Engine.run(V.realisticClass(s, 70),
+				global.Config.make({ seed: "fl" + s, flavorHint: hint }));
+			for (const p of res.players) {
+				if (p.nonNcaa || !p.stats) continue;
+				tpa += p.stats.tpa;
+				n++;
+			}
+		}
+		return tpa / n;
+	};
+	ok("the post-up class shoots fewer threes than the big-heavy one",
+		threes("post-up renaissance") < threes("big-heavy"),
+		threes("post-up renaissance").toFixed(2) + " vs " + threes("big-heavy").toFixed(2));
+	// The 3&D class really is made of fewer builds.
+	const builds = (hint) => {
+		const res = global.Engine.run(V.realisticClass(1, 70),
+			global.Config.make({ seed: "fl", flavorHint: hint }));
+		return new Set(res.players.filter((p) => !p.nonNcaa)
+			.map((p) => p.archetype)).size;
+	};
+	ok("the three-and-D class really is a class of four or five things",
+		builds("three-and-d only") < builds("balanced"),
+		builds("three-and-d only") + " builds vs " + builds("balanced"));
+}
+
+{
+	// Transfers know which way they went.
+	const dirs = {};
+	for (let s = 0; s < 8; s++) {
+		const res = global.Engine.run(V.realisticClass(s, 70),
+			global.Config.make({ seed: "tr" + s, transferShare: 60 }));
+		for (const p of res.players) {
+			if (p.transfer && p.transfer.direction) {
+				dirs[p.transfer.direction] = (dirs[p.transfer.direction] || 0) + 1;
+			}
+		}
+	}
+	ok("transfers are classified up, lateral and down",
+		dirs.up > 0 && dirs.lateral > 0 && dirs.down > 0, JSON.stringify(dirs));
+	// And the classification is right: an up transfer really went up.
+	let wrong = 0;
+	for (let s = 0; s < 6; s++) {
+		const res = global.Engine.run(V.realisticClass(s, 70),
+			global.Config.make({ seed: "tr" + s, transferShare: 60 }));
+		for (const p of res.players) {
+			const t = p.transfer;
+			if (!t || !t.direction) continue;
+			const step = t.toPrestige - t.fromPrestige;
+			if (t.direction === "up" && step <= 0) wrong++;
+			if (t.direction === "down" && step >= 0) wrong++;
+		}
+	}
+	ok("a transfer classified as a step up really went up", wrong === 0,
+		wrong + " misclassified");
+}
+
+{
+	// International prospects carry a development path.
+	const res = global.Engine.run(V.realisticClass(2, 70),
+		global.Config.make({ seed: "intl",
+			leagueWeights: { "EuroLeague": 60, "Liga ACB": 30, "NBL": 20 } }));
+	const abroad = res.players.filter((p) => p.nonNcaa && p.proPath);
+	ok("prospects abroad carry a development path", abroad.length > 0,
+		abroad.length + " of " + res.players.filter((p) => p.nonNcaa).length);
+	ok("every path names a youth system and a debut age",
+		abroad.every((p) => p.proPath.youth && p.proPath.debutAge));
+	ok("a debut age is younger than the player is now",
+		abroad.every((p) => p.proPath.debutAge <= (p.age || 19)));
+	ok("national-team caps name a country the league actually plays in",
+		abroad.every((p) => !p.proPath.caps || p.proPath.caps.country));
+	// The G League is not this story and must not get a European pathway.
+	const g = global.Engine.run(V.realisticClass(2, 70),
+		global.Config.make({ seed: "gl", leagueWeights: { "NBA G League": 80 } }));
+	ok("the G League gets no European academy pathway",
+		g.players.filter((p) => p.newCollege === "NBA G League")
+			.every((p) => !p.proPath));
+}
+
+{
+	// Statistical ranks against the whole of Division I, which is what turns a
+	// defensive number into a defensive fact.
+	const res = global.Engine.run(V.realisticClass(1, 70),
+		global.Config.make({ seed: "ranks" }));
+	const AWm = global.Awards;
+	const withRanks = res.players.filter((p) => !p.nonNcaa && p.statRanks &&
+		Object.keys(p.statRanks).length);
+	ok("prospects carry national and conference ranks", withRanks.length > 5,
+		withRanks.length + " with ranks");
+	ok("a rank is never worse than the cutoff that makes it worth saying",
+		withRanks.every((p) => Object.keys(p.statRanks).every((k) => {
+			const r = p.statRanks[k];
+			return (!r.national || r.national <= 50) && (!r.conf || r.conf <= 10);
+		})));
+	ok("defensive statistics are among the ranked ones",
+		AWm.RANKED_STATS.some((r) => r.key === "deflpg") &&
+		AWm.RANKED_STATS.some((r) => r.key === "drtg"));
+	// Defensive rating is ranked the right way round: low is good.
+	const best = withRanks.filter((p) => p.statRanks.drtg &&
+		p.statRanks.drtg.national === 1)[0];
+	if (best) {
+		const better = res.players.filter((p) => !p.nonNcaa && p.stats &&
+			p.stats.mpg >= 15 && p.stats.drtg < best.stats.drtg).length;
+		ok("defensive rating is ranked with low as good", better === 0,
+			better + " prospects had a better DRtg than the class's No. 1");
+	} else {
+		ok("defensive rating is ranked with low as good", true,
+			"no prospect led the country in DRtg in this class");
+	}
+	ok("rank highlights read as sentences",
+		withRanks.some((p) => AWm.rankHighlights(p, 2).length > 0));
+}
+
+{
+	// Mid-season events, all of them read off results that really happened.
+	const res = global.Engine.run(V.realisticClass(3, 70),
+		global.Config.make({ seed: "events" }));
+	ok("a season produces events", res.seasonEvents.length >= 4,
+		String(res.seasonEvents.length));
+	ok("season events can be turned off",
+		global.Engine.run(V.realisticClass(3, 70),
+			global.Config.make({ seed: "events", seasonEvents: 0 }))
+			.seasonEvents.length === 0);
+	ok("every event names at least one real programme",
+		res.seasonEvents.every((e) => e.teams && e.teams.length &&
+			e.teams.every((n) => !!res.teams[n])));
+	ok("events are in calendar order",
+		res.seasonEvents.every((e, i) =>
+			i === 0 || (res.seasonEvents[i - 1].when || 0) <= (e.when || 0)));
+	// A coaching change must name a team that really was losing.
+	for (const e of res.seasonEvents.filter((x) => x.kind === "coaching change")) {
+		const t = res.teams[e.teams[0]];
+		ok("a fired coach's team really was losing",
+			t && t.w / Math.max(1, t.games) < 0.35,
+			t ? t.w + "-" + t.l : "no team");
+	}
+	// The longest-run helper reads the schedule in calendar order.
+	ok("a winning streak is measured in calendar order",
+		global.TeamsSim.longestRun({ log: [
+			{ won: true, when: 0.9 }, { won: false, when: 0.5 },
+			{ won: true, when: 0.1 }, { won: true, when: 0.2 },
+		] }) === 2);
+}
+
+{
+	/* 6.5 and 6.6 in the audit: the Pac-12 membership and the pro club
+	   rosters. Both were already done in the tree, and a check is cheaper than
+	   remembering that. */
+	const CL = global.Colleges;
+	const PAC12 = ["Boise State", "Colorado State", "Fresno State",
+		"San Diego State", "Utah State", "Oregon State", "Washington State",
+		"Gonzaga"];
+	const misplaced = PAC12.filter((n) => CL.conferenceOf(n) !== "Pac-12");
+	ok("the schools the Pac-12 rebuild moved really are in it",
+		misplaced.length === 0, "still elsewhere: " + misplaced.join(", "));
+	const placeholder = Object.keys(CL.NON_NCAA).filter((lg) => {
+		if (lg === "Did not play") return false;
+		const clubs = CL.PRO_CLUBS[lg];
+		return !clubs || !clubs.length ||
+			clubs.some(([name]) => / (Select|United)$/.test(name) &&
+				name.indexOf(lg) === 0);
+	});
+	ok("no league falls back to placeholder club names",
+		placeholder.length === 0, "placeholders: " + placeholder.join(", "));
+	for (const lg of ["EuroLeague", "Liga ACB", "NBL"]) {
+		ok(lg + " carries a real club roster",
+			(CL.PRO_CLUBS[lg] || []).length >= 8);
+	}
+}
+
+/* ------------------------------------------- warm re-runs and stale state */
+console.log("\nWarm re-runs");
+{
+	/* A staged (warm) re-run has to produce the same class a cold one does.
+	   applyDraftEvents skips a player who already carries a draftEvent so two
+	   events cannot land on one man — and only phaseBuild re-creates the player
+	   objects, so a warm run that starts at `stock` was handed last run's flags
+	   and drew its events from a pool that excluded them. Moving the award
+	   strictness slider, which has nothing to do with the draft board, rewrote
+	   every draft-day event. */
+	const names = (res) => res.draftEvents
+		.map((e) => e.name + "/" + e.player).join(", ");
+	const runner = global.Engine.createRunner(V.syntheticClass(5, 60));
+	runner.run(global.Config.make({ seed: "warm" }));
+	const warm = runner.run(global.Config.make({ seed: "warm", awardStrictness: 1.5 }));
+	const cold = global.Engine.createRunner(V.syntheticClass(5, 60))
+		.run(global.Config.make({ seed: "warm", awardStrictness: 1.5 }));
+	ok("a warm re-run gives the same draft-day events as a cold one",
+		names(warm) === names(cold),
+		"warm [" + names(warm) + "] vs cold [" + names(cold) + "]");
+	ok("no player carries a draft-day flag from a previous run",
+		warm.players.filter((p) => p.draftEvent).length === warm.draftEvents.length);
+
+	// Turning the events off must not leave the flags behind, or the players
+	// who had them are permanently ineligible once it is turned back on.
+	const off = runner.run(global.Config.make({ seed: "warm", draftEvents: 0 }));
+	ok("turning draft events off clears the flags",
+		off.players.filter((p) => p.draftEvent).length === 0);
+	const back = runner.run(global.Config.make({ seed: "warm" }));
+	const coldAgain = global.Engine.createRunner(V.syntheticClass(5, 60))
+		.run(global.Config.make({ seed: "warm" }));
+	ok("and turning them back on reproduces the cold run",
+		names(back) === names(coldAgain));
+
+	/* Each event's sentence describes where the player actually ended up. A
+	   later event's move() shifts everyone it passes by one, so a text written
+	   when the event fired disagreed with the rank printed beside it. */
+	let mismatched = 0;
+	for (let s = 0; s < 12; s++) {
+		const res = global.Engine.run(V.realisticClass(s % 5, 70),
+			global.Config.make({ seed: "detext" + s }));
+		for (const e of res.draftEvents) {
+			const p = res.board.filter((x) => x.key === e.key)[0];
+			const m = /until pick (\d+)/.exec(e.text);
+			if (m && Number(m[1]) !== p.boardRank) mismatched++;
+		}
+	}
+	ok("a draft-day sentence agrees with the rank printed beside it",
+		mismatched === 0, mismatched + " disagreed");
+}
+
+{
+	/* awardNoise 0 has to mean what the slider says it means: every trophy to
+	   whoever the production model ranks first. The season's voter mood scaled
+	   only its random half, so the resume lean stayed at 0.55 of full strength
+	   and the two electorates that weight the resume most still split away. */
+	const POY = /^(Naismith Trophy|John R\. Wooden Award|Oscar Robertson Trophy|AP Player of the Year|NABC Player of the Year|Sporting News Player of the Year)$/;
+	const splits = (noise) => {
+		let split = 0;
+		let seen = 0;
+		for (let s = 0; s < 24; s++) {
+			const res = global.Engine.run(V.realisticClass(s % 6, 70),
+				global.Config.make({ seed: "poy" + s, awardNoise: noise }));
+			const winners = new Set();
+			for (const p of res.players) {
+				for (const a of p.awards || []) if (POY.test(a)) winners.add(p.key);
+			}
+			if (winners.size) { seen++; if (winners.size > 1) split++; }
+		}
+		return { split, seen };
+	};
+	const quiet = splits(0);
+	ok("at award noise 0 the six trophies never disagree",
+		quiet.split === 0,
+		quiet.split + " of " + quiet.seen + " classes split");
+	const loud = splits(2);
+	ok("and at 2 they regularly do", loud.split > 0,
+		loud.split + " of " + loud.seen + " classes split");
+}
+
+{
+	// A season event never names one programme as both sides of a game.
+	let dup = 0;
+	let total = 0;
+	for (let s = 0; s < 30; s++) {
+		const res = global.Engine.run(V.realisticClass(s % 6, 70),
+			global.Config.make({ seed: "dup" + s, seasonEvents: 14 }));
+		for (const e of res.seasonEvents) {
+			total++;
+			if (e.teams && e.teams.length === 2 && e.teams[0] === e.teams[1]) dup++;
+		}
+	}
+	ok("no season event names the same programme twice", dup === 0,
+		dup + " of " + total);
+}
+
+{
+	// The forced-availability windows are measured against the real schedule
+	// length, not a hard-coded 32.
+	let bad = 0;
+	for (let s = 0; s < 20; s++) {
+		const res = global.Engine.run(V.realisticClass(s % 5, 70),
+			global.Config.make({ seed: "avail" + s, surpriseBudget: 6 }));
+		for (const p of res.players) {
+			const av = p.availability;
+			if (!av || av.from === null || av.from === undefined) continue;
+			if (av.to > 1.0001 || av.from < -1e-9 || av.to < av.from) bad++;
+		}
+	}
+	ok("every absence window lies inside the season", bad === 0, String(bad));
 }
 
 console.log("\n" + (failures ? failures + " of " + checks + " checks failed"

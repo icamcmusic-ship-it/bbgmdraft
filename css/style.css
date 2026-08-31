@@ -410,59 +410,65 @@ tr.picked td.sticky::after { content: " ✓"; font-size: .9em; }
 
 /* ---- phones: one prospect per card --------------------------------------- */
 /* Forty columns is a horizontal scroll on a phone however it is arranged, so
-   below 700px the table stops being a table. Each row becomes a card and each
-   cell prints its own column label, which is what data-label is for. The six
-   pinned columns stay on one line at the top; everything else stacks. */
-@media (max-width: 700px) {
-	.cardtable table, .cardtable tbody, .cardtable tr, .cardtable td {
-		display: block;
-		width: auto;
-	}
-	/* Visually hidden rather than moved off-canvas: `left: -9999px` on a thead
-	   inside a block-level table expands the table's scroll width by ten
-	   thousand pixels. */
-	.cardtable thead {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		overflow: hidden;
-		clip: rect(0 0 0 0);
-		white-space: nowrap;
-	}
-	.cardtable .scroll { overflow-x: visible; max-height: none; }
-	.cardtable tr {
-		border: 1px solid var(--line);
-		border-radius: 8px;
-		margin: 0 0 8px;
-		padding: 8px 10px;
-		background: var(--panel);
-	}
-	.cardtable td {
-		display: flex;
-		justify-content: space-between;
-		gap: 10px;
-		border: 0;
-		padding: 2px 0;
-		text-align: right;
-		max-width: none;
-	}
-	.cardtable td.sticky {
-		position: static;
-		font-weight: 600;
-		font-size: 15px;
-		text-align: left;
-		border-bottom: 1px solid var(--line);
-		padding-bottom: 6px;
-		margin-bottom: 4px;
-	}
-	.cardtable td[data-label]::before {
-		content: attr(data-label);
-		color: var(--dim);
-		font-weight: 500;
-		text-align: left;
-	}
-	.cardtable td:empty { display: none; }
+   the table stops being a table: each row becomes a card and each cell prints
+   its own column label, which is what data-label is for.
+
+   These rules were written for a `.cardtable` class that NOTHING EVER ADDED,
+   so for as long as they have existed a phone has been getting the
+   forty-column desktop table with a sticky name column and no way to see more
+   than three columns at once. viewPlayers adds the class now (see cardMode in
+   js/views.js), the card layout picks its own twelve columns rather than
+   inheriting a selection made for a wide table, and the rules are no longer
+   inside a media query — the user can ask for cards at any width, and the
+   query only decides the default. */
+.cardtable table, .cardtable tbody, .cardtable tr, .cardtable td {
+	display: block;
+	width: auto;
 }
+/* Visually hidden rather than moved off-canvas: `left: -9999px` on a thead
+   inside a block-level table expands the table's scroll width by ten
+   thousand pixels. */
+.cardtable thead {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	white-space: nowrap;
+}
+.cardtable .scroll { overflow-x: visible; max-height: none; }
+.cardtable tr {
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	margin: 0 0 8px;
+	padding: 8px 10px;
+	background: var(--panel);
+}
+.cardtable td {
+	display: flex;
+	justify-content: space-between;
+	gap: 10px;
+	border: 0;
+	padding: 2px 0;
+	text-align: right;
+	max-width: none;
+}
+.cardtable td.sticky {
+	position: static;
+	font-weight: 600;
+	font-size: 15px;
+	text-align: left;
+	border-bottom: 1px solid var(--line);
+	padding-bottom: 6px;
+	margin-bottom: 4px;
+}
+.cardtable td[data-label]::before {
+	content: attr(data-label);
+	color: var(--dim);
+	font-weight: 500;
+	text-align: left;
+}
+.cardtable td:empty { display: none; }
 
 /* ---- the editor sits beside the table, not below it ---------------------- */
 /* Appending the editor after a 70-row table put the panel you were about to
@@ -545,13 +551,53 @@ table.compare td.num.up::after { content: " ▲"; font-size: .8em; }
    trend carries what a season average cannot. */
 td.sparkcell { padding: 2px 6px; }
 .spark { display: block; }
+/* Theme-aware by construction. The stroke was already currentColor, which
+   inherits the cell's text colour and therefore does follow the theme — but
+   `opacity: .75` on top of it was measured against the light palette, and the
+   dark one's text (#e6edf3) against its panel (#161b22) does not carry a
+   quarter of itself away as gracefully as #1c2128 on #ffffff does: a
+   1.2px line at 75% is the first thing to disappear on a dark screen.
+
+   So the line uses a token that is defined per theme rather than a constant
+   fraction of the inherited colour, and the token is the accent rather than
+   the text, which makes the trend read as data rather than as faint writing.
+   The reference line (see sparkline() in js/views.js) is drawn from the border
+   token for the same reason. */
+:root { --spark: #0969da; --spark-base: #d6dde4; }
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) { --spark: #4da3ff; --spark-base: #2a323d; }
+}
+:root[data-theme="dark"] { --spark: #4da3ff; --spark-base: #2a323d; }
 .spark .sparkline {
 	fill: none;
-	stroke: currentColor;
-	stroke-width: 1.2;
+	stroke: var(--spark);
+	stroke-width: 1.3;
 	stroke-linejoin: round;
 	stroke-linecap: round;
-	opacity: 0.75;
+}
+.spark .sparkbase {
+	stroke: var(--spark-base);
+	stroke-width: 1;
+	stroke-dasharray: 2 2;
+}
+
+/* ---- busy state ---------------------------------------------------------- */
+/* run() blocks the main thread for 300-600ms and said nothing while it did.
+   See beginBusy in js/app.js: the class is set, a frame is allowed to paint,
+   and only then does the work start. */
+body.busy { cursor: progress; }
+body.busy button, body.busy input[type=range] { cursor: progress; }
+#status.working { color: var(--accent); }
+#status.working::before {
+	content: "";
+	display: inline-block; width: 9px; height: 9px; margin-right: 7px;
+	border: 2px solid var(--accent); border-right-color: transparent;
+	border-radius: 50%; vertical-align: -1px;
+	animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+	#status.working::before { animation: none; border-right-color: var(--accent); }
 }
 
 
@@ -599,3 +645,50 @@ td.sparkcell { padding: 2px 6px; }
 		overflow-y: auto;
 	}
 }
+
+/* ---- the archetype frequency panel --------------------------------------- */
+/* 117 builds in a 230px scroller with no search: see #archSearch in
+   index.html. Filtering and folding are separate classes because a search hit
+   has to show through a fold the user set. */
+#archSearch { width: 100%; margin: 0 0 6px; padding: 4px 8px; font-size: 12px; }
+.archrow.arch-folded, .archrow.arch-filtered, .archgroup.arch-filtered {
+	display: none;
+}
+.archfold {
+	padding: 0 4px; min-width: 18px; line-height: 1.2;
+	background: none; border: none; color: var(--dim); cursor: pointer;
+}
+.archfold:hover { color: var(--text); }
+
+/* ---- the prospect row context menu --------------------------------------- */
+/* Right-clicking a row is the natural place to say "hold this one beside that
+   one", and there was no path to the comparison from the table at all — you
+   read a row, decided, and then hunted the name in a dropdown on another tab.
+   See rowMenu in js/views.js. */
+.rowmenu {
+	position: fixed; z-index: 200; min-width: 200px;
+	background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+	box-shadow: 0 6px 24px rgba(0,0,0,.22);
+	padding: 4px; display: flex; flex-direction: column; gap: 1px;
+}
+.rowmenu button {
+	background: none; border: none; text-align: left;
+	padding: 6px 10px; border-radius: 5px; cursor: pointer;
+	color: var(--text); font: inherit; font-size: 13px;
+}
+.rowmenu button:hover, .rowmenu button:focus-visible {
+	background: var(--panel-2); color: var(--accent);
+}
+
+/* ---- drag-to-reorder columns --------------------------------------------- */
+/* The order was the order of the COLUMNS literal, so wanting PPG next to TS%
+   in a forty-column table meant editing the source. See buildTable in
+   js/views.js; the fixed columns (selection, lock, name) are not draggable
+   because the name is what the horizontal scroll is anchored on. */
+th.sortable[draggable="true"] { cursor: grab; }
+th.sortable.dragging { opacity: .45; cursor: grabbing; }
+th.dropbefore { box-shadow: inset 2px 0 0 0 var(--accent); }
+th.dropafter { box-shadow: inset -2px 0 0 0 var(--accent); }
+/* A card is a stack of labelled lines, so a horizontal drop indicator on it
+   means nothing and dragging a heading that is visually hidden means less. */
+.cardtable th.dropbefore, .cardtable th.dropafter { box-shadow: none; }

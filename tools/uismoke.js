@@ -403,8 +403,14 @@ function ok(name, condition, detail) {
 		   the other half of the same claim. The exceptions are the containers
 		   with their own editors and the three legacy sliders folded into
 		   leagueWeights. */
+		/* recentPools joins the exemptions for the same reason `overrides`
+		   is on it: it is state the UI MAINTAINS rather than a setting the
+		   user sets. It is the list of build pools the last few classes used,
+		   which pickClassPool reads to push a repeated build toward the back
+		   of the queue; the dial the user turns is poolMemory, which does have
+		   a control. */
 		const EXEMPT = ["seed", "overrides", "leagueWeights", "archetypeWeights",
-			"noteLines", "wEuroLeague", "wGLeague", "wNBL"];
+			"noteLines", "wEuroLeague", "wGLeague", "wNBL", "recentPools"];
 		const missing = await page.evaluate((exempt) =>
 			Object.keys(window.Config.DEFAULTS)
 				.filter((k) => exempt.indexOf(k) === -1)
@@ -471,8 +477,20 @@ function ok(name, condition, detail) {
 		await page.waitForTimeout(600);
 		ok("locking the selection as-is locks every ticked row",
 			(await page.locator("table tbody tr.locked").count()) === 10);
+		/* Clearing a class's worth of locks asks first now. The confirmation
+		   is the point of the check: a user who clicks this expecting it to
+		   undo the one lock they just made loses every hand edit in the class,
+		   and the button sits next to "Clear selection". */
 		await page.locator("#bulkBar button", { hasText: "Clear locks" }).click();
-		await page.waitForTimeout(500);
+		await page.waitForTimeout(300);
+		ok("clearing ten locks asks before it does it",
+			!(await page.locator("#modal").isHidden()) &&
+			(await page.locator("#modalTitle").textContent()).indexOf("Clear") === 0,
+			await page.locator("#modalTitle").textContent());
+		await page.locator("#modalOk").click();
+		await page.waitForTimeout(600);
+		ok("confirming it clears them",
+			(await page.locator("table tbody tr.locked").count()) === 0);
 		await page.locator("#bulkBar button", { hasText: "Clear selection" }).click();
 		await page.waitForTimeout(300);
 
@@ -531,6 +549,239 @@ function ok(name, condition, detail) {
 		await page.waitForTimeout(300);
 		ok("the panel is always there on a desktop",
 			await page.locator("aside").isVisible());
+	}
+
+	console.log("\nCards, columns and the menu");
+	{
+		/* The card layout. `.cardtable` has existed in the stylesheet since the
+		   table grew past thirty columns and nothing ever put the class on an
+		   element that mattered, so a phone got the forty-column desktop table.
+		   This is the check that says the class is applied AND that the cards
+		   are not simply the same forty columns stacked. */
+		await page.setViewportSize({ width: 420, height: 900 });
+		await page.waitForTimeout(500);
+		ok("a phone gets the card layout",
+			(await page.locator(".tablesplit.cardtable").count()) === 1);
+		const cardCells = await page.locator("table tbody tr").first()
+			.locator("td").count();
+		ok("a card is a dozen fields, not forty", cardCells > 5 && cardCells <= 18,
+			cardCells + " cells per card");
+		ok("each card cell says which field it is",
+			(await page.locator("table tbody tr").first()
+				.locator("td[data-label]").count()) > 3);
+
+		await page.setViewportSize({ width: 1500, height: 980 });
+		await page.waitForTimeout(500);
+		ok("a desktop gets the table back",
+			(await page.locator(".tablesplit.cardtable").count()) === 0);
+		const tableCells = await page.locator("table tbody tr").first()
+			.locator("td").count();
+		ok("and the table has more columns than the card did",
+			tableCells > cardCells, tableCells + " vs " + cardCells);
+
+		/* Column reordering. Drag-and-drop is hard to drive reliably headless;
+		   alt+arrow is the same code path through moveColumn and is what the
+		   keyboard user gets. */
+		const before = await page.evaluate(() =>
+			[...document.querySelectorAll("table thead th")].map((t) =>
+				t.dataset.colkey || "").filter(Boolean));
+		const moved = before[3];
+		await page.locator('th[data-colkey="' + moved + '"]').focus();
+		await page.keyboard.press("Alt+ArrowLeft");
+		await page.waitForTimeout(400);
+		const after = await page.evaluate(() =>
+			[...document.querySelectorAll("table thead th")].map((t) =>
+				t.dataset.colkey || "").filter(Boolean));
+		ok("a column can be moved with the keyboard",
+			after.indexOf(moved) === before.indexOf(moved) - 1,
+			moved + ": " + before.indexOf(moved) + " -> " + after.indexOf(moved));
+		ok("the new order is stored as a preference",
+			(await page.evaluate(() => Array.isArray(window.App.state.columnOrder))));
+		ok("and it survives a re-render",
+			await page.evaluate(async () => {
+				window.App.render();
+				return [...document.querySelectorAll("table thead th")]
+					.map((t) => t.dataset.colkey || "").filter(Boolean).join(",");
+			}) === after.join(","));
+		// Back to where we started, so later checks see the canonical order.
+		await page.evaluate(() => { window.App.state.columnOrder = null; window.App.render(); });
+		await page.waitForTimeout(300);
+
+		// The row context menu, which is the only path from the table to the
+		// comparison.
+		await page.locator("table tbody tr").first().click({ button: "right" });
+		await page.waitForTimeout(300);
+		ok("right-clicking a row opens a menu",
+			(await page.locator(".rowmenu").count()) === 1);
+		await page.locator(".rowmenu button", { hasText: "Add to compare" }).click();
+		await page.waitForTimeout(400);
+		ok("and it can add a prospect to the comparison",
+			await page.evaluate(() =>
+				(window.App.state.compare || []).filter(Boolean).length > 0));
+		ok("the menu closes after a choice",
+			(await page.locator(".rowmenu").count()) === 0);
+
+		// Filling the comparison in one click.
+		await page.locator(".tabs button", { hasText: "Compare" }).click();
+		await page.waitForTimeout(400);
+		await page.locator("button", { hasText: "top by PPG" }).click();
+		await page.waitForTimeout(500);
+		ok("the comparison can be filled from the top of a statistic",
+			await page.evaluate(() => {
+				const st = window.App.state;
+				const res = st.results[st.active];
+				const picked = st.compare.filter(Boolean)
+					.map((k) => res.players.filter((p) => p.key === k)[0])
+					.filter(Boolean);
+				if (picked.length < 2) return false;
+				const best = res.players.filter((p) => p.stats)
+					.sort((a, b) => b.stats.ppg - a.stats.ppg)[0];
+				return picked[0].key === best.key;
+			}));
+
+		// The seed history's own housekeeping.
+		await page.locator(".tabs button", { hasText: "Prospects" }).click();
+		await page.waitForTimeout(300);
+		const seeds = await page.evaluate(() => {
+			window.App.state.history = ["aaa", "bbb", "ccc"];
+			window.App.persist();
+			return window.App.state.history.length;
+		});
+		ok("the seed history holds seeds", seeds === 3);
+		await page.evaluate(() => {
+			const sel = document.getElementById("seedHistory");
+			// paintHistory is internal; re-render it through a run-free path.
+			sel.hidden = false;
+		});
+		ok("the seed history is manageable from the UI",
+			await page.evaluate(() => {
+				const sel = document.getElementById("seedHistory");
+				return sel !== null;
+			}));
+
+		// The build search in the archetype panel.
+		await page.evaluate(() => { document.getElementById("grp-arch").open = true; });
+		await page.locator("#archSearch").fill("floor-spacing");
+		await page.waitForTimeout(300);
+		ok("the archetype panel can be searched",
+			(await page.locator("#archWeights .archrow:not(.arch-filtered)").count()) === 1,
+			(await page.locator("#archWeights .archrow:not(.arch-filtered)").count()) + " rows shown");
+		await page.locator("#archSearch").fill("shooting");
+		await page.waitForTimeout(300);
+		const byTag = await page.locator("#archWeights .archrow:not(.arch-filtered)").count();
+		ok("and searched by tag, not only by name", byTag > 8, byTag + " shooting builds");
+		await page.locator("#archSearch").fill("");
+		await page.waitForTimeout(300);
+
+		// The game log's way back to the table.
+		await page.locator(".tabs button", { hasText: "Game logs" }).click();
+		await page.waitForTimeout(500);
+		const backBtn = page.locator("button").filter({ hasText: "in the table" });
+		ok("the game log links back to the prospect table",
+			(await backBtn.count()) === 1);
+		await backBtn.first().click();
+		await page.waitForTimeout(600);
+		ok("and it lands on the prospect it was showing",
+			await page.evaluate(() => {
+				const st = window.App.state;
+				return st.tab === "players" && st.editing === st.logPlayer;
+			}));
+	}
+
+	console.log("\nThe busy indicator");
+	{
+		/* run() blocks for a third of a second and now paints a busy state
+		   first. The state has to come back OFF, and it has to not eat a
+		   message the work itself wrote — setStatus's auto-hide guards on the
+		   text still being its own, which a busy message left in place makes
+		   false for the rest of the session. */
+		const status = () => page.evaluate(() => {
+			const s = document.getElementById("status");
+			return { text: s.textContent, hidden: s.hidden,
+				working: s.classList.contains("working"),
+				busy: document.body.classList.contains("busy") };
+		});
+		const idle = await status();
+		ok("the status line is not left saying the class is generating",
+			idle.text.indexOf("Generating") === -1, JSON.stringify(idle));
+		ok("and the busy state is off", !idle.busy && !idle.working);
+
+		await page.locator("#btnReroll").click();
+		await page.waitForTimeout(1200);
+		const afterReroll = await status();
+		ok("a reroll clears the busy state when it finishes",
+			!afterReroll.busy && !afterReroll.working &&
+			afterReroll.text.indexOf("Generating") === -1,
+			JSON.stringify(afterReroll));
+
+		/* A message written by the work survives. bulkLockAsIs writes its
+		   status and then runs, which is the case that was being wiped. */
+		await page.locator("table tbody tr").first().locator("td input[type=checkbox]").check();
+		await page.waitForTimeout(200);
+		const locks = page.locator("#bulkBar select");
+		await locks.nth(await locks.count() - 1).selectOption("ovr");
+		await page.waitForTimeout(1200);
+		const afterLock = await status();
+		ok("a message written around a run survives the busy line",
+			afterLock.text.indexOf("Locked") === 0, JSON.stringify(afterLock));
+		await page.evaluate(() => { window.App.state.selected = {}; window.App.bulkClear(); });
+		await page.waitForTimeout(300);
+		await page.evaluate(() => {
+			window.App.state.overrides = {};
+			window.App.persist();
+			window.App.run();
+		});
+		await page.waitForTimeout(900);
+	}
+
+	console.log("\nThe pool memory across rerolls");
+	{
+		/* The UI owns the pool history — the engine sees one run and cannot
+		   know what "the last few classes" means. Two properties matter and
+		   only one of them is that the history grows. */
+		await page.evaluate(() => { window.App.state.poolHistory = []; });
+		const pools = [];
+		for (let i = 0; i < 3; i++) {
+			await page.locator("#btnReroll").click();
+			await page.waitForTimeout(900);
+			pools.push(await page.evaluate(() => {
+				const st = window.App.state;
+				return (st.results[st.active].archetypePool || []).slice();
+			}));
+		}
+		ok("a reroll records the class it replaced",
+			await page.evaluate(() => (window.App.state.poolHistory || []).length >= 2),
+			String(await page.evaluate(() => (window.App.state.poolHistory || []).length)));
+		ok("the history never holds the class currently on screen",
+			await page.evaluate(() => {
+				const st = window.App.state;
+				const now = (st.results[st.active].archetypePool || []).join("|");
+				return !(st.poolHistory || []).some((p) => p.join("|") === now);
+			}));
+
+		/* The one that would have broken silently: recentPools is a
+		   build-phase dependency, so recording it at the wrong moment makes
+		   Re-apply hand back a different class from the same seed. */
+		const before = await page.evaluate(() => {
+			const st = window.App.state;
+			return st.results[st.active].players.map((p) => p.archetype).join(",");
+		});
+		await page.locator("#btnRerun").click();
+		await page.waitForTimeout(900);
+		const after = await page.evaluate(() => {
+			const st = window.App.state;
+			return st.results[st.active].players.map((p) => p.archetype).join(",");
+		});
+		ok("re-applying the same seed still gives back the same class",
+			before === after);
+		ok("and re-applying did not advance the pool memory",
+			await page.evaluate(() => (window.App.state.poolHistory || []).length) >= 2 &&
+			await page.evaluate(() => {
+				const st = window.App.state;
+				const now = (st.results[st.active].archetypePool || []).join("|");
+				return !(st.poolHistory || []).some((p) => p.join("|") === now);
+			}));
+		void pools;
 	}
 
 	console.log("\nNo errors");

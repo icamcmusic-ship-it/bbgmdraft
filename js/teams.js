@@ -489,6 +489,26 @@
 				// A staff that develops players is a team that is better in
 				// March than in November, which is what `form` means.
 				form: trng.normal(2.0, 4.5) + coach.dev + (coach.formAdj || 0),
+				/* The season's shape, as distinct from its trend.
+
+				   `form` is a straight line from November to March, and a
+				   straight line is not what a season looks like. Every game was
+				   otherwise an independent draw around the team's rating on
+				   that date, so a season had no streaks in it: no five-game run
+				   that put a bubble team in the field, no 2-8 stretch after the
+				   best player went down, nothing a schedule could be read as a
+				   story rather than as a list. Individual STAT LINES already
+				   had autocorrelation (see `form` in gameLog); team results,
+				   the thing a season is actually remembered by, did not.
+
+				   Games are not simulated in date order — they are drawn with a
+				   `when` in [0, 1] and played in whatever order the scheduler
+				   pairs them — so a sequential AR walk is not available. A path
+				   is precomputed instead: ARC_KNOTS knots of an AR(1) process,
+				   interpolated at `when`. Autocorrelation in the calendar is
+				   exactly what that gives, and it does not care what order the
+				   games are played in. */
+				arc: momentumArc(trng, cfg),
 			};
 		}
 		/* Narrative bends, applied after every programme exists because they
@@ -532,9 +552,44 @@
 	   freshmen figure it out, veterans wear down, and a team that is 8 points
 	   better in March than in November is the most ordinary thing in college
 	   basketball. `when` is 0 (first game) to 1 (last). */
+	/* A team's momentum path over the season: ARC_KNOTS knots of an AR(1)
+	   process, centred on zero so the arc moves a season around without moving
+	   its mean. ARC_RHO is the knot-to-knot persistence; at 0.72 over eight
+	   knots a hot stretch lasts about a month of a four-month season, which is
+	   what a streak is. ARC_SD is in rating points, so a team on a run plays
+	   like a team two or three points better — enough to move a bubble, not
+	   enough to make a 12-seed a 3. */
+	const ARC_KNOTS = 8;
+	const ARC_RHO = 0.72;
+	const ARC_SD = 2.6;
+	function momentumArc(rng, cfg) {
+		const strength = clamp(
+			cfg && cfg.teamMomentum !== undefined ? cfg.teamMomentum : 1, 0, 3);
+		if (strength <= 0) return null;
+		const sd = ARC_SD * strength;
+		const knots = [];
+		let x = rng.normal(0, sd);
+		for (let i = 0; i < ARC_KNOTS; i++) {
+			knots.push(x);
+			x = ARC_RHO * x + Math.sqrt(1 - ARC_RHO * ARC_RHO) * rng.normal(0, sd);
+		}
+		// Centred, so the arc is a shape and not a second rating adjustment.
+		const m = knots.reduce((a, b) => a + b, 0) / knots.length;
+		return knots.map((v) => v - m);
+	}
+
+	function arcAt(t, w) {
+		const arc = t.arc;
+		if (!arc || arc.length < 2) return 0;
+		const x = clamp(w, 0, 1) * (arc.length - 1);
+		const i = Math.min(arc.length - 2, Math.floor(x));
+		const f = x - i;
+		return arc[i] * (1 - f) + arc[i + 1] * f;
+	}
+
 	function ratingOn(t, when) {
 		const w = when === undefined ? 0.5 : clamp(when, 0, 1);
-		let r = t.rating + (t.form || 0) * (w - 0.5) * 2;
+		let r = t.rating + (t.form || 0) * (w - 0.5) * 2 + arcAt(t, w);
 		/* Whoever is hurt right now is not playing. Before this, an absence was
 		   invented after the season had been simulated, so a player who missed
 		   fourteen games with a knee had exactly the same effect on his team's
@@ -732,6 +787,172 @@
 		}
 	}
 
+	/* --- the season's mid-season events ---------------------------------
+
+	   The season was one pass: build the programmes, play the games, sort the
+	   results. Nothing happened DURING it. A schedule was a list of scores with
+	   no top-ten upset in it, no rivalry night, no coach fired in January, no
+	   game both prospects in the class played in — which is most of what makes
+	   one season memorable and another one a table.
+
+	   Each event is drawn AFTER the games are played and reads the results that
+	   were already produced, so none of them invents anything: the upset is a
+	   real result in a real game, the coach who gets fired is a coach whose
+	   team really did lose, and the game of the year is genuinely the closest
+	   high-quality game on the schedule. That is the difference between an
+	   event system and a decoration — nothing here can contradict the box
+	   scores, because all of it is read off them.
+
+	   The one exception is the postponement, which is a fact about a game
+	   nobody would otherwise mention and changes nothing about it. */
+	function midSeasonEvents(teams, rng, cfg) {
+		const budget = Math.round(clamp(
+			cfg && cfg.seasonEvents !== undefined ? cfg.seasonEvents : 7, 0, 20));
+		if (!budget) return [];
+		const all = Object.keys(teams).map((n) => teams[n]);
+		const ranked = all.slice().sort((a, b) => b.rating - a.rating);
+		const topRating = ranked.length ? ranked[Math.min(24, ranked.length - 1)].rating : 0;
+		const events = [];
+
+		/* Every game, once, from the winner's log. A team's log holds one row
+		   per game it played, so reading both sides would double every game. */
+		const games = [];
+		for (const t of all) {
+			for (const g of t.log || []) {
+				if (!g.won || !g.opp) continue;
+				const opp = teams[g.opp];
+				if (!opp) continue;
+				games.push({ winner: t, loser: opp, g });
+			}
+		}
+		if (!games.length) return [];
+
+		const add = (kind, text, when, teamsInvolved) => {
+			events.push({ kind, text, when, teams: teamsInvolved });
+		};
+
+		// A top-ten team losing to somebody it had no business losing to.
+		const upsets = games.filter(({ winner, loser }) =>
+			loser.rating >= topRating && winner.rating < loser.rating - 14)
+			.sort((a, b) => (b.loser.rating - b.winner.rating) -
+				(a.loser.rating - a.winner.rating));
+		if (upsets.length) {
+			const u = rng.pick(upsets.slice(0, 8));
+			add("upset", u.winner.name + " beat " + u.loser.name + " " +
+				u.g.pf + "-" + u.g.pa + ", the result of the season's first half",
+				u.g.when, [u.winner.name, u.loser.name]);
+		}
+
+		// The game of the year: the closest game between two good teams.
+		const good = games.filter(({ winner, loser, g }) =>
+			winner.rating > topRating - 6 && loser.rating > topRating - 6 &&
+			Math.abs(g.pf - g.pa) <= 3);
+		if (good.length) {
+			const gm = rng.pick(good);
+			add("game of the year",
+				gm.winner.name + " " + gm.g.pf + ", " + gm.loser.name + " " +
+				gm.g.pa + (gm.g.ot ? " (" + (gm.g.ot > 1 ? gm.g.ot + "OT" : "OT") + ")" : "") +
+				" — the game of the year",
+				gm.g.when, [gm.winner.name, gm.loser.name]);
+		}
+
+		// A coach fired in-season: a programme with real expectations losing.
+		const failing = all.filter((t) =>
+			t.games >= 10 && t.w / Math.max(1, t.games) < 0.35 &&
+			C.prestige(t.name) >= 55);
+		if (failing.length) {
+			const t = rng.pick(failing);
+			add("coaching change",
+				t.name + " fired " + (t.coach && t.coach.name ? t.coach.name : "its head coach") +
+				" in " + rng.pick(["January", "February"]) + " at " + t.w + "-" + t.l,
+				rng.uniform(0.45, 0.85), [t.name]);
+		}
+
+		// A blowout worth naming, because a 40-point game is a fact about a
+		// season and not only about one night.
+		const blowouts = games.filter(({ g }) => g.pf - g.pa >= 38)
+			.sort((a, b) => (b.g.pf - b.g.pa) - (a.g.pf - a.g.pa));
+		if (blowouts.length) {
+			const b = blowouts[0];
+			add("blowout", b.winner.name + " beat " + b.loser.name + " by " +
+				(b.g.pf - b.g.pa), b.g.when, [b.winner.name, b.loser.name]);
+		}
+
+		// A winning streak that changed a team's season.
+		const streaks = all.map((t) => ({ t, n: longestRun(t) }))
+			.filter((x) => x.n >= 12).sort((a, b) => b.n - a.n);
+		if (streaks.length) {
+			const st = rng.pick(streaks.slice(0, 5));
+			add("streak", st.t.name + " won " + st.n + " in a row",
+				rng.uniform(0.3, 0.8), [st.t.name]);
+		}
+
+		/* Colour, which changes nothing and is the point: a season with only
+		   consequential events in it reads like a summary. */
+		/* Two DIFFERENT programmes. r.pick(all) twice can return the same one,
+		   and at 368 teams that is about one flavour event in every 368 — which
+		   is often enough to be seen and is "Duke's trip to Duke was postponed
+		   by a snowstorm". */
+		const twoTeams = (r) => {
+			const a = r.pick(all);
+			let b = a;
+			for (let i = 0; i < 8 && b === a; i++) b = r.pick(all);
+			return [a, b];
+		};
+		const flavour = [
+			(r) => {
+				const [t, host] = twoTeams(r);
+				if (t === host) return null;
+				return ["postponement", t.name + "'s trip to " +
+					host.name + " was postponed by " +
+					r.pick(["a snowstorm", "a frozen floor", "an arena roof leak",
+						"a travel failure"]), [t.name, host.name]];
+			},
+			(r) => {
+				const t = r.pick(ranked.slice(0, 60));
+				return ["viral", "a " + t.name + " dunk was the most-watched " +
+					"clip of the college season", [t.name]];
+			},
+			(r) => {
+				const [a, b] = twoTeams(r);
+				if (a === b) return null;
+				return ["altercation", a.name + " and " + b.name +
+					" cleared the benches with four minutes left", [a.name, b.name]];
+			},
+			(r) => {
+				const t = r.pick(ranked.slice(0, 40));
+				return ["storm", t.name + " played three ranked opponents in eight days " +
+					"and won " + r.int(1, 3) + " of them", [t.name]];
+			},
+		];
+		const picked = rng.shuffle(flavour).slice(0, Math.max(0, budget - events.length));
+		for (const f of picked) {
+			const drawn = f(rng);
+			// A flavour that could not find two distinct programmes returns
+			// null rather than naming one twice.
+			if (!drawn) continue;
+			const [kind, text, involved] = drawn;
+			add(kind, text, rng.random(), involved);
+		}
+		events.sort((a, b) => (a.when || 0) - (b.when || 0));
+		return events.slice(0, budget);
+	}
+
+	/* The longest run of consecutive wins in a team's schedule, in calendar
+	   order. The log is in the order games were SIMULATED, which is the order
+	   the scheduler paired them, so it has to be sorted by date first — a run
+	   read off the raw log would be a run of nothing. */
+	function longestRun(t) {
+		const log = (t.log || []).slice().sort((a, b) => (a.when || 0) - (b.when || 0));
+		let best = 0;
+		let cur = 0;
+		for (const g of log) {
+			cur = g.won ? cur + 1 : 0;
+			if (cur > best) best = cur;
+		}
+		return best;
+	}
+
 	function simulateRegularSeason(teams, cfg, rng) {
 		const names = Object.keys(teams);
 		const play = (A, B, aHome, conference) => {
@@ -909,7 +1130,8 @@
 		capFillers, FILLER_GAP, conferenceDrift, programLevel, applyOutages, makeFiller,
 		PROGRAM_VOL, DOWN_YEAR_RATE, BREAKOUT_RATE, STAR_RETURNER_RATE,
 		rotationWeights, pairUp, record, recordPostseason, finalizeSchedule,
-		REGULAR_NOISE,
+		REGULAR_NOISE, momentumArc, arcAt, ARC_KNOTS,
+		midSeasonEvents, longestRun,
 		label, adoptConference, conferencePools, PROGRAM_STYLES,
 		CONF_GAMES, NON_CONF_GAMES,
 	};

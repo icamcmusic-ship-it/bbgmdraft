@@ -33,13 +33,21 @@
 		overrideFingerprint: null,
 		selected: {},    // player key -> true, for bulk editing
 		history: [],     // recent seeds, newest first
+		// The build pools of the last few classes, newest first. See
+		// rememberPool: the engine reads it and never writes it.
+		poolHistory: [],
 		presetName: "default",
 		presetDirty: false,
 		customPresets: {},
 		editing: null,   // player key currently open in the editor
 		hiddenColumns: {},
+		// Column ORDER, as a list of keys. See orderedColumns in js/views.js.
+		columnOrder: null,
 		statMode: "perGame",
 		density: "normal",
+		// "auto" | "on" | "off" — see cardMode() in js/views.js.
+		cardView: "auto",
+		cardAll: false,
 		redo: [],
 		// The two prospects the Compare tab is holding side by side.
 		compare: [null, null, null, null],
@@ -75,15 +83,19 @@
 				overrides: state.overrides,
 				overrideFingerprint: state.overrideFingerprint,
 				history: state.history.slice(0, 12),
+				poolHistory: state.poolHistory,
 				presetName: state.presetName,
 				presetDirty: state.presetDirty,
 				customPresets: state.customPresets,
 				hiddenColumns: state.hiddenColumns,
+				columnOrder: state.columnOrder,
 				statMode: state.statMode,
 				compare: state.compare,
 				columnLayouts: state.columnLayouts,
 				standingsConf: state.standingsConf,
 				density: state.density,
+				cardView: state.cardView,
+				cardAll: state.cardAll,
 				compactBracket: state.compactBracket,
 				theme: state.theme,
 				sort: state.sort,
@@ -114,10 +126,53 @@
 		}
 	}
 
+	/* Every structured value read back out of localStorage, checked for the
+	   SHAPE the code that consumes it assumes.
+
+	   STORE_VERSION was the only protection, and a version number only catches
+	   changes somebody remembered to bump it for. It does not catch a payload
+	   truncated by a full quota, an entry a browser extension rewrote, a hand
+	   edit, or a value written by a build that has since been reverted — and
+	   `state.sort` in particular is destructured (`for (const {key, dir} of
+	   keys)`) inside the render path, so a string or a null there is not a
+	   degraded table, it is a TypeError with the whole app behind it and no
+	   way for the user to get back except clearing site data they cannot be
+	   expected to know about.
+
+	   Anything that fails its check is dropped and the built-in default stands,
+	   which is the same outcome as a first visit. */
+	function validSortStack(v) {
+		if (!Array.isArray(v) || !v.length) return null;
+		const cols = {};
+		for (const c of V.COLUMNS) cols[c.key] = true;
+		const out = [];
+		const seen = {};
+		for (const s of v) {
+			if (!s || typeof s !== "object") continue;
+			if (typeof s.key !== "string" || !cols[s.key] || seen[s.key]) continue;
+			const dir = Number(s.dir) < 0 ? -1 : 1;
+			seen[s.key] = true;
+			out.push({ key: s.key, dir });
+		}
+		return out.length ? out : null;
+	}
+
+	// A plain {string: true-ish} map, e.g. hiddenColumns and the saved layouts.
+	function validFlagMap(v) {
+		if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+		const out = {};
+		for (const k of Object.keys(v)) if (v[k]) out[k] = true;
+		return out;
+	}
+
+	function validString(v, allowed) {
+		return typeof v === "string" && (!allowed || allowed.indexOf(v) !== -1) ? v : null;
+	}
+
 	function restore() {
 		let saved = null;
 		try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) { saved = null; }
-		if (!saved) return null;
+		if (!saved || typeof saved !== "object" || Array.isArray(saved)) return null;
 		/* A payload from a different schema is discarded rather than
 		   half-applied. Only `theme` is carried across, because it is a
 		   preference about the browser rather than about a draft class and
@@ -126,27 +181,56 @@
 			if (saved.theme) state.theme = saved.theme;
 			return null;
 		}
-		if (saved.cfg) state.cfg = CFG.make(saved.cfg);
-		if (saved.overrides) state.overrides = saved.overrides;
-		if (saved.overrideFingerprint) state.overrideFingerprint = saved.overrideFingerprint;
-		if (Array.isArray(saved.history)) state.history = saved.history;
-		if (saved.presetName) state.presetName = saved.presetName;
+		if (saved.cfg && typeof saved.cfg === "object") state.cfg = CFG.make(saved.cfg);
+		if (saved.overrides && typeof saved.overrides === "object" &&
+			!Array.isArray(saved.overrides)) state.overrides = saved.overrides;
+		if (validString(saved.overrideFingerprint)) {
+			state.overrideFingerprint = saved.overrideFingerprint;
+		}
+		if (Array.isArray(saved.history)) {
+			state.history = saved.history.filter((h) => typeof h === "string");
+		}
+		if (Array.isArray(saved.poolHistory)) {
+			state.poolHistory = saved.poolHistory
+				.filter(Array.isArray)
+				.map((a) => a.filter((n) => typeof n === "string"));
+		}
+		if (validString(saved.presetName)) state.presetName = saved.presetName;
 		state.presetDirty = !!saved.presetDirty;
-		if (saved.customPresets) state.customPresets = saved.customPresets;
-		if (saved.hiddenColumns) state.hiddenColumns = saved.hiddenColumns;
-		if (saved.statMode) state.statMode = saved.statMode;
+		if (saved.customPresets && typeof saved.customPresets === "object" &&
+			!Array.isArray(saved.customPresets)) state.customPresets = saved.customPresets;
+		state.hiddenColumns = validFlagMap(saved.hiddenColumns) || state.hiddenColumns;
+		if (Array.isArray(saved.columnOrder)) {
+			state.columnOrder = saved.columnOrder.filter((k) => typeof k === "string");
+		}
+		if (validString(saved.statMode, V.STAT_MODES.map((m) => m[0]))) {
+			state.statMode = saved.statMode;
+		}
 		if (Array.isArray(saved.compare)) {
-			state.compare = saved.compare.slice(0, V.COMPARE_MAX || 4);
+			state.compare = saved.compare
+				.map((k) => (typeof k === "string" ? k : null))
+				.slice(0, V.COMPARE_MAX || 4);
 		}
-		if (saved.columnLayouts && typeof saved.columnLayouts === "object") {
-			state.columnLayouts = saved.columnLayouts;
+		if (saved.columnLayouts && typeof saved.columnLayouts === "object" &&
+			!Array.isArray(saved.columnLayouts)) {
+			const layouts = {};
+			for (const name of Object.keys(saved.columnLayouts)) {
+				const m = validFlagMap(saved.columnLayouts[name]);
+				if (m) layouts[name] = m;
+			}
+			state.columnLayouts = layouts;
 		}
-		if (saved.standingsConf) state.standingsConf = saved.standingsConf;
-		if (saved.density) state.density = saved.density;
+		if (validString(saved.standingsConf)) state.standingsConf = saved.standingsConf;
+		if (validString(saved.density, ["normal", "compact", "comfortable"])) state.density = saved.density;
+		if (validString(saved.cardView, ["auto", "on", "off"])) state.cardView = saved.cardView;
+		state.cardAll = !!saved.cardAll;
 		state.compactBracket = !!saved.compactBracket;
-		if (saved.theme) state.theme = saved.theme;
-		if (Array.isArray(saved.sort) && saved.sort.length) state.sort = saved.sort;
-		if (saved.pinned) state.pinned = indexSnapshot(saved.pinned);
+		if (validString(saved.theme, ["system", "light", "dark"])) state.theme = saved.theme;
+		const sort = validSortStack(saved.sort);
+		if (sort) state.sort = sort;
+		if (saved.pinned && typeof saved.pinned === "object") {
+			state.pinned = indexSnapshot(saved.pinned);
+		}
 		// Never land on a tab that has nothing to show.
 		if (saved.tab && (saved.tab !== "compare" || state.pinned)) state.tab = saved.tab;
 		return saved;
@@ -183,6 +267,12 @@
 			   the one thing users most want back — the class they just liked
 			   and replaced — was the one thing undo could not return. */
 			lastSeed: state.lastSeed || null,
+			/* The pool memory, for the same reason lastSeed is here: it is a
+			   build-phase input that lives outside cfg. Without it, undoing a
+			   reroll restored the seed and left the history one class ahead, so
+			   the restored class was rebuilt against a memory it had never
+			   been drawn with and came back as somebody else's. */
+			poolHistory: (state.poolHistory || []).map((a) => a.slice()),
 		};
 	}
 
@@ -199,13 +289,15 @@
 		state.cfg = CFG.make(snap.cfg);
 		state.overrides = snap.overrides;
 		if (snap.lastSeed !== undefined) state.lastSeed = snap.lastSeed;
+		if (Array.isArray(snap.poolHistory)) state.poolHistory = snap.poolHistory;
 		// A restored class is a different class, so an editor open on somebody
 		// who may not be in it any more has to close.
 		state.editing = null;
 		paintUndo();
 		paintConfig();
-		setStatus(verb + ": " + snap.label);
-		run();
+		/* Through `after`: a message written before run() is overwritten by the
+		   busy line a frame later and never seen. See beginBusy. */
+		run(() => setStatus(verb + ": " + snap.label));
 	}
 
 	function undo() {
@@ -259,6 +351,8 @@
 		"archetypePool", "surpriseBudget", "injuryRate",
 		"realignmentRate", "bluebloodDownYears", "midMajorLift",
 		"awardStrictness", "confAwardStrictness", "proAwardStrictness",
+		"variation", "poolMemory", "teamMomentum", "awardNoise",
+		"seasonEvents", "draftEvents",
 	];
 
 	const FORMAT = {
@@ -271,6 +365,9 @@
 		confAwardStrictness: (v) => v.toFixed(2) + "x",
 		proAwardStrictness: (v) => v.toFixed(2) + "x",
 		archetypeDiversity: (v) => v + "%",
+		poolMemory: (v) => v.toFixed(2) + "x",
+		teamMomentum: (v) => v.toFixed(2) + "x",
+		awardNoise: (v) => v.toFixed(2) + "x",
 		freshmanShare: (v) => v + "%",
 		transferShare: (v) => v + "%",
 		redshirtShare: (v) => v + "%",
@@ -327,6 +424,28 @@
 			: v > 1.5 ? "a class is unmistakably one thing"
 			: "each class leans guard-heavy, big-heavy, defensive…",
 		buildNoise: (v) => "±" + v + " rating points of per-rating jitter",
+		/* The seed's neighbourhood. 0 is the class the seed has always
+		   produced; anything else keeps its flavour, build pool and curve and
+		   re-rolls the players inside it. */
+		variation: (v) => (v === 0
+			? "the class this seed has always produced"
+			: "variation " + v + ": same flavour, pool and curve, different players"),
+		poolMemory: (v) => (v <= 0
+			? "each class draws its builds with no memory of the last"
+			: "a build in the last three classes is " +
+				Math.round(Math.pow(3, v)) + "x less likely to return"),
+		teamMomentum: (v) => (v <= 0
+			? "every game is an independent draw around the team's rating"
+			: "a team on a run plays like one " + (2.6 * v).toFixed(1) +
+				" rating points better"),
+		awardNoise: (v) => (v <= 0
+			? "every trophy goes to whoever the production model ranks first"
+			: v > 1.5 ? "genuine splits, and the occasional snub"
+			: "the trophies usually agree, and sometimes do not"),
+		seasonEvents: (v) => (v <= 0 ? "no events during the season"
+			: "up to " + v + " things happen during the season"),
+		draftEvents: (v) => (v <= 0 ? "the board is a plain ranking"
+			: "about " + v + " prospects move on draft day"),
 		freshmanShare: (v) => "≈" + v + "% freshmen; the rest spread over So/Jr/Sr",
 		transferShare: (v) => "≈" + v + "% of upperclassmen arrived from another programme",
 		redshirtShare: (v) => "≈" + v + "% of upperclassmen redshirted a year",
@@ -403,6 +522,8 @@
 		paintModifiedMarkerFor("ovrMode", state.cfg.ovrMode);
 		paintModifiedMarkerFor("priorSeasons", state.cfg.priorSeasons);
 		paintModifiedMarkerFor("varySize", state.cfg.varySize);
+		$("flavorHint").value = state.cfg.flavorHint || "";
+		paintModifiedMarkerFor("flavorHint", state.cfg.flavorHint || "");
 		$("ovrMode").value = state.cfg.ovrMode;
 		$("priorSeasons").value = state.cfg.priorSeasons;
 		$("varySize").checked = !!state.cfg.varySize;
@@ -422,12 +543,19 @@
 		paintNoteLines();
 		paintArchWeights();
 		paintLeagueWeights();
-		/* `cardtable` turns the prospect table into one card per prospect below
-		   700px (see css/style.css). It is a body class rather than a media
-		   query alone so the card layout only applies to the table that has the
-		   data-label attributes for it. */
-		document.body.className = "density-" + state.density +
-			(state.tab === "players" ? " cardtable" : "");
+		/* `cardtable` used to go on the BODY whenever the Prospects tab was
+		   open, and did nothing on a desktop only because the rules it selects
+		   were inside a `max-width: 700px` media query. Two things wrong with
+		   that: the class said "this is a card layout" on every viewport while
+		   meaning it on one, and the decision about WHEN to use cards was split
+		   between a JS condition (which tab) and a CSS one (which width), so
+		   neither could be read on its own and neither could be overridden.
+
+		   viewPlayers puts the class on the table's own container instead (see
+		   cardMode in js/views.js), which is both narrower — it cannot reach a
+		   table that has no data-label attributes — and answerable: the user
+		   can now ask for cards at any width. */
+		document.body.className = "density-" + state.density;
 	}
 
 	/* The era selector. The stat model targets one of the anchor sets in
@@ -797,6 +925,22 @@
 			});
 			input.addEventListener("change", () => { pushed = false; persist(); });
 		}
+		/* The class flavour, as a choice rather than a draw. See
+		   Config.DEFAULTS.flavorHint. */
+		const fh = $("flavorHint");
+		fh.appendChild(new Option("draw one at random", ""));
+		for (const f of RB.CLASS_FLAVORS) {
+			fh.appendChild(new Option(f.label || f.name, f.name));
+		}
+		fh.addEventListener("change", () => {
+			pushUndo("changed the class flavour");
+			state.cfg.flavorHint = fh.value;
+			markDirty();
+			paintConfig();
+			persist();
+			scheduleRun();
+		});
+
 		$("era").addEventListener("change", () => {
 			pushUndo("changed the era");
 			state.cfg.era = $("era").value;
@@ -888,12 +1032,31 @@
 		});
 
 		$("btnReset").addEventListener("click", () => {
-			pushUndo("reset every setting to the defaults");
-			state.cfg = CFG.make();
-			state.presetName = "default";
-			state.presetDirty = false;
-			paintConfig();
-			run();
+			// What is actually about to be lost, counted, so the dialog is a
+			// fact rather than a warning.
+			const moved = Object.keys(CFG.DEFAULTS).filter((k) =>
+				k !== "seed" &&
+				JSON.stringify(state.cfg[k]) !== JSON.stringify(CFG.DEFAULTS[k]));
+			if (!moved.length) {
+				setStatus("Every setting is already at its default.");
+				return;
+			}
+			confirmDestructive(
+				"Reset every setting?",
+				moved.length + " setting" + (moved.length === 1 ? " is" : "s are") +
+					" away from the default and will be reset: " +
+					moved.slice(0, 8).join(", ") +
+					(moved.length > 8 ? " and " + (moved.length - 8) + " more" : "") +
+					". Locks and the loaded file are kept.",
+				"Reset everything",
+				() => {
+					pushUndo("reset every setting to the defaults");
+					state.cfg = CFG.make();
+					state.presetName = "default";
+					state.presetDirty = false;
+					paintConfig();
+					run();
+				});
 		});
 
 		/* Archetype rarity weights, grouped. Sixty ungrouped rows of name-and-a
@@ -923,6 +1086,25 @@
 			const members = RB.ARCHETYPES.filter((a) => groupOf(a) === tag);
 			if (!members.length) continue;
 			const head = el("div", "archgroup");
+			head.dataset.group = tag;
+			/* Collapsible. Four groups of thirty rows each is still a wall when
+			   all four are open; a user who wants the bigs does not want to
+			   scroll through the guards to reach them. Open by default, so
+			   nothing a user could already see has moved. */
+			const toggle = el("button", "tiny archfold", "▾");
+			toggle.setAttribute("aria-expanded", "true");
+			toggle.title = "Collapse the " + label.toLowerCase();
+			toggle.addEventListener("click", () => {
+				const open = toggle.getAttribute("aria-expanded") !== "true";
+				toggle.setAttribute("aria-expanded", open ? "true" : "false");
+				toggle.textContent = open ? "▾" : "▸";
+				toggle.title = (open ? "Collapse the " : "Expand the ") + label.toLowerCase();
+				for (const row of aw.querySelectorAll('.archrow[data-group="' +
+					cssEscape(tag) + '"]')) {
+					row.classList.toggle("arch-folded", !open);
+				}
+			});
+			head.appendChild(toggle);
 			head.appendChild(el("span", "archname", label + " (" + members.length + ")"));
 			// One multiplier for the whole group, applied to what is on screen.
 			const mult = el("button", "tiny", "×2");
@@ -943,6 +1125,10 @@
 			aw.appendChild(head);
 			for (const a of members) {
 				const row = el("div", "archrow");
+				row.dataset.group = tag;
+				// Searched against the name AND the tags, so "shooting" finds
+				// the twenty builds that shoot rather than the one called it.
+				row.dataset.search = (a.name + " " + (a.t || []).join(" ")).toLowerCase();
 				const name = el("span", "archname", a.name);
 				name.title = archetypeTooltip(a);
 				row.appendChild(name);
@@ -967,6 +1153,40 @@
 				aw.appendChild(row);
 			}
 		}
+		/* The build search. 117 rows in a fixed-height scroller with no way to
+		   narrow them: finding one build meant knowing roughly where in the
+		   height ordering it sat and scrolling to it. Matches the name and the
+		   tags, and hides a group header whose whole group is filtered out so
+		   the list does not end up as a column of empty headings. */
+		const archSearch = $("archSearch");
+		const archNote = $("archSearchNote");
+		archSearch.addEventListener("input", () => {
+			const q = archSearch.value.trim().toLowerCase();
+			let shown = 0;
+			const perGroup = {};
+			for (const row of aw.querySelectorAll(".archrow")) {
+				const hit = !q || (row.dataset.search || "").indexOf(q) !== -1;
+				row.classList.toggle("arch-filtered", !hit);
+				if (hit) {
+					shown++;
+					perGroup[row.dataset.group] = true;
+					// A search result must be visible even inside a group the
+					// user collapsed, or the search silently finds nothing.
+					if (q) row.classList.remove("arch-folded");
+				}
+			}
+			for (const head of aw.querySelectorAll(".archgroup")) {
+				head.classList.toggle("arch-filtered", !!q && !perGroup[head.dataset.group]);
+			}
+			archNote.hidden = !q;
+			archNote.textContent = q
+				? shown + " build" + (shown === 1 ? "" : "s") + " match “" +
+					archSearch.value.trim() + "”" +
+					(shown ? "" : " — try a tag: guard, wing, big, shooting, " +
+						"defense, playmaking, rebounding, athletic, raw, scoring")
+				: "";
+		});
+
 		$("btnArchReset").addEventListener("click", () => {
 			pushUndo("reset the archetype weights");
 			state.cfg.archetypeWeights = null;
@@ -1265,7 +1485,46 @@
 				" came from a different draft class and have been dropped. " +
 				"Locks are tied to the file they were made against — applying " +
 				"them by pid alone would silently lock the wrong players.");
+			return;
 		}
+		reportUnmatchedLocks(file);
+	}
+
+	/* Locks whose key names no player in this file.
+
+	   The fingerprint check above catches a lock made against a DIFFERENT
+	   class. It cannot catch the case where there is no fingerprint to compare
+	   — a shareable link written before links carried one, or a payload whose
+	   fp was dropped — and that case has a specific and silent failure mode.
+
+	   Engine.playerKey uses the pid when the file has one and "idx<n>" when it
+	   does not. A link copied out of a session whose file HAD pids carries
+	   keys like "512"; pasted into a session whose file does not, every key in
+	   the class is "idx0", "idx1", … Nothing throws, nothing mismatches, and
+	   nothing is locked: the user watches their locks evaporate on the first
+	   reroll with no indication that anything happened. The validator warns
+	   about the missing pids, which explains why the file is unusual and not
+	   why the locks are gone.
+
+	   So say so, and drop them, which is what happens to them anyway. */
+	function reportUnmatchedLocks(file) {
+		const keys = Object.keys(state.overrides);
+		if (!keys.length || !file || !file.data) return;
+		const players = file.data.players || [];
+		const known = new Set(players.map((p, i) => global.Engine.playerKey(p, i)));
+		const lost = keys.filter((k) => !known.has(k));
+		if (!lost.length) return;
+		for (const k of lost) delete state.overrides[k];
+		const indexed = players.length &&
+			!Number.isFinite(Number(players[0] && players[0].pid));
+		showWarning(lost.length + " lock" + (lost.length === 1 ? "" : "s") +
+			" name" + (lost.length === 1 ? "s" : "") + " a player who is not in " +
+			"this file, and " + (lost.length === 1 ? "has" : "have") + " been dropped." +
+			(indexed
+				? " This file has no player ids, so locks in it are tied to row " +
+					"order rather than to the player — a link copied from a file " +
+					"that does have ids cannot be applied to it."
+				: " They were probably made against a file with different player ids."));
 	}
 
 	function bindFiles() {
@@ -1332,7 +1591,45 @@
 		const cfg = CFG.make(state.cfg);
 		cfg.overrides = state.overrides;
 		if (!cfg.seed && state.lastSeed) cfg.seed = state.lastSeed;
+		/* The build pools the last few classes used, newest first. The engine
+		   reads this and never writes it (see pickClassPool): a build that has
+		   been in the pool three classes running is pushed toward the back of
+		   the queue for this one, which is what stops the four heaviest builds
+		   turning up in nearly every class. The UI owns it because it is the
+		   only thing here that knows what "the last few classes" means — the
+		   engine sees one run. */
+		cfg.recentPools = (state.poolHistory || []).slice(0, POOL_HISTORY);
 		return cfg;
+	}
+
+	/* How many classes back the pool memory reaches. Matches
+	   RatingsBuilder.POOL_MEMORY_DEPTH, which is what actually consumes it;
+	   storing more would persist a list nothing reads. */
+	const POOL_HISTORY = (RB.POOL_MEMORY_DEPTH || 3);
+
+	/* Record what the class ON SCREEN was made of, so the NEXT one avoids it.
+
+	   Called at the start of a reroll, before the new class is drawn, and
+	   nowhere else. Two things follow from that and both are load-bearing:
+
+	     - `recentPools` is a build-phase dependency, so it has to be constant
+	       for as long as one class is on screen. Recording after the run
+	       instead would leave the history disagreeing with the class it
+	       produced, and the next re-apply — same seed, same settings — would
+	       rebuild and hand back a DIFFERENT class. "Re-apply keeps the class
+	       you are looking at" is the whole contract of that button.
+	     - Only a reroll counts. A slider move or a staged re-run is the same
+	       class again, and counting those would make the memory a record of
+	       how much the user fiddled rather than of which classes they have
+	       seen: the pool would drift off the heavy builds every time somebody
+	       dragged a slider. */
+	function rememberPool() {
+		const res = state.results[state.active];
+		if (!res || !Array.isArray(res.archetypePool) || !res.archetypePool.length) return;
+		const hist = (state.poolHistory || []).slice();
+		if (hist.length && hist[0].join("|") === res.archetypePool.join("|")) return;
+		hist.unshift(res.archetypePool.slice());
+		state.poolHistory = hist.slice(0, POOL_HISTORY);
 	}
 
 	function ensureResult(i) {
@@ -1348,7 +1645,103 @@
 	   changed. Moving the note template or an award dial used to re-simulate
 	   368 programs, 11,000 games and every stat line in the country — about
 	   200ms of blocking work every 140ms while a slider was moving. */
-	function run() {
+	/* --- the busy indicator ---------------------------------------------
+
+	   run() is synchronous and takes 300-600ms on a 70-player class, and the
+	   status line was written AFTER it finished. So the sequence a user saw was
+	   a click, then between a third and two thirds of a second of a completely
+	   frozen page — no cursor change, no disabled button, nothing — and then a
+	   new table. On a slower machine, or with the class-flavour dials pushed,
+	   that is long enough to click twice.
+
+	   The work cannot simply be moved off the main thread: js/worker.js exists
+	   but the batch path is the only thing it can run, because the interactive
+	   path needs the runner's staged state to live between calls and that state
+	   is a graph of live objects, not a message. What CAN be fixed for free is
+	   that the browser never got a chance to paint the "working" state before
+	   the work started. beginBusy() sets it, and a double requestAnimationFrame
+	   guarantees a frame is committed before the synchronous run begins — one
+	   rAF fires before the paint, two fire after it.
+
+	   Cheap, correct, and honest about what it is: the page still blocks, it
+	   just no longer lies about blocking. */
+	const BUSY_BUTTONS = ["btnReroll", "btnRerun", "btnExport", "btnExportMenu"];
+	let busyDepth = 0;
+	/* What the status line said before the busy message replaced it, so it can
+	   be put back. Without this the busy text is simply left on screen: nothing
+	   else writes the line on a plain run, and setStatus's own auto-hide timer
+	   guards on `s.textContent === text`, which the busy message has already
+	   made false — so "Generating the class…" stayed up for the rest of the
+	   session, and any message written immediately BEFORE a run (bulkLockAsIs's
+	   "Locked ovr on 3 prospects" is the one that matters) was wiped a frame
+	   later and never seen. */
+	let statusBeforeBusy = null;
+	/* The message beginBusy wrote, so endBusy can tell "the line still says what
+	   I put there" from "the work replaced it with something worth keeping". */
+	let busyMessage = null;
+
+	function beginBusy(what) {
+		const s = $("status");
+		if (!busyDepth) {
+			statusBeforeBusy = { text: s.textContent, hidden: s.hidden };
+		}
+		busyDepth++;
+		document.body.classList.add("busy");
+		s.textContent = what;
+		busyMessage = what;
+		s.hidden = false;
+		s.classList.add("working");
+		for (const id of BUSY_BUTTONS) {
+			const b = $(id);
+			if (b) b.setAttribute("aria-busy", "true");
+		}
+	}
+
+	function endBusy() {
+		busyDepth = Math.max(0, busyDepth - 1);
+		if (busyDepth) return;
+		document.body.classList.remove("busy");
+		const s = $("status");
+		s.classList.remove("working");
+		/* Restore, unless the work itself said something. A run that reports an
+		   error, or a caller's `after` that reports a result, has written the
+		   line during fn(); putting the previous message back would throw that
+		   away. So restore only while the line still reads exactly what
+		   beginBusy put on it. */
+		if (statusBeforeBusy && s.textContent === busyMessage) {
+			setStatus(statusBeforeBusy.hidden ? "" : statusBeforeBusy.text);
+		}
+		statusBeforeBusy = null;
+		busyMessage = null;
+		for (const id of BUSY_BUTTONS) {
+			const b = $(id);
+			if (b) b.removeAttribute("aria-busy");
+		}
+	}
+
+	/* Show the busy state, let the browser paint it, then do the work.
+	   Falls back to running inline where requestAnimationFrame does not exist
+	   (a test harness), so run() is still safe to call synchronously. */
+	function withBusy(what, fn) {
+		if (typeof requestAnimationFrame !== "function") { fn(); return; }
+		beginBusy(what);
+		requestAnimationFrame(() => requestAnimationFrame(() => {
+			try { fn(); } finally { endBusy(); }
+		}));
+	}
+
+	/* `after` runs once the class exists. Everything that used to read
+	   state.results on the line below run() has to go through it now, because
+	   the work is deferred by a frame — see withBusy. */
+	function run(after) {
+		if (!state.files.length) return;
+		withBusy("Generating the class…", () => {
+			runNow();
+			if (typeof after === "function") after();
+		});
+	}
+
+	function runNow() {
 		if (!state.files.length) return;
 		let res;
 		const t0 = performance.now();
@@ -1389,17 +1782,74 @@
 		if (!(notesOnly && state.tab !== "notes")) render();
 	}
 
+	/* The seed history, with a way out of it.
+
+	   Seeds accumulated to twelve and persisted, and the only way to remove a
+	   stale one was to clear the site's storage — which also takes the
+	   settings, the presets, the pinned class and the locks with it. The two
+	   entries below are in the list itself rather than as extra buttons in a
+	   header that is already full. */
+	const HISTORY_FORGET = "\u0000forget";
+	const HISTORY_CLEAR = "\u0000clear";
+
 	function paintHistory() {
 		const sel = $("seedHistory");
 		sel.innerHTML = "";
 		sel.appendChild(new Option("recent seeds…", ""));
 		for (const s of state.history) sel.appendChild(new Option(s, s));
+		if (state.history.length) {
+			const sep = new Option("──────────", "");
+			sep.disabled = true;
+			sel.appendChild(sep);
+			sel.appendChild(new Option(
+				state.lastSeed && state.history.indexOf(state.lastSeed) !== -1
+					? "forget “" + state.lastSeed + "”"
+					: "forget the oldest seed",
+				HISTORY_FORGET));
+			sel.appendChild(new Option("clear the seed history", HISTORY_CLEAR));
+		}
 		sel.hidden = state.history.length < 2;
+	}
+
+	function historyCommand(value) {
+		if (value === HISTORY_FORGET) {
+			// The seed on screen if it is in the list, otherwise the oldest —
+			// which is the one a user who just wants the list shorter means.
+			const target = state.lastSeed &&
+				state.history.indexOf(state.lastSeed) !== -1
+				? state.lastSeed : state.history[state.history.length - 1];
+			state.history = state.history.filter((s) => s !== target);
+			persist();
+			paintHistory();
+			setStatus("Removed “" + target + "” from the seed history.");
+			return true;
+		}
+		if (value === HISTORY_CLEAR) {
+			const n = state.history.length;
+			confirmDestructive(
+				"Clear the seed history?",
+				n + " seed" + (n === 1 ? "" : "s") + " will be forgotten. The " +
+				"class you are looking at is not affected, and its seed is still " +
+				"in the pill beside this menu.",
+				"Clear " + n + " seeds",
+				() => {
+					state.history = [];
+					persist();
+					paintHistory();
+					setStatus("Seed history cleared.");
+				});
+			paintHistory();
+			return true;
+		}
+		return false;
 	}
 
 	function reroll() {
 		const previous = state.lastSeed;
 		pushUndo("rerolled the class");
+		// Before the draw: the class being replaced is what the next one is
+		// asked not to repeat. See rememberPool.
+		rememberPool();
 		state.cfg.seed = "";
 		// Reroll is the only thing that changes a blank seed; everything else
 		// keeps the class you are looking at.
@@ -1409,15 +1859,16 @@
 		// is a stale panel over a class that no longer contains him.
 		state.editing = null;
 		state.selected = {};
-		run();
-		const res = state.results[state.active];
-		if (!res) {
-			state.lastSeed = previous || null;
-			return;
-		}
-		// The reroll's seed becomes the pinned one; the box stays blank so the
-		// next reroll draws again.
-		state.lastSeed = res.seed;
+		run(() => {
+			const res = state.results[state.active];
+			if (!res) {
+				state.lastSeed = previous || null;
+				return;
+			}
+			// The reroll's seed becomes the pinned one; the box stays blank so
+			// the next reroll draws again.
+			state.lastSeed = res.seed;
+		});
 	}
 
 	/* ---------------------------------------------------------------- views */
@@ -1569,6 +2020,53 @@
 	function openEditor(p) {
 		state.editing = state.editing === p.key ? null : p.key;
 		render();
+	}
+
+	/* Show a specific prospect in the prospect table: clear whatever filter is
+	   hiding him, open his editor and scroll his row into view.
+
+	   Sending the user to the Prospects tab is not the same as showing them the
+	   player. The table keeps a search, a position filter, a conference filter,
+	   an archetype filter and any number of numeric ranges, and every one of
+	   them can be hiding the man whose game log is on screen — so "back to the
+	   table" without this lands on a table he is not in. */
+	/* The prospects the table is showing, in the order it is showing them.
+	   The Compare tab's "what the table shows" reads this, so a comparison can
+	   follow a filter and a sort the user has already set up rather than
+	   re-specifying both in a dropdown. */
+	function visibleRows() {
+		const res = state.results[state.active];
+		if (!res) return [];
+		const shown = res.players.filter((p) => V.matchesFilter(p, res));
+		// sortRows needs the sortVals the table builds, which only exist after
+		// a render; fall back to the board order, which is what the table shows
+		// by default anyway.
+		return shown.sort((a, b) => (a.boardRank || 999) - (b.boardRank || 999));
+	}
+
+	function revealPlayer(p) {
+		if (!p) return;
+		const f = state.filter;
+		const hidden = !V.matchesFilter(p, state.results[state.active] || {});
+		if (hidden) {
+			state.filter = {
+				q: "", pos: "", conf: "", archetype: "",
+				changedOnly: false, lockedOnly: false, ranges: [],
+			};
+			setStatus("Cleared the table filters to show " + p.name + ".");
+		}
+		void f;
+		state.editing = p.key;
+		render();
+		// After the render, because the row does not exist until then.
+		requestAnimationFrame(() => {
+			const row = document.querySelector(
+				'tr[data-pkey="' + cssEscape(p.key) + '"]');
+			if (!row) return;
+			if (row.scrollIntoView) row.scrollIntoView({ block: "center" });
+			row.tabIndex = 0;
+			try { row.focus(); } catch (e) { /* not focusable in this layout */ }
+		});
 	}
 
 	function editorPanel(p, res) {
@@ -2105,18 +2603,34 @@
 			state.overrides[key] = Object.assign({}, state.overrides[key] || {}, patch);
 		}
 		state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
-		setStatus("Locked " + (nameOf[what] || what) + " on " + keys.length +
+		run(() => setStatus("Locked " + (nameOf[what] || what) + " on " + keys.length +
 			" prospect" + (keys.length === 1 ? "" : "s") +
-			" — a reroll now leaves them alone.");
-		run();
+			" — a reroll now leaves them alone."));
 	}
 
 	function bulkClear() {
 		const keys = bulkTargets();
 		if (!keys.length) return;
-		pushUndo("cleared locks on " + keys.length + " prospects");
-		for (const key of keys) delete state.overrides[key];
-		run();
+		const locked = keys.filter((k) => state.overrides[k]);
+		if (!locked.length) {
+			setStatus("None of the selected prospects is locked.");
+			return;
+		}
+		const go = () => {
+			pushUndo("cleared locks on " + locked.length + " prospects");
+			for (const key of keys) delete state.overrides[key];
+			run();
+		};
+		/* One lock is a click to put back. Wiping the whole class's worth of
+		   editing is not, and the button that does it sits next to the one that
+		   clears a selection. */
+		if (locked.length < 5) { go(); return; }
+		confirmDestructive(
+			"Clear " + locked.length + " locks?",
+			"Every hand-edited rating, overall, potential, archetype and school " +
+			"on those " + locked.length + " prospects is dropped, and the next " +
+			"reroll will draw them again.",
+			"Clear " + locked.length + " locks", go);
 	}
 
 	/* -------------------------------------------------------------- modal */
@@ -2166,6 +2680,27 @@
 			if (first) first.focus();
 		});
 	}
+	/* A confirmation, for the actions that throw work away.
+
+	   "Reset to defaults" and "Clear all locks" ran on the click. The undo
+	   stack catches both, which is not the same as not needing a confirmation:
+	   a user who clicks Reset expecting it to revert the ONE setting they just
+	   moved loses every setting they have, plus the class they were looking at,
+	   and then has to know that undo exists and that it covers this. The cost
+	   of asking is one keystroke on an action taken deliberately once a
+	   session; the cost of not asking is the whole configuration.
+
+	   Deliberately NOT applied to anything reversible in one obvious step —
+	   clearing one lock, changing a slider, removing a saved layout — because a
+	   confirmation on every action is a confirmation on none. */
+	function confirmDestructive(title, detail, okLabel, onOk) {
+		const box = el("div");
+		box.appendChild(el("p", null, detail));
+		box.appendChild(el("p", "hint",
+			"This can be undone with Ctrl+Z, or the Undo button in the header."));
+		modal(title, box, onOk, okLabel);
+	}
+
 	function closeModal() {
 		$("modal").hidden = true;
 		modalOk = null;
@@ -2461,11 +2996,10 @@
 				Object.assign({}, state.overrides[a.player.key] || {}, a.patch);
 		}
 		state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
-		run();
-		setStatus("Applied " + plan.applied.length + " lock" +
+		run(() => setStatus("Applied " + plan.applied.length + " lock" +
 			(plan.applied.length === 1 ? "" : "s") +
 			(plan.unmatched.length
-				? "; " + plan.unmatched.length + " row(s) matched nobody." : "."));
+				? "; " + plan.unmatched.length + " row(s) matched nobody." : ".")));
 	}
 
 	function planLockImport(text) {
@@ -2919,7 +3453,8 @@
 	}
 
 	Object.assign(global.App, {
-		state, render, run, persist, openEditor, editorPanel, modal, closeModal,
+		state, render, run, persist, openEditor, revealPlayer, visibleRows,
+		editorPanel, modal, closeModal,
 		clearLock,
 		copyText, bulkApply, bulkShiftOvr, bulkLockAsIs, bulkClear, refreshBulkBar,
 		snapshot,
@@ -2966,7 +3501,9 @@
 	})();
 
 	$("btnReroll").addEventListener("click", reroll);
-	$("btnRerun").addEventListener("click", run);
+	// Not `run` directly: run takes an `after` callback and a listener
+	// would pass it the click event.
+	$("btnRerun").addEventListener("click", () => run());
 	$("btnUndo").addEventListener("click", undo);
 	$("btnExport").addEventListener("click", () => {
 		if (exportOne(state.active)) setStatus("Exported " + state.files[state.active].name + ".");
@@ -2989,15 +3526,36 @@
 		setStatus("Pinned seed " + res.seed + " as the comparison baseline.");
 		render();
 	});
+	/* The card layout follows the viewport in "auto" mode, so a rotation or a
+	   window resize has to re-render — otherwise a phone turned landscape keeps
+	   the card stack and a desktop window dragged narrow keeps the forty-column
+	   table. Debounced, and it only re-renders when the answer actually
+	   changed, so dragging a window edge is not seventy table rebuilds. */
+	let resizeTimer = null;
+	let lastCardMode = null;
+	window.addEventListener("resize", () => {
+		if ((state.cardView || "auto") !== "auto") return;
+		clearTimeout(resizeTimer);
+		resizeTimer = setTimeout(() => {
+			const now = V.cardMode();
+			if (now === lastCardMode) return;
+			lastCardMode = now;
+			if (state.results[state.active]) render();
+		}, 180);
+	});
+
 	$("btnTheme").addEventListener("click", () => {
 		state.theme = state.theme === "system" ? "dark" : state.theme === "dark" ? "light" : "system";
 		applyTheme();
 		persist();
 	});
 	$("seedHistory").addEventListener("change", (e) => {
-		if (!e.target.value) return;
-		state.cfg.seed = e.target.value;
-		$("seed").value = e.target.value;
+		const v = e.target.value;
+		e.target.value = "";
+		if (!v) return;
+		if (historyCommand(v)) return;
+		state.cfg.seed = v;
+		$("seed").value = v;
 		run();
 	});
 	$("seedPill").addEventListener("click", () => {
@@ -3061,6 +3619,7 @@
 	$("modalCancel").addEventListener("click", closeModal);
 	$("modal").addEventListener("click", (e) => { if (e.target === $("modal")) closeModal(); });
 	document.addEventListener("keydown", (e) => {
+		if (e.key === "Escape") V.closeRowMenu();
 		if (e.key === "Escape" && !$("modal").hidden) closeModal();
 		const tag = (e.target.tagName || "").toLowerCase();
 		const typing = tag === "input" || tag === "textarea" || tag === "select";
@@ -3143,20 +3702,22 @@
 		const res = state.results[state.active];
 		const p = res && res.players.filter((x) => x.key === key)[0];
 		if (!p) return;
+		let said;
 		if (state.overrides[key]) {
 			pushUndo("cleared the lock on " + p.name);
 			delete state.overrides[key];
-			setStatus("Unlocked " + p.name + ".");
+			said = "Unlocked " + p.name + ".";
 		} else {
 			pushUndo("locked " + p.name);
 			state.overrides[key] = {
 				ovr: p.newOvr, archetype: p.archetype, college: p.newCollege,
 			};
-			setStatus("Locked " + p.name + " at ovr " + p.newOvr + ", " +
-				p.archetype + ", " + p.newCollege + ".");
+			said = "Locked " + p.name + " at ovr " + p.newOvr + ", " +
+				p.archetype + ", " + p.newCollege + ".";
 		}
 		state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
-		run();
+		// Through `after`, so the busy line does not eat it. See beginBusy.
+		run(() => setStatus(said));
 	}
 
 	const SHORTCUTS = [

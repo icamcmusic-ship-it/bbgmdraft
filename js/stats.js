@@ -706,8 +706,29 @@
 	         guards up to .511 for seven-footers) was applied to all of Division
 	         I, when the whole-field rotation baseline is .366 flat. That alone
 	         put team free-throw attempts 12% high. */
+	/* A per-player bend on the stat line.
+
+	   The anomaly system (SURPRISES in js/engine.js) could change a prospect's
+	   biography, his height, his recruiting rank and whether he played — and
+	   nothing else. "He shot the ball eight points worse than his jumper says",
+	   "he was the best defender in the league out of nowhere", "he had fifteen
+	   double-doubles" are the anomalies a scout actually has to evaluate
+	   through, and none of them was expressible: every one of them is a fact
+	   about the season and not about the player, which is exactly what a stat
+	   bend is.
+
+	   Every field is optional and additive, and the bend is applied INSIDE the
+	   stat line rather than to it afterwards, so the team reconciliation still
+	   runs over the bent numbers — a player who rebounds more takes the boards
+	   off his own teammates rather than conjuring them, which is what makes the
+	   bend a season and not a cheat. */
+	function bendOf(me) {
+		return (me && me.statBend) || null;
+	}
+
 	function statLine(rng, ratings, comps, minutes, usgShare, ctx, cfg, teamCtx, who) {
 		const me = who || { talent: 55, filler: false };
+		const bend = bendOf(me);
 		const noise = clamp(cfg.statNoise, 0, 3);
 		const env = teamCtx.env || NCAA_ENV;
 		const gameMinutes = env.gameMinutes || 40;
@@ -877,6 +898,7 @@
 		   cohort of shooting specialists is 38-40%. */
 		const tpCeil = clamp(0.435 + 0.08 * Math.max(0, 1 - tpa / 3.5), 0.435, 0.50);
 		const tpp = clamp(
+			(bend && bend.tpp ? bend.tpp : 0) +
 			0.339 + CAL.effShift("three") + envEff +
 				0.40 * (comps.shootingThreePointer - (0.50 - 0.20 * bigness) + refEff) +
 				compAdj + synergy + talentAdj + expAdj + loadAdj * 0.6 - 0.055 * od.perimeter +
@@ -950,14 +972,23 @@
 			saturate(jv(raw, sd), pool * cap, 0.62);
 
 		const rebLim = (teamCtx.orbPool + teamCtx.drbPool) * TUNING.REB_CAP;
-		const orbRaw = jv((teamCtx.orbPool * orbW) / teamCtx.orbDen, 0.14);
-		const drbRaw = jv((teamCtx.drbPool * drbW) / teamCtx.rebDen, 0.09);
+		/* The double-double anomaly. It lifts the rebound share (and, below,
+		   the assist share for a guard) rather than writing double-doubles into
+		   the game log directly: the log is drawn from the season average, so
+		   raising the average is what actually produces the fifteen nights, and
+		   it keeps the line and the log in agreement — which everything else in
+		   this model does and this had no reason not to. Still capped, so a
+		   double-double machine cannot take 60% of his team's boards. */
+		const rebB = 1 + (bend && bend.reb ? bend.reb : 0);
+		const orbRaw = jv((teamCtx.orbPool * orbW) / teamCtx.orbDen, 0.14) * rebB;
+		const drbRaw = jv((teamCtx.drbPool * drbW) / teamCtx.rebDen, 0.09) * rebB;
 		const rebRaw = orbRaw + drbRaw;
 		const rebScale = rebRaw > 0 ? saturate(rebRaw, rebLim, 0.62) / rebRaw : 1;
 		const orb = orbRaw * rebScale;
 		const drb = drbRaw * rebScale;
 		const ast = capNoisy(
-			(teamCtx.astPool * astWeight(comps, ratings, minShare, refVol)) / teamCtx.astDen,
+			((teamCtx.astPool * astWeight(comps, ratings, minShare, refVol)) / teamCtx.astDen) *
+				(1 + (bend && bend.ast ? bend.ast : 0)),
 			0.10, teamCtx.astPool, TUNING.AST_CAP);
 		/* Athleticism finally reaches the steal column. BBGM's stealing
 		   composite is (50 + spd + 2*diq) / 400: defensive IQ outweighs speed
@@ -987,18 +1018,25 @@
 		   which is why defensive honours had almost nothing to rank on. These
 		   are the plays that decide the other two-thirds of it. All three are
 		   real, tracked college statistics. */
+		/* A defensive breakout multiplies the plays a defensive record is made
+		   of, and improves the rating those plays imply. It does NOT touch the
+		   composites: the point of the anomaly is a player whose season was
+		   better than his tools, which a scout then has to decide whether to
+		   believe. */
+		const defB = 1 + (bend && bend.defense ? bend.defense : 0);
 		const contested = jv(
-			(4.2 + 7.6 * comps.defenseInterior + 3.4 * comps.defensePerimeter) * minShare, 0.13);
+			(4.2 + 7.6 * comps.defenseInterior + 3.4 * comps.defensePerimeter) * minShare, 0.13) * defB;
 		const deflections = jv(
-			(0.5 + 4.6 * comps.defensePerimeter + 1.4 * comps.stealing) * minShare, 0.16);
-		const charges = jv((0.9 * comps.defense + 0.5 * comps.defenseInterior) * minShare, 0.30);
+			(0.5 + 4.6 * comps.defensePerimeter + 1.4 * comps.stealing) * minShare, 0.16) * defB;
+		const charges = jv((0.9 * comps.defense + 0.5 * comps.defenseInterior) * minShare, 0.30) * defB;
 		// Defensive rating: points allowed per 100 possessions with him on the
 		// floor. Anchored at the league average and moved by what he actually
 		// does — events, the composites, and the fouls he gives away.
 		const drtg = clamp(
 			104 - 22 * (comps.defense - 0.47) - 9 * (comps.defenseInterior - 0.46) -
 				7 * (comps.defensePerimeter - 0.46) - 1.9 * blk - 2.4 * stl -
-				0.35 * drb + 0.9 * pf + rng.normal(0, 1.6 * noise),
+				0.35 * drb + 0.9 * pf + rng.normal(0, 1.6 * noise) -
+				(bend && bend.defense ? 7 * bend.defense : 0),
 			84, 122,
 		);
 
@@ -1468,6 +1506,9 @@
 					filler: !!m.filler,
 					year: m.filler ? null : classYearIndex(m.player.classYear),
 					availability: m.filler ? null : m.player.availability,
+					// See bendOf / SURPRISES: a per-player bend on the season,
+					// as distinct from a change to the player.
+					statBend: m.filler ? null : m.player.statBend,
 				},
 			);
 			lines.push(line);
@@ -1562,10 +1603,19 @@
 	/* Renormalise one category to its pool, then clip the tail at `cap` of the
 	   team total and redistribute the surplus to everyone with room. */
 	function fitToPool(values, pool, cap) {
+		/* Clipped first, and the sum taken from the clipped values.
+
+		   A negative input would make its own renormalised share negative and
+		   would also shrink the denominator, inflating everyone else — and a
+		   set that summed to zero because its negatives cancelled its
+		   positives took the early return and came back unchanged, negatives
+		   included. Nothing upstream produces a negative; clipping here means
+		   nothing downstream has to assume that. */
+		const clipped = values.map((v) => (Number.isFinite(v) && v > 0 ? v : 0));
 		let sum = 0;
-		for (const v of values) sum += v;
-		if (sum <= 1e-9 || pool <= 0) return values;
-		const out = values.map((v) => (v * pool) / sum);
+		for (const v of clipped) sum += v;
+		if (sum <= 1e-9 || pool <= 0) return clipped;
+		const out = clipped.map((v) => (v * pool) / sum);
 		const lim = pool * cap;
 		for (let iter = 0; iter < 6; iter++) {
 			let excess = 0;
@@ -1607,6 +1657,16 @@
 			const k = before > 1e-9 ? fitted[i] / before : 1;
 			l.orpg *= k;
 			l.drpg *= k;
+			/* Re-floor after the rescale. statLine floors every stat at zero
+			   and every step between here and there preserves that — fitToPool
+			   only ever scales by a positive factor and redistributes into
+			   headroom — so this cannot currently fire. It is here because
+			   "cannot currently" is a property of five functions agreeing, and
+			   a negative rebound total reaching a BBGM export would be
+			   invisible until somebody imported it. Costs two comparisons per
+			   player per team. */
+			l.orpg = Math.max(0, l.orpg);
+			l.drpg = Math.max(0, l.drpg);
 			l.rpg = l.orpg + l.drpg;
 		});
 	}
