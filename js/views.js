@@ -2431,16 +2431,26 @@
 			"The file already carries draft.round and draft.pick and the tool " +
 			"used them as nothing but a class-order proxy. This is the board the " +
 			"simulated season implies: a preseason ranking from ratings alone, " +
-			"then what the year actually showed."));
+			"then what the year actually showed. Click a name for his page."));
 		const cards = el("div", "cards");
 		const mk = (title, list, sign) => {
 			const box = el("div", "card");
 			box.appendChild(el("h4", null, title));
-			box.appendChild(el("div", "note", list.length
-				? list.map((p) => (sign && p.stockMove > 0 ? "+" : "") + p.stockMove +
-					"  No. " + p.boardRank + "  " + p.name + " (" +
-					(p.proClub || p.newCollege) + ")").join("\n")
-				: "nobody moved"));
+			const noteBox = el("div", "note");
+			if (!list.length) {
+				noteBox.textContent = "nobody moved";
+			} else {
+				list.forEach((p, i) => {
+					if (i) noteBox.appendChild(document.createTextNode("\n"));
+					noteBox.appendChild(document.createTextNode(
+						(sign && p.stockMove > 0 ? "+" : "") + p.stockMove +
+						"  No. " + p.boardRank + "  "));
+					noteBox.appendChild(playerLink(p));
+					noteBox.appendChild(document.createTextNode(
+						" (" + (p.proClub || p.newCollege) + ")"));
+				});
+			}
+			box.appendChild(noteBox);
 			return box;
 		};
 		cards.appendChild(mk("Risers", res.risers || [], true));
@@ -2463,19 +2473,35 @@
 		for (const p of res.board || []) {
 			const tr = el("tr");
 			tr.tabIndex = 0;
-			tr.addEventListener("click", () => {
-				A().state.tab = "players";
-				A().openEditor(p);
+			// The board is for LOOKING, not editing — clicking a row (or the
+			// name link inside it) opens the player's own page. The inline
+			// editor is one keystroke away from there ("Edit this prospect…").
+			tr.addEventListener("click", (e) => {
+				// A click on the name or the school/club link does its own
+				// navigation (player vs team); the row click is the fallback
+				// for everywhere else in it.
+				if (e.target.closest(".linky")) return;
+				A().showPlayer(p.key);
+			});
+			tr.addEventListener("keydown", (e) => {
+				if (e.key !== "Enter" && e.key !== " ") return;
+				e.preventDefault();
+				A().showPlayer(p.key);
 			});
 			tr.appendChild(el("td", "num", String(p.boardRank)));
 			tr.appendChild(el("td", "num", p.mockRound ? String(p.mockRound) : "—"));
 			tr.appendChild(el("td", "num", p.mockPick ? String(p.mockPick) : "—"));
-			tr.appendChild(el("td", "sticky", p.name));
+			const nameTd = el("td", "sticky");
+			nameTd.appendChild(playerLink(p));
+			tr.appendChild(nameTd);
 			tr.appendChild(el("td", null, p.newPos));
 			tr.appendChild(el("td", null, p.classYear));
 			tr.appendChild(el("td", "num", String(p.newOvr)));
 			tr.appendChild(el("td", "num", String(p.newPot)));
-			tr.appendChild(el("td", null, p.proClub || p.newCollege));
+			const schoolTd = el("td");
+			if (!p.nonNcaa && res.teams[p.newCollege]) schoolTd.appendChild(teamLink(p.newCollege));
+			else schoolTd.appendChild(document.createTextNode(p.proClub || p.newCollege));
+			tr.appendChild(schoolTd);
 			tr.appendChild(el("td", "num", String(p.preseasonRank)));
 			const mv = el("td", "num");
 			mv.appendChild(el("span", p.stockMove > 0 ? "up" : p.stockMove < 0 ? "down" : "",
@@ -3022,9 +3048,7 @@
 			actions.appendChild(gl);
 		}
 		box.appendChild(actions);
-		if (global.Faces && global.Faces.render) {
-			global.Faces.render(face, p, 120);
-		}
+		if (global.Faces) global.Faces.render(face, p);
 		return box;
 	}
 

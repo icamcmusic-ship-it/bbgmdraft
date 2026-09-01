@@ -418,23 +418,44 @@ true strength. `js/rankings.js` derives everything from **observable results**:
 ## News
 
 The News tab replaces the four ·-joined event strips. `js/news.js` turns the
-material the sim already produces — mid-season events, poll movement, Selection
-Sunday, bracket upsets, the title game, awards, class anomalies, draft-day
-events, realignment — into dated articles grouped by month, with headline
-variants drawn deterministically from the class's own seed and **every player
-and team mention a live link**.
+material the sim already produces into dated articles grouped by month, with
+headline variants drawn deterministically from the class's own seed and
+**every player and team mention a live link**. 28 distinct kinds, from
+signing day and transfer-portal moves through the season and into the
+draft: mid-season events, poll movement (a new No. 1, the biggest riser),
+class flavour, a notable injury, a NET/AP-poll disagreement, conference
+tournament champions (upsets first, then the power leagues), Selection
+Sunday snubs and bid-count surprises, bracket upsets, a Cinderella run, the
+Final Four field, the national championship, the NIT champion, the major
+individual awards (Player of the Year, Freshman of the Year, Defensive
+Player of the Year, the All-America team), the trophy the class lost to a
+named returning player, a spotlight on the best player who wasn't draft
+eligible, realignment, the anomaly stories, and draft day.
 
 ## Player pages, links and faces
 
-Every player name across the season views is a link to a real player page —
-stats, shooting, career (the simulated prior seasons), honours, recruiting
-path, trajectory, scouting note, and an edit button. Team pages gained NET,
-quadrant records and the AP rank history. Back/forward work: player and team
-pages ride on `pushState`. Portraits render with **facesjs** — the same
+Every player name across the season views — including every row on the
+**draft board** — is a link to a real player page: stats, shooting, career
+(the simulated prior seasons), honours, recruiting path, trajectory,
+scouting note, and an edit button. Team pages gained NET, quadrant records
+and the AP rank history. Back/forward work: player and team pages ride on
+`pushState`. Portraits render with **facesjs** — the same
 library BBGM uses, vendored as `js/vendor/facesjs.js` so the no-build-step,
-open-off-the-disk property survives. A file's own `face` blob renders as-is;
-a player without one gets a face generated deterministically from his key, so
-it survives rerolls and reloads.
+open-off-the-disk property survives. A file's own `face` blob renders as-is
+when it is complete (a partial or legacy blob falls back to a generated face
+rather than drawing a portrait with no eyes in it), and the stored blob is
+never mutated, so a face round-trips into the export exactly as it arrived.
+A player without one gets a face generated deterministically from his key, so
+it survives rerolls and reloads. Faces are drawn in the player's own
+programme's kit — teammates match, schools differ — and always in a
+basketball jersey: facesjs draws from every sport it knows, so left alone a
+third of the class turned up in baseball and hockey shirts. No hats: the
+"accessories" range is caps, headbands, eye black, a Santa hat and a
+football facemask, and only a headband or nothing survives — a hat becomes
+a house style the moment enough of the class is wearing one. Glasses are
+curated the same way: three of facesjs's six styles render as an oversized,
+reflective lens shape that swallows both eyes, so only the two that draw at
+a normal scale (thin wire frames, bold rec specs) survive alongside none.
 
 ## Universe mode
 
