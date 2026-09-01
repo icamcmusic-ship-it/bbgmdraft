@@ -420,7 +420,7 @@ true strength. `js/rankings.js` derives everything from **observable results**:
 The News tab replaces the four ·-joined event strips. `js/news.js` turns the
 material the sim already produces into dated articles grouped by month, with
 headline variants drawn deterministically from the class's own seed and
-**every player and team mention a live link**. 28 distinct kinds, from
+**every player and team mention a live link**. Around fifty distinct kinds, from
 signing day and transfer-portal moves through the season and into the
 draft: mid-season events, poll movement (a new No. 1, the biggest riser),
 class flavour, a notable injury, a NET/AP-poll disagreement, conference

@@ -806,6 +806,184 @@
 		return Math.max(0, base) * mult;
 	}
 
+	/* Real abbreviations for the well-known programs, the way a ticker or a
+	   bracket would print them — Kentucky is UK and Kansas is KU because that
+	   is what those schools actually call themselves, and no generator can
+	   know that. Everything not listed here falls through to the generated
+	   abbreviation in abbrev() below. Hand-checked unique. */
+	const ABBREVS = {
+		"Kentucky": "UK",
+		"UCLA": "UCLA",
+		"North Carolina": "UNC",
+		"Duke": "DUKE",
+		"Kansas": "KU",
+		"Indiana": "IND",
+		"Louisville": "LOU",
+		"Notre Dame": "ND",
+		"Michigan": "MICH",
+		"Michigan State": "MSU",
+		"Arizona": "ARIZ",
+		"Arizona State": "ASU",
+		"St. John's": "SJU",
+		"Syracuse": "SYR",
+		"USC": "USC",
+		"Illinois": "ILL",
+		"Maryland": "MD",
+		"Minnesota": "MINN",
+		"Villanova": "NOVA",
+		"Georgia Tech": "GT",
+		"Georgetown": "GTWN",
+		"Tennessee": "TENN",
+		"Washington": "WASH",
+		"Washington State": "WSU",
+		"Florida State": "FSU",
+		"Purdue": "PUR",
+		"Cincinnati": "CIN",
+		"California": "CAL",
+		"Connecticut": "UCONN",
+		"DePaul": "DEP",
+		"Memphis": "MEM",
+		"Ohio State": "OSU",
+		"North Carolina State": "NCST",
+		"Marquette": "MARQ",
+		"UNLV": "UNLV",
+		"LSU": "LSU",
+		"Iowa": "IOWA",
+		"Iowa State": "ISU",
+		"Missouri": "MIZZ",
+		"Stanford": "STAN",
+		"Texas": "TEX",
+		"Texas A&M": "TAMU",
+		"Texas Tech": "TTU",
+		"Houston": "HOU",
+		"Arkansas": "ARK",
+		"Florida": "FLA",
+		"Western Kentucky": "WKU",
+		"Temple": "TEM",
+		"Oklahoma": "OU",
+		"Oklahoma State": "OKST",
+		"Alabama": "ALA",
+		"Seton Hall": "HALL",
+		"Oregon": "ORE",
+		"Oregon State": "ORST",
+		"Utah": "UTAH",
+		"Utah State": "USU",
+		"Virginia": "UVA",
+		"Virginia Tech": "VT",
+		"Wake Forest": "WAKE",
+		"Colorado": "COLO",
+		"Colorado State": "CSU",
+		"San Francisco": "SF",
+		"South Florida": "USF",
+		"Vanderbilt": "VANDY",
+		"Boston College": "BC",
+		"Wisconsin": "WIS",
+		"Kansas State": "KSU",
+		"South Carolina": "SCAR",
+		"Providence": "PROV",
+		"Auburn": "AUB",
+		"Fresno State": "FRES",
+		"BYU": "BYU",
+		"Dayton": "DAY",
+		"Duquesne": "DUQ",
+		"Detroit Mercy": "DET",
+		"Georgia": "UGA",
+		"La Salle": "LAS",
+		"Baylor": "BAY",
+		"Pepperdine": "PEPP",
+		"Wichita State": "WICH",
+		"Clemson": "CLEM",
+		"Gonzaga": "GONZ",
+		"Xavier": "XAV",
+		"Long Beach State": "LBSU",
+		"Creighton": "CREI",
+		"Bowling Green": "BGSU",
+		"Miami (FL)": "MIA",
+		"New Mexico": "UNM",
+		"New Mexico State": "NMSU",
+		"West Virginia": "WVU",
+		"Nebraska": "NEB",
+		"Penn State": "PSU",
+		"Pennsylvania": "PENN",
+		"TCU": "TCU",
+		"SMU": "SMU",
+		"UTEP": "UTEP",
+		"Rhode Island": "URI",
+		"St. Bonaventure": "BONA",
+		"San Diego State": "SDSU",
+		"VCU": "VCU",
+		"UCF": "UCF",
+		"Saint Joseph's (PA)": "SJOE",
+		"Saint Louis": "SLU",
+		"Saint Mary's": "SMC",
+		"Santa Clara": "SCU",
+		"San Diego": "USD",
+		"Northwestern": "NW",
+		"Pittsburgh": "PITT",
+		"UAB": "UAB",
+		"Wyoming": "WYO",
+		"Ole Miss": "MISS",
+		"Mississippi State": "MSST",
+		"Tulsa": "TLSA",
+		"Tulane": "TULN",
+		"Boise State": "BSU",
+		"Nevada": "NEV",
+		"Texas State": "TXST",
+	};
+
+	/* Abbreviations for everyone else are generated, deterministically, from
+	   the name: initials for a multi-word name (which is how W&M or UTSA-style
+	   abbreviations arise naturally), the first four letters otherwise, then a
+	   fixed ladder of longer candidates until one is free. The whole map is
+	   resolved once at load in COLLEGES key order, so the same college gets
+	   the same abbreviation every run and no two colleges ever share one. */
+	function abbrevCandidates(name) {
+		const words = String(name).toUpperCase().split(/[^A-Z&]+/).filter(Boolean);
+		const letters = words.join("");
+		const cands = [];
+		if (words.length >= 2) {
+			const initials = words.map((w) => w[0]).join("");
+			if (initials.length >= 2 && initials.length <= 6) cands.push(initials);
+		}
+		for (const n of [4, 5, 6]) {
+			if (letters.length >= 2) cands.push(letters.slice(0, n));
+		}
+		// Last resort: a fifth-letter suffix walk. With 368 schools this is
+		// essentially never reached, but it keeps resolution total.
+		const stem = letters.slice(0, 5);
+		for (const c of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") cands.push(stem + c);
+		return cands;
+	}
+
+	const RESOLVED_ABBREVS = {};
+	{
+		const used = new Set(Object.keys(ABBREVS).map((k) => ABBREVS[k]));
+		for (const name of Object.keys(COLLEGES)) {
+			if (ABBREVS[name]) {
+				RESOLVED_ABBREVS[name] = ABBREVS[name];
+				continue;
+			}
+			for (const cand of abbrevCandidates(name)) {
+				if (!used.has(cand)) {
+					used.add(cand);
+					RESOLVED_ABBREVS[name] = cand;
+					break;
+				}
+			}
+		}
+	}
+
+	function abbrev(name) {
+		if (RESOLVED_ABBREVS[name]) return RESOLVED_ABBREVS[name];
+		// An out-of-database school (modded league file): first candidate that
+		// does not collide with a database school's abbreviation.
+		const taken = new Set(Object.keys(RESOLVED_ABBREVS).map((k) => RESOLVED_ABBREVS[k]));
+		for (const cand of abbrevCandidates(name)) {
+			if (!taken.has(cand)) return cand;
+		}
+		return String(name).toUpperCase().replace(/[^A-Z&]/g, "").slice(0, 6) || "XX";
+	}
+
 	const conferenceOf = (name) => (COLLEGES[name] ? COLLEGES[name][1] : null);
 	const frequencyOf = (name) => (COLLEGES[name] ? COLLEGES[name][0] : 1);
 
@@ -826,6 +1004,7 @@
 	global.Colleges = {
 		COLLEGES, CONFERENCES, NON_NCAA, PRO_CLUBS, byConference,
 		conferenceOf, frequencyOf, prestige, region, isUSA, leagueWeight,
+		ABBREVS, abbrev,
 		CANADA_HINTS, US_STATES, GEORGIAN_CITIES, EURO_HINTS, OCEANIA_HINTS, ASIA_HINTS, LATAM_HINTS, AFRICA_HINTS,
 		names: Object.keys(COLLEGES),
 	};

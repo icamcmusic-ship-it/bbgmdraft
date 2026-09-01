@@ -1731,45 +1731,182 @@
 			"(of " + (global.Rankings ? global.Rankings.VOTERS : 60) + "); " +
 			"± is movement against the preseason ballot."));
 
-		// The poll as a season: the top ten's rank by week.
+		// The poll as a season: every team that was ever ranked, by week.
 		if (res.pollHistory && res.pollHistory.length) {
+			const hist = res.pollHistory;
+			/* Cells are read from the poll history itself, never from
+			   t.apHistory: a team missing from res.teams (or one the ranker
+			   never wrote apHistory onto) used to produce a one-cell row
+			   that collapsed the whole table. Every row now emits exactly
+			   one cell per week by construction. */
+			const weekRank = hist.map((wk) => {
+				const m = {};
+				wk.ranks.forEach((r) => { m[r.team] = r; });
+				return m;
+			});
+			const last = weekRank[hist.length - 1];
+			const ever = {};
+			hist.forEach((wk) => wk.ranks.forEach((r) => {
+				if (!ever[r.team] || r.rank < ever[r.team]) ever[r.team] = r.rank;
+			}));
+			const rows = Object.keys(ever).sort((a, b) => {
+				const fa = last[a] ? last[a].rank : 99 + ever[a];
+				const fb = last[b] ? last[b].rank : 99 + ever[b];
+				return fa - fb;
+			});
 			view.appendChild(el("h3", null, "The poll, week by week"));
+			view.appendChild(el("p", "legendline",
+				"Every team that appeared in any weekly ballot — the No. 3 in " +
+				"December that was unranked by March is the most interesting " +
+				"row here. Green rose or entered; red fell or dropped out. " +
+				"Hover a cell for points and first-place votes."));
 			const pw = el("div", "scroll");
 			const pt = el("table");
 			const ph = el("tr");
 			ph.appendChild(el("th", null, "Team"));
-			res.pollHistory.forEach((wk) => {
+			hist.forEach((wk) => {
 				ph.appendChild(el("th", "num", wk.week === 0 ? "Pre" : String(wk.week)));
 			});
 			const pth = el("thead");
 			pth.appendChild(ph);
 			pt.appendChild(pth);
 			const ptb = el("tbody");
-			for (const r of res.pollHistory[res.pollHistory.length - 1].ranks.slice(0, 10)) {
-				const t = res.teams[r.team];
+			for (const name of rows) {
 				const tr = el("tr");
 				const td = el("td", "sticky");
-				td.appendChild(teamLink(r.team));
+				td.appendChild(teamLink(name));
 				tr.appendChild(td);
-				(t && t.apHistory ? t.apHistory : []).forEach((rk) => {
-					tr.appendChild(el("td", "num", rk ? String(rk) : "·"));
+				weekRank.forEach((m, w) => {
+					const row = m[name];
+					const prev = w > 0 ? weekRank[w - 1][name] : null;
+					let cls = "num";
+					if (row && (!prev || prev.rank > row.rank)) cls += " pollup";
+					else if ((!row && prev) || (row && prev && prev.rank < row.rank)) cls += " polldown";
+					const cell = el("td", cls, row ? String(row.rank) : "·");
+					if (row) {
+						cell.title = row.points + " pts" +
+							(row.firstPlace ? ", " + row.firstPlace + " first-place" : "") +
+							(row.record ? ", " + row.record : "");
+					}
+					tr.appendChild(cell);
 				});
 				ptb.appendChild(tr);
 			}
 			pt.appendChild(ptb);
 			pw.appendChild(pt);
 			view.appendChild(pw);
-			const final = res.pollHistory[res.pollHistory.length - 1];
-			if (final.othersReceivingVotes && final.othersReceivingVotes.length) {
-				const line = el("p", "legendline");
-				line.appendChild(document.createTextNode("Others receiving votes: "));
-				final.othersReceivingVotes.forEach((o, i) => {
-					if (i) line.appendChild(document.createTextNode(", "));
-					line.appendChild(teamLink(o.team));
-					line.appendChild(document.createTextNode(" " + o.points));
-				});
-				view.appendChild(line);
+
+			// Scrub to any week: the full 25-deep ballot with points, firsts
+			// and records — the data was always there, only the final week
+			// was ever shown.
+			const wkSel = el("select");
+			hist.forEach((wk, i) => {
+				const o = el("option", null,
+					wk.label || (wk.week === 0 ? "Preseason" : "Week " + wk.week));
+				o.value = String(i);
+				wkSel.appendChild(o);
+			});
+			wkSel.value = String(hist.length - 1);
+			const wkHead = el("h3", null, "One week's full ballot ");
+			wkHead.appendChild(wkSel);
+			view.appendChild(wkHead);
+			const wkBox = el("div");
+			view.appendChild(wkBox);
+			const renderWeek = () => {
+				wkBox.textContent = "";
+				const wk = hist[Number(wkSel.value)];
+				if (!wk) return;
+				const prevWk = weekRank[Number(wkSel.value) - 1] || null;
+				const tw = el("div", "scroll");
+				const tb = el("table");
+				const hr = el("tr");
+				for (const h of ["#", "Team", "Record", "Points", "1st", "±"]) {
+					hr.appendChild(el("th", h === "Team" ? null : "num", h));
+				}
+				const thd = el("thead");
+				thd.appendChild(hr);
+				tb.appendChild(thd);
+				const bod = el("tbody");
+				for (const r of wk.ranks) {
+					const tr = el("tr");
+					tr.appendChild(el("td", "num", String(r.rank)));
+					const td = el("td");
+					td.appendChild(teamLink(r.team));
+					tr.appendChild(td);
+					tr.appendChild(el("td", "num", r.record || ""));
+					tr.appendChild(el("td", "num", String(r.points)));
+					tr.appendChild(el("td", "num", r.firstPlace ? String(r.firstPlace) : ""));
+					const was = prevWk && prevWk[r.team] ? prevWk[r.team].rank : null;
+					const delta = was === null
+						? (prevWk ? "NR" : "")
+						: was === r.rank ? "—"
+						: was > r.rank ? "▲" + (was - r.rank) : "▼" + (r.rank - was);
+					tr.appendChild(el("td",
+						"num" + (delta.charAt(0) === "▲" || delta === "NR" ? " pollup"
+							: delta.charAt(0) === "▼" ? " polldown" : ""), delta));
+					bod.appendChild(tr);
+				}
+				tb.appendChild(bod);
+				tw.appendChild(tb);
+				wkBox.appendChild(tw);
+				if (wk.othersReceivingVotes && wk.othersReceivingVotes.length) {
+					const line = el("p", "legendline");
+					line.appendChild(document.createTextNode("Others receiving votes: "));
+					wk.othersReceivingVotes.forEach((o, i) => {
+						if (i) line.appendChild(document.createTextNode(", "));
+						line.appendChild(teamLink(o.team));
+						line.appendChild(document.createTextNode(" " + o.points));
+					});
+					wkBox.appendChild(line);
+				}
+			};
+			wkSel.addEventListener("change", renderWeek);
+			renderWeek();
+		}
+
+		// Recruiting class rankings: the aggregate the per-player stars and
+		// ranks always implied but never produced.
+		if (res.recruitingClasses && res.recruitingClasses.length) {
+			view.appendChild(el("h3", null, "Recruiting class rankings"));
+			view.appendChild(el("p", "legendline",
+				"All 368 programmes, scored 247-style: per-signee points decay " +
+				"steeply with national rank, with diminishing returns after the " +
+				"top handful. Prospects in this class keep their real national " +
+				"ranks; the rest of every class is synthesised from programme " +
+				"prestige. Top 25 shown."));
+			const rw = el("div", "scroll");
+			const rt = el("table");
+			const rh = el("tr");
+			for (const h of ["#", "Program", "Conf", "Score", "Signees", "5★", "4★", "Avg rank", "Headliner"]) {
+				rh.appendChild(el("th", h === "Program" || h === "Headliner" ? null : "num", h));
 			}
+			const rthead = el("thead");
+			rthead.appendChild(rh);
+			rt.appendChild(rthead);
+			const rtb = el("tbody");
+			for (const rc of res.recruitingClasses.slice(0, 25)) {
+				const tr = el("tr");
+				tr.appendChild(el("td", "num", String(rc.natRank)));
+				const td = el("td");
+				td.appendChild(teamLink(rc.name));
+				tr.appendChild(td);
+				tr.appendChild(el("td", null, rc.conf));
+				tr.appendChild(el("td", "num", rc.score.toFixed(1)));
+				tr.appendChild(el("td", "num", String(rc.signees)));
+				tr.appendChild(el("td", "num", rc.fiveStars ? String(rc.fiveStars) : ""));
+				tr.appendChild(el("td", "num", rc.fourStars ? String(rc.fourStars) : ""));
+				tr.appendChild(el("td", "num", rc.avgRank.toFixed(0)));
+				const hd = el("td");
+				if (rc.headliner && rc.headliner.real) {
+					hd.appendChild(playerLink(rc.headliner.name, rc.headliner.key));
+					hd.appendChild(document.createTextNode(" (No. " + rc.headliner.rank + ")"));
+				}
+				tr.appendChild(hd);
+				rtb.appendChild(tr);
+			}
+			rt.appendChild(rtb);
+			rw.appendChild(rt);
+			view.appendChild(rw);
 		}
 
 		// Selection Sunday: the committee's work, in the committee's terms.
@@ -2039,11 +2176,35 @@
 	/* ------------------------------------------------------------- bracket */
 
 	function gameNode(a, b, winner, seedA, seedB, score) {
-		const g = el("div", "game" + (winner === b && seedB > seedA + 2 ? " upset" : ""));
+		/* An upset is styled by its magnitude, not a binary: a 15-over-2 is
+		   not the same event as a 10-over-7, so the seed differential picks
+		   the intensity class. */
+		const loSeed = winner === b ? seedA : seedB;
+		const wSeed = winner === b ? seedB : seedA;
+		const diff = wSeed !== undefined && loSeed !== undefined ? wSeed - loSeed : 0;
+		const upsetCls = diff > 8 ? " upset upset3" : diff > 5 ? " upset upset2"
+			: diff > 2 ? " upset upset1" : "";
+		const g = el("div", "game" + upsetCls);
 		const line = (t, seed, won) => {
 			const d = el("div", won ? "w" : "l");
-			d.appendChild(el("span", "sd", seed === undefined ? "" : String(seed)));
-			d.appendChild(el("span", "gn", t.name));
+			d.appendChild(el("span",
+				"sd" + (seed <= 3 ? " sdtop" : seed >= 13 ? " sdlow" : ""),
+				seed === undefined ? "" : String(seed)));
+			/* The bracket is the most team-dense view in the app — 67 games —
+			   and it was the one place team names rendered as plain text. */
+			const link = teamLink(t.name);
+			link.classList.add("gn");
+			link.setAttribute("data-bteam", t.name);
+			d.appendChild(link);
+			/* Hovering a team lights its entire path through the rounds. */
+			link.addEventListener("mouseenter", () => {
+				document.querySelectorAll('[data-bteam="' + CSS.escape(t.name) + '"]')
+					.forEach((n) => n.classList.add("pathlit"));
+			});
+			link.addEventListener("mouseleave", () => {
+				document.querySelectorAll(".pathlit")
+					.forEach((n) => n.classList.remove("pathlit"));
+			});
 			return d;
 		};
 		g.appendChild(line(a, seedA, winner === a));
@@ -2072,8 +2233,13 @@
 			ruPill.appendChild(teamLink(t.runnerUp.team.name));
 			head.appendChild(ruPill);
 		}
-		head.appendChild(el("span", "pill",
-			"Final Four: " + t.finalFour.map((x) => x.team.name).join(", ")));
+		const ffPill = el("span", "pill");
+		ffPill.appendChild(document.createTextNode("Final Four: "));
+		t.finalFour.forEach((x, i) => {
+			if (i) ffPill.appendChild(document.createTextNode(", "));
+			ffPill.appendChild(teamLink(x.team.name));
+		});
+		head.appendChild(ffPill);
 		const upsets = [];
 		/* Iterate the regions the bracket actually HAS, not the static list:
 		   the engine populates only regions with teams on a degraded field,
@@ -2176,7 +2342,10 @@
 		REG.forEach((region, i) => {
 			const r = t.regions[region];
 			const box = el("div", "regionbox");
-			box.appendChild(el("h4", null, region + " — " + r.champ.team.name + " advances"));
+			const rh = el("h4", null, region + " — ");
+			rh.appendChild(teamLink(r.champ.team.name));
+			rh.appendChild(document.createTextNode(" advances"));
+			box.appendChild(rh);
 			if (st.compactBracket) {
 				/* Four rounds scrolling horizontally inside a box that is
 				   itself in a column gave you nested horizontal scroll. Compact
@@ -2232,7 +2401,10 @@
 		view.appendChild(bub);
 
 		if (t.nit && t.nit.champion) {
-			view.appendChild(el("h3", null, "NIT — " + t.nit.champion.name + " win it"));
+			const nitH = el("h3", null, "NIT — ");
+		nitH.appendChild(teamLink(t.nit.champion.name));
+		nitH.appendChild(document.createTextNode(" win it"));
+		view.appendChild(nitH);
 			view.appendChild(el("p", "legendline",
 				"Thirty-two teams that missed the 68. A fringe prospect's team " +
 				"plays somewhere in March."));
@@ -3162,6 +3334,14 @@
 		}
 		row("Programme level", Math.round(t.level) + " (rating " +
 			t.rating.toFixed(1) + ")");
+		if (t.recruitClass) {
+			row("Recruiting class", "No. " + t.recruitClass.natRank + " nationally · No. " +
+				t.recruitClass.confRank + " in the " + t.recruitClass.conf + " · " +
+				t.recruitClass.signees + " signees" +
+				(t.recruitClass.fiveStars ? " · " + t.recruitClass.fiveStars + " five-star" : "") +
+				(t.recruitClass.headliner && t.recruitClass.headliner.real
+					? " · headlined by " + t.recruitClass.headliner.name : ""));
+		}
 		if (Number.isFinite(t.pace)) row("Tempo", t.pace.toFixed(1) + " possessions a game");
 		if (t.offRtg) {
 			row("Efficiency", "ORtg " + t.offRtg.toFixed(1) +

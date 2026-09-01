@@ -333,9 +333,27 @@
 				? ((p.firstName || "") + " " + (p.lastName || "")).trim()
 				: "player #" + i;
 			if (!p || typeof p !== "object") { bad.push("player #" + i + " is not an object"); return; }
+			/* Independent checks, not an else-chain: a player broken in both
+			   ways used to report one problem, the user fixed it, reloaded,
+			   and got a second error for the same row. */
 			if (!Array.isArray(p.ratings) || !p.ratings.length) {
 				bad.push(who + " has no ratings");
-			} else if (!p.born || !Number.isFinite(Number(p.born.year))) {
+			} else {
+				/* A partial ratings block reached exportFile's ratings[last]
+				   write and silently produced a player with zeros. */
+				const last = p.ratings[p.ratings.length - 1];
+				const missing = last && typeof last === "object"
+					? BB.RATING_KEYS.filter((k) => !Number.isFinite(Number(last[k])))
+					: BB.RATING_KEYS;
+				if (missing.length) {
+					bad.push(who + " last ratings row is missing " +
+						(missing.length === BB.RATING_KEYS.length
+							? "every rating key"
+							: missing.slice(0, 5).join(", ") +
+								(missing.length > 5 ? ", …" : "")));
+				}
+			}
+			if (!p.born || !Number.isFinite(Number(p.born.year))) {
 				bad.push(who + " has no born.year");
 			}
 			/* A file without pids used to collapse the entire generator in
@@ -1500,7 +1518,91 @@
 			};
 		}
 		state.teams = teams;
+		state.recruitingClasses = computeRecruitingClasses(
+			state.players, teams, rng.child("recruitclasses" + variationSalt(state.cfg)));
 		return state;
+	}
+
+	/* Recruiting class rankings (§8.8). Per-player recruiting data existed —
+	   rank, stars, committed — but the aggregate every fan actually argues
+	   about did not. To rank all 368 programmes the class needs synthetic
+	   recruits for every school (the same move the returning-talent model
+	   makes); real prospects keep the national rank assignRecruiting gave
+	   them and the synthetics fill the remaining slots in quality order.
+
+	   The score is the 247-style shape: a per-recruit point value that
+	   decays steeply with national rank, with diminishing returns after the
+	   top handful of signees. */
+	function computeRecruitingClasses(players, teams, rng) {
+		const names = Object.keys(teams);
+		const real = {};
+		for (const p of players) {
+			// A transfer's recruitment belongs to an earlier cycle at
+			// another school; a freshman was signed this cycle, here.
+			if (p.nonNcaa || !p.recruiting) continue;
+			if (p.transfer && p.transfer.from) continue;
+			(real[p.newCollege] = real[p.newCollege] || []).push(p);
+		}
+		const synthBySchool = {};
+		const synth = [];
+		for (const name of names) {
+			const r = rng.child("rc:" + name);
+			const prestige = C.prestige(name);
+			const n = 3 + r.int(0, 2);
+			synthBySchool[name] = [];
+			for (let i = 0; i < n; i++) {
+				const s = { school: name, q: prestige + r.normal(0, 14) };
+				synth.push(s);
+				synthBySchool[name].push(s);
+			}
+		}
+		synth.sort((a, b) => b.q - a.q);
+		const taken = new Set();
+		for (const s of Object.keys(real)) {
+			for (const p of real[s]) taken.add(p.recruiting.rank);
+		}
+		let next = 1;
+		for (const s of synth) {
+			while (taken.has(next)) next++;
+			taken.add(next);
+			s.rank = next;
+		}
+		const starsOf = (rank) => (rank <= 8 ? 5 : rank <= 40 ? 4 : rank <= 130 ? 3 : 2);
+		const pts = (rank) => 100 / Math.pow(rank + 15, 0.42);
+		const rows = names.map((name) => {
+			const signees = (real[name] || [])
+				.map((p) => ({
+					rank: p.recruiting.rank, stars: p.recruiting.stars,
+					name: p.name, key: p.key, real: true,
+				}))
+				.concat(synthBySchool[name].map((s) => ({
+					rank: s.rank, stars: starsOf(s.rank), real: false,
+				})))
+				.sort((a, b) => a.rank - b.rank);
+			let score = 0;
+			signees.forEach((s, i) => {
+				score += pts(s.rank) / (1 + 0.35 * Math.max(0, i - 4));
+			});
+			const stars = { 5: 0, 4: 0, 3: 0, 2: 0 };
+			for (const s of signees) stars[s.stars]++;
+			return {
+				name,
+				conf: teams[name].conf,
+				score,
+				signees: signees.length,
+				fiveStars: stars[5], fourStars: stars[4], threeStars: stars[3],
+				avgRank: signees.reduce((a, s) => a + s.rank, 0) / Math.max(1, signees.length),
+				headliner: signees[0] || null,
+			};
+		}).sort((a, b) => b.score - a.score);
+		const confSeen = {};
+		rows.forEach((row, i) => {
+			row.natRank = i + 1;
+			confSeen[row.conf] = (confSeen[row.conf] || 0) + 1;
+			row.confRank = confSeen[row.conf];
+			if (teams[row.name]) teams[row.name].recruitClass = row;
+		});
+		return rows;
 	}
 
 	/* ------------------------------------------------------------- phase 3 */
@@ -2419,6 +2521,7 @@
 				archetypePool: state.archetypePool
 					? state.archetypePool.map((a) => a.name) : null,
 				surprises: state.surprises || [],
+				recruitingClasses: state.recruitingClasses || [],
 				realignment: state.realignment || [],
 				warnings: validation.warnings,
 				phasesRun: ran,
@@ -2983,16 +3086,87 @@
 		return n + (["th", "st", "nd", "rd"][n % 10] || "th");
 	}
 
-	/* Produce the modified BBGM draft class file. */
-	function exportFile(result) {
+	/* One BBGM-shaped season-total stats row from a per-game rate line.
+	   BBGM wants integer totals, and the derivation has to reconcile: the
+	   points a reader recomputes from 2*(fg-tp) + 3*tp + ft must be the
+	   points the row reports, so makes are adjusted after rounding until
+	   the identity holds against the target scoring total. `ref` supplies
+	   the shot mix when the rate line itself has none (a prior season). */
+	function bbgmStatsRow(rates, ref, seasonYear) {
+		const rnd = Math.round;
+		const gp = Math.max(1, rnd(rates.gp));
+		const k = ref && ref.ppg > 0.1 ? rates.ppg / ref.ppg : 1;
+		const fgaG = Number.isFinite(rates.fga) ? rates.fga : (ref ? ref.fga * k : 0);
+		const tpaG = Number.isFinite(rates.tpa) ? rates.tpa : (ref ? ref.tpa * k : 0);
+		const ftaG = Number.isFinite(rates.fta) ? rates.fta : (ref ? ref.fta * k : 0);
+		const fgp = Number.isFinite(rates.fgp) ? rates.fgp : (ref ? ref.fgp : 0.45);
+		const tpp = Number.isFinite(rates.tpp) ? rates.tpp : (ref ? ref.tpp : 0.33);
+		const ftp = Number.isFinite(rates.ftp) ? rates.ftp : (ref ? ref.ftp : 0.70);
+		const fga = rnd(fgaG * gp);
+		const tpa = Math.min(fga, rnd(tpaG * gp));
+		const fta = rnd(ftaG * gp);
+		let tp = Math.min(tpa, rnd(tpa * tpp));
+		let fg = Math.min(fga, Math.max(tp, rnd(fga * fgp)));
+		let ft = Math.min(fta, rnd(fta * ftp));
+		// Reconcile to the season scoring total: free throws absorb the
+		// rounding first (worth one point each), twos absorb the rest.
+		const target = rnd(rates.ppg * gp);
+		let diff = target - (2 * (fg - tp) + 3 * tp + ft);
+		const ft2 = Math.max(0, Math.min(fta, ft + diff));
+		diff -= ft2 - ft;
+		ft = ft2;
+		const fg2 = Math.max(tp, Math.min(fga, fg + Math.trunc(diff / 2)));
+		fg = fg2;
+		const pts = 2 * (fg - tp) + 3 * tp + ft;
+		const row = {
+			season: seasonYear,
+			tid: -1,          // an undrafted amateur, in BBGM's terms
+			playoffs: false,
+			gp,
+			gs: 0,
+			min: rnd(rates.mpg * gp),
+			fg, fga, tp, tpa, ft, fta, pts,
+			orb: rnd((Number.isFinite(rates.orpg) ? rates.orpg : rates.rpg * 0.3) * gp),
+			ast: rnd(rates.apg * gp),
+			stl: rnd((rates.spg || 0) * gp),
+			blk: rnd((rates.bpg || 0) * gp),
+			tov: rnd((rates.topg || 0) * gp),
+			pf: rnd((rates.pfpg || 0) * gp),
+		};
+		row.drb = Math.max(0, rnd(rates.rpg * gp) - row.orb);
+		return row;
+	}
+
+	/* Produce the modified BBGM draft class file.
+
+	   `opts` is the §8.13 opt-in surface — every flag off writes exactly the
+	   file this function has always written:
+	     stats:  the simulated draft-year season as a BBGM stats row
+	     prior:  simulated earlier seasons as additional stats rows
+	     awards: every honour as {season, type}, concatenated (a re-imported
+	             file may already carry awards)
+	     highs:  game-log season highs and double-double counts on the row */
+	function exportFile(result, opts) {
+		opts = opts || {};
+		/* The export firewall: a generated (past/future) season carries
+		   exportable: false and there is nothing legitimate to write back.
+		   An assert, not a filter — silence is how a world leaks into a
+		   save file. */
+		if (result.exportable === false) {
+			throw new Error("Only the loaded draft class can be exported.");
+		}
 		const src = result.leagueFile;
 		// Match by array position, not pid: files with duplicate pids would
 		// otherwise silently give every duplicate the same rebuilt ratings.
 		const byIdx = result.players;
+		let passthroughs = 0;
 
 		const players = src.players.map((orig, i) => {
 			const p = byIdx[i] && byIdx[i].src === orig ? byIdx[i] : null;
-			if (!p) return orig;
+			// A failed identity check passes the player through untouched;
+			// counted now, so the caller can warn instead of shipping a
+			// half-modified file in silence.
+			if (!p) { passthroughs++; return orig; }
 			const out = JSON.parse(JSON.stringify(orig));
 			out.college = p.newCollege;
 			const ov = p.override || {};
@@ -3030,11 +3204,43 @@
 				ovr: p.newOvr, pot: p.newPot, skills: p.newSkills.slice(),
 			});
 			out.note = p.note;
-			out.noteBool = 1;
+			/* The flag matches the note: writing noteBool = 1 beside an
+			   empty note made BBGM flag a note the player doesn't have. */
+			if (p.note && String(p.note).trim()) out.noteBool = 1;
+			else delete out.noteBool;
+
+			if (opts.awards && p.awards && p.awards.length) {
+				out.awards = (Array.isArray(out.awards) ? out.awards : [])
+					.concat(p.awards.map((type) => ({ season: result.season, type })));
+			}
+			if (opts.stats && p.stats && !p.nonNcaa) {
+				const rows = [];
+				if (opts.prior && Array.isArray(p.priorSeasons)) {
+					for (const r of p.priorSeasons) {
+						if (r.redshirt) continue;
+						rows.push(bbgmStatsRow(r, p.stats, r.season));
+					}
+				}
+				const now = bbgmStatsRow(p.stats, null, result.season);
+				now.gs = p.isReserve ? 0 : now.gp;
+				if (opts.highs && p.gameLog) {
+					const h = p.gameLog.highs || {};
+					Object.assign(now, {
+						ptsMax: h.pts, trbMax: h.reb, astMax: h.ast,
+						stlMax: h.stl, blkMax: h.blk,
+						dd: p.gameLog.doubleDoubles, td: p.gameLog.tripleDoubles,
+					});
+				}
+				rows.push(now);
+				out.stats = (Array.isArray(out.stats) ? out.stats : []).concat(rows);
+			}
 			return out;
 		});
 
-		return Object.assign({}, src, { players });
+		const file = Object.assign({}, src, { players });
+		// Readable by the caller, never written into the file.
+		exportFile.passthroughs = passthroughs;
+		return file;
 	}
 
 	/* Everything the simulated season produced, as plain data. The whole

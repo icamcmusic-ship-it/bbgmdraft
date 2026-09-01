@@ -362,8 +362,14 @@
 		final.ranks.forEach((r) => { rankOf[r.team] = r.rank; });
 		for (const t of list) {
 			t.apRank = rankOf[t.name] || null;
-			t.apFirstPlace = t.apRank === 1
-				? (final.ranks[0] ? final.ranks[0].firstPlace : 0) : 0;
+			/* Every ranked team keeps its first-place votes, not just No. 1.
+			   In a genuinely split year the No. 2 and No. 3 teams have firsts
+			   and the model computed them — throwing them away at the last
+			   line discarded exactly the close-year texture the poll was
+			   built for. */
+			const finalRow = t.apRank
+				? final.ranks.filter((r) => r.team === t.name)[0] : null;
+			t.apFirstPlace = finalRow ? finalRow.firstPlace : 0;
 			t.apHistory = history.map((wk) => {
 				const row = wk.ranks.filter((r) => r.team === t.name)[0];
 				return row ? row.rank : null;

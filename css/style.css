@@ -192,7 +192,25 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .game .w { background: var(--win-bg, rgba(26,127,75,.10)); color: var(--text); font-weight: 600; }
 .game .l { color: var(--dim); }
 .game .sd { width: 20px; color: var(--dim); font-variant-numeric: tabular-nums; }
-.game.upset .w { background: var(--upset-bg, rgba(162,96,26,.13)); }
+/* Upset intensity scales with the seed differential: a 15-over-2 is not
+   the same event as a 10-over-7. */
+.game.upset1 .w { background: var(--upset-bg, rgba(162,96,26,.13)); }
+.game.upset2 .w { background: var(--upset-bg2, rgba(162,96,26,.24)); }
+.game.upset3 .w { background: var(--upset-bg3, rgba(190,72,20,.34)); }
+.game .sdtop { color: var(--accent); font-weight: 700; }
+.game .sdlow { opacity: .65; }
+/* Hovering a team lights its whole path through the rounds. */
+.game .pathlit { color: var(--accent); font-weight: 700; }
+/* Connector elbows: each game joins toward its parent round, which is what
+   makes the columns read as a bracket rather than a list of games. */
+.round .game { position: relative; }
+.round + .round .game::before {
+	content: ""; position: absolute; left: -10px; top: 50%;
+	width: 9px; height: 1px; background: var(--line);
+}
+/* Poll movement colouring. */
+td.pollup { color: var(--win, #1a7f4b); }
+td.polldown { color: var(--accent-2, #a2601a); }
 .game .gn { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .game .score { font-size: 10.5px; color: var(--dim); font-variant-numeric: tabular-nums; border-top: 1px solid var(--line); }
 .drop { border: 2px dashed var(--line); border-radius: 12px; padding: 46px; text-align: center; color: var(--dim); margin: 40px auto; max-width: 620px; }
@@ -695,9 +713,11 @@ body.busy button, body.busy input[type=range] { cursor: progress; }
    between the user and the thing they opened the tool to look at. It is a
    toggle now: hidden by default at that width, shown by the Settings button in
    the header, and unchanged on a desktop where it has its own column. */
-.narrowonly { display: none; }
+/* The toggle shows at every width now: on a desktop, closing the panel
+   hands its 320px column back to the forty-column table. */
+.narrowonly { display: inline-block; }
+body.settings-closed aside { display: none; }
 @media (max-width: 860px) {
-	.narrowonly { display: inline-block; }
 	aside { display: none; }
 	body.settings-open aside { display: block; }
 	/* Somewhere to stop scrolling when it is open. */

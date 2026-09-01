@@ -206,6 +206,169 @@
 		"The absence that hurt most: {player}",
 	];
 
+	const INJURY_RETURN_HEADS = [
+		"{player} is back for {college}",
+		"The wait is over at {college}: {player} returns",
+		"{college} get their man back",
+	];
+
+	const EARLY_SIGNING_HEADS = [
+		"The early signing period closes the book on the top of the class",
+		"Signing day, part one: the blue-chippers put pen to paper",
+		"The letters are in",
+	];
+
+	const DECOMMIT_HEADS = [
+		"{player} flips again — this time it sticks at {college}",
+		"The recruitment that would not end: {player} lands at {college}",
+		"{college} win the tug-of-war for {player}",
+	];
+
+	const FIVE_STAR_HEADS = [
+		"Another five-star off the board: {player} to {college}",
+		"{player} ends his recruitment — it's {college}",
+		"{college} add a five-star in {player}",
+	];
+
+	const TOP_CLASS_HEADS = [
+		"{college} assembled the class of the cycle",
+		"On paper, nobody recruited like {college}",
+		"The haul at {college} has rivals grumbling",
+	];
+
+	const STAY_HEADS = [
+		"{name} is coming back to {college}",
+		"The biggest signing of the offseason: {name}, staying put",
+		"{college} keep their star: {name} returns",
+	];
+
+	const GRAD_TRANSFER_HEADS = [
+		"One year to give: {player} grad-transfers to {college}",
+		"{player} spends his last season at {college}",
+		"{college} land the graduate market's biggest name",
+	];
+
+	const HOMECOMING_HEADS = [
+		"{player} comes home to {college}",
+		"The portal brings {player} back to {college}",
+	];
+
+	const COACH_HIRE_HEADS = [
+		"A new era at {college}",
+		"{college} hand the whistle to {coach}",
+		"The biggest bench hire of the offseason: {coach} to {college}",
+	];
+
+	const RANKED_CLASH_HEADS = [
+		"No. {ws} {winner} take the top-25 showdown from No. {ls} {loser}",
+		"Heavyweights: {winner} beat {loser} in the game the rankings promised",
+		"{winner} settle the argument with {loser}",
+	];
+
+	const OT_CLASSIC_HEADS = [
+		"{winner} outlast {loser} in {ot} overtimes",
+		"An epic: {winner} and {loser} go to {ot}OT",
+		"Nobody wanted it to end: {winner} beat {loser} in {ot}OT",
+	];
+
+	const LOSING_STREAK_HEADS = [
+		"{team} cannot buy a win",
+		"The bottom falls out at {team}",
+		"{team}'s season is unravelling",
+	];
+
+	const SCORING_TITLE_HEADS = [
+		"Nobody scores like {player}",
+		"{player} runs away with the scoring title",
+		"The nation's leading scorer: {player}",
+	];
+
+	const FORTY_HEADS = [
+		"{player} drops {pts} on {opp}",
+		"A {pts}-point night for {player}",
+		"{player} couldn't miss: {pts} against {opp}",
+	];
+
+	const TRIPLE_DOUBLE_HEADS = [
+		"{player} does everything",
+		"The stat sheet belongs to {player}",
+		"Another triple-double for {player}",
+	];
+
+	const CONF_RACE_TIGHT_HEADS = [
+		"The {conf} race comes down to the wire",
+		"{a} and {b} are trading punches for the {conf} title",
+		"One game separates the top of the {conf}",
+	];
+
+	const CONF_RACE_CLINCH_HEADS = [
+		"{a} run away with the {conf}",
+		"The {conf} race is over — {a} made sure of it early",
+	];
+
+	const BID_STEALER_HEADS = [
+		"{champ} steal a bid from the {conf}",
+		"The bubble groans: {champ} crash the field",
+		"A bid thief in the {conf}: {champ}",
+	];
+
+	const TOP_SEED_SCARE_HEADS = [
+		"No. 1 {winner} survive {loser} by a whisker",
+		"The scare of the first round: {winner} escape {loser}",
+		"{winner} nearly made the wrong kind of history against {loser}",
+	];
+
+	const NATIONAL_SEMIS_HEADS = [
+		"The championship game is set",
+		"Semifinal Saturday delivers",
+		"Two survive the Final Four",
+	];
+
+	const TITLE_HERO_HEADS = [
+		"{player} carried {college} to the title",
+		"The tournament belonged to {player}",
+		"One shining player: {player}",
+	];
+
+	const NIT_SEMIS_HEADS = [
+		"The NIT final is set",
+		"Semifinal night in the NIT",
+	];
+
+	const SNUB_HEADS = [
+		"The snub everyone is arguing about: {player}",
+		"{player} did everything but win the argument",
+		"No hardware for {player}, and nobody can explain why",
+	];
+
+	const CONF_POY_HEADS = [
+		"{player} wins the {award}",
+		"The {award} goes to {player}",
+	];
+
+	const MOCK_DRAFT_HEADS = [
+		"Every mock now starts the same way: {player}",
+		"The consensus No. 1: {player}",
+		"The top of the draft has stopped moving — it's {player}",
+	];
+
+	const STOCK_RISER_HEADS = [
+		"The workout circuit loves {player}",
+		"{player} keeps climbing draft boards",
+		"Nobody rose further than {player}",
+	];
+
+	const STOCK_FALLER_HEADS = [
+		"What happened to {player}'s draft stock?",
+		"{player} is sliding, and the war rooms have noticed",
+	];
+
+	const SLEEPER_HEADS = [
+		"The second round's worst-kept secret: {player}",
+		"Late riser: {player} is sneaking up draft boards",
+		"Somebody is getting a steal in {player}",
+	];
+
 	function build(res) {
 		if (!res || !res.players) return [];
 		const rng = new Rng("news|" + ((res.cfg && res.cfg.seed) || ""));
@@ -290,6 +453,20 @@
 						(worst.o.kind || "an injury") + " for "), TM(worst.t.name),
 						T(", who go " + w + "-" + l + " while he's out.")],
 				});
+				// The other half of the same story: the night he came back.
+				// Only when the return happens with season still to play —
+				// a return in the last week is not an article.
+				if (worst.o.to < 0.92) {
+					articles.push({
+						when: worst.o.to + 0.04, kind: "injury return",
+						headline: fill(rng.pick(INJURY_RETURN_HEADS),
+							{ player: PL(worst.p.name, worst.p.key), college: TM(worst.t.name) }),
+						body: [PL(worst.p.name, worst.p.key), T(" is back in the lineup for "),
+							TM(worst.t.name), T(" after " +
+								(worst.o.kind || "his injury") + " cost him a stretch of " +
+								"the season" + (l > w ? " the team could not afford" : "") + ".")],
+					});
+				}
 			}
 		}
 
@@ -657,6 +834,582 @@
 						", averaged " + star.stats.ppg.toFixed(1) + " points and " +
 						star.stats.rpg.toFixed(1) + " rebounds this season — none of " +
 						"it draft eligible.")]),
+				});
+			}
+		}
+
+		// --- the recruiting cycle (before the season) -----------------------
+		// The early signing period, in one roundup: where the top of the
+		// class landed. One article, not one per signature — the two
+		// biggest names already get their own signing-day stories.
+		{
+			const signed = (res.players || []).filter((p) =>
+				!p.nonNcaa && p.recruiting && p.recruiting.stars >= 4)
+				.sort((a, b) => a.recruiting.rank - b.recruiting.rank);
+			if (signed.length >= 3) {
+				articles.push({
+					when: -0.85, kind: "early signing period",
+					headline: [T(rng.pick(EARLY_SIGNING_HEADS))],
+					body: [T("The early signing period closes with the top of the " +
+						"class settled: ")].concat(signed.slice(0, 3).flatMap((p, i) => [
+							T(i ? ", " : ""), PL(p.name, p.key),
+							T(" (No. " + p.recruiting.rank + ") to "), TM(p.newCollege),
+						])).concat([T(".")]),
+				});
+			}
+		}
+
+		// --- a recruitment that would not stay decided ----------------------
+		{
+			const flip = (res.players || []).filter((p) =>
+				!p.nonNcaa && p.recruiting && p.recruiting.decommits)
+				.sort((a, b) => a.recruiting.rank - b.recruiting.rank)[0];
+			if (flip) {
+				articles.push({
+					when: -0.55, kind: "decommitment",
+					headline: fill(rng.pick(DECOMMIT_HEADS),
+						{ player: PL(flip.name, flip.key), college: TM(flip.newCollege) }),
+					body: [PL(flip.name, flip.key), T(" backed off " +
+						flip.recruiting.decommits + " commitments before the letter " +
+						"of intent finally landed at "), TM(flip.newCollege), T(".")],
+				});
+			}
+		}
+
+		// --- one more five-star commitment ----------------------------------
+		// Signing day already covers the top two five-stars; the third one's
+		// commitment is its own, earlier story.
+		{
+			const third = (res.players || []).filter((p) =>
+				!p.nonNcaa && p.recruiting && p.recruiting.stars === 5)
+				.sort((a, b) => a.recruiting.rank - b.recruiting.rank)[2];
+			if (third) {
+				articles.push({
+					when: -0.65, kind: "five-star commit",
+					headline: fill(rng.pick(FIVE_STAR_HEADS),
+						{ player: PL(third.name, third.key), college: TM(third.newCollege) }),
+					body: [PL(third.name, third.key), T(", the No. " +
+						third.recruiting.rank + " player in the class, commits to "),
+						TM(third.newCollege), T(".")],
+				});
+			}
+		}
+
+		// --- the class of the cycle -----------------------------------------
+		// The school that assembled the best haul of prospects, judged by the
+		// recruits it actually has in this class — at least two of them, at
+		// least one blue-chipper, or there is no "class" to write about.
+		{
+			const bySchool = {};
+			for (const p of res.players || []) {
+				if (p.nonNcaa || !p.recruiting || !p.newCollege) continue;
+				(bySchool[p.newCollege] = bySchool[p.newCollege] || []).push(p);
+			}
+			let bestClass = null;
+			for (const school of Object.keys(bySchool)) {
+				const group = bySchool[school];
+				if (group.length < 2 || !teams[school]) continue;
+				if (!group.some((p) => p.recruiting.stars >= 4)) continue;
+				const score = group.reduce((a, p) =>
+					a + Math.max(0, 330 - p.recruiting.rank), 0);
+				if (!bestClass || score > bestClass.score) bestClass = { school, group, score };
+			}
+			if (bestClass) {
+				const names = bestClass.group.slice()
+					.sort((a, b) => a.recruiting.rank - b.recruiting.rank);
+				articles.push({
+					when: -0.7, kind: "recruiting class",
+					headline: fill(rng.pick(TOP_CLASS_HEADS), { college: TM(bestClass.school) }),
+					body: [TM(bestClass.school), T(" put together the cycle's best " +
+						"class: ")].concat(names.slice(0, 3).flatMap((p, i) => [
+							T(i ? ", " : ""), PL(p.name, p.key),
+							T(" (No. " + p.recruiting.rank + ")"),
+						])).concat([T(".")]),
+				});
+			}
+		}
+
+		// --- the star who stayed (offseason) --------------------------------
+		// fieldTop already yields the end-of-season "best player nobody
+		// drafted" article; his DECISION to come back is the offseason story
+		// that sets it up.
+		{
+			const stay = (res.fieldTop || [])[0];
+			if (stay && stay.school && teams[stay.school]) {
+				articles.push({
+					when: -0.6, kind: "staying in school",
+					headline: fill(rng.pick(STAY_HEADS),
+						{ name: T(stay.name), college: TM(stay.school) }),
+					body: [T(stay.name + " — a " +
+						(stay.starReturner || "returning star") +
+						(stay.classYear ? ", " + stay.classYear.toLowerCase() : "") +
+						" — is coming back to "), TM(stay.school),
+						T(" rather than chasing a professional contract.")],
+				});
+			}
+		}
+
+		// --- the graduate market (offseason) --------------------------------
+		{
+			const grad = (res.players || []).filter((p) =>
+				!p.nonNcaa && p.transfer && p.transfer.from &&
+				/grad/i.test(p.transfer.kind || ""))
+				.sort((a, b) => b.newOvr - a.newOvr)[0];
+			if (grad) {
+				articles.push({
+					when: -0.45, kind: "grad transfer",
+					headline: fill(rng.pick(GRAD_TRANSFER_HEADS),
+						{ player: PL(grad.name, grad.key), college: TM(grad.newCollege) }),
+					body: [PL(grad.name, grad.key), T(" leaves " + grad.transfer.from +
+						" with a degree and one season of eligibility, and spends it at "),
+						TM(grad.newCollege), T(".")],
+				});
+			}
+		}
+
+		// --- the homecoming (offseason) -------------------------------------
+		{
+			const home = (res.players || []).filter((p) =>
+				!p.nonNcaa && p.transfer &&
+				p.transfer.kind === "returned to his original school")[0];
+			if (home) {
+				articles.push({
+					when: -0.38, kind: "homecoming",
+					headline: fill(rng.pick(HOMECOMING_HEADS),
+						{ player: PL(home.name, home.key), college: TM(home.newCollege) }),
+					body: [PL(home.name, home.key), T(" is back where he started: " +
+						"the portal returns him to "), TM(home.newCollege), T(".")],
+				});
+			}
+		}
+
+		// --- the offseason's biggest bench hire -----------------------------
+		// A first-year coach at a big-name programme is a hire worth a story
+		// whoever he replaced. One article: the most prestigious bench that
+		// changed hands.
+		{
+			const hire = Object.values(teams).filter((tm) =>
+				tm.coach && tm.coach.situation === "first year" && tm.prestige >= 70)
+				.sort((a, b) => b.prestige - a.prestige)[0];
+			if (hire) {
+				articles.push({
+					when: -0.5, kind: "coaching hire",
+					headline: fill(rng.pick(COACH_HIRE_HEADS),
+						{ college: TM(hire.name), coach: T(hire.coach.name) }),
+					body: [TM(hire.name), T(" hand the programme to " +
+						hire.coach.name +
+						(hire.coach.replaced ? ", replacing " + hire.coach.replaced : "") +
+						". A first-year staff at a name like this is the offseason's " +
+						"biggest bet.")],
+				});
+			}
+		}
+
+		// --- the top-25 showdown (in-season) --------------------------------
+		// The best game between two preseason top-25 teams: highest combined
+		// billing, closest score. Read off the winner's log so each game is
+		// seen once.
+		if (pre && pre.ranks.length) {
+			const preRankMap = {};
+			for (const r of pre.ranks) preRankMap[r.team] = r.rank;
+			let clash = null;
+			for (const tm of Object.values(teams)) {
+				const ra = preRankMap[tm.name];
+				if (!ra || ra > 25) continue;
+				for (const g of tm.log || []) {
+					if (!g.won || g.stage !== "reg" || g.pf === null) continue;
+					const rb = preRankMap[g.opp];
+					if (!rb || rb > 25) continue;
+					const score = 60 - ra - rb - Math.abs(g.pf - g.pa);
+					if (!clash || score > clash.score) clash = { tm, g, ra, rb, score };
+				}
+			}
+			if (clash) {
+				articles.push({
+					when: clash.g.when, kind: "ranked showdown",
+					headline: fill(rng.pick(RANKED_CLASH_HEADS), {
+						winner: TM(clash.tm.name), loser: TM(clash.g.opp),
+						ws: T(String(clash.ra)), ls: T(String(clash.rb)),
+					}),
+					body: [T("No. " + clash.ra + " "), TM(clash.tm.name),
+						T(" beat No. " + clash.rb + " "), TM(clash.g.opp),
+						T(" " + clash.g.pf + "-" + clash.g.pa +
+							(clash.g.ot ? " in overtime" : "") +
+							" in the marquee matchup of the regular season.")],
+				});
+			}
+		}
+
+		// --- the multi-overtime classic (in-season) -------------------------
+		{
+			let epic = null;
+			for (const tm of Object.values(teams)) {
+				for (const g of tm.log || []) {
+					if (!g.won || g.stage !== "reg" || !g.ot || g.ot < 2) continue;
+					if (!epic || g.ot > epic.g.ot) epic = { tm, g };
+				}
+			}
+			if (epic) {
+				articles.push({
+					when: epic.g.when, kind: "overtime classic",
+					headline: fill(rng.pick(OT_CLASSIC_HEADS), {
+						winner: TM(epic.tm.name), loser: TM(epic.g.opp),
+						ot: T(String(epic.g.ot)),
+					}),
+					body: [TM(epic.tm.name), T(" finally put away "), TM(epic.g.opp),
+						T(" " + epic.g.pf + "-" + epic.g.pa + " after " + epic.g.ot +
+							" overtimes.")],
+				});
+			}
+		}
+
+		// --- a ranked team's skid (in-season) -------------------------------
+		// A preseason top-25 team losing four straight is a story the polls
+		// alone don't tell. The log has to be read in calendar order.
+		if (pre && pre.ranks.length) {
+			let skid = null;
+			for (const r of pre.ranks.slice(0, 25)) {
+				const tm = teams[r.team];
+				if (!tm) continue;
+				const log = (tm.log || []).filter((g) => g.stage === "reg")
+					.slice().sort((a, b) => a.when - b.when);
+				let cur = 0;
+				let best = 0;
+				let at = 0.5;
+				for (const g of log) {
+					if (!g.won) {
+						cur++;
+						if (cur > best) { best = cur; at = g.when; }
+					} else cur = 0;
+				}
+				if (best >= 4 && (!skid || best > skid.n)) skid = { tm, n: best, rank: r.rank, at };
+			}
+			if (skid) {
+				articles.push({
+					when: skid.at, kind: "losing streak",
+					headline: fill(rng.pick(LOSING_STREAK_HEADS), { team: TM(skid.tm.name) }),
+					body: [TM(skid.tm.name), T(", ranked No. " + skid.rank +
+						" in the preseason, have now lost " + skid.n + " in a row.")],
+				});
+			}
+		}
+
+		// --- the scoring title (in-season) ----------------------------------
+		{
+			const top = (res.players || []).filter((p) =>
+				!p.nonNcaa && p.stats && p.stats.gp >= 15)
+				.sort((a, b) => b.stats.ppg - a.stats.ppg)[0];
+			if (top && top.stats.ppg >= 18) {
+				articles.push({
+					when: 0.9, kind: "scoring title",
+					headline: fill(rng.pick(SCORING_TITLE_HEADS),
+						{ player: PL(top.name, top.key) }),
+					body: [PL(top.name, top.key), T(" ("), TM(top.newCollege),
+						T(") leads the class in scoring at " + top.stats.ppg.toFixed(1) +
+							" points a game.")],
+				});
+			}
+		}
+
+		// --- the forty-point night (in-season) ------------------------------
+		// The season's biggest individual scoring game, read straight off the
+		// game logs — `best` is the highest-scoring game, so it IS the forty.
+		{
+			const big = (res.players || []).filter((p) =>
+				!p.nonNcaa && p.gameLog && p.gameLog.highs && p.gameLog.highs.pts >= 40)
+				.sort((a, b) => b.gameLog.highs.pts - a.gameLog.highs.pts)[0];
+			if (big && big.gameLog.best) {
+				const g = big.gameLog.best;
+				articles.push({
+					when: Math.min(0.98, g.when || 0.5), kind: "forty-point game",
+					headline: fill(rng.pick(FORTY_HEADS), {
+						player: PL(big.name, big.key), pts: T(String(g.pts)),
+						opp: teams[g.opp] ? TM(g.opp) : T(g.opp || "his opponent"),
+					}),
+					body: [PL(big.name, big.key), T(" scored " + g.pts + " against ")]
+						.concat([teams[g.opp] ? TM(g.opp) : T(g.opp || "his opponent")])
+						.concat([T(g.reb >= 10 ? ", with " + g.reb + " rebounds beside it."
+							: " — the scoring night of the season.")]),
+				});
+			}
+		}
+
+		// --- the triple-double machine (in-season) --------------------------
+		{
+			const td = (res.players || []).filter((p) =>
+				!p.nonNcaa && p.gameLog && p.gameLog.tripleDoubles > 0)
+				.sort((a, b) => b.gameLog.tripleDoubles - a.gameLog.tripleDoubles)[0];
+			if (td) {
+				articles.push({
+					when: 0.62, kind: "triple-double",
+					headline: fill(rng.pick(TRIPLE_DOUBLE_HEADS),
+						{ player: PL(td.name, td.key) }),
+					body: [PL(td.name, td.key), T(" ("), TM(td.newCollege),
+						T(") has " + td.gameLog.tripleDoubles + " triple-double" +
+							(td.gameLog.tripleDoubles > 1 ? "s" : "") + " this season" +
+							(td.stats ? ", on " + td.stats.ppg.toFixed(1) + "/" +
+								td.stats.rpg.toFixed(1) + "/" + td.stats.apg.toFixed(1) +
+								" averages." : "."))],
+				});
+			}
+		}
+
+		// --- the conference race (late season) ------------------------------
+		// One conference, one article: the tightest race among the strongest
+		// leagues, or — failing a tight one anywhere — the most emphatic
+		// runaway. Standings come from the conference tournament seeding,
+		// which is the regular-season table.
+		{
+			const CT2 = res.confTourneys || {};
+			const TS2 = global.TeamsSim;
+			const CC = global.Colleges.CONFERENCES;
+			const races = Object.keys(CT2).map((conf) => {
+				const seeds = CT2[conf] && CT2[conf].seeds;
+				if (!seeds || seeds.length < 2) return null;
+				const gap = (seeds[0].cw - seeds[0].cl) - (seeds[1].cw - seeds[1].cl);
+				return { conf, a: seeds[0], b: seeds[1], gap,
+					strength: (CC[conf] || {}).strength || 0 };
+			}).filter(Boolean);
+			const tight = races.filter((r) => r.gap <= 1)
+				.sort((a, b) => b.strength - a.strength)[0];
+			const runaway = races.filter((r) => r.gap >= 6)
+				.sort((a, b) => b.strength - a.strength)[0];
+			const race = tight || runaway;
+			if (race) {
+				const label = TS2 ? TS2.label(race.conf) : race.conf;
+				articles.push({
+					when: 0.93, kind: "conference race",
+					headline: fill(rng.pick(tight ? CONF_RACE_TIGHT_HEADS : CONF_RACE_CLINCH_HEADS),
+						{ conf: T(label), a: TM(race.a.name), b: TM(race.b.name) }),
+					body: tight
+						? [TM(race.a.name), T(" (" + race.a.cw + "-" + race.a.cl + ") and "),
+							TM(race.b.name), T(" (" + race.b.cw + "-" + race.b.cl +
+								") go to the final week with the " + label +
+								" title still on the table.")]
+						: [TM(race.a.name), T(" clinched the " + label + " at " +
+							race.a.cw + "-" + race.a.cl + ", " +
+							"with the race decided long before the last weekend.")],
+				});
+			}
+		}
+
+		// --- the bid thief (championship week) ------------------------------
+		// A team that could only get in with the automatic bid winning its
+		// tournament takes an at-large spot from someone on the bubble.
+		{
+			const CT3 = res.confTourneys || {};
+			const TS3 = global.TeamsSim;
+			let thief = null;
+			for (const conf of Object.keys(CT3)) {
+				const ct = CT3[conf];
+				if (!ct || !ct.champ || !ct.regularChamp || ct.champ === ct.regularChamp) continue;
+				const margin = ct.champ.cw - ct.champ.cl;
+				if (margin > 1) continue;
+				if (!thief || margin < thief.margin) thief = { conf, ct, margin };
+			}
+			if (thief) {
+				const label = TS3 ? TS3.label(thief.conf) : thief.conf;
+				articles.push({
+					when: 1.008, kind: "bid stealer",
+					headline: fill(rng.pick(BID_STEALER_HEADS),
+						{ champ: TM(thief.ct.champ.name), conf: T(label) }),
+					body: [TM(thief.ct.champ.name), T(" went " + thief.ct.champ.cw +
+						"-" + thief.ct.champ.cl + " in " + label +
+						" play and won the tournament anyway — an automatic bid " +
+						"nobody budgeted for, and one fewer at-large spot for the bubble.")],
+				});
+			}
+		}
+
+		// --- awards the voters missed ---------------------------------------
+		// The best scorer who ended the season without a first-team spot or a
+		// player-of-the-year trophy: every March has one.
+		{
+			const HONOURED = /Consensus First Team All-American|Naismith Trophy|Wooden Award|Oscar Robertson Trophy|AP Player of the Year|NABC Player of the Year|Sporting News Player of the Year/;
+			const snub = (res.players || []).filter((p) =>
+				!p.nonNcaa && p.stats && p.stats.gp >= 15 &&
+				!(p.awards || []).some((a) => HONOURED.test(a)))
+				.sort((a, b) => b.stats.ppg - a.stats.ppg)[0];
+			if (snub && snub.stats.ppg >= 17) {
+				articles.push({
+					when: 1.195, kind: "awards snub",
+					headline: fill(rng.pick(SNUB_HEADS), { player: PL(snub.name, snub.key) }),
+					body: [PL(snub.name, snub.key), T(" ("), TM(snub.newCollege),
+						T(") averaged " + snub.stats.ppg.toFixed(1) + " points and " +
+							snub.stats.rpg.toFixed(1) + " rebounds and did not make " +
+							"the consensus first team.")],
+				});
+			}
+		}
+
+		// --- a conference player of the year --------------------------------
+		{
+			const NATIONAL = /Naismith|Wooden|Oscar Robertson|^AP |NABC|Sporting News|Consensus|Defensive/;
+			let cpoy = null;
+			for (const p of (res.players || []).slice()
+				.sort((a, b) => ((b.stats && b.stats.ppg) || 0) - ((a.stats && a.stats.ppg) || 0))) {
+				const award = (p.awards || []).filter((a) =>
+					/ Player of the Year$/.test(a) && !NATIONAL.test(a))[0];
+				if (award) { cpoy = { p, award }; break; }
+			}
+			if (cpoy) {
+				articles.push({
+					when: 1.155, kind: "conference poy",
+					headline: fill(rng.pick(CONF_POY_HEADS),
+						{ player: PL(cpoy.p.name, cpoy.p.key), award: T(cpoy.award) }),
+					body: [PL(cpoy.p.name, cpoy.p.key), T(" ("), TM(cpoy.p.newCollege),
+						T(") takes the " + cpoy.award +
+							(cpoy.p.stats ? " on " + cpoy.p.stats.ppg.toFixed(1) +
+								" points a game." : "."))],
+				});
+			}
+		}
+
+		// --- more March: the games around the bracket ------------------------
+		if (t && t.regions) {
+			// A No. 1 seed's near-miss in the first round — the game the
+			// bracket almost broke.
+			let scare = null;
+			for (const r of Object.keys(t.regions)) {
+				for (const g of (t.regions[r].rounds[0] || [])) {
+					if (!g.winner || g.winner.seed !== 1) continue;
+					const m = /^(\d+)-(\d+)/.exec(g.score || "");
+					const margin = m ? (+m[1]) - (+m[2]) : 99;
+					const ot = /OT/.test(g.score || "");
+					if (margin > 3 && !ot) continue;
+					if (!scare || margin < scare.margin) scare = { g, margin };
+				}
+			}
+			if (scare) {
+				const loser = scare.g.winner === scare.g.a ? scare.g.b : scare.g.a;
+				articles.push({
+					when: 1.115, kind: "top seed scare",
+					headline: fill(rng.pick(TOP_SEED_SCARE_HEADS), {
+						winner: TM(scare.g.winner.team.name),
+						loser: TM(loser.team.name),
+					}),
+					body: [T("No. 1 "), TM(scare.g.winner.team.name),
+						T(" survived No. " + loser.seed + " "), TM(loser.team.name),
+						T(" " + scare.g.score + " — the closest a top seed came to " +
+							"going home in the first round.")],
+				});
+			}
+
+			// Semifinal Saturday, as results rather than as a preview.
+			if (t.semis && t.semis.length) {
+				articles.push({
+					when: 1.16, kind: "national semifinal",
+					headline: [T(rng.pick(NATIONAL_SEMIS_HEADS))],
+					body: t.semis.flatMap((s, i) => {
+						const lost = s.winner === s.a ? s.b : s.a;
+						return [T(i ? " " : ""), TM(s.winner.team.name),
+							T(" beat "), TM(lost.team.name), T(" " + s.score + ".")];
+					}),
+				});
+			}
+
+			// The champion's best man in the tournament — but only if a
+			// prospect from this class actually carried them.
+			if (t.champion) {
+				const hero = (res.players || []).filter((p) =>
+					!p.nonNcaa && p.newCollege === t.champion.team.name &&
+					p.gameLog && p.gameLog.postseason && p.gameLog.postseason.ncaa >= 3)
+					.sort((a, b) => b.gameLog.postseason.ppg - a.gameLog.postseason.ppg)[0];
+				if (hero) {
+					articles.push({
+						when: 1.205, kind: "title hero",
+						headline: fill(rng.pick(TITLE_HERO_HEADS), {
+							player: PL(hero.name, hero.key),
+							college: TM(t.champion.team.name),
+						}),
+						body: [PL(hero.name, hero.key), T(" averaged " +
+							hero.gameLog.postseason.ppg.toFixed(1) +
+							" points across the postseason for national champion "),
+							TM(t.champion.team.name), T(".")],
+					});
+				}
+			}
+
+			// The NIT semifinals, before its champion gets the trophy story.
+			if (t.nit && t.nit.rounds) {
+				const nitSemis = [];
+				for (const round of t.nit.rounds) {
+					for (const g of round) if (g.round === "NIT Semifinal") nitSemis.push(g);
+				}
+				if (nitSemis.length) {
+					articles.push({
+						when: 1.14, kind: "nit semifinal",
+						headline: [T(rng.pick(NIT_SEMIS_HEADS))],
+						body: nitSemis.flatMap((g, i) => {
+							const lost = g.winner === g.a ? g.b : g.a;
+							return [T(i ? " " : ""), TM(g.winner.name),
+								T(" beat "), TM(lost.name), T(" " + g.score + ".")];
+						}),
+					});
+				}
+			}
+		}
+
+		// --- the draft cycle (after the nets come down) ---------------------
+		// The consensus at the top of the mock drafts.
+		{
+			const bd = res.board || [];
+			const one = bd[0];
+			if (one) {
+				articles.push({
+					when: 1.3, kind: "mock draft",
+					headline: fill(rng.pick(MOCK_DRAFT_HEADS),
+						{ player: PL(one.name, one.key) }),
+					body: [PL(one.name, one.key), T(
+						one.preseasonRank && one.preseasonRank > 3
+							? " has taken over the No. 1 spot in the mocks — he opened " +
+								"the cycle ranked No. " + one.preseasonRank + "."
+							: " sits at No. 1 in the consensus mock, where he has been " +
+								"more or less wire to wire.")],
+				});
+			}
+		}
+
+		// --- the workout-circuit riser and the faller ------------------------
+		{
+			const up = (res.risers || [])[0];
+			if (up && up.stockMove >= 5) {
+				articles.push({
+					when: 1.33, kind: "stock riser",
+					headline: fill(rng.pick(STOCK_RISER_HEADS),
+						{ player: PL(up.name, up.key) }),
+					body: [PL(up.name, up.key), T(" has climbed " + up.stockMove +
+						" spots from his preseason ranking" +
+						(up.boardRank ? " to No. " + up.boardRank + " on the board." : "."))],
+				});
+			}
+			const down = (res.fallers || [])[0];
+			if (down && down.stockMove <= -5) {
+				articles.push({
+					when: 1.34, kind: "stock faller",
+					headline: fill(rng.pick(STOCK_FALLER_HEADS),
+						{ player: PL(down.name, down.key) }),
+					body: [PL(down.name, down.key), T(" has slid " + (-down.stockMove) +
+						" spots from where the preseason boards had him" +
+						(down.boardRank ? ", down to No. " + down.boardRank + "." : "."))],
+				});
+			}
+		}
+
+		// --- the late riser hiding in round two ------------------------------
+		{
+			const sleeper = (res.board || []).filter((p) =>
+				p.mockRound === 2 && p.stockMove >= 8)
+				.sort((a, b) => b.stockMove - a.stockMove)[0];
+			if (sleeper) {
+				articles.push({
+					when: 1.36, kind: "draft sleeper",
+					headline: fill(rng.pick(SLEEPER_HEADS),
+						{ player: PL(sleeper.name, sleeper.key) }),
+					body: [PL(sleeper.name, sleeper.key), T(" is projected in the " +
+						"second round after rising " + sleeper.stockMove +
+						" spots across the season — the kind of climb that keeps " +
+						"going right through the workouts.")],
 				});
 			}
 		}

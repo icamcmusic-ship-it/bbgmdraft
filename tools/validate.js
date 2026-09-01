@@ -579,7 +579,43 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		// Real shot-blockers reach 3.5-4.6 (Kessler 4.6, Chet 3.7).
 		["BPG max", Math.max.apply(null, g((p) => p.stats.bpg))].concat(extreme(2.8, 5.0)),
 		["SPG max", Math.max.apply(null, g((p) => p.stats.spg))].concat(extreme(2.0, 4.2)),
-		["PF mean", mean(g((p) => p.stats.pfpg))].concat(within(2.55, 0.85)),
+		["PF mean", mean(g((p) => p.stats.pfpg))].concat(within(2.35, 0.85)),
+		/* The band on the PF mean is exactly the failure mode the README's
+		   "Shape" section warns about: a quarter of every class used to
+		   average over 4.0 fouls a game — a season average of 5.28 is not a
+		   high number, it is an impossible one (five ends a night, and the
+		   real D-I leader sits around 3.6-3.8) — while the mean sat
+		   comfortably inside its band. So the tail is banded directly. */
+		["PF max", Math.max.apply(null, g((p) => p.stats.pfpg))].concat(extreme(2.9, 3.95)),
+		["PF share above 4.0/g", g((p) => p.stats.pfpg).filter((v) => v > 4.0).length /
+			Math.max(1, all.length), 0, 0.005],
+		/* Conditional rows. Marginal bands cannot see a flat conditional
+		   distribution: team blocks and rebounds were on target while
+		   seven-footers medianed 1.1 blocks — the within-team share model
+		   spread them too evenly. Real drafted 7-footers average roughly
+		   1.8-2.2 blocks and 8.5-9.5 rebounds; a real class's big:guard
+		   block ratio is 8-10x, not 4x. */
+		["BPG mean (81+ inches)", (function () {
+			const v = all.filter((p) => p.newHgtInches >= 81).map((p) => p.stats.bpg);
+			return v.length ? mean(v) : 1.9;
+		})()].concat(within(1.9, 0.75)),
+		["RPG mean (81+ inches)", (function () {
+			const v = all.filter((p) => p.newHgtInches >= 81).map((p) => p.stats.rpg);
+			return v.length ? mean(v) : 8.7;
+		})()].concat(within(8.7, 1.6)),
+		["BLK big:guard ratio", (function () {
+			const bigs = all.filter((p) => p.newHgtInches >= 81).map((p) => p.stats.bpg);
+			const guards = all.filter((p) => p.newHgtInches < 76).map((p) => p.stats.bpg);
+			if (!bigs.length || !guards.length) return 8;
+			return mean(bigs) / Math.max(0.05, mean(guards));
+		})(), 4.5, 16],
+		/* The assist floor, conditioned on minutes: a wing playing 28+ a
+		   night in D-I basketball does not finish with 0.8 assists, and
+		   24% of the class used to. */
+		["APG p10 (28+ MPG)", (function () {
+			const v = all.filter((p) => p.stats.mpg >= 28).map((p) => p.stats.apg);
+			return v.length ? pct(v, 0.10) : 1.3;
+		})()].concat(within(1.45, 0.65)),
 		["TS% mean", mean(g((p) => p.stats.ts)) * 100].concat(within(dy.ts.mean * 100, 1.8)),
 		/* THREE-POINT PERCENTAGE, measured against the population the anchor
 		   describes.
@@ -682,7 +718,9 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		/* The documented per-player share ceilings, measured the way a reader
 		   would check them: against the team total, not against the pool. */
 		["Max share of team AST", Math.max.apply(null, maxAstShare), 0, 0.621],
-		["Max share of team TRB", Math.max.apply(null, maxRebShare), 0, 0.401],
+		// 0.46 tracks the softened REB_CAP: at 0.40 the cap was binding
+		// exactly at the measured maximum, forbidding the tail it documented.
+		["Max share of team TRB", Math.max.apply(null, maxRebShare), 0, 0.461],
 		["Max share of team BLK", Math.max.apply(null, maxBlkShare), 0, 0.681],
 
 		/* The four things a user expects a draft class to express. None of them
