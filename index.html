@@ -33,6 +33,7 @@
 		<button id="btnUndo" disabled title="Undo the last settings or lock change (Ctrl+Z)">Undo</button>
 		<button id="btnRedo" disabled title="Redo (Ctrl+Shift+Z)">Redo</button>
 		<button id="btnKeys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
+		<button id="btnHowTo" title="How to play — what everything does and a sensible order to do it in">Guide</button>
 	</div>
 	<div class="btngroup" role="group" aria-label="Share and export">
 		<button id="btnPin" disabled title="Keep this class as a comparison baseline">Pin</button>
@@ -74,6 +75,23 @@
 		<button id="btnSavePreset" type="button" title="Save the current settings as a named preset">Save preset…</button>
 		<button id="btnDeletePreset" type="button" title="Delete the selected saved preset">Delete</button>
 	</div>
+	<div class="ctl">
+		<label for="randomScope">Randomise</label>
+		<select id="randomScope" aria-label="Randomise scope">
+			<option value="gentle">Everything, gently</option>
+			<option value="wide">Everything, wide open</option>
+			<option value="quality">Class quality &amp; depth only</option>
+			<option value="builds">Builds only</option>
+			<option value="years">Class years &amp; paths only</option>
+			<option value="destinations">Destinations only</option>
+			<option value="season">College season only</option>
+			<option value="awards">Awards only</option>
+		</select>
+	</div>
+	<div class="btngroup wide">
+		<button id="btnRandomize" type="button" title="Randomise the settings in the chosen scope (g). Ctrl+Z restores them in one step.">🎲 Randomise</button>
+	</div>
+	<p class="hint">“Gently” draws near each setting's default; “wide open” draws across each slider's whole range. The seed, the per-build rarity weights and locked settings are never touched — reroll owns the seed.</p>
 	<div class="ctl">
 		<label for="seed">Seed <b id="seedNote">random</b></label>
 		<input type="text" id="seed" placeholder="blank = random each reroll">

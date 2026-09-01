@@ -88,13 +88,20 @@
 	function resumeScore(team) {
 		if (!team) return 0;
 		const conf = C.CONFERENCES[team.conf] || C.CONFERENCES.Independent;
+		/* THIS SEASON's conference strength, not the constant in the table.
+		   The season drifts conference strength (see conferenceDrift in
+		   js/teams.js) and stores it on the team; reading the static value
+		   here meant that in a year the Mountain West was up, its players'
+		   resumes did not know. */
+		const confStrength = Number.isFinite(team.confStrength)
+			? team.confStrength : conf.strength;
 		// Deliberately a minority of the total: winning helps a candidacy, it
 		// does not manufacture one out of 4 points a game. team.w now includes
 		// postseason wins, which is the point — a March run should be worth
 		// something on a resume.
 		return (
 			0.18 * team.w +
-			0.18 * (conf.strength - 58) +
+			0.18 * (confStrength - 58) +
 			0.6 * (NCAA_BONUS[team.ncaaResult] || 0) +
 			(NIT_BONUS[team.nitResult] || 0) +
 			(team.apRank ? (26 - team.apRank) * 0.10 : 0) +

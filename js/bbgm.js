@@ -188,6 +188,13 @@
 		return out;
 	}
 
+	/* Labels are pushed in COMPOSITE_WEIGHTS order, which is how BBGM itself
+	   builds the array. This used to sort alphabetically — cosmetic in-game,
+	   but a needless difference in a file whose premise is byte-level
+	   fidelity. (The `c !== "hgt"` fuzz exclusion in compositeRating is
+	   unverified against upstream compositeRating.ts; if BBGM does not
+	   special-case height, exported skills can still differ for fuzzed
+	   ratings.) */
 	function skills(ratings) {
 		const sk = [];
 		for (const key of Object.keys(COMPOSITE_WEIGHTS)) {
@@ -197,7 +204,6 @@
 				sk.push(c.skill.label);
 			}
 		}
-		sk.sort();
 		return sk;
 	}
 

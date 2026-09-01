@@ -41,7 +41,11 @@
 			// It falls apart: transfers out, an injury in November, a freshman
 			// class that did not arrive. Bigger for a program with more to lose.
 			level -= 6 + 0.14 * C.prestige(name) + rng.uniform(0, 6);
-		} else if (rng.random() < BREAKOUT_RATE) {
+		} else if (rng.random() < BREAKOUT_RATE / (1 - DOWN_YEAR_RATE)) {
+			/* Divided by (1 - DOWN_YEAR_RATE): this branch is only reached in
+			   the 91% of seasons that were not down years, so a bare
+			   BREAKOUT_RATE here realised 8.2%, not the 9% the constant beside
+			   DOWN_YEAR_RATE reads as. */
 			// The other direction: a mid-major that keeps everybody.
 			level += 5 + 0.10 * (100 - C.prestige(name)) + rng.uniform(0, 5);
 		}

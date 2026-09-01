@@ -546,31 +546,32 @@
 	   front line of rim protectors did not actually reduce anyone's rim FG%.
 	   This is the profile that does it. Values are centred at ~0 for an average
 	   D-I rotation and read in points of percentage. */
-	/* `teamMinutes` is 5 * gameMinutes, so the five men on the floor are
-	   teamMinutes / gameMinutes — which is 5 in every league here and was
-	   written as the literal 5 anyway, alongside a literal 200 for the team
-	   total. Two hardcoded numbers that only agree by coincidence is one
-	   number written twice: derive the divisor. */
+	/* Each weight is mins[i] / teamMinutes, so the weights sum to 1 and every
+	   value below is the minutes-weighted average of the rotation. An earlier
+	   version multiplied every weight by an on-floor count and divided every
+	   sum by the same count — arithmetic that cancelled exactly, with a
+	   comment claiming it "derived the divisor". It derived nothing, and the
+	   next person to edit one half without the other would have introduced a
+	   real error. */
 	function defenseProfile(comps, mins, teamMinutes, gameMinutes) {
 		const gm = gameMinutes || 40;
 		const tm = teamMinutes || 5 * gm;
-		const onFloor = tm / gm;
 		let rim = 0;
 		let per = 0;
 		let ovr = 0;
 		let force = 0;
 		for (let i = 0; i < comps.length; i++) {
-			const w = (mins[i] * onFloor) / tm;
+			const w = mins[i] / tm;
 			rim += comps[i].defenseInterior * w;
 			per += comps[i].defensePerimeter * w;
 			ovr += comps[i].defense * w;
 			force += comps[i].stealing * w;
 		}
 		return {
-			rim: rim / onFloor - 0.46,
-			perimeter: per / onFloor - 0.46,
-			overall: ovr / onFloor - 0.47,
-			force: force / onFloor - 0.49,
+			rim: rim - 0.46,
+			perimeter: per - 0.46,
+			overall: ovr - 0.47,
+			force: force - 0.49,
 		};
 	}
 
@@ -583,6 +584,7 @@
 		let rim = 0;
 		let per = 0;
 		let ovr = 0;
+		let force = 0;
 		let w = 0;
 		for (let i = 0; i < sorted.length; i++) {
 			const m = sorted[i];
@@ -590,28 +592,36 @@
 			let di;
 			let dp;
 			let d;
+			let st;
 			if (m.filler) {
 				const r = m.talent / 100;
 				di = clamp(0.46 * (0.55 + 0.9 * r), 0.05, 0.95);
 				dp = clamp(0.46 * (0.55 + 0.9 * r), 0.05, 0.95);
 				d = clamp(0.48 * (0.55 + 0.9 * r), 0.05, 0.95);
+				st = clamp(0.48 * (0.55 + 0.9 * r), 0.05, 0.95);
 			} else {
 				const c = BB.composites(m.player.newRatings);
 				di = c.defenseInterior;
 				dp = c.defensePerimeter;
 				d = c.defense;
+				st = c.stealing;
 			}
 			rim += di * weight;
 			per += dp * weight;
 			ovr += d * weight;
+			force += st * weight;
 			w += weight;
 		}
 		if (!w) return { rim: 0, perimeter: 0, overall: 0, force: 0 };
+		/* `force` was hardcoded to 0 here while defenseProfile computed a real
+		   value, so opponent ball-pressure reached the model only through the
+		   style constant (ctx.oppPress) and never through the rosters actually
+		   faced. Same 0.49 centring as defenseProfile. */
 		return {
 			rim: rim / w - 0.46,
 			perimeter: per / w - 0.46,
 			overall: ovr / w - 0.47,
-			force: 0,
+			force: force / w - 0.49,
 		};
 	}
 
@@ -1156,6 +1166,10 @@
 			orbRate,
 			orbPool,
 			drbPool,
+			/* Team turnovers answer to the era's chance shape the same way
+			   fouls answer to TEAM_PF: the rate model was fixed at the player
+			   level and the team total was still unconstrained. */
+			toPool: chances * shape.tovShare,
 			astPool: teamFga * (1 - missShare) * assistedShare,
 			stlPool: 6.8 * scale(agg("stealing", 0.30), POOL_BASE.stealing, 1.00, 0.70, 1.45),
 			/* Team blocks measured 4.57 a game against a real D-I 3.5, 31%
@@ -1179,7 +1193,10 @@
 		const sorted = team.members.slice().sort((a, b) => b.talent - a.talent);
 		const prospects = sorted.filter((m) => !m.filler);
 		const fillers = sorted.filter((m) => m.filler);
-		const size = Math.max(9, prospects.length);
+		/* At least two returning players even on a prospect-stacked roster: a
+		   school with 12+ prospects used to get a rotation of nothing but
+		   draft picks, which no real programme has ever iced. */
+		const size = Math.max(9, prospects.length + (fillers.length ? 2 : 0));
 		const members = prospects
 			.concat(fillers.slice(0, Math.max(0, size - prospects.length)))
 			.sort((a, b) => b.talent - a.talent);
@@ -1380,6 +1397,11 @@
 		const usgTotalAt = (k) => usgShare.reduce((a, s, i) => a + softUsg(s * k, i), 0);
 		let ulo = 0.05;
 		let uhi = 60;
+		/* The bracket has to actually bracket. On a pathological roster the
+		   solution can sit outside [0.05, 60] and the bisection would silently
+		   return the bound; count it (see CONVERGENCE) so it is a visible
+		   fact rather than a quiet wrong answer. */
+		if (usgTotalAt(uhi) < 1 || usgTotalAt(ulo) > 1) CONVERGENCE.usageBisectionAtBound++;
 		for (let i = 0; i < 60; i++) {
 			const mid = (ulo + uhi) / 2;
 			if (usgTotalAt(mid) < 1) ulo = mid;
@@ -1422,10 +1444,20 @@
 		const shape = CAL.chanceShape();
 		const mult = (orbRate) =>
 			clamp(1 / (1 - orbRate * shape.fgaShare * missShare * TUNING.ORB_FT), 1.05, 1.24);
+		/* The team's pace jitter, drawn BEFORE the pools are sized. The pools
+		   used to be computed at the nominal pace while statLine read the
+		   jittered one, so a team that drew fast (±~3% of possessions) took
+		   more shots against assist, rebound and block pools sized for the
+		   slow pace — a drift in implied team ORB% and AST/FGM that no band
+		   caught, because individual lines are recomputed from attempts. */
+		const paceAdj = rng.normal(0, 2.0);
+		const jitteredPace = env.pace !== null && env.pace !== undefined
+			? clamp(pace + paceAdj, 50, 118)
+			: clamp(pace + paceAdj, 58, 82);
 		let chanceMult = mult(TUNING.ORB_RATE);
-		let pools = teamPools(comps, mins, pace, chanceMult, gameMinutes, poolEnv);
+		let pools = teamPools(comps, mins, jitteredPace, chanceMult, gameMinutes, poolEnv);
 		chanceMult = mult(pools.orbRate);
-		pools = teamPools(comps, mins, pace, chanceMult, gameMinutes, poolEnv);
+		pools = teamPools(comps, mins, jitteredPace, chanceMult, gameMinutes, poolEnv);
 
 		/* Team-level variance lives on the pool, not on the individual draws.
 		   The per-player jitter used to be the only source of it, which meant
@@ -1437,18 +1469,17 @@
 
 		const teamCtx = Object.assign({
 			games: ctx.games,
-			paceAdj: rng.normal(0, 2.0),
+			paceAdj,
 			support: teamTalent,
 			chanceMult,
 			env,
 			style: team.style || { three: 0, rim: 0, press: 0, pace: 0 },
 			rebDen: 0, orbDen: 0, astDen: 0, stlDen: 0, blkDen: 0, pfDen: 0,
 		}, pools);
-		// The pace this team actually plays at, jitter included, so statLine and
-		// teamPools agree on one number.
-		teamCtx.pace = env.pace !== null && env.pace !== undefined
-			? clamp(pace + teamCtx.paceAdj, 50, 118)
-			: clamp(pace + teamCtx.paceAdj, 58, 82);
+		// The pace this team actually plays at, jitter included — the SAME
+		// number the pools above were sized with, so statLine and teamPools
+		// agree by construction.
+		teamCtx.pace = jitteredPace;
 		/* Published, so the award model can normalise a counting-stat resume
 		   for tempo. PROGRAM_STYLES moves possessions by +/-5.5 a game and
 		   productionScore was raw per-game volume, which tilted the entire
@@ -1461,12 +1492,26 @@
 		   partly off the raw passing rating and the numerator and denominator
 		   have to agree. Height is backed out of the blocking composite, which
 		   is mostly height by construction. */
-		const ratingRows = members.map((m, i) => (m.filler
-			? {
+		/* Filler ft and tp were the flat constants 43 and 45, so all ~3,300
+		   returning players in the country shot from the identical raw ratings
+		   — no 90% free-throw shooter, no 48% big — while their composites
+		   varied. Backed out of the shooting composites the filler already
+		   drew (deterministic, no extra rng draws), centred on each filler's
+		   own talent-scaled expectation so the FIELD mean stays exactly on
+		   the calibration anchors (43 and 45) while individual fillers spread
+		   ±6-8 rating points around them. */
+		const ratingRows = members.map((m, i) => {
+			if (!m.filler) return m.player.newRatings;
+			const tscale = 0.55 + 0.9 * (m.talent / 100);
+			const dMid = comps[i].shootingMidRange - 0.455 * tscale;
+			const dTp = comps[i].shootingThreePointer - 0.505 * tscale;
+			return {
 				hgt: clamp(30 + 55 * comps[i].blocking * 0.8, 5, 95),
-				ft: 43, tp: 45, pss: clamp(comps[i].passing * 100, 5, 95),
-			}
-			: m.player.newRatings));
+				ft: clamp(43 + 40 * dMid + 35 * dTp, 5, 95),
+				tp: clamp(45 + 80 * dTp, 5, 95),
+				pss: clamp(comps[i].passing * 100, 5, 95),
+			};
+		});
 
 		for (let i = 0; i < members.length; i++) {
 			const ms = mins[i] / gameMinutes;
@@ -1563,7 +1608,7 @@
 		   moves, so the distribution keeps the shape statLine gave it. */
 		reconcileTeamTotals(lines, pools);
 		totals.ast = 0; totals.stl = 0; totals.blk = 0; totals.pf = 0;
-		totals.orb = 0; totals.trb = 0;
+		totals.orb = 0; totals.trb = 0; totals.tov = 0;
 		for (const line of lines) {
 			totals.ast += line.apg;
 			totals.stl += line.spg;
@@ -1571,6 +1616,7 @@
 			totals.pf += line.pfpg;
 			totals.orb += line.orpg;
 			totals.trb += line.rpg;
+			totals.tov += line.topg;
 		}
 		totals.poss = totals.fga - totals.orb + totals.tov + 0.44 * totals.fta;
 		team.teamTotals = totals;
@@ -1617,21 +1663,30 @@
 		if (sum <= 1e-9 || pool <= 0) return clipped;
 		const out = clipped.map((v) => (v * pool) / sum);
 		const lim = pool * cap;
+		let converged = false;
 		for (let iter = 0; iter < 6; iter++) {
 			let excess = 0;
 			for (let i = 0; i < out.length; i++) {
 				if (out[i] > lim) { excess += out[i] - lim; out[i] = lim; }
 			}
-			if (excess < 1e-9) break;
+			if (excess < 1e-9) { converged = true; break; }
 			let room = 0;
 			for (const v of out) room += Math.max(0, lim - v);
-			if (room < 1e-9) break;
+			if (room < 1e-9) { converged = true; break; } // everyone at cap: done
 			for (let i = 0; i < out.length; i++) {
 				out[i] += (excess * Math.max(0, lim - out[i])) / room;
 			}
 		}
+		// Six passes has always been enough in practice; if it ever stops
+		// being, this makes the failure countable instead of silent.
+		if (!converged) CONVERGENCE.fitToPoolUnconverged++;
 		return out;
 	}
+
+	/* Solver health, aggregated per page load. tools/validate.js and the
+	   batch harness can read (and reset) these; a non-zero count is a fact
+	   about the run that used to be invisible. */
+	const CONVERGENCE = { usageBisectionAtBound: 0, fitToPoolUnconverged: 0 };
 
 	function reconcileTeamTotals(lines, pools) {
 		const set = (key, pool, cap) => {
@@ -1647,6 +1702,11 @@
 		   function fitted everything except them, so team fouls answered to
 		   nothing: measured 15.2 against the model's own 16.6 target. */
 		set("pfpg", pools.pfPool, TUNING.PF_CAP);
+		/* Turnovers: fixed at the rate level long ago, but the team total was
+		   still unconstrained the same way fouls were before pfpg was added
+		   here. A generous cap — one player CAN commit a third of a team's
+		   turnovers. */
+		if (Number.isFinite(pools.toPool)) set("topg", pools.toPool, 0.34);
 		set("orpg", pools.orbPool, 0.75);
 		set("drpg", pools.drbPool, 0.60);
 		const rebPool = pools.orbPool + pools.drbPool;
@@ -1838,7 +1898,7 @@
 
 	global.StatsSim = {
 		simulateTeamStats, allocateMinutes, statLine, teamPools, gameLog,
-		fitToPool, reconcileTeamTotals,
+		fitToPool, reconcileTeamTotals, CONVERGENCE,
 		defenseProfile, rosterDefenseProfile, rosterShooting,
 		astWeight, stlWeight, rebWeight, passSkill,
 		leagueEnv, LEAGUE_ENV, NCAA_ENV,

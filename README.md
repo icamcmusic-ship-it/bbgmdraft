@@ -26,7 +26,7 @@ its own pace, game length and youth minutes cap, its own clubs and league table,
 and its own honours.
 
 **2. Rebuilds ratings into varied, specialised builds — without inflating anyone.**
-Each player is assigned one of ninety-eight archetypes (Floor General, Heliocentric
+Each player is assigned one of 121 archetypes (Floor General, Heliocentric
 Guard, Movement Shooter, 3&D Wing, Point Center, Rim Protector, Stretch Big,
 Lob Threat, Athletic Freak, Drop-Coverage Anchor, Boom-or-Bust Tools, …), gated by
 their height so a 7-footer never becomes a point guard. The archetype pushes some ratings up and others down, then the whole
@@ -35,10 +35,14 @@ out at exactly the target overall. Specialising a player makes him lopsided, not
 better.
 
 Rarity weights span 0.34 to 3.6, so a Combo Guard is about ten times more likely
-than a Point Center — and the *realised* spread now matches that, at 11.6× between
-the commonest specialist build and the rarest, against 281× before the effective
-weight was compressed in log space. A class then draws a **pool** of about
-fourteen of the ninety-eight builds and takes its players from the pool — which is what makes a
+than a Point Center. The realised spread is wider than the authored one — pool
+membership is a draw without replacement, which amplifies any weight difference —
+but two fixes keep it a gradient rather than a cliff: the effective weight is
+compressed in log space (down from a measured 281×), and pool slots are drawn on
+the *authored* weights rather than the exposure-divided ones, which had quietly
+inverted the table (the three centre builds gated at the top of the height range
+each made a quarter of all pools while Iron Man almost never did). A class then
+draws a **pool** of about seventeen of the 121 builds and takes its players from the pool — which is what makes a
 class "the year of the stretch bigs" rather than one of everything, every time.
 It also draws a **flavour** (guard-heavy, defence-first, a weak year,
 one-and-done heavy, a transfer-portal year, …) that tilts which builds enter the
@@ -58,7 +62,7 @@ so adding a build no longer costs a constant. An unknown archetype now throws
 under the test harnesses instead of scoring 1.0.
 
 Every class is also given about four **forced anomalies**, drawn from
-twenty-three kinds — a five-star bust, an unranked recruit who turns into a
+thirty-two kinds — a five-star bust, an unranked recruit who turns into a
 lottery pick, a 24-year-old JUCO who took the long road, a 7'4" project, a
 walk-on who ended up a draft pick, the coach's son, a man who never played a high
 school game, a convert from another sport, a season that ended in February. The
@@ -255,8 +259,8 @@ pixels the table becomes one card per prospect.
 | **Flavour strength** | How strongly the flavour leans (guard-heavy, defence-first, a weak year, one-and-done heavy, a transfer-portal year, European in style, a post-up renaissance, feast or famine, a coaching carousel year, …). Some flavours also bend the class itself — how old it is, how good the top of it is — but only settings you have left at their default. |
 | **Variation** | The neighbourhood of a seed. 0 is the class that seed has always produced. 1, 2, 3… keep its flavour, its build pool and its curve and re-roll every individual player, so the year is still "the year of the stretch bigs, weak at the top" and the sixty-eight men in it are different. Every shareable link ever made is variation 0, so none of them moved. |
 | **Avoid repeating recent builds** | How hard a build that was in one of the last three classes is pushed out of this one. Measured, the four heaviest builds returned in 14% of pools with this off and 6% with it at full strength — the ordering the weights describe survives, the repetition does not. |
-| **Builds per class** | How many of the 98 archetypes one class is drawn from. Lower is more distinctive ("the year of the stretch bigs"); 0 makes every build eligible in every class, which is one of everything, every time. |
-| **Anomalies per class** | How many forced surprises a class gets, drawn from twenty-nine kinds: a five-star bust, an unranked riser, a 24-year-old JUCO, a 7'4" project, the coach's son, a man who never played a high school game, a season that ended in February — and six that change the numbers rather than the note: a suspension, an eligibility hold that costs the first ten games, a mid-season transfer, a double-double machine, a defensive breakout, and a year-long shooting slump that costs about seven points of 3P% off what his jumper says. |
+| **Builds per class** | How many of the 121 archetypes one class is drawn from. Lower is more distinctive ("the year of the stretch bigs"); 0 makes every build eligible in every class, which is one of everything, every time. |
+| **Anomalies per class** | How many forced surprises a class gets, drawn from thirty-two kinds: a five-star bust, an unranked riser, a 24-year-old JUCO, a 7'4" project, the coach's son, a man who never played a high school game, a season that ended in February — and six that change the numbers rather than the note: a suspension, an eligibility hold that costs the first ten games, a mid-season transfer, a double-double machine, a defensive breakout, and a year-long shooting slump that costs about seven points of 3P% off what his jumper says. |
 | **Realignment** | How often the map of college basketball changes. A realignment moves two to five good programmes one rung up, and every conference stays schedulable. |
 | **Earlier seasons** | `Simulate` runs each of a prospect's previous college years through the same stat model the draft year goes through. `Reconstruct` is the older behaviour: a backward-scaled copy of the draft-year line. |
 | **Build noise** | Per-rating jitter. |
@@ -283,6 +287,103 @@ that rebuilds the class are visibly different before you drag either.
 Presets set several at once, and you can save your own; the dropdown says
 "(modified)" once you change anything by hand, and lists exactly which settings
 differ from the preset.
+
+### The randomiser
+
+The 🎲 **Randomise** button (shortcut `g`) draws new settings in the chosen
+scope. *Everything, gently* draws a triangular distribution centred on each
+setting's own default, reaching about a third of the way toward each end;
+*everything, wide open* draws uniformly across each slider's declared range; the
+remaining scopes randomise one fieldset (quality, builds, years, destinations,
+season, awards). Every draw snaps to the control's step so the panel prints
+clean numbers.
+
+Three things it deliberately never touches:
+
+- **The seed.** Reroll owns the seed; randomising both at once means you can't
+  tell which produced what you're looking at.
+- **The per-build rarity weights.** That is a curated 121-row table whose
+  ordering is the authored intent, and a uniform draw over it destroys that
+  invisibly. Flavour, pool size and diversity are randomised instead — those
+  are the supported ways to move the mix.
+- **Variation.** It is a seed-neighbourhood explorer, not a class property;
+  randomising it does Reroll's job while making shared links confusing.
+
+Destination weights are randomised *multiplicatively* off the built-ins, so a
+randomised class is a different mix of the same twenty-four leagues rather than
+a uniform one. A padlock next to each slider excludes that one setting from the
+draw — "randomise everything except pace and era" is a click, not a wish. The
+whole draw goes through one undo entry, so Ctrl+Z restores it in a single step;
+there is no confirmation dialog, deliberately — the point is speed and undo is
+one keystroke (Reset to defaults still confirms, because it is not a draw you
+were iterating on).
+
+---
+
+## How to play
+
+The in-app **Guide** button covers the same ground; this is the long version.
+
+**1. Load a class.** Export a draft class from Basketball GM (*Tools → Export →
+Draft class*) and drop the `.json` onto the page, or use *Load draft class…*.
+Everything runs locally in your browser; nothing is uploaded. You can load
+several files at once and switch between them in the header.
+
+**2. Reroll until something catches your eye.** *Reroll* (`r`, or
+Ctrl+Enter anywhere) draws a fresh seed: a new class flavour, a new build pool,
+a new college season. The seed pill in the header identifies the class — click
+it to copy the seed, shift-click to paste one in, and the dropdown beside it
+remembers recent ones. *Re-apply* keeps the seed and re-runs the current
+settings over it, which is how you tune sliders without losing the class you
+liked. Ctrl+Z undoes a reroll like any other change.
+
+**3. Shape the class.** Each fieldset in the settings panel is one idea:
+
+- *Class quality & depth* shapes the overall curve — switch **Overall ratings**
+  to "Rebuild the class curve" to unlock it; "Preserve" never inflates anyone.
+- *Builds* decides how specialised players are, how many of the 121 archetypes
+  one class draws from, the class flavour (pick one in the dropdown to keep the
+  seed and change what kind of class it is), anomalies, and the pool memory
+  that stops consecutive classes repeating themselves.
+- *Class years & paths* sets how the class got here: freshmen, transfers,
+  redshirts, reclassifications.
+- *Players with no college* routes them across twenty-four real leagues and
+  academies, weighted by where each player was born.
+- *College season* is the era, pace, efficiency, injuries, upsets,
+  realignment, streaks and mid-season events the class plays through.
+- *Awards* controls how much hardware reaches the class and how much the
+  voters disagree.
+
+Every slider prints what it means in units underneath ("top prospect ≈ 48
+ovr", "≈70 team points per game") and which pipeline phases it re-runs, so a
+0.6 ms tweak and a full rebuild are visibly different before you drag either.
+
+**4. Or let the dice do it.** See *The randomiser* above. Gently for "surprise
+me a little", wide open for "show me something I wouldn't have set", one
+fieldset when the rest is already right, padlocks for the settings that must
+survive.
+
+**5. Lock what must survive a reroll.** Open any prospect (Enter on a focused
+row) and lock his overall, potential, archetype, school, name, height or any
+individual rating; `l` locks the focused row as-is. Locks live outside the
+seed, so you can reroll the class around a player you are keeping. Bulk
+editing works from the checkbox column, and locks import/export as CSV.
+
+**6. Read the season, not just the board.** The class plays a full college
+season — standings, a bracket, awards, game logs, box scores, coaches, events.
+A prospect's stat line, honours and draft stock all come from games that were
+actually simulated, so every claim in the Notes tab is defensible from the
+season tabs. The number keys `1`–`9` jump between tabs; `/` focuses the search.
+
+**7. Compare, pin, and keep what you like.** *Pin* (`p`) keeps the current
+class as a baseline the Compare tab measures against; the Compare tab also
+holds up to four prospects side by side. *Save preset…* names your slider
+setup; *Link* copies a URL that reproduces the exact class, settings and locks.
+
+**8. Export back to BBGM.** *Export JSON* writes a draft class file BBGM
+imports directly — every player is re-solved against BBGM's own `ovr` formula,
+so what you see here is what the game computes. *More ▾* has CSV, season data,
+locked prospects and the settings on their own.
 
 ---
 
@@ -487,8 +588,13 @@ tools/golden.json   recorded output hashes
   year's class year, in a rotation rebuilt at his programme's level with the men
   he was behind actually on it. Pooled over three classes that runs 24.1 minutes
   and 9.4 points as a freshman against 31.3 and 15.7 in the draft year. Nothing
-  in the tool ranks on them, and `priorSeasons: "reconstruct"` restores the old
-  backward-scaled line.
+  ranks on them beyond the "was better as a sophomore" note line, and
+  `priorSeasons: "reconstruct"` restores the old backward-scaled line.
+* Some season mechanics are deliberately shallow: the AP poll is computed once
+  rather than weekly, coaches have philosophies and situations but no history,
+  star returners are a rate rather than named people, and conference
+  realignment has no memory — two consecutive runs can move the same school in
+  opposite directions. Each is a candidate for depth, none is a bug.
 * The recruiting ranking, transfer history and redshirt status are biography
   generated to fit the class. They shape the note and the award categories a player
   is eligible for; they are not read from the file, because BBGM does not store them.

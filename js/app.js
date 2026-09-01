@@ -60,6 +60,10 @@
 		pinned: null,
 		undo: [],
 		lastSeed: null,
+		// The randomiser's scope select, persisted like every other control.
+		randomScope: "gentle",
+		// Settings the randomiser must not touch. {key: true}.
+		settingLocks: {},
 	};
 	global.App = { state };
 
@@ -106,6 +110,8 @@
 				cardAll: state.cardAll,
 				compactBracket: state.compactBracket,
 				theme: state.theme,
+				randomScope: state.randomScope,
+				settingLocks: state.settingLocks,
 				sort: state.sort,
 				tab: state.tab,
 				// Small (a name and six numbers per prospect) and the whole
@@ -234,6 +240,11 @@
 		state.cardAll = !!saved.cardAll;
 		state.compactBracket = !!saved.compactBracket;
 		if (validString(saved.theme, THEMES)) state.theme = saved.theme;
+		if (validString(saved.randomScope, ["gentle", "wide", "quality", "builds",
+			"years", "destinations", "season", "awards"])) {
+			state.randomScope = saved.randomScope;
+		}
+		state.settingLocks = validFlagMap(saved.settingLocks) || state.settingLocks;
 		const sort = validSortStack(saved.sort);
 		if (sort) state.sort = sort;
 		if (saved.pinned && typeof saved.pinned === "object") {
@@ -398,7 +409,10 @@
 				"lower is more distinctive, higher is one of everything"
 			: "off: every build is eligible in every class"),
 		surpriseBudget: (v) => (v
-			? "drawn from twenty-three kinds: a five-star bust, a 24-year-old JUCO, " +
+			? "drawn from " +
+				(global.Engine && global.Engine.SURPRISES
+					? global.Engine.SURPRISES.length : "many") +
+				" kinds: a five-star bust, a 24-year-old JUCO, " +
 				"the coach's son, a season that ended in February…"
 			: "no forced anomalies"),
 		realignmentRate: (v) => (v
@@ -427,7 +441,9 @@
 			: v > 1.6 ? "extreme specialists" : "clear roles, real weaknesses",
 		// True by construction now: the +0.05 / +0.02 fudge terms that made this
 		// label a 30% overstatement are gone.
-		archetypeDiversity: (v) => "exactly " + Math.round(100 - v) + "% of the class stays Balanced",
+		archetypeDiversity: (v) => (v === 0
+			? "0: every single player is Balanced — no builds at all. Legal, and probably not what you want."
+			: "exactly " + Math.round(100 - v) + "% of the class stays Balanced"),
 		classFlavor: (v) => v < 0.15 ? "every class has the same archetype mix"
 			: v > 1.5 ? "a class is unmistakably one thing"
 			: "each class leans guard-heavy, big-heavy, defensive…",
@@ -564,6 +580,7 @@
 		   table that has no data-label attributes — and answerable: the user
 		   can now ask for cards at any width. */
 		document.body.className = "density-" + state.density;
+		paintLockButtons();
 	}
 
 	/* The era selector. The stat model targets one of the anchor sets in
@@ -599,11 +616,20 @@
 		notes: "notes only (~0.6 ms)",
 	};
 	function phaseCostFor(key) {
+		/* The EARLIEST phase that declares the dep, explicitly: phases run
+		   upstream-to-downstream, so the earliest is the costliest (everything
+		   after it re-runs too). A first-match return happened to give the
+		   same answer because PHASES is ordered — but that was the ordering
+		   agreeing with the intent, not the code stating it, and a setting in
+		   two phases (pace is in regular AND stats) deserves a mechanism
+		   rather than a coincidence. */
 		const phases = global.Engine.PHASES;
-		for (const ph of phases) {
-			if ((ph.deps || []).indexOf(key) !== -1) return PHASE_COST[ph.name] || ph.name;
+		let best = -1;
+		for (let i = 0; i < phases.length; i++) {
+			if ((phases[i].deps || []).indexOf(key) !== -1 && best === -1) best = i;
 		}
-		return null;
+		if (best === -1) return null;
+		return PHASE_COST[phases[best].name] || phases[best].name;
 	}
 	function paintPhaseCosts() {
 		for (const key of SLIDERS.concat(["era", "ovrMode", "varySize", "priorSeasons"])) {
@@ -915,6 +941,170 @@
 				}
 				persist();
 			});
+		}
+	}
+
+	/* ------------------------------------------------------------ randomiser */
+
+	/* One group per settings fieldset, plus the two whole-panel scopes. What
+	   is deliberately NOT here:
+	     - the seed: Reroll owns the seed. Randomising both at once means you
+	       cannot tell which produced what you are looking at.
+	     - archetypeWeights: a curated 117-row table whose ordering is the
+	       authored intent; a uniform draw over it destroys that invisibly.
+	       Flavour, pool size and diversity are the supported ways to move
+	       the mix, and they ARE randomised.
+	     - variation: a seed-neighbourhood explorer, not a class property.
+	       Randomising it does Reroll's job while making shared links
+	       confusing. */
+	const RANDOM_GROUPS = {
+		quality: ["classQuality", "classDepth", "eliteCount", "potBias", "potSpread"],
+		builds: ["specialization", "archetypeDiversity", "classFlavor",
+			"archetypePool", "surpriseBudget", "buildNoise", "poolMemory"],
+		years: ["freshmanShare", "transferShare", "redshirtShare", "reclassShare"],
+		destinations: ["pDII"],
+		season: ["pace", "scoringEnv", "efficiencyEnv", "statNoise", "injuryRate",
+			"upsetFactor", "realignmentRate", "bluebloodDownYears", "midMajorLift",
+			"teamMomentum", "seasonEvents", "draftEvents"],
+		awards: ["awardStrictness", "confAwardStrictness", "proAwardStrictness",
+			"awardNoise"],
+	};
+	const RANDOM_SCOPES = ["gentle", "wide"].concat(Object.keys(RANDOM_GROUPS));
+	const RANDOM_KEYS = Object.keys(RANDOM_GROUPS)
+		.reduce((a, g) => a.concat(RANDOM_GROUPS[g]), []);
+
+	function stepDecimals(step) {
+		const s = String(step);
+		const i = s.indexOf(".");
+		return i === -1 ? 0 : s.length - i - 1;
+	}
+
+	/* One draw for one slider. "gentle" is a triangular distribution centred
+	   on the setting's own default, reaching ~34% of the slider's range each
+	   way; "wide" is uniform across the declared min/max. Both snap to the
+	   control's step and round off binary-float dust so the panel prints
+	   clean numbers. */
+	function randomSliderValue(key, mode) {
+		const input = $(key);
+		if (!input || input.type !== "range") return null;
+		const min = Number(input.min);
+		const max = Number(input.max);
+		const step = Number(input.step) || 1;
+		if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return null;
+		let v;
+		if (mode === "gentle") {
+			const d = Number(CFG.DEFAULTS[key]);
+			const centre = Number.isFinite(d) ? Math.min(max, Math.max(min, d)) : (min + max) / 2;
+			v = centre + (Math.random() - Math.random()) * 0.34 * (max - min);
+		} else {
+			v = min + Math.random() * (max - min);
+		}
+		v = min + Math.round((Math.min(max, Math.max(min, v)) - min) / step) * step;
+		v = Math.min(max, Math.max(min, v));
+		return Number(v.toFixed(stepDecimals(step)));
+	}
+
+	function randomizeSettings(scope) {
+		if (RANDOM_SCOPES.indexOf(scope) === -1) scope = "gentle";
+		const mode = scope === "wide" ? "wide" : scope === "gentle" ? "gentle" : "wide";
+		const groups = (scope === "gentle" || scope === "wide")
+			? Object.keys(RANDOM_GROUPS) : [scope];
+		pushUndo("randomised settings (" + scope + ")");
+		let moved = 0;
+		let locked = 0;
+		for (const g of groups) {
+			for (const key of RANDOM_GROUPS[g]) {
+				if (state.settingLocks[key]) { locked++; continue; }
+				const v = randomSliderValue(key, mode);
+				if (v === null || v === state.cfg[key]) continue;
+				state.cfg[key] = v;
+				moved++;
+			}
+		}
+		/* Destination weights are randomised MULTIPLICATIVELY off the
+		   built-ins, so a randomised class is a different mix of the same 24
+		   leagues rather than a uniform one. */
+		if (groups.indexOf("destinations") !== -1 && !state.settingLocks.leagueWeights) {
+			const base = CFG.defaultLeagueWeights();
+			const spread = mode === "wide" ? Math.log(4) : Math.log(1.6);
+			const lw = {};
+			for (const k of Object.keys(base)) {
+				lw[k] = Math.max(0, Number(
+					(base[k] * Math.exp((Math.random() * 2 - 1) * spread)).toFixed(1)));
+			}
+			state.cfg.leagueWeights = lw;
+			moved++;
+		}
+		/* Repair the one contradiction the draw can produce: classFlavor 0
+		   disables the flavour system entirely, an explicitly named flavour
+		   included. The engine now floors this itself (see pickFlavor), but
+		   the panel should not display a contradiction either. */
+		if (state.cfg.flavorHint && state.cfg.classFlavor === 0) {
+			state.cfg.classFlavor = 0.5;
+		}
+		if (!moved) {
+			// Undo entry stays — it is a no-op to undo — but say why nothing moved.
+			setStatus(locked
+				? "Nothing to randomise: every setting in that scope is locked."
+				: "Nothing moved.");
+			return;
+		}
+		markDirty();
+		paintConfig();
+		persist();
+		scheduleRun();
+		setStatus("Randomised " + moved + " setting" + (moved === 1 ? "" : "s") +
+			(locked ? " (" + locked + " locked, untouched)" : "") +
+			". Ctrl+Z restores them in one step.");
+	}
+
+	function bindRandomize() {
+		const scope = $("randomScope");
+		const btn = $("btnRandomize");
+		if (!scope || !btn) return;
+		scope.value = state.randomScope;
+		scope.addEventListener("change", () => {
+			state.randomScope = scope.value;
+			persist();
+		});
+		btn.addEventListener("click", () => randomizeSettings(scope.value));
+	}
+
+	/* Per-setting locks. Locks existed per-player per-field and presets exist
+	   for whole configurations; with the randomiser in place the thing in
+	   between — "randomise everything except pace and era" — became the
+	   natural next ask. A locked setting is skipped by the randomiser (and
+	   only by the randomiser: the slider itself still moves by hand). */
+	function paintLockButtons() {
+		for (const key of RANDOM_KEYS) {
+			const input = $(key);
+			if (!input) continue;
+			const ctl = input.closest(".ctl");
+			if (!ctl) continue;
+			const label = ctl.querySelector("label");
+			if (!label) continue;
+			let b = label.querySelector(".lock-btn");
+			if (!b) {
+				b = el("button", "lock-btn");
+				b.type = "button";
+				b.addEventListener("click", (e) => {
+					e.stopPropagation();
+					if (state.settingLocks[key]) delete state.settingLocks[key];
+					else state.settingLocks[key] = true;
+					persist();
+					paintLockButtons();
+				});
+				label.appendChild(b);
+			}
+			const locked = !!state.settingLocks[key];
+			b.textContent = locked ? "🔒" : "🔓";
+			b.classList.toggle("locked", locked);
+			b.title = locked
+				? "Locked: the randomiser will not touch " + key
+				: "Unlocked: the randomiser may move " + key;
+			b.setAttribute("aria-label", (locked ? "Unlock " : "Lock ") + key +
+				" against the randomiser");
+			b.setAttribute("aria-pressed", locked ? "true" : "false");
 		}
 	}
 
@@ -3477,6 +3667,7 @@
 	wrapSlidersWithNumbers();
 	bindConfig();
 	bindSliderNumbers();
+	bindRandomize();
 	bindFiles();
 	applyTheme();
 	paintConfig();
@@ -3618,6 +3809,7 @@
 	$("btnBatchCancel").addEventListener("click", cancelBatch);
 	$("btnRedo").addEventListener("click", redo);
 	$("btnKeys").addEventListener("click", shortcutSheet);
+	$("btnHowTo").addEventListener("click", howToSheet);
 	$("modalOk").addEventListener("click", () => {
 		const fn = modalOk;
 		closeModal();
@@ -3675,6 +3867,11 @@
 			return;
 		}
 		if (k === "r" && !$("btnReroll").disabled) { e.preventDefault(); reroll(); return; }
+		if (k === "g") {
+			e.preventDefault();
+			randomizeSettings(($("randomScope") || {}).value || state.randomScope);
+			return;
+		}
 		if (k === "e" && !$("btnExport").disabled) {
 			e.preventDefault();
 			if (exportOne(state.active)) {
@@ -3732,6 +3929,7 @@
 		["Ctrl / Cmd + Enter", "Reroll the class (works anywhere)"],
 		["1 – 9", "Jump to a tab"],
 		["r", "Reroll the class"],
+		["g", "Randomise the settings in the chosen scope"],
 		["/", "Focus the prospect search"],
 		["l", "Lock or unlock the focused row"],
 		["[ / ]", "Previous / next archetype filter"],
@@ -3755,5 +3953,72 @@
 		}
 		box.appendChild(dl);
 		modal("Keyboard shortcuts", box);
+	}
+
+	/* --------------------------------------------------------- how to play */
+
+	/* A guided tour, in the app itself. The README explains the same things
+	   at more length; this is the version you can read without leaving the
+	   class you are working on. */
+	const HOW_TO_PLAY = [
+		["1. Load a class", "Export a draft class from Basketball GM " +
+			"(Tools → Export → Draft class) and drop the .json here. Nothing " +
+			"is uploaded; everything runs in your browser. You can load " +
+			"several files and switch between them."],
+		["2. Reroll until something catches your eye", "Reroll (r) draws a " +
+			"new seed: a new class flavour, a new build pool, a new season. " +
+			"The seed pill in the header reproduces the exact class — click " +
+			"it to copy, shift-click to paste one in. Re-apply keeps the seed " +
+			"and re-runs the current settings over it."],
+		["3. Shape the class with the settings panel", "Each fieldset is one " +
+			"idea. Quality & depth shapes the overall curve (switch to " +
+			"“Rebuild the class curve” to unlock it). Builds decides how " +
+			"specialised players are, how many archetypes one class draws " +
+			"from, and its flavour — pick a flavour in the dropdown to keep " +
+			"the seed and change what kind of class it is. Class years, " +
+			"destinations, the college season, and awards each own their " +
+			"corner. Every slider shows what it means in units underneath, " +
+			"and what part of the pipeline it re-runs."],
+		["4. Or let the dice do it", "The 🎲 Randomise control (g) draws new " +
+			"settings in the chosen scope. “Everything, gently” stays near " +
+			"the defaults; “everything, wide open” uses each slider's whole " +
+			"range; the other scopes randomise one fieldset. It never touches " +
+			"the seed (Reroll owns that), the per-build rarity table, or any " +
+			"setting you lock with the padlock next to its name. Ctrl+Z puts " +
+			"everything back in one step."],
+		["5. Lock what must survive", "Open a prospect and lock his overall, " +
+			"build, school or individual ratings — locks survive rerolls, so " +
+			"you can keep the player you like while the class around him " +
+			"changes. l locks the focused row as-is. The padlocks in the " +
+			"settings panel are different: they guard a SETTING against the " +
+			"randomiser."],
+		["6. Read the season, not just the board", "The class plays a full " +
+			"college season: standings, a bracket, awards, game logs, box " +
+			"scores, events. A prospect's stat line, his awards and his draft " +
+			"stock all come from games that were actually simulated, so the " +
+			"Notes tab can defend every claim it makes."],
+		["7. Compare, pin, and keep what you like", "Pin (p) keeps the " +
+			"current class as a baseline and the Compare tab holds prospects " +
+			"side by side. Save preset… names your slider setup; the Link " +
+			"button copies a URL that reproduces the exact class, settings " +
+			"and locks."],
+		["8. Export back to BBGM", "Export JSON writes a draft class file " +
+			"BBGM imports directly — every player re-solved against BBGM's " +
+			"own formulas, so what you see here is what the game computes. " +
+			"More ▾ has CSV, season data and the settings on their own."],
+	];
+
+	function howToSheet() {
+		const box = el("div");
+		box.appendChild(el("p", "hint",
+			"The panel's own hints cover each slider; this is the shape of " +
+			"the whole loop. Press ? for the keyboard shortcuts."));
+		for (const [head, body] of HOW_TO_PLAY) {
+			const h = el("h4", null, head);
+			h.style.margin = "12px 0 4px";
+			box.appendChild(h);
+			box.appendChild(el("p", null, body));
+		}
+		modal("How to play", box);
 	}
 })(window);
