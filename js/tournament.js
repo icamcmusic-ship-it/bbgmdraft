@@ -4,6 +4,9 @@
 
 	const T = global.TeamsSim;
 
+	/* The one-shot `resume + prestige * 0.06` poll is gone — the AP poll is
+	   voted weekly by a persistent electorate in js/rankings.js. This helper
+	   remains only as a fallback for callers with no Rankings module. */
 	function apPoll(teams, n) {
 		return Object.values(teams)
 			.map((t) => ({
@@ -18,6 +21,12 @@
 			});
 	}
 
+	/* The committee's ordering: the results-only committee score when the
+	   rankings layer has run, the legacy resume otherwise. */
+	function committee(t) {
+		return Number.isFinite(t.committeeScore) ? t.committeeScore : t.resume;
+	}
+
 	function selectField(teams) {
 		const autos = [];
 		const autoSet = new Set();
@@ -29,7 +38,7 @@
 			if (!pools[conf].length) continue;
 			const champ = pools[conf].filter((t) => t.confTourneyChamp)[0];
 			const pick = champ || pools[conf]
-				.slice().sort((a, b) => b.resume - a.resume)[0];
+				.slice().sort((a, b) => committee(b) - committee(a))[0];
 			if (!pick) continue;
 			autos.push(pick);
 			autoSet.add(pick.name);
@@ -37,16 +46,35 @@
 		}
 		const atLarge = Object.values(teams)
 			.filter((t) => !autoSet.has(t.name))
-			.sort((a, b) => b.resume - a.resume)
+			.sort((a, b) => committee(b) - committee(a))
 			.slice(0, 68 - autos.length);
 		for (const t of atLarge) t.bid = "at-large";
 
 		const bubble = Object.values(teams)
 			.filter((t) => !autoSet.has(t.name) && !t.bid)
-			.sort((a, b) => b.resume - a.resume)
+			.sort((a, b) => committee(b) - committee(a))
 			.slice(0, 6);
 
-		return { autos, atLarge, field: autos.concat(atLarge), bubble };
+		/* CONFERENCES[x].bids as a SANITY EXPECTATION, not a quota: the table
+		   sat in js/colleges.js looking authoritative and controlling nothing.
+		   The committee still selects on results alone; this reports where a
+		   season diverged from the historical norm, which the news and the
+		   selection view can then say out loud ("the SEC got 11 in"). */
+		const bidCheck = [];
+		const C = global.Colleges;
+		const gotByConf = {};
+		for (const t of autos.concat(atLarge)) {
+			gotByConf[t.conf] = (gotByConf[t.conf] || 0) + 1;
+		}
+		for (const conf of Object.keys(gotByConf)) {
+			const expected = C.CONFERENCES[conf] ? C.CONFERENCES[conf].bids : null;
+			if (expected !== null && Math.abs(gotByConf[conf] - expected) >= 2) {
+				bidCheck.push({ conf, expected, got: gotByConf[conf] });
+			}
+		}
+
+		return { autos, atLarge, field: autos.concat(atLarge), bubble, bidCheck,
+			byConf: gotByConf };
 	}
 
 	const REGIONS = ["East", "West", "South", "Midwest"];
@@ -56,8 +84,8 @@
 	function simulate(teams, cfg, rng) {
 		const sel = selectField(teams);
 
-		const autos = sel.autos.slice().sort((a, b) => b.resume - a.resume);
-		const atLarge = sel.atLarge.slice().sort((a, b) => b.resume - a.resume);
+		const autos = sel.autos.slice().sort((a, b) => committee(b) - committee(a));
+		const atLarge = sel.atLarge.slice().sort((a, b) => committee(b) - committee(a));
 
 		/* The four weakest auto bids play for two 16 seeds; the four weakest
 		   at-large bids play for two 11 seeds.
@@ -106,7 +134,7 @@
 		// Play-in winners are locked to the lines they played for (the two 11
 		// seeds and the two 16 seeds), like the real tournament — they are not
 		// re-seeded by resume into better lines.
-		const main = autos.concat(atLarge).sort((a, b) => b.resume - a.resume);
+		const main = autos.concat(atLarge).sort((a, b) => committee(b) - committee(a));
 		/* The seed-line offsets are derived from the field that exists. In a
 		   full 68-team bracket this is exactly the old arithmetic — 40 teams on
 		   lines 1-10, two on the 11 line plus the two play-in winners, sixteen
@@ -192,16 +220,30 @@
 			winner.team.ncaaWins = (winner.team.ncaaWins || 0) + 1;
 			finalists.push(winner);
 		}
-		if (finalists.length < 2) finalists.push(finalists[0] || ff[0]);
-		const finalSc = T.playGameScore(rng, finalists[0].team, finalists[1].team, 0, cfg, 1, true);
-		T.recordPostseason(finalists[0].team, finalists[1].team, finalSc, "ncaa", 1.13,
-			"National Championship");
-		const wonFinal = finalSc.won;
-		const champion = wonFinal ? finalists[0] : finalists[1];
-		const runnerUp = wonFinal ? finalists[1] : finalists[0];
-		const finalScore = (wonFinal ? finalSc.a + "-" + finalSc.b : finalSc.b + "-" + finalSc.a) +
-			(finalSc.ot ? (finalSc.ot > 1 ? " " + finalSc.ot + "OT" : " OT") : "");
-		champion.team.ncaaWins = (champion.team.ncaaWins || 0) + 1;
+		/* A degenerate field can leave one finalist (or none of the semis
+		   playable at all). The old padding pushed the same entry twice and
+		   then played it against itself, crediting one team both a win and a
+		   loss for a game that never happened. A lone survivor is champion by
+		   walkover instead. */
+		let champion;
+		let runnerUp = null;
+		let finalGame;
+		let finalScore = "";
+		if (finalists.length >= 2) {
+			const finalSc = T.playGameScore(rng, finalists[0].team, finalists[1].team, 0, cfg, 1, true);
+			T.recordPostseason(finalists[0].team, finalists[1].team, finalSc, "ncaa", 1.13,
+				"National Championship");
+			const wonFinal = finalSc.won;
+			champion = wonFinal ? finalists[0] : finalists[1];
+			runnerUp = wonFinal ? finalists[1] : finalists[0];
+			finalScore = (wonFinal ? finalSc.a + "-" + finalSc.b : finalSc.b + "-" + finalSc.a) +
+				(finalSc.ot ? (finalSc.ot > 1 ? " " + finalSc.ot + "OT" : " OT") : "");
+			champion.team.ncaaWins = (champion.team.ncaaWins || 0) + 1;
+			finalGame = { a: finalists[0], b: finalists[1], winner: champion, score: finalScore };
+		} else {
+			champion = finalists[0] || ff[0];
+			finalGame = { a: champion, b: null, winner: champion, score: "" };
+		}
 
 		for (const r of liveRegions) {
 			for (const x of regionResults[r].seeds) {
@@ -210,7 +252,7 @@
 				x.team.ncaaRegion = r;
 				x.team.ncaaResult =
 					x.team === champion.team ? "National Champion"
-					: x.team === runnerUp.team ? "National Runner-Up"
+					: (runnerUp && x.team === runnerUp.team) ? "National Runner-Up"
 					: wins >= 4 ? "Lost in the Final Four"
 					: "Lost in the " + ROUND_NAME[wins];
 			}
@@ -220,7 +262,7 @@
 
 		return {
 			selection: sel, firstFour, regions: regionResults, semis,
-			final: { a: finalists[0], b: finalists[1], winner: champion, score: finalScore },
+			final: finalGame,
 			champion, runnerUp, finalFour: ff, nit,
 		};
 	}
@@ -233,7 +275,7 @@
 		const inField = new Set(sel.field.map((t) => t.name));
 		const pool = Object.values(teams)
 			.filter((t) => !inField.has(t.name))
-			.sort((a, b) => b.resume - a.resume)
+			.sort((a, b) => committee(b) - committee(a))
 			.slice(0, 32);
 		if (pool.length < 2) return null;
 		for (const t of pool) t.nitBid = true;

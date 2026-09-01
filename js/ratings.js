@@ -68,7 +68,7 @@
 		{ name: "Energy Wing", min: 34, max: 64, w: 1.6, t: ["wing", "athletic", "defense"], o: { endu: 14, spd: 10, jmp: 10, reb: 8, diq: 6, tp: -10, fg: -10, pss: -8, ft: -6 } },
 		{ name: "Do-It-All Forward", min: 40, max: 70, w: 1.1, t: ["wing"], o: { oiq: 10, pss: 8, reb: 8, diq: 8, fg: 4, tp: -6, dnk: -6, ins: -6 } },
 		{ name: "Bully Slasher", min: 38, max: 66, w: 0.9, t: ["wing", "scoring"], o: { stre: 16, dnk: 14, ins: 10, ft: 6, tp: -14, fg: -8, pss: -8, drb: -4 } },
-		{ name: "Glide Athlete", min: 36, max: 66, w: 1.0, t: ["wing", "athletic"], o: { jmp: 20, spd: 14, dnk: 12, tp: -10, ft: -10, oiq: -10, pss: -8, ins: -4 } },
+		{ name: "Glide Athlete", min: 36, max: 66, w: 1.0, t: ["wing", "athletic", "raw"], o: { jmp: 20, spd: 14, dnk: 12, tp: -10, ft: -10, oiq: -10, pss: -8, ins: -4 } },
 		// --- everyone -----------------------------------------------------
 		{ name: "Microwave Scorer", min: 0, max: 80, w: 0.9, t: ["scoring"], o: { fg: 16, tp: 12, ins: 10, dnk: 8, diq: -16, pss: -12, oiq: -4 } },
 		{ name: "Athletic Freak", min: 0, max: 100, w: 1.8, t: ["athletic", "raw"], o: { spd: 18, jmp: 20, stre: 12, dnk: 14, oiq: -16, ft: -12, tp: -12, pss: -8 } },
@@ -92,10 +92,10 @@
 		{ name: "Switchable Big", min: 54, max: 100, w: 1.2, t: ["big", "defense"], o: { spd: 14, diq: 14, endu: 8, jmp: 6, ins: -10, ft: -8, pss: -8, tp: -6 } },
 		{ name: "Mobile Shot-Swatter", min: 56, max: 100, w: 1.1, t: ["big", "defense", "athletic"], o: { jmp: 18, diq: 16, spd: 8, reb: 6, oiq: -12, ins: -10, ft: -10, tp: -8 } },
 		{ name: "Face-Up Four", min: 50, max: 78, w: 1.6, t: ["big", "scoring"], o: { fg: 16, tp: 10, drb: 8, oiq: 8, ins: -8, stre: -8, reb: -8, pss: -6 } },
-		{ name: "Low-Post Bruiser", min: 56, max: 100, w: 0.9, t: ["big", "scoring"], o: { stre: 20, ins: 16, reb: 10, dnk: 6, spd: -14, tp: -14, ft: -10, drb: -8 } },
+		{ name: "Low-Post Bruiser", min: 56, max: 100, w: 0.9, t: ["big", "scoring", "rebounding"], o: { stre: 20, ins: 16, reb: 10, dnk: 6, spd: -14, tp: -14, ft: -10, drb: -8 } },
 		{ name: "Pick-and-Pop Big", min: 52, max: 100, w: 1.7, t: ["big", "shooting"], o: { tp: 18, ft: 12, oiq: 8, fg: 8, drb: -10, spd: -8, reb: -8, ins: -6 } },
-		{ name: "Lob Threat", min: 56, max: 100, w: 1.6, t: ["big", "athletic"], o: { dnk: 20, jmp: 18, endu: 6, tp: -16, ft: -12, drb: -10, pss: -8, fg: -6 } },
-		{ name: "Old-School Center", min: 60, max: 100, w: 0.95, t: ["big", "scoring"], o: { ins: 18, stre: 14, reb: 12, oiq: 6, spd: -14, tp: -16, drb: -10, ft: -8 } },
+		{ name: "Lob Threat", min: 56, max: 100, w: 1.6, t: ["big", "athletic", "raw"], o: { dnk: 20, jmp: 18, endu: 6, tp: -16, ft: -12, drb: -10, pss: -8, fg: -6 } },
+		{ name: "Old-School Center", min: 60, max: 100, w: 0.95, t: ["big", "scoring", "rebounding"], o: { ins: 18, stre: 14, reb: 12, oiq: 6, spd: -14, tp: -16, drb: -10, ft: -8 } },
 		{ name: "Undersized Rebounder", min: 46, max: 64, w: 0.75, t: ["big", "rebounding"], o: { reb: 20, stre: 14, endu: 10, diq: 6, tp: -10, fg: -8, drb: -8, pss: -6 } },
 		{ name: "Foul-Prone Enforcer", min: 54, max: 100, w: 0.6, t: ["big", "defense"], o: { stre: 18, diq: 10, ins: 8, reb: 8, oiq: -14, ft: -10, spd: -8, tp: -8 } },
 		/* --- the gaps ------------------------------------------------------
@@ -221,15 +221,15 @@
 		   power forward. Nine builds with min 72-78 give a seven-footer his own
 		   identity space — post-up, rim-running, anchoring, paint-bully — without
 		   overlapping the tweener fours. */
-		{ name: "Back-to-Basket Center", min: 76, max: 100, w: 1.3, t: ["big", "scoring"], o: { ins: 22, stre: 18, reb: 12, ft: 6, spd: -16, tp: -16, drb: -12, pss: -8 } },
+		{ name: "Back-to-Basket Center", min: 76, max: 100, w: 1.3, t: ["big", "scoring", "rebounding"], o: { ins: 22, stre: 18, reb: 12, ft: 6, spd: -16, tp: -16, drb: -12, pss: -8 } },
 		{ name: "Shot-Blocking Anchor", min: 76, max: 100, w: 1.4, t: ["big", "defense"], o: { diq: 24, jmp: 16, reb: 12, stre: 8, oiq: -14, tp: -16, pss: -12, drb: -10 } },
 		{ name: "Glass-Eating Center", min: 76, max: 100, w: 1.3, t: ["big", "rebounding"], o: { reb: 24, stre: 16, endu: 12, diq: 8, tp: -16, drb: -12, fg: -10, pss: -10 } },
 		{ name: "Paint Bully", min: 74, max: 100, w: 1.2, t: ["big", "scoring", "rebounding"], o: { stre: 20, ins: 16, reb: 14, dnk: 8, tp: -18, spd: -14, drb: -12, fg: -8 } },
-		{ name: "Vertical Spacer", min: 74, max: 100, w: 1.1, t: ["big", "athletic"], o: { jmp: 20, dnk: 16, spd: 10, reb: 8, tp: -18, ft: -14, drb: -12, pss: -8 } },
+		{ name: "Vertical Spacer", min: 74, max: 100, w: 1.1, t: ["big", "athletic", "raw"], o: { jmp: 20, dnk: 16, spd: 10, reb: 8, tp: -18, ft: -14, drb: -12, pss: -8 } },
 		{ name: "Hook-Shot Specialist", min: 76, max: 100, w: 0.9, t: ["big", "scoring"], o: { ins: 20, fg: 14, stre: 12, ft: 8, tp: -18, spd: -14, drb: -10, pss: -8 } },
 		{ name: "Screen-and-Roll Center", min: 72, max: 100, w: 1.3, t: ["big", "athletic"], o: { dnk: 18, stre: 14, jmp: 10, endu: 8, tp: -16, ft: -12, drb: -10, pss: -8 } },
 		{ name: "Defensive Pillar", min: 74, max: 100, w: 1.2, t: ["big", "defense", "rebounding"], o: { diq: 20, reb: 16, stre: 12, endu: 8, tp: -16, fg: -12, drb: -10, spd: -10 } },
-		{ name: "Two-Way Center", min: 72, max: 100, w: 1.1, t: ["big", "defense", "scoring"], o: { diq: 16, ins: 14, reb: 10, stre: 8, tp: -14, drb: -12, spd: -10, pss: -8 } },
+		{ name: "Two-Way Center", min: 72, max: 100, w: 1.1, t: ["big", "defense", "scoring", "rebounding"], o: { diq: 16, ins: 14, reb: 10, stre: 8, tp: -14, drb: -12, spd: -10, pss: -8 } },
 
 		/* --- four gaps in the coverage, measured rather than wished for -----
 
@@ -496,13 +496,15 @@
 	   inverse, so in principle `down(up(x))` and `up(down(x))` differ. In
 	   practice they do not, and the size of "do not" is worth writing down
 	   because the alternative is trusting it: over the whole of [lo - band,
-	   hi + band] with this table's constants (lo 0.30, hi 2.60, band 0.18) the
-	   two orders differ by at most 1.0e-6, which is four orders of magnitude
-	   below the smallest gap between two builds' role usage. The reason is
-	   that the bounds are 12.8 bands apart: at x = lo the down-half contributes
-	   band * log1p(exp(-12.8)) ≈ 5e-7, so there is no "double squeeze" of the
-	   lower range — the lift the lower softplus applies at 0.30 survives the
-	   upper half intact to within a millionth.
+	   hi + band] with this table's constants (lo 0.45, hi 2.00, band 0.14) the
+	   two orders differ by at most a few 1e-6, still well below the smallest
+	   gap between two builds' role usage. The reason is that the bounds are
+	   ~11.1 bands apart: at x = lo the down-half contributes
+	   band * log1p(exp(-11.1)) ≈ 2e-6, so there is no "double squeeze" of the
+	   lower range — the lift the lower softplus applies at 0.45 survives the
+	   upper half intact to within a few millionths. (The error scales like
+	   band * exp(-(hi - lo) / band), which is why the bounds cannot be
+	   narrowed much further — see the note on ROLE_FIT above.)
 
 	   softBoundOrderError() below measures that gap and tools/test.js asserts
 	   it stays under 1e-5, so this is a checked property rather than a
@@ -1054,8 +1056,14 @@
 		   hurt, the year three blue bloods went down, the year the mid-majors
 		   won. Those are all things the engine already models (injuryRate,
 		   programme strength, upsetFactor); nothing could ask for them. */
+		/* `durability` is the availability axis (Iron Man, Injury-Prone
+		   Talent, Injury-Return Unknown). It was added to those builds so a
+		   flavour could ask for them and then no flavour did — the tag had
+		   three members and zero consumers, reproducing one level up the
+		   exact fault it was created to fix. The year everybody got hurt is
+		   the year those three stories get told. */
 		{ name: "injury year", w: 0.9, label: "the year everybody got hurt",
-			m: { raw: 1.2, athletic: 1.1 },
+			m: { raw: 1.2, athletic: 1.1, durability: 2.4 },
 			c: { injuryRate: 2.0 } },
 		{ name: "blue bloods down", w: 0.9, label: "the year the blue bloods fell over",
 			m: {},
@@ -1361,7 +1369,7 @@
 		return pool;
 	}
 
-	function pickArchetype(rng, hgtRating, cfg, flavor, pool) {
+	function pickArchetype(rng, hgtRating, cfg, flavor, pool, rank) {
 		const source = pool && pool.length ? pool.concat(BALANCED) : ARCHETYPES;
 		const eligible = source.filter(
 			(a) => hgtRating >= a.min && hgtRating <= a.max,
@@ -1369,7 +1377,17 @@
 		if (!eligible.length) {
 			return ARCHETYPES.filter((a) => a.name === "Balanced")[0];
 		}
-		const diversity = clamp(cfg.archetypeDiversity, 0, 100) / 100;
+		let diversity = clamp(cfg.archetypeDiversity, 0, 100) / 100;
+		/* The top of the board is the part of the class everyone looks at,
+		   and the uniform Balanced share made the No. 1 pick the player MOST
+		   likely to have no identity — measured, Balanced 20% of the time at
+		   the top slot, twice any actual build. The Balanced mass shrinks for
+		   the top ten (x0.25 at the very top, fading back to normal by pick
+		   ~10); the slider's promise stays true for the class as a whole,
+		   since ten players move at most about a point of the total share. */
+		if (Number.isFinite(rank) && rank >= 0 && rank < 10) {
+			diversity = 1 - (1 - diversity) * (0.25 + 0.075 * rank);
+		}
 		const wOf = (a) => archetypeWeight(a, cfg, flavor);
 		/* Balanced keeps exactly (1 - diversity) of the probability mass however
 		   many specialist builds are eligible; the rest is split by rarity
@@ -1520,11 +1538,11 @@
 	/* Rebuild one player's ratings.
 	   orig: the ratings row from the league file
 	   targetOvr / targetPot: what the rebuilt player must come out to */
-	function rebuild(rng, orig, targetOvr, targetPot, cfg, forcedArchetype, flavor, pinned, pool) {
+	function rebuild(rng, orig, targetOvr, targetPot, cfg, forcedArchetype, flavor, pinned, pool, rank) {
 		const forced = forcedArchetype
 			? ARCHETYPES.filter((a) => a.name === forcedArchetype)[0]
 			: null;
-		const arch = forced || pickArchetype(rng, orig.hgt, cfg, flavor, pool);
+		const arch = forced || pickArchetype(rng, orig.hgt, cfg, flavor, pool, rank);
 		const spec = clamp(cfg.specialization, 0, 3);
 		const noise = Math.max(0, cfg.buildNoise);
 

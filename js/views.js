@@ -37,6 +37,7 @@
 	const COLUMNS = [
 		{ key: "pick", label: "", num: false, fixed: true, title: "Select for bulk editing" },
 		{ key: "lock", label: "🔒", num: false, fixed: true, title: "Locked settings survive a reroll" },
+		{ key: "face", label: "Face", num: false, off: true, title: "facesjs portrait — the face BBGM itself renders" },
 		{ key: "name", label: "Player", num: false, fixed: true, sticky: true },
 		{ key: "pos", label: "Pos", num: false },
 		{ key: "year", label: "Year", num: false },
@@ -1054,6 +1055,12 @@
 
 	function viewPlayers(view, res) {
 		const st = A().state;
+		// A prospect's own page rides inside this tab the way a team page
+		// rides inside the Teams tab.
+		if (st.player) {
+			view.appendChild(playerPage(view, res, st.player));
+			return;
+		}
 		const summary = el("div", "rowflex");
 		const ncaa = res.players.filter((p) => !p.nonNcaa);
 		const conv = res.players.filter((p) => p.collegeChanged);
@@ -1099,42 +1106,9 @@
 			});
 			view.appendChild(line);
 		}
-		/* Realignment. The map of college basketball changing is a thing a
-		   season is remembered for, and it happened silently. */
-		if (res.realignment && res.realignment.length) {
-			const line = el("p", "legendline");
-			line.appendChild(document.createTextNode(
-				"Realignment: " + res.realignment
-					.map((m) => m.school + " leaves the " + m.from + " for the " + m.to)
-					.join(" · ")));
-			view.appendChild(line);
-		}
-		/* What happened during the season, and what happened on draft day. Both
-		   are read off results the sim already produced (see midSeasonEvents in
-		   js/teams.js and DRAFT_EVENTS in js/engine.js); before this the season
-		   was a list of scores and the board was a sorted list, and neither of
-		   them could say a single thing about itself. */
-		if (res.seasonEvents && res.seasonEvents.length) {
-			const line = el("p", "legendline");
-			line.appendChild(document.createTextNode("The season: " +
-				res.seasonEvents.map((e) => e.text).join(" · ")));
-			view.appendChild(line);
-		}
-		if (res.draftEvents && res.draftEvents.length) {
-			const line = el("p", "legendline");
-			line.appendChild(document.createTextNode("Draft day: "));
-			res.draftEvents.forEach((e, i) => {
-				if (i) line.appendChild(document.createTextNode(" · "));
-				const b = el("button", "linky", e.player + " " + e.text);
-				b.title = e.detail || "";
-				b.addEventListener("click", () => {
-					const who = res.players.filter((x) => x.key === e.key)[0];
-					if (who) A().openEditor(who);
-				});
-				line.appendChild(b);
-			});
-			view.appendChild(line);
-		}
+		/* Realignment, the season's events and draft day used to be three more
+		   ·-joined walls here. They are proper dated articles on the News tab
+		   now, with every player and team mention a link. */
 		view.appendChild(filterBar(res));
 		view.appendChild(rangeBar(res));
 		view.appendChild(bulkBar(res));
@@ -1235,6 +1209,14 @@
 						td.appendChild(btn);
 					}
 					sortVals.lock = ov ? Object.keys(ov).length : 0;
+					break;
+				}
+				case "face": {
+					td = el("td");
+					const fb = el("div", "facebox small");
+					if (global.Faces) global.Faces.render(fb, p);
+					td.appendChild(fb);
+					sortVals.face = 0;
 					break;
 				}
 				case "name":
@@ -1690,18 +1672,17 @@
 		}
 		view.appendChild(el("h3", null, "AP Top 25"));
 		view.appendChild(el("p", "legendline",
-			"Rankings come from record, strength of schedule and roster quality. " +
-			"Program strength starts from each school's BBGM draft frequency, then " +
-			"this year's prospects are layered on top. Every one of the 368 " +
-			"programs plays a full season, so the ratings below are real. " +
-			"Click a team for its page."));
+			"Voted weekly by a persistent 60-member electorate over the results " +
+			"as they happened — first-place votes split, teams rise and fall, " +
+			"and the preseason ballot runs on reputation the way the real one " +
+			"does. Click a team for its page."));
 		const wrap = el("div", "scroll");
 		const table = el("table");
 		const thead = el("thead");
 		const hr = el("tr");
-		for (const h of ["#", "Team", "Conf", "Record", "Conf record", "SOS",
-			"ORtg", "DRtg", "Seed", "Result", "Prospects"]) {
-			const th = el("th", ["#", "SOS", "ORtg", "DRtg"].indexOf(h) >= 0 ? "num" : "", h);
+		for (const h of ["#", "±", "Team", "Conf", "Record", "Conf record", "NET",
+			"Quads", "SOS", "ORtg", "DRtg", "Seed", "Result", "Prospects"]) {
+			const th = el("th", ["#", "±", "NET", "SOS", "ORtg", "DRtg"].indexOf(h) >= 0 ? "num" : "", h);
 			th.scope = "col";
 			hr.appendChild(th);
 		}
@@ -1710,11 +1691,27 @@
 		const tb = el("tbody");
 		res.poll.forEach((t, i) => {
 			const tr = el("tr");
-			tr.appendChild(el("td", "num", String(i + 1)));
+			const fpv = i === 0 && t.apFirstPlace ? " (" + t.apFirstPlace + ")" : "";
+			tr.appendChild(el("td", "num", (i + 1) + fpv));
+			// Movement against the preseason ballot.
+			const move = t.apPreseason ? t.apPreseason - (i + 1) : null;
+			const mv = el("td", "num");
+			mv.appendChild(el("span",
+				move === null ? "" : move > 0 ? "up" : move < 0 ? "down" : "",
+				move === null ? "NEW" : move === 0 ? "—"
+					: (move > 0 ? "▲" : "▼") + Math.abs(move)));
+			mv.title = t.apPreseason
+				? "Preseason: No. " + t.apPreseason : "Unranked in the preseason poll";
+			tr.appendChild(mv);
 			tr.appendChild(el("td", null, "")).appendChild(teamLink(t.name));
 			tr.appendChild(el("td", null, t.conf));
 			tr.appendChild(el("td", null, t.w + "-" + t.l + (t.confRegularChamp ? " ★" : "")));
 			tr.appendChild(el("td", null, t.cw + "-" + t.cl));
+			tr.appendChild(el("td", "num", t.netRank ? String(t.netRank) : "—"));
+			tr.appendChild(el("td", null, t.quads
+				? "Q1 " + t.quads.q1w + "-" + t.quads.q1l + " · Q2 " +
+					t.quads.q2w + "-" + t.quads.q2l
+				: "—"));
 			tr.appendChild(el("td", "num", t.sosAvg.toFixed(1)));
 			tr.appendChild(el("td", "num", t.offRtg ? t.offRtg.toFixed(1) : "—"));
 			tr.appendChild(el("td", "num", t.defRtg ? t.defRtg.toFixed(1) : "—"));
@@ -1730,7 +1727,79 @@
 		view.appendChild(wrap);
 		view.appendChild(el("p", "legendline",
 			"★ = regular-season conference champion. Records include the " +
-			"postseason."));
+			"postseason. The number beside No. 1 is its first-place votes " +
+			"(of " + (global.Rankings ? global.Rankings.VOTERS : 60) + "); " +
+			"± is movement against the preseason ballot."));
+
+		// The poll as a season: the top ten's rank by week.
+		if (res.pollHistory && res.pollHistory.length) {
+			view.appendChild(el("h3", null, "The poll, week by week"));
+			const pw = el("div", "scroll");
+			const pt = el("table");
+			const ph = el("tr");
+			ph.appendChild(el("th", null, "Team"));
+			res.pollHistory.forEach((wk) => {
+				ph.appendChild(el("th", "num", wk.week === 0 ? "Pre" : String(wk.week)));
+			});
+			const pth = el("thead");
+			pth.appendChild(ph);
+			pt.appendChild(pth);
+			const ptb = el("tbody");
+			for (const r of res.pollHistory[res.pollHistory.length - 1].ranks.slice(0, 10)) {
+				const t = res.teams[r.team];
+				const tr = el("tr");
+				const td = el("td", "sticky");
+				td.appendChild(teamLink(r.team));
+				tr.appendChild(td);
+				(t && t.apHistory ? t.apHistory : []).forEach((rk) => {
+					tr.appendChild(el("td", "num", rk ? String(rk) : "·"));
+				});
+				ptb.appendChild(tr);
+			}
+			pt.appendChild(ptb);
+			pw.appendChild(pt);
+			view.appendChild(pw);
+			const final = res.pollHistory[res.pollHistory.length - 1];
+			if (final.othersReceivingVotes && final.othersReceivingVotes.length) {
+				const line = el("p", "legendline");
+				line.appendChild(document.createTextNode("Others receiving votes: "));
+				final.othersReceivingVotes.forEach((o, i) => {
+					if (i) line.appendChild(document.createTextNode(", "));
+					line.appendChild(teamLink(o.team));
+					line.appendChild(document.createTextNode(" " + o.points));
+				});
+				view.appendChild(line);
+			}
+		}
+
+		// Selection Sunday: the committee's work, in the committee's terms.
+		const sel = res.tourney && res.tourney.selection;
+		if (sel) {
+			view.appendChild(el("h3", null, "Selection"));
+			view.appendChild(el("p", "legendline",
+				"Selection and seeding run on observables only: NET rank " +
+				"(margin-capped adjusted efficiency + results-based team value), " +
+				"quadrant records, road record, stretch form. The committee " +
+				"cannot see a team's true rating."));
+			if (sel.bubble && sel.bubble.length) {
+				const line = el("p", "legendline");
+				line.appendChild(document.createTextNode("First four out: "));
+				sel.bubble.slice(0, 4).forEach((t, i) => {
+					if (i) line.appendChild(document.createTextNode(" · "));
+					line.appendChild(teamLink(t.name));
+					line.appendChild(document.createTextNode(
+						" (NET " + (t.netRank || "—") +
+						(t.quads ? ", Q1 " + t.quads.q1w + "-" + t.quads.q1l : "") + ")"));
+				});
+				view.appendChild(line);
+			}
+			if (sel.bidCheck && sel.bidCheck.length) {
+				view.appendChild(el("p", "legendline",
+					"Against the historical norm: " + sel.bidCheck.map((b) =>
+						"the " + b.conf + " got " + b.got + " bids (typical " +
+						b.expected + ")").join(" · ")));
+			}
+		}
 
 		view.appendChild(el("h3", null, "Programs with prospects in this class"));
 		const cards = el("div", "cards");
@@ -1739,8 +1808,11 @@
 			.sort((a, b) => b.resume - a.resume);
 		for (const t of withP) {
 			const c = el("div", "card");
-			c.appendChild(el("h4", null,
-				t.name + " — " + t.w + "-" + t.l + (t.apRank ? "  (AP #" + t.apRank + ")" : "")));
+			const h4 = el("h4");
+			h4.appendChild(teamLink(t.name));
+			h4.appendChild(document.createTextNode(" — " + t.w + "-" + t.l +
+				(t.apRank ? "  (AP #" + t.apRank + ")" : "")));
+			c.appendChild(h4);
 			const best = t.log.filter((g) => g.won).sort((a, b) => b.quality - a.quality)[0];
 			c.appendChild(el("div", "note",
 				t.conf + " " + t.cw + "-" + t.cl +
@@ -1804,6 +1876,166 @@
 		}
 	}
 
+	/* ---------------------------------------------------------------- news */
+
+	/* The season as dated articles (see js/news.js), replacing the four
+	   ·-joined strips that used to sit above the prospect table. */
+	function viewNews(view, res) {
+		const articles = global.News ? global.News.build(res) : [];
+		view.appendChild(el("h3", null, "The season, as it happened"));
+		view.appendChild(el("p", "legendline",
+			"Every article is read off results the sim actually produced — " +
+			"nothing here can contradict a box score. Names are links."));
+		if (!articles.length) {
+			view.appendChild(el("p", "hint", "A quiet year. Turn up season " +
+				"events, anomalies or draft-day events in the settings."));
+			return;
+		}
+		let lastDate = null;
+		const wrap = el("div", "news");
+		for (const a of articles) {
+			if (a.dateline !== lastDate) {
+				wrap.appendChild(el("h4", "newsdate", a.dateline));
+				lastDate = a.dateline;
+			}
+			const art = el("article", "newsitem");
+			const h = el("h5");
+			renderSegs(h, a.headline, res);
+			art.appendChild(h);
+			const body = el("p");
+			renderSegs(body, a.body, res);
+			art.appendChild(body);
+			art.appendChild(el("p", "newskind", a.kind));
+			wrap.appendChild(art);
+		}
+		view.appendChild(wrap);
+	}
+
+	/* ------------------------------------------------------------ universe */
+
+	function viewUniverse(view, res) {
+		const st = A().state;
+		const u = st.universe || { rows: [] };
+		view.appendChild(el("h3", null, "Universe"));
+		view.appendChild(el("p", "legendline",
+			"Load several class files (oldest season first) and run them as one " +
+			"continuous world: conference realignment keeps its memory, " +
+			"programme strength drifts season to season instead of being " +
+			"redrawn, a fired coach is replaced by a named first-year hire, and " +
+			"the build-pool memory spans the whole timeline. A universe re-runs " +
+			"from its seeds — the export stores seeds, not simulated output."));
+
+		const bar = el("div", "filters");
+		const run = el("button", u.running ? "warn" : "primary",
+			u.running ? "Running… " + (u.done || 0) + "/" + (u.total || "?")
+				: "Run universe");
+		run.disabled = !!u.running;
+		run.addEventListener("click", () => { A().runUniverse(); });
+		bar.appendChild(run);
+		const exp = el("button", null, "Export universe JSON");
+		exp.disabled = !u.rows.length || !!u.running;
+		exp.addEventListener("click", () => { A().exportUniverse(); });
+		bar.appendChild(exp);
+		const impBtn = el("button", null, "Import universe…");
+		impBtn.disabled = !!u.running;
+		const impInput = el("input");
+		impInput.type = "file";
+		impInput.accept = ".json";
+		impInput.hidden = true;
+		impInput.addEventListener("change", () => {
+			const f = impInput.files && impInput.files[0];
+			if (!f) return;
+			f.text().then((txt) => {
+				try { A().importUniverse(JSON.parse(txt)); }
+				catch (e) { A().showError(e); }
+			});
+			impInput.value = "";
+		});
+		impBtn.addEventListener("click", () => impInput.click());
+		bar.appendChild(impBtn);
+		bar.appendChild(impInput);
+		view.appendChild(bar);
+
+		// Per-file diagnostics: which files will run, in what order, and why
+		// a file will not.
+		const diags = u.diags ||
+			(A().state.files.length && global.Universe
+				? global.Universe.validate(A().state.files) : []);
+		if (diags.length) {
+			view.appendChild(el("h4", null, "Files"));
+			const dl = el("div", "note");
+			diags.slice().sort((a, b) => (a.season || 0) - (b.season || 0))
+				.forEach((d, i) => {
+					if (i) dl.appendChild(document.createTextNode("\n"));
+					dl.appendChild(document.createTextNode(
+						(d.ok ? "✓ " : "✗ ") + d.name +
+						(d.season ? " — season " + d.season : "") +
+						(d.players ? ", " + d.players + " players" : "") +
+						(d.errors && d.errors.length ? "  REJECTED: " + d.errors.join("; ") : "") +
+						(d.warnings && d.warnings.length ? "  (" + d.warnings.join("; ") + ")" : "")));
+				});
+			view.appendChild(dl);
+		} else {
+			view.appendChild(el("p", "hint",
+				"No files loaded yet. Load draft classes with the button in the " +
+				"header — multiple files at once is fine."));
+		}
+
+		if (!u.rows.length) return;
+
+		view.appendChild(el("h4", null, "Timeline"));
+		const wrap = el("div", "scroll");
+		const table = el("table");
+		const hr = el("tr");
+		for (const h of ["Season", "Flavour", "AP No. 1", "Champion", "Player of the Year",
+			"No. 1 pick", "Realignment", "Coaches fired"]) {
+			hr.appendChild(el("th", null, h));
+		}
+		const thead = el("thead");
+		thead.appendChild(hr);
+		table.appendChild(thead);
+		const tb = el("tbody");
+		for (const r of u.rows) {
+			const tr = el("tr");
+			tr.appendChild(el("td", null, String(r.season || "?")));
+			if (r.error) {
+				const td = el("td", null, "failed: " + r.error);
+				td.colSpan = 7;
+				tr.appendChild(td);
+				tb.appendChild(tr);
+				continue;
+			}
+			tr.appendChild(el("td", null, r.flavor || "—"));
+			tr.appendChild(el("td", null, r.apOne || "—"));
+			tr.appendChild(el("td", null, (r.champion || "—") +
+				(r.champSeed ? " (No. " + r.champSeed + ")" : "")));
+			tr.appendChild(el("td", null, r.poy
+				? r.poy.name + " (" + r.poy.school + ")" : "—"));
+			tr.appendChild(el("td", null, r.no1
+				? r.no1.name + " (" + r.no1.school + ")" : "—"));
+			tr.appendChild(el("td", null, r.realignment && r.realignment.length
+				? r.realignment.join("; ") : "—"));
+			tr.appendChild(el("td", "num", String(r.coachChanges || 0)));
+			tb.appendChild(tr);
+		}
+		table.appendChild(tb);
+		wrap.appendChild(table);
+		view.appendChild(wrap);
+
+		if (u.threads && u.threads.length) {
+			view.appendChild(el("h4", null, "Threads"));
+			view.appendChild(el("div", "note", u.threads.join("\n")));
+		}
+		if (u.alumni && u.alumni.length) {
+			view.appendChild(el("h4", null, "Alumni index"));
+			view.appendChild(el("p", "legendline",
+				"The names this world remembers, season by season — what a later " +
+				"class's news can refer back to."));
+			view.appendChild(el("div", "note", u.alumni.map((a) =>
+				a.season + "  " + a.name + " (" + a.school + ") — " + a.why).join("\n")));
+		}
+	}
+
 	/* ------------------------------------------------------------- bracket */
 
 	function gameNode(a, b, winner, seedA, seedB, score) {
@@ -1829,13 +2061,26 @@
 		const st = A().state;
 		const t = res.tourney;
 		const head = el("div", "rowflex");
-		head.appendChild(el("span", "pill",
-			"Champion: " + t.champion.team.name + " (No. " + t.champion.seed + ")"));
-		head.appendChild(el("span", "pill", "Runner-up: " + t.runnerUp.team.name));
+		const champPill = el("span", "pill");
+		champPill.appendChild(document.createTextNode("Champion: "));
+		champPill.appendChild(teamLink(t.champion.team.name));
+		champPill.appendChild(document.createTextNode(" (No. " + t.champion.seed + ")"));
+		head.appendChild(champPill);
+		if (t.runnerUp) {
+			const ruPill = el("span", "pill");
+			ruPill.appendChild(document.createTextNode("Runner-up: "));
+			ruPill.appendChild(teamLink(t.runnerUp.team.name));
+			head.appendChild(ruPill);
+		}
 		head.appendChild(el("span", "pill",
 			"Final Four: " + t.finalFour.map((x) => x.team.name).join(", ")));
 		const upsets = [];
-		for (const r of global.Tournament.REGIONS) {
+		/* Iterate the regions the bracket actually HAS, not the static list:
+		   the engine populates only regions with teams on a degraded field,
+		   and t.regions[r] on an empty one is a TypeError that takes the whole
+		   tab down. Same in the cinderella scan and the follow-a-team paths. */
+		const liveRegions = Object.keys(t.regions);
+		for (const r of liveRegions) {
 			for (const round of t.regions[r].rounds) {
 				for (const g of round) if (g.upset) upsets.push(g);
 			}
@@ -1856,7 +2101,7 @@
 		view.appendChild(head);
 
 		const cinderella = [];
-		for (const r of global.Tournament.REGIONS) {
+		for (const r of liveRegions) {
 			for (const x of t.regions[r].seeds) {
 				if (x.seed >= 10 && (x.team.ncaaWins || 0) >= 1) cinderella.push(x);
 			}
@@ -1864,9 +2109,12 @@
 		cinderella.sort((a, b) => (b.team.ncaaWins || 0) - (a.team.ncaaWins || 0));
 		if (cinderella.length) {
 			const c = cinderella[0];
-			view.appendChild(el("p", "legendline",
-				"Cinderella: No. " + c.seed + " " + c.team.name + " won " +
+			const line = el("p", "legendline");
+			line.appendChild(document.createTextNode("Cinderella: No. " + c.seed + " "));
+			line.appendChild(teamLink(c.team.name));
+			line.appendChild(document.createTextNode(" won " +
 				c.team.ncaaWins + " game(s) — " + c.team.ncaaResult + "."));
+			view.appendChild(line);
 		}
 
 		const path = el("div", "ctl");
@@ -1874,7 +2122,7 @@
 		sel.setAttribute("aria-label", "Follow a team's path through the bracket");
 		sel.appendChild(new Option("follow a team's path…", ""));
 		const inField = [];
-		for (const r of global.Tournament.REGIONS) {
+		for (const r of liveRegions) {
 			for (const x of t.regions[r].seeds) inField.push(x);
 		}
 		inField.sort((a, b) => a.team.name.localeCompare(b.team.name));
@@ -1885,7 +2133,7 @@
 			out.textContent = "";
 			if (!sel.value) return;
 			const lines = [];
-			for (const r of global.Tournament.REGIONS) {
+			for (const r of liveRegions) {
 				for (const round of t.regions[r].rounds) {
 					for (const g of round) {
 						if (g.a.team.name !== sel.value && g.b.team.name !== sel.value) continue;
@@ -1898,7 +2146,7 @@
 				}
 			}
 			for (const g of t.semis.concat([t.final])) {
-				if (!g.a || !g.b) continue;
+				if (!g || !g.a || !g.b) continue;
 				if (g.a.team.name !== sel.value && g.b.team.name !== sel.value) continue;
 				const me = g.a.team.name === sel.value ? g.a : g.b;
 				const them = g.a.team.name === sel.value ? g.b : g.a;
@@ -1921,7 +2169,7 @@
 		view.appendChild(ff);
 
 		const ROUNDS = ["Round of 64", "Round of 32", "Sweet 16", "Elite Eight"];
-		const REG = global.Tournament.REGIONS;
+		const REG = global.Tournament.REGIONS.filter((r) => t.regions[r]);
 		const mirror = el("div", "bracketwrap");
 		const leftCol = el("div", "half");
 		const rightCol = el("div", "half right");
@@ -1967,8 +2215,10 @@
 				g.a.seed, g.b.seed, g.score));
 		}
 		centre.appendChild(el("h4", null, "National championship"));
-		centre.appendChild(gameNode(t.final.a.team, t.final.b.team, t.final.winner.team,
-			t.final.a.seed, t.final.b.seed, t.final.score));
+		if (t.final && t.final.b) {
+			centre.appendChild(gameNode(t.final.a.team, t.final.b.team, t.final.winner.team,
+				t.final.a.seed, t.final.b.seed, t.final.score));
+		}
 		mirror.appendChild(leftCol);
 		mirror.appendChild(centre);
 		mirror.appendChild(rightCol);
@@ -1998,14 +2248,30 @@
 
 	/* --------------------------------------------------------------- awards */
 
+	/* Counting stats are ranked PER 40 MINUTES OF GAME, because the class
+	   spans leagues with incompatible game lengths: a G League prospect plays
+	   48-minute games at 103 possessions against the NCAA's 40 at ~68, so his
+	   raw per-game totals structurally dominate any mixed board. Rates (TS%,
+	   percentages) are already length-free and rank as-is. The DISPLAYED
+	   number stays the real per-game figure; only the ordering normalises. */
+	const RATE_KEYS = { ts: true, fgp: true, tpp: true, ftp: true, usg: true, drtg: true };
+	function leaderValue(p, key) {
+		const v = p.stats[key];
+		if (RATE_KEYS[key]) return v;
+		const gm = p.nonNcaa
+			? (global.StatsSim.leagueEnv(p.newCollege).gameMinutes || 40) : 40;
+		return v * (40 / gm);
+	}
 	function leaderTable(res, title, key, fmt, low) {
 		const list = res.players.filter((p) => p.stats && p.stats.mpg >= 15)
 			.sort((a, b) => (low
-				? a.stats[key] - b.stats[key] : b.stats[key] - a.stats[key]))
+				? leaderValue(a, key) - leaderValue(b, key)
+				: leaderValue(b, key) - leaderValue(a, key)))
 			.slice(0, 10);
 		const box = el("div", "card");
 		box.appendChild(el("h4", null, title));
-		box.appendChild(el("div", "note", list.map((p, i) => {
+		const noteBox = el("div", "note");
+		list.forEach((p, i) => {
 			/* Where he finished against the WHOLE of Division I, not only
 			   against the other sixty-nine men in this class. A class leader
 			   board answers "who is the best of these"; the rank answers "was
@@ -2014,9 +2280,14 @@
 			const nat = r && r.national ? "  (" + ordinalish(r.national) + " nationally)"
 				: r && r.conf ? "  (" + ordinalish(r.conf) + " in the " + r.confName + ")"
 				: "";
-			return (i + 1) + ". " + (fmt ? fmt(p.stats[key]) : n1(p.stats[key])) + "  " +
-				p.name + " (" + (p.proClub || p.newCollege) + ")" + nat;
-		}).join("\n")));
+			if (i) noteBox.appendChild(document.createTextNode("\n"));
+			noteBox.appendChild(document.createTextNode(
+				(i + 1) + ". " + (fmt ? fmt(p.stats[key]) : n1(p.stats[key])) + "  "));
+			noteBox.appendChild(playerLink(p));
+			noteBox.appendChild(document.createTextNode(
+				" (" + (p.proClub || p.newCollege) + ")" + nat));
+		});
+		box.appendChild(noteBox);
 		return box;
 	}
 
@@ -2071,10 +2342,17 @@
 		const defList = res.players
 			.filter((p) => p.stats && p.stats.mpg >= 15 && Number.isFinite(p.scoreDef))
 			.sort((a, b) => b.scoreDef - a.scoreDef).slice(0, 10);
-		defBox.appendChild(el("div", "note", defList.length
-			? defList.map((p, i) => (i + 1) + ". " + p.scoreDef.toFixed(1) + "  " +
-				p.name + " (" + (p.proClub || p.newCollege) + ")").join("\n")
-			: "No defensive scores in this class."));
+		const defNote = el("div", "note");
+		if (!defList.length) defNote.textContent = "No defensive scores in this class.";
+		defList.forEach((p, i) => {
+			if (i) defNote.appendChild(document.createTextNode("\n"));
+			defNote.appendChild(document.createTextNode(
+				(i + 1) + ". " + p.scoreDef.toFixed(1) + "  "));
+			defNote.appendChild(playerLink(p));
+			defNote.appendChild(document.createTextNode(
+				" (" + (p.proClub || p.newCollege) + ")"));
+		});
+		defBox.appendChild(defNote);
 		dLeaders.appendChild(defBox);
 		view.appendChild(dLeaders);
 
@@ -2082,9 +2360,38 @@
 			.sort((a, b) => b.pct - a.pct).slice(0, 15);
 		const trBox = el("div", "card");
 		trBox.appendChild(el("h4", null, "Best records among programs with prospects"));
-		trBox.appendChild(el("div", "note", teamRows.map((t) =>
-			t.w + "-" + t.l + "  " + t.name + " (" + t.conf + ")").join("\n")));
+		const trNote = el("div", "note");
+		teamRows.forEach((t, i) => {
+			if (i) trNote.appendChild(document.createTextNode("\n"));
+			trNote.appendChild(document.createTextNode(t.w + "-" + t.l + "  "));
+			trNote.appendChild(teamLink(t.name));
+			trNote.appendChild(document.createTextNode(" (" + t.conf + ")"));
+		});
+		trBox.appendChild(trNote);
 		view.appendChild(trBox);
+
+		// The trophies the class LOST — to named returning players.
+		const fh = res.fieldHonours || [];
+		if (fh.length) {
+			const box = el("div", "card");
+			box.appendChild(el("h4", null, "Honours won by returning players"));
+			const noteBox = el("div", "note");
+			fh.forEach((h, i) => {
+				if (i) noteBox.appendChild(document.createTextNode("\n"));
+				noteBox.appendChild(document.createTextNode(
+					h.award + " — " + h.name +
+					(h.classYear ? ", " + h.classYear.toLowerCase() : "") + " ("));
+				if (h.school && res.teams[h.school]) noteBox.appendChild(teamLink(h.school));
+				else noteBox.appendChild(document.createTextNode(h.school || "unknown"));
+				noteBox.appendChild(document.createTextNode(")" +
+					(h.starReturner ? " — " + h.starReturner : "")));
+			});
+			box.appendChild(noteBox);
+			view.appendChild(box);
+			view.appendChild(el("p", "legendline",
+				"A returning player who out-produces the class takes the trophy " +
+				"with him — these are the races the class lost."));
+		}
 
 		view.appendChild(el("h3", null, "Honours"));
 		const honored = res.players.filter((p) => p.awards && p.awards.length)
@@ -2100,7 +2407,12 @@
 		const cards = el("div", "cards");
 		for (const p of honored) {
 			const c = el("div", "card");
-			c.appendChild(el("h4", null, p.name + " — " + (p.proClub || p.newCollege)));
+			const h4 = el("h4");
+			h4.appendChild(playerLink(p));
+			h4.appendChild(document.createTextNode(" — "));
+			if (!p.nonNcaa && res.teams[p.newCollege]) h4.appendChild(teamLink(p.newCollege));
+			else h4.appendChild(document.createTextNode(p.proClub || p.newCollege));
+			c.appendChild(h4);
 			const s = p.stats;
 			c.appendChild(el("div", "note",
 				p.newPos + " · " + p.newOvr + "/" + p.newPot + " · " + p.archetype + "\n" +
@@ -2541,13 +2853,179 @@
 
 	function teamLink(name) {
 		const b = el("button", "linky", name);
-		b.addEventListener("click", () => {
-			A().state.team = name;
-			A().state.tab = "teams";
-			A().persist();
-			A().render();
-		});
+		b.addEventListener("click", () => { A().showTeam(name); });
 		return b;
+	}
+
+	/* The player-page equivalent of teamLink. Every player name in the season
+	   views used to be a string in a text node; there was no page to send it
+	   to. Takes a player object or (name, key). */
+	function playerLink(p, key) {
+		const name = typeof p === "string" ? p : p.name;
+		const k = typeof p === "string" ? key : p.key;
+		const b = el("button", "linky", name);
+		b.addEventListener("click", () => { A().showPlayer(k); });
+		return b;
+	}
+
+	/* Render a News-style segment list ({t:"text"|"team"|"player"}) with the
+	   entities as live links. */
+	function renderSegs(container, segs, res) {
+		for (const seg of segs) {
+			if (seg.t === "team" && res.teams[seg.v]) {
+				container.appendChild(teamLink(seg.v));
+			} else if (seg.t === "player" && seg.key !== undefined) {
+				container.appendChild(playerLink(seg.v, seg.key));
+			} else {
+				container.appendChild(document.createTextNode(seg.v));
+			}
+		}
+	}
+
+	/* ---------------------------------------------------------- player page */
+
+	function playerPage(view, res, key) {
+		const p = res.players.filter((x) => x.key === key)[0];
+		const box = el("div");
+		const back = el("button", "tiny", "← All prospects");
+		back.addEventListener("click", () => { A().showPlayer(null); });
+		box.appendChild(back);
+		if (!p) {
+			box.appendChild(el("p", "hint", "No such prospect in this class."));
+			return box;
+		}
+		const head = el("div", "rowflex playerhead");
+		const face = el("div", "facebox");
+		face.dataset.playerKey = p.key;
+		head.appendChild(face);
+		const idbox = el("div");
+		idbox.appendChild(el("h3", null, p.name));
+		const line = el("p", "legendline");
+		line.appendChild(teamLink(p.newCollege));
+		line.appendChild(document.createTextNode(
+			" · " + p.classYear + " · " + p.newPos + " · " + feet(p.newHgtInches) +
+			", " + p.weight + " lb · " + p.archetype));
+		idbox.appendChild(line);
+		const pills = el("div", "rowflex");
+		pills.appendChild(el("span", "pill", "ovr " + p.newOvr + " · pot " + p.newPot));
+		if (p.newSkills && p.newSkills.length) {
+			pills.appendChild(el("span", "pill", p.newSkills.join(" ")));
+		}
+		if (p.boardRank) pills.appendChild(el("span", "pill", "Board: No. " + p.boardRank));
+		if (p.surprise) pills.appendChild(el("span", "pill", p.surprise.label));
+		idbox.appendChild(pills);
+		head.appendChild(idbox);
+		box.appendChild(head);
+
+		const dl = el("dl", "shortcuts");
+		const row = (k, v) => {
+			if (!v) return;
+			dl.appendChild(el("dt", null, k));
+			const dd = el("dd");
+			if (typeof v === "string") dd.textContent = v;
+			else dd.appendChild(v);
+			dl.appendChild(dd);
+		};
+		const s = p.stats;
+		if (s) {
+			row("This season", s.gp + " GP · " + n1(s.mpg) + " MPG · " +
+				n1(s.ppg) + " / " + n1(s.rpg) + " / " + n1(s.apg) +
+				" · " + n1(s.spg) + " stl, " + n1(s.bpg) + " blk");
+			row("Shooting", "FG " + pc(s.fgp) + "% · 3P " + pc(s.tpp) + "% · FT " +
+				pc(s.ftp) + "% · TS " + pc(s.ts) + "%");
+			row("Usage", pc(s.usg) + "% of possessions · " + n1(s.topg) + " TO · " +
+				n1(s.pfpg) + " PF");
+		}
+		if (p.recruiting) {
+			row("Recruiting", p.recruiting.stars + "-star, No. " + p.recruiting.rank +
+				" nationally" + (p.recruiting.headliner ? " — headline signing" : ""));
+		}
+		if (p.transfer) row("Path", p.transfer.kind +
+			(p.transfer.from ? " — from " + p.transfer.from : ""));
+		if (p.backstory) row("Story", p.backstory);
+		if (p.betterEarlier) {
+			row("Trajectory", "Was better as a " +
+				String(p.betterEarlier.classYear || "").toLowerCase() + " (" +
+				n1(p.betterEarlier.ppg) + " PPG in " + p.betterEarlier.season + ")");
+		}
+		if (p.awards && p.awards.length) row("Honours", p.awards.join("; "));
+		box.appendChild(dl);
+
+		// Earlier seasons, when they were simulated.
+		if (p.priorSeasons && p.priorSeasons.length) {
+			box.appendChild(el("h4", null, "Career"));
+			const wrap = el("div", "scroll");
+			const table = el("table");
+			const hr = el("tr");
+			for (const h of ["Season", "Team", "Year", "GP", "MPG", "PPG", "RPG", "APG", "TS%"]) {
+				hr.appendChild(el("th", ["Season", "Team", "Year"].indexOf(h) === -1 ? "num" : "", h));
+			}
+			const thead = el("thead");
+			thead.appendChild(hr);
+			table.appendChild(thead);
+			const tb = el("tbody");
+			const rows = p.priorSeasons.slice();
+			for (const r of rows) {
+				const tr = el("tr");
+				tr.appendChild(el("td", null, String(r.season || "")));
+				tr.appendChild(el("td", null, r.team || ""));
+				tr.appendChild(el("td", null, r.redshirt ? "Redshirt" : (r.classYear || "")));
+				if (r.redshirt) {
+					const td = el("td", null, r.reason || "did not play");
+					td.colSpan = 6;
+					tr.appendChild(td);
+				} else {
+					tr.appendChild(el("td", "num", String(r.gp || "")));
+					tr.appendChild(el("td", "num", n1(r.mpg)));
+					tr.appendChild(el("td", "num", n1(r.ppg)));
+					tr.appendChild(el("td", "num", n1(r.rpg)));
+					tr.appendChild(el("td", "num", n1(r.apg)));
+					tr.appendChild(el("td", "num", r.ts ? pc(r.ts) : ""));
+				}
+				tb.appendChild(tr);
+			}
+			if (s) {
+				const tr = el("tr");
+				tr.appendChild(el("td", null, String(res.leagueFile.startingSeason || "")));
+				tr.appendChild(el("td", null, p.newCollege));
+				tr.appendChild(el("td", null, p.classYear));
+				tr.appendChild(el("td", "num", String(s.gp)));
+				tr.appendChild(el("td", "num", n1(s.mpg)));
+				tr.appendChild(el("td", "num", n1(s.ppg)));
+				tr.appendChild(el("td", "num", n1(s.rpg)));
+				tr.appendChild(el("td", "num", n1(s.apg)));
+				tr.appendChild(el("td", "num", pc(s.ts)));
+				tb.appendChild(tr);
+			}
+			table.appendChild(tb);
+			wrap.appendChild(table);
+			box.appendChild(wrap);
+		}
+
+		if (p.note) {
+			box.appendChild(el("h4", null, "Scouting note"));
+			box.appendChild(el("div", "note", p.note));
+		}
+
+		const actions = el("div", "rowflex");
+		const edit = el("button", null, "Edit this prospect…");
+		edit.addEventListener("click", () => { A().openEditor(p); });
+		actions.appendChild(edit);
+		if (p.gameLog && p.gameLog.games && p.gameLog.games.length) {
+			const gl = el("button", null, "Game log");
+			gl.addEventListener("click", () => {
+				A().state.logPlayer = p.key;
+				A().state.tab = "gamelog";
+				A().persist();
+				A().render();
+			});
+			actions.appendChild(gl);
+		}
+		box.appendChild(actions);
+		if (global.Faces && global.Faces.render) {
+			global.Faces.render(face, p, 120);
+		}
+		return box;
 	}
 
 	/* Conference standings. The data has always been there — cw/cl, conference
@@ -2652,7 +3130,9 @@
 		row("Conference", t.conf + " " + t.cw + "-" + t.cl +
 			(t.confRegularChamp ? " · regular-season champion" : "") +
 			(t.confTourneyChamp ? " · tournament champion" : ""));
-		if (t.coach) {
+		// Guard on t.style, which is the object actually read: it comes from
+		// the coach today, but the guard was on the wrong object.
+		if (t.coach && t.style) {
 			row("Coach", t.coach.name + ", year " + t.coach.tenure +
 				" — plays " + t.style.name);
 		}
@@ -2662,6 +3142,19 @@
 		if (t.offRtg) {
 			row("Efficiency", "ORtg " + t.offRtg.toFixed(1) +
 				" · DRtg " + t.defRtg.toFixed(1) + " · SOS " + t.sosAvg.toFixed(1));
+		}
+		if (t.netRank) {
+			row("NET", "No. " + t.netRank +
+				(t.quads ? " · Q1 " + t.quads.q1w + "-" + t.quads.q1l +
+					" · Q2 " + t.quads.q2w + "-" + t.quads.q2l +
+					" · Q3/Q4 losses " + (t.quads.q3l + t.quads.q4l) : "") +
+				(Number.isFinite(t.roadW) ? " · road " + t.roadW + "-" + t.roadL : ""));
+		}
+		if (t.apHistory && t.apHistory.some((r) => r)) {
+			row("AP poll", "Peak No. " + t.apPeak +
+				(t.apPreseason ? " · preseason No. " + t.apPreseason : " · unranked in the preseason") +
+				(t.apRank ? " · final No. " + t.apRank : " · unranked at the end") +
+				"  [" + t.apHistory.map((r) => (r ? r : "·")).join(" ") + "]");
 		}
 		row("Postseason", t.ncaaSeed ? "No. " + t.ncaaSeed + " seed, " + t.ncaaResult
 			: (t.nitResult || "Did not make the field"));
@@ -2687,14 +3180,11 @@
 		const plist = el("div", "cards");
 		for (const p of t.prospects) {
 			const c = el("div", "card");
-			const h = el("h4");
-			const b = el("button", "linky", p.name);
-			b.addEventListener("click", () => {
-				A().state.team = null;
-				A().state.tab = "players";
-				A().openEditor(p);
-			});
-			h.appendChild(b);
+			const h = el("h4", "rowflex");
+			const fb = el("div", "facebox small");
+			if (global.Faces) global.Faces.render(fb, p);
+			h.appendChild(fb);
+			h.appendChild(playerLink(p));
 			c.appendChild(h);
 			c.appendChild(el("div", "note",
 				p.newPos + " " + p.newOvr + "/" + p.newPot + " · " + p.archetype +
@@ -2889,7 +3379,14 @@
 		const table = el("table", "mini compare");
 		const head = el("tr");
 		head.appendChild(el("th", null, ""));
-		for (const p of picked) head.appendChild(el("th", "num", p.name));
+		for (const p of picked) {
+			const th = el("th", "num");
+			const fb = el("div", "facebox small");
+			if (global.Faces) global.Faces.render(fb, p);
+			th.appendChild(fb);
+			th.appendChild(playerLink(p));
+			head.appendChild(th);
+		}
 		table.appendChild(head);
 		const meta = (label, f) => {
 			const tr = el("tr");
@@ -2934,6 +3431,7 @@
 		players: viewPlayers, teams: viewTeams, bracket: viewBracket, bulkBar,
 		awards: viewAwards, board: viewBoard, distribution: viewDistribution,
 		notes: viewNotes, gamelog: viewGameLog, compare: viewCompare,
+		news: viewNews, universe: viewUniverse, playerLink, teamLink, playerPage,
 		COLUMNS, STAT_MODES, PCT_KEYS, DERIVED, derived, cellValue, statValue,
 		CARD_COLUMNS, CARD_BREAKPOINT, cardMode, orderedColumns, moveColumn,
 		dropColumn, setColumnOrder,

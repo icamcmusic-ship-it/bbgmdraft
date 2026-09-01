@@ -1931,7 +1931,11 @@ console.log("\nMechanical anomalies and season narrative");
 			if (p.doubleDoubleMachine) {
 				dt.dd.push((p.stats.rpg + p.stats.apg) - (q.stats.rpg + q.stats.apg));
 			}
-			if (p.eligibilityHold) dt.gpElig.push(q.stats.gp - p.stats.gp);
+			/* Only against a baseline who PLAYED: if the same man drew an
+			   ordinary ten-game injury in the anomaly-free run, the delta
+			   measures one absence against another and says nothing about
+			   the hold. */
+			if (p.eligibilityHold && q.stats.gp >= 28) dt.gpElig.push(q.stats.gp - p.stats.gp);
 			if (p.surprise && p.surprise.name === "suspension") {
 				dt.gpSusp.push(q.stats.gp - p.stats.gp);
 			}

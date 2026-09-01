@@ -25,7 +25,7 @@ function loadEngine() {
 	if (!global.Engine) {
 		for (const f of [
 			"rng", "bbgm", "colleges", "config", "calibration", "ratings",
-			"teams", "stats", "tournament", "awards", "engine", "batch",
+			"teams", "stats", "rankings", "tournament", "awards", "engine", "batch",
 		]) require(path.join(__dirname, "..", "js", f + ".js"));
 	}
 	return global;

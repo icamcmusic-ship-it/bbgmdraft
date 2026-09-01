@@ -24,6 +24,9 @@
 	}
 }
 :root[data-theme="dark"] {
+	--tag-arch-border: #3b5b7d; --tag-arch-text: #8fc0f0;
+	--tag-pro-border: #6b5230; --tag-pro-text: var(--accent-2);
+	--win-bg: rgba(87,199,138,.10); --upset-bg: rgba(255,180,84,.13);
 	--bg: #0f1216; --panel: #161b22; --panel-2: #1c232c; --line: #2a323d;
 	--text: #e6edf3; --dim: #9aa7b4; --accent: #4da3ff; --accent-2: #ffb454;
 	--good: #57c78a; --bad: #f2686a;
@@ -39,6 +42,9 @@
 	--good: #1a7f4b; --bad: #c0323a;
 }
 :root[data-theme="twilight-court"] {
+	--tag-arch-border: #3b5b7d; --tag-arch-text: #8fc0f0;
+	--tag-pro-border: #6b5230; --tag-pro-text: var(--accent-2);
+	--win-bg: rgba(87,199,138,.10); --upset-bg: rgba(255,180,84,.13);
 	--bg: #17151f; --panel: #1e1b28; --panel-2: #272332; --line: #383343;
 	--text: #ded9e2; --dim: #a79fc0; --accent: #80a1d4; --accent-2: #75c9c8;
 	--good: #75c9c8; --bad: #e89197;
@@ -59,6 +65,9 @@
 	--good: #1a7f4b; --bad: #c0323a;
 }
 :root[data-theme="night-game"] {
+	--tag-arch-border: #3b5b7d; --tag-arch-text: #8fc0f0;
+	--tag-pro-border: #6b5230; --tag-pro-text: var(--accent-2);
+	--win-bg: rgba(87,199,138,.10); --upset-bg: rgba(255,180,84,.13);
 	--bg: #171123; --panel: #221631; --panel-2: #2c1c3d; --line: #414770;
 	--text: #f4efe8; --dim: #9a93b0; --accent: #5b85aa; --accent-2: #f46036;
 	--good: #57c78a; --bad: #e0574a;
@@ -157,26 +166,19 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .density-compact { --rowH: 2px; }
 .density-comfortable { --rowH: 9px; }
 .tag { display: inline-block; font-size: 10.5px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); }
-.tag.arch { border-color: #9dc0e4; color: #17548d; }
-.tag.pro { border-color: #d8b98a; color: #8a5714; }
+/* Promoted to tokens: these used to be hex values repeated across a
+   hand-maintained selector list of every dark theme, so each new dark theme
+   had to be added to four lists. A theme now sets the six tokens in its own
+   block (see the theme definitions at the top) and these rules never change. */
+.tag.arch { border-color: var(--tag-arch-border, #9dc0e4); color: var(--tag-arch-text, #17548d); }
+.tag.pro { border-color: var(--tag-pro-border, #d8b98a); color: var(--tag-pro-text, #8a5714); }
 @media (prefers-color-scheme: dark) {
-	:root:not([data-theme="light"]) .tag.arch { border-color: #3b5b7d; color: #8fc0f0; }
-	:root:not([data-theme="light"]) .tag.pro { border-color: #6b5230; color: var(--accent-2); }
-	:root:not([data-theme="light"]) .game .w { background: rgba(87,199,138,.10); }
-	:root:not([data-theme="light"]) .game.upset .w { background: rgba(255,180,84,.13); }
+	:root:not([data-theme="light"]) {
+		--tag-arch-border: #3b5b7d; --tag-arch-text: #8fc0f0;
+		--tag-pro-border: #6b5230; --tag-pro-text: var(--accent-2);
+		--win-bg: rgba(87,199,138,.10); --upset-bg: rgba(255,180,84,.13);
+	}
 }
-:root[data-theme="dark"] .tag.arch,
-:root[data-theme="twilight-court"] .tag.arch,
-:root[data-theme="night-game"] .tag.arch { border-color: #3b5b7d; color: #8fc0f0; }
-:root[data-theme="dark"] .tag.pro,
-:root[data-theme="twilight-court"] .tag.pro,
-:root[data-theme="night-game"] .tag.pro { border-color: #6b5230; color: var(--accent-2); }
-:root[data-theme="dark"] .game .w,
-:root[data-theme="twilight-court"] .game .w,
-:root[data-theme="night-game"] .game .w { background: rgba(87,199,138,.10); }
-:root[data-theme="dark"] .game.upset .w,
-:root[data-theme="twilight-court"] .game.upset .w,
-:root[data-theme="night-game"] .game.upset .w { background: rgba(255,180,84,.13); }
 .up { color: var(--good); } .down { color: var(--bad); }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
 .card { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--panel); }
@@ -187,10 +189,10 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .round h5 { margin: 0 0 8px; font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .07em; }
 .game { border: 1px solid var(--line); border-radius: 6px; margin-bottom: 6px; font-size: 11.5px; overflow: hidden; }
 .game div { padding: 3px 7px; display: flex; gap: 6px; }
-.game .w { background: rgba(26,127,75,.10); color: var(--text); font-weight: 600; }
+.game .w { background: var(--win-bg, rgba(26,127,75,.10)); color: var(--text); font-weight: 600; }
 .game .l { color: var(--dim); }
 .game .sd { width: 20px; color: var(--dim); font-variant-numeric: tabular-nums; }
-.game.upset .w { background: rgba(162,96,26,.13); }
+.game.upset .w { background: var(--upset-bg, rgba(162,96,26,.13)); }
 .game .gn { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .game .score { font-size: 10.5px; color: var(--dim); font-variant-numeric: tabular-nums; border-top: 1px solid var(--line); }
 .drop { border: 2px dashed var(--line); border-radius: 12px; padding: 46px; text-align: center; color: var(--dim); margin: 40px auto; max-width: 620px; }
@@ -751,3 +753,25 @@ th.dropafter { box-shadow: inset -2px 0 0 0 var(--accent); }
 /* A card is a stack of labelled lines, so a horizontal drop indicator on it
    means nothing and dragging a heading that is visually hidden means less. */
 .cardtable th.dropbefore, .cardtable th.dropafter { box-shadow: none; }
+
+/* ---- grouped tabs, news, player page -------------------------------------- */
+.tabgroup {
+	align-self: center; font-size: 10px; color: var(--dim);
+	text-transform: uppercase; letter-spacing: .1em; padding: 0 4px 0 10px;
+	border-left: 1px solid var(--line);
+}
+.tabs .tabgroup:first-child { border-left: none; padding-left: 0; }
+.news { max-width: 760px; }
+.newsdate {
+	margin: 18px 0 6px; font-size: 11px; color: var(--dim);
+	text-transform: uppercase; letter-spacing: .09em;
+	border-bottom: 1px solid var(--line); padding-bottom: 3px;
+}
+.newsitem { padding: 8px 0 4px; }
+.newsitem h5 { margin: 0 0 3px; font-size: 14px; }
+.newsitem p { margin: 0; font-size: 12.5px; color: var(--text); }
+.newsitem .newskind { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: .07em; margin-top: 3px; }
+.playerhead { align-items: flex-start; gap: 14px; margin-bottom: 10px; }
+.facebox { width: 120px; min-height: 120px; flex: none; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel-2); }
+.facebox svg { display: block; width: 100%; height: auto; }
+.facebox.small { width: 44px; min-height: 44px; border-radius: 6px; }

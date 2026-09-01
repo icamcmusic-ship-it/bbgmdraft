@@ -60,6 +60,12 @@
 		pinned: null,
 		undo: [],
 		lastSeed: null,
+		// The prospect whose page the Prospects tab is showing, if any.
+		player: null,
+		/* Universe mode: the timeline of the last universe run. rows are
+		   compact summaries (seeds, champions, names), not simulated output —
+		   a universe re-runs from its seeds. */
+		universe: { rows: [], threads: [], alumni: [], baseSeed: "", running: false },
 		// The randomiser's scope select, persisted like every other control.
 		randomScope: "gentle",
 		// Settings the randomiser must not touch. {key: true}.
@@ -105,6 +111,12 @@
 				compare: state.compare,
 				columnLayouts: state.columnLayouts,
 				standingsConf: state.standingsConf,
+				player: state.player,
+				team: state.team,
+				universe: {
+					rows: state.universe.rows, threads: state.universe.threads,
+					alumni: state.universe.alumni, baseSeed: state.universe.baseSeed,
+				},
 				density: state.density,
 				cardView: state.cardView,
 				cardAll: state.cardAll,
@@ -235,6 +247,18 @@
 			state.columnLayouts = layouts;
 		}
 		if (validString(saved.standingsConf)) state.standingsConf = saved.standingsConf;
+		if (validString(saved.player)) state.player = saved.player;
+		if (saved.universe && typeof saved.universe === "object" &&
+			Array.isArray(saved.universe.rows)) {
+			state.universe = {
+				rows: saved.universe.rows,
+				threads: Array.isArray(saved.universe.threads) ? saved.universe.threads : [],
+				alumni: Array.isArray(saved.universe.alumni) ? saved.universe.alumni : [],
+				baseSeed: validString(saved.universe.baseSeed) || "",
+				running: false,
+			};
+		}
+		if (validString(saved.team)) state.team = saved.team;
 		if (validString(saved.density, ["normal", "compact", "comfortable"])) state.density = saved.density;
 		if (validString(saved.cardView, ["auto", "on", "off"])) state.cardView = saved.cardView;
 		state.cardAll = !!saved.cardAll;
@@ -608,7 +632,7 @@
 	const PHASE_COST = {
 		build: "everything (~210 ms)",
 		regular: "the season onward (~180 ms)",
-		postseason: "March onward (~60 ms)",
+		postseason: "March onward (~150 ms — the NET, the weekly poll and the bracket)",
 		stats: "stats onward (~40 ms)",
 		pot: "potential onward (~3 ms)",
 		awards: "awards onward (~2 ms)",
@@ -2071,23 +2095,190 @@
 
 	/* ---------------------------------------------------------------- views */
 
+	/* Grouped: nine flat peer tabs was the navigability complaint. The third
+	   element is the group label the tab bar renders between clusters. */
 	const TABS = [
-		["players", "Prospects"],
-		["board", "Draft board"],
-		["teams", "AP Poll & Teams"],
-		["bracket", "March Madness"],
-		["awards", "Awards & leaders"],
-		["gamelog", "Game logs"],
-		["distribution", "Distributions"],
-		["notes", "Player notes"],
-		["compare", "Compare"],
+		["players", "Prospects", "Class"],
+		["board", "Draft board", "Class"],
+		["compare", "Compare", "Class"],
+		["distribution", "Distributions", "Class"],
+		["teams", "AP Poll & Teams", "Season"],
+		["bracket", "March Madness", "Season"],
+		["awards", "Awards & leaders", "Season"],
+		["news", "News", "Season"],
+		["gamelog", "Game logs", "Season"],
+		["notes", "Player notes", "Season"],
+		["universe", "Universe", "Universe"],
 	];
+
+	/* ----------------------------------------------------------- universe */
+
+	/* Run every loaded file as one continuous world, oldest season first,
+	   handing carry-over state (conference map, programme levels, coaches,
+	   pool memory) from each season to the next. Asynchronous in slices so
+	   the page stays alive; ~330ms a season means 50 classes is a progress
+	   bar, not a click. */
+	function runUniverse() {
+		const U = global.Universe;
+		if (!state.files.length) {
+			setStatus("Load two or more class files to run a universe.");
+			return;
+		}
+		if (state.universe.running) return;
+		const diags = U.validate(state.files);
+		state.universe.diags = diags;
+		const runnable = diags.filter((d) => d.ok)
+			.sort((a, b) => (a.season || 0) - (b.season || 0) || a.index - b.index);
+		if (runnable.length < 1) {
+			setStatus("No runnable files — see the Universe tab for per-file diagnostics.");
+			state.tab = "universe";
+			render();
+			return;
+		}
+		const baseSeed = state.cfg.seed && state.cfg.seed.trim()
+			? state.cfg.seed.trim()
+			: "universe-" + Math.floor(Math.random() * 1e9);
+		state.universe = {
+			rows: [], threads: [], alumni: [], baseSeed,
+			running: true, diags, total: runnable.length, done: 0,
+		};
+		state.tab = "universe";
+		render();
+		let carry = null;
+		let recentPools = [];
+		const step = (k) => {
+			if (k >= runnable.length) {
+				state.universe.running = false;
+				// Every runner just ran with universe seeds and carry-over;
+				// the cached per-file results no longer describe them.
+				state.results = state.results.map(() => null);
+				state.universe.threads = U.threads(state.universe.rows);
+				persist();
+				setStatus("Universe complete: " + state.universe.rows.length +
+					" seasons, " + state.universe.threads.length + " threads.");
+				render();
+				return;
+			}
+			const d = runnable[k];
+			try {
+				const cfg = CFG.make(state.cfg);
+				cfg.seed = baseSeed + "#" + (d.season || k);
+				cfg.overrides = {};
+				cfg.recentPools = recentPools.map((a) => a.slice());
+				cfg.carryOver = carry;
+				const res = state.runners[d.index].run(cfg);
+				state.universe.rows.push(Object.assign(
+					U.summarise(res, cfg.seed, d.name),
+					{ fingerprint: state.files[d.index].fingerprint || null }));
+				state.universe.alumni = state.universe.alumni
+					.concat(U.alumniOf(res, d.season));
+				carry = U.harvest(res);
+				if (res.archetypePool) {
+					recentPools.unshift(res.archetypePool.slice());
+					recentPools = recentPools.slice(0, 3);
+				}
+			} catch (e) {
+				state.universe.rows.push({
+					season: d.season, fileName: d.name, seed: null,
+					error: e && e.message ? e.message : String(e),
+				});
+			}
+			state.universe.done = k + 1;
+			setStatus("Universe: season " + (k + 1) + " of " + runnable.length + "…", true);
+			render();
+			setTimeout(() => step(k + 1), 0);
+		};
+		setTimeout(() => step(0), 0);
+	}
+
+	function exportUniverse() {
+		const U = global.Universe;
+		if (!state.universe.rows.length) {
+			setStatus("Run a universe first.");
+			return;
+		}
+		const blob = new Blob(
+			[JSON.stringify(U.exportUniverse(state.universe), null, "\t")],
+			{ type: "application/json" });
+		const a = document.createElement("a");
+		a.href = URL.createObjectURL(blob);
+		a.download = "universe.json";
+		a.click();
+		setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+	}
+
+	/* Re-import: a universe file carries seeds and file fingerprints, not
+	   output. With the same class files loaded, replaying it reproduces the
+	   same world exactly — that is what determinism buys. */
+	function importUniverse(json) {
+		if (!json || json.format !== "bbgm-draft-workshop/universe") {
+			showError(new Error("Not a universe export."));
+			return;
+		}
+		const have = new Set(state.files.map((f) => f.fingerprint));
+		const missing = (json.seasons || []).filter(
+			(s) => s.fingerprint && !have.has(s.fingerprint));
+		if (missing.length) {
+			showError(new Error("Load these class files first: " +
+				missing.map((m) => m.fileName).join(", ")));
+			return;
+		}
+		state.cfg.seed = json.baseSeed || state.cfg.seed;
+		$("seed").value = state.cfg.seed;
+		runUniverse();
+	}
+
+	/* ------------------------------------------------------------ routing */
+
+	/* Player and team pages are real destinations: back/forward work, and a
+	   page survives a refresh (state.player/state.team persist). The heavy
+	   settings+seed payload stays in the hash exactly as before — this rides
+	   on pushState so the two never fight over the URL. */
+	function navState() {
+		return { tab: state.tab, team: state.team || null, player: state.player || null };
+	}
+
+	function pushNav() {
+		try {
+			history.pushState(Object.assign({ bbgmNav: true }, navState()), "");
+		} catch (e) { /* file:// in some browsers */ }
+	}
+
+	function showPlayer(key) {
+		state.player = key || null;
+		if (key) state.tab = "players";
+		pushNav();
+		persist();
+		render();
+	}
+
+	function showTeam(name) {
+		state.team = name || null;
+		if (name) state.tab = "teams";
+		pushNav();
+		persist();
+		render();
+	}
+
+	window.addEventListener("popstate", (e) => {
+		const st = e.state;
+		if (!st || !st.bbgmNav) return;
+		state.tab = st.tab || state.tab;
+		state.team = st.team;
+		state.player = st.player;
+		render();
+	});
 
 	function render() {
 		const tabs = $("tabs");
 		tabs.innerHTML = "";
 		tabs.setAttribute("role", "tablist");
-		TABS.forEach(([key, label], i) => {
+		let lastGroup = null;
+		TABS.forEach(([key, label, group], i) => {
+			if (group !== lastGroup) {
+				tabs.appendChild(el("span", "tabgroup", group));
+				lastGroup = group;
+			}
 			const b = el("button", key === state.tab ? "active" : "", label);
 			b.setAttribute("role", "tab");
 			b.setAttribute("aria-selected", key === state.tab ? "true" : "false");
@@ -3651,7 +3842,8 @@
 	Object.assign(global.App, {
 		state, render, run, persist, openEditor, revealPlayer, visibleRows,
 		editorPanel, modal, closeModal,
-		clearLock,
+		clearLock, showPlayer, showTeam,
+		runUniverse, exportUniverse, importUniverse,
 		copyText, bulkApply, bulkShiftOvr, bulkLockAsIs, bulkClear, refreshBulkBar,
 		snapshot,
 		exportCsv, setStatus, showError, indexSnapshot,

@@ -1578,7 +1578,10 @@
 				   understated a weak team's best player (extrapolating the
 				   prospects-only fit down to talent 30 predicted a scoring
 				   line of roughly zero for a low-major's leading scorer). */
-				field.push({ talent: m.talent, rotationIndex: i, mpg: mins[i], line });
+				field.push({ talent: m.talent, rotationIndex: i, mpg: mins[i], line,
+					// Identity, so an award a returner wins can name him.
+					name: m.name, classYear: m.classYear || null,
+					starReturner: m.starReturner || null });
 				continue;
 			}
 			m.player.stats = line;

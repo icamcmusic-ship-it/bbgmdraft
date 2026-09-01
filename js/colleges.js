@@ -46,7 +46,11 @@
 		"Pac-12":         { strength: 78, bids: 3, tier: "mid" },
 		// Catch-all for colleges outside the built-in database (league files
 		// drift across BBGM versions). Not a real league: no members in
-		// byConference, no auto bid — just sane strength for lookups.
+		// byConference. NOTE it still receives an auto bid whenever it has
+		// two or more members — selectField() awards one to every non-empty
+		// conference pool, DELIBERATELY, so out-of-database schools in a
+		// modded class are not silently excluded from the postseason. See
+		// the comment in js/tournament.js; the two files agree on this.
 		"Independent":    { strength: 62, bids: 0, tier: "mid" },
 	};
 

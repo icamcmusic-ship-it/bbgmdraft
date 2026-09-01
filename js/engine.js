@@ -16,6 +16,7 @@
 	const T = global.TeamsSim;
 	const S = global.StatsSim;
 	const TN = global.Tournament;
+	const RK = global.Rankings;
 	const AW = global.Awards;
 	const CAL = global.Calibration;
 
@@ -691,7 +692,7 @@
 			const built = RB.rebuild(
 				prng, baseRatings, targetOvr, targetOvr + gap, cfg,
 				ov.archetype || null, state.flavor, ov.ratings || null,
-				state.archetypePool);
+				state.archetypePool, i);
 			p.newRatings = built.ratings;
 			// Validate: every rating key must be a finite number. A NaN or
 			// Infinity from a degenerate input or a solver edge case must not
@@ -1322,8 +1323,15 @@
 		const used = new Set();
 		const kinds = SURPRISES.slice();
 		const out = [];
+		/* Compressed in log space, like archetype rarity: with 32 kinds and
+		   ~4 draws, the authored 2.0-weight kinds (five-star bust, unranked
+		   riser) turned up in roughly a third of classes — 2-3x the uniform
+		   expectation — which made the feature meant to keep classes fresh
+		   the first thing to go stale. The ordering survives; the gap does
+		   not compound. */
+		const compressed = (k) => Math.pow(k.w === undefined ? 1 : k.w, 0.5);
 		for (let i = 0; i < n && kinds.length; i++) {
-			const kind = rng.weighted(kinds);
+			const kind = rng.weighted(kinds, compressed);
 			kinds.splice(kinds.indexOf(kind), 1);
 			const options = players.filter((p) => !used.has(p.key) && kind.pick(p));
 			if (!options.length) continue;
@@ -1501,6 +1509,11 @@
 		"ctW", "inConfTourney", "confTourneyChamp", "confRegularChamp", "bid",
 		"ncaaSeed", "ncaaRegion", "ncaaResult", "ncaaWins", "ffWin", "apRank",
 		"nitBid", "nitWins", "nitResult", "nitChamp",
+		// The rankings layer (js/rankings.js) — recomputed every postseason
+		// pass, so a warm re-run must not inherit a previous pass's values.
+		"netRank", "netScore", "tvi", "adjEff", "quads", "roadW", "roadL",
+		"last12W", "last12L", "committeeScore",
+		"apHistory", "apPeak", "apPreseason", "apFirstPlace",
 	];
 
 	function resetPostseason(teams) {
@@ -1523,7 +1536,17 @@
 		const rng = state.rng;
 		resetPostseason(teams);
 		state.confTourneys = T.simulateConferenceTournaments(teams, cfg, rng.child("conftourney"));
-		state.poll = TN.apPoll(teams, 25);
+		/* Results-derived rankings replace the one-line poll and the
+		   rating-peeking resume sort: a NET built from the game log (TVI +
+		   margin-capped adjusted efficiency), quadrant records, a committee
+		   score over observables only, and a weekly AP poll voted by a
+		   persistent 60-member electorate. See js/rankings.js. */
+		RK.computeRankings(teams);
+		state.pollHistory = RK.weeklyPoll(teams, rng.child("appoll"));
+		// Same shape the old one-shot poll produced: the top 25, in order.
+		const finalWeek = state.pollHistory[state.pollHistory.length - 1];
+		state.poll = finalWeek
+			? finalWeek.ranks.map((r) => teams[r.team]).filter(Boolean) : [];
 		state.tourney = TN.simulate(teams, cfg, rng.child("ncaa"));
 		// Chronological order and full records, now that March has happened.
 		T.finalizeSchedule(teams);
@@ -1894,11 +1917,25 @@
 			counts[k] = (counts[k] || 0) + 1;
 		}
 		const classMean = n ? total / n : RB.ROLE_USG_CENTRE;
-		const out = { "": classMean };
-		for (const k of Object.keys(sums)) {
-			if (counts[k] >= USAGE_REF_MIN) out[k] = sums[k] / counts[k];
+		/* Returned as sums-and-counts rather than a finished mean, so the
+		   caller can exclude the PLAYER HIMSELF from his own reference. In a
+		   17-build pool over sixty players the rarer builds routinely have
+		   two or three members, and a mean that includes the man being judged
+		   is partly a mirror — the exact circularity potFromRole exists to
+		   avoid, surviving in the builds where it was worst. */
+		return { classMean, sums, counts };
+	}
+
+	function usageRefFor(ref, p) {
+		const k = p.archetype;
+		const c = ref.counts[k] || 0;
+		const own = p.stats && Number.isFinite(p.stats.usg) ? p.stats.usg : null;
+		// At least USAGE_REF_MIN OTHERS with his build, himself excluded.
+		if (own !== null && c - 1 >= USAGE_REF_MIN) {
+			return (ref.sums[k] - own) / (c - 1);
 		}
-		return out;
+		if (own === null && c >= USAGE_REF_MIN) return ref.sums[k] / c;
+		return ref.classMean;
 	}
 
 	function phasePot(state) {
@@ -1931,8 +1968,7 @@
 			const factors = RB.potFactors(
 				p.archetype, p.age, p.newRatings,
 				{ hgtInches: p.newHgtInches, weight: p.newWeight }, state.classAge);
-			factors.role = RB.potFromRole(p.stats, p.classYear,
-				Number.isFinite(usageRef[p.archetype]) ? usageRef[p.archetype] : usageRef[""]);
+			factors.role = RB.potFromRole(p.stats, p.classYear, usageRefFor(usageRef, p));
 			factors.bias = bias;
 			factors.noise = prng.normal(0, spread * 0.35);
 			factors.total = factors.arch + factors.age + factors.ageClass +
@@ -1949,6 +1985,9 @@
 	function phaseAwards(state) {
 		state.ranked = AW.assign(state.players, state.teams, state.tourney,
 			state.effectiveCfg || state.cfg, state.rng.child("awards"));
+		// Lifted off the map before anything iterates it, like __realignment.
+		state.fieldHonours = state.teams.__fieldHonours || [];
+		delete state.teams.__fieldHonours;
 		return state;
 	}
 
@@ -2273,9 +2312,21 @@
 		{ name: "notes", deps: ["noteLines"], run: phaseNotes },
 	];
 
+	/* JSON.stringify with object keys sorted at every level, so two configs
+	   that differ only in key INSERTION order hash identically. Without this,
+	   editing one archetype weight (or re-reading overrides from storage in a
+	   different order) forced a full rebuild nothing semantically required. */
+	function stableStringify(v) {
+		if (v === undefined) return "undefined";
+		if (v === null || typeof v !== "object") return JSON.stringify(v);
+		if (Array.isArray(v)) return "[" + v.map(stableStringify).join(",") + "]";
+		return "{" + Object.keys(v).sort().map(
+			(k) => JSON.stringify(k) + ":" + stableStringify(v[k])).join(",") + "}";
+	}
+
 	function phaseKey(phase, cfg) {
 		const parts = [];
-		for (const k of phase.deps) parts.push(k + "=" + JSON.stringify(cfg[k]));
+		for (const k of phase.deps) parts.push(k + "=" + stableStringify(cfg[k]));
 		return parts.join("&");
 	}
 
@@ -2348,6 +2399,7 @@
 				players: state.players,
 				teams: state.teams,
 				poll: state.poll,
+				pollHistory: state.pollHistory || [],
 				tourney: state.tourney,
 				confTourneys: state.confTourneys,
 				ranked: state.ranked,
@@ -2356,6 +2408,7 @@
 				risers: state.risers,
 				fallers: state.fallers,
 				draftEvents: state.draftEvents || [],
+			fieldHonours: state.fieldHonours || [],
 				seasonEvents: state.seasonEvents || [],
 				flavor: state.flavor,
 				// The builds this class was drawn from, and the anomalies it
@@ -3018,7 +3071,7 @@
 			season: result.season,
 			flavor: result.flavor ? result.flavor.label : null,
 			champion: result.tourney ? result.tourney.champion.team.name : null,
-			runnerUp: result.tourney ? result.tourney.runnerUp.team.name : null,
+			runnerUp: result.tourney && result.tourney.runnerUp ? result.tourney.runnerUp.team.name : null,
 			nitChampion: result.tourney && result.tourney.nit && result.tourney.nit.champion
 				? result.tourney.nit.champion.name : null,
 			poll: result.poll.map((t, i) => ({ rank: i + 1, team: t.name, record: t.w + "-" + t.l })),
