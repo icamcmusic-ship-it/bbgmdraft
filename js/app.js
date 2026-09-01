@@ -1986,6 +1986,11 @@
 		   the same seventy players. */
 		$("seedPill").textContent = "seed " + res.seed + " · " + classFingerprint(res);
 		$("seedPill").dataset.seed = res.seed;
+		/* The fingerprint and flavour in the tab title, so two browser tabs
+		   comparing two classes are distinguishable from the tab strip. */
+		document.title = classFingerprint(res) +
+			(res.flavor && res.flavor.label ? " · " + res.flavor.label : "") +
+			" — BBGM Draft Class Workshop";
 		$("seedPill").title = "Seed and class fingerprint — two people with the same " +
 			"fingerprint are looking at the same seventy players. " +
 			"Click to copy the seed, shift-click or right-click to paste one · " + Math.round(ms) + "ms (" +
@@ -3177,11 +3182,17 @@
 		setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 	}
 
-	function exportOne(i) {
+	function exportOne(i, opts) {
 		const res = ensureResult(i);
 		if (!res) return false;
 		try {
-			const out = global.Engine.exportFile(res);
+			const out = global.Engine.exportFile(res, opts);
+			/* A player whose identity check failed passed through untouched;
+			   that used to be silent. */
+			if (global.Engine.exportFile.passthroughs) {
+				setStatus("Warning: " + global.Engine.exportFile.passthroughs +
+					" player(s) could not be matched and were exported unmodified.");
+			}
 			const base = state.files[i].name.replace(/\.json$/i, "");
 			// BBGM writes its exports with a BOM; match it.
 			download(base + "_customized.json", "\ufeff" + JSON.stringify(out, null, 2),
@@ -3496,6 +3507,30 @@
 			b.addEventListener("click", () => { closeModal(); fn(); });
 			list.appendChild(b);
 		};
+		/* §8.13: the simulated season, honours and career were computed and
+		   then thrown away at export time. Opt-in, so the default file is
+		   unchanged. */
+		const optBox = el("div", "checks");
+		const opt = (key, label, dflt) => {
+			const lab = el("label", "check");
+			const cb = el("input");
+			cb.type = "checkbox";
+			cb.checked = !!dflt;
+			lab.appendChild(cb);
+			lab.appendChild(document.createTextNode(" " + label));
+			optBox.appendChild(lab);
+			return () => cb.checked;
+		};
+		const oStats = opt("stats", "Include college statline (draft year)");
+		const oPrior = opt("prior", "…and prior seasons");
+		const oHighs = opt("highs", "…and game-log season highs");
+		const oAwards = opt("awards", "Include college awards");
+		list.appendChild(optBox);
+		item("BBGM class file, with the options above", () => {
+			if (exportOne(state.active, {
+				stats: oStats(), prior: oPrior(), highs: oHighs(), awards: oAwards(),
+			})) setStatus("Exported " + state.files[state.active].name + ".");
+		});
 		item("Prospect table as CSV (the current filter)", () => exportCsv(res));
 		item("Prospect table as CSV (whole class)", () => exportCsv(res, true));
 		item("Season as JSON — records, bracket, awards, board", () => exportSeasonJson(res));
@@ -3869,24 +3904,40 @@
 
 	$("errClose").addEventListener("click", clearError);
 	$("warnClose").addEventListener("click", () => { $("warnBanner").hidden = true; });
-	/* The settings panel is a toggle on a narrow screen. It starts CLOSED
-	   there — a phone user's first act is to look at the class, not at the
-	   sliders — and the button reflects the real state either way. */
+	/* The settings panel is a toggle at EVERY width now, not only narrow.
+	   On a phone it starts closed — the first act is to look at the class,
+	   not the sliders. On a desktop it starts open, and closing it hands
+	   its 320px column to the forty-column table. The two states persist
+	   separately, so closing it on a phone does not close it on a desktop. */
 	(function bindSettingsToggle() {
 		const btn = $("btnSettings");
 		if (!btn) return;
 		const narrow = () => window.matchMedia("(max-width: 860px)").matches;
-		const paint = () => {
-			const open = !narrow() || document.body.classList.contains("settings-open");
-			btn.setAttribute("aria-expanded", open ? "true" : "false");
-			btn.textContent = open ? "Hide settings" : "Settings";
+		const KEY = "bbgmdc.settingsPanel";
+		let pref = {};
+		try { pref = JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) {}
+		const isOpen = () => (narrow() ? pref.narrow === true : pref.wide !== false);
+		const apply = () => {
+			document.body.classList.toggle("settings-open", narrow() && isOpen());
+			document.body.classList.toggle("settings-closed", !narrow() && !isOpen());
+			btn.setAttribute("aria-expanded", isOpen() ? "true" : "false");
+			btn.textContent = isOpen() ? "Hide settings" : "Settings";
 		};
-		btn.addEventListener("click", () => {
-			document.body.classList.toggle("settings-open");
-			paint();
+		const toggle = () => {
+			if (narrow()) pref.narrow = !isOpen();
+			else pref.wide = !isOpen();
+			try { localStorage.setItem(KEY, JSON.stringify(pref)); } catch (e) {}
+			apply();
+		};
+		btn.addEventListener("click", toggle);
+		document.addEventListener("keydown", (e) => {
+			if (e.key !== "s" || e.ctrlKey || e.metaKey || e.altKey) return;
+			const tag = (e.target && e.target.tagName) || "";
+			if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+			toggle();
 		});
-		window.addEventListener("resize", paint);
-		paint();
+		window.addEventListener("resize", apply);
+		apply();
 	})();
 
 	$("btnReroll").addEventListener("click", reroll);
@@ -4127,6 +4178,7 @@
 		["[ / ]", "Previous / next archetype filter"],
 		["p", "Pin this class as the comparison baseline"],
 		["e", "Export the active file"],
+		["s", "Show or hide the settings panel"],
 		["Ctrl / Cmd + Z", "Undo the last change — a reroll included"],
 		["Ctrl / Cmd + Shift + Z", "Redo it"],
 		["j / ↓", "Next prospect in the table"],

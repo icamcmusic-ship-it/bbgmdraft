@@ -130,16 +130,33 @@
 		   0.5*oiq and therefore rewards every guard build for handling the
 		   ball — which is why a Sharpshooter finished within 1.7 assists of a
 		   dedicated Floor General. */
-		AST_EXP: 3.0,
-		AST_FLOOR: 0.30,
+		/* Down from 3.0/0.30: the cubic starved every non-creator — 24% of
+		   28+ MPG players finished under 1.5 APG, and a wing playing 31
+		   minutes of D-I basketball does not finish with 0.8 assists. The
+		   softer exponent plus a higher floor lifts the bottom without
+		   moving the ceiling (the pool is fixed, so the best passer barely
+		   notices). */
+		AST_EXP: 2.4,
+		AST_FLOOR: 0.42,
 		/* Rebounds. At 1.25 a centre out-rebounded a guard by 2.4x; the real
-		   defensive-rebound-rate ratio between those two is 4-5x. */
-		REB_EXP: 1.55,
+		   defensive-rebound-rate ratio between those two is 4-5x. 1.55 got
+		   the big:guard RPG ratio to 1.9x against a real ~2.4x, so another
+		   step to 1.9, offset by a softer REB_CAP below so the ceiling stops
+		   binding exactly at the measured maximum. */
+		REB_EXP: 1.9,
 		REB_FLOOR: 0.30,
 		AST_PSS: 0.45,
 		STL_EXP: 2.1,
-		BLK_EXP: 2.6,
-		PF_EXP: 1.2,
+		/* 2.6 gave a big:guard BPG ratio of 4.1x against a real 8-10x, with
+		   seven-footers medianing 1.1 a game. Team blocks were on target, so
+		   the pool is fine and the share was too flat — steepen it. */
+		BLK_EXP: 3.5,
+		/* 1.2 handed fouls out almost proportionally to minutes: a quarter
+		   of every class averaged over 4.0 PF/g and the max was 5.28, which
+		   is not a high number but an impossible one (five is a foul-out).
+		   At 2.0 the fouling composite actually separates the foul-prone
+		   from the disciplined. */
+		PF_EXP: 2.0,
 		ORB_RATE: 0.29,     // D-I offensive rebound rate
 		/* Missed free throws come off the rim too, so the rebounds available on
 		   a possession exceed the missed field goals by a few percent. */
@@ -161,12 +178,17 @@
 		ASSISTED_SHARE: 0.52,
 		// Documented per-player ceilings, now actually enforced (see capNoisy).
 		AST_CAP: 0.62,
-		REB_CAP: 0.40,
+		/* Measured max share was 0.40 against a cap of 0.40 — binding
+		   exactly. Softened so the steeper REB_EXP has headroom. */
+		REB_CAP: 0.46,
 		// Walker Kessler took 4.6 of Auburn's 6.6 blocks — 70%. The old 0.50
 		// cap forbade by construction the exact season the comment cited.
 		BLK_CAP: 0.68,
 		STL_CAP: 0.42,
-		PF_CAP: 0.28,
+		/* 0.28 let one player take 28% of a team's 16.6 fouls — 4.65 a
+		   game, past the number that ends a night. The real D-I leader in
+		   fouls per game sits around 3.6-3.8. */
+		PF_CAP: 0.20,
 		/* Minutes are flatter than talent, but not as flat as they were: 32% of
 		   minutes handed out uniformly made an NBA prospect the fourth option
 		   on his own blue-blood roster, and 22% still had him fourth. At 22%,
@@ -1019,9 +1041,14 @@
 		// and they are the ones a coach protects), so fouls scale with minutes
 		// sub-linearly rather than one-for-one.
 		const pfW = Math.pow(comps.fouling, TUNING.PF_EXP) * Math.pow(minShare, 0.82);
-		// Five fouls ends a night, so a season average saturates well below it.
+		// Five fouls ends a night, so a season average saturates well below
+		// it. The hard ceiling is derived from minutes: a player at 5 PF/40
+		// is fouling out of most of his games, which caps what any season
+		// average can physically reach — and the national leader in fouls
+		// per game sits around 3.6-3.8, not five.
 		const pfRaw = (teamCtx.pfPool * pfW) / teamCtx.pfDen;
-		const pf = clamp(jv(saturate(pfRaw, 4.2, 0.60), 0.12), 0, 4.6);
+		const pfLim = Math.min(3.9, 5.0 * (minutes / 40) * 0.95 + 0.6);
+		const pf = clamp(jv(saturate(pfRaw, 3.4, 0.60), 0.12), 0, pfLim);
 
 		/* --- the defensive box score --------------------------------------
 		   Steals and blocks were the whole of a player's defensive record,
@@ -1159,8 +1186,11 @@
 		   term leans on the best passer on the floor (topWeight 0.35), so a
 		   roster with a true point guard assists more of its own baskets than
 		   a team of wings does. */
+		/* Sensitivity 0.55 → 0.80 for the same reason as blocks below: a
+		   roster with a true Floor General should assist visibly more of
+		   its own baskets than a team of wings, not 6% more. */
 		const assistedShare = TUNING.ASSISTED_SHARE *
-			scale(agg("passing", 0.35), POOL_BASE.passing, 0.55, 0.80, 1.22);
+			scale(agg("passing", 0.35), POOL_BASE.passing, 0.80, 0.72, 1.30);
 
 		return {
 			orbRate,
@@ -1178,7 +1208,13 @@
 			   best rim protector on the floor should move his team's total,
 			   which is what the 0.70 top-player weight buys); the level and the
 			   ceiling were not. */
-			blkPool: 4.0 * scale(agg("blocking", 0.70), POOL_BASE.blocking, 1.70, 0.55, 2.20),
+			/* The covariance term is the piece that makes the extremes
+			   reachable without moving the mean: a roster anchored by a
+			   genuine 7'2" rim protector should block 6-7 a game and a team
+			   of guards should block 2, rather than everybody clustering at
+			   3.5. Sensitivity up (1.70 → 2.30) and the floor down, mean
+			   unchanged because scale() is centred on POOL_BASE. */
+			blkPool: 4.0 * scale(agg("blocking", 0.70), POOL_BASE.blocking, 2.30, 0.45, 2.20),
 			pfPool: TUNING.TEAM_PF * scale(agg("fouling", 0.20), POOL_BASE.fouling, 0.60, 0.80, 1.25),
 		};
 	}
@@ -1704,7 +1740,13 @@
 		/* Personal fouls. statLine computed them, totals summed them and this
 		   function fitted everything except them, so team fouls answered to
 		   nothing: measured 15.2 against the model's own 16.6 target. */
-		set("pfpg", pools.pfPool, TUNING.PF_CAP);
+		/* Fouls carry a second, ABSOLUTE ceiling on top of the share cap: the
+		   team-noise pass above can inflate pfPool ~10%, and PF_CAP of an
+		   inflated pool walked one player back over 4.5 a game — past the
+		   number that ends a night. 3.9 is just above the real D-I
+		   leader's 3.6-3.8. */
+		set("pfpg", pools.pfPool,
+			Math.min(TUNING.PF_CAP, 3.9 / Math.max(1e-9, pools.pfPool)));
 		/* Turnovers: fixed at the rate level long ago, but the team total was
 		   still unconstrained the same way fouls were before pfpg was added
 		   here. A generous cap — one player CAN commit a third of a team's
@@ -1817,16 +1859,50 @@
 				stl: draw(s.spg, 0.70, 0.5),
 				blk: draw(s.bpg, 0.75, 0.4),
 				tov: draw(s.topg, 0.55, 0.7),
+				fouls: draw(s.pfpg || 0, 0.42, 0.8),
 			});
 		}
 		if (!games.length) return null;
 
-		// Rescale so the log's mean is the season average exactly, then round.
-		for (const key of ["pts", "reb", "ast", "stl", "blk", "tov"]) {
-			const target = { pts: s.ppg, reb: s.rpg, ast: s.apg, stl: s.spg, blk: s.bpg, tov: s.topg }[key];
-			const got = games.reduce((a, g) => a + g[key], 0) / games.length;
-			const k = got > 1e-9 ? target / got : 0;
-			for (const g of games) g[key] = Math.max(0, Math.round(g[key] * k));
+		/* Rescale so the log SUMS to the season total exactly, then hand out
+		   integers by largest remainder. Rounding each game independently
+		   after scaling meant the log's mean no longer equalled the season
+		   average — for a low-rate stat (0.3 blocks over 31 games) the
+		   rounding error was a large fraction of the total. Fouls are the
+		   one stat with a per-game physical ceiling: five ends a night, so
+		   the allocation respects it and the games that hit it are counted
+		   as foul-outs below. */
+		const targets = {
+			pts: s.ppg, reb: s.rpg, ast: s.apg,
+			stl: s.spg, blk: s.bpg, tov: s.topg, fouls: s.pfpg || 0,
+		};
+		for (const key of Object.keys(targets)) {
+			const cap = key === "fouls" ? 5 : Infinity;
+			const target = targets[key];
+			const total = Math.round(target * games.length);
+			const got = games.reduce((a, g) => a + g[key], 0);
+			const k = got > 1e-9 ? (target * games.length) / got : 0;
+			const scaled = games.map((g) => Math.min(cap, Math.max(0, g[key] * k)));
+			const base = scaled.map((v) => Math.floor(v));
+			let sum = 0;
+			for (const v of base) sum += v;
+			let need = total - sum;
+			const order = scaled
+				.map((v, i) => ({ i, r: v - base[i] }))
+				.sort((a, b) => b.r - a.r);
+			for (let j = 0; need > 0 && j < order.length; j++) {
+				if (base[order[j].i] < cap) { base[order[j].i]++; need--; }
+			}
+			// A capped stat can leave the total short (a season average of
+			// fouls the cap forbids). Fill any room left, then stop: the cap
+			// wins over the total, by construction.
+			let guard = 0;
+			while (need > 0 && guard++ < 8) {
+				for (let i = 0; i < base.length && need > 0; i++) {
+					if (base[i] < cap) { base[i]++; need--; }
+				}
+			}
+			games.forEach((g, i) => { g[key] = base[i]; });
 		}
 
 		const best = games.slice().sort((a, b) =>
@@ -1853,6 +1929,10 @@
 			best,
 			highs,
 			injury,
+			/* Fouling out is one of the most legible things in a box score,
+			   and the number a physically plausible foul rate is actually
+			   constrained by. */
+			foulOuts: games.filter((g) => g.fouls >= 5).length,
 			doubleDoubles: games.filter((g) =>
 				[g.pts, g.reb, g.ast, g.stl, g.blk].filter((v) => v >= 10).length >= 2).length,
 			tripleDoubles: games.filter((g) =>
