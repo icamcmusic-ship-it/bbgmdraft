@@ -989,6 +989,19 @@
 		}
 
 		teams.__fieldHonours = fieldHonours;
+		/* The best of the field, independent of whether he won anything —
+		   for the News item that says the country's best player this year
+		   was not in the draft class at all. Trimmed to what a spotlight
+		   article needs; the rest of `field` (the fitted improvement scores,
+		   the defensive approximations) stays internal to this function. */
+		teams.__fieldTop = field.slice()
+			.sort((a, b) => b.scoreTotal - a.scoreTotal)
+			.slice(0, 5)
+			.map((x) => ({
+				name: x.name, school: x.school || (x.team ? x.team.name : null),
+				classYear: x.classYear || null, starReturner: x.starReturner || null,
+				pos: x.pos, stats: x.stats,
+			}));
 		return ranked;
 	}
 

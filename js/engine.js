@@ -1988,6 +1988,8 @@
 		// Lifted off the map before anything iterates it, like __realignment.
 		state.fieldHonours = state.teams.__fieldHonours || [];
 		delete state.teams.__fieldHonours;
+		state.fieldTop = state.teams.__fieldTop || [];
+		delete state.teams.__fieldTop;
 		return state;
 	}
 
@@ -2409,6 +2411,7 @@
 				fallers: state.fallers,
 				draftEvents: state.draftEvents || [],
 			fieldHonours: state.fieldHonours || [],
+			fieldTop: state.fieldTop || [],
 				seasonEvents: state.seasonEvents || [],
 				flavor: state.flavor,
 				// The builds this class was drawn from, and the anomalies it

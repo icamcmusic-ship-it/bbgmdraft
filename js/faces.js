@@ -106,6 +106,16 @@
 	const ALLOWED_ACCESSORIES = { "none": true, "headband": true, "headband-high": true };
 	const ACCESSORY_SWAP = ["none", "none", "headband", "headband-high"];
 
+	/* Three of facesjs's six glasses styles ("glasses1-primary",
+	   "glasses1-secondary", "glasses2-black") render as an oversized,
+	   reflective lens shape that swallows both eyes — a swim-goggle look
+	   that reads as broken rather than as a style choice. "glasses2-primary"
+	   (thin wire frames) and "glasses2-secondary" (bold rec specs) are drawn
+	   at a normal scale and are kept, alongside "none" and the
+	   already-excluded "facemask". */
+	const ALLOWED_GLASSES = { "none": true, "glasses2-primary": true, "glasses2-secondary": true };
+	const GLASSES_SWAP = ["none", "none", "none", "glasses2-primary"];
+
 	/* The face as it should be DRAWN: the player's own features, in his
 	   programme's kit. The stored face is never mutated — a face round-trips
 	   into the exported file exactly as it arrived. */
@@ -124,8 +134,10 @@
 				id: ACCESSORY_SWAP[hashOf(key + "|acc") % ACCESSORY_SWAP.length],
 			};
 		}
-		if (base.glasses && base.glasses.id === "facemask") {
-			out.glasses = { id: "none" };
+		if (!base.glasses || !ALLOWED_GLASSES[base.glasses.id]) {
+			out.glasses = {
+				id: GLASSES_SWAP[hashOf(key + "|glasses") % GLASSES_SWAP.length],
+			};
 		}
 		return out;
 	}
