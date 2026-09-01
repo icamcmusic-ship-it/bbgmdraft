@@ -24,8 +24,14 @@
 		classFlavor: 1.0,
 		/* How many specialist builds one class may contain, before height
 		   coverage tops the pool up. 0 turns the pool off, which restores the
-		   pre-2026 behaviour of one of everything in every class. */
-		archetypePool: 14,
+		   pre-2026 behaviour of one of everything in every class.
+
+		   Raised from 14 when the table grew past 117 builds: per-class
+		   coverage had quietly fallen from 23% of the table to 12%, and
+		   measured over 20 classes five builds never appeared at all. 17 is a
+		   deliberate target, not a maximisation — consecutive classes should
+		   share a build or two, the way real drafts repeat archetypes. */
+		archetypePool: 17,
 		/* How many forced anomalies a class gets: a five-star bust, an
 		   unranked recruit who turns into a lottery pick, a 24-year-old JUCO,
 		   a 7'4" project, the coach's son, the man whose season ended in

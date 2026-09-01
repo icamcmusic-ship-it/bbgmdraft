@@ -75,7 +75,11 @@
 		{ name: "Glue Guy", min: 0, max: 100, w: 1.6, t: ["defense"], o: { diq: 12, oiq: 10, pss: 8, endu: 12, ins: -8, dnk: -8, fg: -4, tp: -2 } },
 		{ name: "High-IQ Connector", min: 0, max: 100, w: 1.0, t: ["playmaking"], o: { oiq: 16, pss: 12, diq: 8, tp: 4, dnk: -10, jmp: -8, ins: -8, fg: -4 } },
 		{ name: "Raw Project", min: 0, max: 100, w: 1.7, t: ["raw", "athletic"], o: { jmp: 14, spd: 10, stre: 10, endu: 6, oiq: -14, diq: -10, ft: -10, tp: -8, fg: -6 } },
-		{ name: "Iron Man", min: 0, max: 100, w: 0.7, t: [], o: { endu: 20, stre: 8, diq: 6, oiq: 6, dnk: -8, tp: -6, ins: -8, jmp: -6 } },
+		/* Untagged meant no flavour could ever reach it — measured, Iron Man
+		   appeared zero times in 30 consecutive classes. `durability` is the
+		   shared availability axis with Injury-Prone Talent and Injury-Return
+		   Unknown; `athletic` is what an every-game body is. */
+		{ name: "Iron Man", min: 0, max: 100, w: 0.7, t: ["athletic", "durability"], o: { endu: 20, stre: 8, diq: 6, oiq: 6, dnk: -8, tp: -6, ins: -8, jmp: -6 } },
 		// --- bigs ---------------------------------------------------------
 		{ name: "Stretch Big", min: 54, max: 100, w: 2.4, t: ["big", "shooting"], o: { tp: 22, ft: 14, reb: 6, oiq: 4, spd: -10, drb: -10, dnk: -6, ins: -8 } },
 		{ name: "Post Scorer", min: 56, max: 100, w: 1.8, t: ["big", "scoring"], o: { ins: 24, stre: 16, reb: 10, dnk: 8, tp: -18, spd: -12, drb: -10, ft: -6 } },
@@ -107,7 +111,7 @@
 		   These twelve fill those holes rather than adding more of what was
 		   already well covered. */
 		{ name: "Low-Motor Talent", min: 0, max: 100, w: 1.0, t: ["scoring", "raw"], o: { fg: 16, ins: 10, tp: 8, oiq: 6, endu: -20, diq: -14, reb: -8 } },
-		{ name: "Injury-Prone Talent", min: 0, max: 100, w: 0.7, t: ["raw"], o: { fg: 12, drb: 10, pss: 8, oiq: 8, endu: -22, stre: -12, spd: -4 } },
+		{ name: "Injury-Prone Talent", min: 0, max: 100, w: 0.7, t: ["raw", "durability"], o: { fg: 12, drb: 10, pss: 8, oiq: 8, endu: -22, stre: -12, spd: -4 } },
 		{ name: "Foul Magnet Guard", min: 0, max: 48, w: 0.8, t: ["guard", "scoring"], o: { ft: 16, drb: 12, spd: 10, ins: 6, diq: -14, endu: -10, tp: -8, reb: -6 } },
 		{ name: "Non-Shooting Playmaker", min: 0, max: 52, w: 1.2, t: ["guard", "playmaking"], o: { pss: 22, drb: 16, oiq: 10, spd: 6, tp: -22, ft: -12, ins: -8 } },
 		{ name: "Rebounding Guard", min: 20, max: 46, w: 0.9, t: ["guard", "rebounding", "athletic"], o: { reb: 20, jmp: 12, stre: 10, diq: 8, tp: -12, ins: -10, ft: -8 } },
@@ -116,7 +120,7 @@
 		{ name: "Stretch Four Stopper", min: 48, max: 74, w: 1.1, t: ["big", "shooting", "defense"], o: { tp: 16, diq: 14, ft: 8, endu: 6, ins: -14, pss: -10, drb: -8, dnk: -6 } },
 		{ name: "Rim-Running Wing", min: 40, max: 68, w: 1.2, t: ["wing", "athletic"], o: { spd: 16, dnk: 14, jmp: 12, endu: 10, tp: -14, ft: -10, pss: -8, fg: -6 } },
 		{ name: "Late Bloomer", min: 0, max: 100, w: 1.1, t: ["raw"], o: { endu: 10, oiq: 8, spd: 6, stre: 6, fg: -8, tp: -6, ins: -6, drb: -4 } },
-		{ name: "Fifth-Year Senior", min: 0, max: 100, w: 1.2, t: [], o: { oiq: 14, diq: 10, ft: 8, fg: 6, jmp: -14, spd: -10, endu: -4, dnk: -8 } },
+		{ name: "Fifth-Year Senior", min: 0, max: 100, w: 1.2, t: ["defense", "playmaking"], o: { oiq: 14, diq: 10, ft: 8, fg: 6, jmp: -14, spd: -10, endu: -4, dnk: -8 } },
 		{ name: "Positionless Forward", min: 38, max: 72, w: 1.4, t: ["wing", "playmaking", "defense"], o: { pss: 12, diq: 10, drb: 10, reb: 8, oiq: 6, ins: -10, dnk: -8, ft: -6 } },
 		/* --- twenty-six more, and the shape of the table ---------------------
 
@@ -192,7 +196,7 @@
 		{ name: "High-Floor Low-Ceiling", min: 0, max: 100, w: 1.2, t: ["defense"], o: { oiq: 12, diq: 10, ft: 10, endu: 8, jmp: -14, dnk: -10, spd: -8, tp: -4 } },
 		{ name: "Boom-or-Bust Tools", min: 0, max: 100, w: 1.4, t: ["raw", "athletic"], o: { jmp: 18, dnk: 14, spd: 10, stre: 8, oiq: -16, diq: -12, ft: -10, drb: -8 } },
 		{ name: "Overseas Pro Veteran", min: 0, max: 100, w: 1.0, t: ["shooting", "playmaking"], o: { oiq: 14, tp: 12, pss: 10, ft: 8, jmp: -14, spd: -10, dnk: -8, endu: -6 } },
-		{ name: "Injury-Return Unknown", min: 0, max: 100, w: 0.9, t: ["raw", "scoring"], o: { fg: 12, ins: 10, oiq: 8, ft: 6, endu: -18, spd: -10, jmp: -8 } },
+		{ name: "Injury-Return Unknown", min: 0, max: 100, w: 0.9, t: ["raw", "scoring", "durability"], o: { fg: 12, ins: 10, oiq: 8, ft: 6, endu: -18, spd: -10, jmp: -8 } },
 
 		/* --- shooting-tagged additions (task 4.1) ---
 		   Measured: the `shooting` tag had 14 members against `guard`'s 30+, and
@@ -261,6 +265,31 @@
 		{ name: "Secondary Creator", min: 36, max: 68, w: 1.6, t: ["wing", "playmaking", "scoring"], o: { drb: 14, pss: 12, fg: 10, ins: 8, oiq: 6, reb: -12, diq: -10, stre: -8, jmp: -6 } },
 		{ name: "Zone Buster", min: 0, max: 66, w: 1.1, t: ["shooting", "scoring"], o: { oiq: 18, tp: 16, fg: 10, pss: 6, stre: -16, reb: -14, dnk: -10, diq: -8 } },
 		{ name: "Matchup-Zone Defender", min: 52, max: 66, w: 1.3, t: ["wing", "defense", "athletic"], o: { diq: 18, spd: 12, endu: 10, reb: 8, ins: -10, tp: -8, ft: -8, pss: -6 } },
+
+		/* --- four more gaps, each a role a scout names out loud ------------
+
+		   Point-of-Attack Menace is the genuine non-shooter who is a great
+		   defender at 6'3": Defensive Pest and Ball Hawk both cut tp by only
+		   4-6, so the table had no guard whose jumper is truly broken and who
+		   starts anyway because nobody gets the ball up the floor against him.
+
+		   Rim-Pressure Bruiser is the foul-drawing rim finisher without a
+		   jumper. Free-Throw Merchant is a guard build; this is the big whose
+		   whole offence is a seal, a catch and two free throws.
+
+		   Grab-and-Go Big is the high-turnover high-assist big. Passing Hub
+		   Five and Point Center both carry positive oiq, so the table could not
+		   say "he sees everything and throws a third of it away".
+
+		   Tweener Forward is the 6'9"-6'10" band (hgt 58-74), which was the
+		   thinnest pool in the table — most wing builds cap at 66-70 and the
+		   centre builds start at 72-76 — despite being the most common
+		   bad-outcome profile in real drafts: not a wing, not a five, tools
+		   without a role. */
+		{ name: "Point-of-Attack Menace", min: 0, max: 50, w: 1.0, t: ["guard", "defense", "athletic"], o: { diq: 20, spd: 14, endu: 10, stre: 6, tp: -16, ft: -10, ins: -8, fg: -6 } },
+		{ name: "Rim-Pressure Bruiser", min: 62, max: 88, w: 1.0, t: ["big", "scoring", "raw"], o: { ins: 16, dnk: 14, stre: 12, endu: 6, tp: -18, ft: -6, pss: -8, oiq: -6 } },
+		{ name: "Grab-and-Go Big", min: 60, max: 80, w: 0.9, t: ["big", "playmaking", "raw"], o: { pss: 16, drb: 12, reb: 8, spd: 8, oiq: -14, tp: -10, ft: -8 } },
+		{ name: "Tweener Forward", min: 58, max: 74, w: 1.3, t: ["wing", "big", "raw", "rebounding"], o: { jmp: 12, stre: 6, reb: 8, endu: 6, tp: -10, pss: -8, ins: -6, diq: -8 } },
 
 		{ name: "Balanced", min: 0, max: 100, w: 1.0, t: [], o: {} },
 	];
@@ -436,8 +465,20 @@
 			defense: 0.99, athletic: 1.08, rebounding: 1.00, raw: 0.93,
 		},
 		/* Softly bounded rather than clamped, so a build can never land
-		   exactly on a limit the way twelve of the old table's entries did. */
-		lo: 0.30, hi: 2.60, band: 0.18,
+		   exactly on a limit the way twelve of the old table's entries did.
+
+		   Narrowed from 0.30-2.60: measured across all builds the realised
+		   output spans about 0.79-1.16, because the ovr-normaliser and the
+		   self-referential usage centre already absorb most of the level and
+		   this multiplier only carries what the composite cannot say. Bounds
+		   twelve bands wide described a mechanism that was not operating, and
+		   tools/rolefit.js --iterate (worst residual 1.29 points against a
+		   2.00 band) confirms the near-unity output is the fit succeeding,
+		   not failing. Not narrower than this: the order-independence and
+		   monotonicity guarantees tested in tools/test.js scale like
+		   band * exp(-(hi - lo) / band), and a still-tighter pair underflows
+		   them at the extremes of the tested range. */
+		lo: 0.45, hi: 2.00, band: 0.14,
 	};
 
 	/* The delta an archetype's offsets make to BBGM's usage composite. Read
@@ -609,6 +650,12 @@
 		   a college identity that does not transfer, which is a ceiling. */
 		"Screen Navigator": -2, "Secondary Creator": 2,
 		"Zone Buster": -3, "Matchup-Zone Defender": 1,
+		/* The four scout-named gaps. A broken jumper can arrive (Menace),
+		   a foul-drawing seal game is already what it is (Bruiser), vision
+		   with turnovers is coachable (Grab-and-Go), and a tweener's whole
+		   bet is that a role appears for the tools (Tweener). */
+		"Point-of-Attack Menace": 1, "Rim-Pressure Bruiser": -1,
+		"Grab-and-Go Big": 2, "Tweener Forward": 4,
 	};
 
 	/* What a basketball player of a given listed height typically weighs.
@@ -657,6 +704,16 @@
 
 	   Returns a breakdown as well as a total so the editor can explain it. */
 	function potFactors(archetypeName, age, ratings, physical, classAge) {
+		/* Same contract as roleUsage: an unknown build is an ERROR under the
+		   test harness and a quiet 0 in a browser. This was the half of the
+		   "silent default for a name never seen" bug that stayed unfixed when
+		   roleUsage got its strict check. */
+		if (STRICT_ROLES && archetypeName !== undefined &&
+			POT_BY_ARCHETYPE[archetypeName] === undefined) {
+			throw new Error("potFactors: unknown archetype " +
+				JSON.stringify(archetypeName) +
+				" — every build must be in POT_BY_ARCHETYPE");
+		}
 		const arch = POT_BY_ARCHETYPE[archetypeName] || 0;
 		// 19 is the modal draft age; every year younger is worth real upside.
 		const ageAdj = Number.isFinite(age) ? clamp((19.0 - age) * 2.4, -7, 7) : 0;
@@ -1099,18 +1156,27 @@
 
 	/* Draw one flavour for a class. Returns null when the flavour system is
 	   turned off, which keeps the old behaviour exactly. */
+	/* The strength an explicitly named flavour is guaranteed. classFlavor: 0
+	   used to disable the flavour system before the hint was even read, so a
+	   user who NAMED a flavour in the dropdown got nothing, silently. Asking
+	   for one implies wanting it to exist. */
+	const ASKED_STRENGTH_FLOOR = 0.5;
+
 	function pickFlavor(rng, cfg) {
-		const strength = clamp(cfg && cfg.classFlavor !== undefined ? cfg.classFlavor : 1, 0, 3);
-		if (strength <= 0) return null;
 		/* An asked-for flavour wins over the draw. A user who wants a
 		   guard-heavy class could previously only set classFlavor to 2 and
 		   reroll until one came up, which is a slot machine, not a setting —
 		   and rerolling replaces the whole class, so the thing they were
 		   keeping the seed for went with it. An unknown name falls through to
-		   the draw rather than throwing: cfg comes from URLs and localStorage. */
+		   the draw rather than throwing: cfg comes from URLs and localStorage.
+		   Checked BEFORE the strength gate: a named flavour at strength 0 is a
+		   contradiction, resolved in favour of the thing the user named. */
 		const hint = cfg && cfg.flavorHint ? String(cfg.flavorHint) : "";
 		const asked = hint
 			? CLASS_FLAVORS.filter((x) => x.name === hint)[0] : null;
+		let strength = clamp(cfg && cfg.classFlavor !== undefined ? cfg.classFlavor : 1, 0, 3);
+		if (asked && strength < ASKED_STRENGTH_FLOOR) strength = ASKED_STRENGTH_FLOOR;
+		if (strength <= 0) return null;
 		const f = asked || rng.weighted(CLASS_FLAVORS);
 		if (f.name === "balanced") {
 			return { name: f.name, label: f.label, mult: {}, cfg: null, strength,
@@ -1194,6 +1260,28 @@
 		return raw > 0 ? Math.pow(raw, RARITY_COMPRESS) : 0;
 	}
 
+	/* The same weight WITHOUT the exposure divisor, for pool membership.
+
+	   Dividing by exposure is correct for per-player selection — it makes `w`
+	   mean "target share of the whole class". It is wrong for pool membership,
+	   because a pool slot is a fixed resource regardless of how many players
+	   can use it. Measured over 4000 pool draws with the divisor applied to
+	   both: the three centre builds gated at hgt >= 76 each made ~25% of pools
+	   (effective weight 3.75 against an authored 1.4) while Iron Man and
+	   Injury-Prone Talent made ~6% (0.86 against 0.7) — a 4.4x inversion of
+	   the authored ordering, spending 15% of the pool budget on builds two or
+	   three prospects can use, taken from the builds the other 78% of the
+	   class draws from. Height coverage is MIN_PER_BAND's job, and the probes
+	   at 82 and 93 already guarantee it. */
+	function poolWeight(a, cfg, flavor) {
+		const custom = (cfg && cfg.archetypeWeights) || null;
+		const base = custom && Number.isFinite(custom[a.name])
+			? custom[a.name]
+			: (a.w === undefined ? 1 : a.w);
+		const raw = Math.max(0, base) * flavorMultiplier(a, flavor);
+		return raw > 0 ? Math.pow(raw, RARITY_COMPRESS) : 0;
+	}
+
 	/* Draw the class's build pool. `size` is how many specialist builds the
 	   class may contain before height coverage tops it up; 0 or a size at or
 	   above the table turns the pool off entirely and restores the old
@@ -1246,7 +1334,9 @@
 		const strength = clamp(
 			cfg && cfg.poolMemory !== undefined ? cfg.poolMemory : 0, 0, 1);
 		const recent = (cfg && Array.isArray(cfg.recentPools)) ? cfg.recentPools : null;
-		const wOf = (a) => archetypeWeight(a, cfg, flavor) *
+		// Raw authored weight for pool slots; the exposure-divided weight
+		// stays where it belongs, in pickArchetype. See poolWeight.
+		const wOf = (a) => poolWeight(a, cfg, flavor) *
 			poolMemoryFactor(a.name, recent, strength);
 		const remaining = specialists.slice();
 		const pool = [];
@@ -1412,9 +1502,13 @@
 			const t = n === 1 ? 0 : i / (n - 1);
 			let v = top - (top - bottom) * Math.pow(t, p);
 			if (i < cfg.eliteCount) v += (cfg.eliteCount - i) * 2.2 + rng.uniform(0, 3);
-			// Lottery cliff: steepen the drop from picks ~1-5 to ~10-14.
-			if (i <= 14) {
-				const lotteryBoost = Math.max(0, (14 - i) / 14) * 0.15;
+			// Lottery cliff: steepen the drop across the top ~23% of the
+			// class (14 picks of a 60-man class — the real lottery share).
+			// A fixed `i <= 14` gave EVERY player in a 12-man class the
+			// boost, which flattened exactly the cliff it exists to shape.
+			const lotterySpan = Math.min(14, Math.max(3, Math.round(n * 0.23)));
+			if (i < lotterySpan) {
+				const lotteryBoost = ((lotterySpan - i) / lotterySpan) * 0.15;
 				v *= (1 + lotteryBoost);
 			}
 			out.push(clamp(Math.round(v + rng.normal(0, 1.6)), 0, 100));
@@ -1502,6 +1596,6 @@
 		ROLE_FIT, softBound, softBoundOrderError,
 		CLASS_FLAVORS, pickFlavor, flavorMultiplier, flavorConfig, pickClassPool,
 		poolMemoryFactor, POOL_MEMORY_DEPTH,
-		archetypeWeight, RARITY_COMPRESS,
+		archetypeWeight, poolWeight, RARITY_COMPRESS,
 	};
 })(typeof window !== "undefined" ? window : self);

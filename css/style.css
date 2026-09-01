@@ -678,6 +678,16 @@ body.busy button, body.busy input[type=range] { cursor: progress; }
 }
 .ctl .revert-btn:hover { color: var(--accent); opacity: 1; }
 
+/* Per-setting randomiser lock. Dim until locked, so eighty padlocks do not
+   shout over the sliders they guard. */
+.ctl .lock-btn {
+	background: none; border: none; padding: 0 2px; cursor: pointer;
+	font-size: 11px; line-height: 1; margin-left: 4px;
+	flex-shrink: 0; opacity: .35; filter: grayscale(1);
+}
+.ctl .lock-btn:hover { opacity: .9; }
+.ctl .lock-btn.locked { opacity: 1; filter: none; }
+
 /* ---- the settings panel on a narrow screen ------------------------------- */
 /* Below 860px the aside stacks above the table, which put eight fieldsets
    between the user and the thing they opened the tool to look at. It is a

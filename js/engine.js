@@ -489,11 +489,31 @@
 		if (!bend) return cfg;
 		const out = Object.assign({}, cfg);
 		const D = global.Config.DEFAULTS;
+		/* The bend scales with flavour strength, like the tag multipliers
+		   always did. It used to be applied at full size whatever the slider
+		   said, so for the narrative flavours whose whole point IS the bend
+		   (injury year, blue bloods down, mid-major year…) the slider labelled
+		   "how strongly the flavour leans" did essentially nothing: measured,
+		   classFlavor 0.1 and classFlavor 2 both returned the identical
+		   {injuryRate: 2}. Interpolated from the default toward the authored
+		   bend; above 1 it extrapolates mildly (half slope, capped at 1.5x)
+		   rather than linearly, because the authored values are already the
+		   full-strength statement and 2x "freshmanShare: 68" is 90. */
+		const s = flavor && Number.isFinite(flavor.strength) ? flavor.strength : 1;
+		const t = s <= 1 ? Math.max(0, s) : Math.min(1.5, 1 + 0.5 * (s - 1));
 		let moved = false;
 		let league = false;
 		for (const k of Object.keys(bend)) {
 			if (cfg[k] !== D[k]) continue;
-			out[k] = bend[k];
+			if (typeof bend[k] === "number" && typeof D[k] === "number") {
+				const v = D[k] + (bend[k] - D[k]) * t;
+				// A count stays a count: eliteCount 1.5 is not a class anyone
+				// can build.
+				out[k] = (Number.isInteger(D[k]) && Number.isInteger(bend[k]))
+					? Math.round(v) : v;
+			} else {
+				out[k] = bend[k];
+			}
 			moved = true;
 			if (LEGACY_LEAGUE[k]) league = true;
 		}
@@ -1668,7 +1688,13 @@
 	   player arrives; the ovr→pot gap says how fast, because a high-upside
 	   player is one who was further back. */
 	function ovrYearsAgo(p, i) {
-		const room = Math.max(2, (p.newPot || p.newOvr) - p.newOvr);
+		/* talentPot, not newPot: this runs in the stats phase, and newPot is
+		   finalised by the pot phase after it — so on a cold run this read the
+		   build-phase provisional and on a warm re-run it read the previous
+		   pass's adjusted value, which made prior seasons differ between the
+		   two. talentPot is set in the build phase for exactly this purpose
+		   (and keeps the cosmetic "Potential bias" dial out of the sim). */
+		const room = Math.max(2, (p.talentPot || p.newOvr) - p.newOvr);
 		const step = 2.6 + 0.32 * room;
 		return clamp(Math.round(p.newOvr - step * Math.pow(i, 0.85)), 8, 90);
 	}
@@ -1714,7 +1740,8 @@
 		   and that senior is cheap to put on the floor. Fewer of them each year
 		   as he becomes the one they are behind. */
 		const level = clamp((home.level || 50) + rng.normal(0, 3), 5, 99);
-		const mine = T.prospectTalent(younger.newOvr, p.newPot || younger.newOvr);
+		// talentPot for the same reason ovrYearsAgo reads it.
+		const mine = T.prospectTalent(younger.newOvr, p.talentPot || younger.newOvr);
 		const members = [{ filler: false, player: younger, talent: mine }];
 		const fillers = [];
 		for (let j = 0; j < 9; j++) fillers.push(T.makeFiller(rng.child("f" + j), level, j));
@@ -1820,6 +1847,22 @@
 				});
 			}
 			p.priorSeasons = rows;
+			/* The flag a scout actually reads off a multi-year page: he was
+			   better before. Prior seasons were simulated and nothing ranked
+			   on them. A real edge only — two clear points on meaningful
+			   minutes — so it marks a trajectory, not noise. */
+			p.betterEarlier = null;
+			if (p.stats) {
+				for (const row of rows) {
+					if (row.redshirt || !(row.mpg >= 15)) continue;
+					if (row.ppg > p.stats.ppg + 2 &&
+						(!p.betterEarlier || row.ppg > p.betterEarlier.ppg)) {
+						p.betterEarlier = {
+							season: row.season, classYear: row.classYear, ppg: row.ppg,
+						};
+					}
+				}
+			}
 		}
 	}
 
@@ -2781,6 +2824,14 @@
 				" PPG, " + n1(s.rpg) + " RPG, " + n1(s.apg) + " APG, " + n1(s.spg) +
 				" SPG, " + n1(s.bpg) + " BPG",
 			);
+			// "He was better as a sophomore" is exactly what a scout reads off
+			// a multi-year page, and the simulated prior seasons can say it.
+			if (p.betterEarlier) {
+				lines.push("Was better as a " +
+					String(p.betterEarlier.classYear || "").toLowerCase() +
+					" (" + n1(p.betterEarlier.ppg) + " PPG in " +
+					p.betterEarlier.season + ")");
+			}
 		}
 		if (s && on("shooting")) {
 			lines.push(
