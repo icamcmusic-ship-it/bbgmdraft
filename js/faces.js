@@ -96,11 +96,14 @@
 		return usable(face) ? face : seededFace(p ? p.key : "unknown");
 	}
 
-	/* Two items in facesjs's range belong to other sports (or to December):
-	   a Santa hat and a football facemask. Everything else — caps, headbands,
-	   eye black, glasses — is left exactly as the library draws it, because
-	   the point is BBGM's own aesthetic and not a house restyling of it. */
-	const WRONG_SPORT = { "santa-hat": true };
+	/* No hats. facesjs's "accessories" range is caps, headbands, eye black, a
+	   Santa hat and a football facemask — hats read as a house style the
+	   moment enough of the class is wearing one, and eye black and the two
+	   other-sport items are just as much "not this". Only a headband or
+	   nothing survives. Deterministic per player, same as everything else
+	   here: the hash decides headband-or-bare once, not a fresh coin flip on
+	   every render. */
+	const ALLOWED_ACCESSORIES = { "none": true, "headband": true, "headband-high": true };
 	const ACCESSORY_SWAP = ["none", "none", "headband", "headband-high"];
 
 	/* The face as it should be DRAWN: the player's own features, in his
@@ -116,7 +119,7 @@
 			},
 			teamColors: kitFor(team),
 		});
-		if (base.accessories && WRONG_SPORT[base.accessories.id]) {
+		if (!base.accessories || !ALLOWED_ACCESSORIES[base.accessories.id]) {
 			out.accessories = {
 				id: ACCESSORY_SWAP[hashOf(key + "|acc") % ACCESSORY_SWAP.length],
 			};

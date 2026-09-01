@@ -440,7 +440,10 @@ A player without one gets a face generated deterministically from his key, so
 it survives rerolls and reloads. Faces are drawn in the player's own
 programme's kit — teammates match, schools differ — and always in a
 basketball jersey: facesjs draws from every sport it knows, so left alone a
-third of the class turned up in baseball and hockey shirts.
+third of the class turned up in baseball and hockey shirts. No hats: the
+"accessories" range is caps, headbands, eye black, a Santa hat and a
+football facemask, and only a headband or nothing survives — a hat becomes
+a house style the moment enough of the class is wearing one.
 
 ## Universe mode
 
