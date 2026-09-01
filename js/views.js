@@ -3022,9 +3022,7 @@
 			actions.appendChild(gl);
 		}
 		box.appendChild(actions);
-		if (global.Faces && global.Faces.render) {
-			global.Faces.render(face, p, 120);
-		}
+		if (global.Faces) global.Faces.render(face, p);
 		return box;
 	}
 

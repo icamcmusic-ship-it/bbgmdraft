@@ -432,9 +432,15 @@ path, trajectory, scouting note, and an edit button. Team pages gained NET,
 quadrant records and the AP rank history. Back/forward work: player and team
 pages ride on `pushState`. Portraits render with **facesjs** — the same
 library BBGM uses, vendored as `js/vendor/facesjs.js` so the no-build-step,
-open-off-the-disk property survives. A file's own `face` blob renders as-is;
-a player without one gets a face generated deterministically from his key, so
-it survives rerolls and reloads.
+open-off-the-disk property survives. A file's own `face` blob renders as-is
+when it is complete (a partial or legacy blob falls back to a generated face
+rather than drawing a portrait with no eyes in it), and the stored blob is
+never mutated, so a face round-trips into the export exactly as it arrived.
+A player without one gets a face generated deterministically from his key, so
+it survives rerolls and reloads. Faces are drawn in the player's own
+programme's kit — teammates match, schools differ — and always in a
+basketball jersey: facesjs draws from every sport it knows, so left alone a
+third of the class turned up in baseball and hockey shirts.
 
 ## Universe mode
 
