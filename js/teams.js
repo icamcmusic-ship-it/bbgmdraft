@@ -130,8 +130,18 @@
 		const endu = starReturner
 			? clamp(rng.normal(0.62 - 0.015 * i, 0.08), 0.30, 0.95)
 			: clamp(rng.normal(0.52 - 0.02 * i, 0.10), 0.15, 0.95);
+		/* A real name and a class year. Star returners in particular used to
+		   win awards as "Duke returner 2" — a rate, not a person — which made
+		   the awards page read like a spreadsheet. Every rotation filler gets
+		   a name; the award model shows it when one of them beats the class
+		   to a trophy. */
+		const displayName = rng.pick(PLAYER_FIRST) + " " + rng.pick(PLAYER_LAST);
+		const year = starReturner
+			? rng.pick(["Junior", "Senior", "Senior", "Graduate"])
+			: rng.pick(["Sophomore", "Junior", "Junior", "Senior", "Senior"]);
 		return {
-			filler: true, talent, name: "roster" + i,
+			filler: true, talent, name: displayName, slot: "roster" + i,
+			classYear: year,
 			endurance: endu,
 			starReturner,
 		};
@@ -254,6 +264,22 @@
 	   style roll, `dev` moves how much a young roster improves over the season,
 	   and `tenure` and `hot` feed Coach of the Year. Drawn from the program's
 	   own RNG child, so a given program gets a stable coach for a given seed. */
+	/* Names for the synthetic returning players. Distinct from the coach
+	   pools so a roster does not read like the staff directory. */
+	const PLAYER_FIRST = [
+		"Jalen", "Marcus", "Tyrese", "DeShawn", "Caleb", "Jordan", "Malik",
+		"Trey", "Isaiah", "Xavier", "Devin", "Cam", "Andre", "Darius",
+		"Kobe", "Zion", "Jaylen", "Micah", "Elijah", "Noah", "Grant",
+		"Tucker", "Reed", "Cole", "Bryce", "Wes", "Donte", "Rasheed",
+	];
+	const PLAYER_LAST = [
+		"Washington", "Carter", "Brooks", "Jenkins", "Hayes", "Porter",
+		"Bell", "Rivers", "Sims", "Whitfield", "Dillard", "McCray",
+		"Holloway", "Battle", "Vaughn", "Kessler", "Okafor", "Ramirez",
+		"Thompson", "Greer", "Lofton", "Pemberton", "Sanders", "Diallo",
+		"Barnes", "Hendricks", "Mosley", "Turner",
+	];
+
 	const COACH_FIRST = [
 		"Ray", "Dan", "Marcus", "Tom", "Bruce", "Leon", "Chris", "Pat", "Ed",
 		"Kevin", "Andre", "Mike", "Steve", "Wes", "Hal", "Dennis", "Craig",
@@ -393,7 +419,16 @@
 	const MIN_CONF_MEMBERS = 7;
 	function realign(rng, cfg) {
 		const confOf = {};
-		for (const name of C.names) confOf[name] = C.conferenceOf(name) || "Independent";
+		/* Universe carry-over: realignment has MEMORY when a previous season's
+		   map is carried in. The baseline is last season's membership rather
+		   than the static table, so two consecutive seasons can never move the
+		   same school in opposite directions — this season's raid happens on
+		   top of last season's map. */
+		const carried = cfg && cfg.carryOver && cfg.carryOver.confOf;
+		for (const name of C.names) {
+			confOf[name] = (carried && carried[name]) ||
+				C.conferenceOf(name) || "Independent";
+		}
 		const rate = clamp(
 			cfg && cfg.realignmentRate !== undefined ? cfg.realignmentRate : 0.35, 0, 1);
 		const moves = [];
@@ -448,9 +483,18 @@
 		const map = realign(rng.child("realign"), cfg);
 		const confAt = (n) => map.confOf[n] || C.conferenceOf(n) || "Independent";
 		teams.__realignment = map.moves;
+		const carry = (cfg && cfg.carryOver) || null;
 		for (const name of C.names.concat(extra)) {
 			const trng = rng.child("prog:" + name);
-			const level = programLevel(name, trng, confStrength[confAt(name)]);
+			let level = programLevel(name, trng, confStrength[confAt(name)]);
+			/* Universe carry-over: strength drifts CONTINUOUSLY from last
+			   season instead of being redrawn from the static prior — a
+			   programme that broke out stays partly broken out, one that fell
+			   apart climbs back rather than teleporting. The fresh draw keeps
+			   the season honest; the blend keeps it continuous. */
+			if (carry && carry.levels && Number.isFinite(carry.levels[name])) {
+				level = clamp(0.62 * level + 0.38 * carry.levels[name], 12, 95);
+			}
 			const prospects = prospectsBySchool[name] || [];
 			const members = prospects.map((p) => ({
 				filler: false,
@@ -463,7 +507,38 @@
 			capFillers(fillers, members);
 			for (const f of fillers) members.push(f);
 
-			const coach = makeCoach(trng.child("coach"), level, C.prestige(name));
+			let coach;
+			const kept = carry && carry.coaches && carry.coaches[name];
+			if (kept && !kept.fired) {
+				/* The same man, one year on. His philosophy, style and name
+				   persist — that is what makes him a coach rather than a roll —
+				   while tenure advances and the situation is re-read from how
+				   the programme sits under him now. */
+				coach = Object.assign({}, kept.coach);
+				coach.tenure = (coach.tenure || 1) + 1;
+				const roll = trng.child("coach").random();
+				coach.situation = coach.tenure >= 16 && roll < 0.55 ? "fixture"
+					: level < C.prestige(name) - 12 && roll < 0.40 ? "hot seat"
+					: "settled";
+				const sit = SITUATION_BY_NAME[coach.situation];
+				coach.situationLabel = sit.label;
+				coach.levelAdj = sit.levelAdj;
+				coach.formAdj = sit.form;
+				coach.carried = true;
+			} else {
+				coach = makeCoach(trng.child("coach"), level, C.prestige(name));
+				if (kept && kept.fired) {
+					// The replacement hire: always a first-year man, and the
+					// team page can say whom he replaced.
+					coach.tenure = 1;
+					coach.situation = "first year";
+					const sit = SITUATION_BY_NAME["first year"];
+					coach.situationLabel = sit.label;
+					coach.levelAdj = sit.levelAdj;
+					coach.formAdj = sit.form;
+					coach.replaced = kept.coach ? kept.coach.name : null;
+				}
+			}
 			/* A first-year rebuild is not the team the previous staff left
 			   behind, and an interim's is less of one still. */
 			const coachedLevel = clamp(level + (coach.levelAdj || 0), 5, 99);
@@ -477,9 +552,10 @@
 				// The style IS the coach; it used to be an independent roll.
 				style: coach.style,
 				conf: confAt(name),
-				// Where this programme played last season, when it moved.
-				movedFrom: map.confOf[name] && C.conferenceOf(name) !== map.confOf[name]
-					? C.conferenceOf(name) : null,
+				// Where this programme played last season, when it moved
+				// THIS season (a carried move from an earlier universe season
+				// is simply where it plays now).
+				movedFrom: (map.moves.filter((m) => m.school === name)[0] || {}).from || null,
 				prestige: C.prestige(name),
 				level: coachedLevel,
 				members,
@@ -687,9 +763,10 @@
 		if (won) { t.w++; if (conference) t.cw++; } else { t.l++; if (conference) t.cl++; }
 		t.sos += opp.rating;
 		t.games++;
-		// Team ratings run mean ~38, p95 ~61 on this scale, so "quality win"
-		// means beating a clearly-above-average opponent, not a near-unicorn.
-		if (won && opp.rating > 55) t.quadWins++;
+		// quadWins is computed after the season from a PERCENTILE of the
+		// season's own ratings (see simulateRegularSeason) — a hardcoded
+		// "opp.rating > 55" was an absolute answer to a percentile question,
+		// on a scale that midMajorLift and bluebloodDownYears both shift.
 		// Kept so a prospect's best night can name a real opponent and date.
 		t.log.push({
 			opp: opp.name, won, conference: !!conference,
@@ -748,10 +825,20 @@
 	   vector is empty, which it always can be: the total need is even (each
 	   game consumes two), so the only failure mode is a single team left
 	   needing games, which the odd-total guard below rules out. */
-	function pairUp(rng, pool, target, filterFn, onGame) {
+	function pairUp(rng, pool, target, filterFn, onGame, maxMeet) {
 		if (pool.length < 2) return;
 		const need = new Map();
 		for (const t of pool) need.set(t, target);
+		/* How often the same pair may meet. pairUp guaranteed every team the
+		   right NUMBER of games and nothing about their spread, so the same
+		   two teams could meet four times while another pair never met — and
+		   the conference standings were decided over a schedule that was not
+		   round-robin-shaped. The cap is a preference, not a hard rule: when
+		   nothing else is available the schedule still completes. */
+		const meetCap = maxMeet || Infinity;
+		const met = new Map();
+		const pairKey = (a, b) => (a.name < b.name ? a.name + "|" + b.name : b.name + "|" + a.name);
+		const meetings = (a, b) => met.get(pairKey(a, b)) || 0;
 		// An odd (teams x target) product cannot be split into pairs; drop one
 		// game from a random team so the rest come out exact.
 		if ((pool.length * target) % 2 === 1) {
@@ -782,10 +869,18 @@
 			for (let tries = 0; tries < 14 && !b; tries++) {
 				const cand = rest[Math.floor(rng.random() * Math.min(rest.length, 24))];
 				const roll = rng.random();
+				if (cand && meetings(a, cand) >= meetCap) continue;
 				if (cand && (!filterFn || filterFn(a, cand, roll))) b = cand;
 			}
-			if (!b) b = rest[Math.floor(rng.random() * rest.length)];
+			if (!b) {
+				// First anyone still under the meeting cap, then anyone at all
+				// — a complete schedule beats a perfectly spread one.
+				const under = rest.filter((t) => meetings(a, t) < meetCap);
+				const from = under.length ? under : rest;
+				b = from[Math.floor(rng.random() * from.length)];
+			}
 			onGame(a, b);
+			met.set(pairKey(a, b), meetings(a, b) + 1);
 			need.set(a, need.get(a) - 1);
 			need.set(b, need.get(b) - 1);
 		}
@@ -976,26 +1071,26 @@
 
 		for (const conf of Object.keys(confPools)) {
 			const pool = confPools[conf];
+			// Cap the same conference pair at two meetings, like a real
+			// double-round-robin slate at this league size.
 			pairUp(rng, pool, CONF_GAMES, null, (A, B) => {
 				play(A, B, rng.random() < 0.5 ? 1 : -1, true);
-			});
+			}, 2);
 		}
 
 		// Non-conference: teams mostly schedule near their own level, and the
 		// bigger program usually hosts.
 		const all = names.map((n) => teams[n]);
 		// A team short of a conference slate (a one-team synthetic conference)
-		// makes up the difference in non-conference play, so everyone still
-		// finishes on the same number of games.
-		const shortfall = new Map();
-		for (const t of all) shortfall.set(t, CONF_GAMES + NON_CONF_GAMES - t.games);
-		const nonConfTarget = NON_CONF_GAMES;
-		pairUp(rng, all, nonConfTarget,
+		// makes up the difference in the top-up loop below, which reads the
+		// live t.games directly. (An earlier draft built a shortfall map here
+		// that nothing ever read.)
+		pairUp(rng, all, NON_CONF_GAMES,
 			(a, b, roll) => a.conf !== b.conf &&
 				roll < Math.exp(-Math.abs(a.rating - b.rating) / 24) + 0.06,
 			(A, B) => {
 				play(A, B, A.prestige > B.prestige ? 1 : -1, false);
-			});
+			}, 1);
 
 		// Anyone still short (a lone Independent, or the odd-total victim)
 		// tops up against the other short teams.
@@ -1008,16 +1103,29 @@
 			play(short[0], short[1], 0, false);
 		}
 
+		/* "Quality win" as a percentile of THIS season's ratings: beating a
+		   top-20% opponent. Ratings shift with midMajorLift and blueblood
+		   down years, so an absolute threshold moved the meaning of the term
+		   every time either slider did. */
+		const ratingsSorted = names.map((n) => teams[n].rating).sort((a, b) => a - b);
+		const qualityBar = ratingsSorted[Math.floor(ratingsSorted.length * 0.8)] || 55;
 		for (const name of names) {
 			const t = teams[name];
+			t.quadWins = t.log.reduce(
+				(a, g) => a + (g.won && g.quality > qualityBar ? 1 : 0), 0);
 			t.sosAvg = t.games ? t.sos / t.games : 50;
 			t.pct = t.games ? t.w / t.games : 0;
 			// Frozen here: w/l keep growing through the postseason now, but a
-			// selection resume is a regular-season resume.
+			// selection resume is a regular-season resume. regSosAvg for the
+			// same reason: finalizeSchedule recomputes sosAvg over the full
+			// log including March, so without the snapshot the SOS on the team
+			// page silently stopped being the SOS the committee used — and the
+			// two differed most for exactly the teams that went deepest.
 			t.regW = t.w;
 			t.regL = t.l;
 			t.regGames = t.games;
 			t.regPct = t.pct;
+			t.regSosAvg = t.sosAvg;
 			// Resume score blends record, schedule and raw quality.
 			t.resume = 100 * t.pct * 0.55 + (t.sosAvg - 45) * 0.9 + t.rating * 0.45 + t.quadWins * 0.9;
 		}

@@ -214,7 +214,12 @@
 				const def = fieldDefenseScore(stats);
 				field.push({
 					filler: true,
-					name: t.name + " returner " + (fp.rotationIndex + 1),
+					// His own name, when the roster gave him one (it does now);
+					// the slot label survives as a fallback for old callers.
+					name: fp.name || (t.name + " returner " + (fp.rotationIndex + 1)),
+					school: t.name,
+					classYear: fp.classYear || null,
+					starReturner: fp.starReturner || null,
 					conf: t.conf,
 					team: t,
 					stats,
@@ -619,8 +624,25 @@
 		/* --- national honours ---------------------------------------------- */
 		const ranked = ncaa.slice().sort((a, b) => b.scoreTotal - a.scoreTotal);
 		const nation = everyone.slice().sort((a, b) => b.scoreTotal - a.scoreTotal);
+		/* Honours that went to the field rather than the class. A returning
+		   player who beats every prospect to a trophy used to take the slot
+		   and vanish — the award was simply not handed out. He has a name
+		   now, so it is a result: "the class lost the POY race to a senior
+		   at Houston" is a fact about the class. */
+		const fieldHonours = [];
 		const giveNat = (x, award, unshift) => {
-			if (x.filler || !x.awards) return;
+			if (x.filler || !x.awards) {
+				if (x.filler && x.name) {
+					fieldHonours.push({
+						award,
+						name: x.name,
+						school: x.school || (x.team ? x.team.name : null),
+						classYear: x.classYear || null,
+						starReturner: x.starReturner || null,
+					});
+				}
+				return;
+			}
 			if (x.stats && x.stats.mpg < 20) return;
 			if (unshift) x.awards.unshift(award);
 			else x.awards.push(award);
@@ -650,9 +672,20 @@
 		for (const award of NATIONAL_POY) {
 			const vrng = rng.child("poy|" + award.name);
 			const lean = (award.resume || 0) * mood;
-			const ballot = (x) => x.scoreTotal + lean * (x.scoreResume || 0) +
-				vrng.normal(0, award.sd * noiseScale);
-			const winner = top.slice().sort((a, b) => ballot(b) - ballot(a))[0];
+			/* One noise draw PER CANDIDATE, stored, then sorted on the stored
+			   key. The draw used to live inside the comparator, so every
+			   pairwise comparison redrew the voter noise: the "ordering" was
+			   not transitive, the number of RNG draws consumed depended on the
+			   sort algorithm's internals, and the realised variance was not
+			   the authored sd — at high noise the winner was a shuffle, not a
+			   sampled electorate. */
+			const ballots = top.map((x) => ({
+				x,
+				score: x.scoreTotal + lean * (x.scoreResume || 0) +
+					vrng.normal(0, award.sd * noiseScale),
+			}));
+			ballots.sort((a, b) => b.score - a.score);
+			const winner = ballots.length ? ballots[0].x : null;
 			if (!winner) continue;
 			giveNat(winner, award.name);
 			poyWins.set(winner, (poyWins.get(winner) || 0) + 1);
@@ -684,11 +717,25 @@
 		const defTop = natDef.slice(0, Math.max(5, slots(6)));
 		for (const award of NATIONAL_DPOY) {
 			const vrng = rng.child("dpoy|" + award.name);
-			const winner = defTop.slice()
-				.sort((a, b) => (b.scoreDefTotal + vrng.normal(0, award.sd)) -
-					(a.scoreDefTotal + vrng.normal(0, award.sd)))[0];
+			// Same fix as the POY block: draw once per candidate, sort on the
+			// stored score, never draw inside a comparator.
+			const ballots = defTop.map((x) => ({
+				x, score: x.scoreDefTotal + vrng.normal(0, award.sd),
+			}));
+			ballots.sort((a, b) => b.score - a.score);
+			const winner = ballots.length ? ballots[0].x : null;
 			if (!winner) continue;
-			if (winner.filler || !winner.awards) continue;
+			if (winner.filler || !winner.awards) {
+				if (winner.filler && winner.name) {
+					fieldHonours.push({
+						award: award.name, name: winner.name,
+						school: winner.school || (winner.team ? winner.team.name : null),
+						classYear: winner.classYear || null,
+						starReturner: winner.starReturner || null,
+					});
+				}
+				continue;
+			}
 			if (!GATES.defensive(winner)) continue;
 			winner.awards.push(award.name);
 		}
@@ -719,16 +766,23 @@
 		   further down), and they roughly triple the number of distinguishable
 		   outcomes without adding a single winner. Named after the trophy, and
 		   never given to somebody who already won the thing itself. */
-		const finalist = (list, from, to, label) => {
+		/* `wonPrefix` names the trophy the tier belongs to, for the "never
+		   given to somebody who already won the thing itself" check. It used
+		   to be derived as label.split(" finalist")[0], which for "Wooden
+		   Award Late Season Top 20" is the whole string — a prefix nobody
+		   holds — so the Wooden winner also collected the Top 20, unlike
+		   every other finalist tier. */
+		const finalist = (list, from, to, label, wonPrefix) => {
+			const prefix = wonPrefix || label.split(" finalist")[0];
 			for (const x of list.slice(from, to)) {
 				if (x.filler || !x.awards) continue;
 				if (x.stats && x.stats.mpg < 20) continue;
-				if (x.awards.some((a) => a.indexOf(label.split(" finalist")[0]) === 0)) continue;
+				if (x.awards.some((a) => a.indexOf(prefix) === 0)) continue;
 				x.awards.push(label);
 			}
 		};
 		finalist(nation, 0, slots(4), "Naismith Trophy finalist");
-		finalist(nation, 0, slots(20), "Wooden Award Late Season Top 20");
+		finalist(nation, 0, slots(20), "Wooden Award Late Season Top 20", "John R. Wooden Award");
 		finalist(nation, slots(15), slots(30), "Associated Press honourable mention");
 		finalist(natDef.filter((x) => GATES.defensive(x)), 0, slots(4),
 			"Naismith Defensive Player of the Year finalist");
@@ -770,7 +824,11 @@
 		const mop = mopAll[0] && mopAll[0].p ? mopAll[0].p : null;
 		if (mop) mop.awards.push("Final Four Most Outstanding Player");
 		mopAll.slice(0, 5).forEach((x) => {
-			if (x.p && x.p !== mop) x.p.awards.push("NCAA All-Tournament Team");
+			// Same minutes gate the All-Region and conference tournament
+			// teams apply; this one applied none.
+			if (x.p && x.p !== mop && x.p.stats && x.p.stats.mpg >= 18) {
+				x.p.awards.push("NCAA All-Tournament Team");
+			}
 		});
 
 		/* All-Region teams: five players per regional, drawn from the two teams
@@ -828,12 +886,15 @@
 			if (!cands.length) continue;
 			cands.sort((a, b) => b.score - a.score);
 			const lb = label(conf);
-			cands.slice(0, 5).forEach((x, i) => {
-				if (!x.p || !x.p.stats || x.p.stats.mpg < 18) return;
-				x.p.awards.push(i === 0
-					? lb + " Tournament MVP"
-					: "All-" + lb + " Tournament Team");
-			});
+			// Filter for eligibility FIRST, so a gated-out top candidate does
+			// not silently vacate the MVP slot while the rest of the team is
+			// still handed out.
+			cands.filter((x) => x.p && x.p.stats && x.p.stats.mpg >= 18)
+				.slice(0, 5).forEach((x, i) => {
+					x.p.awards.push(i === 0
+						? lb + " Tournament MVP"
+						: "All-" + lb + " Tournament Team");
+				});
 		}
 
 		// NIT all-tournament team.
@@ -844,10 +905,13 @@
 			const cands = ncaa.filter((p) => nitTeams.has(p.newCollege))
 				.map((p) => ({ p, score: p.scoreProd + nrng.normal(0, 1.2) }))
 				.sort((a, b) => b.score - a.score);
-			cands.slice(0, 5).forEach((x, i) => {
-				if (!x.p.stats || x.p.stats.mpg < 18) return;
-				x.p.awards.push(i === 0 ? "NIT Most Valuable Player" : "NIT All-Tournament Team");
-			});
+			// Eligibility first, same as the conference tournaments: the old
+			// index-based gate could vacate the MVP while still naming four
+			// All-Tournament players.
+			cands.filter((x) => x.p.stats && x.p.stats.mpg >= 18)
+				.slice(0, 5).forEach((x, i) => {
+					x.p.awards.push(i === 0 ? "NIT Most Valuable Player" : "NIT All-Tournament Team");
+				});
 		}
 
 		/* --- pro / DII league honours --------------------------------------- */
@@ -924,6 +988,7 @@
 			if (p.awards && p.awards.length) p.awards = sortAwards(p.awards);
 		}
 
+		teams.__fieldHonours = fieldHonours;
 		return ranked;
 	}
 

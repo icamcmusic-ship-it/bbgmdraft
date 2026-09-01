@@ -387,6 +387,73 @@ locked prospects and the settings on their own.
 
 ---
 
+## Rankings, selection and the AP poll
+
+The postseason no longer runs on a scalar `resume` that read the sim's hidden
+true strength. `js/rankings.js` derives everything from **observable results**:
+
+- **Team value** — per-game credit weighted by opponent strength and location
+  (a road win beats a home win; a home loss costs more), where opponent
+  strength is itself derived from results by fixed-point iteration, not read
+  off the rating.
+- **Adjusted efficiency** — per-game margin, capped at ±10 like the real NET
+  so blowouts don't pay, adjusted for opponent quality and venue by the same
+  iteration.
+- **NET rank** — a blend of the two, over all 368 programmes.
+- **Quadrant records** — the standard Q1–Q4 map (home 1–30 / neutral 1–50 /
+  away 1–75 is a Q1 game, and so on). With 368 programmes the real ~360-team
+  thresholds transfer directly.
+- **The committee** — selection and seeding score NET rank, Q1/Q2 wins, bad
+  losses, road record, the last twelve games and head-to-head among the
+  bubble. `CONFERENCES[x].bids` finally has a job: a sanity expectation the
+  selection view reports against ("the SEC got 11 in"), never a quota.
+- **The AP poll** — voted weekly by sixty persistent voters, each with a bias
+  vector over record, schedule, quality wins, bad losses and an eye-test
+  prior, submitting 25-deep ballots aggregated by the real points system.
+  Ballots anchor on the voter's previous week, so a team doesn't crater after
+  one loss. The preseason ballot runs on reputation; you get first-place-vote
+  splits, "others receiving votes", a week-by-week table, movement arrows,
+  and each team's peak/preseason/final rank on its page.
+
+## News
+
+The News tab replaces the four ·-joined event strips. `js/news.js` turns the
+material the sim already produces — mid-season events, poll movement, Selection
+Sunday, bracket upsets, the title game, awards, class anomalies, draft-day
+events, realignment — into dated articles grouped by month, with headline
+variants drawn deterministically from the class's own seed and **every player
+and team mention a live link**.
+
+## Player pages, links and faces
+
+Every player name across the season views is a link to a real player page —
+stats, shooting, career (the simulated prior seasons), honours, recruiting
+path, trajectory, scouting note, and an edit button. Team pages gained NET,
+quadrant records and the AP rank history. Back/forward work: player and team
+pages ride on `pushState`. Portraits render with **facesjs** — the same
+library BBGM uses, vendored as `js/vendor/facesjs.js` so the no-build-step,
+open-off-the-disk property survives. A file's own `face` blob renders as-is;
+a player without one gets a face generated deterministically from his key, so
+it survives rerolls and reloads.
+
+## Universe mode
+
+Load several class files and run them as **one continuous world**, oldest
+season first. Each season hands the next: conference membership (realignment
+has memory — consecutive seasons can never move the same school in opposite
+directions), programme strength (a breakout persists instead of being
+redrawn; year-to-year level correlation ≈ 0.9), coaches (the same named man,
+one year older, unless he was fired — then a named first-year hire replaces
+him), the build-pool memory, and an **alumni index** of the names each season
+sends forward. The Universe tab shows per-file diagnostics (a bad file is
+rejected by name; the rest run), the timeline (champion, POY, No. 1 pick,
+flavour, realignment, coaching changes per season), continuity threads
+(repeat champions, programmes with multiple No. 1 picks), and the alumni
+index. The export stores seeds and file fingerprints, not simulated output —
+with the same files loaded, importing it replays the identical world.
+
+---
+
 ## Performance
 
 The pipeline is staged. Each phase declares which settings it reads, so a change
@@ -590,11 +657,14 @@ tools/golden.json   recorded output hashes
   and 9.4 points as a freshman against 31.3 and 15.7 in the draft year. Nothing
   ranks on them beyond the "was better as a sophomore" note line, and
   `priorSeasons: "reconstruct"` restores the old backward-scaled line.
-* Some season mechanics are deliberately shallow: the AP poll is computed once
-  rather than weekly, coaches have philosophies and situations but no history,
-  star returners are a rate rather than named people, and conference
-  realignment has no memory — two consecutive runs can move the same school in
-  opposite directions. Each is a candidate for depth, none is a bug.
+* Depth that used to be missing and now exists: the AP poll is voted weekly by
+  a persistent 60-member electorate; selection runs a committee model over
+  observables (NET, quadrants, road record, stretch form) instead of peeking at
+  the hidden team rating; star returners have names and take trophies under
+  them; and in Universe mode coaches persist (a fired one is replaced by a
+  named first-year hire), programme strength drifts continuously and
+  realignment keeps its memory. In a single-class run, coaches and the map
+  still reset between rerolls by design — a reroll is a different world.
 * The recruiting ranking, transfer history and redshirt status are biography
   generated to fit the class. They shape the note and the award categories a player
   is eligible for; they are not read from the file, because BBGM does not store them.
