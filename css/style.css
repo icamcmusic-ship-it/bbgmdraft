@@ -28,6 +28,41 @@
 	--text: #e6edf3; --dim: #9aa7b4; --accent: #4da3ff; --accent-2: #ffb454;
 	--good: #57c78a; --bad: #f2686a;
 }
+
+/* ---- named themes ---------------------------------------------------------
+   Colour-only palettes pulled from Color Type Pairings.dc.html. Each is a
+   full override of the same tokens the light/dark palettes above set, so
+   nothing downstream needs to know a given theme exists. */
+:root[data-theme="ledger-light"] {
+	--bg: #f2efe4; --panel: #fffdf8; --panel-2: #ded9e2; --line: #c0b9dd;
+	--text: #211f2b; --dim: #6b6878; --accent: #3a5d8f; --accent-2: #2f7877;
+	--good: #1a7f4b; --bad: #c0323a;
+}
+:root[data-theme="twilight-court"] {
+	--bg: #17151f; --panel: #1e1b28; --panel-2: #272332; --line: #383343;
+	--text: #ded9e2; --dim: #a79fc0; --accent: #80a1d4; --accent-2: #75c9c8;
+	--good: #75c9c8; --bad: #e89197;
+}
+:root[data-theme="draft-board"] {
+	--bg: #efeadb; --panel: #fffefb; --panel-2: #ded9e2; --line: #c0b9dd;
+	--text: #211f2b; --dim: #5a5768; --accent: #4a6da3; --accent-2: #2f7877;
+	--good: #1a7f4b; --bad: #c0323a;
+}
+:root[data-theme="fieldhouse"] {
+	--bg: #efe8d5; --panel: #faf5ea; --panel-2: #d7be82; --line: #755c1b;
+	--text: #400406; --dim: #5c4b2a; --accent: #7a4419; --accent-2: #755c1b;
+	--good: #515a47; --bad: #a3341f;
+}
+:root[data-theme="scout-report"] {
+	--bg: #eef3f8; --panel: #ffffff; --panel-2: #dbe4ee; --line: #81a4cd;
+	--text: #0a2d52; --dim: #4c6784; --accent: #054a91; --accent-2: #f17300;
+	--good: #1a7f4b; --bad: #c0323a;
+}
+:root[data-theme="night-game"] {
+	--bg: #171123; --panel: #221631; --panel-2: #2c1c3d; --line: #414770;
+	--text: #f4efe8; --dim: #9a93b0; --accent: #5b85aa; --accent-2: #f46036;
+	--good: #57c78a; --bad: #e0574a;
+}
 * { box-sizing: border-box; }
 body {
 	margin: 0;
@@ -130,10 +165,18 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 	:root:not([data-theme="light"]) .game .w { background: rgba(87,199,138,.10); }
 	:root:not([data-theme="light"]) .game.upset .w { background: rgba(255,180,84,.13); }
 }
-:root[data-theme="dark"] .tag.arch { border-color: #3b5b7d; color: #8fc0f0; }
-:root[data-theme="dark"] .tag.pro { border-color: #6b5230; color: var(--accent-2); }
-:root[data-theme="dark"] .game .w { background: rgba(87,199,138,.10); }
-:root[data-theme="dark"] .game.upset .w { background: rgba(255,180,84,.13); }
+:root[data-theme="dark"] .tag.arch,
+:root[data-theme="twilight-court"] .tag.arch,
+:root[data-theme="night-game"] .tag.arch { border-color: #3b5b7d; color: #8fc0f0; }
+:root[data-theme="dark"] .tag.pro,
+:root[data-theme="twilight-court"] .tag.pro,
+:root[data-theme="night-game"] .tag.pro { border-color: #6b5230; color: var(--accent-2); }
+:root[data-theme="dark"] .game .w,
+:root[data-theme="twilight-court"] .game .w,
+:root[data-theme="night-game"] .game .w { background: rgba(87,199,138,.10); }
+:root[data-theme="dark"] .game.upset .w,
+:root[data-theme="twilight-court"] .game.upset .w,
+:root[data-theme="night-game"] .game.upset .w { background: rgba(255,180,84,.13); }
 .up { color: var(--good); } .down { color: var(--bad); }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
 .card { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--panel); }
@@ -568,6 +611,12 @@ td.sparkcell { padding: 2px 6px; }
 	:root:not([data-theme="light"]) { --spark: #4da3ff; --spark-base: #2a323d; }
 }
 :root[data-theme="dark"] { --spark: #4da3ff; --spark-base: #2a323d; }
+:root[data-theme="ledger-light"] { --spark: #3a5d8f; --spark-base: #ded9e2; }
+:root[data-theme="twilight-court"] { --spark: #80a1d4; --spark-base: #383343; }
+:root[data-theme="draft-board"] { --spark: #4a6da3; --spark-base: #ded9e2; }
+:root[data-theme="fieldhouse"] { --spark: #7a4419; --spark-base: #d7be82; }
+:root[data-theme="scout-report"] { --spark: #054a91; --spark-base: #dbe4ee; }
+:root[data-theme="night-game"] { --spark: #5b85aa; --spark-base: #414770; }
 .spark .sparkline {
 	fill: none;
 	stroke: var(--spark);

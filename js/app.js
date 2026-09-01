@@ -55,13 +55,21 @@
 		team: null,
 		standingsConf: null,
 		compactBracket: false,
-		theme: "system",
+		theme: "system", // see THEMES below
 		logPlayer: null,
 		pinned: null,
 		undo: [],
 		lastSeed: null,
 	};
 	global.App = { state };
+
+	// "system" follows the OS; the rest set data-theme and are defined in
+	// css/style.css. Keep in sync with the <option> values in index.html.
+	const THEMES = [
+		"system", "light", "dark",
+		"ledger-light", "draft-board", "fieldhouse", "scout-report",
+		"twilight-court", "night-game",
+	];
 
 	/* ------------------------------------------------------------ persistence */
 
@@ -225,7 +233,7 @@
 		if (validString(saved.cardView, ["auto", "on", "off"])) state.cardView = saved.cardView;
 		state.cardAll = !!saved.cardAll;
 		state.compactBracket = !!saved.compactBracket;
-		if (validString(saved.theme, ["system", "light", "dark"])) state.theme = saved.theme;
+		if (validString(saved.theme, THEMES)) state.theme = saved.theme;
 		const sort = validSortStack(saved.sort);
 		if (sort) state.sort = sort;
 		if (saved.pinned && typeof saved.pinned === "object") {
@@ -3438,9 +3446,7 @@
 		const root = document.documentElement;
 		if (state.theme === "system") root.removeAttribute("data-theme");
 		else root.setAttribute("data-theme", state.theme);
-		$("btnTheme").textContent = state.theme === "dark" ? "☾"
-			: state.theme === "light" ? "☀" : "◐";
-		$("btnTheme").title = "Theme: " + state.theme + " (click to change)";
+		$("themeSelect").value = state.theme;
 	}
 
 	/* ----------------------------------------------------------------- init */
@@ -3544,8 +3550,9 @@
 		}, 180);
 	});
 
-	$("btnTheme").addEventListener("click", () => {
-		state.theme = state.theme === "system" ? "dark" : state.theme === "dark" ? "light" : "system";
+	$("themeSelect").addEventListener("change", (e) => {
+		if (!THEMES.includes(e.target.value)) return;
+		state.theme = e.target.value;
 		applyTheme();
 		persist();
 	});
