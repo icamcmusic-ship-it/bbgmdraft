@@ -46,7 +46,21 @@
 			title="CSV, season data, locked prospects and the settings JSON">More ▾</button>
 		<button id="btnExportAll" disabled hidden>Export all</button>
 	</div>
-	<button id="btnTheme" title="Switch between light and dark" aria-label="Switch colour theme">◐</button>
+	<select id="themeSelect" aria-label="Colour theme" title="Colour theme">
+		<option value="system">◐ Auto</option>
+		<option value="light">☀ Light</option>
+		<option value="dark">☾ Dark</option>
+		<optgroup label="Light themes">
+			<option value="ledger-light">Ledger Light</option>
+			<option value="draft-board">Draft Board</option>
+			<option value="fieldhouse">Fieldhouse</option>
+			<option value="scout-report">Scout Report</option>
+		</optgroup>
+		<optgroup label="Dark themes">
+			<option value="twilight-court">Twilight Court</option>
+			<option value="night-game">Night Game</option>
+		</optgroup>
+	</select>
 </header>
 
 <div class="layout">
