@@ -34,7 +34,7 @@ build is re-solved against **BBGM's own `ovr` formula** so the finished player c
 out at exactly the target overall. Specialising a player makes him lopsided, not
 better.
 
-Rarity weights span 0.34 to 3.6, so a Combo Guard is about ten times more likely
+Rarity weights span 0.45 to 3.6, so a Combo Guard is about eight times more likely
 than a Point Center. The realised spread is wider than the authored one — pool
 membership is a draw without replacement, which amplifies any weight difference —
 but two fixes keep it a gradient rather than a cliff: the effective weight is
@@ -49,6 +49,21 @@ one-and-done heavy, a transfer-portal year, …) that tilts which builds enter t
 pool and, for some flavours, bends the class itself: how old it is, how good the
 top of it is, how it got here. A flavour only moves settings you have left alone.
 
+The 121 names are 121 shapes. Measured by cosine similarity over the offset
+vectors, the table used to hold 96 pairs above 0.85 and sixteen above 0.95 —
+Rim Protector and Shot-Blocking Anchor were the same vector behind two height
+gates — so a seventeen-build pool that looked varied by name still drew several
+members of one cluster, which is what "every class feels the same" is from the
+inside. Every pair above 0.95 was pushed apart on at least one axis that means
+something (an Anchor is verticality and timing with poor conditioning; a Rim
+Protector is mobile and rebounds; a Glass-Eating Center is slow and
+ground-bound where an Undersized Rebounder is quick and springy), and
+`tools/test.js` holds the whole table under 0.93 so it cannot re-converge. The
+nine genuine-centre builds gated at hgt 72 and up used to be crowded out of
+the pool by the thirty bigs gated at 52 — Shot-Blocking Anchor appeared once in
+2,800 players — so a pool now always carries at least three of them, and a
+seven-footer draws a build made for him about 40% of the time.
+
 How much of a team's offence a build is given is **derived, not tabulated**. It
 used to be seventy-two hand-fitted constants, two builds missing entirely
 (Injury-Prone Talent silently scored 1.0 and came out the highest-scoring build
@@ -60,6 +75,28 @@ That is computable straight off the build's own offset vector, plus a
 self-creation term and a small per-tag intent — and `tools/rolefit.js` fits it,
 so adding a build no longer costs a constant. An unknown archetype now throws
 under the test harnesses instead of scoring 1.0.
+
+What the fit is fitted **to** matters as much as the fit. It used to be asked
+to bring every build's scoring residual against the class's own ovr line to
+zero, and it did — and the consequence was that a Score-First Point and a
+Perimeter-Switch Five scored within a couple of points of each other at equal
+rating, usage ran 22-28% across the whole table and the tags a coach reads had
+been fitted to do nothing. Each tag now **declares** its intent in points at
+equal overall (`ROLE_INTENT`: a scorer +1.6, a stopper -1.2, a rebounder -0.9,
+a shooter +0.4), the fit and the harness both measure the residual against
+that declaration, and only the *unintended* part of a build's bias is fitted
+away. Specialisation you cannot see in the box score is a label.
+
+Two more things the composites could not see. BBGM's `drawingFouls` composite
+reads hgt, spd, drb, dnk and oiq, and its `fouling` composite hgt, diq and spd
+— neither reads ins, stre or ft — so a Free-Throw Merchant drew fouls at
+exactly the class rate and a Foul-Prone Enforcer fouled like everyone else. A
+build's own offset vector now feeds a free-throw-rate term (inside scoring and
+strength are rim pressure; a free-throw shooter gets sent there on purpose) and
+a personal-foul term (strength used without feel), centred on the table so the
+class anchor does not move. Measured at specialisation 1.5, the foul-drawing
+builds run about five points of FTr above the rest and the Enforcer a third of
+a foul a game above the class.
 
 Every class is also given about four **forced anomalies**, drawn from
 thirty-two kinds — a five-star bust, an unranked recruit who turns into a
@@ -89,6 +126,26 @@ have won with him.
 Then **every one of the 368 programs** plays the same 31-game schedule, conference
 tournaments, a 68-team national tournament and a 32-team NIT — with real scores,
 overtimes, and teams a few points better in March than in November.
+
+**March is calibrated, not merely plausible.** The bracket used to look right
+(real scores, real upsets, real overtimes) while being systematically more
+chaotic than the real one: measured over forty seasons, a 1 seed beat a 16 seed
+92% of the time against a real 99%, 1 seeds won 23% of titles against a real
+55-65% and filled a fifth of the Final Four against a real two fifths, while an
+8-9 game was the coin flip it should be. The cause was the *top* of the
+strength curve, not the upset slider: the best programme sat about twenty
+rating points above the sixty-fourth against thirteen points of game-to-game
+noise, so "March upsets: 0 = chalk" could not deliver chalk on a gradient that
+shallow. Team strength above the top-64 line is now stretched the way real
+efficiency margins are (the gap between No. 1 and No. 16 is about as large as
+the gap between No. 16 and No. 150), the game noise comes down to the eleven
+points a real game carries, and `tools/validate.js` bands the seed-line win
+rates, the champion's seed and the Final Four's composition — with a top as
+well as a floor, because a curve steep enough for the same school to win every
+year is the opposite failure. Forty classes still produce about 26 different
+champions. The Distributions tab shows the same readings for one class and
+batch mode shows them as a histogram, so the chalkiness of a March is on
+screen rather than only in an audit script.
 
 Every program is simulated, not only the forty with a prospect on them, which is
 what makes the AP poll's ratings real and gives the award model an actual field to
@@ -124,7 +181,15 @@ The stat line carries points, an offensive/defensive rebound split, assists,
 steals, blocks, turnovers, personal fouls, contested shots, deflections, charges
 drawn, a defensive rating, usage and the shooting splits — and it reconciles:
 recomputing points from the attempts and percentages printed beside it returns
-the same PPG.
+the same PPG. It also carries the playmaking and lineup side a modern box score
+has: an **assisted rate** (how much of his scoring came off a teammate's pass —
+the engine already computed a creation term for role purposes and never
+surfaced it), a **transition share**, a per-game **plus/minus** read off the
+margins of the games he actually played and an estimated **on/off**, and a
+**close-game split** (his record and scoring in games decided by five or fewer
+or in overtime). Every prospect has a **hand**, too; about one in nine shoots
+left-handed, it is the first thing a scout writes after the height, and the
+note says so.
 
 **A college role is not an NBA rating.** How much of a team's offence a prospect
 gets is decided by how long he has been in the programme, what kind of player he
@@ -159,7 +224,15 @@ plays 48-minute games at 103 possessions; the EuroLeague plays 40 at 70; a
 19-year-old at Real Madrid is capped at the minutes a 19-year-old at Real Madrid
 actually gets. Each league has a club list, a table, a playoff with named rounds
 (the EuroLeague's ends in a Final Four), a domestic cup, promotion and relegation
-where it applies, and two-way contracts and loan spells where they apply.
+where it applies, and two-way contracts and loan spells where they apply. The
+achievement layer on top of that scaffolding exists now: each league hands out
+its own **MVP**, **first team**, **Finals MVP** and **cup-final MVP** on the
+same production scale the youth awards use, with the bar raised by the
+league's strength, and the top clubs of the domestic leagues play a
+**continental competition** alongside their season — the EuroLeague, the
+EuroCup and the Champions League for the European leagues, BCL Americas for
+Brazil, the East Asia Super League for Japan, China and Australia — with a
+result that reaches the note and, when the run goes deep, the honours.
 
 **4. Writes a scouting note for every player.** Which lines go in is yours to
 choose under *Note template*: school/club and class year, how he got here
@@ -170,7 +243,7 @@ splits, games missed and why, the archetype, honours, and his position on the dr
 board. This goes into the player's `note` field, which BBGM displays on the player
 page.
 
-**5. Hands out honours — about ninety distinguishable ones.** The six named
+**5. Hands out honours — about a hundred distinguishable ones.** The six named
 national player-of-the-year trophies (Naismith, Wooden, Oscar Robertson, AP, NABC,
 Sporting News) each have their own electorate, so a clear best player sweeps and a
 close year splits. Three national defensive awards, the five position awards (Cousy,
@@ -278,7 +351,7 @@ pixels the table becomes one card per prospect.
 | **Draft-day events** | What happens between the last game and the pick: a medical flag, a workout riser, a team trading up, a late-first reach, a green-room slide. 0 leaves the board as a plain ranking. |
 | **Voter disagreement** | How far the award voters stray from the arithmetic. The six player-of-the-year trophies have their own electorates, each weighting the team's resume differently — the coaches' and broadcasters' panels lean on it, the writers' lean away — scaled by a mood drawn once per class, so some years the argument is about the best player and some years about the best team. |
 | **National / conference / abroad award strictness** | Three separate dials. This used to be one slider driving three different mechanisms. |
-| **Archetype frequencies** | Per-build rarity weights for every archetype, grouped by guards / wings / bigs / any size with a ×2 and ×½ per group, and showing what share of the last generated class each build actually came out as. Searchable by name or by tag ("shooting" finds the twenty builds that shoot, not the one called it), and each group folds. Hover a name to see its offset vector. |
+| **Archetype frequencies** | Per-build rarity weights for every archetype, grouped by guards / wings / bigs / any size with a ×2 and ×½ per group, and showing what share of the last generated class each build actually came out as. Searchable by name or by tag ("shooting" finds the twenty builds that shoot, not the one called it), filterable by the height a build is eligible at ("make this a rim-protector-heavy class" starts with the builds a seven-footer can draw) and by whether it is in the current class's pool, and each group folds. Hover a name to see its offset vector. The count and weight span in the hint are read off the table, not typed. |
 | **Note template** | Which lines are written into each player's exported note. |
 
 Every control says which phases it re-runs, so a slider that costs 0.6 ms and one
@@ -420,7 +493,14 @@ true strength. `js/rankings.js` derives everything from **observable results**:
 The News tab replaces the four ·-joined event strips. `js/news.js` turns the
 material the sim already produces into dated articles grouped by month, with
 headline variants drawn deterministically from the class's own seed and
-**every player and team mention a live link**. Around fifty distinct kinds, from
+**every player and team mention a live link**. Which items run is drawn too:
+of fifty-seven kinds, forty-two used to fire in every one of forty test
+classes (the triple-double, the forty-point night, the overtime classic, the
+scoring title, the stock riser and faller…), so the paper's table of contents
+was the same every year and only the names changed. The load-bearing kinds —
+the poll, the bracket, the champion, the awards, the draft — always run; the
+notebook items are occasional, and `tools/test.js` holds the always-firing
+share under a third. Around fifty distinct kinds, from
 signing day and transfer-portal moves through the season and into the
 draft: mid-season events, poll movement (a new No. 1, the biggest riser),
 class flavour, a notable injury, a NET/AP-poll disagreement, conference
@@ -465,8 +545,12 @@ has memory — consecutive seasons can never move the same school in opposite
 directions), programme strength (a breakout persists instead of being
 redrawn; year-to-year level correlation ≈ 0.9), coaches (the same named man,
 one year older, unless he was fired — then a named first-year hire replaces
-him), the build-pool memory, and an **alumni index** of the names each season
-sends forward. The Universe tab shows per-file diagnostics (a bad file is
+him), the **named star returners** (a returning conference player of the year
+who was a junior is a senior next season, on the same programme, under the
+same name, with a year of growth; a senior has left), the build-pool memory,
+and an **alumni index** of the names each season sends forward. The coach-name
+pool is 12,672 names deep, so a multi-season save does not start handing the
+same man three programmes. The Universe tab shows per-file diagnostics (a bad file is
 rejected by name; the rest run), the timeline (champion, POY, No. 1 pick,
 flavour, realignment, coaching changes per season), continuity threads
 (repeat champions, programmes with multiple No. 1 picks), and the alumni
@@ -525,6 +609,15 @@ node tools/bench.js [reps] [--md|--json]   # staged-pipeline timings
 node tools/uismoke.js                      # headless-browser smoke test
 ```
 
+Both harnesses load **every module the page loads**, `js/news.js` and
+`js/universe.js` included. They used to be left out, so nothing that ran in
+CI ever read a News article's text, which is exactly how "a Arizona State
+dunk" shipped. `test.js` now sweeps every generated note, article, season
+event, draft-day event and anomaly story for the faults no reader should see
+(a leaked `undefined`, a doubled space, a doubled full stop, an article that
+disagrees with the word after it), and the one a/an rule every template shares
+lives in `js/text.js`.
+
 `validate.js` runs the full engine for **every era** and asserts the outputs
 land near that era's anchors. The bands are *derived* from the anchor set rather
 than typed in, because a band typed in by hand silently belongs to whichever era
@@ -568,6 +661,11 @@ structural ones run on both. Four groups:
   the worst archetype scoring residual — how much of a player's scoring is
   decided by his build rather than by how good he is, reported in points less
   the sampling error a sample that size carries anyway.
+* **March**, because nothing banded it: the round-of-64 win rate on the
+  1-16, 2-15, 5-12 and 8-9 lines, how often a 1 seed (and a 5 seed or worse)
+  wins the title, the 1 seeds' share of the Final Four, and whether the first
+  in-season AP top ten is drawn from the preseason top 25 — the last because a
+  November ballot re-derived from two games once put a 2-0 Colgate at No. 2.
 * **Shape**, because no band on a mean or a percentile can see a WALL. Two
   clamps used to pin about 29% of every class onto two usage values, which is
   what "the stats all feel the same" is from the inside, and every distribution
@@ -635,9 +733,12 @@ its own exports (so is the CSV — Excel reads a BOM-less UTF-8 file as the syst
 code page, which turns Dončić into mojibake). Load it back with **Tools → Import → Draft class**.
 
 The **More ▾** button next to it also exports the prospect table as CSV, the whole simulated
-season (records, bracket, awards, draft board) as JSON or CSV, the note text alone
-for a spreadsheet, and imports locks back in from a CSV so a round trip through a
-spreadsheet works.
+season (records, bracket, awards, draft board) as JSON or CSV, the season as a
+**BBGM-shaped league fragment** (`teams` and `teamSeasons` in the game's own
+field names, one conference per college league, plus a `coaches` block this tool
+defines — no players and no schedule, so it is a fragment to merge rather than a
+league to load), the note text alone for a spreadsheet, and imports locks back
+in from a CSV so a round trip through a spreadsheet works.
 
 If you load several seasons at once, `Export all` writes each of them.
 
@@ -646,6 +747,7 @@ If you load several seasons at once, `Export all` writes each of them.
 ```
 index.html          UI shell
 css/style.css
+js/text.js          a/an, sentence endings, and the text-fault sweep every template shares
 js/rng.js           seeded RNG (mulberry32) + distributions
 js/bbgm.js          BBGM's own rating formulas, reimplemented
 js/colleges.js      368 colleges + 24 non-NCAA destinations and their clubs
@@ -702,8 +804,9 @@ tools/golden.json   recorded output hashes
   which is right, so what remains is the shape of the tail rather than its
   level. `tools/validate.js` bands both.
 * The professional side is thinner than the NCAA side. Clubs, tables, playoffs,
-  cups and relegation exist; individual pro awards, international competitions
-  and national-team summers do not.
+  cups, relegation, each league's own MVP and first team, and a continental
+  competition for the top clubs exist; national-team summers do not, and the
+  continental run is a drawn result rather than a simulated bracket.
 * Below 700 pixels the prospect table becomes one card per prospect, because a
   forty-column table on a 390-pixel screen is a horizontal scroll however it is
   arranged — and a card is the twelve fields a scout reads first, not the same
@@ -728,8 +831,20 @@ tools/golden.json   recorded output hashes
   returners** now exist across the 368 programmes — the excellent college player
   who is not an NBA prospect, which several of the 2024 consensus first-team
   All-Americans were — and the class takes the trophy in 80% of seasons and 2.4
-  of the five consensus first-team spots instead. They are still a rate, not
-  people: nothing gives one of them a name or a story.
+  of the five consensus first-team spots instead. Each has a name, a class year
+  and a kind, and in Universe mode the ones with eligibility left come back to
+  the same programme the next season as the same men. In a single-class run
+  they are still drawn fresh with the rest of the roster.
+* The default class-year mix (46% freshmen at the default `freshmanShare`)
+  is younger than a typical real 60-70 man class, which runs closer to a third
+  freshmen. The knob works exactly as labelled; whether the default should
+  move is a design choice, and the "veteran" and "portal" flavours already
+  produce the older class when drawn.
+* **For contributors introspecting a run result:** `Engine.run` returns
+  live objects with cycles in them (`team.members[i].player.proTeam` points
+  back at the team), so `JSON.stringify(res)` throws. Use `Engine.exportSeason`,
+  `Engine.exportLeagueFragment` or `BatchStats.summarise` for a flat view, or
+  walk `res.players` / `res.teams` directly the way `tools/validate.js` does.
 * The professional side has no multi-year history: a prospect abroad still gets
   the reconstructed career panel rather than a simulated one, because there is
   no prior-year club roster to put him on.

@@ -88,6 +88,14 @@
 		{ key: "deflpg", label: "DEFL", num: true, stat: true, off: true, title: "Deflections per game" },
 		{ key: "chgpg", label: "CHG", num: true, stat: true, off: true, title: "Charges drawn per game" },
 		{ key: "drtg", label: "DRtg", num: true, off: true, title: "Points allowed per 100 possessions on the floor" },
+		/* The playmaking and lineup side of a modern box score, none of
+		   which the line carried: an assisted rate, a transition share, a
+		   plus/minus, a close-game scoring average. */
+		{ key: "pm", label: "+/-", num: true, stat: true, off: true, title: "Plus/minus per game while on the floor" },
+		{ key: "onOff", label: "On/Off", num: true, off: true, title: "Estimated per-40 plus/minus less the team's margin without him" },
+		{ key: "astd", label: "AST'd", num: true, off: true, derived: true, title: "Share of his made field goals that were assisted, as a ratio (.640 = 64%)" },
+		{ key: "trans", label: "TRN", num: true, off: true, derived: true, title: "Share of his points scored in transition, as a ratio" },
+		{ key: "clutchPpg", label: "CLU", num: true, off: true, title: "Points per game in games decided by five or fewer, or in overtime" },
 		{ key: "ortg", label: "ORtg", num: true, off: true, derived: true, title: "Points produced per 100 possessions he used" },
 		{ key: "usg", label: "USG%", num: true, title: "Share of team chances used on the floor" },
 		{ key: "fgp", label: "FG%", num: true },
@@ -107,6 +115,8 @@
 	   Per-game / totals / per-40 does not apply to a ratio, so these are
 	   excluded from statValue's unit conversion. */
 	const DERIVED = {
+		astd: (s) => (Number.isFinite(s.astdRate) ? s.astdRate : undefined),
+		trans: (s) => (Number.isFinite(s.transShare) ? s.transShare : undefined),
 		tpar: (s) => (s.fga > 0 ? s.tpa / s.fga : undefined),
 		ftr: (s) => (s.fga > 0 ? s.fta / s.fga : undefined),
 		efg: (s) => (s.fga > 0 ? (s.fgp * s.fga + 0.5 * s.tpa * s.tpp) / s.fga : undefined),
@@ -2742,6 +2752,62 @@
 		return box;
 	}
 
+	/* How chalky this March was, in the numbers a maintainer would otherwise
+	   only see from an audit script: the champion's seed, the Final Four's
+	   composition, the first-round upsets, the seed-line results, and the
+	   strength margin between the top of the field and the bottom of it.
+	   tools/validate.js bands the same quantities over many seeds; this is
+	   the one-class reading. */
+	function tournamentCard(res) {
+		const box = el("div", "card");
+		box.appendChild(el("h4", null, "Tournament realism"));
+		const t = res.tourney;
+		if (!t || !t.regions || !t.champion) {
+			box.appendChild(el("p", "hint", "No tournament in this run."));
+			return box;
+		}
+		const TS = global.TeamsSim;
+		const lines = [];
+		lines.push("Champion: No. " + t.champion.seed + " " + t.champion.team.name +
+			(t.runnerUp ? " over No. " + t.runnerUp.seed + " " + t.runnerUp.team.name : ""));
+		lines.push("Final Four seeds: " + (t.finalFour || []).map((x) => x.seed).join(", "));
+		const r64 = [];
+		for (const r of Object.keys(t.regions)) for (const g of t.regions[r].rounds[0] || []) r64.push(g);
+		const byLine = {};
+		for (const g of r64) {
+			const hi = Math.min(g.a.seed, g.b.seed);
+			const lo = Math.max(g.a.seed, g.b.seed);
+			const k = hi + " v " + lo;
+			byLine[k] = byLine[k] || [0, 0];
+			if (g.winner.seed === hi) byLine[k][0]++; else byLine[k][1]++;
+		}
+		lines.push("Round of 64 by line: " + Object.keys(byLine)
+			.sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
+			.map((k) => k + " " + byLine[k][0] + "-" + byLine[k][1]).join(" · "));
+		lines.push("First-round upsets (seed gap of five or more): " +
+			r64.filter((g) => g.winner.seed - (g.winner === g.a ? g.b : g.a).seed >= 5).length);
+		const strengthOf = (x) => (TS && TS.gameStrength ? TS.gameStrength(x.team.rating) : x.team.rating);
+		const lineMean = (seed) => {
+			const v = [];
+			for (const r of Object.keys(t.regions)) for (const x of t.regions[r].seeds) if (x.seed === seed) v.push(strengthOf(x));
+			return v.length ? v.reduce((a, b) => a + b, 0) / v.length : NaN;
+		};
+		const s1 = lineMean(1);
+		const s8 = lineMean(8);
+		const s16 = lineMean(16);
+		if (Number.isFinite(s1) && Number.isFinite(s16)) {
+			lines.push("Top-seed strength margin: 1 seeds sit " + (s1 - s16).toFixed(1) +
+				" strength points above 16 seeds and " + (s1 - s8).toFixed(1) +
+				" above 8 seeds (about " + (0.72 * (s1 - s16)).toFixed(0) + " and " +
+				(0.72 * (s1 - s8)).toFixed(0) + " points of expected margin)");
+		}
+		box.appendChild(el("div", "note", lines.join("\n")));
+		box.appendChild(el("p", "hint", "Real March: 1 seeds win about 99% of first-round games, " +
+			"take roughly 40% of Final Four places and win 55-65% of titles. Batch mode " +
+			"shows the same figures as a distribution."));
+		return box;
+	}
+
 	function viewDistribution(view, res) {
 		view.appendChild(el("p", "legendline",
 			"Eyeball the shape of a class in one second instead of reading 70 rows."));
@@ -2754,6 +2820,7 @@
 		cards.appendChild(histogram("Usage rate", withStats.map((p) => p.stats.usg * 100), 12));
 		cards.appendChild(histogram("True shooting", withStats.map((p) => p.stats.ts * 100), 12));
 		cards.appendChild(histogram("Defensive rating", withStats.map((p) => p.stats.drtg), 12));
+		cards.appendChild(tournamentCard(res));
 
 		const counts = {};
 		for (const p of res.players) counts[p.archetype] = (counts[p.archetype] || 0) + 1;
@@ -3133,6 +3200,17 @@
 				pc(s.ftp) + "% · TS " + pc(s.ts) + "%");
 			row("Usage", pc(s.usg) + "% of possessions · " + n1(s.topg) + " TO · " +
 				n1(s.pfpg) + " PF");
+			const gl = p.gameLog;
+			row("Playmaking", (Number.isFinite(s.astdRate) ? "assisted on " + pc(s.astdRate) + "% of his makes · " : "") +
+				(Number.isFinite(s.transShare) ? pc(s.transShare) + "% of points in transition · " : "") +
+				(Number.isFinite(s.pm) ? (s.pm >= 0 ? "+" : "") + n1(s.pm) + " per game" +
+					(Number.isFinite(s.onOff) ? " (on/off " + (s.onOff >= 0 ? "+" : "") + n1(s.onOff) + ", est.)" : "") : ""));
+			if (gl && gl.clutch) {
+				row("Close games", gl.clutch.w + "-" + gl.clutch.l + " in games decided by five or fewer · " +
+					n1(gl.clutch.ppg) + " PPG (" + (gl.clutch.delta >= 0 ? "+" : "") +
+					n1(gl.clutch.delta) + " on his average)");
+			}
+			if (p.hand === "left") row("Hand", "Left-handed");
 		}
 		if (p.recruiting) {
 			row("Recruiting", p.recruiting.stars + "-star, No. " + p.recruiting.rank +
@@ -3442,6 +3520,7 @@
 		["fga", "Field goals", 1], ["tpa", "Threes", 1], ["fta", "Free throws", 1],
 		["usg", "Usage", 1], ["ts", "True shooting", 1], ["tpp", "3P%", 1],
 		["ftp", "FT%", 1], ["drtg", "Defensive rating", 1, true],
+		["pm", "Plus/minus", 1], ["astd", "Assisted rate", 2],
 		["board", "Board position", 0, true],
 	];
 
@@ -3633,7 +3712,7 @@
 
 	global.Views = {
 		players: viewPlayers, teams: viewTeams, bracket: viewBracket, bulkBar,
-		awards: viewAwards, board: viewBoard, distribution: viewDistribution,
+		awards: viewAwards, board: viewBoard, distribution: viewDistribution, tournamentCard,
 		notes: viewNotes, gamelog: viewGameLog, compare: viewCompare,
 		news: viewNews, universe: viewUniverse, playerLink, teamLink, playerPage,
 		COLUMNS, STAT_MODES, PCT_KEYS, DERIVED, derived, cellValue, statValue,

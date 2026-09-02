@@ -164,6 +164,7 @@
 	   untouched, and a roster whose prospect is a genuine lottery talent is
 	   untouched too, because the cap is not binding there. */
 	const FILLER_GAP = 4;
+	const NEXT_CLASS_YEAR = { Freshman: "Sophomore", Sophomore: "Junior", Junior: "Senior" };
 	/* Per top-three rotation slot, so roughly a dozen across 368 programmes.
 	   Raised from 0.012 (task 4.6): at the old rate about seven programmes in
 	   the country had a star returner, and the uniform talent bump (+10-24)
@@ -280,12 +281,24 @@
 		"Barnes", "Hendricks", "Mosley", "Turner",
 	];
 
+	/* 40 x 42 = 1,680 possible names for 368 programmes a season. In a
+	   single class that is invisible; in Universe mode, where a coach persists
+	   until he is fired, a forty-name pool starts repeating inside a few
+	   seasons (measured over 40 classes: 1,679 distinct names across 14,720
+	   team-seasons, the commonest used 19 times). 96 x 132 is 12,672. */
 	const COACH_FIRST = [
 		"Ray", "Dan", "Marcus", "Tom", "Bruce", "Leon", "Chris", "Pat", "Ed",
 		"Kevin", "Andre", "Mike", "Steve", "Wes", "Hal", "Dennis", "Craig",
 		"Tony", "Grant", "Sam", "Vince", "Nate", "Curtis", "Joel", "Roland",
 		"Rodney", "Jerome", "Cliff", "Walt", "Terrence", "Darren", "Phil",
 		"Reggie", "Lamont", "Oscar", "Calvin", "Mitch", "Boyd", "Russ", "Dwight",
+		"Aaron", "Barry", "Brad", "Brian", "Bryan", "Carl", "Chad", "Clay",
+		"Dale", "Dave", "Doug", "Drew", "Earl", "Eric", "Frank", "Fred",
+		"Gary", "Glen", "Greg", "Hank", "Howard", "Ira", "Jake", "Jay",
+		"Jeff", "Jim", "Joe", "Jon", "Keith", "Ken", "Kirk", "Kyle",
+		"Lance", "Larry", "Lee", "Len", "Lonnie", "Luke", "Marty", "Matt",
+		"Neil", "Nick", "Otis", "Paul", "Pete", "Rick", "Rob", "Ron",
+		"Roy", "Scott", "Shawn", "Ted", "Tim", "Todd", "Troy", "Wade",
 	];
 	const COACH_LAST = [
 		"Aldrich", "Beauchamp", "Calloway", "Duvall", "Espinoza", "Fenwick",
@@ -295,6 +308,22 @@
 		"Zabala", "Baptiste", "Cifuentes", "Donnelly", "Ferrara", "Gundersen",
 		"Hargrove", "Iverson", "Kirby", "Langford", "McBride", "Nwosu",
 		"Pettigrew", "Renfroe", "Simmonds", "Tran", "Villarreal", "Worthington",
+		"Abernathy", "Ackerman", "Alvarado", "Anselmo", "Ashby", "Atkinson",
+		"Bancroft", "Barlow", "Bassett", "Bettencourt", "Blackwood", "Boland",
+		"Bracken", "Brennan", "Buckner", "Burkhart", "Cadwell", "Cantrell",
+		"Carmody", "Castellano", "Chastain", "Coakley", "Colquitt", "Crandall",
+		"Dabney", "DeLuca", "Devereaux", "Dorsey", "Driscoll", "Eckhart",
+		"Ellison", "Fairbanks", "Farrow", "Fitzgibbon", "Galbraith", "Gentry",
+		"Goldberg", "Grimaldi", "Haddad", "Hallett", "Hanrahan", "Hatfield",
+		"Hensley", "Holcomb", "Hutchins", "Jankowski", "Keegan", "Kellerman",
+		"Kimball", "Kruger", "Lachance", "Landry", "Larkin", "Leclerc",
+		"Lindgren", "Lockhart", "Maldonado", "Mangum", "Matsuda", "McAllister",
+		"McKenna", "Medeiros", "Montoya", "Moriarty", "Navarro", "Nordstrom",
+		"O'Rourke", "Oyelaran", "Padgett", "Palmieri", "Pruitt", "Quinlan",
+		"Radcliffe", "Rainey", "Reinhardt", "Rocha", "Sandoval", "Schaefer",
+		"Sheridan", "Slattery", "Stroud", "Sutter", "Tanaka", "Thackeray",
+		"Toussaint", "Truitt", "Vasquez", "Wendell", "Whitaker", "Wilkerson",
+		"Winslow", "Yates", "Zielinski", "Ainsworth", "Bergstrom", "Coyle",
 	];
 
 	/* Coaching philosophy archetypes (task 4.4).
@@ -504,6 +533,27 @@
 			const nFill = Math.max(6, 10 - members.length);
 			const fillers = [];
 			for (let i = 0; i < nFill; i++) fillers.push(makeFiller(trng, level, i));
+			/* Universe carry-over: last season's named star returners come
+			   back as the same men, a year older, if they have eligibility
+			   left. A returning conference player of the year who was a
+			   junior is a senior now, on the same programme, with the same
+			   name — and nothing about him used to survive the season. A
+			   senior or a graduate has left, which is the story too. */
+			if (carry && carry.returners && carry.returners[name]) {
+				for (const r of carry.returners[name]) {
+					const next = NEXT_CLASS_YEAR[r.classYear];
+					if (!next) continue;
+					const slot = Math.min(Math.max(0, r.slotIndex || 0), fillers.length - 1);
+					const f = fillers[slot];
+					if (!f) continue;
+					f.name = r.name;
+					f.starReturner = r.starReturner;
+					f.classYear = next;
+					f.returned = true;
+					// A year of growth, off the talent he actually had.
+					f.talent = clamp(Math.max(f.talent, r.talent + trng.uniform(0, 3)), 6, 96);
+				}
+			}
 			capFillers(fillers, members);
 			for (const f of fillers) members.push(f);
 
@@ -714,14 +764,44 @@
 	   changing it had to re-simulate the entire regular season rather than only
 	   the bracket it names. Regular-season variance is a fixed, realistic
 	   amount; the slider moves the postseason, which is what the label says. */
-	const REGULAR_NOISE = 1.35;
+	const REGULAR_NOISE = 1.2;
+
+	/* The top of the country was too flat.
+
+	   Team rating is a rotation-weighted mean of talent, and talent is drawn
+	   around 0.60 * level + 12.6 with the level clamped at 95 — so the best
+	   programme in the country sat about twenty rating points above the
+	   sixty-fourth, against a game-to-game noise of 12.7 points of margin.
+	   Measured over 40 seasons: a 1 seed beat a 16 seed 92% of the time
+	   (real: about 99%), 1 seeds won 23% of titles (real: 55-65%) and
+	   filled 20% of Final Four slots (real: about 40%), while an 8-9 game was
+	   the coin flip it should be. Every March read like a wild one, and the
+	   "March upsets: 0 = chalk" slider could not deliver chalk because the
+	   gradient it was scaling was already too shallow.
+
+	   In efficiency-margin terms the real curve is convex at the top: the
+	   gap between the No. 1 and No. 16 teams is about as large as the gap
+	   between No. 16 and No. 150. So a rating above TOP_KNEE is stretched by
+	   TOP_STRETCH before it reaches a game, and the game noise comes down
+	   from 12.7 to 11.3 points, which is the residual a real D-I game
+	   carries. Neither touches the middle of the field: an 8 seed and a 9
+	   seed are the same distance apart as they were. tools/validate.js
+	   bands the seed-line win rates, the champion's seed distribution and
+	   the Final Four's composition, so this cannot drift back — in either
+	   direction, since a curve steep enough for Kentucky to win every year
+	   is the opposite failure. */
+	const TOP_KNEE = 50;
+	const TOP_STRETCH = 0.7;
+	function gameStrength(r) {
+		return r + TOP_STRETCH * Math.max(0, r - TOP_KNEE);
+	}
 
 	function playGameScore(rng, A, B, homeForA, cfg, when, postseason) {
 		const noise = postseason
-			? 1 + 0.35 * clamp(cfg.upsetFactor, 0, 3)
+			? 1 + 0.2 * clamp(cfg.upsetFactor, 0, 3)
 			: REGULAR_NOISE;
 		const home = homeForA === 0 ? 0 : homeForA > 0 ? 3.2 : -3.2;
-		const edge = ratingOn(A, when) - ratingOn(B, when) + home;
+		const edge = gameStrength(ratingOn(A, when)) - gameStrength(ratingOn(B, when)) + home;
 		// ~0.72 points of margin per rating point, plus real game-to-game noise.
 		const margin = edge * 0.72 + rng.normal(0, 9.4 * noise);
 		const pace = clamp((cfg.pace || 68) + (cfg.scoringEnv || 0) * 1.6, 58, 82);
@@ -929,13 +1009,21 @@
 		const add = (kind, text, when, teamsInvolved) => {
 			events.push({ kind, text, when, teams: teamsInvolved });
 		};
+		/* Whether a consequential event makes the feed this season. With a
+		   budget of seven and five consequential kinds that nearly always
+		   have a candidate, every season's feed opened with the same five
+		   headlines and only the colour varied — measured over 40 classes,
+		   the upset, the game of the year, the blowout, the streak and the
+		   coaching change all fired in 40 of 40. A season that had a
+		   fourteen-game streak in it does not always make a story of it. */
+		const tells = (p) => rng.random() < p;
 
 		// A top-ten team losing to somebody it had no business losing to.
 		const upsets = games.filter(({ winner, loser }) =>
 			loser.rating >= topRating && winner.rating < loser.rating - 14)
 			.sort((a, b) => (b.loser.rating - b.winner.rating) -
 				(a.loser.rating - a.winner.rating));
-		if (upsets.length) {
+		if (upsets.length && tells(0.8)) {
 			const u = rng.pick(upsets.slice(0, 8));
 			add("upset", u.winner.name + " beat " + u.loser.name + " " +
 				u.g.pf + "-" + u.g.pa + ", the result of the season's first half",
@@ -946,7 +1034,7 @@
 		const good = games.filter(({ winner, loser, g }) =>
 			winner.rating > topRating - 6 && loser.rating > topRating - 6 &&
 			Math.abs(g.pf - g.pa) <= 3);
-		if (good.length) {
+		if (good.length && tells(0.75)) {
 			const gm = rng.pick(good);
 			add("game of the year",
 				gm.winner.name + " " + gm.g.pf + ", " + gm.loser.name + " " +
@@ -959,7 +1047,7 @@
 		const failing = all.filter((t) =>
 			t.games >= 10 && t.w / Math.max(1, t.games) < 0.35 &&
 			C.prestige(t.name) >= 55);
-		if (failing.length) {
+		if (failing.length && tells(0.7)) {
 			const t = rng.pick(failing);
 			add("coaching change",
 				t.name + " fired " + (t.coach && t.coach.name ? t.coach.name : "its head coach") +
@@ -971,7 +1059,7 @@
 		// season and not only about one night.
 		const blowouts = games.filter(({ g }) => g.pf - g.pa >= 38)
 			.sort((a, b) => (b.g.pf - b.g.pa) - (a.g.pf - a.g.pa));
-		if (blowouts.length) {
+		if (blowouts.length && tells(0.65)) {
 			const b = blowouts[0];
 			add("blowout", b.winner.name + " beat " + b.loser.name + " by " +
 				(b.g.pf - b.g.pa), b.g.when, [b.winner.name, b.loser.name]);
@@ -980,7 +1068,7 @@
 		// A winning streak that changed a team's season.
 		const streaks = all.map((t) => ({ t, n: longestRun(t) }))
 			.filter((x) => x.n >= 12).sort((a, b) => b.n - a.n);
-		if (streaks.length) {
+		if (streaks.length && tells(0.7)) {
 			const st = rng.pick(streaks.slice(0, 5));
 			add("streak", st.t.name + " won " + st.n + " in a row",
 				rng.uniform(0.3, 0.8), [st.t.name]);
@@ -1009,8 +1097,10 @@
 			},
 			(r) => {
 				const t = r.pick(ranked.slice(0, 60));
-				return ["viral", "a " + t.name + " dunk was the most-watched " +
-					"clip of the college season", [t.name]];
+				// "a Arizona State dunk": the article has to agree with the
+				// name, and js/text.js is where that rule lives.
+				return ["viral", global.Text.withArticle(t.name + " dunk") +
+					" was the most-watched clip of the college season", [t.name]];
 			},
 			(r) => {
 				const [a, b] = twoTeams(r);
@@ -1239,6 +1329,7 @@
 		buildPrograms, simulateRegularSeason, simulateConferenceTournaments,
 		prospectTalent, teamRating, winProb, playGame, playGameScore, ratingOn,
 		realign, makeCoach, COACH_SITUATIONS, COACH_PHILOSOPHIES,
+		gameStrength, TOP_KNEE, TOP_STRETCH, REGULAR_NOISE,
 		capFillers, FILLER_GAP, conferenceDrift, programLevel, applyOutages, makeFiller,
 		PROGRAM_VOL, DOWN_YEAR_RATE, BREAKOUT_RATE, STAR_RETURNER_RATE,
 		rotationWeights, pairUp, record, recordPostseason, finalizeSchedule,

@@ -1,0 +1,90 @@
+/* Small text helpers shared by every module that writes prose: the season
+   events, the news desk, the scouting notes, the anomaly stories.
+
+   There was no a/an helper anywhere, so every template that put an article in
+   front of a programme name did it by hand — and the first one that did,
+   "a " + team.name + " dunk", produced "a Arizona State dunk" for every
+   vowel-leading school in the country. Fifty-seven article kinds and dozens
+   of event and note templates is fifty-seven places for the same bug to
+   recur, so the rule lives here once and the text-QA sweep in
+   tools/test.js reads every generated string looking for the class. */
+(function (global) {
+	"use strict";
+
+	/* Words whose first letter lies about their first sound. The list is not
+	   exhaustive English; it is the vocabulary this tool actually emits. */
+	const AN_BEFORE_CONSONANT = /^(hour|honou?r|honest|heir)/i;
+	const A_BEFORE_VOWEL = /^(uni|use|usu|utah|utility|europe|euro|one|once|ou[ai])/i;
+	// Initialisms read letter by letter: "an NBA", "an FBI", "a UCLA".
+	const INITIALISM = /^[A-Z]{2,}\b/;
+	const LETTER_SOUND_VOWEL = /^[AEFHILMNORSX]/;
+
+	function article(word) {
+		const w = String(word === undefined || word === null ? "" : word).trim();
+		if (!w) return "a";
+		if (INITIALISM.test(w)) return LETTER_SOUND_VOWEL.test(w) ? "an" : "a";
+		if (AN_BEFORE_CONSONANT.test(w)) return "an";
+		if (A_BEFORE_VOWEL.test(w)) return "a";
+		return /^[aeiou]/i.test(w) ? "an" : "a";
+	}
+
+	/* "a Duke dunk" / "an Arizona State dunk". Capitalised when it opens a
+	   sentence. */
+	function withArticle(phrase, capital) {
+		const art = article(phrase);
+		return (capital ? art.charAt(0).toUpperCase() + art.slice(1) : art) + " " + phrase;
+	}
+
+	/* The faults a generated string can carry that no reader should see:
+	   a leaked undefined/NaN/null, a doubled space, a wrong article before a
+	   vowel, a stray "[object Object]", and an empty parenthesis. Returns
+	   the list of fault labels (empty = clean) so a harness can name what
+	   it found rather than only that it found something. */
+	const FAULTS = [
+		["undefined/NaN/null leaked", /\b(undefined|NaN|null)\b/],
+		["object leaked", /\[object Object\]/],
+		["double space", /  /],
+		["empty parenthesis", /\(\s*\)/],
+		/* "a Arizona", "a Ohio State". "a one-and-done" and "a European"
+		   are legal, which is why this reads the same list article() does:
+		   a capitalised vowel-led word after "a " that article() would have
+		   given "an". */
+		["a before a vowel sound", /\b[aA] ([AEIOU][a-z]+)/],
+		["an before a consonant sound", /\b[aA]n ([B-DF-HJ-NP-TV-Zb-df-hj-np-tv-z][a-z]+)/],
+		["space before punctuation", / [,.;:!?]/],
+		["doubled punctuation", /([,.;:])\1/],
+	];
+
+	function textFaults(s) {
+		const str = String(s === undefined || s === null ? "" : s);
+		const out = [];
+		for (const [label, re] of FAULTS) {
+			const m = re.exec(str);
+			if (!m) continue;
+			// The article checks defer to article() itself, so the exception
+			// lists live in one place.
+			if (label === "a before a vowel sound" && article(m[1]) === "a") continue;
+			if (label === "an before a consonant sound" && article(m[1]) === "an") continue;
+			out.push(label);
+		}
+		return out;
+	}
+
+	/* Close a sentence whose last word may already carry its own full stop
+	   ("a step up from N.J.I.T.") without doubling it. */
+	function endSentence(s) {
+		const str = String(s === undefined || s === null ? "" : s).replace(/\s+$/, "");
+		if (!str) return "";
+		return /[.!?…]$/.test(str) ? str : str + ".";
+	}
+
+	/* Flatten the segment lists js/news.js produces into plain prose, so the
+	   same sweep can read an article and a note. */
+	function segsToText(segs) {
+		if (typeof segs === "string") return segs;
+		if (!Array.isArray(segs)) return "";
+		return segs.map((x) => (x && x.v !== undefined ? String(x.v) : "")).join("");
+	}
+
+	global.Text = { article, withArticle, endSentence, textFaults, segsToText };
+})(typeof window !== "undefined" ? window : self);

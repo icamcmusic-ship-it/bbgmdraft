@@ -777,9 +777,11 @@
 	/* Repaint every archetype weight box, whether or not a custom set exists.
 	   The old code only repainted when cfg.archetypeWeights was truthy, so
 	   "Reset weights" followed by a preset change left stale numbers on screen. */
+	let archFilterHook = null;
 	function paintArchWeights() {
 		const aw = $("archWeights");
 		if (!aw) return;
+		if (archFilterHook) archFilterHook();
 		// Realised frequency from the last run, beside the weight that asked
 		// for it.
 		const res = state.results[state.active];
@@ -1348,6 +1350,7 @@
 			for (const a of members) {
 				const row = el("div", "archrow");
 				row.dataset.group = tag;
+				row.dataset.arch = a.name;
 				// Searched against the name AND the tags, so "shooting" finds
 				// the twenty builds that shoot rather than the one called it.
 				row.dataset.search = (a.name + " " + (a.t || []).join(" ")).toLowerCase();
@@ -1380,34 +1383,75 @@
 		   height ordering it sat and scrolling to it. Matches the name and the
 		   tags, and hides a group header whose whole group is filtered out so
 		   the list does not end up as a column of empty headings. */
+		/* The hint's numbers come from the table, not from the markup: the
+		   prose said "117 builds" and "0.34 = the rarest" for a table of 121
+		   whose floor was 0.45, on every page load, because nothing compared
+		   the two. */
+		const archHint = $("archHint");
+		if (archHint) {
+			const ws = RB.ARCHETYPES.filter((a) => a.name !== "Balanced")
+				.map((a) => (a.w === undefined ? 1 : a.w));
+			archHint.textContent = RB.ARCHETYPES.length + " builds. Rarity weight per " +
+				"build (1 = common, " + Math.max.apply(null, ws) + " = the most common, " +
+				Math.min.apply(null, ws) + " = the rarest), and beside it the share of " +
+				"the last generated class that build actually came out as. Height " +
+				"bands are fixed by the archetype. Hover a name to see what it does " +
+				"to the ratings.";
+		}
+		/* Three filters that compose: the search (name or tag), a height
+		   band (only builds a player of that height can draw — "make this a
+		   rim-protector-heavy class" starts with the builds a seven-footer is
+		   eligible for, not with 121 rows), and "in this class's pool" (only
+		   the builds the current class actually drew from). */
 		const archSearch = $("archSearch");
 		const archNote = $("archSearchNote");
-		archSearch.addEventListener("input", () => {
+		const archBand = $("archBand");
+		const archInPool = $("archInPool");
+		const byName = {};
+		for (const a of RB.ARCHETYPES) byName[a.name] = a;
+		const applyArchFilter = () => {
 			const q = archSearch.value.trim().toLowerCase();
+			const band = archBand && archBand.value !== "" ? Number(archBand.value) : null;
+			const res = state.results[state.active];
+			const wantPool = !!(archInPool && archInPool.checked);
+			const pool = wantPool && res && Array.isArray(res.archetypePool)
+				? new Set(res.archetypePool) : null;
+			const active = !!q || band !== null || wantPool;
 			let shown = 0;
 			const perGroup = {};
 			for (const row of aw.querySelectorAll(".archrow")) {
-				const hit = !q || (row.dataset.search || "").indexOf(q) !== -1;
+				const a = byName[row.dataset.arch] || {};
+				const hit = (!q || (row.dataset.search || "").indexOf(q) !== -1) &&
+					(band === null || (band >= (a.min || 0) && band <= (a.max === undefined ? 100 : a.max))) &&
+					(!pool || pool.has(a.name));
 				row.classList.toggle("arch-filtered", !hit);
 				if (hit) {
 					shown++;
 					perGroup[row.dataset.group] = true;
 					// A search result must be visible even inside a group the
 					// user collapsed, or the search silently finds nothing.
-					if (q) row.classList.remove("arch-folded");
+					if (active) row.classList.remove("arch-folded");
 				}
 			}
 			for (const head of aw.querySelectorAll(".archgroup")) {
-				head.classList.toggle("arch-filtered", !!q && !perGroup[head.dataset.group]);
+				head.classList.toggle("arch-filtered", active && !perGroup[head.dataset.group]);
 			}
-			archNote.hidden = !q;
-			archNote.textContent = q
-				? shown + " build" + (shown === 1 ? "" : "s") + " match “" +
-					archSearch.value.trim() + "”" +
-					(shown ? "" : " — try a tag: guard, wing, big, shooting, " +
+			archNote.hidden = !active;
+			const what = [];
+			if (q) what.push("match “" + archSearch.value.trim() + "”");
+			if (band !== null) what.push("are eligible at hgt " + band);
+			if (wantPool) what.push(pool ? "are in this class's pool" : "— the pool is off, so every build is eligible");
+			archNote.textContent = active
+				? shown + " build" + (shown === 1 ? "" : "s") + " " + what.join(" and ") +
+					(shown || !q ? "" : " — try a tag: guard, wing, big, shooting, " +
 						"defense, playmaking, rebounding, athletic, raw, scoring")
 				: "";
-		});
+		};
+		archSearch.addEventListener("input", applyArchFilter);
+		if (archBand) archBand.addEventListener("change", applyArchFilter);
+		if (archInPool) archInPool.addEventListener("change", applyArchFilter);
+		// The pool changes with every reroll; a filter on it has to follow.
+		archFilterHook = applyArchFilter;
 
 		$("btnArchReset").addEventListener("click", () => {
 			pushUndo("reset the archetype weights");
@@ -3284,6 +3328,12 @@
 		setStatus("Season exported.");
 	}
 
+	function exportLeagueFragment(res) {
+		download(state.files[state.active].name.replace(/\.json$/i, "") + "_league_fragment.json",
+			JSON.stringify(global.Engine.exportLeagueFragment(res), null, 2), "application/json");
+		setStatus("League fragment exported.");
+	}
+
 	function exportSeasonCsv(res) {
 		const season = global.Engine.exportSeason(res);
 		const lines = ["section,a,b,c,d,e"];
@@ -3535,6 +3585,7 @@
 		item("Prospect table as CSV (whole class)", () => exportCsv(res, true));
 		item("Season as JSON — records, bracket, awards, board", () => exportSeasonJson(res));
 		item("Season as CSV", () => exportSeasonCsv(res));
+		item("Season as a BBGM league fragment — teams, records, coaches", () => exportLeagueFragment(res));
 		item("Note text only, for a spreadsheet", () => exportNotes(res));
 		item("Notes as Markdown, for a forum post", () => exportNotesMarkdown(res));
 		item("Import locks from a CSV…", () => $("csvFile").click());
@@ -3660,7 +3711,8 @@
 		/* A batch of fifty classes exists to show a distribution, and the panel
 		   showed one row of averages. p5 / p50 / p95 answers "how unusual was
 		   the class I just generated?", which is the actual question. */
-		const d = (k) => (k === "awards" || k === "honoured" || k === "archetypes" ? 1 : 2);
+		const d = (k) => (k === "awards" || k === "honoured" || k === "archetypes" ||
+			k === "champSeed" || k === "ffOneSeeds" || k === "r64Upsets" ? 1 : 2);
 		const line = (label, k) => {
 			const v = col(k);
 			const f = (x) => x.toFixed(d(k)).padStart(7);
@@ -3685,6 +3737,9 @@
 			line("awards/class", "awards"),
 			line("honoured players", "honoured"),
 			line("distinct archetypes", "archetypes"),
+			line("champion's seed", "champSeed"),
+			line("1 seeds in Final Four", "ffOneSeeds"),
+			line("R64 upsets (gap ≥ 5)", "r64Upsets"),
 			"",
 			/* Which population each row describes. The per-player rows are the
 			   NCAA prospects only; a teenager on a 22-minute cap at Real Madrid
@@ -3707,6 +3762,25 @@
 		cards.appendChild(V.histogram("Awards per class", col("awards"), 10));
 		cards.appendChild(V.histogram("Mean PPG per class", col("ppg"), 10));
 		cards.appendChild(V.histogram("Distinct archetypes per class", col("archetypes"), 10));
+		/* Champion seed and Final Four composition as histograms: the reading
+		   that says whether March is calibrated. Real modern-era figures:
+		   1 seeds win 55-65% of titles and fill about 40% of the Final Four. */
+		const seeds = col("champSeed").filter(Number.isFinite);
+		if (seeds.length) {
+			const sBox = el("div", "card");
+			sBox.appendChild(el("h4", null, "Champion's seed"));
+			const hist = {};
+			for (const s of seeds) hist[s] = (hist[s] || 0) + 1;
+			sBox.appendChild(el("div", "note", Object.keys(hist)
+				.sort((a, b) => a - b)
+				.map((k) => ("No. " + k).padStart(6) + "  " + "█".repeat(hist[k]) + " " + hist[k]).join("\n") +
+				"\n\n1 seeds: " + (100 * (hist[1] || 0) / seeds.length).toFixed(0) +
+				"% of titles (real: 55-65%) · seeds 5-11: " +
+				(100 * seeds.filter((s) => s >= 5 && s <= 11).length / seeds.length).toFixed(0) +
+				"% (real: under 10%)"));
+			cards.appendChild(sBox);
+			cards.appendChild(V.histogram("1 seeds in the Final Four", col("ffOneSeeds"), 5, (v) => String(Math.round(v))));
+		}
 		const flavours = {};
 		for (const r of rows) flavours[r.flavor || "—"] = (flavours[r.flavor || "—"] || 0) + 1;
 		const fBox = el("div", "card");
@@ -3909,6 +3983,24 @@
 	   not the sliders. On a desktop it starts open, and closing it hands
 	   its 320px column to the forty-column table. The two states persist
 	   separately, so closing it on a phone does not close it on a desktop. */
+	/* One chip per fieldset. Clicking opens that group and scrolls to it, so a
+	   phone user reaches "Awards" without dragging past fifty controls. */
+	(function buildSettingsJump() {
+		const nav = $("settingsJump");
+		if (!nav) return;
+		for (const grp of document.querySelectorAll("aside details.grp")) {
+			const sum = grp.querySelector("summary");
+			if (!sum || !grp.id) continue;
+			const a = el("a", null, sum.textContent.trim());
+			a.href = "#" + grp.id;
+			a.addEventListener("click", (e) => {
+				e.preventDefault();
+				grp.open = true;
+				grp.scrollIntoView({ behavior: "smooth", block: "start" });
+			});
+			nav.appendChild(a);
+		}
+	})();
 	(function bindSettingsToggle() {
 		const btn = $("btnSettings");
 		if (!btn) return;

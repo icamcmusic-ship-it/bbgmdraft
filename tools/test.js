@@ -2185,12 +2185,17 @@ console.log("\nMechanical anomalies and season narrative");
 	ok("events are in calendar order",
 		res.seasonEvents.every((e, i) =>
 			i === 0 || (res.seasonEvents[i - 1].when || 0) <= (e.when || 0)));
-	// A coaching change must name a team that really was losing.
+	// A coaching change must name a team that really was losing. Judged on
+	// the regular season the event was read off: a 10-21 team that then won
+	// a conference-tournament game finishes 12-22, and that is not a
+	// contradiction.
 	for (const e of res.seasonEvents.filter((x) => x.kind === "coaching change")) {
 		const t = res.teams[e.teams[0]];
+		const rw = t && Number.isFinite(t.regW) ? t.regW : (t ? t.w : 0);
+		const rl = t && Number.isFinite(t.regL) ? t.regL : (t ? t.l : 0);
 		ok("a fired coach's team really was losing",
-			t && t.w / Math.max(1, t.games) < 0.35,
-			t ? t.w + "-" + t.l : "no team");
+			t && rw / Math.max(1, rw + rl) < 0.35,
+			t ? rw + "-" + rl : "no team");
 	}
 	// The longest-run helper reads the schedule in calendar order.
 	ok("a winning streak is measured in calendar order",
@@ -2336,6 +2341,394 @@ console.log("\nWarm re-runs");
 		}
 	}
 	ok("every absence window lies inside the season", bad === 0, String(bad));
+}
+
+console.log("\nGenerated text");
+{
+	/* js/text.js: the one a/an rule every template now shares. */
+	const T = global.Text;
+	ok("article(): a Duke dunk, an Arizona State dunk",
+		T.article("Duke") === "a" && T.article("Arizona State") === "an" &&
+		T.article("Ole Miss") === "an" && T.article("Iowa") === "an");
+	ok("article(): initialisms and vowel-letter consonant sounds",
+		T.article("NBA") === "an" && T.article("UCLA") === "a" &&
+		T.article("Utah") === "a" && T.article("European") === "a" &&
+		T.article("one-and-done") === "a" && T.article("hour") === "an");
+	ok("textFaults() sees the classes it exists for",
+		T.textFaults("a Ohio State dunk").length === 1 &&
+		T.textFaults("scored undefined points").length === 1 &&
+		T.textFaults("won  twice").length === 1 &&
+		T.textFaults("an Arizona State dunk, a Duke dunk, a European year").length === 0);
+
+	/* THE SWEEP. Every string the engine writes for a reader — notes, news
+	   articles, season events, draft-day events, anomaly stories — read for
+	   the faults no reader should see. News and Universe were not loaded by
+	   the harness at all before this, so "a Arizona State dunk" shipped in
+	   the one feed nothing in CI ever read. */
+	const faults = [];
+	const seen = { notes: 0, articles: 0, events: 0 };
+	const report = (where, text) => {
+		const f = T.textFaults(text);
+		if (f.length) faults.push(where + " [" + f.join(", ") + "]: " + String(text).slice(0, 110));
+	};
+	const NOTE_ALL = global.Engine.NOTE_LINES.map((l) => l[0]);
+	for (let s = 0; s < 14; s++) {
+		const res = global.Engine.run(V.realisticClass(s % 7, 70),
+			global.Config.make({ seed: "text" + s, seasonEvents: 14, noteLines: NOTE_ALL,
+				surpriseBudget: 6 }));
+		for (const p of res.players) {
+			if (p.note) { seen.notes++; report("note", p.note); }
+			if (p.backstory) report("backstory", p.backstory);
+		}
+		for (const e of res.seasonEvents || []) { seen.events++; report("event " + e.kind, e.text); }
+		for (const e of res.draftEvents || []) report("draft event", e.text + " " + (e.detail || ""));
+		for (const sp of res.surprises || []) report("anomaly", sp.label);
+		for (const a of global.News.build(res)) {
+			seen.articles++;
+			report("news " + a.kind, T.segsToText(a.headline) + " | " + T.segsToText(a.body));
+		}
+	}
+	ok("the sweep actually read something",
+		seen.notes > 500 && seen.articles > 300 && seen.events > 50,
+		JSON.stringify(seen));
+	ok("no generated note, article or event carries a text fault",
+		faults.length === 0, faults.slice(0, 6).join("\n         "));
+}
+
+console.log("\nUniverse");
+{
+	/* js/universe.js was never loaded by a harness either. Two seasons run
+	   as one world: the carry-over reaches the next season, the summary row
+	   is populated, and the export replays. */
+	const U = global.Universe;
+	const a = global.Engine.run(V.realisticClass(1, 70), global.Config.make({ seed: "u1" }));
+	const carry = U.harvest(a);
+	ok("harvest carries every programme forward",
+		Object.keys(carry.levels).length >= 360 && Object.keys(carry.coaches).length >= 360);
+	const b = global.Engine.run(V.realisticClass(2, 70),
+		global.Config.make({ seed: "u2", carryOver: carry }));
+	let same = 0;
+	let total = 0;
+	for (const name of Object.keys(b.teams)) {
+		const t = b.teams[name];
+		if (!t || !t.coach || !carry.coaches[name]) continue;
+		total++;
+		if (t.coach.name === carry.coaches[name].coach.name) same++;
+	}
+	ok("a carried coach is the same man next season",
+		total > 300 && same / total > 0.9, same + " of " + total);
+	const rows = [U.summarise(a, "u1", "a.json"), U.summarise(b, "u2", "b.json")];
+	ok("a timeline row names a champion, a POY and a No. 1 pick",
+		rows.every((r) => r.champion && r.champSeed && r.no1 && r.apOne));
+	ok("threads() runs on a two-season timeline", Array.isArray(U.threads(rows)));
+	const ex = U.exportUniverse({ name: "t", baseSeed: "x", rows: rows.map((r) => ({
+		season: r.season, fileName: r.fileName, seed: r.seed, fingerprint: "f" })) });
+	ok("the universe export stores seeds, not output",
+		ex.seasons.length === 2 && ex.seasons.every((s) => s.seed && !s.champion));
+	const diag = U.validate([{ name: "a.json", data: V.realisticClass(1, 70) },
+		{ name: "bad.json", data: { players: [] } }]);
+	ok("validate() rejects a bad file by name and keeps the rest",
+		diag[0].ok && !diag[1].ok && diag[1].errors.length > 0);
+}
+
+console.log("\nAudit regressions");
+{
+	/* --- archetype redundancy -------------------------------------------
+	   Cosine similarity over the authored 15-rating offset vectors. There
+	   were 96 pairs above 0.85 and sixteen above 0.95, with Rim Protector
+	   and Shot-Blocking Anchor identical in shape (1.00) and differing only
+	   in height gate — 121 names for about 65 distinct shapes, which is why
+	   a 17-build pool still read as repetition. */
+	const keys = BB.RATING_KEYS;
+	const specs = RB.ARCHETYPES.filter((a) => a.name !== "Balanced");
+	const vec = (a) => keys.map((k) => RB.RAW_OFFSETS[a.name][k] || 0);
+	const cosine = (u, v) => {
+		let d = 0;
+		let nu = 0;
+		let nv = 0;
+		for (let i = 0; i < u.length; i++) { d += u[i] * v[i]; nu += u[i] * u[i]; nv += v[i] * v[i]; }
+		return nu && nv ? d / Math.sqrt(nu * nv) : 0;
+	};
+	let maxCos = 0;
+	let maxPair = "";
+	let above85 = 0;
+	for (let i = 0; i < specs.length; i++) {
+		for (let j = i + 1; j < specs.length; j++) {
+			const c = cosine(vec(specs[i]), vec(specs[j]));
+			if (c > 0.85) above85++;
+			if (c > maxCos) { maxCos = c; maxPair = specs[i].name + " / " + specs[j].name; }
+		}
+	}
+	ok("no two archetypes share a shape (max cosine < 0.93)", maxCos < 0.93,
+		maxPair + " at " + maxCos.toFixed(3));
+	ok("near-duplicate pairs (cosine > 0.85) stay under 50", above85 <= 50, String(above85));
+	const durability = RB.ARCHETYPES.filter((a) => (a.t || []).indexOf("durability") !== -1).length;
+	ok("the durability tag has a pool to draw from", durability >= 6, durability + " members");
+
+	/* --- the seven-footers' own builds ----------------------------------- */
+	{
+		let tall = 0;
+		let own = 0;
+		let poolsShort = 0;
+		for (let s = 0; s < 16; s++) {
+			const res = global.Engine.run(V.realisticClass(s % 8, 70),
+				global.Config.make({ seed: "centre" + s }));
+			const pool = res.archetypePool || [];
+			const centres = pool.filter((n) => {
+				const a = RB.ARCHETYPES.filter((x) => x.name === n)[0];
+				return a && a.min >= RB.CENTRE_MIN;
+			}).length;
+			if (centres < RB.CENTRE_IN_POOL) poolsShort++;
+			for (const p of res.players) {
+				if (!p.newRatings || p.newRatings.hgt < RB.CENTRE_MIN) continue;
+				tall++;
+				const a = RB.ARCHETYPES.filter((x) => x.name === p.archetype)[0];
+				if (a && a.min >= RB.CENTRE_MIN) own++;
+			}
+		}
+		ok("every pool carries the genuine-centre builds", poolsShort === 0, poolsShort + " short");
+		ok("a seven-footer usually draws a build made for him",
+			tall > 40 && own / tall >= 0.30, own + " of " + tall);
+	}
+
+	/* --- FT-rate and foul identity --------------------------------------- */
+	{
+		const S = global.StatsSim;
+		const id = (n) => S.archetypeIdentity(n, { specialization: 1 });
+		ok("Free-Throw Merchant and Rim-Pressure Bruiser draw fouls the composite cannot see",
+			id("Free-Throw Merchant").ftr > 0.02 && id("Rim-Pressure Bruiser").ftr > 0.03 &&
+			id("Sharpshooter").ftr < 0);
+		ok("Foul-Prone Enforcer fouls, a Sharpshooter does not",
+			id("Foul-Prone Enforcer").pf > 1.15 && id("Sharpshooter").pf < 1.0);
+		ok("Balanced sits at the anchor",
+			Math.abs(id("Balanced").ftr) < 0.015 && Math.abs(id("Balanced").pf - 1) < 0.05);
+		ok("the identity vanishes at specialisation 0",
+			S.archetypeIdentity("Foul-Prone Enforcer", { specialization: 0 }).ftr === 0);
+		// Simulated: the builds the identity says draw fouls do, on the field.
+		const hi = [];
+		const rest = [];
+		const foulers = [];
+		const calm = [];
+		for (let s = 0; s < 10; s++) {
+			const res = global.Engine.run(V.realisticClass(s % 5, 70),
+				global.Config.make({ seed: "ftr" + s, specialization: 1.5 }));
+			for (const p of res.players) {
+				if (p.nonNcaa || !p.stats || p.stats.fga < 4) continue;
+				const i = S.archetypeIdentity(p.archetype, { specialization: 1.5 });
+				(i.ftr > 0.04 ? hi : rest).push(p.stats.fta / p.stats.fga);
+				(i.pf > 1.2 ? foulers : calm).push(p.stats.pfpg);
+			}
+		}
+		const m = (v) => v.reduce((a, b) => a + b, 0) / Math.max(1, v.length);
+		ok("foul-drawing builds draw more fouls on the floor",
+			hi.length >= 15 && m(hi) - m(rest) > 0.03,
+			hi.length + " players, FTr " + m(hi).toFixed(3) + " vs " + m(rest).toFixed(3));
+		ok("foul-prone builds commit more fouls on the floor",
+			foulers.length >= 10 && m(foulers) - m(calm) > 0.15,
+			foulers.length + " players, PF " + m(foulers).toFixed(2) + " vs " + m(calm).toFixed(2));
+	}
+
+	/* --- settings copy is derived, not typed ----------------------------- */
+	{
+		const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
+		const m = /<p class="hint" id="archHint">([^<]*)<\/p>/.exec(html);
+		ok("the archetype hint in index.html carries no numbers of its own",
+			!!m && !/\d/.test(m[1]));
+		const readme = fs.readFileSync(path.join(__dirname, "..", "README.md"), "utf8");
+		const span = /Rarity weights span ([\d.]+) to ([\d.]+)/.exec(readme);
+		const ws = specs.map((a) => (a.w === undefined ? 1 : a.w));
+		ok("the README's stated weight span matches the table",
+			!!span && Number(span[1]) === Math.min.apply(null, ws) &&
+			Number(span[2]) === Math.max.apply(null, ws),
+			span ? span[0] + " vs " + Math.min.apply(null, ws) + "-" + Math.max.apply(null, ws) : "no span line");
+		ok("the README's build count matches the table",
+			new RegExp("one of " + RB.ARCHETYPES.length + " archetypes").test(readme));
+	}
+
+	/* --- coach names ------------------------------------------------------ */
+	{
+		const names = new Set();
+		let n = 0;
+		for (let s = 0; s < 8; s++) {
+			const res = global.Engine.run(V.realisticClass(s, 70), global.Config.make({ seed: "cn" + s }));
+			for (const t of Object.values(res.teams)) {
+				if (!t || !t.coach) continue;
+				n++;
+				names.add(t.coach.name);
+			}
+		}
+		ok("the coach-name pool is big enough for a universe",
+			names.size >= 0.75 * n, names.size + " distinct in " + n + " team-seasons");
+	}
+
+	/* --- age is measured from one year for the whole class -------------- */
+	{
+		const lf = V.realisticClass(9, 20);
+		lf.players[3].draft.year = lf.startingSeason + 1;
+		const res = global.Engine.run(lf, global.Config.make({ seed: "age" }));
+		const p = res.players[3];
+		ok("a player's age is measured from the class's season, not his own draft year",
+			p.age === lf.startingSeason - lf.players[3].born.year);
+		const v = global.Engine.validateLeagueFile(lf);
+		ok("and the file check says so", v.warnings.some((w) => /draft year/.test(w)));
+	}
+
+	/* --- the paper is not the same paper every year --------------------- */
+	{
+		const seen = {};
+		const N = 24;
+		for (let s = 0; s < N; s++) {
+			const res = global.Engine.run(V.realisticClass(s % 6, 70),
+				global.Config.make({ seed: "paper" + s }));
+			for (const k of new Set(global.News.build(res).map((a) => a.kind))) {
+				seen[k] = (seen[k] || 0) + 1;
+			}
+		}
+		const kinds = Object.keys(seen);
+		const always = kinds.filter((k) => seen[k] === N).length;
+		ok("fewer than a third of article kinds run in every class",
+			kinds.length >= 40 && always <= kinds.length / 3,
+			always + " of " + kinds.length + " kinds fire every time");
+	}
+
+	/* --- the box score's playmaking and lineup side --------------------- */
+	{
+		const res = global.Engine.run(V.realisticClass(2, 70), global.Config.make({ seed: "pm" }));
+		const ncaa = res.players.filter((p) => !p.nonNcaa && p.stats);
+		ok("every stat line carries an assisted rate and a transition share",
+			ncaa.every((p) => p.stats.astdRate >= 0.12 && p.stats.astdRate <= 0.96 &&
+				p.stats.transShare >= 0.03 && p.stats.transShare <= 0.45));
+		ok("creators are assisted less than finishers",
+			(function () {
+				const by = (name) => ncaa.filter((p) => p.archetype === name);
+				const hubs = ncaa.filter((p) => /Floor General|Heliocentric|Point|Playmaker|Sparkplug|Maestro/.test(p.archetype));
+				const finishers = ncaa.filter((p) => /Cutter|Lob Threat|Rim Runner|Spot-Up|Catch-and-Shoot|Corner/.test(p.archetype));
+				void by;
+				if (hubs.length < 2 || finishers.length < 2) return true;
+				const m = (v) => v.reduce((a, p) => a + p.stats.astdRate, 0) / v.length;
+				return m(hubs) < m(finishers);
+			})());
+		ok("plus/minus, on/off and a close-game split exist on the log",
+			ncaa.every((p) => Number.isFinite(p.stats.pm) && Number.isFinite(p.stats.onOff) &&
+				p.gameLog && (p.gameLog.clutch === null || Number.isFinite(p.gameLog.clutch.ppg))));
+		const lefties = res.players.filter((p) => p.hand === "left").length;
+		ok("handedness is drawn and mostly right-handed",
+			res.players.every((p) => p.hand === "left" || p.hand === "right") &&
+			lefties >= 2 && lefties <= 20, lefties + " left-handers of " + res.players.length);
+		const note = global.Engine.run(V.realisticClass(2, 70), global.Config.make({
+			seed: "pm", noteLines: ["playmaking", "archetype"] })).players.filter((p) => !p.nonNcaa && p.note)[0];
+		ok("the note can say all of it", !!note && /assisted on/.test(note.note) && /per game/.test(note.note));
+	}
+
+	/* --- the pro achievement layer -------------------------------------- */
+	{
+		let leagueHonours = 0;
+		let continental = 0;
+		let pros = 0;
+		for (let s = 0; s < 12; s++) {
+			const res = global.Engine.run(V.realisticClass(s % 4, 70),
+				global.Config.make({ seed: "pro" + s, proAwardStrictness: 0.8 }));
+			for (const p of res.players) {
+				if (!p.nonNcaa) continue;
+				pros++;
+				if ((p.awards || []).some((a) => / MVP$| First Team$/.test(a))) leagueHonours++;
+				if (p.continental) continental++;
+			}
+		}
+		ok("prospects abroad can win their league's own honours",
+			pros > 50 && leagueHonours > 0, leagueHonours + " of " + pros);
+		ok("clubs in the domestic leagues play a continental competition",
+			continental > 0, continental + " of " + pros);
+		const stages = ["group stage", "round of 16", "quarterfinals", "Final Four", "final", "champions"];
+		const res = global.Engine.run(V.realisticClass(1, 70), global.Config.make({ seed: "pro1" }));
+		ok("a continental result is a named stage",
+			res.players.filter((p) => p.continental).every((p) =>
+				stages.indexOf(p.continental.result) !== -1));
+	}
+
+	/* --- universe: the same star returner, a year older ----------------- */
+	{
+		const a = global.Engine.run(V.realisticClass(3, 70), global.Config.make({ seed: "ret1" }));
+		const carry = global.Universe.harvest(a);
+		const schools = Object.keys(carry.returners || {});
+		ok("harvest carries the named star returners", schools.length >= 6, schools.length + " programmes");
+		const b = global.Engine.run(V.realisticClass(4, 70),
+			global.Config.make({ seed: "ret2", carryOver: carry }));
+		let expected = 0;
+		let back = 0;
+		let gone = 0;
+		for (const school of schools) {
+			for (const r of carry.returners[school]) {
+				const t = b.teams[school];
+				if (!t) continue;
+				const found = t.members.filter((m) => m.filler && m.name === r.name)[0];
+				if (r.classYear === "Senior" || r.classYear === "Graduate") {
+					if (!found) gone++;
+					continue;
+				}
+				expected++;
+				if (found && found.starReturner === r.starReturner &&
+					found.classYear !== r.classYear) back++;
+			}
+		}
+		ok("a returner with eligibility left is back on the same programme, a year on",
+			expected > 0 && back === expected, back + " of " + expected);
+		ok("a senior has left", gone > 0, String(gone));
+	}
+
+	/* --- the league fragment ---------------------------------------------- */
+	{
+		const res = global.Engine.run(V.realisticClass(5, 70), global.Config.make({ seed: "frag" }));
+		const frag = global.Engine.exportLeagueFragment(res);
+		const abbrevs = new Set(frag.teams.map((t) => t.abbrev));
+		ok("the league fragment carries every programme once, in BBGM's field names",
+			frag.startingSeason === res.season && frag.teams.length >= 360 &&
+			frag.teamSeasons.length === frag.teams.length &&
+			frag.coaches.length === frag.teams.length &&
+			abbrevs.size === frag.teams.length &&
+			frag.teams.every((t, i) => t.tid === i && Number.isFinite(t.cid)) &&
+			frag.teamSeasons.every((ts) => Number.isFinite(ts.won) && Number.isFinite(ts.lost)));
+		ok("the fragment serialises (no circular references)",
+			(function () { try { JSON.stringify(frag); return true; } catch (e) { return false; } })());
+	}
+
+	/* --- declared scoring intent ----------------------------------------- */
+	{
+		ok("scorers are meant to score and stoppers are not",
+			RB.roleIntentOf("Score-First Point") > 0.8 && RB.roleIntentOf("Rim Protector") < -0.8 &&
+			RB.roleIntentOf("Balanced") === 0);
+		/* Measured: at equal overall, the scoring-tagged builds sit above
+		   the class's own ovr fit and the defense-tagged ones below it. */
+		const all = [];
+		for (let s = 0; s < 12; s++) {
+			const res = global.Engine.run(V.realisticClass(s % 6, 70),
+				global.Config.make({ seed: "intent" + s }));
+			for (const p of res.players) if (!p.nonNcaa && p.stats) all.push(p);
+		}
+		const xs = all.map((p) => p.newOvr);
+		const ys = all.map((p) => p.stats.ppg);
+		const mx = xs.reduce((a, b) => a + b, 0) / xs.length;
+		const my = ys.reduce((a, b) => a + b, 0) / ys.length;
+		let num = 0;
+		let den = 0;
+		for (let i = 0; i < xs.length; i++) { num += (xs[i] - mx) * (ys[i] - my); den += (xs[i] - mx) * (xs[i] - mx); }
+		const slope = num / den;
+		const icpt = my - slope * mx;
+		const resid = (p) => p.stats.ppg - (icpt + slope * p.newOvr);
+		const tagged = (t) => all.filter((p) => {
+			const a = RB.ARCHETYPES.filter((x) => x.name === p.archetype)[0];
+			return a && (a.t || []).indexOf(t) !== -1;
+		});
+		const m = (v) => v.reduce((a, p) => a + resid(p), 0) / Math.max(1, v.length);
+		const gap = m(tagged("scoring")) - m(tagged("defense"));
+		ok("scoring builds out-score defensive builds at equal overall",
+			gap >= 1.2, "gap " + gap.toFixed(2) + " points");
+	}
+
+	ok("endSentence() does not double a full stop",
+		global.Text.endSentence("from N.J.I.T.") === "from N.J.I.T." &&
+		global.Text.endSentence("a step up") === "a step up." &&
+		global.Text.endSentence("") === "");
 }
 
 console.log("\n" + (failures ? failures + " of " + checks + " checks failed"

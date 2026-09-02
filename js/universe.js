@@ -90,9 +90,24 @@
 		};
 	}
 
+	/* The named star returners on a roster, with what the next season needs
+	   to bring them back as the same men. See buildPrograms in js/teams.js. */
+	function returnersOf(t) {
+		const out = [];
+		for (const m of t.members || []) {
+			if (!m.filler || !m.starReturner || !m.name) continue;
+			const slotIndex = Number(String(m.slot || "").replace(/^roster/, ""));
+			out.push({
+				name: m.name, starReturner: m.starReturner, classYear: m.classYear,
+				talent: m.talent, slotIndex: Number.isFinite(slotIndex) ? slotIndex : 0,
+			});
+		}
+		return out;
+	}
+
 	/* What one finished season hands the next. */
 	function harvest(res) {
-		const carry = { confOf: {}, levels: {}, coaches: {} };
+		const carry = { confOf: {}, levels: {}, coaches: {}, returners: {} };
 		const fired = new Set();
 		for (const e of res.seasonEvents || []) {
 			if (e.kind === "coaching change" && e.teams && e.teams[0]) {
@@ -107,6 +122,8 @@
 				coach: stripCoach(t.coach),
 				fired: fired.has(t.name),
 			};
+			const ret = returnersOf(t);
+			if (ret.length) carry.returners[t.name] = ret;
 		}
 		return carry;
 	}
@@ -213,6 +230,7 @@
 	}
 
 	global.Universe = {
-		VERSION, validate, harvest, alumniOf, summarise, threads, exportUniverse,
+		VERSION, validate, harvest, returnersOf, alumniOf, summarise, threads,
+		exportUniverse,
 	};
 })(typeof window !== "undefined" ? window : self);

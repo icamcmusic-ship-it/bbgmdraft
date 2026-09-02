@@ -962,10 +962,62 @@
 			p.scoreTotal = p.scoreProd + standing + rng.normal(0, 1.5);
 			(byLeague[p.newCollege] = byLeague[p.newCollege] || []).push(p);
 		}
+		/* The achievement layer the pro side lacked. Clubs, tables, playoffs,
+		   cups and relegation existed; a prospect who led the ACB in scoring
+		   finished the year with an empty award list, because the only
+		   honours were age-restricted. These are the league's own trophies:
+		   the MVP, the first team, a Finals MVP for the man who carried the
+		   champion, a cup-final MVP, and the continental honour when his
+		   club's European run went deep. The bar is the same production
+		   scale the youth awards use, set higher, and the league's own
+		   strength raises it — an MVP in the EuroLeague is a harder thing
+		   than one in NBL1. */
+		const SHORT = {
+			"EuroLeague": "EuroLeague", "NBA G League": "G League", "Liga ACB": "ACB",
+			"NBL": "NBL", "Chinese CBA": "CBA", "LNB Pro A": "LNB", "EuroCup": "EuroCup",
+			"Basketball Bundesliga": "BBL", "Adriatic League": "ABA", "NBL1": "NBL1",
+			"Basketball Champions League": "BCL", "Turkish BSL": "BSL",
+			"Greek Basket League": "GBL", "Israeli Premier League": "Israeli League",
+			"Japan B.League": "B.League", "Brazil NBB": "NBB",
+			"Basketball Africa League": "BAL", "CEBL": "CEBL", "NAIA": "NAIA",
+			"DII NCAA": "Division II",
+		};
 		for (const lg of Object.keys(byLeague)) {
 			const list = byLeague[lg].sort((a, b) => b.scoreTotal - a.scoreTotal);
 			const names = PRO_AWARDS[lg] || [];
 			const meta = C.NON_NCAA[lg] || {};
+			const short = SHORT[lg];
+			if (short && !meta.youth && !meta.idle) {
+				const strength = Number.isFinite(meta.strength) ? meta.strength : 50;
+				const mvpBar = (22 + strength * 0.10) * proStrict;
+				const firstBar = (17 + strength * 0.08) * proStrict;
+				const env = global.StatsSim.leagueEnv(lg);
+				const minMpg = env.youthCap ? Math.min(20, env.youthCap * 0.8) : 20;
+				list.forEach((p, i) => {
+					if (!p.stats || p.stats.mpg < minMpg) return;
+					if (i === 0 && p.scoreTotal > mvpBar) p.awards.push(short + " MVP");
+					else if (i < 5 && p.scoreTotal > firstBar) p.awards.push("All-" + short + " First Team");
+					const club = p.proTeam;
+					if (!club) return;
+					const bestAtClub = club.prospects.slice()
+						.sort((a, b) => b.scoreTotal - a.scoreTotal)[0] === p;
+					if (club.leagueChamp && bestAtClub && p.scoreTotal > firstBar * 0.8) {
+						p.awards.push(short + " Finals MVP");
+					}
+					if (club.cupChamp && bestAtClub && p.scoreTotal > firstBar * 0.7) {
+						p.awards.push(short + " Cup Final MVP");
+					}
+					/* The continental competition his club played in (see
+					   continentalRun in js/engine.js). A Final Four or a title
+					   is an honour in its own right; a group-stage exit is a
+					   line in the note and nothing else. */
+					const cont = club.continental;
+					if (cont && bestAtClub && p.scoreTotal > firstBar * 0.9) {
+						if (cont.result === "champions") p.awards.push(cont.competition + " Final Four MVP");
+						else if (/Final Four|final/.test(cont.result)) p.awards.push("All-" + cont.competition + " Team");
+					}
+				});
+			}
 			// These are age-restricted or rookie awards, so a prospect really
 			// can win one — but he still has to be the best of the ones here,
 			// and the bar scales with how hard the league is. A youth league

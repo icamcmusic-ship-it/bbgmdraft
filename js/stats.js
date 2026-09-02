@@ -758,9 +758,79 @@
 		return (me && me.statBend) || null;
 	}
 
+	/* What a build says about a stat line that BBGM's composites cannot.
+
+	   BBGM's `drawingFouls` composite is {hgt, spd, drb, dnk, oiq} and its
+	   `fouling` composite is {hgt, diq, spd}: neither reads ins, stre or ft,
+	   so a Free-Throw Merchant (ft 18, ins 6) and a Foul Magnet Guard drew
+	   fouls at exactly the class rate — measured, FTr 0.30 against a class
+	   mean of 0.33 — and a Foul-Prone Enforcer (stre 18, oiq -14) fouled like
+	   everybody else. Any build whose identity rests on those three ratings
+	   was structurally invisible to the model that should express it.
+
+	   Derived from the build's own (normalised) offset vector rather than
+	   tabulated per build, on the same reasoning as ROLE_USAGE: the
+	   ratings a specialist trades toward are the fact; a hand-fitted
+	   constant per name is a second table to keep in sync. Inside scoring
+	   and strength are rim pressure, which is what draws a whistle; a
+	   free-throw shooter gets sent there on purpose late in games, which is
+	   why ft carries a smaller, real weight. Fouls given away come from
+	   strength used without feel. Balanced is the origin of both. */
+	const IDENTITY_FTR = { ins: 0.0024, stre: 0.0016, ft: 0.0018, dnk: 0.0006 };
+	const IDENTITY_PF = { stre: 0.010, oiq: -0.008, ins: 0.003 };
+	/* Centred on the table, weighted by rarity: the offset table is
+	   net-negative on ins (a specialist genuinely trades inside scoring
+	   away), so an uncentred term would move the CLASS free-throw rate off
+	   its anchor by a few percent rather than only moving builds around it.
+	   The anchor is the calibration table's job. */
+	const IDENTITY_CENTRE = { ftr: 0, pf: 0 };
+	const IDENTITY_CACHE = {};
+	function identityRaw(arch) {
+		let ftr = 0;
+		let pf = 0;
+		for (const k of Object.keys(IDENTITY_FTR)) ftr += IDENTITY_FTR[k] * (arch.o[k] || 0);
+		for (const k of Object.keys(IDENTITY_PF)) pf += IDENTITY_PF[k] * (arch.o[k] || 0);
+		return { ftr, pf };
+	}
+	function identityOf(name) {
+		const RB = global.RatingsBuilder;
+		if (!RB || !name) return null;
+		if (IDENTITY_CACHE[name]) return IDENTITY_CACHE[name];
+		if (!IDENTITY_CACHE.__centred) {
+			let wsum = 0;
+			let ftr = 0;
+			let pf = 0;
+			for (const a of RB.ARCHETYPES) {
+				const w = a.w === undefined ? 1 : a.w;
+				const r = identityRaw(a);
+				wsum += w;
+				ftr += w * r.ftr;
+				pf += w * r.pf;
+			}
+			IDENTITY_CENTRE.ftr = wsum ? ftr / wsum : 0;
+			IDENTITY_CENTRE.pf = wsum ? pf / wsum : 0;
+			IDENTITY_CACHE.__centred = true;
+		}
+		const arch = RB.ARCHETYPES.filter((a) => a.name === name)[0];
+		if (!arch || !arch.o) return null;
+		const r = identityRaw(arch);
+		IDENTITY_CACHE[name] = { ftr: r.ftr - IDENTITY_CENTRE.ftr, pf: r.pf - IDENTITY_CENTRE.pf };
+		return IDENTITY_CACHE[name];
+	}
+	function archetypeIdentity(name, cfg) {
+		const id = identityOf(name);
+		if (!id) return { ftr: 0, pf: 1 };
+		/* Scaled by specialisation, the same way the offsets reach the
+		   ratings: at 0 every build is BBGM's own and there is no identity to
+		   read. */
+		const spec = clamp(cfg && Number.isFinite(cfg.specialization) ? cfg.specialization : 1, 0, 3);
+		return { ftr: clamp(id.ftr * spec, -0.09, 0.12), pf: Math.exp(clamp(id.pf * spec, -0.45, 0.55)) };
+	}
+
 	function statLine(rng, ratings, comps, minutes, usgShare, ctx, cfg, teamCtx, who) {
 		const me = who || { talent: 55, filler: false };
 		const bend = bendOf(me);
+		const identity = archetypeIdentity(me.archetype, cfg);
 		const noise = clamp(cfg.statNoise, 0, 3);
 		const env = teamCtx.env || NCAA_ENV;
 		const gameMinutes = env.gameMinutes || 40;
@@ -888,6 +958,8 @@
 			: CAL.byHeight("ftr", bigness);
 		const ftRate = clamp(
 			ftrAnchor + 0.32 * (comps.drawingFouls - (0.42 + 0.11 * bigness) + refVol) +
+				// The rim pressure the composite cannot see: see archetypeIdentity.
+				identity.ftr +
 				rng.normal(0, 0.045 * noise),
 			0.10, 0.75,
 		);
@@ -1040,7 +1112,12 @@
 		// Starters foul less per minute than the bench does (they are better,
 		// and they are the ones a coach protects), so fouls scale with minutes
 		// sub-linearly rather than one-for-one.
-		const pfW = Math.pow(comps.fouling, TUNING.PF_EXP) * Math.pow(minShare, 0.82);
+		// The build's own fouling identity multiplies the composite's share;
+		// reconcileTeamTotals refits the team to its pool afterwards, so an
+		// Enforcer's extra fouls come out of his teammates' rather than
+		// inflating the team.
+		const pfW = Math.pow(comps.fouling, TUNING.PF_EXP) * Math.pow(minShare, 0.82) *
+			identity.pf;
 		// Five fouls ends a night, so a season average saturates well below
 		// it. The hard ceiling is derived from minutes: a player at 5 PF/40
 		// is fouling out of most of his games, which caps what any season
@@ -1077,10 +1154,31 @@
 			84, 122,
 		);
 
+		/* --- the playmaking side of the box score ------------------------
+		   Assisted rate (how much of his scoring came off a teammate's pass
+		   rather than his own creation) and the share of his points that
+		   came in transition. The engine already computed a creation term
+		   for role-usage purposes and never surfaced it; a scout reads
+		   "assisted on 78% of his makes" as a different player from one
+		   assisted on 35%, and a stat line could not say which he was. Both
+		   are rates, drawn around what the composites and the system imply. */
+		const creation = 0.5 * (comps.dribbling - 0.50) + 0.5 * (comps.passing - 0.45);
+		const astdRate = clamp(
+			0.56 + 0.20 * bigness - 0.9 * creation - 0.35 * (usgRate - 0.245) +
+				rng.normal(0, 0.05 * noise),
+			0.12, 0.96);
+		const transShare = clamp(
+			0.14 + 0.45 * (comps.athleticism - 0.50) - 0.06 * bigness +
+				0.006 * (style.pace || 0) + 0.15 * (ctx.oppPress || 0) +
+				rng.normal(0, 0.03 * noise),
+			0.03, 0.45);
+
 		return {
 			gp: games,
 			mpg: minutes,
 			ppg: pts,
+			astdRate,
+			transShare,
 			rpg: orb + drb,
 			orpg: orb,
 			drpg: drb,
@@ -1590,6 +1688,9 @@
 					// See bendOf / SURPRISES: a per-player bend on the season,
 					// as distinct from a change to the player.
 					statBend: m.filler ? null : m.player.statBend,
+					// The build, so the parts of a stat line BBGM's composites
+					// cannot see (see archetypeIdentity) can read it.
+					archetype: m.filler ? null : m.player.archetype,
 				},
 			);
 			lines.push(line);
@@ -1905,6 +2006,32 @@
 			games.forEach((g, i) => { g[key] = base[i]; });
 		}
 
+		/* Plus/minus, which a modern box score carries and this one did
+		   not. His team's margin that night, scaled by how much of it he
+		   was on the floor for, plus the real night-to-night variance of a
+		   lineup number. On/off is the difference between his per-40
+		   plus/minus and the team's margin — an estimate, and labelled as
+		   one in the view. */
+		const share = Math.min(1, s.mpg / 40);
+		for (const g of games) {
+			const margin = Number.isFinite(g.pf) && Number.isFinite(g.pa) ? g.pf - g.pa : 0;
+			g.pm = Math.round(margin * share + rng.normal(0, 5.0));
+		}
+		const teamMargin = meanOf(games.map((g) =>
+			({ m: Number.isFinite(g.pf) && Number.isFinite(g.pa) ? g.pf - g.pa : 0 })), "m");
+		const plusMinus = meanOf(games, "pm");
+		const onOff = share > 0.05 ? plusMinus / share - teamMargin : 0;
+		// Close games: decided by five or fewer, or in overtime.
+		const closeGames = games.filter((g) =>
+			Number.isFinite(g.pf) && Number.isFinite(g.pa) && (Math.abs(g.pf - g.pa) <= 5 || g.ot));
+		const clutch = closeGames.length ? {
+			gp: closeGames.length,
+			ppg: meanOf(closeGames, "pts"),
+			delta: meanOf(closeGames, "pts") - s.ppg,
+			w: closeGames.filter((g) => g.won).length,
+			l: closeGames.filter((g) => !g.won).length,
+		} : null;
+
 		const best = games.slice().sort((a, b) =>
 			b.pts - a.pts || (b.reb + b.ast) - (a.reb + a.ast))[0];
 		const highs = {};
@@ -1933,6 +2060,9 @@
 			   and the number a physically plausible foul rate is actually
 			   constrained by. */
 			foulOuts: games.filter((g) => g.fouls >= 5).length,
+			plusMinus,
+			onOff,
+			clutch,
 			doubleDoubles: games.filter((g) =>
 				[g.pts, g.reb, g.ast, g.stl, g.blk].filter((v) => v >= 10).length >= 2).length,
 			tripleDoubles: games.filter((g) =>
@@ -1986,5 +2116,6 @@
 		astWeight, stlWeight, rebWeight, passSkill,
 		leagueEnv, LEAGUE_ENV, NCAA_ENV,
 		TUNING, ROTATION_SHAPE, classYearIndex, experienceUsage, collegeRole,
+		archetypeIdentity, IDENTITY_FTR, IDENTITY_PF,
 	};
 })(typeof window !== "undefined" ? window : self);
