@@ -3593,26 +3593,33 @@
 		const oHighs = opt("highs", "…and game-log season highs");
 		const oAwards = opt("awards", "Include college awards");
 		list.appendChild(optBox);
-		/* Checked against BBGM's own source, and the reason a user saw
-		   nothing after importing: handleUploadedDraftClass deletes a
-		   player's stats unconditionally on the way in, so Import -> Draft
-		   class cannot show a statline whatever this file writes. Awards
-		   survive it (never deleted there), which is why they do show up.
-		   importPlayers — Tools -> Import players — is the route that keeps
-		   them, and it has its own "include stats" checkbox; it stamps every
-		   imported row's team as DNE, which is what these rows already say
-		   they are. A hand-merge into a league file's player list works too,
-		   the same audience "Season as a BBGM league fragment" serves. */
+		/* Checked against BBGM's own source, and the reason a user saw nothing
+		   after importing twice: the Draft Scouting page's Import button calls
+		   handleUploadedDraftClass, which deletes a player's stats
+		   unconditionally on the way in. No file can show a statline through
+		   that button. Awards survive it (never deleted there), which is why
+		   they do show up. Two routes keep the rows: Tools -> Import players
+		   with its "Include stats" box, which adds players rather than
+		   replacing the class, and the merge below, which writes the user's
+		   own league file back out with the class in it. */
 		list.appendChild(el("p", "hint",
-			"For the statline to survive, import with Tools → Import players " +
-			"and tick its \u201cinclude stats\u201d box. Import → Draft class " +
-			"deletes every uploaded player's stats — only the awards survive " +
-			"that route. The rows are full Basketball GM season rows, so a " +
-			"hand-merge into a league file's player list works as well."));
+			"Importing on the Draft → [year] → Import button deletes every " +
+			"uploaded player's stats before it reads the file, so no statline " +
+			"can come through it — only the awards do. Use “Merge into a " +
+			"league file” below and load the result with Create New League → " +
+			"upload, or import the players with Tools → Import players and " +
+			"tick its “Include stats” box (that one adds to the class instead " +
+			"of replacing it)."));
 		item("BBGM class file, with the options above", () => {
 			if (exportOne(state.active, {
 				stats: oStats(), prior: oPrior(), highs: oHighs(), awards: oAwards(),
 			})) setStatus("Exported " + state.files[state.active].name + ".");
+		});
+		item("Merge into a league file… (the route that keeps the statline)", () => {
+			state.mergeOpts = {
+				stats: oStats(), prior: oPrior(), highs: oHighs(), awards: oAwards(),
+			};
+			$("leagueMergeFile").click();
 		});
 		item("Prospect table as CSV (the current filter)", () => exportCsv(res));
 		item("Prospect table as CSV (whole class)", () => exportCsv(res, true));
@@ -4075,6 +4082,37 @@
 	});
 	$("btnExportMenu").addEventListener("click", exportMenu);
 	$("btnExportAll").addEventListener("click", exportAll);
+	/* Merging the class into a whole league file. The file is the user's own
+	   league export and can be very large, so the read is announced and the
+	   parse failure is a sentence rather than a raw throw. */
+	$("leagueMergeFile").addEventListener("change", (e) => {
+		const f = e.target.files[0];
+		e.target.value = "";
+		if (!f) return;
+		const res = state.results[state.active];
+		if (!res) return;
+		setStatus("Reading " + f.name + "…", true);
+		const r = new FileReader();
+		r.onerror = () => setStatus(f.name + " could not be read from disk.");
+		r.onload = () => {
+			let out;
+			try {
+				const league = JSON.parse(String(r.result).replace(/^\ufeff/, ""));
+				out = global.Engine.mergeIntoLeague(res, league, state.mergeOpts || {});
+			} catch (err) {
+				setStatus("Could not merge: " + (err && err.message ? err.message : err));
+				return;
+			}
+			const base = f.name.replace(/\.json$/i, "");
+			download(base + "_with_" + out.season + "_class.json",
+				"\ufeff" + JSON.stringify(out.file), "application/json");
+			setStatus("Merged " + (out.replaced + out.added) + " players into " +
+				f.name + " (" + out.replaced + " replaced, " + out.added + " added, " +
+				out.removed + " generated prospects dropped). Load the new file with " +
+				"Create New League → upload.");
+		};
+		r.readAsText(f);
+	});
 	$("csvFile").addEventListener("change", (e) => {
 		const f = e.target.files[0];
 		if (!f) return;
