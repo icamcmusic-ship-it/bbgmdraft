@@ -1439,7 +1439,12 @@
 	   a reference to one prospect and one result, and a stale one pointing at a
 	   rerolled class is worse than no menu. */
 	let openMenu = null;
+	let openMenuOutsideClick = null;
 	function closeRowMenu() {
+		if (openMenuOutsideClick) {
+			document.removeEventListener("click", openMenuOutsideClick);
+			openMenuOutsideClick = null;
+		}
 		if (!openMenu) return;
 		if (openMenu.parentNode) openMenu.parentNode.removeChild(openMenu);
 		openMenu = null;
@@ -1519,8 +1524,28 @@
 		menu.style.left = Math.max(4, x) + "px";
 		menu.style.top = Math.max(4, y) + "px";
 		openMenu = menu;
+		/* Dismiss on a genuine click elsewhere. The listener used to fire on
+		   ANY document click, including a right button's own — and some
+		   Chromium builds bubble a synthetic `click` to document immediately
+		   after the `contextmenu` event that opened this menu (Playwright's
+		   CI runner hit this; the Chromium cached for local dev did not), so
+		   the menu closed itself before the next deliberate click could land
+		   on it, which read as the menu having no items at all. A real
+		   "click away to dismiss" is always the primary button; anything
+		   else is that echo, not a user closing the menu. */
+		/* Not { once: true }: that removes the listener the moment it FIRES,
+		   whether or not the handler below actually closed the menu, so the
+		   one real left-click still to come would arrive with nothing left
+		   to catch it. closeRowMenu() (called from a menu item, Escape, or
+		   this handler itself) is what removes it, so a menu dismissed any
+		   other way never leaves a stale listener on document. */
+		const outsideClick = (e) => {
+			if (e.button !== undefined && e.button !== 0) return;
+			closeRowMenu();
+		};
+		openMenuOutsideClick = outsideClick;
 		setTimeout(() => {
-			document.addEventListener("click", closeRowMenu, { once: true });
+			document.addEventListener("click", outsideClick);
 			document.addEventListener("contextmenu", closeRowMenu, { once: true });
 		}, 0);
 	}

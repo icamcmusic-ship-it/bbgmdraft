@@ -613,6 +613,20 @@ function ok(name, condition, detail) {
 		await page.waitForTimeout(300);
 		ok("right-clicking a row opens a menu",
 			(await page.locator(".rowmenu").count()) === 1);
+		/* Some Chromium builds bubble an extra `click` (button 2) to document
+		   right after the `contextmenu` that opens this menu — CI hit exactly
+		   this and the menu's own outside-click listener, which did not check
+		   which button fired, read that echo as the user dismissing it and
+		   closed the menu before the next line's click could land, which
+		   showed up as "no button matches Add to compare" thirty seconds
+		   later. A right-button echo must not close it; a real left click
+		   still does (checked below, after the menu is done with). */
+		await page.evaluate(() => {
+			document.dispatchEvent(new MouseEvent("click",
+				{ bubbles: true, cancelable: true, button: 2 }));
+		});
+		ok("a right-button echo does not close the menu",
+			(await page.locator(".rowmenu").count()) === 1);
 		await page.locator(".rowmenu button", { hasText: "Add to compare" }).click();
 		await page.waitForTimeout(400);
 		ok("and it can add a prospect to the comparison",
