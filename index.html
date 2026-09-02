@@ -47,7 +47,7 @@
 			title="CSV, season data, locked prospects and the settings JSON">More ▾</button>
 		<button id="btnExportAll" disabled hidden>Export all</button>
 	</div>
-	<select id="themeSelect" aria-label="Colour theme" title="Colour theme">
+	<select id="themeSelect" aria-label="Color theme" title="Color theme">
 		<option value="system">◐ Auto</option>
 		<option value="light">☀ Light</option>
 		<option value="dark">☾ Dark</option>
@@ -78,8 +78,8 @@
 		<button id="btnDeletePreset" type="button" title="Delete the selected saved preset">Delete</button>
 	</div>
 	<div class="ctl">
-		<label for="randomScope">Randomise</label>
-		<select id="randomScope" aria-label="Randomise scope">
+		<label for="randomScope">Randomize</label>
+		<select id="randomScope" aria-label="Randomize scope">
 			<option value="gentle">Everything, gently</option>
 			<option value="wide">Everything, wide open</option>
 			<option value="quality">Class quality &amp; depth only</option>
@@ -91,7 +91,7 @@
 		</select>
 	</div>
 	<div class="btngroup wide">
-		<button id="btnRandomize" type="button" title="Randomise the settings in the chosen scope (g). Ctrl+Z restores them in one step.">🎲 Randomise</button>
+		<button id="btnRandomize" type="button" title="Randomize the settings in the chosen scope (g). Ctrl+Z restores them in one step.">🎲 Randomize</button>
 	</div>
 	<p class="hint">“Gently” draws near each setting's default; “wide open” draws across each slider's whole range. The seed, the per-build rarity weights and locked settings are never touched — reroll owns the seed.</p>
 	<div class="ctl">
@@ -118,21 +118,21 @@
 
 	<details class="grp" id="grp-builds" open>
 		<summary>Builds</summary>
-		<div class="ctl"><label for="specialization">Specialisation <b></b></label><input type="range" id="specialization" min="0" max="2.5" step="0.05"></div>
+		<div class="ctl"><label for="specialization">Specialization <b></b></label><input type="range" id="specialization" min="0" max="2.5" step="0.05"></div>
 		<div class="ctl"><label for="archetypeDiversity">Archetype diversity <b></b></label><input type="range" id="archetypeDiversity" min="0" max="100" step="1"></div>
-		<div class="ctl"><label for="classFlavor">Flavour strength <b></b></label><input type="range" id="classFlavor" min="0" max="2" step="0.05"></div>
+		<div class="ctl"><label for="classFlavor">Flavor strength <b></b></label><input type="range" id="classFlavor" min="0" max="2" step="0.05"></div>
 		<div class="ctl"><label for="archetypePool">Builds per class <b></b></label><input type="range" id="archetypePool" min="0" max="40" step="1"></div>
 		<div class="ctl"><label for="surpriseBudget">Anomalies per class <b></b></label><input type="range" id="surpriseBudget" min="0" max="6" step="1"></div>
 		<div class="ctl"><label for="buildNoise">Build noise <b></b></label><input type="range" id="buildNoise" min="0" max="14" step="0.5"></div>
 		<div class="ctl">
-			<label for="flavorHint">Class flavour</label>
+			<label for="flavorHint">Class flavor</label>
 			<select id="flavorHint"></select>
-			<p class="hint">Leave on “draw one” for the usual behaviour. Picking one keeps the seed and changes what kind of class it is.</p>
+			<p class="hint">Leave on “draw one” for the usual behavior. Picking one keeps the seed and changes what kind of class it is.</p>
 		</div>
 		<div class="ctl"><label for="variation">Variation <b></b></label><input type="range" id="variation" min="0" max="12" step="1"></div>
 		<div class="ctl"><label for="poolMemory">Avoid repeating recent builds <b></b></label><input type="range" id="poolMemory" min="0" max="1" step="0.05"></div>
 		<div class="ctl"><label><input type="checkbox" id="varySize"> Let height &amp; weight drift with the build</label></div>
-		<p class="hint">Every rebuilt player is re-solved against BBGM's own ovr formula, so specialising a build never changes his overall.</p>
+		<p class="hint">Every rebuilt player is re-solved against BBGM's own ovr formula, so specializing a build never changes his overall.</p>
 	</details>
 
 	<details class="grp" id="grp-years">

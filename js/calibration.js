@@ -78,7 +78,7 @@
 	const { clamp } = global.BBGMRng;
 
 	/* Height buckets keyed by "bigness" (0 = smallest guards, 1 = 7-footers),
-	   matching the bigness scale used by the stat model. Bucket centres sit at
+	   matching the bigness scale used by the stat model. Bucket centers sit at
 	   roughly bigness 0.05 / 0.35 / 0.7 / 0.95.
 
 	   The shape (guards shoot more threes, bigs finish better and draw more
@@ -109,7 +109,7 @@
 	   was drafted off. Volume moves (MPG +9%, GP +1.2 games, USG +2.2 points)
 	   and the lower tail contracts hard: the p5 season is now a rotation
 	   player's year, not a freshman's. Efficiency barely moves (+0.5 TS) —
-	   players get more of the offence in their draft year, they do not become
+	   players get more of the offense in their draft year, they do not become
 	   far more efficient. */
 	const DRAFT_YEAR_2009 = {
 		mpg: { mean: 30.6, p5: 19.5, p95: 36.6 },
@@ -377,7 +377,7 @@
 	   sharper; 0.0009 turns the realistic 55-90 prospect talent span into a
 	   3.2-point swing in true shooting, which is what a draft board shows.
 
-	   Centred on the mean DRAFT PROSPECT (talent ~72), not on the middle of the
+	   Centered on the mean DRAFT PROSPECT (talent ~72), not on the middle of the
 	   0-100 scale, and applied only to prospects: it describes the draft-tier
 	   spread inside a class, so it must redistribute efficiency within the
 	   class without moving the class mean off the empirical anchor, and without

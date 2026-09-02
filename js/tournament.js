@@ -121,7 +121,7 @@
 				});
 				loser.ncaaResult = "Lost in the First Four";
 				loser.ncaaSeed = seed;
-				// Tracked separately from ncaaWins so round-name labelling
+				// Tracked separately from ncaaWins so round-name labeling
 				// stays correct while the game still counts for GP.
 				winner.ffWin = 1;
 				adv.push(winner);

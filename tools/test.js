@@ -514,8 +514,8 @@ console.log("\nLeague environments");
 }
 
 /* ---------------------------------------------------------- program style */
-/* A shooter at a four-out programme and the same shooter in a pack-line
-   offence should not produce the same line. Programs had a strength and
+/* A shooter at a four-out program and the same shooter in a pack-line
+   offense should not produce the same line. Programs had a strength and
    nothing else. */
 console.log("\nProgram style");
 {
@@ -538,7 +538,7 @@ console.log("\nProgram style");
 		if (t.style.name === "four-out, three-heavy") three.push(mean(share));
 		if (t.style.name === "inside-out, post-heavy") pack.push(mean(share));
 	}
-	ok("a four-out programme takes more threes than a post-heavy one",
+	ok("a four-out program takes more threes than a post-heavy one",
 		three.length && pack.length && mean(three) > mean(pack) + 0.08,
 		"four-out " + mean(three).toFixed(3) + " vs post-heavy " + mean(pack).toFixed(3));
 }
@@ -819,18 +819,18 @@ console.log("\nDistributions");
 console.log("\nArchetypes");
 {
 	/* An archetype's offset vector is made ovr-neutral before the solver runs.
-	   The old normaliser did that by subtracting uniformly, which took the
+	   The old normalizer did that by subtracting uniformly, which took the
 	   points out of exactly the ratings BBGM's usage composite reads — so a
-	   defensive build came out ovr-neutral by construction and offence-negative
+	   defensive build came out ovr-neutral by construction and offense-negative
 	   by side effect, and "the best defensive big in the class" was a player
 	   nobody would draft. */
 	const usageKeys = ["ins", "dnk", "fg", "tp"];
 	const OVR_W = RB.OVR_W;
 	const SHIFT_SCALE = RB.SHIFT_SCALE;
-	// What the old uniform normaliser would have produced, for comparison.
+	// What the old uniform normalizer would have produced, for comparison.
 	let shiftW = 0;
 	for (const k of BB.RATING_KEYS) shiftW += OVR_W[k] * SHIFT_SCALE[k];
-	const uniformNormalise = (raw) => {
+	const uniformNormalize = (raw) => {
 		let push = 0;
 		for (const k of Object.keys(raw)) push += OVR_W[k] * raw[k];
 		const u = push / shiftW;
@@ -845,14 +845,14 @@ console.log("\nArchetypes");
 	for (const name of ["Switchable Big", "Defensive Pest", "Wing Stopper",
 		"Rim Protector", "Mobile Shot-Swatter"]) {
 		const a = RB.ARCHETYPES.filter((x) => x.name === name)[0];
-		const was = usageHit(uniformNormalise(RB.RAW_OFFSETS[name]));
+		const was = usageHit(uniformNormalize(RB.RAW_OFFSETS[name]));
 		const now = usageHit(a.o);
-		ok(name + " keeps more of its offence than a uniform shift would",
+		ok(name + " keeps more of its offense than a uniform shift would",
 			now > was + 1.5,
 			"usage ratings shifted " + now.toFixed(1) + ", against " +
 				was.toFixed(1) + " under a uniform shift");
 	}
-	// And it is still ovr-neutral, which is the whole point of normalising.
+	// And it is still ovr-neutral, which is the whole point of normalizing.
 	let worstPush = 0;
 	for (const a of RB.ARCHETYPES) {
 		let push = 0;
@@ -1041,13 +1041,13 @@ console.log("\nOVR weights against BBGM's own formula");
 	   and it is what makes every archetype's offset vector ovr-neutral. If BBGM
 	   ever re-fits those weights, BB.ovr() keeps passing every test it has —
 	   it is the source of truth — while every archetype silently stops being
-	   ovr-neutral and the specialisation slider starts meaning something
+	   ovr-neutral and the specialization slider starts meaning something
 	   different per build. Nothing could see that.
 
 	   So derive the weights numerically by finite differences and check them
 	   against the table. This runs against BB.ovrRaw — the linear half, before
 	   the piecewise fudge and the rounding — because against ovr() itself a
-	   single rating's contribution disappears into the quantisation: endu moves
+	   single rating's contribution disappears into the quantization: endu moves
 	   the result by 1.3 points over the whole difference and the rounding is
 	   half a point. ovrRaw is what ovr() is built from, so there is still only
 	   one copy of these weights inside BBGM to drift away from. */
@@ -1088,12 +1088,12 @@ console.log("\nSmall custom college sets");
 		}
 		global.Colleges.byConference = keep;
 		const res = global.Engine.run(lf, global.Config.make({ seed: "tiny" }));
-		ok("a 14-programme season still produces a champion",
+		ok("a 14-program season still produces a champion",
 			!!(res.tourney && res.tourney.champion && res.tourney.champion.team));
 		ok("every prospect still gets a stat line",
 			res.players.filter((p) => !p.nonNcaa).every((p) => p.stats));
 	} catch (err) {
-		ok("a 14-programme season still produces a champion", false, err.message);
+		ok("a 14-program season still produces a champion", false, err.message);
 		ok("every prospect still gets a stat line", false, err.message);
 	} finally {
 		global.Colleges.names = savedNames;
@@ -1114,7 +1114,7 @@ console.log("\nBatch mode");
 		for (let i = 0; i < 3; i++) {
 			const c = global.Config.make({});
 			c.seed = "fixedbatch#" + i;
-			rows.push(B.summarise(runner.run(c)));
+			rows.push(B.summarize(runner.run(c)));
 		}
 		return rows;
 	};
@@ -1130,7 +1130,7 @@ console.log("\nBatch mode");
 	   were averaged over the class, so the panel read a point below the
 	   Prospects tab with nothing on screen to explain it. */
 	const res = global.Engine.run(V.syntheticClass(5, 70), global.Config.make({ seed: "bd" }));
-	const row = B.summarise(res);
+	const row = B.summarize(res);
 	const ncaa = res.players.filter((p) => p.stats && !p.nonNcaa);
 	const want = ncaa.reduce((x, p) => x + p.stats.ppg, 0) / ncaa.length;
 	ok("batch PPG is the NCAA population the Prospects tab shows",
@@ -1179,7 +1179,7 @@ console.log("\nSeason story");
 		const moves = res.realignment || [];
 		if (moves.length) withMoves++;
 		for (const m of moves) {
-			// The programme must actually be playing where the move says.
+			// The program must actually be playing where the move says.
 			if (!res.teams[m.school] || res.teams[m.school].conf !== m.to) bad++;
 			// And a raid reaches one rung down, not five.
 			const sf = global.Colleges.CONFERENCES[m.from];
@@ -1216,13 +1216,13 @@ console.log("\nSeason story");
 		Object.values(res.teams).every((t) =>
 			t.coach.situation !== "first year" || t.coach.tenure === 1));
 
-	/* The narrative flavours bend settings that later phases own, and those
+	/* The narrative flavors bend settings that later phases own, and those
 	   phases used to read the unbent config. */
 	const down = global.Engine.run(V.syntheticClass(311, 60),
 		global.Config.make({ seed: "down", bluebloodDownYears: 3 }));
-	ok("a blue-blood down year actually reaches the programmes",
+	ok("a blue-blood down year actually reaches the programs",
 		Object.values(down.teams).filter((t) => t.downYear).length === 3,
-		Object.values(down.teams).filter((t) => t.downYear).length + " programmes");
+		Object.values(down.teams).filter((t) => t.downYear).length + " programs");
 }
 
 console.log("\nEarlier seasons");
@@ -1326,7 +1326,7 @@ console.log("\nRegressions");
 			S.classYearIndex("Redshirt Junior") > S.classYearIndex("Junior"),
 		[S.classYearIndex("Freshman"), S.classYearIndex("Redshirt Junior"),
 			S.classYearIndex("Graduate")].join("/"));
-	ok("an upperclassman is given more of the offence than a freshman",
+	ok("an upperclassman is given more of the offense than a freshman",
 		S.experienceUsage("Senior") > S.experienceUsage("Junior") &&
 			S.experienceUsage("Junior") > S.experienceUsage("Sophomore") &&
 			S.experienceUsage("Sophomore") > S.experienceUsage("Freshman"));
@@ -1354,7 +1354,7 @@ console.log("\nArchetype rarity ordering");
 	   but "several" stops meaning two hundred. This test verifies:
 	     1. The compression parameter is what the code documents (0.42).
 	     2. Rare archetypes (low w) appear less often than common ones (high w).
-	     3. The realised frequency spread is compressed relative to the authored
+	     3. The realized frequency spread is compressed relative to the authored
 	        weight spread, within the range the exponent predicts. */
 	ok("RARITY_COMPRESS is the documented value", RB.RARITY_COMPRESS === 0.42,
 		"got " + RB.RARITY_COMPRESS);
@@ -1388,12 +1388,12 @@ console.log("\nArchetype rarity ordering");
 		"top quartile " + topCount + " draws vs bottom quartile " + botCount);
 
 	/* The authored weight spread (max w / min w among eligible) is compressed
-	   by the RARITY_COMPRESS exponent. Verify the realised frequency ratio is
+	   by the RARITY_COMPRESS exponent. Verify the realized frequency ratio is
 	   closer to the compressed prediction than to the raw one.
 
 	   raw ratio     = max(w/exposure) / min(w/exposure)
 	   compressed    = raw ^ RARITY_COMPRESS
-	   The realised spread (max count / min count) should be closer to the
+	   The realized spread (max count / min count) should be closer to the
 	   compressed value than to the raw one, with sampling noise allowed. */
 	const weights = eligible.map((a) => RB.archetypeWeight(a, cfg, null));
 	const maxW = Math.max.apply(null, weights);
@@ -1601,7 +1601,7 @@ console.log("\nArchetype table and solver audit");
 
 {
 	/* The usage protection is scaled by what the build loaded on the usage
-	   composite itself, so an offence-loaded build no longer collects a
+	   composite itself, so an offense-loaded build no longer collects a
 	   defensive build's compensation. */
 	const W = { ins: 1.5, dnk: 1, fg: 1, tp: 1, spd: 0.5, hgt: 0.5, drb: 0.5, oiq: 0.5 };
 	const du = (name) => {
@@ -1610,24 +1610,24 @@ console.log("\nArchetype table and solver audit");
 		for (const k of Object.keys(o)) d += (W[k] || 0) * o[k];
 		return d / 650;
 	};
-	ok("an offence-loaded build reads positive on the usage composite",
+	ok("an offense-loaded build reads positive on the usage composite",
 		du("Score-First Point") > 0.03 && du("Combo Guard") > 0.02,
 		"Score-First Point " + du("Score-First Point").toFixed(4));
 	ok("a defensive build reads negative on it",
 		du("Rim Protector") < -0.02 && du("Defensive Pest") < -0.02);
 
-	/* The measurable consequence: after normalisation the offence-loaded
+	/* The measurable consequence: after normalization the offense-loaded
 	   builds should not have kept MORE composite than they authored. */
 	const kept = (name) => RB.usageCompositeDelta(
 		RB.ARCHETYPES.filter((a) => a.name === name)[0]);
-	ok("normalisation no longer inflates an offence-loaded build's composite",
+	ok("normalization no longer inflates an offense-loaded build's composite",
 		kept("Score-First Point") <= du("Score-First Point") + 1e-9,
 		"authored " + du("Score-First Point").toFixed(4) + ", kept " +
 			kept("Score-First Point").toFixed(4));
 }
 
 {
-	/* The creation term is residualised against the tags, so it separates two
+	/* The creation term is residualized against the tags, so it separates two
 	   builds that share a tag and do not share a creation profile. */
 	const of = (n) => RB.ARCHETYPES.filter((a) => a.name === n)[0];
 	const helio = RB.creationDelta(of("Heliocentric Guard"));
@@ -1635,7 +1635,7 @@ console.log("\nArchetype table and solver audit");
 	ok("creation separates a heliocentric guard from a sharpshooter",
 		helio - sharp > 0.5,
 		"helio " + helio.toFixed(3) + " vs sharp " + sharp.toFixed(3));
-	ok("creation is centred: the table's tag-weighted mean is near zero",
+	ok("creation is centered: the table's tag-weighted mean is near zero",
 		Math.abs(RB.ARCHETYPES.reduce((a, x) => a + RB.creationDelta(x), 0) /
 			RB.ARCHETYPES.length) < 0.15);
 	ok("the fitted creation weight is no longer a rounding error",
@@ -1689,12 +1689,12 @@ console.log("\nArchetype table and solver audit");
 	/* potFromRole's load term is measured against the player's own build, so
 	   it no longer pays a build for having that build's usage. */
 	const stats = { usg: 0.20, mpg: 30, ppg: 12, rpg: 8, apg: 1.5, ts: 0.58 };
-	const againstClass = RB.potFromRole(stats, "Freshman", RB.ROLE_USG_CENTRE);
+	const againstClass = RB.potFromRole(stats, "Freshman", RB.ROLE_USG_CENTER);
 	const againstBuild = RB.potFromRole(stats, "Freshman", 0.20);
 	ok("a low-usage line scores lower against its own build's usage than " +
-		"against the class centre", againstBuild < againstClass,
+		"against the class center", againstBuild < againstClass,
 		againstBuild.toFixed(2) + " vs " + againstClass.toFixed(2));
-	ok("potFromRole still falls back to the class centre",
+	ok("potFromRole still falls back to the class center",
 		Math.abs(RB.potFromRole(stats, "Freshman") - againstClass) < 1e-9);
 	// And the build-driven part of the term is gone from a real class.
 	const byArch = {};
@@ -1717,11 +1717,11 @@ console.log("\nArchetype table and solver audit");
 }
 
 /* --------------------------------------- variation, memory and narrative */
-console.log("\nExploring a seed's neighbourhood");
+console.log("\nExploring a seed's neighborhood");
 {
 	const lf = () => V.realisticClass(3, 70);
 	const run = (over) => global.Engine.run(lf(),
-		global.Config.make(Object.assign({ seed: "neighbour" }, over)));
+		global.Config.make(Object.assign({ seed: "neighbor" }, over)));
 	const base = run({});
 	const same = run({ variation: 0 });
 	const v1 = run({ variation: 1 });
@@ -1747,13 +1747,13 @@ console.log("\nExploring a seed's neighbourhood");
 }
 
 {
-	// A flavour can be asked for rather than only drawn.
+	// A flavor can be asked for rather than only drawn.
 	const ask = (name) => global.Engine.run(V.realisticClass(4, 70),
 		global.Config.make({ seed: "hint", flavorHint: name })).flavor;
-	ok("a flavour hint is honoured", ask("big-heavy").name === "big-heavy");
-	ok("an asked-for flavour says so", ask("defensive").asked === true);
-	ok("a hint for a flavour that does not exist falls back to the draw",
-		!!ask("no such flavour").name && ask("no such flavour").asked === false);
+	ok("a flavor hint is honored", ask("big-heavy").name === "big-heavy");
+	ok("an asked-for flavor says so", ask("defensive").asked === true);
+	ok("a hint for a flavor that does not exist falls back to the draw",
+		!!ask("no such flavor").name && ask("no such flavor").asked === false);
 	ok("no hint still draws",
 		global.Engine.run(V.realisticClass(4, 70),
 			global.Config.make({ seed: "hint" })).flavor.asked === false);
@@ -1763,7 +1763,7 @@ console.log("\nExploring a seed's neighbourhood");
 	/* Pool exclusion memory: a build that was in the last few pools is pushed
 	   toward the back of the queue rather than banned. */
 	const recent = [["Combo Guard", "Rim Runner"], ["Combo Guard"], ["Combo Guard"]];
-	ok("a build in every recent pool is penalised",
+	ok("a build in every recent pool is penalized",
 		RB.poolMemoryFactor("Combo Guard", recent, 1) < 0.4,
 		String(RB.poolMemoryFactor("Combo Guard", recent, 1)));
 	ok("the penalty fades with age",
@@ -1773,7 +1773,7 @@ console.log("\nExploring a seed's neighbourhood");
 		RB.poolMemoryFactor("Point Center", recent, 1) === 1);
 	ok("memory 0 is a no-op",
 		RB.poolMemoryFactor("Combo Guard", recent, 0) === 1);
-	ok("a penalised build is not banned",
+	ok("a penalized build is not banned",
 		RB.poolMemoryFactor("Combo Guard", recent, 1) > 0);
 
 	/* End to end, on the thing actually complained about: how often the
@@ -1808,16 +1808,16 @@ console.log("\nExploring a seed's neighbourhood");
 }
 
 {
-	/* Team momentum: an autocorrelated arc, centred so it moves a season's
+	/* Team momentum: an autocorrelated arc, centered so it moves a season's
 	   shape without moving its level. */
 	const T = global.TeamsSim;
 	const arc = T.momentumArc(new Rng("arc"), { teamMomentum: 1 });
 	ok("the momentum arc has a knot per stretch of the season",
 		arc.length === T.ARC_KNOTS);
-	ok("the arc is centred", Math.abs(arc.reduce((a, b) => a + b, 0)) < 1e-9);
+	ok("the arc is centered", Math.abs(arc.reduce((a, b) => a + b, 0)) < 1e-9);
 	ok("momentum can be turned off",
 		T.momentumArc(new Rng("arc"), { teamMomentum: 0 }) === null);
-	// Autocorrelated: neighbouring knots agree more than distant ones do.
+	// Autocorrelated: neighboring knots agree more than distant ones do.
 	let near = 0;
 	let far = 0;
 	for (let s = 0; s < 400; s++) {
@@ -1979,8 +1979,8 @@ console.log("\nMechanical anomalies and season narrative");
 }
 
 {
-	/* Flavour config bends reach the phases that own the settings they bend.
-	   Four flavours exist mainly to move potBias and potSpread and phasePot
+	/* Flavor config bends reach the phases that own the settings they bend.
+	   Four flavors exist mainly to move potBias and potSpread and phasePot
 	   read state.cfg, so none of them did anything. */
 	const gap = (hint) => {
 		const all = [];
@@ -1994,24 +1994,24 @@ console.log("\nMechanical anomalies and season narrative");
 		return all.reduce((a, b) => a + b, 0) / all.length;
 	};
 	const none = gap("");
-	ok("a flavour that lowers potential actually lowers it",
+	ok("a flavor that lowers potential actually lowers it",
 		gap("veteran") < none - 1.5,
 		"veteran " + gap("veteran").toFixed(2) + " vs none " + none.toFixed(2));
-	ok("a flavour that raises potential actually raises it",
+	ok("a flavor that raises potential actually raises it",
 		gap("one-and-done") > none + 1.5,
 		"one-and-done " + gap("one-and-done").toFixed(2));
 }
 
 {
-	/* A flavour's DESTINATION bend reaches assignCollege.
+	/* A flavor's DESTINATION bend reaches assignCollege.
 
 	   Config.make folds the three legacy sliders (wEuroLeague, wGLeague, wNBL)
 	   into `leagueWeights`, which is the only thing assignCollege reads — and
-	   it does that at make() time, before any flavour bend runs. So a flavour
+	   it does that at make() time, before any flavor bend runs. So a flavor
 	   that set wEuroLeague wrote a number nothing read. The "unusually
-	   international" flavour, whose entire purpose is to put more of the class
+	   international" flavor, whose entire purpose is to put more of the class
 	   abroad, produced EuroLeague at 11.9% of non-NCAA prospects against 11.9%
-	   with no flavour at all. */
+	   with no flavor at all. */
 	const euroShare = (over) => {
 		let euro = 0;
 		let abroad = 0;
@@ -2028,29 +2028,29 @@ console.log("\nMechanical anomalies and season narrative");
 	};
 	const plain = euroShare({ classFlavor: 0 });
 	const intl = euroShare({ flavorHint: "international" });
-	ok("a flavour's destination bend reaches the college assignment",
+	ok("a flavor's destination bend reaches the college assignment",
 		intl > plain * 1.3,
-		"EuroLeague share: no flavour " + (plain * 100).toFixed(1) +
+		"EuroLeague share: no flavor " + (plain * 100).toFixed(1) +
 			"%, international " + (intl * 100).toFixed(1) + "%");
 	// And a user who edited the destination table is not overruled by it.
 	const mine = euroShare({ flavorHint: "international",
 		leagueWeights: { EuroLeague: 0 } });
-	ok("a destination the user set wins over the flavour", mine === 0,
+	ok("a destination the user set wins over the flavor", mine === 0,
 		(mine * 100).toFixed(1) + "%");
 }
 
 {
-	// The five new flavours exist and are distinguishable from the old ones by
+	// The five new flavors exist and are distinguishable from the old ones by
 	// the tilt they apply, which is the fault they were added to fix.
 	const RBF = RB.CLASS_FLAVORS;
 	const added = ["euro-influenced", "post-up renaissance", "three-and-d only",
 		"feast or famine", "coaching carousel"];
-	ok("the five new flavours are in the table",
+	ok("the five new flavors are in the table",
 		added.every((n) => RBF.some((f) => f.name === n)));
-	// Every flavour carries either a distinct tilt or a distinct bend.
+	// Every flavor carries either a distinct tilt or a distinct bend.
 	const sig = (f) => JSON.stringify([f.m || {}, f.c || {}]);
 	const sigs = RBF.map(sig);
-	ok("no two flavours are the same flavour",
+	ok("no two flavors are the same flavor",
 		new Set(sigs).size === sigs.length);
 	// The post-up class really does shoot fewer threes than the big-heavy one.
 	const threes = (hint) => {
@@ -2179,7 +2179,7 @@ console.log("\nMechanical anomalies and season narrative");
 		global.Engine.run(V.realisticClass(3, 70),
 			global.Config.make({ seed: "events", seasonEvents: 0 }))
 			.seasonEvents.length === 0);
-	ok("every event names at least one real programme",
+	ok("every event names at least one real program",
 		res.seasonEvents.every((e) => e.teams && e.teams.length &&
 			e.teams.every((n) => !!res.teams[n])));
 	ok("events are in calendar order",
@@ -2312,7 +2312,7 @@ console.log("\nWarm re-runs");
 }
 
 {
-	// A season event never names one programme as both sides of a game.
+	// A season event never names one program as both sides of a game.
 	let dup = 0;
 	let total = 0;
 	for (let s = 0; s < 30; s++) {
@@ -2323,7 +2323,7 @@ console.log("\nWarm re-runs");
 			if (e.teams && e.teams.length === 2 && e.teams[0] === e.teams[1]) dup++;
 		}
 	}
-	ok("no season event names the same programme twice", dup === 0,
+	ok("no season event names the same program twice", dup === 0,
 		dup + " of " + total);
 }
 
@@ -2403,7 +2403,7 @@ console.log("\nUniverse");
 	const U = global.Universe;
 	const a = global.Engine.run(V.realisticClass(1, 70), global.Config.make({ seed: "u1" }));
 	const carry = U.harvest(a);
-	ok("harvest carries every programme forward",
+	ok("harvest carries every program forward",
 		Object.keys(carry.levels).length >= 360 && Object.keys(carry.coaches).length >= 360);
 	const b = global.Engine.run(V.realisticClass(2, 70),
 		global.Config.make({ seed: "u2", carryOver: carry }));
@@ -2417,7 +2417,7 @@ console.log("\nUniverse");
 	}
 	ok("a carried coach is the same man next season",
 		total > 300 && same / total > 0.9, same + " of " + total);
-	const rows = [U.summarise(a, "u1", "a.json"), U.summarise(b, "u2", "b.json")];
+	const rows = [U.summarize(a, "u1", "a.json"), U.summarize(b, "u2", "b.json")];
 	ok("a timeline row names a champion, a POY and a No. 1 pick",
 		rows.every((r) => r.champion && r.champSeed && r.no1 && r.apOne));
 	ok("threads() runs on a two-season timeline", Array.isArray(U.threads(rows)));
@@ -2472,21 +2472,21 @@ console.log("\nAudit regressions");
 		let poolsShort = 0;
 		for (let s = 0; s < 16; s++) {
 			const res = global.Engine.run(V.realisticClass(s % 8, 70),
-				global.Config.make({ seed: "centre" + s }));
+				global.Config.make({ seed: "center" + s }));
 			const pool = res.archetypePool || [];
-			const centres = pool.filter((n) => {
+			const centers = pool.filter((n) => {
 				const a = RB.ARCHETYPES.filter((x) => x.name === n)[0];
-				return a && a.min >= RB.CENTRE_MIN;
+				return a && a.min >= RB.CENTER_MIN;
 			}).length;
-			if (centres < RB.CENTRE_IN_POOL) poolsShort++;
+			if (centers < RB.CENTER_IN_POOL) poolsShort++;
 			for (const p of res.players) {
-				if (!p.newRatings || p.newRatings.hgt < RB.CENTRE_MIN) continue;
+				if (!p.newRatings || p.newRatings.hgt < RB.CENTER_MIN) continue;
 				tall++;
 				const a = RB.ARCHETYPES.filter((x) => x.name === p.archetype)[0];
-				if (a && a.min >= RB.CENTRE_MIN) own++;
+				if (a && a.min >= RB.CENTER_MIN) own++;
 			}
 		}
-		ok("every pool carries the genuine-centre builds", poolsShort === 0, poolsShort + " short");
+		ok("every pool carries the genuine-center builds", poolsShort === 0, poolsShort + " short");
 		ok("a seven-footer usually draws a build made for him",
 			tall > 40 && own / tall >= 0.30, own + " of " + tall);
 	}
@@ -2502,7 +2502,7 @@ console.log("\nAudit regressions");
 			id("Foul-Prone Enforcer").pf > 1.15 && id("Sharpshooter").pf < 1.0);
 		ok("Balanced sits at the anchor",
 			Math.abs(id("Balanced").ftr) < 0.015 && Math.abs(id("Balanced").pf - 1) < 0.05);
-		ok("the identity vanishes at specialisation 0",
+		ok("the identity vanishes at specialization 0",
 			S.archetypeIdentity("Foul-Prone Enforcer", { specialization: 0 }).ftr === 0);
 		// Simulated: the builds the identity says draw fouls do, on the field.
 		const hi = [];
@@ -2622,7 +2622,7 @@ console.log("\nAudit regressions");
 
 	/* --- the pro achievement layer -------------------------------------- */
 	{
-		let leagueHonours = 0;
+		let leagueHonors = 0;
 		let continental = 0;
 		let pros = 0;
 		for (let s = 0; s < 12; s++) {
@@ -2631,12 +2631,12 @@ console.log("\nAudit regressions");
 			for (const p of res.players) {
 				if (!p.nonNcaa) continue;
 				pros++;
-				if ((p.awards || []).some((a) => / MVP$| First Team$/.test(a))) leagueHonours++;
+				if ((p.awards || []).some((a) => / MVP$| First Team$/.test(a))) leagueHonors++;
 				if (p.continental) continental++;
 			}
 		}
-		ok("prospects abroad can win their league's own honours",
-			pros > 50 && leagueHonours > 0, leagueHonours + " of " + pros);
+		ok("prospects abroad can win their league's own honors",
+			pros > 50 && leagueHonors > 0, leagueHonors + " of " + pros);
 		ok("clubs in the domestic leagues play a continental competition",
 			continental > 0, continental + " of " + pros);
 		const stages = ["group stage", "round of 16", "quarterfinals", "Final Four", "final", "champions"];
@@ -2651,7 +2651,7 @@ console.log("\nAudit regressions");
 		const a = global.Engine.run(V.realisticClass(3, 70), global.Config.make({ seed: "ret1" }));
 		const carry = global.Universe.harvest(a);
 		const schools = Object.keys(carry.returners || {});
-		ok("harvest carries the named star returners", schools.length >= 6, schools.length + " programmes");
+		ok("harvest carries the named star returners", schools.length >= 6, schools.length + " programs");
 		const b = global.Engine.run(V.realisticClass(4, 70),
 			global.Config.make({ seed: "ret2", carryOver: carry }));
 		let expected = 0;
@@ -2671,7 +2671,7 @@ console.log("\nAudit regressions");
 					found.classYear !== r.classYear) back++;
 			}
 		}
-		ok("a returner with eligibility left is back on the same programme, a year on",
+		ok("a returner with eligibility left is back on the same program, a year on",
 			expected > 0 && back === expected, back + " of " + expected);
 		ok("a senior has left", gone > 0, String(gone));
 	}
@@ -2681,14 +2681,14 @@ console.log("\nAudit regressions");
 		const res = global.Engine.run(V.realisticClass(5, 70), global.Config.make({ seed: "frag" }));
 		const frag = global.Engine.exportLeagueFragment(res);
 		const abbrevs = new Set(frag.teams.map((t) => t.abbrev));
-		ok("the league fragment carries every programme once, in BBGM's field names",
+		ok("the league fragment carries every program once, in BBGM's field names",
 			frag.startingSeason === res.season && frag.teams.length >= 360 &&
 			frag.teamSeasons.length === frag.teams.length &&
 			frag.coaches.length === frag.teams.length &&
 			abbrevs.size === frag.teams.length &&
 			frag.teams.every((t, i) => t.tid === i && Number.isFinite(t.cid)) &&
 			frag.teamSeasons.every((ts) => Number.isFinite(ts.won) && Number.isFinite(ts.lost)));
-		ok("the fragment serialises (no circular references)",
+		ok("the fragment serializes (no circular references)",
 			(function () { try { JSON.stringify(frag); return true; } catch (e) { return false; } })());
 	}
 
@@ -2859,7 +2859,7 @@ console.log("\nAudit regressions (September 2026)");
 			const month = /\b(November|December|January|February)\b/.exec(head);
 			if (month && dl.indexOf(month[1]) !== 0) headMismatch++;
 			const year = /\b(freshman|sophomore|junior|senior|graduate)\b/i.exec(head);
-			if (year && a.kind === "field honours" && body.toLowerCase().indexOf(year[1].toLowerCase()) === -1) headMismatch++;
+			if (year && a.kind === "field honors" && body.toLowerCase().indexOf(year[1].toLowerCase()) === -1) headMismatch++;
 			if (a.kind === "realignment") realignArticles++;
 			if (a.kind === "conf tourney") confArticles++;
 		}
@@ -2891,7 +2891,7 @@ console.log("\nAudit regressions (September 2026)");
 		realignArticles <= N, realignArticles + " realignment articles in " + N + " classes");
 	ok("conference tournaments run as at most four articles",
 		confArticlesMax <= 4, String(confArticlesMax));
-	ok("realignment moves a programme into a league it shares a map with",
+	ok("realignment moves a program into a league it shares a map with",
 		moves > 0 && overlapping / moves >= 0.9, overlapping + " of " + moves);
 	/* The realistic fixture itself carries ratings at 1 (its bottom third
 	   is shifted down to a draft-slot curve), so the claim is about what
@@ -2912,9 +2912,9 @@ console.log("\nAudit regressions (September 2026)");
 		T.textFaults("has 1 triple-double and 2 double-doubles").length === 0);
 	ok("plural() agrees", T.plural(1, "triple-double") === "1 triple-double" &&
 		T.plural(3, "team") === "3 teams");
-	ok("a team honour is named to, a trophy is won",
-		/^is named a Consensus/.test(global.News.honourPhrase("Consensus First Team All-American")) &&
-		/^wins the /.test(global.News.honourPhrase("Wooden Award")));
+	ok("a team honor is named to, a trophy is won",
+		/^is named a Consensus/.test(global.News.honorPhrase("Consensus First Team All-American")) &&
+		/^wins the /.test(global.News.honorPhrase("Wooden Award")));
 
 	/* The potential gap is derived from the build. */
 	ok("every build has a derived potential gap",
@@ -2965,7 +2965,7 @@ console.log("\nAudit regressions (September 2026)");
 			(crafty / pools * 100).toFixed(1) + "% / " + (system / pools * 100).toFixed(1) + "%");
 	}
 
-	/* Renamed programmes and the sample class. */
+	/* Renamed programs and the sample class. */
 	ok("a file that says IUPUI lands on IU Indianapolis",
 		global.Colleges.canonical("IUPUI") === "IU Indianapolis" &&
 		global.Colleges.canonical("Louisiana-Lafayette") === "Louisiana" &&
@@ -2995,8 +2995,44 @@ console.log("\nAudit regressions (September 2026)");
 		const withKey = Object.values(res.teams).flatMap((t) => t.fieldPlayers || [])
 			.filter((f) => f.key);
 		ok("every returning rotation player carries a key", withKey.length > 3000);
-		ok("a field honour names the player it can link to",
-			(res.fieldHonours || []).every((h) => !h.key || withKey.some((f) => f.key === h.key)));
+		ok("a field honor names the player it can link to",
+			(res.fieldHonors || []).every((h) => !h.key || withKey.some((f) => f.key === h.key)));
+	}
+
+	/* The §8.13 export options (stats/prior/highs), reported as broken by a
+	   user: they show up nowhere after Import -> Draft class in BBGM. That
+	   is confirmed against BBGM's own source: handleUploadedDraftClass does
+	   `delete p.stats` on every uploaded player unconditionally, no matter
+	   what this file writes, which is why only awards (never deleted there)
+	   come through. The fix is the export dialog telling the user that
+	   rather than a code change here — but the rows this function writes
+	   still have to be right for the workflow they DO serve, a manual merge
+	   into an existing league file's player list, so that stays covered. */
+	{
+		const res = global.Engine.run(V.realisticClass(2, 70), global.Config.make({ seed: "statsopt" }));
+		const withStats = res.players.filter((p) => !p.nonNcaa && p.stats && p.stats.gp > 0)[0];
+		const plain = global.Engine.exportFile(res);
+		const idx = res.players.indexOf(withStats);
+		ok("no opts writes exactly the original stats field",
+			JSON.stringify(plain.players[idx].stats) ===
+			JSON.stringify(withStats.src.stats));
+		const withOpts = global.Engine.exportFile(res, { stats: true, prior: true, highs: true, awards: true });
+		const row = withOpts.players[idx];
+		const draftRow = row.stats[row.stats.length - 1];
+		ok("stats:true appends a draft-year row with tid -1 and this season",
+			Array.isArray(row.stats) && row.stats.length >= 1 &&
+			draftRow.tid === -1 && draftRow.season === res.leagueFile.startingSeason &&
+			draftRow.gp > 0);
+		ok("highs:true adds the game-log season highs onto that row",
+			Number.isFinite(draftRow.ptsMax) && draftRow.ptsMax >= draftRow.trbMax);
+		if (Array.isArray(withStats.priorSeasons) && withStats.priorSeasons.length) {
+			ok("prior:true adds a row per simulated earlier season",
+				row.stats.length > 1 + (withOpts.players[idx].awards ? 0 : 0) &&
+				row.stats.length - 1 <= withStats.priorSeasons.length);
+		}
+		ok("awards:true concatenates every honor as {season, type}",
+			row.awards.length >= (withStats.awards || []).length &&
+			row.awards.every((a) => Number.isFinite(a.season) && typeof a.type === "string"));
 	}
 }
 

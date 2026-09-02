@@ -51,7 +51,7 @@
 		redo: [],
 		// The two prospects the Compare tab is holding side by side.
 		compare: [null, null, null, null],
-		// The programme whose page the Teams tab is showing, if any.
+		// The program whose page the Teams tab is showing, if any.
 		team: null,
 		standingsConf: null,
 		compactBracket: false,
@@ -66,9 +66,9 @@
 		   compact summaries (seeds, champions, names), not simulated output —
 		   a universe re-runs from its seeds. */
 		universe: { rows: [], threads: [], alumni: [], baseSeed: "", running: false },
-		// The randomiser's scope select, persisted like every other control.
+		// The randomizer's scope select, persisted like every other control.
 		randomScope: "gentle",
-		// Settings the randomiser must not touch. {key: true}.
+		// Settings the randomizer must not touch. {key: true}.
 		settingLocks: {},
 	};
 	global.App = { state };
@@ -419,7 +419,7 @@
 		archetypePool: (v) => (v ? v + " builds" : "off"),
 		surpriseBudget: (v) => (v ? "about " + v : "none"),
 		realignmentRate: (v) => (v ? Math.round(v * 100) + "%" : "off"),
-		bluebloodDownYears: (v) => (v ? v + " programme" + (v === 1 ? "" : "s") : "none"),
+		bluebloodDownYears: (v) => (v ? v + " program" + (v === 1 ? "" : "s") : "none"),
 		midMajorLift: (v) => (v ? "+" + v : "off"),
 	};
 
@@ -441,14 +441,14 @@
 			: "no forced anomalies"),
 		realignmentRate: (v) => (v
 			? "the chance this season's map differs from last season's; a " +
-				"realignment moves two to five programmes one rung up"
+				"realignment moves two to five programs one rung up"
 			: "conference membership never changes"),
 		bluebloodDownYears: (v) => (v
-			? v + " of the twenty-four biggest programmes has a bad year on top " +
+			? v + " of the twenty-four biggest programs has a bad year on top " +
 				"of the ordinary roll"
 			: "no forced down years"),
 		midMajorLift: (v) => (v
-			? "every programme outside the power leagues is stronger by up to " + v
+			? "every program outside the power leagues is stronger by up to " + v
 			: "the mid-majors are where the table says"),
 		injuryRate: (v) => (v === 0
 			? "nobody misses a game"
@@ -472,12 +472,12 @@
 			: v > 1.5 ? "a class is unmistakably one thing"
 			: "each class leans guard-heavy, big-heavy, defensive…",
 		buildNoise: (v) => "±" + v + " rating points of per-rating jitter",
-		/* The seed's neighbourhood. 0 is the class the seed has always
-		   produced; anything else keeps its flavour, build pool and curve and
+		/* The seed's neighborhood. 0 is the class the seed has always
+		   produced; anything else keeps its flavor, build pool and curve and
 		   re-rolls the players inside it. */
 		variation: (v) => (v === 0
 			? "the class this seed has always produced"
-			: "variation " + v + ": same flavour, pool and curve, different players"),
+			: "variation " + v + ": same flavor, pool and curve, different players"),
 		poolMemory: (v) => (v <= 0
 			? "each class draws its builds with no memory of the last"
 			: "a build in the last three classes is " +
@@ -495,7 +495,7 @@
 		draftEvents: (v) => (v <= 0 ? "the board is a plain ranking"
 			: "about " + v + " prospects move on draft day"),
 		freshmanShare: (v) => "≈" + v + "% freshmen; the rest spread over So/Jr/Sr",
-		transferShare: (v) => "≈" + v + "% of upperclassmen arrived from another programme",
+		transferShare: (v) => "≈" + v + "% of upperclassmen arrived from another program",
 		redshirtShare: (v) => "≈" + v + "% of upperclassmen redshirted a year",
 		reclassShare: (v) => "≈" + v + "% reclassified in or out of their year",
 		pDII: (v) => (v <= 0 ? "no DII conversions" :
@@ -519,12 +519,12 @@
 			(v >= 0 ? "+" : "") + (v * 2.2).toFixed(1) + " team points per game",
 		statNoise: (v) => v < 0.3 ? "stat lines follow ratings exactly" : "season-to-season luck",
 		upsetFactor: (v) => v < 0.6 ? "chalk: seeds mostly hold" : v > 1.4 ? "madness" : "a normal March",
-		awardStrictness: (v) => v > 1.2 ? "fewer national honours reach this class"
-			: v < 0.9 ? "more national honours reach this class" : "realistic national award volume",
-		confAwardStrictness: (v) => v > 1.2 ? "fewer conference honours"
-			: v < 0.9 ? "more conference honours" : "realistic conference award volume",
-		proAwardStrictness: (v) => v > 1.2 ? "a higher bar for honours abroad"
-			: v < 0.9 ? "a lower bar for honours abroad" : "a realistic bar abroad",
+		awardStrictness: (v) => v > 1.2 ? "fewer national honors reach this class"
+			: v < 0.9 ? "more national honors reach this class" : "realistic national award volume",
+		confAwardStrictness: (v) => v > 1.2 ? "fewer conference honors"
+			: v < 0.9 ? "more conference honors" : "realistic conference award volume",
+		proAwardStrictness: (v) => v > 1.2 ? "a higher bar for honors abroad"
+			: v < 0.9 ? "a lower bar for honors abroad" : "a realistic bar abroad",
 	};
 
 	function awardInteractionHint() {
@@ -535,8 +535,8 @@
 				? "With only " + fresh + "% freshmen, the Freshman of the Year and " +
 					"All-Freshman categories mostly dry up."
 				: fresh > 70
-				? "With " + fresh + "% freshmen, almost every honour in the class is " +
-					"also a freshman honour."
+				? "With " + fresh + "% freshmen, almost every honor in the class is " +
+					"also a freshman honor."
 				: "Freshman categories scale with the “Freshmen in the class” slider."),
 			"Award strictness used to be one slider driving three different " +
 			"mechanisms; it is three sliders now.",
@@ -709,7 +709,7 @@
 
 	/* Every setting that differs from the selected preset, as "name: was → is".
 	   Object-valued settings (the archetype and destination weight tables) are
-	   summarised rather than dumped. */
+	   summarized rather than dumped. */
 	function presetDiff() {
 		const preset = CFG.PRESETS[state.presetName] || state.customPresets[state.presetName];
 		if (!preset) return [];
@@ -718,7 +718,7 @@
 
 	/* The settings two configurations differ on, as "name: was → is".
 	   Object-valued settings (the archetype and destination weight tables) are
-	   summarised rather than dumped. */
+	   summarized rather than dumped. */
 	function diffConfigs(a, b) {
 		const out = [];
 		for (const k of Object.keys(CFG.DEFAULTS)) {
@@ -782,7 +782,7 @@
 		const aw = $("archWeights");
 		if (!aw) return;
 		if (archFilterHook) archFilterHook();
-		// Realised frequency from the last run, beside the weight that asked
+		// Realized frequency from the last run, beside the weight that asked
 		// for it.
 		const res = state.results[state.active];
 		const counts = {};
@@ -970,18 +970,18 @@
 		}
 	}
 
-	/* ------------------------------------------------------------ randomiser */
+	/* ------------------------------------------------------------ randomizer */
 
 	/* One group per settings fieldset, plus the two whole-panel scopes. What
 	   is deliberately NOT here:
-	     - the seed: Reroll owns the seed. Randomising both at once means you
+	     - the seed: Reroll owns the seed. Randomizing both at once means you
 	       cannot tell which produced what you are looking at.
 	     - archetypeWeights: a curated 117-row table whose ordering is the
 	       authored intent; a uniform draw over it destroys that invisibly.
-	       Flavour, pool size and diversity are the supported ways to move
-	       the mix, and they ARE randomised.
-	     - variation: a seed-neighbourhood explorer, not a class property.
-	       Randomising it does Reroll's job while making shared links
+	       Flavor, pool size and diversity are the supported ways to move
+	       the mix, and they ARE randomized.
+	     - variation: a seed-neighborhood explorer, not a class property.
+	       Randomizing it does Reroll's job while making shared links
 	       confusing. */
 	const RANDOM_GROUPS = {
 		quality: ["classQuality", "classDepth", "eliteCount", "potBias", "potSpread"],
@@ -1005,7 +1005,7 @@
 		return i === -1 ? 0 : s.length - i - 1;
 	}
 
-	/* One draw for one slider. "gentle" is a triangular distribution centred
+	/* One draw for one slider. "gentle" is a triangular distribution centered
 	   on the setting's own default, reaching ~34% of the slider's range each
 	   way; "wide" is uniform across the declared min/max. Both snap to the
 	   control's step and round off binary-float dust so the panel prints
@@ -1020,8 +1020,8 @@
 		let v;
 		if (mode === "gentle") {
 			const d = Number(CFG.DEFAULTS[key]);
-			const centre = Number.isFinite(d) ? Math.min(max, Math.max(min, d)) : (min + max) / 2;
-			v = centre + (Math.random() - Math.random()) * 0.34 * (max - min);
+			const center = Number.isFinite(d) ? Math.min(max, Math.max(min, d)) : (min + max) / 2;
+			v = center + (Math.random() - Math.random()) * 0.34 * (max - min);
 		} else {
 			v = min + Math.random() * (max - min);
 		}
@@ -1035,7 +1035,7 @@
 		const mode = scope === "wide" ? "wide" : scope === "gentle" ? "gentle" : "wide";
 		const groups = (scope === "gentle" || scope === "wide")
 			? Object.keys(RANDOM_GROUPS) : [scope];
-		pushUndo("randomised settings (" + scope + ")");
+		pushUndo("randomized settings (" + scope + ")");
 		let moved = 0;
 		let locked = 0;
 		for (const g of groups) {
@@ -1047,8 +1047,8 @@
 				moved++;
 			}
 		}
-		/* Destination weights are randomised MULTIPLICATIVELY off the
-		   built-ins, so a randomised class is a different mix of the same 24
+		/* Destination weights are randomized MULTIPLICATIVELY off the
+		   built-ins, so a randomized class is a different mix of the same 24
 		   leagues rather than a uniform one. */
 		if (groups.indexOf("destinations") !== -1 && !state.settingLocks.leagueWeights) {
 			const base = CFG.defaultLeagueWeights();
@@ -1062,7 +1062,7 @@
 			moved++;
 		}
 		/* Repair the one contradiction the draw can produce: classFlavor 0
-		   disables the flavour system entirely, an explicitly named flavour
+		   disables the flavor system entirely, an explicitly named flavor
 		   included. The engine now floors this itself (see pickFlavor), but
 		   the panel should not display a contradiction either. */
 		if (state.cfg.flavorHint && state.cfg.classFlavor === 0) {
@@ -1071,7 +1071,7 @@
 		if (!moved) {
 			// Undo entry stays — it is a no-op to undo — but say why nothing moved.
 			setStatus(locked
-				? "Nothing to randomise: every setting in that scope is locked."
+				? "Nothing to randomize: every setting in that scope is locked."
 				: "Nothing moved.");
 			return;
 		}
@@ -1079,7 +1079,7 @@
 		paintConfig();
 		persist();
 		scheduleRun();
-		setStatus("Randomised " + moved + " setting" + (moved === 1 ? "" : "s") +
+		setStatus("Randomized " + moved + " setting" + (moved === 1 ? "" : "s") +
 			(locked ? " (" + locked + " locked, untouched)" : "") +
 			". Ctrl+Z restores them in one step.");
 	}
@@ -1097,10 +1097,10 @@
 	}
 
 	/* Per-setting locks. Locks existed per-player per-field and presets exist
-	   for whole configurations; with the randomiser in place the thing in
-	   between — "randomise everything except pace and era" — became the
-	   natural next ask. A locked setting is skipped by the randomiser (and
-	   only by the randomiser: the slider itself still moves by hand). */
+	   for whole configurations; with the randomizer in place the thing in
+	   between — "randomize everything except pace and era" — became the
+	   natural next ask. A locked setting is skipped by the randomizer (and
+	   only by the randomizer: the slider itself still moves by hand). */
 	function paintLockButtons() {
 		for (const key of RANDOM_KEYS) {
 			const input = $(key);
@@ -1126,10 +1126,10 @@
 			b.textContent = locked ? "🔒" : "🔓";
 			b.classList.toggle("locked", locked);
 			b.title = locked
-				? "Locked: the randomiser will not touch " + key
-				: "Unlocked: the randomiser may move " + key;
+				? "Locked: the randomizer will not touch " + key
+				: "Unlocked: the randomizer may move " + key;
 			b.setAttribute("aria-label", (locked ? "Unlock " : "Lock ") + key +
-				" against the randomiser");
+				" against the randomizer");
 			b.setAttribute("aria-pressed", locked ? "true" : "false");
 		}
 	}
@@ -1149,7 +1149,7 @@
 			});
 			input.addEventListener("change", () => { pushed = false; persist(); });
 		}
-		/* The class flavour, as a choice rather than a draw. See
+		/* The class flavor, as a choice rather than a draw. See
 		   Config.DEFAULTS.flavorHint. */
 		const fh = $("flavorHint");
 		fh.appendChild(new Option("draw one at random", ""));
@@ -1157,7 +1157,7 @@
 			fh.appendChild(new Option(f.label || f.name, f.name));
 		}
 		fh.addEventListener("change", () => {
-			pushUndo("changed the class flavour");
+			pushUndo("changed the class flavor");
 			state.cfg.flavorHint = fh.value;
 			markDirty();
 			paintConfig();
@@ -1648,7 +1648,7 @@
 
 	/* ------------------------------------------------------------ file input */
 
-	function summarise(data) {
+	function summarize(data) {
 		const players = data.players || [];
 		const blank = players.filter((p) => !p.college || !String(p.college).trim()).length;
 		return players.length + " players, season " + (data.startingSeason || "?") +
@@ -1737,7 +1737,7 @@
 			$("empty").hidden = true;
 			$("app").hidden = false;
 			$("fileSummary").textContent = state.files.map(
-				(f) => f.name + ": " + summarise(f.data)).join("  ·  ");
+				(f) => f.name + ": " + summarize(f.data)).join("  ·  ");
 			$("fileSummary").hidden = false;
 			for (const id of ["btnReroll", "btnRerun", "btnExport", "btnExportMenu",
 				"btnExportAll", "btnPin"]) $(id).disabled = false;
@@ -1934,7 +1934,7 @@
 	   status line was written AFTER it finished. So the sequence a user saw was
 	   a click, then between a third and two thirds of a second of a completely
 	   frozen page — no cursor change, no disabled button, nothing — and then a
-	   new table. On a slower machine, or with the class-flavour dials pushed,
+	   new table. On a slower machine, or with the class-flavor dials pushed,
 	   that is long enough to click twice.
 
 	   The work cannot simply be moved off the main thread: js/worker.js exists
@@ -2047,7 +2047,7 @@
 		   the same seventy players. */
 		$("seedPill").textContent = "seed " + res.seed + " · " + classFingerprint(res);
 		$("seedPill").dataset.seed = res.seed;
-		/* The fingerprint and flavour in the tab title, so two browser tabs
+		/* The fingerprint and flavor in the tab title, so two browser tabs
 		   comparing two classes are distinguishable from the tab strip. */
 		document.title = classFingerprint(res) +
 			(res.flavor && res.flavor.label ? " · " + res.flavor.label : "") +
@@ -2180,7 +2180,7 @@
 	/* ----------------------------------------------------------- universe */
 
 	/* Run every loaded file as one continuous world, oldest season first,
-	   handing carry-over state (conference map, programme levels, coaches,
+	   handing carry-over state (conference map, program levels, coaches,
 	   pool memory) from each season to the next. Asynchronous in slices so
 	   the page stays alive; ~330ms a season means 50 classes is a progress
 	   bar, not a click. */
@@ -2234,7 +2234,7 @@
 				cfg.carryOver = carry;
 				const res = state.runners[d.index].run(cfg);
 				state.universe.rows.push(Object.assign(
-					U.summarise(res, cfg.seed, d.name),
+					U.summarize(res, cfg.seed, d.name),
 					{ fingerprint: state.files[d.index].fingerprint || null }));
 				state.universe.alumni = state.universe.alumni
 					.concat(U.alumniOf(res, d.season));
@@ -2770,7 +2770,7 @@
 				" — offsets are made ovr-neutral before the solver runs, so the",
 			"  build changed his shape, not his overall.",
 			res.flavor && res.flavor.name !== "balanced"
-				? "Class flavour: " + res.flavor.label + " (archetype weights are tilted this year)"
+				? "Class flavor: " + res.flavor.label + " (archetype weights are tilted this year)"
 				: "",
 			"Overall: " + p.origOvr + " → " + p.newOvr +
 				(state.cfg.ovrMode === "curve" ? " (re-dealt along the class curve)" : " (preserved)"),
@@ -2788,7 +2788,7 @@
 			s ? "Stat line comes from " + n1(s.mpg) + " MPG at USG " + pc(s.usg) +
 				"% on a team rated " + (team ? team.rating.toFixed(1) : "—") : "",
 			s && team && team.oppDefense
-				? "Opponents faced: rim defence " + (team.oppDefense.rim >= 0 ? "+" : "") +
+				? "Opponents faced: rim defense " + (team.oppDefense.rim >= 0 ? "+" : "") +
 					(team.oppDefense.rim * 100).toFixed(1) + ", perimeter " +
 					(team.oppDefense.perimeter >= 0 ? "+" : "") +
 					(team.oppDefense.perimeter * 100).toFixed(1) : "",
@@ -2836,7 +2836,7 @@
 	   answer to "why does this 45-overall prospect score seven points" was
 	   unavailable inside the tool that produced the seven points — you had to
 	   instrument the engine to find out. It is minutes, then share of the
-	   offence, then the pace of the team he plays for, then the defences he
+	   offense, then the pace of the team he plays for, then the defenses he
 	   faced, and every one of those is a number the sim already computed. */
 	function explainStats(p, res) {
 		const box = el("details", "explain");
@@ -2856,19 +2856,19 @@
 		row("Minutes", n1(s.mpg) + " a game over " + Math.round(s.gp) + " games" +
 			(p.availability ? ", missing " + p.availability.games + " with " +
 				p.availability.kind : ""));
-		row("Share of the offence", (s.usg * 100).toFixed(1) + "% of his team's " +
+		row("Share of the offense", (s.usg * 100).toFixed(1) + "% of his team's " +
 			"chances while on the floor (" + (s.usgShare * 100).toFixed(1) +
 			"% of all of them)");
 		if (t) {
 			row("Team tempo", n1(t.pace) + " possessions a game" +
 				(t.style ? " — " + t.style.name : ""));
-			row("Programme", t.name + ", level " + Math.round(t.level) +
+			row("Program", t.name + ", level " + Math.round(t.level) +
 				", " + t.w + "-" + t.l +
 				(t.coach ? " under " + t.coach.name + " (year " + t.coach.tenure + ")" : ""));
 			if (t.oppDefense) {
 				const d = t.oppDefense;
 				const say = (v) => (v > 0.01 ? "tougher" : v < -0.01 ? "softer" : "average");
-				row("Defences faced", "at the rim " + say(d.rim) +
+				row("Defenses faced", "at the rim " + say(d.rim) +
 					", on the perimeter " + say(d.perimeter) +
 					" than an average schedule");
 			}
@@ -2928,7 +2928,7 @@
 		return box;
 	}
 
-	/* The seasons before this one. Fabricated, and labelled as such — but "he
+	/* The seasons before this one. Fabricated, and labeled as such — but "he
 	   averaged 4, then 9, then 16" is a completely different scouting report
 	   from "he averaged 16", and the tool had no way to say the first one. */
 	function priorSeasonsPanel(p, res) {
@@ -3277,7 +3277,7 @@
 	   opened in Excel or Sheets. Names come from BBGM, but the lock-import
 	   round trip means a user-authored CSV can come back in, and "it is only
 	   our own data" is exactly the assumption that makes this class of bug
-	   ship. A leading apostrophe is the standard neutraliser and is invisible
+	   ship. A leading apostrophe is the standard neutralizer and is invisible
 	   in the spreadsheet.
 
 	   The escape test also missed a bare carriage return: a field containing
@@ -3574,7 +3574,7 @@
 			b.addEventListener("click", () => { closeModal(); fn(); });
 			list.appendChild(b);
 		};
-		/* §8.13: the simulated season, honours and career were computed and
+		/* §8.13: the simulated season, honors and career were computed and
 		   then thrown away at export time. Opt-in, so the default file is
 		   unchanged. */
 		const optBox = el("div", "checks");
@@ -3593,6 +3593,22 @@
 		const oHighs = opt("highs", "…and game-log season highs");
 		const oAwards = opt("awards", "Include college awards");
 		list.appendChild(optBox);
+		/* Checked against BBGM's own source: its Import -> Draft class tool
+		   deletes a player's stats unconditionally on the way in, so the
+		   three stat options above never reach the game through the one
+		   import path this tool documents. Awards survive that import (it
+		   is never deleted there), which is why they show up in-game and
+		   the statline doesn't. The rows are still worth writing for anyone
+		   merging this file into an existing league's player list by hand
+		   instead — the same audience "Season as a BBGM league fragment"
+		   below is for — so the caption says what actually happens rather
+		   than removing the options. */
+		list.appendChild(el("p", "hint",
+			"Basketball GM's Import → Draft class tool deletes a player's " +
+			"stats on import, so the statline options above will not show " +
+			"up in-game that way — only awards survive that import. They " +
+			"still write correctly for a manual merge into an existing " +
+			"league file's player list."));
 		item("BBGM class file, with the options above", () => {
 			if (exportOne(state.active, {
 				stats: oStats(), prior: oPrior(), highs: oHighs(), awards: oAwards(),
@@ -3671,7 +3687,7 @@
 		$("btnBatch").disabled = false;
 		$("btnBatchCancel").hidden = true;
 		batchWorker = null;
-		if (!rows || !rows.length) { setStatus("Batch cancelled."); return; }
+		if (!rows || !rows.length) { setStatus("Batch canceled."); return; }
 		renderBatch(rows);
 		setStatus("");
 	}
@@ -3728,7 +3744,7 @@
 		/* A batch of fifty classes exists to show a distribution, and the panel
 		   showed one row of averages. p5 / p50 / p95 answers "how unusual was
 		   the class I just generated?", which is the actual question. */
-		const d = (k) => (k === "awards" || k === "honoured" || k === "archetypes" ||
+		const d = (k) => (k === "awards" || k === "honored" || k === "archetypes" ||
 			k === "champSeed" || k === "ffOneSeeds" || k === "r64Upsets" ? 1 : 2);
 		const line = (label, k) => {
 			const v = col(k);
@@ -3752,7 +3768,7 @@
 			line("assist leader", "topApg"),
 			line("block leader", "topBpg"),
 			line("awards/class", "awards"),
-			line("honoured players", "honoured"),
+			line("honored players", "honored"),
 			line("distinct archetypes", "archetypes"),
 			line("champion's seed", "champSeed"),
 			line("1 seeds in Final Four", "ffOneSeeds"),
@@ -3798,13 +3814,13 @@
 			cards.appendChild(sBox);
 			cards.appendChild(V.histogram("1 seeds in the Final Four", col("ffOneSeeds"), 5, (v) => String(Math.round(v))));
 		}
-		const flavours = {};
-		for (const r of rows) flavours[r.flavor || "—"] = (flavours[r.flavor || "—"] || 0) + 1;
+		const flavors = {};
+		for (const r of rows) flavors[r.flavor || "—"] = (flavors[r.flavor || "—"] || 0) + 1;
 		const fBox = el("div", "card");
-		fBox.appendChild(el("h4", null, "Class flavours drawn"));
-		fBox.appendChild(el("div", "note", Object.keys(flavours)
-			.sort((a, b) => flavours[b] - flavours[a])
-			.map((k) => String(flavours[k]).padStart(3) + "  " + k).join("\n")));
+		fBox.appendChild(el("h4", null, "Class flavors drawn"));
+		fBox.appendChild(el("div", "note", Object.keys(flavors)
+			.sort((a, b) => flavors[b] - flavors[a])
+			.map((k) => String(flavors[k]).padStart(3) + "  " + k).join("\n")));
 		cards.appendChild(fBox);
 		view.appendChild(cards);
 	}
@@ -3824,7 +3840,7 @@
 		   the disk blocks workers in most browsers, and that is the documented
 		   way to use this tool, so the fallback below has to be just as usable:
 		   it slices the work into single classes on a timer, which yields to
-		   the UI between each one and can be cancelled the same way. */
+		   the UI between each one and can be canceled the same way. */
 		try {
 			batchWorker = new Worker("js/worker.js");
 			batchWorker.onmessage = (e) => {
@@ -3861,7 +3877,7 @@
 			c.seed = batchBaseSeed + "#" + i;
 			c.overrides = cfg.overrides || {};
 			try {
-				rows.push(global.BatchStats.summarise(runner.run(c)));
+				rows.push(global.BatchStats.summarize(runner.run(c)));
 			} catch (err) {
 				showError(err);
 				batchDone(null);
@@ -3876,7 +3892,7 @@
 
 	/* A against B, on every row the batch panel reports, plus which settings
 	   differ between the two — because "the scoring leader moved 1.4 points"
-	   only means something next to "because I moved pace and specialisation". */
+	   only means something next to "because I moved pace and specialization". */
 	const BATCH_ROWS = [
 		["mean ovr", "ovr", 2], ["mean pot", "pot", 2], ["mean MPG", "mpg", 2],
 		["mean PPG", "ppg", 2], ["mean RPG", "rpg", 2], ["mean APG", "apg", 2],
@@ -3884,7 +3900,7 @@
 		["team PPG", "teamPpg", 2], ["team AST", "teamAst", 2],
 		["scoring leader", "topPpg", 2], ["assist leader", "topApg", 2],
 		["block leader", "topBpg", 2], ["awards/class", "awards", 1],
-		["honoured players", "honoured", 1], ["distinct archetypes", "archetypes", 1],
+		["honored players", "honored", 1], ["distinct archetypes", "archetypes", 1],
 	];
 
 	/* Every held batch beside the current one, in one table. The last column is
@@ -4281,7 +4297,7 @@
 		["Ctrl / Cmd + Enter", "Reroll the class (works anywhere)"],
 		["1 – 9", "Jump to a tab"],
 		["r", "Reroll the class"],
-		["g", "Randomise the settings in the chosen scope"],
+		["g", "Randomize the settings in the chosen scope"],
 		["/", "Focus the prospect search"],
 		["l", "Lock or unlock the focused row"],
 		["[ / ]", "Previous / next archetype filter"],
@@ -4319,23 +4335,23 @@
 			"is uploaded; everything runs in your browser. You can load " +
 			"several files and switch between them."],
 		["2. Reroll until something catches your eye", "Reroll (r) draws a " +
-			"new seed: a new class flavour, a new build pool, a new season. " +
+			"new seed: a new class flavor, a new build pool, a new season. " +
 			"The seed pill in the header reproduces the exact class — click " +
 			"it to copy, shift-click to paste one in. Re-apply keeps the seed " +
 			"and re-runs the current settings over it."],
 		["3. Shape the class with the settings panel", "Each fieldset is one " +
 			"idea. Quality & depth shapes the overall curve (switch to " +
 			"“Rebuild the class curve” to unlock it). Builds decides how " +
-			"specialised players are, how many archetypes one class draws " +
-			"from, and its flavour — pick a flavour in the dropdown to keep " +
+			"specialized players are, how many archetypes one class draws " +
+			"from, and its flavor — pick a flavor in the dropdown to keep " +
 			"the seed and change what kind of class it is. Class years, " +
 			"destinations, the college season, and awards each own their " +
 			"corner. Every slider shows what it means in units underneath, " +
 			"and what part of the pipeline it re-runs."],
-		["4. Or let the dice do it", "The 🎲 Randomise control (g) draws new " +
+		["4. Or let the dice do it", "The 🎲 Randomize control (g) draws new " +
 			"settings in the chosen scope. “Everything, gently” stays near " +
 			"the defaults; “everything, wide open” uses each slider's whole " +
-			"range; the other scopes randomise one fieldset. It never touches " +
+			"range; the other scopes randomize one fieldset. It never touches " +
 			"the seed (Reroll owns that), the per-build rarity table, or any " +
 			"setting you lock with the padlock next to its name. Ctrl+Z puts " +
 			"everything back in one step."],
@@ -4344,7 +4360,7 @@
 			"you can keep the player you like while the class around him " +
 			"changes. l locks the focused row as-is. The padlocks in the " +
 			"settings panel are different: they guard a SETTING against the " +
-			"randomiser."],
+			"randomizer."],
 		["6. Read the season, not just the board", "The class plays a full " +
 			"college season: standings, a bracket, awards, game logs, box " +
 			"scores, events. A prospect's stat line, his awards and his draft " +

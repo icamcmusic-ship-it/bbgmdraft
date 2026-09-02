@@ -66,7 +66,7 @@
 				}
 				next.set(t.name, credit / games.length);
 			}
-			// Renormalise onto a stable 0-100-ish scale for the next pass.
+			// Renormalize onto a stable 0-100-ish scale for the next pass.
 			const vals = list.map((t) => next.get(t.name));
 			const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
 			const sd = Math.sqrt(vals.reduce((a, v) => a + (v - mean) * (v - mean), 0) /
@@ -118,7 +118,7 @@
 	/* --------------------------------------------------------- quadrants
 
 	   The standard NET quadrant map: opponent rank thresholds by location.
-	   With 368 programmes in the database the real ~360-team thresholds
+	   With 368 programs in the database the real ~360-team thresholds
 	   transfer almost directly. */
 	const QUADS = [
 		{ q: 1, home: 30, neutral: 50, away: 75 },
@@ -223,7 +223,7 @@
 	   drawn once per team — submitting a 25-deep ballot at each checkpoint,
 	   aggregated by the real points system (25 for a first-place vote down to
 	   1). Ballots are anchored on the voter's previous week (`INERTIA`), which
-	   is what produces the realistic behaviour where a team does not fall far
+	   is what produces the realistic behavior where a team does not fall far
 	   after one loss. */
 	const VOTERS = 60;
 	const WEEKS = 15;          // preseason + 14 in-season checkpoints
@@ -236,7 +236,7 @@
 		for (const t of list) t.regGamesList = regGames(t)
 			.slice().sort((a, b) => a.when - b.when);
 
-		// Voter biases, drawn once. Sum-normalised so every voter's ballot is
+		// Voter biases, drawn once. Sum-normalized so every voter's ballot is
 		// on the same scale; the VARIATION between voters is the point.
 		const voters = [];
 		for (let v = 0; v < VOTERS; v++) {
@@ -247,7 +247,7 @@
 				wQual: 0.8 + vr.uniform(-0.35, 0.35),
 				wBad: 0.9 + vr.uniform(-0.4, 0.4),
 				wEye: 0.35 + vr.uniform(-0.2, 0.25),
-				// The persistent prior a voter carries about each programme.
+				// The persistent prior a voter carries about each program.
 				eye: list.map(() => vr.normal(0, 1)),
 				prev: null,   // last week's scores, for inertia
 			});
@@ -289,7 +289,7 @@
 					prestige: t.prestige || 0,
 					/* What a panel that has watched practice knows. The
 					   preseason ballot used to run on prestige alone, and
-					   the programme's LEVEL this season — the roster it
+					   the program's LEVEL this season — the roster it
 					   actually has, the down year, the breakout — is drawn
 					   before the ballot and was hidden from it. Measured
 					   over thirty seasons: the preseason No. 1 missed the

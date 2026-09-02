@@ -2,7 +2,7 @@
    events, the news desk, the scouting notes, the anomaly stories.
 
    There was no a/an helper anywhere, so every template that put an article in
-   front of a programme name did it by hand — and the first one that did,
+   front of a program name did it by hand — and the first one that did,
    "a " + team.name + " dunk", produced "a Arizona State dunk" for every
    vowel-leading school in the country. Fifty-seven article kinds and dozens
    of event and note templates is fifty-seven places for the same bug to
@@ -28,7 +28,7 @@
 		return /^[aeiou]/i.test(w) ? "an" : "a";
 	}
 
-	/* "a Duke dunk" / "an Arizona State dunk". Capitalised when it opens a
+	/* "a Duke dunk" / "an Arizona State dunk". Capitalized when it opens a
 	   sentence. */
 	function withArticle(phrase, capital) {
 		const art = article(phrase);
@@ -47,7 +47,7 @@
 		["empty parenthesis", /\(\s*\)/],
 		/* "a Arizona", "a Ohio State". "a one-and-done" and "a European"
 		   are legal, which is why this reads the same list article() does:
-		   a capitalised vowel-led word after "a " that article() would have
+		   a capitalized vowel-led word after "a " that article() would have
 		   given "an". */
 		["a before a vowel sound", /\b[aA] ([AEIOU][a-z]+)/],
 		["an before a consonant sound", /\b[aA]n ([B-DF-HJ-NP-TV-Zb-df-hj-np-tv-z][a-z]+)/],
@@ -77,7 +77,7 @@
 		return out;
 	}
 
-	/* "1 triple-double", "2 triple-doubles". Every stat-line pluralisation
+	/* "1 triple-double", "2 triple-doubles". Every stat-line pluralization
 	   used to be written by hand, and the ones that were not ("1 teams in
 	   the field", "1 triple-doubles") shipped. */
 	function plural(n, word, pluralWord) {
@@ -85,9 +85,9 @@
 		return num + " " + (num === 1 ? word : (pluralWord || word + "s"));
 	}
 
-	/* Capitalise the first letter of a sentence that begins with generated
+	/* Capitalize the first letter of a sentence that begins with generated
 	   text ("a Louisiana dunk was the most-watched clip" as a body). */
-	function capitalise(s) {
+	function capitalize(s) {
 		const str = String(s === undefined || s === null ? "" : s);
 		return str.charAt(0).toUpperCase() + str.slice(1);
 	}
@@ -108,5 +108,5 @@
 		return segs.map((x) => (x && x.v !== undefined ? String(x.v) : "")).join("");
 	}
 
-	global.Text = { article, withArticle, endSentence, textFaults, segsToText, plural, capitalise };
+	global.Text = { article, withArticle, endSentence, textFaults, segsToText, plural, capitalize };
 })(typeof window !== "undefined" ? window : self);

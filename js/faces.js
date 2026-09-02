@@ -18,13 +18,13 @@
 	   rest are football, baseball and hockey shirts. */
 	const BASKETBALL_JERSEYS = ["jersey", "jersey2", "jersey3", "jersey4", "jersey5"];
 
-	/* Kit colours per programme. facesjs draws teamColors[0] as the jersey
+	/* Kit colors per program. facesjs draws teamColors[0] as the jersey
 	   body and [1]/[2] as trim, and its default is one fixed washed-out blue —
 	   so before this every player in every class wore the identical kit, which
 	   is both dull and wrong: teammates should match and Duke should not look
 	   like Gonzaga. These are plausible college combinations rather than
 	   random hues, because a random triple in HSV space produces the clashing
-	   mess that "just randomise it" always produces. */
+	   mess that "just randomize it" always produces. */
 	const KITS = [
 		["#9e1b32", "#ffffff", "#63132a"],   // crimson
 		["#13294b", "#e8c547", "#ffffff"],   // navy and gold
@@ -36,7 +36,7 @@
 		["#6f263d", "#f2a900", "#ffffff"],   // maroon and gold
 		["#101820", "#c5a900", "#ffffff"],   // black and gold
 		["#6cace4", "#0b2341", "#ffffff"],   // sky and navy
-		["#bb0000", "#8a8d8f", "#ffffff"],   // scarlet and grey
+		["#bb0000", "#8a8d8f", "#ffffff"],   // scarlet and gray
 		["#00685e", "#ffffff", "#c4d600"],   // teal
 		["#782f40", "#ceb888", "#ffffff"],   // garnet and gold
 		["#003087", "#ff8200", "#ffffff"],   // blue and orange
@@ -117,7 +117,7 @@
 	const GLASSES_SWAP = ["none", "none", "none", "glasses2-primary"];
 
 	/* The face as it should be DRAWN: the player's own features, in his
-	   programme's kit. The stored face is never mutated — a face round-trips
+	   program's kit. The stored face is never mutated — a face round-trips
 	   into the exported file exactly as it arrived. */
 	function displayFace(p) {
 		const base = faceOf(p);

@@ -25,7 +25,7 @@
 	   derives OVR_W from this by finite differences and asserts the two agree,
 	   which is impossible against ovr() itself: the fudge is piecewise and the
 	   result is rounded to an integer, so a single rating's contribution
-	   disappears into the quantisation. Keeping one copy of the weights in this
+	   disappears into the quantization. Keeping one copy of the weights in this
 	   file means the check compares ratings.js against BBGM, and not against
 	   a stale second copy of BBGM. */
 	function ovrRaw(r) {

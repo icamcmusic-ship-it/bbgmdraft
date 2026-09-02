@@ -165,7 +165,7 @@ const FIXTURES = { realistic: realisticClass, synthetic: syntheticClass };
 /* The named national player-of-the-year trophies replaced a single generic
    "National Player of the Year" string. */
 const POY_RE = /^(Naismith Trophy|John R\. Wooden Award|Oscar Robertson Trophy|AP Player of the Year|NABC Player of the Year|Sporting News Player of the Year)$/;
-const FINALIST_RE = /finalist|Late Season Top|honourable mention|watch list/;
+const FINALIST_RE = /finalist|Late Season Top|honorable mention|watch list/;
 const NATIONAL_RE = /All-American|All-Freshman Team|NABC All-Defensive|^(Naismith|John R\.|Oscar Robertson|AP Player|NABC Player|Sporting News|Lefty Driesell|Bob Cousy|Jerry West|Julius Erving|Karl Malone|Kareem|Pete Newell|Lute Olson|Wayman Tisdale|Consensus National)/;
 
 function pct(vals, p) {
@@ -189,7 +189,7 @@ const sd = (v) => {
                 alone.
      field      about the whole simulated Division I — team totals, the
                 rotation-player baseline. The 70 prospects are a rounding error
-                in 360 programmes, so these are fixture-independent and are
+                in 360 programs, so these are fixture-independent and are
                 checked on both.
      structure  about the engine rather than the season (schedule integrity,
                 award plumbing, reconciliation). Also fixture-independent. */
@@ -218,7 +218,7 @@ function collect(nSeeds, cfgOverrides, fixture) {
 	   whose expected value grows with the sample rather than converging, so
 	   both of its bounds drift outward with n instead. */
 	const REF_SEEDS = 20;
-	/* Only ever WIDER, never narrower. These bands are modelling tolerances
+	/* Only ever WIDER, never narrower. These bands are modeling tolerances
 	   against an anchor, not confidence intervals around a sample mean: how far
 	   the simulated true-shooting percentage may sit from the era's own figure
 	   is a statement about the model, and running more seeds does not make it
@@ -266,7 +266,7 @@ function collect(nSeeds, cfgOverrides, fixture) {
 	const leaders = [];
 	const astLeaders = [];
 	const awardsCount = [];
-	const honouredCount = [];
+	const honoredCount = [];
 	const teamPts = [];
 	const teamFga = [];
 	const teamPoss = [];
@@ -301,7 +301,7 @@ function collect(nSeeds, cfgOverrides, fixture) {
 	   own mean, and a band on either one cannot see the other. */
 	const midClass = [];
 	const backTen = [];
-	const paceOfHonoured = [];
+	const paceOfHonored = [];
 	const paceOfAll = [];
 	const usgBins = {};
 	const scorers20 = [];
@@ -401,7 +401,7 @@ function collect(nSeeds, cfgOverrides, fixture) {
 				if (t.log[i].when < t.log[i - 1].when - 1e-9) outOfOrder.push(1);
 			}
 		}
-		/* Tempo must not buy honours. productionScore is raw counting volume,
+		/* Tempo must not buy honors. productionScore is raw counting volume,
 		   and PROGRAM_STYLES moves a team's possessions by +/-5.5 a game, so a
 		   run-and-gun program handed its best player about 8% more of
 		   everything for nothing he had done — and that score is what both the
@@ -410,7 +410,7 @@ function collect(nSeeds, cfgOverrides, fixture) {
 			const t = res.teams[p.newCollege];
 			if (!t || !Number.isFinite(t.pace)) continue;
 			paceOfAll.push(t.pace);
-			if ((p.awards || []).length) paceOfHonoured.push(t.pace);
+			if ((p.awards || []).length) paceOfHonored.push(t.pace);
 		}
 		const regGames = Object.values(res.teams).map((t) => t.regGames);
 		gamesSpread.push(Math.max.apply(null, regGames) - Math.min.apply(null, regGames));
@@ -447,7 +447,7 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		// DII/pro players must never win a D-I national award. "Division II
 		// All-American" and "Division II Player of the Year" are their OWN
 		// awards (previously unreachable dead code) and are not leaks.
-		/* A league's OWN honours are not a leak, however they are spelled.
+		/* A league's OWN honors are not a leak, however they are spelled.
 		   "Division II All-American", "NAIA All-American" and "Prep
 		   All-American" all match the national regex because they are all
 		   All-American teams — of a different division. */
@@ -467,7 +467,7 @@ function collect(nSeeds, cfgOverrides, fixture) {
 			(p.awards || []).some((a) => POY_RE.test(a))) ? 1 : 0);
 		firstTeam.push(res.players.filter((p) =>
 			(p.awards || []).indexOf("Consensus First Team All-American") !== -1).length);
-		honouredCount.push(res.players.filter((p) => (p.awards || []).length).length);
+		honoredCount.push(res.players.filter((p) => (p.awards || []).length).length);
 		confFirst.push(res.players.filter((p) =>
 			(p.awards || []).some((a) => /^All-.+ First Team$/.test(a))).length);
 		confSecond.push(res.players.filter((p) =>
@@ -568,7 +568,7 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   genuine scorers it contains. A real draft class has seven or eight
 		   twenty-point scorers and about one at twenty-five. This is the row
 		   that fails when the model is quietly handing the class's possessions
-		   to its synthesised teammates. */
+		   to its synthesized teammates. */
 		["20+ PPG scorers/class", mean(scorers20)].concat(perClass(6.0, 14.0)),
 		["25+ PPG scorers/class", mean(scorers25)].concat(perClass(0.5, 3.8)),
 		/* The bottom of the board, as a level rather than a percentile. Picks
@@ -837,7 +837,7 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		/* The scoring floor of the back of a class. A second-rounder out of
 		   D-I averaged roughly 13-15 points in his draft year; sub-8 seasons
 		   are almost non-existent and belong to elite defensive bigs. */
-		/* Recentred for the realistic fixture. The old [7.8, 14] was measured
+		/* Recentered for the realistic fixture. The old [7.8, 14] was measured
 		   on a class where the "bottom third" was ovr-40 players; on a real
 		   board it is picks 47-70, who average around ten points with a tail
 		   below six. The band's job is to catch a collapsed floor — the model
@@ -851,7 +851,7 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   SPREAD, which no per-stat mean or percentile can see: a class whose
 		   middle all scores 12.5 passes every other row in this file. Real
 		   boards have a ten-point scoring gap among similarly-ranked prospects,
-		   which is what makes ranking them a judgement rather than a sort.
+		   which is what makes ranking them a judgment rather than a sort.
 
 		   Measured on the current model the middle runs 8.8 at the 10th
 		   percentile to 19.8 at the 90th, so the band is set around that with
@@ -883,7 +883,7 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		/* Scoring by size, at equal overall rating. A draft class's guards are
 		   its volume scorers; the sim had seven-footers as the highest-scoring
 		   group even after matching on quality. */
-		/* Recentred and tightened. The intended ordering — stated in this
+		/* Recentered and tightened. The intended ordering — stated in this
 		   file's own comment and in js/stats.js, and the reason the size tilt
 		   exists at all — is guards ahead of bigs at equal overall rating. The
 		   band was drawn symmetrically around -0.1 but scaled by matchedK,
@@ -918,8 +918,8 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		/* The finalist tier: named shortlists a class should land on more often
 		   than it wins the trophies themselves, and never so often that being a
 		   finalist stops meaning anything. */
-		["Finalist honours/class", mean(finalistAwards)].concat(perClass(8, 37)),
-		/* Recentred from [0.05, 0.85]. Now that every program in the country is
+		["Finalist honors/class", mean(finalistAwards)].concat(perClass(8, 37)),
+		/* Recentered from [0.05, 0.85]. Now that every program in the country is
 		   simulated and a prospect's minutes are decided by how good he is
 		   rather than by where he plays, the best player in a 70-man draft
 		   class is the best player in the country in 57-75% of seasons — which
@@ -936,19 +936,19 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		["Defensive awards/class", mean(defAwards)].concat(perClass(4, 16)),
 		/* Top raised from 52 for the pro achievement layer: a class's dozen
 		   prospects abroad can now win their league's MVP or first team,
-		   which honours one or two more players a class. */
-		["Honoured players/class", mean(honouredCount)].concat(perClass(30, 56)),
-		// Dominated by conference honours across ~31 conferences, which future
+		   which honors one or two more players a class. */
+		["Honored players/class", mean(honoredCount)].concat(perClass(30, 56)),
+		// Dominated by conference honors across ~31 conferences, which future
 		// draft picks legitimately win a lot of.
 		["Awards/class (all)", mean(awardsCount)].concat(perClass(95, 220)),
 	];
 
 	const structureRows = [
-		/* Tempo must not buy honours: productionScore is raw counting volume
+		/* Tempo must not buy honors: productionScore is raw counting volume
 		   and PROGRAM_STYLES moves possessions by +/-5.5 a game. About the
 		   engine, not about the class, so it runs on both fixtures. */
-		["Pace of honoured minus pace of all",
-			(paceOfHonoured.length ? mean(paceOfHonoured) : 0) -
+		["Pace of honored minus pace of all",
+			(paceOfHonored.length ? mean(paceOfHonored) : 0) -
 				(paceOfAll.length ? mean(paceOfAll) : 0), -1.2, 1.2],
 
 		/* Schedule integrity. */

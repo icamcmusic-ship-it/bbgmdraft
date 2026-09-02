@@ -1,6 +1,6 @@
 /* The season as news. The raw material has always existed — mid-season events
    read off simulated results, draft-day events, the class anomalies, the poll,
-   the bracket, the awards — and it was rendered as four walls of centre-dots.
+   the bracket, the awards — and it was rendered as four walls of center-dots.
    This module turns it into dated articles with resolved entities, so every
    player and team mention can be a link in the view.
 
@@ -120,7 +120,7 @@
 		}
 		bodySegs.push(T(rest + "."));
 		// A body that opens with generated text opens a sentence.
-		if (bodySegs[0].t === "text") bodySegs[0].v = global.Text.capitalise(bodySegs[0].v);
+		if (bodySegs[0].t === "text") bodySegs[0].v = global.Text.capitalize(bodySegs[0].v);
 		articles.push({
 			when: e.when === undefined ? 0.5 : e.when,
 			kind: e.kind,
@@ -169,7 +169,7 @@
 		"The Cinderella of this tournament: {team}",
 	];
 
-	const FIELD_HONOUR_HEADS = [
+	const FIELD_HONOR_HEADS = [
 		"{name} beats the class to the trophy",
 		"The award the class didn't win: {name}",
 		// Filled from the class year the body asserts, so the headline
@@ -178,7 +178,7 @@
 	];
 	/* A trophy is won; a team is named to. "wins the Consensus First Team
 	   All-American" treated a selection like a cup. */
-	function honourPhrase(award) {
+	function honorPhrase(award) {
 		if (/All-American|All-America|Team\b|All-Defensive|All-Freshman|All-Newcomer/.test(award)) {
 			return "is named " + global.Text.withArticle(award);
 		}
@@ -193,7 +193,7 @@
 
 	const FRESHMAN_HEADS = [
 		"{player} named the country's top freshman",
-		"{player} sweeps freshman honours",
+		"{player} sweeps freshman honors",
 	];
 
 	const DPOY_HEADS = [
@@ -222,7 +222,7 @@
 		"{team}: the poll and the metrics disagree",
 	];
 
-	const CLASS_FLAVOUR_HEADS = [
+	const CLASS_FLAVOR_HEADS = [
 		"Scouts agree: this is {label}",
 		"The scouting consensus on this class: {label}",
 	];
@@ -472,10 +472,10 @@
 				articles.push({
 					when: -0.3, kind: "realignment",
 					headline: fill(rng.pick(sameRaider ? [
-						"The {to} raids {n} programmes",
+						"The {to} raids {n} programs",
 						"Realignment roundup: {n} schools on the move to the {to}",
 					] : [
-						"Realignment roundup: {n} programmes change leagues",
+						"Realignment roundup: {n} programs change leagues",
 						"The map moves again",
 					]), { to: T(to), n: T(String(moves.length)) }),
 					body: [T("The offseason's realignment, in one place: ")].concat(
@@ -524,7 +524,7 @@
 				for (const o of t.outages || []) {
 					const p = withKey[o.who];
 					// The anomaly system already tells this story with more
-					// colour for a player who drew one of its injury kinds;
+					// color for a player who drew one of its injury kinds;
 					// this section is for the ordinary draws it didn't touch.
 					if (!p || p.surprise) continue;
 					candidates.push({ p, t, o });
@@ -681,7 +681,7 @@
 		if (res.flavor && res.flavor.name !== "balanced" && res.flavor.label) {
 			articles.push({
 				when: -0.15, kind: "class notebook",
-				headline: fill(rng.pick(CLASS_FLAVOUR_HEADS), { label: T(res.flavor.label) }),
+				headline: fill(rng.pick(CLASS_FLAVOR_HEADS), { label: T(res.flavor.label) }),
 				body: [T("Beat writers settling in for the season keep landing on " +
 					"the same word for this class: " + global.Text.endSentence(res.flavor.label))],
 			});
@@ -885,7 +885,7 @@
 					T(") took " + (p.awards || []).filter((a) =>
 						/Player of the Year|Trophy|Award/.test(a) &&
 						!/finalist|Top 20|watch/.test(a)).length +
-						" national honours" +
+						" national honors" +
 						(p.stats ? " on " + p.stats.ppg.toFixed(1) + " points a game." : ".")),
 				],
 			});
@@ -934,22 +934,22 @@
 		}
 
 		// --- the trophy the class didn't win ---------------------------------
-		for (const h of (res.fieldHonours || []).slice(0, runs(0.6) ? 3 : 1)) {
+		for (const h of (res.fieldHonors || []).slice(0, runs(0.6) ? 3 : 1)) {
 			const segs = [T(h.name)];
 			if (h.school && teams[h.school]) segs.push(T(" ("), TM(h.school), T(")"));
 			else if (h.school) segs.push(T(" (" + h.school + ")"));
-			const heads = h.classYear ? FIELD_HONOUR_HEADS
-				: FIELD_HONOUR_HEADS.filter((x) => x.indexOf("{year}") === -1);
+			const heads = h.classYear ? FIELD_HONOR_HEADS
+				: FIELD_HONOR_HEADS.filter((x) => x.indexOf("{year}") === -1);
 			const who = h.key ? PL(h.name, h.key) : T(h.name);
 			articles.push({
-				when: 1.21, kind: "field honours",
+				when: 1.21, kind: "field honors",
 				headline: fill(rng.pick(heads), {
 					name: who,
 					year: T(h.classYear
 						? global.Text.withArticle(h.classYear.toLowerCase(), true) : ""),
 				}),
 				body: (h.key ? [who] : [T(h.name)]).concat(segs.slice(1)).concat([
-					T(" " + honourPhrase(h.award) +
+					T(" " + honorPhrase(h.award) +
 					(h.classYear ? " as " + global.Text.withArticle(h.classYear.toLowerCase()) : "") +
 					" — this class had nothing for it.")]),
 			});
@@ -1122,7 +1122,7 @@
 		}
 
 		// --- the offseason's biggest bench hire -----------------------------
-		// A first-year coach at a big-name programme is a hire worth a story
+		// A first-year coach at a big-name program is a hire worth a story
 		// whoever he replaced. One article: the most prestigious bench that
 		// changed hands.
 		{
@@ -1134,7 +1134,7 @@
 					when: -0.5, kind: "coaching hire",
 					headline: fill(rng.pick(COACH_HIRE_HEADS),
 						{ college: TM(hire.name), coach: T(hire.coach.name) }),
-					body: [TM(hire.name), T(" hand the programme to " +
+					body: [TM(hire.name), T(" hand the program to " +
 						hire.coach.name +
 						(hire.coach.replaced ? ", replacing " + hire.coach.replaced : "") +
 						". A first-year staff at a name like this is the offseason's " +
@@ -1363,10 +1363,10 @@
 		// The best scorer who ended the season without a first-team spot or a
 		// player-of-the-year trophy: every March has one.
 		{
-			const HONOURED = /Consensus First Team All-American|Naismith Trophy|Wooden Award|Oscar Robertson Trophy|AP Player of the Year|NABC Player of the Year|Sporting News Player of the Year/;
+			const HONORED = /Consensus First Team All-American|Naismith Trophy|Wooden Award|Oscar Robertson Trophy|AP Player of the Year|NABC Player of the Year|Sporting News Player of the Year/;
 			const snub = (res.players || []).filter((p) =>
 				!p.nonNcaa && p.stats && p.stats.gp >= 15 &&
-				!(p.awards || []).some((a) => HONOURED.test(a)))
+				!(p.awards || []).some((a) => HONORED.test(a)))
 				.sort((a, b) => b.stats.ppg - a.stats.ppg)[0];
 			if (snub && snub.stats.ppg >= 17 && runs(0.5)) {
 				articles.push({
@@ -1571,5 +1571,5 @@
 		return articles;
 	}
 
-	global.News = { build, dateline, yearOf, statBlurb, honourPhrase };
+	global.News = { build, dateline, yearOf, statBlurb, honorPhrase };
 })(typeof window !== "undefined" ? window : self);

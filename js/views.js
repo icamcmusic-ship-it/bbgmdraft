@@ -105,7 +105,7 @@
 		{ key: "ts", label: "TS%", num: true },
 		{ key: "astTo", label: "A:TO", num: true, off: true, derived: true, title: "Assists per turnover" },
 		{ key: "prod", label: "PROD", num: true, off: true, derived: true, title: "Production score — the single number the award model ranks on" },
-		{ key: "awards", label: "Honours", num: false },
+		{ key: "awards", label: "Honors", num: false },
 	];
 	const PCT_KEYS = { usg: 1, fgp: 1, tpp: 1, ftp: 1, ts: 1, efg: 1 };
 
@@ -198,7 +198,7 @@
 	   more than three columns at once" the audit describes.
 
 	   Two things are needed and only one of them is the class. A card that
-	   stacks forty labelled lines per prospect is not an improvement on a
+	   stacks forty labeled lines per prospect is not an improvement on a
 	   scroll; it is the same information in a taller shape. So the card layout
 	   also has its own column set — the twelve fields a scout reads first —
 	   independent of whichever columns the user has ticked for the desktop
@@ -207,7 +207,7 @@
 
 	   `auto` follows the viewport, which is what a phone user wants and a
 	   desktop user never notices; `on` and `off` are there because a tablet in
-	   landscape is a genuine judgement call and because a narrow window on a
+	   landscape is a genuine judgment call and because a narrow window on a
 	   desktop is not necessarily a phone. */
 	const CARD_COLUMNS = ["pick", "lock", "name", "pos", "year", "board",
 		"newOvr", "newPot", "archetype", "college", "mpg", "ppg", "rpg", "apg",
@@ -250,7 +250,7 @@
 			out.push(byKey[k]);
 		}
 		// Anything the stored order never heard of keeps its place relative to
-		// the columns around it, which is the only behaviour that makes a
+		// the columns around it, which is the only behavior that makes a
 		// partial order safe.
 		COLUMNS.forEach((c, i) => {
 			if (seen[c.key]) return;
@@ -666,7 +666,7 @@
 		case "tpp":
 		case "ftp":
 			return who + ". Shooting composites against a player of his size, " +
-				"the defences he faced, and how much of the offence he carried.";
+				"the defenses he faced, and how much of the offense he carried.";
 		default:
 			return who + ".";
 		}
@@ -818,7 +818,7 @@
 		const st = A().state;
 		const bar = el("div", "filters");
 		const search = searchInput(
-			"Search name, school, archetype, honour…", "Search prospects",
+			"Search name, school, archetype, honor…", "Search prospects",
 			() => st.filter.q, (v) => { st.filter.q = v; });
 		// So "/" has something to focus.
 		search.id = "prospectSearch";
@@ -1033,7 +1033,7 @@
 			"tpar", "ftr", "fgp", "efg", "tpp", "ftp", "ts", "usg"]);
 		preset("Efficiency", ["pos", "college", "mpg", "usg", "ts", "efg", "ortg",
 			"drtg", "astTo", "prod", "ppg", "apg", "topg"]);
-		preset("Defence", ["pos", "college", "mpg", "drpg", "spg", "bpg", "cspg",
+		preset("Defense", ["pos", "college", "mpg", "drpg", "spg", "bpg", "cspg",
 			"deflpg", "chgpg", "drtg", "pfpg", "awards"]);
 		preset("Team context", ["pos", "college", "conf", "record", "apRank", "seed",
 			"newOvr", "mpg", "ppg", "usg", "ts", "awards"]);
@@ -1125,7 +1125,7 @@
 
 		/* On a phone the card layout picks its own columns (see CARD_COLUMNS):
 		   the desktop selection is a choice about a wide table and applying it
-		   to a stack of labelled lines produces a forty-line card. `cardAll`
+		   to a stack of labeled lines produces a forty-line card. `cardAll`
 		   opts back in to everything. */
 		const cards = cardMode();
 		const columns = cards && !st.cardAll
@@ -1302,7 +1302,7 @@
 				case "college":
 					td = el("td");
 					if (p.nonNcaa) {
-						// A professional club and an academy or DII programme are
+						// A professional club and an academy or DII program are
 						// not the same kind of destination.
 						td.appendChild(el("span", p.leaguePro ? "tag pro" : "tag",
 							p.proClub || p.newCollege));
@@ -1698,7 +1698,7 @@
 	/* ---------------------------------------------------------- team views */
 
 	function viewTeams(view, res) {
-		/* A team page. You could follow a programme through the bracket and
+		/* A team page. You could follow a program through the bracket and
 		   never see its roster, its style, its coach, its four prospects and
 		   its schedule in one place. */
 		if (A().state.team) {
@@ -1904,10 +1904,10 @@
 		if (res.recruitingClasses && res.recruitingClasses.length) {
 			view.appendChild(el("h3", null, "Recruiting class rankings"));
 			view.appendChild(el("p", "legendline",
-				"All 368 programmes, scored 247-style: per-signee points decay " +
+				"All 368 programs, scored 247-style: per-signee points decay " +
 				"steeply with national rank, with diminishing returns after the " +
 				"top handful. Prospects in this class keep their real national " +
-				"ranks; the rest of every class is synthesised from programme " +
+				"ranks; the rest of every class is synthesized from program " +
 				"prestige. Top 25 shown."));
 			const rw = el("div", "scroll");
 			const rt = el("table");
@@ -2092,7 +2092,7 @@
 		view.appendChild(el("p", "legendline",
 			"Load several class files (oldest season first) and run them as one " +
 			"continuous world: conference realignment keeps its memory, " +
-			"programme strength drifts season to season instead of being " +
+			"program strength drifts season to season instead of being " +
 			"redrawn, a fired coach is replaced by a named first-year hire, and " +
 			"the build-pool memory spans the whole timeline. A universe re-runs " +
 			"from its seeds — the export stores seeds, not simulated output."));
@@ -2159,7 +2159,7 @@
 		const wrap = el("div", "scroll");
 		const table = el("table");
 		const hr = el("tr");
-		for (const h of ["Season", "Flavour", "AP No. 1", "Champion", "Player of the Year",
+		for (const h of ["Season", "Flavor", "AP No. 1", "Champion", "Player of the Year",
 			"No. 1 pick", "Realignment", "Coaches fired"]) {
 			hr.appendChild(el("th", null, h));
 		}
@@ -2412,19 +2412,19 @@
 			}
 			(i < 2 ? leftCol : rightCol).appendChild(box);
 		});
-		const centre = el("div", "centrecol");
-		centre.appendChild(el("h4", null, "Final Four"));
+		const center = el("div", "centercol");
+		center.appendChild(el("h4", null, "Final Four"));
 		for (const g of t.semis) {
-			centre.appendChild(gameNode(g.a.team, g.b.team, g.winner.team,
+			center.appendChild(gameNode(g.a.team, g.b.team, g.winner.team,
 				g.a.seed, g.b.seed, g.score));
 		}
-		centre.appendChild(el("h4", null, "National championship"));
+		center.appendChild(el("h4", null, "National championship"));
 		if (t.final && t.final.b) {
-			centre.appendChild(gameNode(t.final.a.team, t.final.b.team, t.final.winner.team,
+			center.appendChild(gameNode(t.final.a.team, t.final.b.team, t.final.winner.team,
 				t.final.a.seed, t.final.b.seed, t.final.score));
 		}
 		mirror.appendChild(leftCol);
-		mirror.appendChild(centre);
+		mirror.appendChild(center);
 		mirror.appendChild(rightCol);
 		view.appendChild(mirror);
 
@@ -2460,7 +2460,7 @@
 	   48-minute games at 103 possessions against the NCAA's 40 at ~68, so his
 	   raw per-game totals structurally dominate any mixed board. Rates (TS%,
 	   percentages) are already length-free and rank as-is. The DISPLAYED
-	   number stays the real per-game figure; only the ordering normalises. */
+	   number stays the real per-game figure; only the ordering normalizes. */
 	const RATE_KEYS = { ts: true, fgp: true, tpp: true, ftp: true, usg: true, drtg: true };
 	function leaderValue(p, key) {
 		const v = p.stats[key];
@@ -2520,7 +2520,7 @@
 		   The defensive box score was generated, displayed and never ranked the
 		   way the offensive one is. The award model reads defenseScore() to
 		   decide a defensive player of the year and then discarded the
-		   ordering, so the number the honour was decided on was the one number
+		   ordering, so the number the honor was decided on was the one number
 		   the user could not see — and a prospect's 2.7 deflections a game had
 		   nothing beside it to say whether that was remarkable.
 
@@ -2530,7 +2530,7 @@
 		view.appendChild(el("h3", null, "Defensive leaders"));
 		view.appendChild(el("p", "legendline",
 			"Ranks are against every returning rotation player in Division I, " +
-			"simulated through the same model — the field the defensive honours " +
+			"simulated through the same model — the field the defensive honors " +
 			"are decided against."));
 		const dLeaders = el("div", "cards");
 		dLeaders.appendChild(leaderTable(res, "Blocks", "bpg"));
@@ -2543,7 +2543,7 @@
 		// why it used to sit at the top of the board showing the worst.
 		dLeaders.appendChild(leaderTable(res, "Defensive rating (lowest)", "drtg",
 			(v) => v.toFixed(1), true));
-		// The single number the defensive honours are actually ranked on.
+		// The single number the defensive honors are actually ranked on.
 		const defBox = el("div", "card");
 		defBox.appendChild(el("h4", null, "Defensive score"));
 		const defList = res.players
@@ -2578,10 +2578,10 @@
 		view.appendChild(trBox);
 
 		// The trophies the class LOST — to named returning players.
-		const fh = res.fieldHonours || [];
+		const fh = res.fieldHonors || [];
 		if (fh.length) {
 			const box = el("div", "card");
-			box.appendChild(el("h4", null, "Honours won by returning players"));
+			box.appendChild(el("h4", null, "Honors won by returning players"));
 			const noteBox = el("div", "note");
 			fh.forEach((h, i) => {
 				if (i) noteBox.appendChild(document.createTextNode("\n"));
@@ -2600,7 +2600,7 @@
 				"with him — these are the races the class lost."));
 		}
 
-		view.appendChild(el("h3", null, "Honours"));
+		view.appendChild(el("h3", null, "Honors"));
 		const honored = res.players.filter((p) => p.awards && p.awards.length)
 			.sort((a, b) => (b.scoreTotal || 0) - (a.scoreTotal || 0));
 		if (!honored.length) {
@@ -2669,7 +2669,7 @@
 		const thead = el("thead");
 		const hr = el("tr");
 		for (const h of ["Board", "Rd", "Pick", "Player", "Pos", "Year", "Ovr", "Pot",
-			"School / club", "Preseason", "±", "PPG", "Honours"]) {
+			"School / club", "Preseason", "±", "PPG", "Honors"]) {
 			const th = el("th", ["Board", "Rd", "Pick", "Ovr", "Pot", "Preseason", "±", "PPG"].indexOf(h) >= 0 ? "num" : "", h);
 			th.scope = "col";
 			hr.appendChild(th);
@@ -3080,8 +3080,8 @@
 		}
 		const now = A().snapshot(res);
 		view.appendChild(el("p", "legendline",
-			"Pinned: seed " + pinned.seed + " · " + (pinned.flavor || "no flavour") +
-			"    vs    current: seed " + now.seed + " · " + (now.flavor || "no flavour")));
+			"Pinned: seed " + pinned.seed + " · " + (pinned.flavor || "no flavor") +
+			"    vs    current: seed " + now.seed + " · " + (now.flavor || "no flavor")));
 
 		const cards = el("div", "cards");
 		const num = (label, a, b, digits) => {
@@ -3100,7 +3100,7 @@
 		num("Average PPG", pinned.avgPpg, now.avgPpg);
 		num("Average MPG", pinned.avgMpg, now.avgMpg);
 		num("Scoring leader", pinned.topPpg, now.topPpg);
-		num("Honours handed out", pinned.awards, now.awards, 0);
+		num("Honors handed out", pinned.awards, now.awards, 0);
 		num("Distinct archetypes", pinned.archetypes, now.archetypes, 0);
 		view.appendChild(cards);
 
@@ -3267,7 +3267,7 @@
 				String(p.betterEarlier.classYear || "").toLowerCase() + " (" +
 				n1(p.betterEarlier.ppg) + " PPG in " + p.betterEarlier.season + ")");
 		}
-		if (p.awards && p.awards.length) row("Honours", p.awards.join("; "));
+		if (p.awards && p.awards.length) row("Honors", p.awards.join("; "));
 		box.appendChild(dl);
 
 		// Earlier seasons, when they were simulated.
@@ -3347,9 +3347,9 @@
 
 	/* A returning player's page. Star returners have names, take trophies
 	   under them and appear in News, and used to be text nobody could click:
-	   they are rotation entries on a programme, not draft prospects, so they
+	   they are rotation entries on a program, not draft prospects, so they
 	   have a stat line and a season but no ratings and no export row. The
-	   page says so and shows what there is — the line, the honours he took
+	   page says so and shows what there is — the line, the honors he took
 	   off the class, and a game log drawn from his season on demand. */
 	function fieldPlayerPage(box, res, key) {
 		const m = /^field:(.*):(\d+)$/.exec(String(key));
@@ -3391,8 +3391,8 @@
 			row("Usage", pc(s.usg) + "% of possessions · " + n1(s.topg) + " TO · " +
 				n1(s.pfpg) + " PF");
 		}
-		const honours = (res.fieldHonours || []).filter((h) => h.key === key || (!h.key && h.name === fp.name && h.school === team.name));
-		if (honours.length) row("Honours", honours.map((h) => h.award).join("; "));
+		const honors = (res.fieldHonors || []).filter((h) => h.key === key || (!h.key && h.name === fp.name && h.school === team.name));
+		if (honors.length) row("Honors", honors.map((h) => h.award).join("; "));
 		box.appendChild(dl);
 
 		if (s && global.StatsSim && global.BBGMRng) {
@@ -3488,7 +3488,7 @@
 		return box;
 	}
 
-	/* One programme: who coaches it, how it plays, who is on it, and every game
+	/* One program: who coaches it, how it plays, who is on it, and every game
 	   it played. */
 	function teamPage(view, res, name) {
 		const t = res.teams[name];
@@ -3501,7 +3501,7 @@
 		});
 		box.appendChild(back);
 		if (!t) {
-			box.appendChild(el("p", "hint", "No such programme in this class."));
+			box.appendChild(el("p", "hint", "No such program in this class."));
 			return box;
 		}
 		box.appendChild(el("h3", null, t.name + " — " + t.w + "-" + t.l +
@@ -3520,7 +3520,7 @@
 			row("Coach", t.coach.name + ", year " + t.coach.tenure +
 				" — plays " + t.style.name);
 		}
-		row("Programme level", Math.round(t.level) + " (rating " +
+		row("Program level", Math.round(t.level) + " (rating " +
 			t.rating.toFixed(1) + ")");
 		if (t.recruitClass) {
 			row("Recruiting class", "No. " + t.recruitClass.natRank + " nationally · No. " +
@@ -3587,7 +3587,7 @@
 		box.appendChild(plist);
 
 		/* The rest of the rotation. Returning players carry names, stat
-		   lines and, when one of them beat the class to a trophy, honours —
+		   lines and, when one of them beat the class to a trophy, honors —
 		   and nothing on the team page showed them. Each one links to a
 		   page of his own. */
 		const returners = (t.fieldPlayers || []).slice()
@@ -3638,7 +3638,12 @@
 		table.appendChild(thead);
 		const tb = el("tbody");
 		t.log.forEach((g, i) => {
-			const tr = el("tr", g.won ? "" : "down");
+			/* A dedicated class, not the shared .down: that class also carries
+			   a ::before "▼ " pseudo-element meant for a small inline stat
+			   delta, and a browser renders that inserted text as an extra cell
+			   at the start of the row — which is why a loss visibly pushed the
+			   whole schedule row one column to the right. */
+			const tr = el("tr", g.won ? "" : "loss");
 			tr.appendChild(el("td", "num", String(i + 1)));
 			const td = el("td", "sticky");
 			td.appendChild(teamLink(g.opp));

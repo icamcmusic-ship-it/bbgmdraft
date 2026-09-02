@@ -154,7 +154,7 @@ function ok(name, condition, detail) {
 	   editor, and each reads numbers the sim already computed — so a broken
 	   reference in one of them is invisible until somebody opens it. */
 	for (const [label, needle] of [
-		["Where this stat line comes from", "Share of the offence"],
+		["Where this stat line comes from", "Share of the offense"],
 		["Why he is at No.", "Overall rating"],
 		// A freshman has no earlier seasons, so this one is checked on the
 		// row the panel always has: the season just played.
@@ -325,6 +325,22 @@ function ok(name, condition, detail) {
 	ok("a team page opens with its coach, its splits and its schedule",
 		/Coach/.test(teamText) && /Home . away . neutral/.test(teamText) &&
 		/Schedule/.test(teamText), teamText.slice(0, 90));
+	/* A loss row used to carry the shared .down class, which also draws a
+	   "▼ " pseudo-element before the row and visibly shifted every column
+	   one to the right. Every row in the schedule table must have the same
+	   cell count regardless of the game's result. */
+	{
+		const counts = await page.locator("#view table")
+			.filter({ hasText: "Opponent" }).last()
+			.locator("tbody tr").evaluateAll(
+				(rows) => rows.map((r) => r.children.length));
+		ok("every schedule row has the same number of cells, win or loss",
+			counts.length > 5 && counts.every((c) => c === counts[0]),
+			JSON.stringify(counts.slice(0, 10)));
+		const lossRows = await page.locator("#view table tr.loss").count();
+		ok("a loss row does not carry the shared .down class",
+			(await page.locator("#view table tr.down").count()) === 0 && lossRows >= 0);
+	}
 	await page.locator('#view button:has-text("All teams")').click();
 	await page.waitForTimeout(250);
 
@@ -347,6 +363,9 @@ function ok(name, condition, detail) {
 	ok("the export menu offers Markdown notes, a message history and a preset diff",
 		/Markdown/.test(menuText) && /Message history/.test(menuText) &&
 		/Compare two presets/.test(menuText), menuText.replace(/\n/g, " · ").slice(0, 140));
+	ok("the statline export options warn that BBGM's own import discards them",
+		/Import.{0,5}Draft class.{0,40}deletes a player's stats/.test(menuText),
+		menuText.replace(/\n/g, " · ").slice(0, 400));
 	await page.locator('#modal button:has-text("Compare two presets")').click();
 	await page.waitForTimeout(250);
 	ok("two presets can be compared",

@@ -473,7 +473,7 @@
 			regions: { usa: 1, canada: 0.7, europe: 0.2, oceania: 0.2, asia: 0.2, latam: 0.3, africa: 0.3, other: 0.3 } },
 		/* Pathways that a modern draft class actually contains and that the
 		   table did not. The three EuroLeague feeders (Turkey, Greece, Israel)
-		   were modelled only through the EuroLeague itself, so a nineteen-year
+		   were modeled only through the EuroLeague itself, so a nineteen-year
 		   old at a Turkish club could only be simulated as if he were playing
 		   the strongest league in Europe. The BAL matters because NBA Academy
 		   already weights Africa at 2.0 and had nowhere to send those players
@@ -984,12 +984,12 @@
 		return String(name).toUpperCase().replace(/[^A-Z&]/g, "").slice(0, 6) || "XX";
 	}
 
-	/* Names a BBGM export may still carry for a programme that has since
+	/* Names a BBGM export may still carry for a program that has since
 	   rebranded. The table is anchored on 2023-26, and three of its names
 	   were stale against 2025-26 membership: IUPUI became IU Indianapolis,
 	   Texas A&M-Commerce became East Texas A&M, and Louisiana-Lafayette is
 	   simply Louisiana. A file that says the old name still lands on the
-	   right programme; the export writes the current one. */
+	   right program; the export writes the current one. */
 	const ALIASES = {
 		"IUPUI": "IU Indianapolis",
 		"Texas A&M-Commerce": "East Texas A&M",
