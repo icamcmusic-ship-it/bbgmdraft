@@ -9,7 +9,9 @@
    This is that fit. It simulates nSeeds realistic draft classes, measures each
    build's mean scoring residual against the class's own ovr fit — i.e. how
    much of a player's scoring is decided by his BUILD rather than by how good
-   he is, which is the thing the role multiplier exists to zero out — and then
+   he is, LESS the intent the build declares (ROLE_INTENT in js/ratings.js:
+   a scorer is meant to score more at equal rating and a stopper less), which
+   leaves the part the role multiplier exists to zero out — and then
    regresses those residuals on the same terms the formula uses (the usage
    composite delta, and the tags). The output is a drop-in ROLE_FIT block.
 
@@ -52,11 +54,15 @@ function residuals(nSeeds) {
 	for (const p of all) (by[p.archetype] = by[p.archetype] || []).push(p);
 	const out = [];
 	for (const k of Object.keys(by)) {
-		const rr = by[k].map((p) => p.stats.ppg - (icpt + slope * p.newOvr));
+		const raw = by[k].map((p) => p.stats.ppg - (icpt + slope * p.newOvr));
+		// The residual the fit and the harness both work on is the raw one
+		// LESS the build's declared intent (ROLE_INTENT in js/ratings.js).
+		const intent = R.roleIntentOf(k);
+		const rr = raw.map((x) => x - intent);
 		const m = mean(rr);
 		const se = Math.sqrt(mean(rr.map((x) => (x - m) * (x - m))) / rr.length);
 		out.push({
-			name: k, n: by[k].length, resid: m, se,
+			name: k, n: by[k].length, resid: m, se, intent, raw: mean(raw),
 			// The same noise-adjusted figure tools/validate.js bands.
 			excess: Math.abs(m) - 1.96 * se,
 		});
@@ -128,7 +134,7 @@ function main() {
 	const { rows, meanPpg, n } = residuals(nSeeds);
 	console.log(nSeeds + " realistic classes, " + n + " player-seasons, " +
 		"class mean " + meanPpg.toFixed(2) + " PPG\n");
-	console.log("  build                          n    role   resid   excess");
+	console.log("  build                          n    role     raw  intent   resid   excess");
 	let worst = 0;
 	for (const r of rows) {
 		if (r.n < minN) continue;
@@ -136,6 +142,7 @@ function main() {
 		console.log("  " + r.name.padEnd(30) +
 			String(r.n).padStart(4) + "  " +
 			(R.ROLE_USAGE[r.name] || 1).toFixed(2).padStart(6) +
+			r.raw.toFixed(2).padStart(8) + r.intent.toFixed(2).padStart(8) +
 			r.resid.toFixed(2).padStart(8) + r.excess.toFixed(2).padStart(9));
 	}
 	console.log("\nworst bias beyond noise = " + worst.toFixed(2) +

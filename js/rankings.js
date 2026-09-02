@@ -297,12 +297,29 @@
 			   everyone ranked anywhere last week. Scoring all 368 for all 60
 			   voters at all 15 checkpoints tripled the postseason phase for
 			   ballots that were identical below the top fifty. */
+			/* Reputation fades out over the first REP_GAMES games rather than
+			   vanishing at tip-off. The preseason ballot scored 0-6 on
+			   reputation and the first in-season ballot scored 0-15 on
+			   results, so a 2-0 Colgate out-scored a 1-1 Kansas in week one
+			   by nearly the whole scale and the inertia term, anchored on a
+			   number a third the size, could not hold it — measured, a
+			   week-one AP No. 2 at Colgate. A real November poll is the
+			   preseason poll with the losers moved down. */
+			/* On the SAME SCALE as the results score. Reputation used to be
+			   scored 0-6 against a results score that reaches 15, so even a
+			   half-weighted 4-0 La Salle out-pointed a fully-reputed 1-1
+			   Kentucky, and the inertia term, anchored on a 0-6 number, could
+			   not hold last week's ballot either. */
+			const REP_GAMES = 10;
+			const REP_SCALE = 14;
+			const ramp = (f) => Math.min(1, f.games / REP_GAMES);
+			const resultsScore = (f) => 10 * f.pct + 4 * sosPct(f.sos) + f.qual - 1.4 * f.bad;
+			const reputation = (f) => REP_SCALE * presPct(f.prestige);
 			const shared = new Array(n);
 			for (let i = 0; i < n; i++) {
 				const f = feats[i];
-				shared[i] = f.games > 0
-					? 10 * f.pct + 4 * sosPct(f.sos) + f.qual - 1.4 * f.bad
-					: 6 * presPct(f.prestige);
+				const r = ramp(f);
+				shared[i] = r * resultsScore(f) + (1 - r) * reputation(f);
 			}
 			const candSet = new Set(
 				shared.map((s, i) => i).sort((a, b) => shared[b] - shared[a]).slice(0, 50));
@@ -315,14 +332,13 @@
 				const scores = new Map();
 				for (const i of cands) {
 					const f = feats[i];
-					const played = f.games > 0;
-					const base = played
-						? voter.wRecord * 10 * f.pct +
+					const r = ramp(f);
+					const base = r * (voter.wRecord * 10 * f.pct +
 							voter.wSos * 4 * sosPct(f.sos) +
 							voter.wQual * f.qual -
-							voter.wBad * 1.4 * f.bad +
-							voter.wEye * voter.eye[i]
-						: 6 * presPct(f.prestige) + voter.wEye * voter.eye[i];
+							voter.wBad * 1.4 * f.bad) +
+						(1 - r) * reputation(f) +
+						voter.wEye * voter.eye[i];
 					scores.set(i, voter.prev && voter.prev.has(i)
 						? INERTIA * voter.prev.get(i) + (1 - INERTIA) * base
 						: base);

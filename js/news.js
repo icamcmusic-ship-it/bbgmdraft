@@ -374,6 +374,17 @@
 		const rng = new Rng("news|" + ((res.cfg && res.cfg.seed) || ""));
 		const teams = res.teams || {};
 		const articles = [];
+		/* Whether a notebook item runs this year. Of fifty-seven article
+		   kinds, forty-two fired in every one of forty test classes: the
+		   triple-double, the forty-point night, the overtime classic, the
+		   scoring title, the poll riser, the stock riser and faller, the
+		   conference race — so the table of contents of the paper was the
+		   same every season and only the names changed. The material is
+		   always there (every season has a longest overtime game); a real
+		   desk does not run every one of them every year. The load-bearing
+		   kinds — the poll, the bracket, the champion, the awards, the draft
+		   — always run. The rest are drawn from the class's own seed. */
+		const runs = (p) => rng.random() < p;
 		const season = res.leagueFile && res.leagueFile.startingSeason;
 
 		// --- preseason ---------------------------------------------------
@@ -416,7 +427,7 @@
 				kind: "prospect story",
 				headline: fill(rng.pick(SURPRISE_HEADS),
 					{ player: PL(sp.player, sp.key) }),
-				body: [PL(sp.player, sp.key), T(" — " + sp.label + ".")],
+				body: [PL(sp.player, sp.key), T(" — " + global.Text.endSentence(sp.label))],
 			});
 		});
 
@@ -440,7 +451,7 @@
 			}
 			candidates.sort((a, b) => b.o.drop - a.o.drop);
 			const worst = candidates[0];
-			if (worst && worst.o.drop >= 3) {
+			if (worst && worst.o.drop >= 3 && runs(0.7)) {
 				const games = (worst.t.log || []).filter(
 					(g) => g.stage === "reg" && g.when >= worst.o.from && g.when <= worst.o.to);
 				const w = games.filter((g) => g.won).length;
@@ -479,7 +490,7 @@
 				const gap = t.netRank - apRank;
 				if (!worst || Math.abs(gap) > Math.abs(worst.gap)) worst = { t, apRank, gap };
 			});
-			if (worst && Math.abs(worst.gap) >= 15) {
+			if (worst && Math.abs(worst.gap) >= 15 && runs(0.6)) {
 				articles.push({
 					when: 0.7, kind: "analytics",
 					headline: fill(rng.pick(ANALYTICS_HEADS), { team: TM(worst.t.name) }),
@@ -501,7 +512,7 @@
 			let prevTop = hist[0].ranks[0] && hist[0].ranks[0].team;
 			for (let w = 1; w < hist.length; w++) {
 				const top = hist[w].ranks[0] && hist[w].ranks[0].team;
-				if (top && prevTop && top !== prevTop) {
+				if (top && prevTop && top !== prevTop && runs(0.7)) {
 					articles.push({
 						when: (w / (hist.length - 1)) * 0.98,
 						kind: "new number one",
@@ -525,7 +536,7 @@
 				const delta = (preRank[r.team] || 30) - r.rank;
 				if (!riser || delta > riser.delta) riser = { team: r.team, rank: r.rank, delta };
 			}
-			if (riser && riser.delta >= 8) {
+			if (riser && riser.delta >= 8 && runs(0.6)) {
 				articles.push({
 					when: 0.99, kind: "poll riser",
 					headline: fill(rng.pick([
@@ -546,7 +557,7 @@
 			const fivestars = (res.players || []).filter((p) =>
 				!p.nonNcaa && p.recruiting && p.recruiting.stars === 5)
 				.sort((a, b) => a.recruiting.rank - b.recruiting.rank);
-			for (const p of fivestars.slice(0, 2)) {
+			for (const p of fivestars.slice(0, runs(0.6) ? 2 : 1)) {
 				articles.push({
 					when: -0.4, kind: "signing day",
 					headline: fill(rng.pick(SIGNING_HEADS),
@@ -568,13 +579,13 @@
 					(b.transfer.toPrestige - b.transfer.fromPrestige) -
 					(a.transfer.toPrestige - a.transfer.fromPrestige));
 			const bigMove = moves.filter((p) => p.transfer.direction === "up")[0];
-			if (bigMove) {
+			if (bigMove && runs(0.6)) {
 				articles.push({
 					when: -0.35, kind: "transfer",
 					headline: fill(rng.pick(TRANSFER_HEADS),
 						{ player: PL(bigMove.name, bigMove.key), college: TM(bigMove.newCollege) }),
 					body: [PL(bigMove.name, bigMove.key), T(" arrives at "),
-						TM(bigMove.newCollege), T(" — " + bigMove.transfer.story + ".")],
+						TM(bigMove.newCollege), T(" — " + global.Text.endSentence(bigMove.transfer.story))],
 				});
 			}
 		}
@@ -585,7 +596,7 @@
 				when: -0.15, kind: "class notebook",
 				headline: fill(rng.pick(CLASS_FLAVOUR_HEADS), { label: T(res.flavor.label) }),
 				body: [T("Beat writers settling in for the season keep landing on " +
-					"the same word for this class: " + res.flavor.label + ".")],
+					"the same word for this class: " + global.Text.endSentence(res.flavor.label))],
 			});
 		}
 
@@ -607,7 +618,7 @@
 				return { conf, ct, champ, isUpset, strength: (C[conf] || {}).strength || 0 };
 			}).sort((a, b) =>
 				(b.isUpset ? 1 : 0) - (a.isUpset ? 1 : 0) || b.strength - a.strength);
-			for (const row of rows.slice(0, 8)) {
+			for (const row of rows.slice(0, runs(0.5) ? 8 : 4)) {
 				const { conf, ct, champ, isUpset } = row;
 				const label = TS ? TS.label(conf) : conf;
 				const body = [TM(champ.name), T(" win the " + label + " tournament")];
@@ -697,7 +708,7 @@
 				});
 			}
 
-			for (const g of upsets.slice(0, 3)) {
+			for (const g of upsets.slice(0, runs(0.5) ? 3 : 1)) {
 				const loserSide = g.winner === g.a ? g.b : g.a;
 				articles.push({
 					when: 1.12, kind: "bracket upset",
@@ -730,7 +741,7 @@
 					body: segs,
 				});
 			}
-			if (t.nit && t.nit.champion) {
+			if (t.nit && t.nit.champion && runs(0.6)) {
 				articles.push({
 					when: 1.18, kind: "nit champion",
 					headline: fill(rng.pick(NIT_HEADS), { champ: TM(t.nit.champion.name) }),
@@ -766,7 +777,7 @@
 		{
 			const fry = (res.players || []).filter((p) =>
 				(p.awards || []).indexOf("Wayman Tisdale Award") !== -1)[0];
-			if (fry) {
+			if (fry && runs(0.7)) {
 				articles.push({
 					when: 1.16, kind: "awards",
 					headline: fill(rng.pick(FRESHMAN_HEADS), { player: PL(fry.name, fry.key) }),
@@ -778,7 +789,7 @@
 			}
 			const dpoy = (res.players || []).filter((p) =>
 				(p.awards || []).indexOf("Naismith Defensive Player of the Year") !== -1)[0];
-			if (dpoy) {
+			if (dpoy && runs(0.7)) {
 				articles.push({
 					when: 1.17, kind: "awards",
 					headline: fill(rng.pick(DPOY_HEADS), { player: PL(dpoy.name, dpoy.key) }),
@@ -805,7 +816,7 @@
 		}
 
 		// --- the trophy the class didn't win ---------------------------------
-		for (const h of (res.fieldHonours || []).slice(0, 3)) {
+		for (const h of (res.fieldHonours || []).slice(0, runs(0.6) ? 3 : 1)) {
 			const segs = [T(h.name)];
 			if (h.school && teams[h.school]) segs.push(T(" ("), TM(h.school), T(")"));
 			else if (h.school) segs.push(T(" (" + h.school + ")"));
@@ -821,7 +832,7 @@
 		// --- the best player nobody drafted -----------------------------------
 		{
 			const star = (res.fieldTop || [])[0];
-			if (star && star.stats) {
+			if (star && star.stats && runs(0.6)) {
 				const nameSeg = star.school && teams[star.school]
 					? [T(star.name + " (")].concat([TM(star.school)]).concat([T(")")])
 					: [T(star.name + " (" + (star.school || "unattached") + ")")];
@@ -846,7 +857,7 @@
 			const signed = (res.players || []).filter((p) =>
 				!p.nonNcaa && p.recruiting && p.recruiting.stars >= 4)
 				.sort((a, b) => a.recruiting.rank - b.recruiting.rank);
-			if (signed.length >= 3) {
+			if (signed.length >= 3 && runs(0.6)) {
 				articles.push({
 					when: -0.85, kind: "early signing period",
 					headline: [T(rng.pick(EARLY_SIGNING_HEADS))],
@@ -883,7 +894,7 @@
 			const third = (res.players || []).filter((p) =>
 				!p.nonNcaa && p.recruiting && p.recruiting.stars === 5)
 				.sort((a, b) => a.recruiting.rank - b.recruiting.rank)[2];
-			if (third) {
+			if (third && runs(0.6)) {
 				articles.push({
 					when: -0.65, kind: "five-star commit",
 					headline: fill(rng.pick(FIVE_STAR_HEADS),
@@ -914,7 +925,7 @@
 					a + Math.max(0, 330 - p.recruiting.rank), 0);
 				if (!bestClass || score > bestClass.score) bestClass = { school, group, score };
 			}
-			if (bestClass) {
+			if (bestClass && runs(0.6)) {
 				const names = bestClass.group.slice()
 					.sort((a, b) => a.recruiting.rank - b.recruiting.rank);
 				articles.push({
@@ -935,7 +946,7 @@
 		// that sets it up.
 		{
 			const stay = (res.fieldTop || [])[0];
-			if (stay && stay.school && teams[stay.school]) {
+			if (stay && stay.school && teams[stay.school] && runs(0.6)) {
 				articles.push({
 					when: -0.6, kind: "staying in school",
 					headline: fill(rng.pick(STAY_HEADS),
@@ -955,7 +966,7 @@
 				!p.nonNcaa && p.transfer && p.transfer.from &&
 				/grad/i.test(p.transfer.kind || ""))
 				.sort((a, b) => b.newOvr - a.newOvr)[0];
-			if (grad) {
+			if (grad && runs(0.7)) {
 				articles.push({
 					when: -0.45, kind: "grad transfer",
 					headline: fill(rng.pick(GRAD_TRANSFER_HEADS),
@@ -972,7 +983,7 @@
 			const home = (res.players || []).filter((p) =>
 				!p.nonNcaa && p.transfer &&
 				p.transfer.kind === "returned to his original school")[0];
-			if (home) {
+			if (home && runs(0.8)) {
 				articles.push({
 					when: -0.38, kind: "homecoming",
 					headline: fill(rng.pick(HOMECOMING_HEADS),
@@ -991,7 +1002,7 @@
 			const hire = Object.values(teams).filter((tm) =>
 				tm.coach && tm.coach.situation === "first year" && tm.prestige >= 70)
 				.sort((a, b) => b.prestige - a.prestige)[0];
-			if (hire) {
+			if (hire && runs(0.7)) {
 				articles.push({
 					when: -0.5, kind: "coaching hire",
 					headline: fill(rng.pick(COACH_HIRE_HEADS),
@@ -1024,7 +1035,7 @@
 					if (!clash || score > clash.score) clash = { tm, g, ra, rb, score };
 				}
 			}
-			if (clash) {
+			if (clash && runs(0.6)) {
 				articles.push({
 					when: clash.g.when, kind: "ranked showdown",
 					headline: fill(rng.pick(RANKED_CLASH_HEADS), {
@@ -1049,7 +1060,7 @@
 					if (!epic || g.ot > epic.g.ot) epic = { tm, g };
 				}
 			}
-			if (epic) {
+			if (epic && runs(0.6)) {
 				articles.push({
 					when: epic.g.when, kind: "overtime classic",
 					headline: fill(rng.pick(OT_CLASSIC_HEADS), {
@@ -1084,7 +1095,7 @@
 				}
 				if (best >= 4 && (!skid || best > skid.n)) skid = { tm, n: best, rank: r.rank, at };
 			}
-			if (skid) {
+			if (skid && runs(0.6)) {
 				articles.push({
 					when: skid.at, kind: "losing streak",
 					headline: fill(rng.pick(LOSING_STREAK_HEADS), { team: TM(skid.tm.name) }),
@@ -1099,7 +1110,7 @@
 			const top = (res.players || []).filter((p) =>
 				!p.nonNcaa && p.stats && p.stats.gp >= 15)
 				.sort((a, b) => b.stats.ppg - a.stats.ppg)[0];
-			if (top && top.stats.ppg >= 18) {
+			if (top && top.stats.ppg >= 18 && runs(0.55)) {
 				articles.push({
 					when: 0.9, kind: "scoring title",
 					headline: fill(rng.pick(SCORING_TITLE_HEADS),
@@ -1118,7 +1129,7 @@
 			const big = (res.players || []).filter((p) =>
 				!p.nonNcaa && p.gameLog && p.gameLog.highs && p.gameLog.highs.pts >= 40)
 				.sort((a, b) => b.gameLog.highs.pts - a.gameLog.highs.pts)[0];
-			if (big && big.gameLog.best) {
+			if (big && big.gameLog.best && runs(0.6)) {
 				const g = big.gameLog.best;
 				articles.push({
 					when: Math.min(0.98, g.when || 0.5), kind: "forty-point game",
@@ -1139,7 +1150,7 @@
 			const td = (res.players || []).filter((p) =>
 				!p.nonNcaa && p.gameLog && p.gameLog.tripleDoubles > 0)
 				.sort((a, b) => b.gameLog.tripleDoubles - a.gameLog.tripleDoubles)[0];
-			if (td) {
+			if (td && runs(0.6)) {
 				articles.push({
 					when: 0.62, kind: "triple-double",
 					headline: fill(rng.pick(TRIPLE_DOUBLE_HEADS),
@@ -1175,7 +1186,7 @@
 			const runaway = races.filter((r) => r.gap >= 6)
 				.sort((a, b) => b.strength - a.strength)[0];
 			const race = tight || runaway;
-			if (race) {
+			if (race && runs(0.6)) {
 				const label = TS2 ? TS2.label(race.conf) : race.conf;
 				articles.push({
 					when: 0.93, kind: "conference race",
@@ -1207,7 +1218,7 @@
 				if (margin > 1) continue;
 				if (!thief || margin < thief.margin) thief = { conf, ct, margin };
 			}
-			if (thief) {
+			if (thief && runs(0.6)) {
 				const label = TS3 ? TS3.label(thief.conf) : thief.conf;
 				articles.push({
 					when: 1.008, kind: "bid stealer",
@@ -1230,7 +1241,7 @@
 				!p.nonNcaa && p.stats && p.stats.gp >= 15 &&
 				!(p.awards || []).some((a) => HONOURED.test(a)))
 				.sort((a, b) => b.stats.ppg - a.stats.ppg)[0];
-			if (snub && snub.stats.ppg >= 17) {
+			if (snub && snub.stats.ppg >= 17 && runs(0.5)) {
 				articles.push({
 					when: 1.195, kind: "awards snub",
 					headline: fill(rng.pick(SNUB_HEADS), { player: PL(snub.name, snub.key) }),
@@ -1252,7 +1263,7 @@
 					/ Player of the Year$/.test(a) && !NATIONAL.test(a))[0];
 				if (award) { cpoy = { p, award }; break; }
 			}
-			if (cpoy) {
+			if (cpoy && runs(0.55)) {
 				articles.push({
 					when: 1.155, kind: "conference poy",
 					headline: fill(rng.pick(CONF_POY_HEADS),
@@ -1296,7 +1307,7 @@
 			}
 
 			// Semifinal Saturday, as results rather than as a preview.
-			if (t.semis && t.semis.length) {
+			if (t.semis && t.semis.length && runs(0.6)) {
 				articles.push({
 					when: 1.16, kind: "national semifinal",
 					headline: [T(rng.pick(NATIONAL_SEMIS_HEADS))],
@@ -1336,7 +1347,7 @@
 				for (const round of t.nit.rounds) {
 					for (const g of round) if (g.round === "NIT Semifinal") nitSemis.push(g);
 				}
-				if (nitSemis.length) {
+				if (nitSemis.length && runs(0.5)) {
 					articles.push({
 						when: 1.14, kind: "nit semifinal",
 						headline: [T(rng.pick(NIT_SEMIS_HEADS))],
@@ -1373,7 +1384,7 @@
 		// --- the workout-circuit riser and the faller ------------------------
 		{
 			const up = (res.risers || [])[0];
-			if (up && up.stockMove >= 5) {
+			if (up && up.stockMove >= 5 && runs(0.6)) {
 				articles.push({
 					when: 1.33, kind: "stock riser",
 					headline: fill(rng.pick(STOCK_RISER_HEADS),
@@ -1384,7 +1395,7 @@
 				});
 			}
 			const down = (res.fallers || [])[0];
-			if (down && down.stockMove <= -5) {
+			if (down && down.stockMove <= -5 && runs(0.6)) {
 				articles.push({
 					when: 1.34, kind: "stock faller",
 					headline: fill(rng.pick(STOCK_FALLER_HEADS),
@@ -1401,7 +1412,7 @@
 			const sleeper = (res.board || []).filter((p) =>
 				p.mockRound === 2 && p.stockMove >= 8)
 				.sort((a, b) => b.stockMove - a.stockMove)[0];
-			if (sleeper) {
+			if (sleeper && runs(0.5)) {
 				articles.push({
 					when: 1.36, kind: "draft sleeper",
 					headline: fill(rng.pick(SLEEPER_HEADS),
@@ -1419,8 +1430,8 @@
 			articles.push({
 				when: 1.4, kind: "draft",
 				headline: fill(rng.pick(DRAFT_HEADS), { player: PL(e.player, e.key) }),
-				body: [PL(e.player, e.key), T(" — " + e.text +
-					(e.detail ? " (" + e.detail + ")" : "") + ".")],
+				body: [PL(e.player, e.key), T(" — " + global.Text.endSentence(e.text +
+					(e.detail ? " (" + e.detail + ")" : "")))],
 			});
 		}
 

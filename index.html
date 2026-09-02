@@ -66,6 +66,8 @@
 
 <div class="layout">
 <aside id="settings" aria-label="Settings">
+	<!-- Filled by js/app.js from the fieldsets below; shown below 860px. -->
+	<nav id="settingsJump" class="jumplist" aria-label="Jump to a settings group"></nav>
 	<div class="ctl">
 		<label for="preset">Preset</label>
 		<select id="preset"></select>
@@ -189,11 +191,32 @@
 
 	<details class="grp" id="grp-arch">
 		<summary>Archetype frequencies</summary>
-		<p class="hint">Rarity weight per build (1 = common, 3.6 = the most common, 0.34 = the rarest), and beside it the share of the last generated class that build actually came out as. Height bands are fixed by the archetype. Hover a name to see what it does to the ratings.</p>
-		<!-- 117 builds in a 230px scroller: finding "Floor-Spacing Four" meant
-		     scrolling past a hundred names. -->
-		<input type="search" id="archSearch" placeholder="Find a build…"
-			aria-label="Filter builds by name or tag">
+		<!-- The count and the weight span are filled in by js/app.js from the
+		     table itself. They used to be typed here, and read "117 builds"
+		     and "0.34 = the rarest" for a table of 121 whose floor was 0.45:
+		     nothing checked the prose against the array, so it drifted on
+		     every page load. tools/test.js now asserts this hint carries no
+		     digits of its own. -->
+		<p class="hint" id="archHint">Rarity weight per build, and beside it the share of the last generated class that build actually came out as. Height bands are fixed by the archetype. Hover a name to see what it does to the ratings.</p>
+		<!-- A hundred-odd builds in a 230px scroller: finding "Floor-Spacing
+		     Four" meant scrolling past a hundred names. The search matches
+		     names and tags; the filters narrow by the height band a build is
+		     eligible for and by whether it is in the class's drawn pool. -->
+		<div class="rowflex archfilters">
+			<input type="search" id="archSearch" placeholder="Find a build…"
+				aria-label="Filter builds by name or tag">
+			<select id="archBand" aria-label="Show only builds eligible at a height" title="Show only the builds a player of this height can draw">
+				<option value="">any height</option>
+				<option value="10">≤ 6'2" (hgt 10)</option>
+				<option value="30">6'4" (hgt 30)</option>
+				<option value="45">6'6" (hgt 45)</option>
+				<option value="58">6'8" (hgt 58)</option>
+				<option value="70">6'10" (hgt 70)</option>
+				<option value="80">7'0" (hgt 80)</option>
+				<option value="92">7'2"+ (hgt 92)</option>
+			</select>
+			<label class="check tiny" title="Only the builds this class's pool actually drew"><input type="checkbox" id="archInPool"> in this class's pool</label>
+		</div>
 		<p class="hint" id="archSearchNote" hidden></p>
 		<div id="archWeights" class="archlist"></div>
 		<button id="btnArchReset" type="button">Reset weights</button>
@@ -261,6 +284,7 @@
 	</div>
 </div>
 
+<script src="js/text.js"></script>
 <script src="js/rng.js"></script>
 <script src="js/bbgm.js"></script>
 <script src="js/colleges.js"></script>

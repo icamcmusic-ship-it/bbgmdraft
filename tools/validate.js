@@ -23,9 +23,16 @@ process.env.BBGM_STRICT_ROLES = "1";
 function loadEngine() {
 	if (!global.window) global.window = global;
 	if (!global.Engine) {
+		/* Every module the page loads, in the page's own order — news.js and
+		   universe.js included. They used to be left out, so nothing that
+		   ran in CI ever read a News article's text, which is exactly how
+		   "a Arizona State dunk" shipped. faces.js is the one exception: it
+		   wraps the vendored facesjs and draws SVG, which has no business in
+		   a Node harness. */
 		for (const f of [
-			"rng", "bbgm", "colleges", "config", "calibration", "ratings",
+			"text", "rng", "bbgm", "colleges", "config", "calibration", "ratings",
 			"teams", "stats", "rankings", "tournament", "awards", "engine", "batch",
+			"news", "universe",
 		]) require(path.join(__dirname, "..", "js", f + ".js"));
 	}
 	return global;
@@ -299,6 +306,23 @@ function collect(nSeeds, cfgOverrides, fixture) {
 	const usgBins = {};
 	const scorers20 = [];
 	const scorers25 = [];
+	/* March. Nothing here was banded, so the bracket could be — and was —
+	   systematically more chaotic than the real one with every stat band
+	   passing: 1 seeds beat 16 seeds 92% of the time against a real 99%,
+	   won 23% of titles against a real 55-65%, and filled 20% of Final Four
+	   places against a real 40%. Seed-line win rates in the round of 64,
+	   the champion's seed and the Final Four's composition are the three
+	   readings that describe how chalky a tournament is, and all three
+	   drift in either direction: a curve steep enough for the same school
+	   to win every year is the opposite failure and the bands have a top. */
+	const seedLine = { "1v16": [0, 0], "2v15": [0, 0], "5v12": [0, 0], "8v9": [0, 0] };
+	const champSeedOne = [];
+	const champSeedDeep = [];
+	const ffOneShare = [];
+	/* The first in-season AP poll. A November ballot is the preseason ballot
+	   with the losers moved down; it used to be re-derived from two games
+	   of results, which put a 2-0 Colgate at No. 2. */
+	const pollWeek1 = [];
 	for (let s = 0; s < nSeeds; s++) {
 		const lf = makeFixture(s, 70);
 		const res = global.Engine.run(
@@ -390,6 +414,29 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		}
 		const regGames = Object.values(res.teams).map((t) => t.regGames);
 		gamesSpread.push(Math.max.apply(null, regGames) - Math.min.apply(null, regGames));
+		const tourney = res.tourney;
+		if (tourney && tourney.regions && tourney.champion) {
+			for (const r of Object.keys(tourney.regions)) {
+				for (const g of tourney.regions[r].rounds[0] || []) {
+					const hi = Math.min(g.a.seed, g.b.seed);
+					const lo = Math.max(g.a.seed, g.b.seed);
+					const k = hi + "v" + lo;
+					if (!seedLine[k]) continue;
+					seedLine[k][1]++;
+					if (g.winner.seed === hi) seedLine[k][0]++;
+				}
+			}
+			champSeedOne.push(tourney.champion.seed === 1 ? 1 : 0);
+			champSeedDeep.push(tourney.champion.seed >= 5 ? 1 : 0);
+			const ff = tourney.finalFour || [];
+			if (ff.length) ffOneShare.push(ff.filter((x) => x.seed === 1).length / ff.length);
+		}
+		const hist = res.pollHistory;
+		if (hist && hist.length > 2 && hist[0].ranks && hist[1].ranks) {
+			const pre = new Set(hist[0].ranks.slice(0, 25).map((r) => r.team));
+			const w1 = hist[1].ranks.slice(0, 10);
+			if (w1.length) pollWeek1.push(w1.filter((r) => pre.has(r.team)).length / w1.length);
+		}
 		// A team's displayed record has to include the games it played in
 		// March. The champion goes 6-0 in the NCAA tournament; if w + l does
 		// not move with it, the record contradicts the result printed beside it.
@@ -576,8 +623,12 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   class of one of everything. The D-I single-season record is 13.3. */
 		["APG max", Math.max.apply(null, apg)].concat(extreme(7.0, 12.0)),
 		["BPG p95", pct(g((p) => p.stats.bpg), 0.95)].concat(within(2.2, 0.8)),
-		// Real shot-blockers reach 3.5-4.6 (Kessler 4.6, Chet 3.7).
-		["BPG max", Math.max.apply(null, g((p) => p.stats.bpg))].concat(extreme(2.8, 5.0)),
+		/* Real shot-blockers reach 3.5-4.6 in a modern season (Kessler 4.6,
+		   Chet 3.7); the D-I single-season records sit higher (Bradley 5.2 as
+		   a freshman, Foyle 6.4), so a seven-foot anchor on a roster of
+		   shot-blockers reaching five once in 1,400 seasons is the tail the
+		   model should have, not a fault. */
+		["BPG max", Math.max.apply(null, g((p) => p.stats.bpg))].concat(extreme(2.8, 5.5)),
 		["SPG max", Math.max.apply(null, g((p) => p.stats.spg))].concat(extreme(2.0, 4.2)),
 		["PF mean", mean(g((p) => p.stats.pfpg))].concat(within(2.35, 0.85)),
 		/* The band on the PF mean is exactly the failure mode the README's
@@ -883,7 +934,10 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		["All-conference 1st/class", mean(confFirst)].concat(perClass(11, 30)),
 		["All-conference 2nd/class", mean(confSecond)].concat(perClass(3.5, 12)),
 		["Defensive awards/class", mean(defAwards)].concat(perClass(4, 16)),
-		["Honoured players/class", mean(honouredCount)].concat(perClass(30, 52)),
+		/* Top raised from 52 for the pro achievement layer: a class's dozen
+		   prospects abroad can now win their league's MVP or first team,
+		   which honours one or two more players a class. */
+		["Honoured players/class", mean(honouredCount)].concat(perClass(30, 56)),
 		// Dominated by conference honours across ~31 conferences, which future
 		// draft picks legitimately win a lot of.
 		["Awards/class (all)", mean(awardsCount)].concat(perClass(95, 220)),
@@ -905,8 +959,26 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		/* A D-II or professional player winning a Division I national award is
 		   a leak in the award model, not a statement about the class. */
 		["Non-D1 D-I awards", mean(nonNcaaAwards), 0, 0],
+
+		/* March, against the modern NCAA tournament's own history. Rates are
+		   per-class means and widen at low seed counts like every other
+		   rate; a 1-v-16 result over sixteen games at four seeds is exactly
+		   as noisy as it sounds, which is why the low bound is not 0.99. */
+		/* The model sits at 93-96% on this line against a real 99%: what
+		   remains is genuine — a 1 seed whose best player is out, a
+		   16 seed on a run — and the floor is drawn where the old 92%
+		   regresses rather than where reality is. */
+		["1 seed beats 16 seed (rate)", lineRate(seedLine["1v16"])].concat(rateBand(0.92, 1.0)),
+		["2 seed beats 15 seed (rate)", lineRate(seedLine["2v15"])].concat(rateBand(0.82, 0.98)),
+		["5 seed beats 12 seed (rate)", lineRate(seedLine["5v12"])].concat(rateBand(0.50, 0.78)),
+		["8 seed beats 9 seed (rate)", lineRate(seedLine["8v9"])].concat(rateBand(0.36, 0.66)),
+		["1 seed wins the title (rate)", mean(champSeedOne)].concat(rateBand(0.28, 0.72)),
+		["Seed 5 or worse wins the title (rate)", mean(champSeedDeep)].concat(rateBand(0.0, 0.36)),
+		["1 seeds' share of the Final Four", mean(ffOneShare)].concat(rateBand(0.24, 0.56)),
+		["Week-1 AP top 10 drawn from preseason top 25", mean(pollWeek1)].concat(rateBand(0.72, 1.0)),
 	];
 
+	function lineRate(v) { return v[1] ? v[0] / v[1] : 1; }
 	const tag = (list, scope) => list.map((r) => ({
 		name: r[0], value: r[1], lo: r[2], hi: r[3], scope,
 	}));
@@ -961,7 +1033,13 @@ function archResidual(all, minN) {
 	let worst = 0;
 	for (const k of Object.keys(by)) {
 		if (by[k].length < (minN || 12)) continue;
-		const res = by[k].map((p) => p.stats.ppg - (icpt + slope * p.newOvr));
+		/* Against the build's DECLARED intent (see ROLE_INTENT in
+		   js/ratings.js): a scorer is meant to sit above the line and a
+		   stopper below it, and only the part of the bias that is not
+		   declared counts. A flat zero target here is what flattened the
+		   table. */
+		const intent = global.RatingsBuilder.roleIntentOf(k);
+		const res = by[k].map((p) => p.stats.ppg - (icpt + slope * p.newOvr) - intent);
 		const m = mean(res);
 		const v = mean(res.map((x) => (x - m) * (x - m)));
 		const se = Math.sqrt(v / res.length);

@@ -328,7 +328,10 @@
 		let missingPid = 0;
 		const seenPid = new Set();
 		let duplicatePid = 0;
+		let draftYearMismatch = 0;
 		leagueFile.players.forEach((p, i) => {
+			if (p && p.draft && Number.isFinite(Number(p.draft.year)) &&
+				Number(p.draft.year) !== season) draftYearMismatch++;
 			const who = p && (p.firstName || p.lastName)
 				? ((p.firstName || "") + " " + (p.lastName || "")).trim()
 				: "player #" + i;
@@ -414,6 +417,13 @@
 		if (duplicatePid) {
 			warnings.push(duplicatePid + " players share a pid with another player. " +
 				"Row order is used to tell them apart.");
+		}
+		if (draftYearMismatch && !oversized) {
+			warnings.push(draftYearMismatch + " of " + leagueFile.players.length +
+				" players carry a draft year that is not " + season + ". Ages and " +
+				"class years are measured from " + season + " for everyone, so a " +
+				"player drafted in another year will read older or younger than " +
+				"his own draft class would have made him.");
 		}
 		return {
 			ok: true,
@@ -611,8 +621,19 @@
 				name: ((p.firstName || "") + " " + (p.lastName || "")).trim() ||
 					("Prospect " + (p.pid === undefined ? idx : p.pid)),
 				born: p.born,
-				age: (p.draft && Number.isFinite(p.draft.year) ? p.draft.year : season) -
-					Number(p.born.year),
+				/* Handedness: about one player in nine shoots left-handed, it
+				   is the first thing a scout writes after the height, and
+				   nothing in the tool carried it. Drawn per player key so it
+				   survives rerolls. */
+				hand: rng.child("hand:" + key).random() < 0.11 ? "left" : "right",
+				/* Age at the class's own season. It used to prefer each
+				   player's draft.year, so in an export whose top-level season
+				   and a player's draft year disagreed (a multi-year league
+				   subset), two prospects in the same class could have their
+				   ages measured from different years. One reference year for
+				   the whole class; validateLeagueFile warns when a draft year
+				   disagrees with it. */
+				age: season - Number(p.born.year),
 				draftRound: p.draft && Number.isFinite(p.draft.round) ? p.draft.round : null,
 				draftPick: p.draft && Number.isFinite(p.draft.pick) ? p.draft.pick : null,
 				origCollege: p.college,
@@ -1760,6 +1781,12 @@
 			const home = p.nonNcaa ? p.proTeam : teams[p.newCollege];
 			p.gameLog = S.gameLog(p, home, logRng.child("gl:" + p.key));
 			p.signature = p.gameLog ? p.gameLog.best : null;
+			// The log-derived numbers a table column needs on the stat line.
+			if (p.stats && p.gameLog) {
+				p.stats.pm = p.gameLog.plusMinus;
+				p.stats.onOff = p.gameLog.onOff;
+				p.stats.clutchPpg = p.gameLog.clutch ? p.gameLog.clutch.ppg : undefined;
+			}
 		}
 		buildPriorSeasons(state.players, state.season, state.rng.child("prior"),
 			teams, cfg, classRefVolume, classRefEfficiency);
@@ -2830,6 +2857,16 @@
 				}
 			}
 
+			/* The continental layer. A domestic league's top clubs spend the
+			   winter in a European (or Asian, or American) competition
+			   alongside it, and the note used to say nothing about it: a
+			   prospect at Real Madrid had a Liga ACB table and no EuroLeague.
+			   The run is drawn from the club's own rating against the
+			   competition's strength; it moves the note, the honours (see
+			   js/awards.js) and nothing about the domestic season, which is
+			   what the scaffolding already simulated. */
+			continentalRuns(lgName, table, lrng.child("continental"));
+
 			for (const c of clubs) {
 				if (!c.prospects.length) continue;
 				const idx = table.indexOf(c);
@@ -2838,6 +2875,9 @@
 					: c.relegated ? "relegated"
 					: "missed the playoffs";
 				if (c.cupChamp) c.finish += ", cup winners";
+				if (c.continental) {
+					c.finish += "; " + c.continental.competition + ": " + c.continental.result;
+				}
 			}
 
 			// Stats: each club is simulated exactly like a college rotation, in
@@ -2867,6 +2907,49 @@
 		return out;
 	}
 
+	/* Which continental competition a domestic league's top clubs enter,
+	   how many of them, and how strong the field is. The EuroLeague, the
+	   EuroCup and the Champions League are themselves destinations in this
+	   tool, so a club already IN one of those does not enter another. */
+	const CONTINENTAL = {
+		"Liga ACB": [["EuroLeague", 2, 88], ["EuroCup", 2, 74], ["Basketball Champions League", 2, 68]],
+		"Turkish BSL": [["EuroLeague", 2, 88], ["EuroCup", 1, 74], ["Basketball Champions League", 2, 68]],
+		"Greek Basket League": [["EuroLeague", 2, 88], ["Basketball Champions League", 2, 68]],
+		"Israeli Premier League": [["EuroLeague", 1, 88], ["Basketball Champions League", 2, 68]],
+		"Adriatic League": [["EuroLeague", 2, 88], ["EuroCup", 2, 74]],
+		"LNB Pro A": [["EuroLeague", 2, 88], ["EuroCup", 2, 74], ["Basketball Champions League", 2, 68]],
+		"Basketball Bundesliga": [["EuroLeague", 2, 88], ["EuroCup", 2, 74], ["Basketball Champions League", 2, 68]],
+		"Brazil NBB": [["BCL Americas", 2, 60]],
+		"Japan B.League": [["East Asia Super League", 2, 66]],
+		"Chinese CBA": [["East Asia Super League", 2, 66]],
+		"NBL": [["East Asia Super League", 2, 66]],
+	};
+	const CONTINENTAL_STAGES = ["group stage", "round of 16", "quarterfinals",
+		"Final Four", "final", "champions"];
+	function continentalRuns(lgName, table, rng) {
+		const entries = CONTINENTAL[lgName];
+		if (!entries) return;
+		let i = 0;
+		for (const [competition, slots, strength] of entries) {
+			for (let k = 0; k < slots && i < table.length; k++, i++) {
+				const club = table[i];
+				/* How far the club goes: each stage is a coin weighted by the
+				   club's rating against the field, so a 60-rated club in an
+				   88-rated competition usually goes out in the group and a
+				   90 usually reaches the last four. */
+				let stage = 0;
+				while (stage < CONTINENTAL_STAGES.length - 1) {
+					const edge = club.rating - strength;
+					const p = 1 / (1 + Math.exp(-(edge + 4) / 7));
+					if (rng.random() > p) break;
+					stage++;
+				}
+				club.continental = { competition, result: CONTINENTAL_STAGES[stage] };
+				for (const p of club.prospects) p.continental = club.continental;
+			}
+		}
+	}
+
 	/* The best single night of a prospect's season. Kept as a named export
 	   because it is a useful thing to call on its own; the pipeline reads it
 	   off the full game log instead. */
@@ -2889,6 +2972,7 @@
 		["shooting", "Shooting splits and TS%"],
 		["advanced", "Usage, rebounds split, fouls"],
 		["defense", "Defensive line (contests, deflections, charges, DRtg)"],
+		["playmaking", "Assisted rate, transition share, plus/minus, close games"],
 		["signature", "Best game of the season"],
 		["highs", "Season highs, 20-point games, streaks"],
 		["march", "Postseason splits"],
@@ -3057,7 +3141,21 @@
 				" (year " + team.coach.tenure + ")" +
 				(team.downYear ? " · a down year for the programme" : ""));
 		}
-		if (on("archetype") && p.archetype) lines.push("Profile: " + p.archetype);
+		if (s && on("playmaking")) {
+			const bits = [];
+			if (Number.isFinite(s.astdRate)) bits.push("assisted on " + pct(s.astdRate) + " of his makes");
+			if (Number.isFinite(s.transShare)) bits.push(pct(s.transShare) + " of his points in transition");
+			if (Number.isFinite(s.pm)) bits.push((s.pm >= 0 ? "+" : "") + n1(s.pm) + " per game");
+			const cl = p.gameLog && p.gameLog.clutch;
+			if (cl) {
+				bits.push("close games: " + cl.w + "-" + cl.l + ", " + n1(cl.ppg) + " PPG" +
+					(Math.abs(cl.delta) >= 1.5 ? " (" + (cl.delta > 0 ? "+" : "") + n1(cl.delta) + " on his average)" : ""));
+			}
+			if (bits.length) lines.push(bits.join(" · "));
+		}
+		if (on("archetype") && p.archetype) {
+			lines.push("Profile: " + p.archetype + (p.hand === "left" ? ", left-handed" : ""));
+		}
 		if (on("awards") && p.awards && p.awards.length) {
 			// Awards arrive sorted by prestige. A genuine star can collect a
 			// dozen honours across the national, conference and tournament
@@ -3308,12 +3406,81 @@
 		};
 	}
 
+	/* The season as a BBGM-shaped league fragment: `teams` and `teamSeasons`
+	   in the game's own field names, one conference per college league, plus
+	   a `coaches` block this tool defines. exportSeason is a flat report;
+	   this is the same programmes as records a league file can carry, so a
+	   user building a college league in BBGM has the year's standings and
+	   staff in the shape the game reads rather than in a CSV. It is a
+	   fragment — no players, no schedule — and says so in `format`. */
+	function exportLeagueFragment(result) {
+		const teams = Object.values(result.teams)
+			.filter((t) => t && t.name && t.log)
+			.sort((a, b) => a.name.localeCompare(b.name));
+		const confs = [];
+		const cidOf = {};
+		for (const t of teams) {
+			if (cidOf[t.conf] === undefined) {
+				cidOf[t.conf] = confs.length;
+				confs.push({ cid: confs.length, name: t.conf });
+			}
+		}
+		const seen = {};
+		const abbrevOf = (name) => {
+			let a = name.replace(/[^A-Za-z ]/g, "").split(/\s+/).filter(Boolean)
+				.map((w) => w[0]).join("").toUpperCase();
+			if (a.length < 3) a = name.replace(/[^A-Za-z]/g, "").slice(0, 3).toUpperCase();
+			let out = a;
+			let n = 2;
+			while (seen[out]) out = a + n++;
+			seen[out] = true;
+			return out;
+		};
+		const season = result.season;
+		const out = {
+			format: "bbgm-draft-workshop/league-fragment",
+			version: 1,
+			startingSeason: season,
+			confs,
+			teams: [],
+			teamSeasons: [],
+			coaches: [],
+		};
+		teams.forEach((t, tid) => {
+			out.teams.push({
+				tid, cid: cidOf[t.conf], did: cidOf[t.conf],
+				region: t.name, name: "", abbrev: abbrevOf(t.name),
+				pop: 1, stadiumCapacity: 10000,
+			});
+			out.teamSeasons.push({
+				tid, season, won: t.w, lost: t.l, wonConf: t.cw, lostConf: t.cl,
+				wonHome: (t.log || []).filter((g) => g.home > 0 && g.won).length,
+				lostHome: (t.log || []).filter((g) => g.home > 0 && !g.won).length,
+				wonAway: (t.log || []).filter((g) => g.home < 0 && g.won).length,
+				lostAway: (t.log || []).filter((g) => g.home < 0 && !g.won).length,
+				playoffRoundsWon: t.ncaaSeed ? (t.ncaaWins || 0) : -1,
+				// This tool's own fields, prefixed so they cannot collide.
+				ncaaSeed: t.ncaaSeed || null, ncaaResult: t.ncaaResult || null,
+				nitResult: t.nitResult || null, apRank: t.apRank || null,
+			});
+			if (t.coach) {
+				out.coaches.push({
+					tid, name: t.coach.name, tenure: t.coach.tenure,
+					philosophy: t.coach.philosophy ? t.coach.philosophy.name || t.coach.philosophy : null,
+					style: t.coach.style ? t.coach.style.name : null,
+					situation: t.coach.situation || null,
+				});
+			}
+		});
+		return out;
+	}
+
 	function round2(x) {
 		return Number.isFinite(x) ? Math.round(x * 100) / 100 : null;
 	}
 
 	global.Engine = {
-		run, createRunner, exportFile, exportSeason, buildNote, classYear,
+		run, createRunner, exportFile, exportSeason, exportLeagueFragment, buildNote, classYear,
 		assignClassYears, inchesFromHgtRating, validateLeagueFile, findSeason, playerKey,
 		SIZE_OVERRIDE_KEYS, SURPRISES, DRAFT_EVENTS,
 		MAX_CLASS,
