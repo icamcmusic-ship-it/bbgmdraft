@@ -44,7 +44,7 @@
 		} else if (rng.random() < BREAKOUT_RATE / (1 - DOWN_YEAR_RATE)) {
 			/* Divided by (1 - DOWN_YEAR_RATE): this branch is only reached in
 			   the 91% of seasons that were not down years, so a bare
-			   BREAKOUT_RATE here realised 8.2%, not the 9% the constant beside
+			   BREAKOUT_RATE here realized 8.2%, not the 9% the constant beside
 			   DOWN_YEAR_RATE reads as. */
 			// The other direction: a mid-major that keeps everybody.
 			level += 5 + 0.10 * (100 - C.prestige(name)) + rng.uniform(0, 5);
@@ -102,7 +102,7 @@
 		let talent = clamp(rng.normal(mean, 8.5) - Math.pow(i, 1.35) * 2.4, 6, 95);
 		/* The college star who is not a prospect.
 
-		   A returning player's talent was drawn from his programme's level and
+		   A returning player's talent was drawn from his program's level and
 		   nothing else, so the best player in the country was, by construction,
 		   always somebody in the draft class: the national player of the year
 		   came out of the class in 100% of seasons. Real college basketball is
@@ -116,7 +116,7 @@
 		   college level and not an NBA prospect. The kind is drawn from a table
 		   so "returning conference player of the year" and "senior leader who
 		   came back" produce different boosts, and the `starReturner` tag lets
-		   the award model recognise who this player is. */
+		   the award model recognize who this player is. */
 		let starReturner = null;
 		if (i <= 2 && rng.random() < STAR_RETURNER_RATE) {
 			const kind = rng.weighted(STAR_RETURNER_KINDS);
@@ -152,7 +152,7 @@
 
 	   Without this, `makeFiller` and `prospectTalent` sit on incompatible
 	   scales at the top of the country: a level-85 program's three best
-	   returning players synthesise to 63.6 / 61.2 / 57.5, while an ovr-30
+	   returning players synthesize to 63.6 / 61.2 / 57.5, while an ovr-30
 	   second-rounder is talent 59.9 — so a drafted NBA player was routinely the
 	   fourth option on his own college team, fell to ~25 minutes and printed
 	   seven points. Measured, where a prospect played predicted his minutes
@@ -165,8 +165,8 @@
 	   untouched too, because the cap is not binding there. */
 	const FILLER_GAP = 4;
 	const NEXT_CLASS_YEAR = { Freshman: "Sophomore", Sophomore: "Junior", Junior: "Senior" };
-	/* Per top-three rotation slot, so roughly a dozen across 368 programmes.
-	   Raised from 0.012 (task 4.6): at the old rate about seven programmes in
+	/* Per top-three rotation slot, so roughly a dozen across 368 programs.
+	   Raised from 0.012 (task 4.6): at the old rate about seven programs in
 	   the country had a star returner, and the uniform talent bump (+10-24)
 	   produced the same kind of player every time. The rate is doubled so a
 	   class has 14-18 star returners — still rare, but enough that the award
@@ -187,7 +187,7 @@
 		let best = -Infinity;
 		for (const p of prospects) best = Math.max(best, p.talent);
 		const cap = best - FILLER_GAP;
-		// The cap applies to the two best returners as realised, not to the two
+		// The cap applies to the two best returners as realized, not to the two
 		// nominal slots: the draw has sd 8.5, so slot 3 routinely out-rolls
 		// slot 0 and capping by slot index would miss the player it is for.
 		const order = fillers.slice().sort((a, b) => b.talent - a.talent);
@@ -219,14 +219,14 @@
 	   a four-out program and a shooter at a pack-line program produced the same
 	   line. The numbers are shifts applied to the stat model: `three` moves
 	   3PA share, `pace` moves possessions, `rim` moves the rim/mid split and
-	   `press` moves the turnovers a defence forces. */
+	   `press` moves the turnovers a defense forces. */
 	/* `defScheme` is a defensive-scheme axis: switching = a switch-everything
 	   scheme that gives up size to stay in front; zone = a 2-3 or 3-2 zone that
 	   protects the paint; packLine = a pack-line/sagging man scheme that walls
 	   off the rim; pressing = a full-court press that gambles for turnovers.
 	   Each is a multiplier on the stat model's steal/block/turnover channels,
-	   so a prospect at a switching programme steals more and blocks less than
-	   the same prospect at a zone programme — which is what actually happens. */
+	   so a prospect at a switching program steals more and blocks less than
+	   the same prospect at a zone program — which is what actually happens. */
 	const PROGRAM_STYLES = [
 		{ name: "balanced", w: 3.0, three: 0, pace: 0, rim: 0, press: 0, defScheme: "man" },
 		{ name: "four-out, three-heavy", w: 2.0, three: 0.09, pace: 1.5, rim: -0.03, press: 0, defScheme: "switching" },
@@ -246,7 +246,7 @@
 		{ name: "2-3 zone, protect the paint", w: 1.2, three: -0.03, pace: -2.0, rim: 0.04, press: -0.02, defScheme: "zone" },
 		{ name: "matchup zone", w: 1.0, three: 0.02, pace: -1.0, rim: 0.02, press: 0, defScheme: "zone" },
 		{ name: "press and trap", w: 0.8, three: 0.03, pace: 5.0, rim: 0.02, press: 0.08, defScheme: "pressing" },
-		{ name: "motion offence, pack-line D", w: 1.3, three: 0.04, pace: -2.5, rim: 0, press: -0.02, defScheme: "packLine" },
+		{ name: "motion offense, pack-line D", w: 1.3, three: 0.04, pace: -2.5, rim: 0, press: -0.02, defScheme: "packLine" },
 		{ name: "dribble-drive, deny the wing", w: 1.1, three: -0.02, pace: 2.0, rim: 0.05, press: 0.01, defScheme: "man" },
 	];
 
@@ -281,7 +281,7 @@
 		"Barnes", "Hendricks", "Mosley", "Turner",
 	];
 
-	/* 40 x 42 = 1,680 possible names for 368 programmes a season. In a
+	/* 40 x 42 = 1,680 possible names for 368 programs a season. In a
 	   single class that is invisible; in Universe mode, where a coach persists
 	   until he is fired, a forty-name pool starts repeating inside a few
 	   seasons (measured over 40 classes: 1,679 distinct names across 14,720
@@ -332,8 +332,8 @@
 	   developed players the same way. In reality, a "player-development
 	   guru" and a "Xs-and-Os tactician" are different staffs with different
 	   effects on the same prospect: one raises his ceiling, the other
-	   maximises what he already has. `devBias` skews how much a roster
-	   improves over the season (form), `usageBias` nudges how much offence
+	   maximizes what he already has. `devBias` skews how much a roster
+	   improves over the season (form), `usageBias` nudges how much offense
 	   a prospect gets (a stars-and-scrubs coach funnels touches; a
 	   egalitarian one spreads them), and `defEmphasis` weights the
 	   defensive stat channel. */
@@ -393,7 +393,7 @@
 		// possible without being ordinary.
 		const tenure = Math.max(1, Math.round(
 			rng.uniform(0, 3) + Math.abs(rng.normal(0, 2 + prestige * 0.09))));
-		/* The situation follows from the tenure and from whether the programme
+		/* The situation follows from the tenure and from whether the program
 		   is under-performing its name, which is what actually puts a coach on
 		   a hot seat. */
 		let situation = "settled";
@@ -440,12 +440,62 @@
 	   make every run different — and realignment is the single most
 	   consequential thing that happens to that map in real life.
 
-	   A realignment moves two to five programmes from weaker conferences into
+	   A realignment moves two to five programs from weaker conferences into
 	   a stronger one that is raiding. It is bounded by two rules that keep the
 	   season schedulable: a conference never falls below MIN_CONF_MEMBERS, and
 	   a raider never takes more than it can fit. Returns the per-run mapping
 	   plus a list of the moves, so the UI can say what happened. */
 	const MIN_CONF_MEMBERS = 7;
+	/* Where each conference lives, coarsely. Realignment was
+	   geography-blind — Tennessee State to the CAA, a New England and
+	   Mid-Atlantic league, in one sampled run — and the database carries no
+	   state per school, so the footprint is a fact about the conference:
+	   NE New England · MA Mid-Atlantic · CAR Carolinas and Virginia ·
+	   SE Deep South and Florida · TN Tennessee and Kentucky · OH Great
+	   Lakes · MW Plains · TX Texas, Louisiana, Arkansas, Oklahoma · MTN
+	   Mountain · W Pacific. A raid reaches into a league whose footprint
+	   overlaps the raider's, which is what the real ones do, and the
+	   national leagues overlap nearly everything. */
+	const CONF_REGIONS = {
+		"ACC": ["NE", "MA", "CAR", "SE", "TN", "OH", "W", "TX"],
+		"SEC": ["SE", "TN", "TX", "MW", "CAR"],
+		"Big Ten": ["OH", "MW", "MA", "W"],
+		"Big 12": ["TX", "MW", "MTN", "W", "OH", "SE", "MA"],
+		"Big East": ["NE", "MA", "OH", "MW"],
+		"WCC": ["W", "MTN"],
+		"American": ["TX", "SE", "TN", "CAR", "MA", "MW"],
+		"Mountain West": ["MTN", "W"],
+		"Atlantic 10": ["MA", "NE", "OH", "MW"],
+		"Missouri Valley": ["MW", "OH", "TN"],
+		"Conference USA": ["TX", "SE", "TN", "MTN"],
+		"MAC": ["OH"],
+		"Sun Belt": ["SE", "TX", "CAR"],
+		"Big West": ["W"],
+		"CAA": ["NE", "MA", "CAR"],
+		"WAC": ["TX", "MTN", "W"],
+		"Horizon": ["OH", "MW"],
+		"MAAC": ["NE", "MA"],
+		"Southern": ["CAR", "SE", "TN"],
+		"Ivy": ["NE", "MA"],
+		"Ohio Valley": ["TN", "OH", "MW", "TX"],
+		"Big Sky": ["MTN", "W"],
+		"Summit": ["MW", "MTN"],
+		"ASUN": ["SE", "TN", "CAR"],
+		"Southland": ["TX"],
+		"Big South": ["CAR", "SE"],
+		"Patriot": ["NE", "MA"],
+		"America East": ["NE", "MA"],
+		"NEC": ["NE", "MA"],
+		"SWAC": ["SE", "TX"],
+		"MEAC": ["MA", "CAR", "SE"],
+		"Pac-12": ["W", "MTN", "TX"],
+	};
+	function regionsOverlap(a, b) {
+		const ra = CONF_REGIONS[a];
+		const rb = CONF_REGIONS[b];
+		if (!ra || !rb) return true;
+		return ra.some((r) => rb.indexOf(r) !== -1);
+	}
 	function realign(rng, cfg) {
 		const confOf = {};
 		/* Universe carry-over: realignment has MEMORY when a previous season's
@@ -473,19 +523,27 @@
 		if (!raiders.length) return { confOf, moves };
 		const to = rng.weighted(raiders, (c) => Math.pow(strength(c) - 55, 2));
 		const wanted = rng.int(2, 5);
-		/* Who gets taken: a good programme from the tier immediately below.
+		/* Who gets taken: a good program from the tier immediately below.
 		   Without the lower bound on the raided conference's strength the
 		   model produced "LIU, NEC to Big 12", which is not a realignment,
 		   it is a rounding error — real raids reach one rung down, not five. */
-		const candidates = C.names
-			.filter((n) => {
-				if (confOf[n] === to) return false;
-				const sf = strength(confOf[n]);
-				return sf < strength(to) - 4 && sf > strength(to) - 26 &&
-					C.prestige(n) >= 60;
-			})
+		const tier = (n) => {
+			if (confOf[n] === to) return false;
+			const sf = strength(confOf[n]);
+			return sf < strength(to) - 4 && sf > strength(to) - 26 &&
+				C.prestige(n) >= 60;
+		};
+		let candidates = C.names
+			.filter((n) => tier(n) && regionsOverlap(confOf[n], to))
 			.sort((a, b) => C.prestige(b) - C.prestige(a))
 			.slice(0, 30);
+		// A raider with nobody in reach on the map takes the tier anyway,
+		// which is what a raid across the country is.
+		if (candidates.length < wanted) {
+			candidates = C.names.filter(tier)
+				.sort((a, b) => C.prestige(b) - C.prestige(a))
+				.slice(0, 30);
+		}
 		for (const name of rng.shuffle(candidates)) {
 			if (moves.length >= wanted) break;
 			const from = confOf[name];
@@ -518,7 +576,7 @@
 			let level = programLevel(name, trng, confStrength[confAt(name)]);
 			/* Universe carry-over: strength drifts CONTINUOUSLY from last
 			   season instead of being redrawn from the static prior — a
-			   programme that broke out stays partly broken out, one that fell
+			   program that broke out stays partly broken out, one that fell
 			   apart climbs back rather than teleporting. The fresh draw keeps
 			   the season honest; the blend keeps it continuous. */
 			if (carry && carry.levels && Number.isFinite(carry.levels[name])) {
@@ -536,7 +594,7 @@
 			/* Universe carry-over: last season's named star returners come
 			   back as the same men, a year older, if they have eligibility
 			   left. A returning conference player of the year who was a
-			   junior is a senior now, on the same programme, with the same
+			   junior is a senior now, on the same program, with the same
 			   name — and nothing about him used to survive the season. A
 			   senior or a graduate has left, which is the story too. */
 			if (carry && carry.returners && carry.returners[name]) {
@@ -563,7 +621,7 @@
 				/* The same man, one year on. His philosophy, style and name
 				   persist — that is what makes him a coach rather than a roll —
 				   while tenure advances and the situation is re-read from how
-				   the programme sits under him now. */
+				   the program sits under him now. */
 				coach = Object.assign({}, kept.coach);
 				coach.tenure = (coach.tenure || 1) + 1;
 				const roll = trng.child("coach").random();
@@ -602,7 +660,7 @@
 				// The style IS the coach; it used to be an independent roll.
 				style: coach.style,
 				conf: confAt(name),
-				// Where this programme played last season, when it moved
+				// Where this program played last season, when it moved
 				// THIS season (a carried move from an earlier universe season
 				// is simply where it plays now).
 				movedFrom: (map.moves.filter((m) => m.school === name)[0] || {}).from || null,
@@ -641,11 +699,11 @@
 				arc: momentumArc(trng, cfg),
 			};
 		}
-		/* Narrative bends, applied after every programme exists because they
+		/* Narrative bends, applied after every program exists because they
 		   are statements about the SEASON rather than about any one team:
 		   "the year three blue bloods all went down" and "the year the
 		   mid-majors won" are the kind of thing a class is remembered for and
-		   the archetype-mix flavours could never express. */
+		   the archetype-mix flavors could never express. */
 		const nrng = rng.child("narrative");
 		const down = Math.round(clamp(
 			cfg && cfg.bluebloodDownYears !== undefined ? cfg.bluebloodDownYears : 0, 0, 8));
@@ -683,7 +741,7 @@
 	   better in March than in November is the most ordinary thing in college
 	   basketball. `when` is 0 (first game) to 1 (last). */
 	/* A team's momentum path over the season: ARC_KNOTS knots of an AR(1)
-	   process, centred on zero so the arc moves a season around without moving
+	   process, centered on zero so the arc moves a season around without moving
 	   its mean. ARC_RHO is the knot-to-knot persistence; at 0.72 over eight
 	   knots a hot stretch lasts about a month of a four-month season, which is
 	   what a streak is. ARC_SD is in rating points, so a team on a run plays
@@ -703,7 +761,7 @@
 			knots.push(x);
 			x = ARC_RHO * x + Math.sqrt(1 - ARC_RHO * ARC_RHO) * rng.normal(0, sd);
 		}
-		// Centred, so the arc is a shape and not a second rating adjustment.
+		// Centered, so the arc is a shape and not a second rating adjustment.
 		const m = knots.reduce((a, b) => a + b, 0) / knots.length;
 		return knots.map((v) => v - m);
 	}
@@ -759,7 +817,7 @@
 	   58-55 finals and a track meet produces 88-84. Ties go to overtime. */
 	/* `postseason` decides whether the "March upsets" slider applies.
 
-	   It used to apply to every game in the season, so a slider labelled
+	   It used to apply to every game in the season, so a slider labeled
 	   "March upsets" silently re-rolled November too — which is also why
 	   changing it had to re-simulate the entire regular season rather than only
 	   the bracket it names. Regular-season variance is a fixed, realistic
@@ -770,7 +828,7 @@
 
 	   Team rating is a rotation-weighted mean of talent, and talent is drawn
 	   around 0.60 * level + 12.6 with the level clamped at 95 — so the best
-	   programme in the country sat about twenty rating points above the
+	   program in the country sat about twenty rating points above the
 	   sixty-fourth, against a game-to-game noise of 12.7 points of margin.
 	   Measured over 40 seasons: a 1 seed beat a 16 seed 92% of the time
 	   (real: about 99%), 1 seeds won 23% of titles (real: 55-65%) and
@@ -968,7 +1026,7 @@
 
 	/* --- the season's mid-season events ---------------------------------
 
-	   The season was one pass: build the programmes, play the games, sort the
+	   The season was one pass: build the programs, play the games, sort the
 	   results. Nothing happened DURING it. A schedule was a list of scores with
 	   no top-ten upset in it, no rivalry night, no coach fired in January, no
 	   game both prospects in the class played in — which is most of what makes
@@ -999,6 +1057,11 @@
 		for (const t of all) {
 			for (const g of t.log || []) {
 				if (!g.won || !g.opp) continue;
+				/* Regular season only. The bracket writes its own stories,
+				   and an "upset" read off a March game carried the
+				   regular-season template's "result of the season's first
+				   half" into Championship Week. */
+				if (g.stage && g.stage !== "reg") continue;
 				const opp = teams[g.opp];
 				if (!opp) continue;
 				games.push({ winner: t, loser: opp, g });
@@ -1012,7 +1075,7 @@
 		/* Whether a consequential event makes the feed this season. With a
 		   budget of seven and five consequential kinds that nearly always
 		   have a candidate, every season's feed opened with the same five
-		   headlines and only the colour varied — measured over 40 classes,
+		   headlines and only the color varied — measured over 40 classes,
 		   the upset, the game of the year, the blowout, the streak and the
 		   coaching change all fired in 40 of 40. A season that had a
 		   fourteen-game streak in it does not always make a story of it. */
@@ -1026,7 +1089,8 @@
 		if (upsets.length && tells(0.8)) {
 			const u = rng.pick(upsets.slice(0, 8));
 			add("upset", u.winner.name + " beat " + u.loser.name + " " +
-				u.g.pf + "-" + u.g.pa + ", the result of the season's first half",
+				u.g.pf + "-" + u.g.pa + ", the result of the " +
+				(u.g.when < 0.5 ? "season's first half" : "conference season"),
 				u.g.when, [u.winner.name, u.loser.name]);
 		}
 
@@ -1043,16 +1107,21 @@
 				gm.g.when, [gm.winner.name, gm.loser.name]);
 		}
 
-		// A coach fired in-season: a programme with real expectations losing.
+		// A coach fired in-season: a program with real expectations losing.
 		const failing = all.filter((t) =>
 			t.games >= 10 && t.w / Math.max(1, t.games) < 0.35 &&
 			C.prestige(t.name) >= 55);
 		if (failing.length && tells(0.7)) {
 			const t = rng.pick(failing);
+			/* The month is drawn first and the date follows it. They used to
+			   be two independent draws, so the text said February while the
+			   dateline (and the "December divorce" headline drawn off it)
+			   said something else. */
+			const month = rng.pick(["January", "February"]);
 			add("coaching change",
 				t.name + " fired " + (t.coach && t.coach.name ? t.coach.name : "its head coach") +
-				" in " + rng.pick(["January", "February"]) + " at " + t.w + "-" + t.l,
-				rng.uniform(0.45, 0.85), [t.name]);
+				" in " + month + " at " + t.w + "-" + t.l,
+				month === "January" ? rng.uniform(0.46, 0.65) : rng.uniform(0.68, 0.87), [t.name]);
 		}
 
 		// A blowout worth naming, because a 40-point game is a fact about a
@@ -1074,10 +1143,10 @@
 				rng.uniform(0.3, 0.8), [st.t.name]);
 		}
 
-		/* Colour, which changes nothing and is the point: a season with only
+		/* Color, which changes nothing and is the point: a season with only
 		   consequential events in it reads like a summary. */
-		/* Two DIFFERENT programmes. r.pick(all) twice can return the same one,
-		   and at 368 teams that is about one flavour event in every 368 — which
+		/* Two DIFFERENT programs. r.pick(all) twice can return the same one,
+		   and at 368 teams that is about one flavor event in every 368 — which
 		   is often enough to be seen and is "Duke's trip to Duke was postponed
 		   by a snowstorm". */
 		const twoTeams = (r) => {
@@ -1086,7 +1155,7 @@
 			for (let i = 0; i < 8 && b === a; i++) b = r.pick(all);
 			return [a, b];
 		};
-		const flavour = [
+		const flavor = [
 			(r) => {
 				const [t, host] = twoTeams(r);
 				if (t === host) return null;
@@ -1114,10 +1183,10 @@
 					"and won " + r.int(1, 3) + " of them", [t.name]];
 			},
 		];
-		const picked = rng.shuffle(flavour).slice(0, Math.max(0, budget - events.length));
+		const picked = rng.shuffle(flavor).slice(0, Math.max(0, budget - events.length));
 		for (const f of picked) {
 			const drawn = f(rng);
-			// A flavour that could not find two distinct programmes returns
+			// A flavor that could not find two distinct programs returns
 			// null rather than naming one twice.
 			if (!drawn) continue;
 			const [kind, text, involved] = drawn;
@@ -1155,7 +1224,7 @@
 		// Out-of-database colleges land in "Independent", which has no members
 		// in byConference — so they used to get no conference slate, no
 		// conference tournament and no auto bid. They are grouped into a real
-		// (if synthetic) conference instead, so a prospect at an unrecognised
+		// (if synthetic) conference instead, so a prospect at an unrecognized
 		// school gets the same kind of season as everyone else.
 		const confPools = conferencePools(teams);
 
@@ -1221,7 +1290,7 @@
 		}
 	}
 
-	/* "All-American First Team" (the AAC) would read as a national honour, so
+	/* "All-American First Team" (the AAC) would read as a national honor, so
 	   the conference gets an abbreviation for label purposes. Shared with
 	   awards.js via the export below so both spell it the same way. */
 	function label(conf) {
@@ -1317,7 +1386,7 @@
 			}
 			results[conf] = { champ: field[0], seeds, log: bracketLog, regularChamp: seeds[0] };
 			field[0].confTourneyChamp = true;
-			// Winning the league over 18 games is a real, separate honour from
+			// Winning the league over 18 games is a real, separate honor from
 			// winning three games in March; both are surfaced and both are
 			// worth something on an award resume.
 			seeds[0].confRegularChamp = true;
@@ -1328,7 +1397,7 @@
 	global.TeamsSim = {
 		buildPrograms, simulateRegularSeason, simulateConferenceTournaments,
 		prospectTalent, teamRating, winProb, playGame, playGameScore, ratingOn,
-		realign, makeCoach, COACH_SITUATIONS, COACH_PHILOSOPHIES,
+		realign, makeCoach, COACH_SITUATIONS, COACH_PHILOSOPHIES, CONF_REGIONS, regionsOverlap,
 		gameStrength, TOP_KNEE, TOP_STRETCH, REGULAR_NOISE,
 		capFillers, FILLER_GAP, conferenceDrift, programLevel, applyOutages, makeFiller,
 		PROGRAM_VOL, DOWN_YEAR_RATE, BREAKOUT_RATE, STAR_RETURNER_RATE,

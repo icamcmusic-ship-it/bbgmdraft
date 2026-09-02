@@ -1,4 +1,4 @@
-/* Rebuilds player ratings into varied, specialised builds without inflating
+/* Rebuilds player ratings into varied, specialized builds without inflating
    overall rating. Every build is re-solved so that BBGM's own ovr formula
    returns the target ovr exactly. */
 (function (global) {
@@ -10,13 +10,13 @@
 
 	/* Rating offsets that define a build. hgt is never touched here: it is tied
 	   to the player's listed height, so archetypes are gated on size instead.
-	   `w` is a rarity weight and `t` a list of tags the per-class flavour roll
+	   `w` is a rarity weight and `t` a list of tags the per-class flavor roll
 	   reads (see CLASS_FLAVORS). The offset shapes are loosely patterned on the
 	   drafted-player clusters in the 2009-21 college data (high-assist low-3PA
 	   guards, 3&D wings, high-FTr low-FT% bigs, etc.).
 
 	   The weights used to span [0.35, 1.0], with 47 of the 60 builds inside
-	   [0.7, 1.0]. After the exposure normalisation that produced a realised
+	   [0.7, 1.0]. After the exposure normalization that produced a realized
 	   frequency spread of about 5x across 59 specialist builds — one of
 	   everything, every class, with no scarcity and no sense that a class was
 	   guard-heavy or full of stretch bigs. They now span [0.34, 3.6]: a Combo
@@ -32,7 +32,7 @@
 	   project is the character a draft class is remembered for. */
 	const ARCHETYPES = [
 		// --- guards -------------------------------------------------------
-		{ name: "Floor General", min: 0, max: 46, w: 2.6, t: ["guard", "playmaking"], o: { pss: 22, drb: 16, oiq: 14, ft: 6, spd: 6, ins: -14, dnk: -12, reb: -10, stre: -8 } },
+		{ name: "Floor General", min: 0, max: 46, w: 2.6, pot: -3, t: ["guard", "playmaking"], o: { pss: 22, drb: 16, oiq: 14, ft: 6, spd: 6, ins: -14, dnk: -12, reb: -10, stre: -8 } },
 		{ name: "Combo Guard", min: 0, max: 50, w: 3.6, t: ["guard", "scoring"], o: { fg: 14, tp: 12, drb: 12, spd: 8, pss: -4, diq: -8, reb: -10, ins: -10 } },
 		{ name: "Sharpshooter", min: 0, max: 62, w: 2.6, t: ["guard", "shooting"], o: { tp: 24, ft: 18, fg: 10, oiq: 4, ins: -14, dnk: -12, diq: -10, stre: -8, reb: -8 } },
 		{ name: "Slasher", min: 0, max: 64, w: 3.0, t: ["guard", "athletic", "scoring"], o: { dnk: 20, spd: 16, jmp: 14, drb: 10, tp: -16, ft: -8, fg: -4, reb: -6 } },
@@ -57,7 +57,7 @@
 		{ name: "Two-Way Wing", min: 34, max: 66, w: 3.2, t: ["wing", "defense"], o: { diq: 12, oiq: 12, spd: 8, drb: 6, tp: 4, ins: -8, reb: -4 } },
 		{ name: "Point Forward", min: 40, max: 70, w: 1.0, t: ["wing", "playmaking"], o: { pss: 20, oiq: 14, drb: 14, tp: -6, ins: -6, dnk: -4 } },
 		{ name: "Wing Sniper", min: 36, max: 64, w: 2.0, t: ["wing", "shooting"], o: { tp: 22, ft: 14, fg: 6, jmp: 4, oiq: 4, drb: -8, ins: -12, dnk: -8, stre: -8, pss: -8, reb: -6 } },
-		{ name: "Shot-Creating Wing", min: 36, max: 66, w: 1.9, t: ["wing", "scoring"], o: { fg: 14, drb: 14, ins: 8, dnk: 6, oiq: 6, diq: -10, reb: -8, tp: -4, pss: -4 } },
+		{ name: "Shot-Creating Wing", min: 36, max: 66, w: 1.9, pot: 2, t: ["wing", "scoring"], o: { fg: 14, drb: 14, ins: 8, dnk: 6, oiq: 6, diq: -10, reb: -8, tp: -4, pss: -4 } },
 		{ name: "Transition Wing", min: 34, max: 64, w: 1.7, t: ["wing", "athletic"], o: { spd: 16, dnk: 14, endu: 10, jmp: 8, tp: -10, fg: -8, ft: -6, ins: -6 } },
 		{ name: "Cutter / Finisher", min: 36, max: 66, w: 1.7, t: ["wing", "athletic"], o: { dnk: 18, jmp: 12, oiq: 10, endu: 6, tp: -12, drb: -10, pss: -8, fg: -4 } },
 		{ name: "Wing Stopper", min: 36, max: 62, w: 1.2, t: ["wing", "defense"], o: { diq: 22, stre: 6, endu: 10, spd: 8, fg: -10, tp: -8, pss: -8, ins: -8 } },
@@ -68,26 +68,26 @@
 		{ name: "Energy Wing", min: 34, max: 64, w: 1.6, t: ["wing", "athletic", "defense"], o: { endu: 14, spd: 10, jmp: 10, reb: 8, diq: 6, tp: -10, fg: -10, pss: -8, ft: -6 } },
 		{ name: "Do-It-All Forward", min: 40, max: 70, w: 1.1, t: ["wing"], o: { oiq: 10, pss: 8, reb: 8, diq: 8, fg: 4, tp: -6, dnk: -6, ins: -6 } },
 		{ name: "Bully Slasher", min: 38, max: 66, w: 0.9, t: ["wing", "scoring"], o: { stre: 16, dnk: 14, ins: 10, ft: 6, tp: -14, fg: -8, pss: -8, drb: -4 } },
-		{ name: "Glide Athlete", min: 36, max: 66, w: 1.0, t: ["wing", "athletic", "raw"], o: { jmp: 20, spd: 14, fg: 8, endu: 6, dnk: 6, tp: -10, ft: -10, oiq: -8, pss: -8, stre: -10 } },
+		{ name: "Glide Athlete", min: 36, max: 66, w: 1.0, inj: 1.15, t: ["wing", "athletic", "raw"], o: { jmp: 20, spd: 14, fg: 8, endu: 6, dnk: 6, tp: -10, ft: -10, oiq: -8, pss: -8, stre: -10 } },
 		// --- everyone -----------------------------------------------------
-		{ name: "Microwave Scorer", min: 0, max: 80, w: 0.9, t: ["scoring"], o: { fg: 16, tp: 12, ins: 10, dnk: 8, diq: -16, pss: -12, oiq: -4 } },
-		{ name: "Athletic Freak", min: 0, max: 100, w: 1.8, t: ["athletic", "raw"], o: { spd: 18, jmp: 20, stre: 12, dnk: 14, oiq: -16, ft: -12, tp: -12, pss: -8 } },
-		{ name: "Glue Guy", min: 0, max: 100, w: 1.6, t: ["defense", "durability"], o: { diq: 12, oiq: 10, pss: 8, endu: 12, ins: -8, dnk: -8, fg: -4, tp: -2 } },
+		{ name: "Microwave Scorer", min: 0, max: 80, w: 0.9, pot: -3, t: ["scoring"], o: { fg: 16, tp: 12, ins: 10, dnk: 8, diq: -16, pss: -12, oiq: -4 } },
+		{ name: "Athletic Freak", min: 0, max: 100, w: 1.8, inj: 1.25, t: ["athletic", "raw"], o: { spd: 18, jmp: 20, stre: 12, dnk: 14, oiq: -16, ft: -12, tp: -12, pss: -8 } },
+		{ name: "Glue Guy", min: 0, max: 100, w: 1.6, pot: -3, inj: 0.8, t: ["defense", "durability"], o: { diq: 12, oiq: 10, pss: 8, endu: 12, ins: -8, dnk: -8, fg: -4, tp: -2 } },
 		{ name: "High-IQ Connector", min: 0, max: 100, w: 1.0, t: ["playmaking"], o: { oiq: 16, pss: 12, diq: 8, tp: 4, dnk: -10, jmp: -8, ins: -8, fg: -4 } },
-		{ name: "Raw Project", min: 0, max: 100, w: 1.7, t: ["raw", "athletic"], o: { jmp: 14, spd: 10, stre: 10, endu: 6, oiq: -14, diq: -10, ft: -10, tp: -8, fg: -6 } },
-		/* Untagged meant no flavour could ever reach it — measured, Iron Man
+		{ name: "Raw Project", min: 0, max: 100, w: 1.7, pot: 9, t: ["raw", "athletic"], o: { jmp: 14, spd: 10, stre: 10, endu: 6, oiq: -14, diq: -10, ft: -10, tp: -8, fg: -6 } },
+		/* Untagged meant no flavor could ever reach it — measured, Iron Man
 		   appeared zero times in 30 consecutive classes. `durability` is the
 		   shared availability axis with Injury-Prone Talent and Injury-Return
 		   Unknown; `athletic` is what an every-game body is. */
-		{ name: "Iron Man", min: 0, max: 100, w: 0.7, t: ["athletic", "durability"], o: { endu: 20, stre: 8, diq: 6, oiq: 6, dnk: -8, tp: -6, ins: -8, jmp: -6 } },
+		{ name: "Iron Man", min: 0, max: 100, w: 0.7, inj: 0.45, t: ["athletic", "durability"], o: { endu: 20, stre: 8, diq: 6, oiq: 6, dnk: -8, tp: -6, ins: -8, jmp: -6 } },
 		// --- bigs ---------------------------------------------------------
 		{ name: "Stretch Big", min: 54, max: 100, w: 2.4, t: ["big", "shooting"], o: { tp: 22, ft: 14, fg: 6, oiq: 4, reb: 4, spd: -8, drb: -10, dnk: -8, ins: -8, diq: -6 } },
 		{ name: "Post Scorer", min: 56, max: 100, w: 1.8, t: ["big", "scoring"], o: { ins: 24, stre: 12, reb: 8, dnk: 8, oiq: 6, tp: -16, spd: -12, drb: -10, ft: -8, diq: -6 } },
 		{ name: "Rim Protector", min: 58, max: 100, w: 2.4, t: ["big", "defense"], o: { diq: 22, jmp: 12, reb: 14, spd: 8, dnk: 6, oiq: -12, tp: -14, pss: -10, drb: -12 } },
 		{ name: "Rim Runner", min: 52, max: 100, w: 3.0, t: ["big", "athletic"], o: { dnk: 22, spd: 14, endu: 10, jmp: 10, reb: 6, tp: -18, ft: -14, pss: -10, drb: -12, oiq: -6 } },
-		{ name: "Motor Big", min: 50, max: 100, w: 2.8, t: ["big", "rebounding", "durability"], o: { reb: 20, stre: 14, endu: 14, diq: 10, ft: -12, tp: -14, pss: -6 } },
+		{ name: "Motor Big", min: 50, max: 100, w: 2.8, pot: 1, t: ["big", "rebounding", "durability"], o: { reb: 20, stre: 14, endu: 14, diq: 10, ft: -12, tp: -14, pss: -6 } },
 		{ name: "Skilled Big", min: 54, max: 100, w: 1.8, t: ["big", "playmaking"], o: { ins: 14, pss: 16, oiq: 12, ft: 10, reb: 8, spd: -8, jmp: -6 } },
-		{ name: "Point Center", min: 60, max: 100, w: 0.62, t: ["big", "playmaking"], o: { pss: 22, oiq: 16, drb: 10, ft: 6, dnk: -10, jmp: -8, diq: -8, tp: -6 } },
+		{ name: "Point Center", min: 60, max: 100, w: 0.62, pot: 3, t: ["big", "playmaking"], o: { pss: 22, oiq: 16, drb: 10, ft: 6, dnk: -10, jmp: -8, diq: -8, tp: -6 } },
 		{ name: "Offensive Rebounding Menace", min: 54, max: 100, w: 1.0, t: ["big", "rebounding"], o: { reb: 20, jmp: 14, dnk: 10, endu: 8, ins: 4, ft: -14, tp: -14, pss: -10, drb: -10, oiq: -6 } },
 		{ name: "Switchable Big", min: 54, max: 100, w: 1.2, t: ["big", "defense"], o: { spd: 14, diq: 14, endu: 8, jmp: 6, ins: -10, ft: -8, pss: -8, tp: -6 } },
 		{ name: "Mobile Shot-Swatter", min: 56, max: 100, w: 1.1, t: ["big", "defense", "athletic"], o: { jmp: 18, diq: 16, spd: 8, reb: 6, oiq: -12, ins: -10, ft: -10, tp: -8 } },
@@ -95,8 +95,8 @@
 		{ name: "Low-Post Bruiser", min: 56, max: 100, w: 0.9, t: ["big", "scoring", "rebounding"], o: { stre: 22, ins: 14, reb: 12, endu: 8, diq: 4, spd: -14, tp: -16, ft: -12, drb: -10, jmp: -6 } },
 		{ name: "Pick-and-Pop Big", min: 52, max: 100, w: 1.7, t: ["big", "shooting"], o: { tp: 18, ft: 12, oiq: 8, fg: 8, drb: -10, spd: -8, reb: -8, ins: -6 } },
 		{ name: "Lob Threat", min: 56, max: 100, w: 1.6, t: ["big", "athletic", "raw"], o: { dnk: 20, jmp: 18, stre: 6, ins: 4, oiq: -12, tp: -16, ft: -12, drb: -10, pss: -8, endu: -6 } },
-		{ name: "Old-School Center", min: 60, max: 100, w: 0.95, t: ["big", "scoring", "rebounding"], o: { ins: 16, reb: 14, oiq: 10, pss: 8, diq: 6, spd: -16, tp: -16, drb: -10, jmp: -8, dnk: -4 } },
-		{ name: "Undersized Rebounder", min: 46, max: 64, w: 0.75, t: ["big", "rebounding"], o: { reb: 20, jmp: 12, endu: 12, spd: 8, diq: 6, tp: -10, ins: -10, drb: -8, pss: -6, ft: -6 } },
+		{ name: "Old-School Center", min: 60, max: 100, w: 0.95, inj: 1.15, t: ["big", "scoring", "rebounding"], o: { ins: 16, reb: 14, oiq: 10, pss: 8, diq: 6, spd: -16, tp: -16, drb: -10, jmp: -8, dnk: -4 } },
+		{ name: "Undersized Rebounder", min: 46, max: 64, w: 0.75, pot: -4, t: ["big", "rebounding"], o: { reb: 20, jmp: 12, endu: 12, spd: 8, diq: 6, tp: -10, ins: -10, drb: -8, pss: -6, ft: -6 } },
 		{ name: "Foul-Prone Enforcer", min: 54, max: 100, w: 0.6, t: ["big", "defense"], o: { stre: 18, diq: 10, ins: 8, reb: 8, oiq: -14, ft: -10, spd: -8, tp: -8 } },
 		/* --- the gaps ------------------------------------------------------
 
@@ -105,13 +105,13 @@
 		   conditioning question mark, no foul-trouble-through-effort, no "great
 		   in twenty-two minutes". There was no rebounding-tagged build under
 		   hgt 46 at all, so a Westbrook or a Marcus Smart could not exist. And
-		   the `raw` tag had exactly two members while one flavour multiplies it
+		   the `raw` tag had exactly two members while one flavor multiplies it
 		   by 2.2, which is a tilt applied to nothing.
 
 		   These twelve fill those holes rather than adding more of what was
 		   already well covered. */
 		{ name: "Low-Motor Talent", min: 0, max: 100, w: 1.0, t: ["scoring", "raw", "durability"], o: { fg: 16, ins: 10, tp: 8, oiq: 6, endu: -20, diq: -14, reb: -8 } },
-		{ name: "Injury-Prone Talent", min: 0, max: 100, w: 0.7, t: ["raw", "durability"], o: { fg: 12, drb: 10, pss: 8, oiq: 8, endu: -22, stre: -12, spd: -4 } },
+		{ name: "Injury-Prone Talent", min: 0, max: 100, w: 0.7, inj: 2.0, t: ["raw", "durability"], o: { fg: 12, drb: 10, pss: 8, oiq: 8, endu: -22, stre: -12, spd: -4 } },
 		{ name: "Foul Magnet Guard", min: 0, max: 48, w: 0.8, t: ["guard", "scoring"], o: { ft: 16, drb: 12, spd: 10, ins: 6, diq: -14, endu: -10, tp: -8, reb: -6 } },
 		{ name: "Non-Shooting Playmaker", min: 0, max: 52, w: 1.2, t: ["guard", "playmaking"], o: { pss: 22, drb: 16, oiq: 10, spd: 6, tp: -22, ft: -12, ins: -8 } },
 		{ name: "Rebounding Guard", min: 20, max: 46, w: 0.9, t: ["guard", "rebounding", "athletic"], o: { reb: 20, jmp: 12, stre: 10, diq: 8, tp: -12, ins: -10, ft: -8 } },
@@ -120,7 +120,7 @@
 		{ name: "Stretch Four Stopper", min: 48, max: 74, w: 1.1, t: ["big", "shooting", "defense"], o: { tp: 14, diq: 14, stre: 10, reb: 8, oiq: 4, ins: -12, pss: -10, drb: -12, spd: -6 } },
 		{ name: "Rim-Running Wing", min: 40, max: 68, w: 1.2, t: ["wing", "athletic"], o: { spd: 16, dnk: 14, endu: 12, reb: 6, oiq: -6, tp: -14, ft: -10, pss: -8, fg: -6 } },
 		{ name: "Late Bloomer", min: 0, max: 100, w: 1.1, t: ["raw"], o: { endu: 10, oiq: 8, spd: 6, stre: 6, fg: -8, tp: -6, ins: -6, drb: -4 } },
-		{ name: "Fifth-Year Senior", min: 0, max: 100, w: 1.2, t: ["defense", "playmaking", "durability"], o: { oiq: 14, diq: 10, ft: 8, fg: 6, jmp: -14, spd: -10, endu: -4, dnk: -8 } },
+		{ name: "Fifth-Year Senior", min: 0, max: 100, w: 1.2, pot: -6, inj: 1.1, t: ["defense", "playmaking", "durability"], o: { oiq: 14, diq: 10, ft: 8, fg: 6, jmp: -14, spd: -10, endu: -4, dnk: -8 } },
 		{ name: "Positionless Forward", min: 38, max: 72, w: 1.4, t: ["wing", "playmaking", "defense"], o: { pss: 12, diq: 10, drb: 10, reb: 8, oiq: 6, ins: -10, dnk: -8, ft: -6 } },
 		/* --- twenty-six more, and the shape of the table ---------------------
 
@@ -132,22 +132,22 @@
 		   those tags by up to 2.2. A 2.2x on a five-member pool is a much
 		   blunter instrument than the same multiplier on a 24-member one, so a
 		   rebounding-heavy or raw-heavy class could only ever be the same five
-		   builds — which is the opposite of what a flavour is for. Fifteen of
+		   builds — which is the opposite of what a flavor is for. Fifteen of
 		   the builds below carry `rebounding`, `raw`, `big` or `shooting`.
 
 		   THE OFFSET TABLE WAS SYSTEMATICALLY SUBTRACTIVE. Every rating except
 		   oiq and endurance was reduced by more builds than boosted it, most
 		   severely tp (20 up / 43 down), ins (13/36), pss (16/31) and reb
-		   (18/25). The ovr-neutralising normaliser handles the LEVEL, so
+		   (18/25). The ovr-neutralizing normalizer handles the LEVEL, so
 		   nothing was broken — but the shape meant the average specialist was a
-		   subtraction, which is why specialisation read as "worse at things"
+		   subtraction, which is why specialization read as "worse at things"
 		   rather than "different". These builds lean the other way: most of
 		   them boost one of the four ratings the table was starving, and the
 		   measured ratio of boosts to cuts improved for every one of them
 		   (ft 19/23 -> 30/32, reb 18/25 -> 24/30, tp 20/43 -> 25/48,
 		   pss 16/31 -> 24/36). tp, ins, pss and reb are still net-negative and
 		   will stay so: they are the ratings a specialist genuinely trades
-		   away, and the normaliser handles the level regardless. The fault
+		   away, and the normalizer handles the level regardless. The fault
 		   worth fixing was the SHAPE being lopsided enough that the average
 		   build read as a subtraction, and it no longer is.
 
@@ -159,7 +159,7 @@
 		   audit correctly identified as the CONSEQUENCE — that ins carries
 		   weight 1.5 in BBGM's usage composite, the highest of any rating, so a
 		   table that is net-negative on it systematically under-reads inside
-		   scoring's claim on the offence — is real, and it is handled where it
+		   scoring's claim on the offense — is real, and it is handled where it
 		   arises rather than by adding post builds nobody asked for: see
 		   USAGE_SELF_REF below, which is the fix for the protection mechanism
 		   the audit named as compensating "imperfectly".
@@ -174,7 +174,7 @@
 		{ name: "Spot-Up Only Guard", min: 0, max: 54, w: 1.3, t: ["guard", "shooting"], o: { tp: 20, ft: 14, fg: 6, oiq: 4, drb: -14, spd: -10, pss: -10, ins: -8, diq: -6 } },
 		{ name: "Tough-Shot Maker", min: 0, max: 56, w: 1.1, t: ["guard", "scoring"], o: { fg: 20, tp: 10, jmp: 8, oiq: 6, diq: -12, pss: -10, reb: -8, endu: -6 } },
 		{ name: "Full-Court Pusher", min: 0, max: 46, w: 1.2, t: ["guard", "athletic", "playmaking"], o: { spd: 18, endu: 14, pss: 12, drb: 8, fg: -12, ins: -10, stre: -10, reb: -6 } },
-		{ name: "Steady Backup Point", min: 0, max: 44, w: 1.1, t: ["guard", "playmaking"], o: { oiq: 14, pss: 12, ft: 10, diq: 6, jmp: -12, dnk: -10, spd: -8, ins: -6 } },
+		{ name: "Steady Backup Point", min: 0, max: 44, w: 1.1, inj: 0.85, t: ["guard", "playmaking"], o: { oiq: 14, pss: 12, ft: 10, diq: 6, jmp: -12, dnk: -10, spd: -8, ins: -6 } },
 		// --- wings --------------------------------------------------------
 		{ name: "Weak-Side Rim Protector", min: 40, max: 70, w: 1.3, t: ["wing", "defense", "rebounding"], o: { diq: 16, jmp: 12, reb: 12, endu: 6, fg: -12, ft: -12, drb: -10, spd: -4 } },
 		{ name: "Slashing Non-Shooter", min: 34, max: 66, w: 1.5, t: ["wing", "athletic", "scoring"], o: { dnk: 18, spd: 12, ins: 12, stre: 8, tp: -20, ft: -12, pss: -6 } },
@@ -188,22 +188,22 @@
 		{ name: "Perimeter-Switch Five", min: 54, max: 100, w: 1.3, t: ["big", "defense", "athletic"], o: { spd: 16, diq: 12, endu: 10, jmp: 8, ins: -12, ft: -8, fg: -8, dnk: -6 } },
 		{ name: "Free-Throw-Line Extended Big", min: 50, max: 80, w: 1.2, t: ["big", "shooting", "scoring"], o: { ft: 18, fg: 14, oiq: 8, ins: 6, spd: -10, drb: -10, reb: -8, diq: -6 } },
 		{ name: "Bruising Backup Center", min: 58, max: 100, w: 1.2, t: ["big", "scoring", "rebounding"], o: { stre: 18, ins: 14, reb: 12, dnk: 6, spd: -14, drb: -14, endu: -10, jmp: -8 } },
-		{ name: "Third-Big Energy Guy", min: 52, max: 100, w: 1.5, t: ["big", "rebounding", "athletic"], o: { endu: 18, dnk: 12, reb: 10, spd: 8, diq: 6, drb: -12, ft: -12, oiq: -10, tp: -10 } },
+		{ name: "Third-Big Energy Guy", min: 52, max: 100, w: 1.5, pot: 2, t: ["big", "rebounding", "athletic"], o: { endu: 18, dnk: 12, reb: 10, spd: 8, diq: 6, drb: -12, ft: -12, oiq: -10, tp: -10 } },
 		// --- everyone -----------------------------------------------------
-		{ name: "Two-Sport Athlete", min: 0, max: 100, w: 1.1, t: ["athletic", "raw"], o: { spd: 16, stre: 16, endu: 12, jmp: 8, oiq: -14, fg: -12, tp: -10, drb: -8, pss: -6 } },
+		{ name: "Two-Sport Athlete", min: 0, max: 100, w: 1.1, inj: 1.2, t: ["athletic", "raw"], o: { spd: 16, stre: 16, endu: 12, jmp: 8, oiq: -14, fg: -12, tp: -10, drb: -8, pss: -6 } },
 		{ name: "Late-Blooming Shooter", min: 0, max: 100, w: 1.3, t: ["shooting", "raw"], o: { tp: 18, ft: 12, endu: 8, drb: 6, oiq: -6, ins: -12, dnk: -10, diq: -8, stre: -8, pss: -6 } },
 		{ name: "System Player", min: 0, max: 100, w: 1.2, t: ["playmaking", "defense"], o: { oiq: 14, diq: 10, tp: 8, endu: 8, pss: 4, dnk: -12, jmp: -10, drb: -8, ins: -6, stre: -4 } },
-		{ name: "High-Floor Low-Ceiling", min: 0, max: 100, w: 1.2, t: ["defense"], o: { oiq: 12, ft: 12, fg: 8, endu: 8, diq: 4, jmp: -14, dnk: -12, spd: -8, reb: -6 } },
-		{ name: "Boom-or-Bust Tools", min: 0, max: 100, w: 1.4, t: ["raw", "athletic"], o: { jmp: 18, dnk: 14, spd: 10, stre: 8, oiq: -16, diq: -12, ft: -10, drb: -8 } },
-		{ name: "Overseas Pro Veteran", min: 0, max: 100, w: 1.0, t: ["shooting", "playmaking"], o: { oiq: 14, tp: 12, pss: 10, ft: 8, jmp: -14, spd: -10, dnk: -8, endu: -6 } },
-		{ name: "Injury-Return Unknown", min: 0, max: 100, w: 0.9, t: ["raw", "scoring", "durability"], o: { fg: 12, ins: 10, oiq: 8, ft: 6, endu: -18, spd: -10, jmp: -8 } },
+		{ name: "High-Floor Low-Ceiling", min: 0, max: 100, w: 1.2, inj: 0.85, t: ["defense"], o: { oiq: 12, ft: 12, fg: 8, endu: 8, diq: 4, jmp: -14, dnk: -12, spd: -8, reb: -6 } },
+		{ name: "Boom-or-Bust Tools", min: 0, max: 100, w: 1.4, inj: 1.3, t: ["raw", "athletic"], o: { jmp: 18, dnk: 14, spd: 10, stre: 8, oiq: -16, diq: -12, ft: -10, drb: -8 } },
+		{ name: "Overseas Pro Veteran", min: 0, max: 100, w: 1.0, pot: -6, t: ["shooting", "playmaking"], o: { oiq: 14, tp: 12, pss: 10, ft: 8, jmp: -14, spd: -10, dnk: -8, endu: -6 } },
+		{ name: "Injury-Return Unknown", min: 0, max: 100, w: 0.9, pot: 5, inj: 1.7, t: ["raw", "scoring", "durability"], o: { fg: 12, ins: 10, oiq: 8, ft: 6, endu: -18, spd: -10, jmp: -8 } },
 
 		/* --- shooting-tagged additions (task 4.1) ---
 		   Measured: the `shooting` tag had 14 members against `guard`'s 30+, and
 		   CLASS_FLAVORS multiplies shooting by 2.6 in the shooting-rich class.
 		   Six more fills the tag to ~20 so the multiplier has real diversity to
 		   work with. Each is a recognisable spot in the modern game: off-ball
-		   catch-and-shoot, transition pull-up, a true centre who shoots, a
+		   catch-and-shoot, transition pull-up, a true center who shoots, a
 		   relocation wing, a handoff-action guard, a floor-spacing four. */
 		// --- guards (shooting) -----------------------------------------------
 		{ name: "Transition Sniper", min: 0, max: 54, w: 1.2, t: ["guard", "shooting", "athletic"], o: { tp: 18, spd: 14, ft: 10, endu: 6, ins: -14, pss: -12, reb: -10, stre: -6 } },
@@ -215,21 +215,21 @@
 		{ name: "Stretch Five", min: 60, max: 100, w: 1.4, t: ["big", "shooting"], o: { tp: 20, ft: 12, diq: 10, reb: 8, stre: 4, spd: -14, drb: -14, dnk: -8, ins: -8 } },
 		{ name: "Floor-Spacing Four", min: 48, max: 78, w: 1.5, t: ["big", "shooting"], o: { tp: 18, ft: 10, reb: 8, oiq: 8, ins: -10, dnk: -12, drb: -12, spd: -10, pss: -6, stre: 4 } },
 
-		/* --- genuine-centre builds (task 4.2) --------------------------------
+		/* --- genuine-center builds (task 4.2) --------------------------------
 		   No build in the table had min >= 72: every "big" was eligible for a
-		   6'6" wing, so a 7'2" true centre drew from the same pool as a 6'8"
+		   6'6" wing, so a 7'2" true center drew from the same pool as a 6'8"
 		   power forward. Nine builds with min 72-78 give a seven-footer his own
 		   identity space — post-up, rim-running, anchoring, paint-bully — without
 		   overlapping the tweener fours. */
 		{ name: "Back-to-Basket Center", min: 76, max: 100, w: 1.3, t: ["big", "scoring", "rebounding"], o: { ins: 22, stre: 12, ft: 10, oiq: 8, reb: 8, spd: -16, tp: -16, drb: -12, pss: -6, jmp: -8 } },
-		{ name: "Shot-Blocking Anchor", min: 76, max: 100, w: 1.4, t: ["big", "defense"], o: { diq: 22, jmp: 10, ins: 10, stre: 8, endu: -10, reb: 2, spd: -10, tp: -16, pss: -10, drb: -12 } },
+		{ name: "Shot-Blocking Anchor", min: 76, max: 100, w: 1.4, pot: 2, t: ["big", "defense"], o: { diq: 22, jmp: 10, ins: 10, stre: 8, endu: -10, reb: 2, spd: -10, tp: -16, pss: -10, drb: -12 } },
 		{ name: "Glass-Eating Center", min: 76, max: 100, w: 1.3, t: ["big", "rebounding"], o: { reb: 24, stre: 14, ins: 10, oiq: 6, spd: -14, jmp: -8, tp: -16, drb: -12, pss: -8 } },
 		{ name: "Paint Bully", min: 74, max: 100, w: 1.2, t: ["big", "scoring", "rebounding"], o: { stre: 20, dnk: 14, ins: 12, reb: 10, endu: 6, tp: -18, spd: -12, drb: -12, fg: -10, oiq: -6 } },
 		{ name: "Vertical Spacer", min: 74, max: 100, w: 1.1, t: ["big", "athletic", "raw"], o: { jmp: 18, dnk: 14, diq: 8, spd: 4, stre: -6, tp: -18, ft: -12, drb: -12, pss: -8, oiq: -8, ins: -4 } },
 		{ name: "Hook-Shot Specialist", min: 76, max: 100, w: 0.9, t: ["big", "scoring"], o: { ins: 20, fg: 16, endu: 8, oiq: 4, stre: 4, tp: -18, spd: -12, drb: -10, pss: -8, diq: -8, reb: -6 } },
 		{ name: "Screen-and-Roll Center", min: 72, max: 100, w: 1.3, t: ["big", "athletic"], o: { dnk: 18, stre: 14, jmp: 10, endu: 8, tp: -16, ft: -12, drb: -10, pss: -8 } },
 		{ name: "Defensive Pillar", min: 74, max: 100, w: 1.2, t: ["big", "defense", "rebounding"], o: { diq: 20, reb: 16, stre: 12, endu: 8, tp: -16, fg: -12, drb: -10, spd: -10 } },
-		{ name: "Two-Way Center", min: 72, max: 100, w: 1.1, t: ["big", "defense", "scoring", "rebounding"], o: { diq: 16, ins: 14, reb: 10, stre: 8, tp: -14, drb: -12, spd: -10, pss: -8 } },
+		{ name: "Two-Way Center", min: 72, max: 100, w: 1.1, pot: 1, t: ["big", "defense", "scoring", "rebounding"], o: { diq: 16, ins: 14, reb: 10, stre: 8, tp: -14, drb: -12, spd: -10, pss: -8 } },
 
 		/* --- four gaps in the coverage, measured rather than wished for -----
 
@@ -248,7 +248,7 @@
 		   scorer) and Connective Passer Wing (pss 16, a swing-swing connector).
 		   Both extremes existed and the two-to-four in the middle — the man who
 		   runs the second side of the action, creates a shot when the first
-		   option dies, and is the reason a good offence has two of them — did
+		   option dies, and is the reason a good offense has two of them — did
 		   not.
 
 		   Zone Buster is an identity college has and the NBA does not, which is
@@ -259,10 +259,10 @@
 		   Matchup-Zone Defender is the 6'7"-6'9" band specifically (hgt 52-66
 		   maps to about 78.5-81.8 inches). Switchable Big is a five who can
 		   move his feet; Wing Stopper is a pure on-ball stopper who gives up
-		   offence for it. This is the man who guards one through four in a
-		   changing defence and is still on the floor for it. */
+		   offense for it. This is the man who guards one through four in a
+		   changing defense and is still on the floor for it. */
 		{ name: "Screen Navigator", min: 0, max: 54, w: 1.3, t: ["guard", "athletic", "durability"], o: { endu: 20, spd: 12, oiq: 12, diq: 6, ins: -12, stre: -12, reb: -10, dnk: -8 } },
-		{ name: "Secondary Creator", min: 36, max: 68, w: 1.6, t: ["wing", "playmaking", "scoring"], o: { drb: 14, pss: 12, fg: 10, ins: 8, oiq: 6, reb: -12, diq: -10, stre: -8, jmp: -6 } },
+		{ name: "Secondary Creator", min: 36, max: 68, w: 1.6, pot: 2, t: ["wing", "playmaking", "scoring"], o: { drb: 14, pss: 12, fg: 10, ins: 8, oiq: 6, reb: -12, diq: -10, stre: -8, jmp: -6 } },
 		{ name: "Zone Buster", min: 0, max: 66, w: 1.1, t: ["shooting", "scoring"], o: { oiq: 18, tp: 16, fg: 10, pss: 6, stre: -16, reb: -14, dnk: -10, diq: -8 } },
 		{ name: "Matchup-Zone Defender", min: 52, max: 66, w: 1.3, t: ["wing", "defense", "athletic"], o: { diq: 18, spd: 10, endu: 10, reb: 8, oiq: 6, stre: 4, ins: -10, tp: -8, ft: -8, pss: -6, dnk: -6 } },
 
@@ -275,7 +275,7 @@
 
 		   Rim-Pressure Bruiser is the foul-drawing rim finisher without a
 		   jumper. Free-Throw Merchant is a guard build; this is the big whose
-		   whole offence is a seal, a catch and two free throws.
+		   whole offense is a seal, a catch and two free throws.
 
 		   Grab-and-Go Big is the high-turnover high-assist big. Passing Hub
 		   Five and Point Center both carry positive oiq, so the table could not
@@ -283,29 +283,29 @@
 
 		   Tweener Forward is the 6'9"-6'10" band (hgt 58-74), which was the
 		   thinnest pool in the table — most wing builds cap at 66-70 and the
-		   centre builds start at 72-76 — despite being the most common
+		   center builds start at 72-76 — despite being the most common
 		   bad-outcome profile in real drafts: not a wing, not a five, tools
 		   without a role. */
 		{ name: "Point-of-Attack Menace", min: 0, max: 50, w: 1.0, t: ["guard", "defense", "athletic"], o: { diq: 20, spd: 14, endu: 10, stre: 6, tp: -16, ft: -10, ins: -8, fg: -6 } },
-		{ name: "Rim-Pressure Bruiser", min: 62, max: 88, w: 1.0, t: ["big", "scoring", "raw"], o: { ins: 16, dnk: 14, stre: 12, endu: 6, tp: -18, ft: -6, pss: -8, oiq: -6 } },
+		{ name: "Rim-Pressure Bruiser", min: 62, max: 88, w: 1.0, pot: -1, t: ["big", "scoring", "raw"], o: { ins: 16, dnk: 14, stre: 12, endu: 6, tp: -18, ft: -6, pss: -8, oiq: -6 } },
 		{ name: "Grab-and-Go Big", min: 60, max: 80, w: 0.9, t: ["big", "playmaking", "raw"], o: { pss: 16, drb: 12, reb: 8, spd: 8, oiq: -14, tp: -10, ft: -8 } },
 		{ name: "Tweener Forward", min: 58, max: 74, w: 1.3, t: ["wing", "big", "raw", "rebounding"], o: { jmp: 12, stre: 6, reb: 8, endu: 6, tp: -10, pss: -8, ins: -6, diq: -8 } },
 
 		{ name: "Balanced", min: 0, max: 100, w: 1.0, t: [], o: {} },
 	];
 
-	/* Role usage: the share of a team's offence a build is given, over and
+	/* Role usage: the share of a team's offense a build is given, over and
 	   above what BBGM's usage composite says.
 
 	   The composite is (1.5*ins + dnk + fg + tp + 0.5*(spd + hgt + drb + oiq)),
 	   which is a description of a player's SHOT-MAKING, not of the role a
-	   coach hands him. USAGE_PROTECT stops the ovr-neutralising normaliser
-	   gutting a defensive build's offence, and it works in its own terms — but
+	   coach hands him. USAGE_PROTECT stops the ovr-neutralizing normalizer
+	   gutting a defensive build's offense, and it works in its own terms — but
 	   it can only protect what the composite reads, so a stopper still lost
 	   volume, and the measured spread of scoring at equal overall rating ran
 	   from -4.9 points (Defensive Pest) to +4.9 (Score-First Point). Nearly ten
 	   points of scoring decided by build alone, at the same rating, is not a
-	   specialisation, it is a different player.
+	   specialization, it is a different player.
 
 	   `u` says what the composite cannot: an on-ball creator is given the ball
 	   whether or not his ins rating agrees, and a rim protector is not, and
@@ -338,7 +338,7 @@
 	   loads on fg and tp raises that composite and takes volume it was never
 	   given; one that loads on diq and reb lowers it and loses volume it never
 	   should have lost. Both of those are computable straight off the build's
-	   own (ovr-neutralised) offset vector.
+	   own (ovr-neutralized) offset vector.
 
 	   So:
 
@@ -350,7 +350,7 @@
 
 	   Fitted, not guessed: tools/rolefit.js measures every build's mean scoring
 	   residual against the class's own ovr fit and reports the constants that
-	   minimise them, and tools/validate.js bands the worst residual so this
+	   minimize them, and tools/validate.js bands the worst residual so this
 	   cannot drift. Adding a build no longer requires adding a constant. */
 	const ROLE_USAGE_W = { ins: 1.5, dnk: 1, fg: 1, tp: 1, spd: 0.5, hgt: 0.5, drb: 0.5, oiq: 0.5 };
 	const ROLE_USAGE_DENOM = 650;
@@ -396,7 +396,7 @@
 	   was not measured to be worthless; it was measured against a copy of
 	   itself.
 
-	   So creation is residualised against the tags before it is used. Each tag
+	   So creation is residualized against the tags before it is used. Each tag
 	   carries the mean raw creation of the builds that hold it, a build's
 	   predicted creation is the mean of its own tags' means, and
 	   creationDelta() returns the difference. The term now answers a question
@@ -407,14 +407,14 @@
 	   can now put real weight on because it no longer duplicates a column that
 	   is already in the design.
 
-	   Measured on the AUTHORED offsets, before normalisation. That is a real
-	   choice and not an oversight: the normaliser's job is to make a build
+	   Measured on the AUTHORED offsets, before normalization. That is a real
+	   choice and not an oversight: the normalizer's job is to make a build
 	   ovr-neutral, and the amount it has to move a build is a fact about the
 	   ovr weights rather than about how much of a creator the build is — so
-	   reading creation off the post-normalisation vector would mix the author's
+	   reading creation off the post-normalization vector would mix the author's
 	   intent with the solver's arithmetic. tools/rolefit.js fits ROLE_FIT
-	   against these same pre-normalisation values, so the two agree by
-	   construction; changing which side of normalisation this is measured on
+	   against these same pre-normalization values, so the two agree by
+	   construction; changing which side of normalization this is measured on
 	   silently invalidates the fitted coefficients and needs a re-fit. */
 	const CREATE_TAG_MEAN = {};
 	let CREATE_GRAND_MEAN = 0;
@@ -471,9 +471,9 @@
 		/* Softly bounded rather than clamped, so a build can never land
 		   exactly on a limit the way twelve of the old table's entries did.
 
-		   Narrowed from 0.30-2.60: measured across all builds the realised
-		   output spans about 0.79-1.16, because the ovr-normaliser and the
-		   self-referential usage centre already absorb most of the level and
+		   Narrowed from 0.30-2.60: measured across all builds the realized
+		   output spans about 0.79-1.16, because the ovr-normalizer and the
+		   self-referential usage center already absorb most of the level and
 		   this multiplier only carries what the composite cannot say. Bounds
 		   twelve bands wide described a mechanism that was not operating, and
 		   tools/rolefit.js --iterate (worst residual 1.29 points against a
@@ -496,7 +496,7 @@
 	   28-33. The fit was inverting the offensive intent of the tags to hit a
 	   flat target: a scorer's role multiplier came out at 0.83 and a
 	   defensive big's at 1.15, because that is what zeroing the residual
-	   required. Specialisation that cannot be seen in the box score is a
+	   required. Specialization that cannot be seen in the box score is a
 	   label.
 
 	   So the target is no longer zero. Each tag declares how many points a
@@ -520,13 +520,22 @@
 		for (const t of (arch && arch.t) || []) v += ROLE_INTENT[t] || 0;
 		return clamp(v, -ROLE_INTENT_CAP, ROLE_INTENT_CAP);
 	}
+	/* The injury-history axis. `availability` already models who misses
+	   games and when; nothing tied a build's RATING PROFILE to that draw,
+	   so a brittle athletic freak and an iron man were hurt at the same
+	   rate. A build may carry `inj`, a multiplier on the season's injury
+	   roll, beside its offsets. */
+	function injuryMultiplier(name) {
+		const a = ARCHETYPES.filter((x) => x.name === name)[0];
+		return a && Number.isFinite(a.inj) ? a.inj : 1;
+	}
 	function roleIntentOf(name) {
 		const a = ARCHETYPES.filter((x) => x.name === name)[0];
 		return a ? roleIntent(a) : 0;
 	}
 
 	/* The delta an archetype's offsets make to BBGM's usage composite. Read
-	   off the NORMALISED offsets, which is what actually reaches the ratings. */
+	   off the NORMALIZED offsets, which is what actually reaches the ratings. */
 	function usageCompositeDelta(arch) {
 		let d = 0;
 		for (const k of Object.keys(arch.o)) d += (ROLE_USAGE_W[k] || 0) * arch.o[k];
@@ -606,7 +615,7 @@
 	   Both builds that fell through the old table did so invisibly, and the
 	   only reason anyone noticed is that one of them came out as the
 	   highest-scoring archetype in the class. In a browser the sim must not
-	   die on a name it does not recognise, so a fallback is still returned —
+	   die on a name it does not recognize, so a fallback is still returned —
 	   but under a test harness (BBGM_STRICT_ROLES, set by tools/test.js and
 	   tools/validate.js) it throws, which is where a missing build should be
 	   found. */
@@ -625,84 +634,43 @@
 	/* How much room to grow each build implies, in ovr→pot gap points. A Raw
 	   Project should be a wider bet than a Floor General by construction; the
 	   old model drew the gap from one distribution regardless of who the player
-	   was, so potential said nothing about the build. */
-	const POT_BY_ARCHETYPE = {
-		"Raw Project": 9, "Athletic Freak": 6, "Glide Athlete": 5,
-		"Lob Threat": 4, "Rim Runner": 4, "Transition Wing": 3,
-		"Mobile Shot-Swatter": 3, "Cutter / Finisher": 2, "Energy Wing": 2,
-		"Bully Slasher": 2, "Downhill Attacker": 2, "Slasher": 2,
-		"Heliocentric Guard": 2, "Point Center": 3, "Jumbo Playmaker": 3,
-		"Skilled Big": 1, "Two-Way Wing": 1, "Balanced": 0,
-		"Sharpshooter": -1, "Movement Shooter": -1, "Corner Specialist": -2,
-		"Sixth-Man Gunner": -2, "Free-Throw Merchant": -2, "Glue Guy": -3,
-		"Iron Man": -3, "Floor General": -3, "Pesky On-Ball Stopper": -3,
-		"Old-School Center": -4, "Post-Up Guard": -4, "Undersized Rebounder": -4,
-		"Low-Post Bruiser": -3, "Foul-Prone Enforcer": -2,
-		/* The 28 builds below had no entry and defaulted to 0, so nearly half a
-		   class — including Combo Guard, 3&D Wing, Rim Protector, Stretch Big,
-		   Post Scorer and Motor Big, six of the ten commonest builds in the
-		   table — got no archetype signal in its potential at all. The values
-		   follow the same logic as the ones above: length, athleticism and
-		   youth-coded tools are upside; finished skill, a narrow role and a
-		   build that already needs the ball are not.
+	   was, so potential said nothing about the build.
 
-		   Positive: the tools are there and the skill is not yet.
-		   Negative: the skill is there and this is what he is. */
-		"Switchable Big": 3, "Rim Protector": 2, "Shot-Creating Wing": 2,
-		"Combo Guard": 1, "3&D Wing": 1, "Point Forward": 1,
-		"Offensive Rebounding Menace": 1, "Motor Big": 1, "Ball Hawk": 1,
-		"Defensive Pest": 0, "Do-It-All Forward": 0, "Change-of-Pace Guard": 0,
-		"Face-Up Four": 0, "Stretch Big": 0, "Rebounding Wing": 0,
-		"Pick-and-Roll Maestro": -1, "Wing Stopper": -1, "High-IQ Connector": -1,
-		"Post Scorer": -1, "Pick-and-Pop Big": -1, "Pull-Up Artist": -1,
-		"Crafty Finisher": -2, "Pass-First Sparkplug": -2, "Wing Sniper": -2,
-		"Score-First Point": -2, "Microwave Scorer": -3,
-		"Streaky Volume Scorer": -3, "Midrange Operator": -3,
-		"Low-Motor Talent": 4, "Injury-Prone Talent": 5, "Late Bloomer": 6,
-		"Rim-Running Wing": 3, "Small-Ball Five": 1, "Positionless Forward": 2,
-		"Two-Way Point Guard": 1, "Stretch Four Stopper": 0,
-		"Rebounding Guard": 0, "Non-Shooting Playmaker": -1,
-		"Foul Magnet Guard": -2, "Fifth-Year Senior": -6,
-		/* The twenty-six added below, on the same logic: length, athleticism
-		   and unfinished tools are upside; finished skill, a narrow role and a
-		   body that is already what it is going to be are not. */
-		"Boom-or-Bust Tools": 8, "Two-Sport Athlete": 7, "Injury-Return Unknown": 5,
-		"Late-Blooming Shooter": 5, "Turnover-Prone Creator": 4,
-		"Perimeter-Switch Five": 3, "Third-Big Energy Guy": 2,
-		"Weak-Side Rim Protector": 2, "Slashing Non-Shooter": 2,
-		"Full-Court Pusher": 1, "Small-Ball Four": 1, "Drop-Coverage Anchor": 1,
-		"Off-Ball Cutter Specialist": 1, "High-Motor Rebounding Forward": 0,
-		"Connective Passer Wing": 0, "Defensive Combo Guard": 0,
-		"Passing Hub Five": 0, "Off-Ball Mover": -1, "System Player": -1,
-		"Tough-Shot Maker": -1, "Free-Throw-Line Extended Big": -2,
-		"Spot-Up Only Guard": -2, "Steady Backup Point": -3,
-		"Bruising Backup Center": -3, "High-Floor Low-Ceiling": -5,
-		"Overseas Pro Veteran": -6,
-		/* Shooting additions (task 4.1) */
-		"Transition Sniper": 0, "DHO Specialist": -1,
-		"Catch-and-Shoot Wing": -2, "Relocation Shooter": 0,
-		"Stretch Five": 0, "Floor-Spacing Four": -1,
-		/* Genuine-centre builds (task 4.2) — length and athleticism are
-		   upside; narrow post skill and a body that is already what it is
-		   going to be are not. */
-		"Back-to-Basket Center": -3, "Shot-Blocking Anchor": 2,
-		"Glass-Eating Center": -1, "Paint Bully": -2,
-		"Vertical Spacer": 3, "Hook-Shot Specialist": -4,
-		"Screen-and-Roll Center": 2, "Defensive Pillar": -1,
-		"Two-Way Center": 1,
-		/* The four coverage gaps. Screen Navigator and Matchup-Zone Defender
-		   are conditioning-and-feel builds whose value is already realised;
-		   Secondary Creator has real on-ball room to grow into; Zone Buster is
-		   a college identity that does not transfer, which is a ceiling. */
-		"Screen Navigator": -2, "Secondary Creator": 2,
-		"Zone Buster": -3, "Matchup-Zone Defender": 1,
-		/* The four scout-named gaps. A broken jumper can arrive (Menace),
-		   a foul-drawing seal game is already what it is (Bruiser), vision
-		   with turnovers is coachable (Grab-and-Go), and a tweener's whole
-		   bet is that a role appears for the tools (Tweener). */
-		"Point-of-Attack Menace": 1, "Rim-Pressure Bruiser": -1,
-		"Grab-and-Go Big": 2, "Tweener Forward": 4,
+	   DERIVED, not tabulated. This used to be a second hand-authored table of
+	   132 integers that had to be kept in sync with ARCHETYPES by a human
+	   every time a build was added — the same maintenance burden ROLE_USAGE
+	   carried before it became a formula. Fitted against that table, the gap
+	   is legible: it is how much FINISHED SKILL the offset vector loads
+	   (feel, conditioning, the jumper, the handle — a build that already has
+	   them is already what he is going to be) plus a per-tag intent (a raw
+	   build is a wide bet, a shooting build a narrow one). Athletic tools
+	   (jmp, dnk, reb) turned out to carry no weight in the authored table at
+	   all: upside was never "he can jump", it was "he cannot yet shoot". The
+	   fit explains about two thirds of the table; where the rest was the
+	   build's BIOGRAPHY rather than its vector (a fifth-year senior, a pro
+	   veteran, a rehab case, a project) the build carries its own `pot` on
+	   the ARCHETYPES entry, beside the offsets it belongs with, so a new
+	   build gets a sane number without an entry anywhere else. */
+	const POT_SKILL_W = {
+		diq: -0.27, oiq: -0.17, endu: -0.15, spd: -0.12, stre: -0.10,
+		fg: -0.10, ft: -0.07, pss: -0.07, tp: -0.06, drb: -0.05, ins: -0.04,
 	};
+	const POT_INTENT = {
+		raw: 3, athletic: 0.6, defense: 0.8, shooting: -0.7, scoring: -0.5,
+		rebounding: -0.5, playmaking: -0.2, durability: -0.2,
+		guard: 0, wing: 0, big: 0,
+	};
+	const POT_BASE = 0.3;
+	function computePotGap(arch) {
+		if (!arch || arch.name === "Balanced") return 0;
+		if (Number.isFinite(arch.pot)) return arch.pot;
+		let v = POT_BASE;
+		for (const k of Object.keys(POT_SKILL_W)) v += POT_SKILL_W[k] * ((arch.o && arch.o[k]) || 0);
+		for (const t of arch.t || []) v += POT_INTENT[t] || 0;
+		return Math.round(v);
+	}
+	const POT_BY_ARCHETYPE = {};
+	for (const a of ARCHETYPES) POT_BY_ARCHETYPE[a.name] = computePotGap(a);
 
 	/* What a basketball player of a given listed height typically weighs.
 
@@ -791,13 +759,13 @@
 
 	/* The role term, which cannot be known until the season has been simulated:
 	   production out of proportion to the touches he got is upside, and needing
-	   a huge share of the offence to produce is not.
+	   a huge share of the offense to produce is not.
 
 	   `usg` is his usage rate, `share` his share of team scoring, `year` his
 	   class year. */
 	/* `load` used to be measured against a single class-wide 0.245, which made
 	   the term partly circular. A build's archetype decides how much of an
-	   offence it is given, so a Rim Protector arrives at 18% usage BECAUSE HE
+	   offense it is given, so a Rim Protector arrives at 18% usage BECAUSE HE
 	   IS A RIM PROTECTOR — and was then paid a large positive `load` for it, on
 	   the reasoning that efficient production on modest usage is a breakout
 	   signal. It is, but only when the modest usage is a fact about his season
@@ -815,12 +783,12 @@
 	   is worth recording as a dead end: that table is a COMPENSATION applied on
 	   top of BBGM's usage composite, not a statement of intent, so a Rim
 	   Protector's entry is above 1 precisely because the composite reads him
-	   too low. Reading it as "how much of the offence this build gets" inverts
+	   too low. Reading it as "how much of the offense this build gets" inverts
 	   half the table.
 
-	   Falls back to the class-wide centre when no reference is supplied, which
-	   is the old behaviour and what the two-argument callers still get. */
-	const ROLE_USG_CENTRE = 0.245;
+	   Falls back to the class-wide center when no reference is supplied, which
+	   is the old behavior and what the two-argument callers still get. */
+	const ROLE_USG_CENTER = 0.245;
 
 	function potFromRole(stats, classYear, usageReference) {
 		if (!stats) return 0;
@@ -832,7 +800,7 @@
 			: classYear === "Junior" ? 0.25 : 0;
 		const efficiency = clamp((stats.ts - Cal.DRAFT_YEAR.ts.mean) * 26, -2.5, 3);
 		const reference = Number.isFinite(usageReference)
-			? clamp(usageReference, 0.16, 0.33) : ROLE_USG_CENTRE;
+			? clamp(usageReference, 0.16, 0.33) : ROLE_USG_CENTER;
 		const load = clamp((reference - usg) * 26, -3, 3.5);
 		const output = clamp((perMinute - 0.55) * 9, -2.5, 3);
 		return clamp((load * 0.55 + output * 0.6 + efficiency * 0.5) * (0.45 + 0.75 * youth),
@@ -885,9 +853,9 @@
 	   rounding threshold. */
 	const SHIFT_RANGE = 500;
 
-	/* BBGM's usage composite, which decides how much of an offence a player is
+	/* BBGM's usage composite, which decides how much of an offense a player is
 	   given: ins 1.5, dnk 1, fg 1, tp 1, spd 0.5, hgt 0.5, drb 0.5, oiq 0.5.
-	   Normalised to a share so it can be used as a protection weight below. */
+	   Normalized to a share so it can be used as a protection weight below. */
 	const USAGE_W = (function () {
 		const raw = { ins: 1.5, dnk: 1, fg: 1, tp: 1, spd: 0.5, hgt: 0.5, drb: 0.5, oiq: 0.5 };
 		let total = 0;
@@ -900,44 +868,44 @@
 	// Linear ovr weight of each rating (from BBGM's ovr formula). Used to make
 	// every archetype's offset vector ovr-neutral by construction: without
 	// this, a build loading on diq (.159) forces the solver to gut everything
-	// else, while one loading on ins (.0126) barely specialises at all — the
-	// specialisation slider would mean something different per archetype.
+	// else, while one loading on ins (.0126) barely specializes at all — the
+	// specialization slider would mean something different per archetype.
 	const OVR_W = {
 		hgt: 0.159, stre: 0.0777, spd: 0.123, jmp: 0.051, endu: 0.0632,
 		ins: 0.0126, dnk: 0.0286, ft: 0.0202, fg: 0.01, tp: 0.0726,
 		oiq: 0.133, diq: 0.159, drb: 0.059, pss: 0.062, reb: 0.01,
 	};
 	/* Make every archetype's offset vector ovr-neutral, WITHOUT quietly making
-	   the defensive builds unplayable on offence.
+	   the defensive builds unplayable on offense.
 
-	   The old normaliser subtracted a uniform u * SHIFT_SCALE from every
+	   The old normalizer subtracted a uniform u * SHIFT_SCALE from every
 	   rating. A build loading on diq (ovr weight .159) and spd (.123) generates
 	   a large positive ovr push, so u was large and negative for the defensive
 	   archetypes — and the ratings that lost most were exactly the ones BBGM's
 	   usage composite reads: ins (weight 1.5), dnk, fg, tp. The build came out
-	   ovr-neutral by construction and offence-negative by side effect.
+	   ovr-neutral by construction and offense-negative by side effect.
 	   Measured: Switchable Big had the HIGHEST mean overall in the class (51.6)
 	   and the 14th-highest scoring average (10.5 a game); Defensive Pest ran
 	   9.4 points on 17.8% usage, which is not a rotation player. "The best
 	   defensive big in the class" was a player nobody would draft.
 
-	   So when the normaliser has to take ovr back OUT of a build, it protects
+	   So when the normalizer has to take ovr back OUT of a build, it protects
 	   the usage inputs and takes the points out of everything else instead. A
-	   build that has to be lifted is not losing its offence, so the other
+	   build that has to be lifted is not losing its offense, so the other
 	   direction is left alone. The
 	   shift weights still have to reproduce the same total ovr push, so the
-	   protection is renormalised rather than simply capped. */
+	   protection is renormalized rather than simply capped. */
 	const USAGE_PROTECT = 0.75;
 	const USAGE_PROTECT_MAX = Math.max(...Object.values(USAGE_W));
 	/* How much of a build's own usage-composite loading cancels the
 	   protection.
 
 	   The protection above was written for one case and applied to two. It
-	   fires whenever `push > 0` — whenever the normaliser has to take ovr back
+	   fires whenever `push > 0` — whenever the normalizer has to take ovr back
 	   OUT of a build — and it then spends that give-back away from the ratings
 	   BBGM's usage composite reads. For a build that loaded on diq (ovr weight
 	   .159) and spd (.123) that is exactly right: the ovr it has to hand back
-	   would otherwise come out of its offence, and a stopper who cannot be
+	   would otherwise come out of its offense, and a stopper who cannot be
 	   given the ball is not a stopper, he is unplayable.
 
 	   But `push > 0` is not the same question as "is this a defensive build",
@@ -961,11 +929,11 @@
 	   USAGE_SELF_REF or more gets none of it; one that pushes it down — a
 	   stopper, a rim protector, a rebounder — gets all of it; in between it
 	   tapers. USAGE_SELF_REF is the composite delta of a moderately
-	   offence-loaded build, so "he paid for it himself" is measured on the same
+	   offense-loaded build, so "he paid for it himself" is measured on the same
 	   scale as the compensation. */
 	const USAGE_SELF_REF = 0.030;
-	/* The offset vectors as authored, before normalisation. Kept so the tests
-	   can compare what the normaliser does now against what the old uniform
+	/* The offset vectors as authored, before normalization. Kept so the tests
+	   can compare what the normalizer does now against what the old uniform
 	   one did, and so the editor's tooltip can show a build's intent rather
 	   than the solver's arithmetic. */
 	const RAW_OFFSETS = {};
@@ -977,8 +945,8 @@
 			let push = 0;
 			for (const k of Object.keys(a.o)) push += OVR_W[k] * a.o[k];
 			if (Math.abs(push / shiftW) < 0.05) continue;
-			/* A positive push means the normaliser has to take ovr back OUT of
-			   the build, which is the case that guts the offence. Spend that
+			/* A positive push means the normalizer has to take ovr back OUT of
+			   the build, which is the case that guts the offense. Spend that
 			   budget away from the usage composite — but only to the extent
 			   the build did not load on the usage composite itself. See
 			   USAGE_SELF_REF. */
@@ -1006,7 +974,7 @@
 	})();
 
 	/* How large a slice of the league each archetype is even eligible for.
-	   Normalising by the eligible set alone made an archetype's real frequency
+	   Normalizing by the eligible set alone made an archetype's real frequency
 	   rarity / (number of archetypes eligible at that height): guards see ~26
 	   eligible builds and 7-footers ~14, so guard archetypes came out
 	   systematically rarer at equal w, and a narrow band like Point Center
@@ -1037,17 +1005,17 @@
 		}
 	})();
 
-	/* Per-class flavour.
+	/* Per-class flavor.
 
 	   Every class used to come out with the same archetype mix, which is the
 	   real reason rerolling did not feel like it produced a different draft:
 	   34 distinct archetypes in a 70-man class is one of everything. A real
 	   class is remembered as guard-heavy, or as the year the bigs were good.
 
-	   A flavour is drawn once per run and multiplies the weight of every build
+	   A flavor is drawn once per run and multiplies the weight of every build
 	   carrying the matching tags. cfg.classFlavor scales how far it bends. */
 	const CLASS_FLAVORS = [
-		{ name: "balanced", w: 1.4, label: "no strong flavour", m: {} },
+		{ name: "balanced", w: 1.4, label: "no strong flavor", m: {} },
 		{ name: "guard-heavy", w: 1.3, label: "guard-heavy",
 			m: { guard: 2.2, wing: 1.0, big: 0.45, playmaking: 1.4 } },
 		{ name: "big-heavy", w: 1.0, label: "big-heavy",
@@ -1056,7 +1024,7 @@
 			m: { wing: 2.3, guard: 0.75, big: 0.7 } },
 		{ name: "shooting-rich", w: 1.0, label: "full of shooters",
 			m: { shooting: 2.6, scoring: 1.2, defense: 0.75, raw: 0.6 } },
-		{ name: "defensive", w: 0.9, label: "defence-first",
+		{ name: "defensive", w: 0.9, label: "defense-first",
 			m: { defense: 2.6, shooting: 0.7, scoring: 0.65 } },
 		{ name: "athletic", w: 0.9, label: "athletic and raw",
 			m: { athletic: 2.5, raw: 2.2, shooting: 0.6, playmaking: 0.7 } },
@@ -1064,9 +1032,9 @@
 			m: { playmaking: 2.5, shooting: 1.3, raw: 0.45, athletic: 0.7 } },
 		{ name: "top-heavy scoring", w: 0.8, label: "score-first",
 			m: { scoring: 2.4, defense: 0.7, playmaking: 0.85 } },
-		/* Seven more, because nine flavours of which four barely differed is
+		/* Seven more, because nine flavors of which four barely differed is
 		   not a reason to reroll. These carry `c` — a config bend applied to
-		   the whole class, not only to its archetype mix — so a flavour can
+		   the whole class, not only to its archetype mix — so a flavor can
 		   move the things a class is actually remembered for: how old it is,
 		   how many of it came through the portal, how good the top of it is.
 		   The archetype tilt alone could never say "weak year". */
@@ -1092,17 +1060,17 @@
 			m: { shooting: 1.4, defense: 1.3, raw: 0.35, athletic: 0.7 },
 			c: { freshmanShare: 18, potBias: -1.3, potSpread: 0.7 } },
 
-		/* --- narrative flavours ----------------------------------------------
+		/* --- narrative flavors ----------------------------------------------
 
-		   Every flavour above is compositional: it bends WHO IS IN the class.
+		   Every flavor above is compositional: it bends WHO IS IN the class.
 		   None of them bends the SEASON, and a class is remembered for its
 		   season at least as often as for its build mix — the year everyone got
 		   hurt, the year three blue bloods went down, the year the mid-majors
 		   won. Those are all things the engine already models (injuryRate,
-		   programme strength, upsetFactor); nothing could ask for them. */
+		   program strength, upsetFactor); nothing could ask for them. */
 		/* `durability` is the availability axis (Iron Man, Injury-Prone
 		   Talent, Injury-Return Unknown). It was added to those builds so a
-		   flavour could ask for them and then no flavour did — the tag had
+		   flavor could ask for them and then no flavor did — the tag had
 		   three members and zero consumers, reproducing one level up the
 		   exact fault it was created to fix. The year everybody got hurt is
 		   the year those three stories get told. */
@@ -1123,7 +1091,7 @@
 			m: {},
 			c: { realignmentRate: 1, transferShare: 52 } },
 
-		/* --- spread / depth flavours -----------------------------------------
+		/* --- spread / depth flavors -----------------------------------------
 		   These bend potSpread and eliteCount directly, which shapes how the
 		   talent is DISTRIBUTED rather than what kind it is.  A top-heavy class
 		   concentrates ceiling in two or three names; a deep class spreads it
@@ -1143,22 +1111,22 @@
 
 		/* --- five that are not another shading of an existing one ------------
 
-		   Twenty-four flavours sounds like variety and several of them were
+		   Twenty-four flavors sounds like variety and several of them were
 		   each other with a different label. Measured on the tag multipliers
 		   they apply: "guard-heavy" and "one-and-done" both lean athletic and
-		   raw; "defensive" and "veteran" both lean defence and cut raw; "weak"
+		   raw; "defensive" and "veteran" both lean defense and cut raw; "weak"
 		   and "weak top deep middle" differ mainly in a depth constant. A
-		   flavour whose archetype tilt is another flavour's is not a second
+		   flavor whose archetype tilt is another flavor's is not a second
 		   thing a class can be, it is the same class with two names, and it
 		   makes the draw look richer than it is.
 
 		   These five are chosen to be far from every existing entry in the tilt
-		   they apply, and each carries a config bend that no other flavour
+		   they apply, and each carries a config bend that no other flavor
 		   carries, so it changes something about the class that the archetype
 		   mix alone could not say. */
 		{ name: "euro-influenced", w: 0.75, label: "European in style",
 			m: { shooting: 1.9, playmaking: 1.8, athletic: 0.5, raw: 0.5, defense: 1.1 },
-			/* Not "international" with different numbers: that flavour changes
+			/* Not "international" with different numbers: that flavor changes
 			   where the blank-college players END UP, which is a fact about the
 			   roster. This one is about how the class PLAYS — feel, passing and
 			   range over athleticism — and it lowers buildNoise, because the
@@ -1167,17 +1135,17 @@
 			c: { buildNoise: 3, freshmanShare: 34, wEuroLeague: 34 } },
 		{ name: "post-up renaissance", w: 0.7, label: "the year the bigs came back",
 			/* The exact inverse of the small-ball class every other big-leaning
-			   flavour is a version of: big-heavy raises `big` and `rebounding`
+			   flavor is a version of: big-heavy raises `big` and `rebounding`
 			   and leaves shooting alone, which in a table where most big builds
 			   shoot is a class of stretch fives. This one cuts shooting hard,
 			   which is what makes it a POST-UP year rather than a tall one. */
 			m: { big: 2.2, scoring: 1.6, rebounding: 1.8, shooting: 0.35, guard: 0.6 },
 			c: { pace: 63, efficiencyEnv: -0.5 } },
 		{ name: "three-and-d only", w: 0.6, label: "3&D wings and rim protectors",
-			/* Extreme specialisation, which no existing flavour asks for: every
+			/* Extreme specialization, which no existing flavor asks for: every
 			   other one bends the mix and leaves the SHAPE of a build alone.
 			   The archetype pool is cut to eight so the class really is made of
-			   four or five things, and specialisation is pushed up so each of
+			   four or five things, and specialization is pushed up so each of
 			   them is unmistakably itself. */
 			m: { shooting: 2.2, defense: 2.2, playmaking: 0.4, scoring: 0.45, raw: 0.5 },
 			c: { archetypePool: 8, specialization: 1.7, archetypeDiversity: 96 } },
@@ -1198,31 +1166,31 @@
 			c: { bluebloodDownYears: 5, transferShare: 55, upsetFactor: 1.3 } },
 	];
 
-	/* The config bend a flavour applies to the whole class. Returned separately
+	/* The config bend a flavor applies to the whole class. Returned separately
 	   from the archetype multipliers because the engine applies it once, before
-	   anything is built, and because a user's own setting has to win: a flavour
+	   anything is built, and because a user's own setting has to win: a flavor
 	   nudges the DEFAULT, it does not overrule a slider the user moved. */
 	function flavorConfig(flavor) {
 		return (flavor && flavor.cfg) || null;
 	}
 
-	/* Draw one flavour for a class. Returns null when the flavour system is
-	   turned off, which keeps the old behaviour exactly. */
-	/* The strength an explicitly named flavour is guaranteed. classFlavor: 0
-	   used to disable the flavour system before the hint was even read, so a
-	   user who NAMED a flavour in the dropdown got nothing, silently. Asking
+	/* Draw one flavor for a class. Returns null when the flavor system is
+	   turned off, which keeps the old behavior exactly. */
+	/* The strength an explicitly named flavor is guaranteed. classFlavor: 0
+	   used to disable the flavor system before the hint was even read, so a
+	   user who NAMED a flavor in the dropdown got nothing, silently. Asking
 	   for one implies wanting it to exist. */
 	const ASKED_STRENGTH_FLOOR = 0.5;
 
 	function pickFlavor(rng, cfg) {
-		/* An asked-for flavour wins over the draw. A user who wants a
+		/* An asked-for flavor wins over the draw. A user who wants a
 		   guard-heavy class could previously only set classFlavor to 2 and
 		   reroll until one came up, which is a slot machine, not a setting —
 		   and rerolling replaces the whole class, so the thing they were
 		   keeping the seed for went with it. An unknown name falls through to
 		   the draw rather than throwing: cfg comes from URLs and localStorage.
-		   Checked BEFORE the strength gate: a named flavour at strength 0 is a
-		   contradiction, resolved in favour of the thing the user named. */
+		   Checked BEFORE the strength gate: a named flavor at strength 0 is a
+		   contradiction, resolved in favor of the thing the user named. */
 		const hint = cfg && cfg.flavorHint ? String(cfg.flavorHint) : "";
 		const asked = hint
 			? CLASS_FLAVORS.filter((x) => x.name === hint)[0] : null;
@@ -1258,16 +1226,16 @@
 	   Measured over 24 rerolls of the same file, every class contained 34.6
 	   distinct archetypes out of 60 (sd 2.66) — one of everything, every time,
 	   which is the whole reason rerolling did not feel like it produced a
-	   different draft. The class-flavour system was built to fix that and moved
-	   the number by about three, because pickArchetype renormalises the
-	   specialist mass to sum to `diversity` within the eligible set: flavour
-	   multiplies the weights and the normalisation divides most of it straight
+	   different draft. The class-flavor system was built to fix that and moved
+	   the number by about three, because pickArchetype renormalizes the
+	   specialist mass to sum to `diversity` within the eligible set: flavor
+	   multiplies the weights and the normalization divides most of it straight
 	   back out. Doubling every guard weight in a pool that is two-thirds guards
 	   at that height changes almost nothing.
 
 	   So the class draws a POOL of builds first and then draws its players from
-	   the pool. Pool membership is discrete, so a flavour that favours guards
-	   puts more guard builds in the pool and no renormalisation can take that
+	   the pool. Pool membership is discrete, so a flavor that favors guards
+	   puts more guard builds in the pool and no renormalization can take that
 	   back — and a 12-build class is "the year of the stretch bigs" rather than
 	   one of everything.
 
@@ -1278,18 +1246,18 @@
 	   commonest builds and would otherwise crowd out the rest. */
 	const POOL_PROBES = [8, 26, 40, 50, 58, 68, 82, 93];
 	const MIN_PER_BAND = 2;
-	/* The genuine-centre builds (min >= CENTRE_MIN) were added so a
+	/* The genuine-center builds (min >= CENTER_MIN) were added so a
 	   seven-footer would have his own identity space, and measured over 40
 	   classes they mostly did not reach it: Shot-Blocking Anchor and
 	   Glass-Eating Center appeared once each in 2,800 players and Passing Hub
 	   Five not at all. The coverage top-up above asked only that the 82 and
 	   93 probes have SOME eligible build, and thirty bigs gated at 52-60
-	   satisfy that — so a pool routinely carried no build a 7'2" centre was
+	   satisfy that — so a pool routinely carried no build a 7'2" center was
 	   specifically for, and he drew from the same power-forward pool as a
-	   6'8". A pool now has to carry at least CENTRE_IN_POOL builds whose
-	   floor is a centre's height. */
-	const CENTRE_MIN = 72;
-	const CENTRE_IN_POOL = 3;
+	   6'8". A pool now has to carry at least CENTER_IN_POOL builds whose
+	   floor is a center's height. */
+	const CENTER_MIN = 72;
+	const CENTER_IN_POOL = 3;
 
 	function eligibleAt(list, hgt) {
 		return list.filter((a) => hgt >= a.min && hgt <= a.max && a.name !== "Balanced");
@@ -1298,7 +1266,7 @@
 	/* Rarity compression.
 
 	   The table's design target was a ~10x spread between the commonest build
-	   and the rarest. Measured, the realised spread was far larger — the
+	   and the rarest. Measured, the realized spread was far larger — the
 	   rarest builds appeared roughly once every four or five classes, which is
 	   not rarity but absence — because three multiplications compound: the
 	   authored weight (0.45 to 3.6, an 8x range), the exposure divisor, and the
@@ -1310,8 +1278,8 @@
 	   be corrected without flattening the authored intent: a Combo Guard stays
 	   several times likelier than a Point Center, but "several" stops meaning
 	   two hundred. The exponent is applied after the exposure divisor and after
-	   the flavour, so a class flavour still bends the mix by as much as it ever
-	   did — the flavour multiplier is the thing a user asked for, and it is
+	   the flavor, so a class flavor still bends the mix by as much as it ever
+	   did — the flavor multiplier is the thing a user asked for, and it is
 	   compressed by the same amount as everything else rather than singled
 	   out. */
 	const RARITY_COMPRESS = 0.42;
@@ -1330,7 +1298,7 @@
 	   mean "target share of the whole class". It is wrong for pool membership,
 	   because a pool slot is a fixed resource regardless of how many players
 	   can use it. Measured over 4000 pool draws with the divisor applied to
-	   both: the three centre builds gated at hgt >= 76 each made ~25% of pools
+	   both: the three center builds gated at hgt >= 76 each made ~25% of pools
 	   (effective weight 3.75 against an authored 1.4) while Iron Man and
 	   Injury-Prone Talent made ~6% (0.86 against 0.7) — a 4.4x inversion of
 	   the authored ordering, spending 15% of the pool budget on builds two or
@@ -1349,7 +1317,7 @@
 	/* Draw the class's build pool. `size` is how many specialist builds the
 	   class may contain before height coverage tops it up; 0 or a size at or
 	   above the table turns the pool off entirely and restores the old
-	   behaviour exactly. */
+	   behavior exactly. */
 	/* How much a build's weight is divided by for each of the last few pools
 	   it appeared in, at cfg.poolMemory = 1. The most recent class counts
 	   fullest and the memory fades over POOL_MEMORY_DEPTH classes, so a build
@@ -1378,13 +1346,13 @@
 			if (names && names.indexOf(name) !== -1) penalty += weight;
 		}
 		if (!penalty || most <= 0) return 1;
-		/* Normalised by the largest penalty available at this depth, so the
+		/* Normalized by the largest penalty available at this depth, so the
 		   exponent runs 0..1 and the intermediate cases stay distinguishable.
 		   A `Math.min(1, penalty)` cap was the first version and flattened
 		   exactly the distinction the memory is for: at depth 3 a build in all
 		   three pools scores 2.0 and one in the newest alone scores 1.0, and
 		   both were clipped to 1, so "in every class lately" and "in the last
-		   one" were penalised identically. */
+		   one" were penalized identically. */
 		return 1 / Math.pow(POOL_MEMORY_PENALTY, strength * (penalty / most));
 	}
 
@@ -1409,12 +1377,12 @@
 			pool.push(pick);
 			remaining.splice(remaining.indexOf(pick), 1);
 		}
-		// The seven-footers' own builds. See CENTRE_MIN.
+		// The seven-footers' own builds. See CENTER_MIN.
 		{
-			const isCentre = (a) => a.min >= CENTRE_MIN;
-			let have = pool.filter(isCentre).length;
-			while (have < CENTRE_IN_POOL) {
-				const options = remaining.filter(isCentre);
+			const isCenter = (a) => a.min >= CENTER_MIN;
+			let have = pool.filter(isCenter).length;
+			while (have < CENTER_IN_POOL) {
+				const options = remaining.filter(isCenter);
 				if (!options.length) break;
 				const pick = rng.weighted(options, wOf);
 				pool.push(pick);
@@ -1476,7 +1444,7 @@
 	/* Per-rating shift scales for one build. A uniform shift preserves the gaps
 	   between ratings but not the build's identity at the extremes: pushing a
 	   low-ovr specialist down drives several ratings into the floor, after
-	   which further shift moves only the others and quietly de-specialises him.
+	   which further shift moves only the others and quietly de-specializes him.
 	   The same happens at the ceiling going up.
 
 	   So the solver spends its budget where the archetype lives — raising the
@@ -1528,7 +1496,7 @@
 	   player: the editor showed a solvable range that moved under the user on
 	   every reroll while nothing about the prospect had changed, and a lock
 	   that was reachable a moment ago stopped being so. It is a function of the
-	   original ratings, the archetype, the specialisation setting and the
+	   original ratings, the archetype, the specialization setting and the
 	   pinned vector, all of which the user can see. */
 	function ovrRange(base, arch, pinned) {
 		const upScales = arch ? shiftScales(arch, true, pinned) : SHIFT_SCALE;
@@ -1629,9 +1597,20 @@
 				cleanBase[key] = base[key];
 				continue;
 			}
-			const off = arch.o[key] || 0;
 			const lo = key === "hgt" ? orig[key] : 1;
 			const hi = key === "hgt" ? orig[key] : 99;
+			/* A negative offset is scaled by the room it has. Taking the
+			   full offset off a rating that was already low and clamping
+			   at 1 put about 1.5% of every class's ratings on the floor
+			   exactly, concentrated in the ovr 20-39 band — a 25-overall
+			   walk-on candidate with four 1s — and once a rating is on the
+			   floor the solver can only de-specialize him. The cut still
+			   points the same way; it just cannot go through the floor. */
+			let off = arch.o[key] || 0;
+			if (off < 0 && key !== "hgt") {
+				const room = Math.max(0, orig[key] - lo);
+				off *= room / (room + 0.5 * Math.abs(spec * off));
+			}
 			base[key] = clamp(orig[key] + spec * off + rng.normal(0, noise), lo, hi);
 			cleanBase[key] = clamp(orig[key] + spec * off, lo, hi);
 		}
@@ -1677,13 +1656,14 @@
 	global.RatingsBuilder = {
 		ARCHETYPES, RAW_OFFSETS, OVR_W, SHIFT_SCALE, USAGE_W,
 		rebuild, classCurve, pickArchetype, solveToOvr, shiftScales, ovrRange, resolveTo,
-		potAdjust, potFactors, potFromRole, ROLE_USG_CENTRE, POT_BY_ARCHETYPE, typicalWeight,
+		potAdjust, potFactors, potFromRole, ROLE_USG_CENTER, POT_BY_ARCHETYPE, computePotGap,
+		POT_SKILL_W, POT_INTENT, typicalWeight,
 		ROLE_USAGE, roleUsage, computeRoleUsage, usageCompositeDelta, creationDelta,
 		rawCreation, CREATE_TAG_MEAN,
 		ROLE_FIT, softBound, softBoundOrderError,
-		ROLE_INTENT, ROLE_INTENT_CAP, roleIntent, roleIntentOf,
+		ROLE_INTENT, ROLE_INTENT_CAP, roleIntent, roleIntentOf, injuryMultiplier,
 		CLASS_FLAVORS, pickFlavor, flavorMultiplier, flavorConfig, pickClassPool,
 		poolMemoryFactor, POOL_MEMORY_DEPTH,
-		archetypeWeight, poolWeight, RARITY_COMPRESS, CENTRE_MIN, CENTRE_IN_POOL,
+		archetypeWeight, poolWeight, RARITY_COMPRESS, CENTER_MIN, CENTER_IN_POOL,
 	};
 })(typeof window !== "undefined" ? window : self);

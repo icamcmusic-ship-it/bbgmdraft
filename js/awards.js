@@ -1,4 +1,4 @@
-/* Postseason honours, awarded from the simulated stat lines, team results and
+/* Postseason honors, awarded from the simulated stat lines, team results and
    the strength of the league the player did it in.
 
    The central problem this file has to solve: a 70-man draft class shares
@@ -6,17 +6,17 @@
    only against each other handed out fixed quotas by array index — every class
    contained the National Player of the Year and all five Consensus First
    Teamers, 80 awards a year across 51% of the class. So the unseen field is
-   modelled explicitly: every filler on every roster gets a comparable score,
-   and a prospect has to finish ahead of them to be honoured.
+   modeled explicitly: every filler on every roster gets a comparable score,
+   and a prospect has to finish ahead of them to be honored.
 
    The award list itself used to be eighteen strings, three of them generic
    ("National Player of the Year", "National Defensive Player of the Year") and
    six conference-templated. A real college season hands out well over a
-   hundred distinguishable honours, and — more importantly — the defensive ones
-   had almost nothing to rank on, because defence was two counting stats and a
+   hundred distinguishable honors, and — more importantly — the defensive ones
+   had almost nothing to rank on, because defense was two counting stats and a
    composite. Both halves are fixed here: the defensive score reads a real
    defensive box score (contested shots, deflections, charges, defensive
-   rating), and the honours it feeds are the ones that actually exist. */
+   rating), and the honors it feeds are the ones that actually exist. */
 (function (global) {
 	"use strict";
 
@@ -24,14 +24,14 @@
 	const C = global.Colleges;
 	const T = global.TeamsSim;
 
-	/* A production resume, normalised for PACE.
+	/* A production resume, normalized for PACE.
 
 	   The counting half of this is raw per-game volume, and PROGRAM_STYLES
 	   moves a team's possessions by +/-5.5 a game — so a run-and-gun program
 	   handed its best player about 8% more of everything than a pack-line
 	   program did, for nothing he had done. This score is what the award model
 	   and the draft board rank on, so that was a systematic tilt of the whole
-	   honours list towards fast schools.
+	   honors list towards fast schools.
 
 	   The counting terms are scaled to a reference tempo and the rate term
 	   (true shooting) is left alone, because a percentage is already
@@ -67,7 +67,7 @@
 			7 * (comps.defenseInterior - 0.46) +
 			7 * (comps.defensePerimeter - 0.46);
 		const impact = Number.isFinite(s.drtg) ? 0.30 * (104 - s.drtg) : 0;
-		// Fouling your way through a game is not defence.
+		// Fouling your way through a game is not defense.
 		return events + skill + impact - 0.5 * Math.max(0, s.pfpg - 2.6);
 	}
 
@@ -214,6 +214,7 @@
 				const def = fieldDefenseScore(stats);
 				field.push({
 					filler: true,
+					key: fp.key || null,
 					// His own name, when the roster gave him one (it does now);
 					// the slot label survives as a fallback for old callers.
 					name: fp.name || (t.name + " returner " + (fp.rotationIndex + 1)),
@@ -239,7 +240,7 @@
 					   a constant here, so at awardNoise 0 the prospects were
 					   deterministic and the FIELD they are ranked against — every
 					   returning rotation player in Division I, which is what
-					   decides an All-America slot — was still randomised. Half a
+					   decides an All-America slot — was still randomized. Half a
 					   deterministic comparison is not one. */
 					scoreTotal: prod + resume + trng.normal(0, 1.4 * noiseScale),
 					scoreDefTotal: def + resume * 0.35 + trng.normal(0, 1.2 * noiseScale),
@@ -308,10 +309,10 @@
 		{ name: "Kareem Abdul-Jabbar Award", label: "best center", pos: ["C", "FC"] },
 	];
 
-	/* How much an honour is worth on a scouting note, so a résumé reads
+	/* How much an honor is worth on a scouting note, so a résumé reads
 	   "Naismith Trophy; Consensus First Team All-American; All-Big Ten First
 	   Team" and not whatever order the code happened to run in. Lower sorts
-	   first. There are ninety-odd distinguishable honours now; without an
+	   first. There are ninety-odd distinguishable honors now; without an
 	   ordering, the good ones get buried. */
 	const AWARD_TIERS = [
 		[/^Consensus National Player of the Year/, 0],
@@ -350,9 +351,9 @@
 		return list.slice().sort((a, b) => awardRank(a) - awardRank(b) || a.localeCompare(b));
 	}
 
-	/* Who is eligible for which kind of honour.
+	/* Who is eligible for which kind of honor.
 
-	   These are separate predicates on purpose. Every conference honour used to
+	   These are separate predicates on purpose. Every conference honor used to
 	   run through ONE gate — `mpg < 20 || scoreProd < 12` — including Defensive
 	   Player of the Year, and scoreProd is an offensive box score
 	   (ppg + 1.2*rpg + 1.7*apg + 2.6*spg + 2.6*bpg - 0.8*tov + 55*(ts-.52)).
@@ -361,7 +362,7 @@
 	   his scoring. Meanwhile the national DPOY used a minutes-only gate, so the
 	   two were not even consistent with each other.
 
-	   Exported so the behaviour is testable directly rather than inferred from
+	   Exported so the behavior is testable directly rather than inferred from
 	   whoever happened to win. */
 	const GATES = {
 		offensive: (x) => !x.stats || (x.stats.mpg >= 20 && x.scoreProd >= 12),
@@ -375,7 +376,7 @@
 	/* Where a prospect's season places him against the rest of Division I.
 
 	   The defensive box score — contested shots, deflections, charges,
-	   defensive rating — is generated, displayed, and never contextualised.
+	   defensive rating — is generated, displayed, and never contextualized.
 	   2.4 deflections a game is a number; "second in the country in
 	   deflections" is a scouting report, and the difference between them is a
 	   sort the model was already in a position to do: `field` is every
@@ -532,19 +533,19 @@
 		}
 		const everyone = ncaa.concat(field);
 		rankAgainstField(ncaa, everyone);
-		// A candidate pool for any honour that needs a comparable score for a
+		// A candidate pool for any honor that needs a comparable score for a
 		// player on one particular team.
 		const fieldByTeam = {};
 		for (const x of field) (fieldByTeam[x.team.name] = fieldByTeam[x.team.name] || []).push(x);
 
-		// awardStrictness shifts how far into the field the honours reach:
+		// awardStrictness shifts how far into the field the honors reach:
 		// 1.0 = the real slot counts, higher = fewer slots, lower = more.
 		const slots = (n) => Math.max(1, Math.round(n / strict));
 		const confSlots = (n) => Math.max(1, Math.round(n / confStrict));
 
 		const label = T.label;
 
-		/* --- conference honours ------------------------------------------- */
+		/* --- conference honors ------------------------------------------- */
 		const byConf = {};
 		for (const x of everyone) {
 			if (!x.conf) continue;
@@ -554,14 +555,14 @@
 			const pool = byConf[conf];
 			const list = pool.slice().sort((a, b) => b.scoreTotal - a.scoreTotal);
 			const lb = label(conf);
-			// Offensive honours: a bit-part player never wins one however the
+			// Offensive honors: a bit-part player never wins one however the
 			// maths ranked him.
 			const give = (x, award) => {
 				if (x.filler || !x.awards) return;
 				if (!GATES.offensive(x)) return;
 				x.awards.push(award);
 			};
-			/* Defensive honours get their OWN gate. The shared one required
+			/* Defensive honors get their OWN gate. The shared one required
 			   scoreProd >= 12 — an offensive box score — so a genuine
 			   low-usage perimeter stopper (5 points, 3 rebounds, 1.6 steals)
 			   scored about 11 and was disqualified from Defensive Player of the
@@ -595,7 +596,7 @@
 			fresh.slice(0, confSlots(1)).forEach((x) => give(x, lb + " Freshman of the Year"));
 			fresh.slice(0, confSlots(5)).forEach((x) => give(x, "All-" + lb + " Freshman Team"));
 
-			// Newcomer here means "arrived from another programme". Freshmen
+			// Newcomer here means "arrived from another program". Freshmen
 			// have their own team; naming them on both is double-counting the
 			// same five players.
 			const newcomers = list.filter((x) => x.isNewcomer && !x.isFreshman);
@@ -621,21 +622,22 @@
 				.forEach((x) => giveDef(x, "All-" + lb + " Defensive Team"));
 		}
 
-		/* --- national honours ---------------------------------------------- */
+		/* --- national honors ---------------------------------------------- */
 		const ranked = ncaa.slice().sort((a, b) => b.scoreTotal - a.scoreTotal);
 		const nation = everyone.slice().sort((a, b) => b.scoreTotal - a.scoreTotal);
-		/* Honours that went to the field rather than the class. A returning
+		/* Honors that went to the field rather than the class. A returning
 		   player who beats every prospect to a trophy used to take the slot
 		   and vanish — the award was simply not handed out. He has a name
 		   now, so it is a result: "the class lost the POY race to a senior
 		   at Houston" is a fact about the class. */
-		const fieldHonours = [];
+		const fieldHonors = [];
 		const giveNat = (x, award, unshift) => {
 			if (x.filler || !x.awards) {
 				if (x.filler && x.name) {
-					fieldHonours.push({
+					fieldHonors.push({
 						award,
 						name: x.name,
+						key: x.key || null,
 						school: x.school || (x.team ? x.team.name : null),
 						classYear: x.classYear || null,
 						starReturner: x.starReturner || null,
@@ -676,7 +678,7 @@
 			   key. The draw used to live inside the comparator, so every
 			   pairwise comparison redrew the voter noise: the "ordering" was
 			   not transitive, the number of RNG draws consumed depended on the
-			   sort algorithm's internals, and the realised variance was not
+			   sort algorithm's internals, and the realized variance was not
 			   the authored sd — at high noise the winner was a shuffle, not a
 			   sampled electorate. */
 			const ballots = top.map((x) => ({
@@ -727,8 +729,8 @@
 			if (!winner) continue;
 			if (winner.filler || !winner.awards) {
 				if (winner.filler && winner.name) {
-					fieldHonours.push({
-						award: award.name, name: winner.name,
+					fieldHonors.push({
+						award: award.name, name: winner.name, key: winner.key || null,
 						school: winner.school || (winner.team ? winner.team.name : null),
 						classYear: winner.classYear || null,
 						starReturner: winner.starReturner || null,
@@ -756,7 +758,7 @@
 		/* Finalists.
 
 		   Ninety awards, every one of them binary: you won it or your season
-		   does not appear. That is not how the honours actually work and it
+		   does not appear. That is not how the honors actually work and it
 		   throws away most of the resolution the model already has — the
 		   difference between the ninth-best player in the country and the
 		   fortieth is real, and both of them finished the year with nothing to
@@ -783,7 +785,7 @@
 		};
 		finalist(nation, 0, slots(4), "Naismith Trophy finalist");
 		finalist(nation, 0, slots(20), "Wooden Award Late Season Top 20", "John R. Wooden Award");
-		finalist(nation, slots(15), slots(30), "Associated Press honourable mention");
+		finalist(nation, slots(15), slots(30), "Associated Press honorable mention");
 		finalist(natDef.filter((x) => GATES.defensive(x)), 0, slots(4),
 			"Naismith Defensive Player of the Year finalist");
 		finalist(freshmen, slots(5), slots(10), "Wayman Tisdale Award watch list");
@@ -805,7 +807,7 @@
 			}
 		}
 
-		/* --- tournament honours -------------------------------------------- */
+		/* --- tournament honors -------------------------------------------- */
 		const ffNames = new Set(tourney.finalFour.map((x) => x.team.name));
 		const inFF = ncaa.filter((p) => ffNames.has(p.newCollege))
 			.sort((a, b) => b.scoreProd - a.scoreProd);
@@ -832,7 +834,7 @@
 		});
 
 		/* All-Region teams: five players per regional, drawn from the two teams
-		   that played the regional final. Four more real honours the sim built
+		   that played the regional final. Four more real honors the sim built
 		   the entire bracket for and then never used. */
 		if (tourney.regions) {
 			for (const region of Object.keys(tourney.regions)) {
@@ -914,7 +916,7 @@
 				});
 		}
 
-		/* --- pro / DII league honours --------------------------------------- */
+		/* --- pro / DII league honors --------------------------------------- */
 		const PRO_AWARDS = {
 			"EuroLeague": ["EuroLeague Rising Star", "EuroLeague Best Young Player", "All-EuroLeague Second Team"],
 			"NBA G League": ["G League Rookie of the Year", "All-G League First Team", "G League Next Up Award"],
@@ -929,7 +931,7 @@
 			"Overtime Elite": ["Overtime Elite MVP", "OTE Defensive Player of the Year", "All-OTE First Team"],
 			"NBA Academy": ["NBA Academy Games MVP", "NBA Academy Player of the Year", "Academy All-Star"],
 			"DII NCAA": ["Division II Player of the Year", "Division II All-American", "Division II Freshman of the Year"],
-			/* The destinations added alongside these had no honours at all, so
+			/* The destinations added alongside these had no honors at all, so
 			   a prospect who spent his year in Turkey or the BAL finished it
 			   with an empty award list whatever he averaged — and the award
 			   list is most of what a note about an overseas prospect has to
@@ -965,9 +967,9 @@
 		/* The achievement layer the pro side lacked. Clubs, tables, playoffs,
 		   cups and relegation existed; a prospect who led the ACB in scoring
 		   finished the year with an empty award list, because the only
-		   honours were age-restricted. These are the league's own trophies:
+		   honors were age-restricted. These are the league's own trophies:
 		   the MVP, the first team, a Finals MVP for the man who carried the
-		   champion, a cup-final MVP, and the continental honour when his
+		   champion, a cup-final MVP, and the continental honor when his
 		   club's European run went deep. The bar is the same production
 		   scale the youth awards use, set higher, and the league's own
 		   strength raises it — an MVP in the EuroLeague is a harder thing
@@ -1009,7 +1011,7 @@
 					}
 					/* The continental competition his club played in (see
 					   continentalRun in js/engine.js). A Final Four or a title
-					   is an honour in its own right; a group-stage exit is a
+					   is an honor in its own right; a group-stage exit is a
 					   line in the note and nothing else. */
 					const cont = club.continental;
 					if (cont && bestAtClub && p.scoreTotal > firstBar * 0.9) {
@@ -1040,7 +1042,7 @@
 			if (p.awards && p.awards.length) p.awards = sortAwards(p.awards);
 		}
 
-		teams.__fieldHonours = fieldHonours;
+		teams.__fieldHonors = fieldHonors;
 		/* The best of the field, independent of whether he won anything —
 		   for the News item that says the country's best player this year
 		   was not in the draft class at all. Trimmed to what a spotlight
@@ -1050,7 +1052,8 @@
 			.sort((a, b) => b.scoreTotal - a.scoreTotal)
 			.slice(0, 5)
 			.map((x) => ({
-				name: x.name, school: x.school || (x.team ? x.team.name : null),
+				name: x.name, key: x.key || null,
+				school: x.school || (x.team ? x.team.name : null),
 				classYear: x.classYear || null, starReturner: x.starReturner || null,
 				pos: x.pos, stats: x.stats,
 			}));

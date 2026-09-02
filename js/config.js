@@ -18,18 +18,18 @@
 		archetypeDiversity: 85,// 0-100, how often a non-balanced archetype is used
 		buildNoise: 5,         // per-rating random jitter (rating points)
 		varySize: false,       // let hgt/weight drift with the archetype
-		// How strongly each class picks up a flavour of its own (guard-heavy,
+		// How strongly each class picks up a flavor of its own (guard-heavy,
 		// big-heavy, defensive, shooting-rich, …). 0 = every class has the same
 		// archetype mix, 2 = a class is unmistakably one thing.
 		classFlavor: 1.0,
 		/* How many specialist builds one class may contain, before height
 		   coverage tops the pool up. 0 turns the pool off, which restores the
-		   pre-2026 behaviour of one of everything in every class.
+		   pre-2026 behavior of one of everything in every class.
 
 		   Raised from 14 when the table grew past 117 builds: per-class
 		   coverage had quietly fallen from 23% of the table to 12%, and
 		   measured over 20 classes five builds never appeared at all. 17 is a
-		   deliberate target, not a maximisation — consecutive classes should
+		   deliberate target, not a maximization — consecutive classes should
 		   share a build or two, the way real drafts repeat archetypes. */
 		archetypePool: 17,
 		/* How many forced anomalies a class gets: a five-star bust, an
@@ -47,7 +47,7 @@
 		   moves records and resumes and not only the note text. */
 		injuryRate: 1,
 
-		/* --- exploring a seed's neighbourhood -------------------------------
+		/* --- exploring a seed's neighborhood -------------------------------
 
 		   One seed produced exactly one class, which is the whole point of the
 		   RNG design and also its cost: a user who found a seed they liked
@@ -57,19 +57,19 @@
 		   `variation` salts the PER-PLAYER streams and leaves the class-level
 		   ones alone. At 0 nothing changes and a seed reproduces exactly what
 		   it always did, so every shareable link ever made still resolves. At
-		   1, 2, 3… the flavour, the build pool, the class curve and the
+		   1, 2, 3… the flavor, the build pool, the class curve and the
 		   environment jitter are identical — the class is still "the year of
 		   the stretch bigs, weak at the top" — while every individual player's
 		   build, school, class year, recruiting and potential are drawn afresh.
 		   Same shape, different sixty-eight men. */
 		variation: 0,
 
-		/* Ask for a particular class flavour instead of drawing one.
+		/* Ask for a particular class flavor instead of drawing one.
 
 		   pickFlavor drew from a weighted table and applied the result, and the
 		   only ways to ask for a guard-heavy class were to set classFlavor to 2
 		   and reroll until one came up, or to edit archetype weights by hand.
-		   A flavour is the single most visible thing about a class and it was
+		   A flavor is the single most visible thing about a class and it was
 		   the one thing the user had no say in. Empty = draw one, as before;
 		   otherwise the name of a CLASS_FLAVORS entry. */
 		flavorHint: "",
@@ -100,14 +100,14 @@
 		   already drifted from year to year; membership never did, so the one
 		   constant in a tool built to make every run different was the single
 		   most consequential thing that happens to college basketball in real
-		   life. A realignment moves two to five of the best programmes in
+		   life. A realignment moves two to five of the best programs in
 		   weaker leagues into a conference that is raiding. 0 turns it off. */
 		realignmentRate: 0.35,
 		/* How many blue bloods have a down year, beyond the ordinary
-		   programme-strength roll. "The year three blue bloods all went down"
+		   program-strength roll. "The year three blue bloods all went down"
 		   is a season nobody forgets and nothing could ask for it. */
 		bluebloodDownYears: 0,
-		/* How far the mid-majors are lifted, in programme-strength points. */
+		/* How far the mid-majors are lifted, in program-strength points. */
 		midMajorLift: 0,
 		/* How much a team's season wanders around its own rating.
 
@@ -150,7 +150,7 @@
 		archetypeWeights: null,
 
 		// --- notes -----------------------------------------------------------
-		noteLines: ["team", "stats", "shooting", "signature", "awards"],
+		noteLines: ["summary", "team", "stats", "shooting", "signature", "awards"],
 
 		// --- college season ----------------------------------------------
 		// Which era's empirical anchors the stat model targets. See the header
@@ -173,20 +173,20 @@
 		   "simulate" runs each of them through the same stat model the draft
 		   year goes through — the player at the ratings he had then, with that
 		   year's class year, in a rotation rebuilt around him. "reconstruct" is
-		   the older behaviour: a backward-scaled copy of the draft-year line,
+		   the older behavior: a backward-scaled copy of the draft-year line,
 		   which reads fine and is not a season. */
 		priorSeasons: "simulate",   // "simulate" | "reconstruct"
 
 		// --- postseason ---------------------------------------------------
 		upsetFactor: 1.0,      // 0 = chalk, 2 = madness
-		// How far into the national field the honours reach. Kept separate
+		// How far into the national field the honors reach. Kept separate
 		// from the two things it used to silently also control.
 		awardStrictness: 1.0,
-		// Conference honours are their own dial: 32 conferences hand out far
+		// Conference honors are their own dial: 32 conferences hand out far
 		// more hardware than the national voters do, and wanting a realistic
 		// number of one is not wanting fewer of the other.
 		confAwardStrictness: 1.0,
-		// The bar a prospect abroad has to clear for a pro-league honour.
+		// The bar a prospect abroad has to clear for a pro-league honor.
 		proAwardStrictness: 1.0,
 		/* How far the voters stray from the arithmetic. 0 hands every trophy to
 		   whoever the production model ranks first, which is a list nobody

@@ -2,7 +2,7 @@
 
    A universe is an ORDERED run over several loaded class files, where each
    season hands state forward to the next: conference membership (so
-   realignment has memory), programme strength (so a breakout persists rather
+   realignment has memory), program strength (so a breakout persists rather
    than being redrawn), coaches (so a fired coach is replaced by a named
    first-year hire rather than reappearing), the build-pool memory, and an
    alumni index that lets later seasons refer to earlier ones.
@@ -159,7 +159,7 @@
 	}
 
 	/* One row of the timeline. */
-	function summarise(res, seed, fileName) {
+	function summarize(res, seed, fileName) {
 		const t = res.tourney;
 		const poy = (res.players || []).filter((p) => (p.awards || []).some(
 			(a) => /^(Naismith Trophy|John R\. Wooden Award)$/.test(a)))[0];
@@ -183,7 +183,7 @@
 	}
 
 	/* Continuity threads across the timeline, for the Universe view: repeat
-	   champions, programmes with multiple No. 1 picks, back-to-back POY
+	   champions, programs with multiple No. 1 picks, back-to-back POY
 	   schools — the connections that make it one world rather than N runs. */
 	function threads(rows) {
 		const out = [];
@@ -230,7 +230,7 @@
 	}
 
 	global.Universe = {
-		VERSION, validate, harvest, returnersOf, alumniOf, summarise, threads,
+		VERSION, validate, harvest, returnersOf, alumniOf, summarize, threads,
 		exportUniverse,
 	};
 })(typeof window !== "undefined" ? window : self);

@@ -33,7 +33,7 @@
 }
 
 /* ---- named themes ---------------------------------------------------------
-   Colour-only palettes pulled from Color Type Pairings.dc.html. Each is a
+   Color-only palettes pulled from Color Type Pairings.dc.html. Each is a
    full override of the same tokens the light/dark palettes above set, so
    nothing downstream needs to know a given theme exists. */
 :root[data-theme="ledger-light"] {
@@ -155,7 +155,7 @@ tbody tr:hover td { background: var(--panel-2); }
 tbody tr:hover td.sticky { background: var(--panel-2); }
 tbody td { vertical-align: top; }
 td.wrap { white-space: normal; min-width: 250px; max-width: 340px; font-size: 11.5px; line-height: 1.35; }
-/* A prospect can collect a dozen honours. Left to wrap freely, one such cell
+/* A prospect can collect a dozen honors. Left to wrap freely, one such cell
    made its whole row 150px tall and the table stopped being a table. */
 .clamp {
 	display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
@@ -180,6 +180,11 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 	}
 }
 .up { color: var(--good); } .down { color: var(--bad); }
+/* A schedule row for a loss: text color only, no ::before arrow. .down
+   above carries that arrow for its inline-number callers (a stat delta),
+   and reusing it on a <tr> inserted the arrow as an extra table cell,
+   pushing every column in the row one to the right. */
+.loss { color: var(--bad); }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
 .card { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--panel); }
 .card h4 { margin: 0 0 6px; font-size: 13px; }
@@ -208,7 +213,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 	content: ""; position: absolute; left: -10px; top: 50%;
 	width: 9px; height: 1px; background: var(--line);
 }
-/* Poll movement colouring. */
+/* Poll movement coloring. */
 td.pollup { color: var(--win, #1a7f4b); }
 td.polldown { color: var(--accent-2, #a2601a); }
 .game .gn { flex: 1; overflow: hidden; text-overflow: ellipsis; }
@@ -300,12 +305,12 @@ tbody tr { cursor: pointer; }
    room for both. */
 .bracketwrap { display: grid; gap: 16px; grid-template-columns: 1fr; }
 .bracketwrap .half { min-width: 0; display: grid; gap: 14px; }
-.bracketwrap .centrecol { min-width: 0; order: 1; }
+.bracketwrap .centercol { min-width: 0; order: 1; }
 @media (min-width: 1850px) {
 	.bracketwrap { grid-template-columns: 1fr 240px 1fr; align-items: start; }
-	.bracketwrap .centrecol { order: 0; align-self: center; }
+	.bracketwrap .centercol { order: 0; align-self: center; }
 }
-.bracketwrap .centrecol h4 { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .07em; margin: 10px 0 6px; }
+.bracketwrap .centercol h4 { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .07em; margin: 10px 0 6px; }
 .regionbox h4 { margin: 0 0 6px; font-size: 12px; }
 /* Compact mode: winners only, no nested horizontal scroll. */
 .compactregion { font-size: 12px; }
@@ -342,7 +347,7 @@ tbody tr { cursor: pointer; }
 	header { padding: 10px 12px; gap: 8px; }
 	header h1 { font-size: 14px; width: 100%; }
 	.bracketwrap { flex-direction: column; }
-	.bracketwrap .centrecol { align-self: stretch; }
+	.bracketwrap .centercol { align-self: stretch; }
 }
 @media (max-width: 520px) {
 	.filters input[type=search] { min-width: 0; }
@@ -434,7 +439,7 @@ tbody tr.editing td.sticky { background: rgba(9,105,218,.14); }
 }
 
 /* ---- motion -------------------------------------------------------------- */
-/* Nothing here is load-bearing animation, so honour the preference outright. */
+/* Nothing here is load-bearing animation, so honor the preference outright. */
 @media (prefers-reduced-motion: reduce) {
 	*, *::before, *::after {
 		animation-duration: .001ms !important;
@@ -475,10 +480,10 @@ tbody tr.editing td.sticky { background: rgba(9,105,218,.14); }
 .empty-state h4 { margin: 0 0 6px; }
 .empty-state .hint { margin: 0 0 12px; }
 
-/* ---- risers, fallers, locks: not colour alone ---------------------------- */
-/* Movement and lock state were encoded in colour only, which is invisible to
-   the eight percent of men with a colour vision deficiency and to anyone
-   reading a screenshot in greyscale. The glyph carries the same information. */
+/* ---- risers, fallers, locks: not color alone ---------------------------- */
+/* Movement and lock state were encoded in color only, which is invisible to
+   the eight percent of men with a color vision deficiency and to anyone
+   reading a screenshot in grayscale. The glyph carries the same information. */
 .up::before { content: "▲ "; font-size: .85em; }
 .down::before { content: "▼ "; font-size: .85em; }
 tr.locked td.sticky::after { content: " 🔒"; font-size: .85em; }
@@ -616,7 +621,7 @@ table.mini td.num { text-align: right; font-variant-numeric: tabular-nums; }
 table.mini tr.now { font-weight: 600; }
 
 /* Two prospects side by side: the better number in each row is marked with a
-   glyph as well as a colour. */
+   glyph as well as a color. */
 table.compare td.num.up::after { content: " ▲"; font-size: .8em; }
 
 /* The build's signature ratings, printed on the row rather than hidden in a
@@ -628,14 +633,14 @@ table.compare td.num.up::after { content: " ▲"; font-size: .8em; }
 td.sparkcell { padding: 2px 6px; }
 .spark { display: block; }
 /* Theme-aware by construction. The stroke was already currentColor, which
-   inherits the cell's text colour and therefore does follow the theme — but
+   inherits the cell's text color and therefore does follow the theme — but
    `opacity: .75` on top of it was measured against the light palette, and the
    dark one's text (#e6edf3) against its panel (#161b22) does not carry a
    quarter of itself away as gracefully as #1c2128 on #ffffff does: a
    1.2px line at 75% is the first thing to disappear on a dark screen.
 
    So the line uses a token that is defined per theme rather than a constant
-   fraction of the inherited colour, and the token is the accent rather than
+   fraction of the inherited color, and the token is the accent rather than
    the text, which makes the trend read as data rather than as faint writing.
    The reference line (see sparkline() in js/views.js) is drawn from the border
    token for the same reason. */
@@ -711,7 +716,7 @@ body.busy button, body.busy input[type=range] { cursor: progress; }
 }
 .ctl .revert-btn:hover { color: var(--accent); opacity: 1; }
 
-/* Per-setting randomiser lock. Dim until locked, so eighty padlocks do not
+/* Per-setting randomizer lock. Dim until locked, so eighty padlocks do not
    shout over the sliders they guard. */
 .ctl .lock-btn {
 	background: none; border: none; padding: 0 2px; cursor: pointer;
@@ -783,7 +788,7 @@ th.sortable[draggable="true"] { cursor: grab; }
 th.sortable.dragging { opacity: .45; cursor: grabbing; }
 th.dropbefore { box-shadow: inset 2px 0 0 0 var(--accent); }
 th.dropafter { box-shadow: inset -2px 0 0 0 var(--accent); }
-/* A card is a stack of labelled lines, so a horizontal drop indicator on it
+/* A card is a stack of labeled lines, so a horizontal drop indicator on it
    means nothing and dragging a heading that is visually hidden means less. */
 .cardtable th.dropbefore, .cardtable th.dropafter { box-shadow: none; }
 

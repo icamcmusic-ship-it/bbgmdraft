@@ -34,7 +34,7 @@ self.onmessage = function (e) {
 			const cfg = self.Config.make(msg.cfg);
 			cfg.seed = base + "#" + i;
 			cfg.overrides = msg.cfg.overrides || {};
-			out.push(self.BatchStats.summarise(runner.run(cfg)));
+			out.push(self.BatchStats.summarize(runner.run(cfg)));
 			self.postMessage({ type: "progress", done: i + 1, total: msg.n });
 		}
 		self.postMessage({ type: "done", rows: out, baseSeed: base });

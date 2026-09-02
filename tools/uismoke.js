@@ -154,7 +154,7 @@ function ok(name, condition, detail) {
 	   editor, and each reads numbers the sim already computed — so a broken
 	   reference in one of them is invisible until somebody opens it. */
 	for (const [label, needle] of [
-		["Where this stat line comes from", "Share of the offence"],
+		["Where this stat line comes from", "Share of the offense"],
 		["Why he is at No.", "Overall rating"],
 		// A freshman has no earlier seasons, so this one is checked on the
 		// row the panel always has: the season just played.
@@ -251,7 +251,10 @@ function ok(name, condition, detail) {
 	};
 	ok("the note template re-runs the notes only",
 		(await phases(() => {
-			const i = document.getElementById("noteLines").querySelectorAll("input")[1];
+			// The first line that is OFF by default: ticking one that is
+			// already on is not a change and re-runs nothing.
+			const i = Array.from(document.getElementById("noteLines").querySelectorAll("input"))
+				.filter((x) => !x.checked)[0];
 			i.checked = true;
 			i.dispatchEvent(new Event("change", { bubbles: true }));
 		})) === "notes");
@@ -322,6 +325,22 @@ function ok(name, condition, detail) {
 	ok("a team page opens with its coach, its splits and its schedule",
 		/Coach/.test(teamText) && /Home . away . neutral/.test(teamText) &&
 		/Schedule/.test(teamText), teamText.slice(0, 90));
+	/* A loss row used to carry the shared .down class, which also draws a
+	   "▼ " pseudo-element before the row and visibly shifted every column
+	   one to the right. Every row in the schedule table must have the same
+	   cell count regardless of the game's result. */
+	{
+		const counts = await page.locator("#view table")
+			.filter({ hasText: "Opponent" }).last()
+			.locator("tbody tr").evaluateAll(
+				(rows) => rows.map((r) => r.children.length));
+		ok("every schedule row has the same number of cells, win or loss",
+			counts.length > 5 && counts.every((c) => c === counts[0]),
+			JSON.stringify(counts.slice(0, 10)));
+		const lossRows = await page.locator("#view table tr.loss").count();
+		ok("a loss row does not carry the shared .down class",
+			(await page.locator("#view table tr.down").count()) === 0 && lossRows >= 0);
+	}
 	await page.locator('#view button:has-text("All teams")').click();
 	await page.waitForTimeout(250);
 
@@ -344,6 +363,9 @@ function ok(name, condition, detail) {
 	ok("the export menu offers Markdown notes, a message history and a preset diff",
 		/Markdown/.test(menuText) && /Message history/.test(menuText) &&
 		/Compare two presets/.test(menuText), menuText.replace(/\n/g, " · ").slice(0, 140));
+	ok("the statline export options warn that BBGM's own import discards them",
+		/Import.{0,5}Draft class.{0,40}deletes a player's stats/.test(menuText),
+		menuText.replace(/\n/g, " · ").slice(0, 400));
 	await page.locator('#modal button:has-text("Compare two presets")').click();
 	await page.waitForTimeout(250);
 	ok("two presets can be compared",
@@ -796,6 +818,41 @@ function ok(name, condition, detail) {
 				return !(st.poolHistory || []).some((p) => p.join("|") === now);
 			}));
 		void pools;
+	}
+
+	console.log("\nGame log detail");
+	{
+		await page.locator("#tabs button", { hasText: "Game log" }).first().click();
+		await page.waitForTimeout(250);
+		const heads = await page.locator("#view table thead th").allTextContents();
+		ok("the game log carries minutes and shooting splits",
+			heads.indexOf("MIN") !== -1 && heads.indexOf("FG") !== -1 &&
+			heads.indexOf("3P") !== -1 && heads.indexOf("FT") !== -1, heads.join(","));
+		const cell = await page.locator("#view table tbody tr").first()
+			.locator("td").nth(6).textContent();
+		ok("a shooting cell reads makes-of-attempts", /^\d+-\d+$/.test(cell.trim()), cell);
+	}
+
+	console.log("\nSample class");
+	{
+		/* A first-time visitor with no export gets a drop-a-file screen and
+		   a button. The button has to produce a class through the same
+		   path a real file takes. */
+		await page.goto(base);
+		await page.evaluate(() => localStorage.clear());
+		await page.goto(base);
+		ok("the empty screen offers a sample class",
+			(await page.locator("#btnSample").count()) === 1);
+		await page.locator("#btnSample").click();
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		ok("the sample class renders a prospect table",
+			(await page.locator("table tbody tr").count()) === 70);
+		ok("the sample class is named as one",
+			/sample/i.test(await page.locator("#fileSummary").textContent()));
+		await page.locator("#tabs button", { hasText: "News" }).first().click();
+		await page.waitForTimeout(250);
+		ok("the sample class writes a News feed",
+			(await page.locator("#view").innerHTML()).length > 2000);
 	}
 
 	console.log("\nNo errors");

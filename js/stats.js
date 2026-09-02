@@ -31,17 +31,17 @@
 	const TUNING = {
 		MPG_CAP: 37.5,      // D-I minutes leaders run 36-38, not a flat 35.5
 		USG_CAP: 0.365,     // share of team possessions while on the floor
-		/* A drafted player never vanishes from the offence. The draft-year 5th
+		/* A drafted player never vanishes from the offense. The draft-year 5th
 		   percentile is USG 17.8, so this is where a prospect's usage settles,
 		   not where it stops: `softUsg` approaches it from below rather than
 		   clamping onto it. The hard clamp piled 3.7% of the whole class on
-		   exactly 15.5% usage — a wall, which is the artefact the soft CEILING
+		   exactly 15.5% usage — a wall, which is the artifact the soft CEILING
 		   was introduced to remove, left in place at the other end. */
 		/* The floor is the PLAYER's, not the class's. A single shared constant
 		   is a wall wherever it binds however softly it is approached: the
 		   asymptote at USG_FLOOR * (1 - USG_FLOOR_BAND) = 13.65% collected
 		   11.5% of a realistic class into one percentage point of usage, which
-		   is the "everyone's stats feel the same" artefact seen from the
+		   is the "everyone's stats feel the same" artifact seen from the
 		   inside. A bound cannot be un-piled by moving it — raising the floor
 		   to 0.190 pinned a quarter of the class on 17.1% instead — so the
 		   floor is now a function of how good the player is, which spreads the
@@ -77,7 +77,7 @@
 		   1.6 on (0.35 + 1.3 * talent/100). */
 		USG_TALENT_EXP: 1.20,
 		/* Size tilt on raw usage: a draft class's guards carry more of the
-		   offence than its centres, which BBGM's usage composite (ins 1.5,
+		   offense than its centers, which BBGM's usage composite (ins 1.5,
 		   hgt 0.5) gets backwards. Was an inline 1.05. */
 		USG_SIZE_TILT: 1.30,
 		/* COLLEGE ROLE, the variable that did not exist.
@@ -89,14 +89,14 @@
 		   taking 30% of his team's shots, was a player the model could not
 		   construct. A college role is not an NBA overall rating: it is what a
 		   coach hands a player, and it depends on how long he has been in the
-		   programme, what kind of player he is (ROLE_USAGE), and a genuine
+		   program, what kind of player he is (ROLE_USAGE), and a genuine
 		   independent draw that no rating predicts. */
 		EXP_USG: {
 			Freshman: 0.90, Sophomore: 1.04, Junior: 1.12,
 			Senior: 1.20, Graduate: 1.24,
 		},
 		/* The independent half of the role. Log-normal, so the multiplier is
-		   centred on 1 and right-skewed the way "how big a role did he get"
+		   centered on 1 and right-skewed the way "how big a role did he get"
 		   actually is. This is what widens the raw usage distribution enough
 		   that the bounds above stop binding for most of the class, and it is
 		   the term that breaks college production loose from NBA overall. */
@@ -110,13 +110,13 @@
 		   damped hard on its way in. */
 		MIN_ROLE_EXP: 0.45,
 		/* Upperclassmen finish better and turn it over less: an extra year in
-		   a college programme is worth real efficiency, which is most of why
+		   a college program is worth real efficiency, which is most of why
 		   the senior-mid-major-scorer archetype exists at all. Per class-year
-		   step, centred on a sophomore. */
+		   step, centered on a sophomore. */
 		EXP_EFF: 0.0045,
 		EXP_TOV: 0.030,
 		/* Assists. At 4.1 the exponent produced a physically impossible floor:
-		   a centre's 10th-percentile line was 0.15 assists per game and the Rim
+		   a center's 10th-percentile line was 0.15 assists per game and the Rim
 		   Protector archetype averaged 0.42, which is not what a man playing 25
 		   minutes a night finishes a season with (the real floor for a
 		   non-passing D-I big is 0.6-0.8). It also made the distribution
@@ -138,7 +138,7 @@
 		   notices). */
 		AST_EXP: 2.4,
 		AST_FLOOR: 0.42,
-		/* Rebounds. At 1.25 a centre out-rebounded a guard by 2.4x; the real
+		/* Rebounds. At 1.25 a center out-rebounded a guard by 2.4x; the real
 		   defensive-rebound-rate ratio between those two is 4-5x. 1.55 got
 		   the big:guard RPG ratio to 1.9x against a real ~2.4x, so another
 		   step to 1.9, offset by a softer REB_CAP below so the ceiling stops
@@ -171,7 +171,7 @@
 		   league totals (13.5 assists on 25.9 made field goals in the modern
 		   game, 12.6 on 24.1 in 2009-2021 — the same 0.52 in both eras). The
 		   old 0.53 sat on top of a stale 0.465 field-goal percentage that no
-		   longer matched what the sim shot, so the two errors part-cancelled
+		   longer matched what the sim shot, so the two errors part-canceled
 		   and team assists came out 7% light anyway. Everything else the pool
 		   needs — how much of a chance is a shot, how often it misses — now
 		   comes from the era's own team averages via CAL.chanceShape(). */
@@ -225,9 +225,9 @@
 		MINUTES_TILT_ANCHOR: 62,
 		MINUTES_TILT_REF: 14,
 		/* How much of the class's scoring gradient is allowed to come from
-		   playing at a weak programme rather than from being good. */
+		   playing at a weak program rather than from being good. */
 		STL_ATH: 0.60,
-		/* The usage composite a synthesised returning teammate scores. See
+		/* The usage composite a synthesized returning teammate scores. See
 		   simulateTeamStats for why this number decides the whole class's
 		   scoring level. */
 		FILLER_USAGE: 0.280,
@@ -258,7 +258,7 @@
 	/* The shape of a college rotation's minutes, by slot. Measured off D-I
 	   box scores: a starter plays 30-34, the sixth man low twenties, and the
 	   ninth man single figures — and that shape barely moves between a blue
-	   blood and a low major. It is renormalised to the team total below, so
+	   blood and a low major. It is renormalized to the team total below, so
 	   only the ratios here matter. */
 	const ROTATION_SHAPE = [1.00, 0.95, 0.89, 0.83, 0.75, 0.61, 0.47, 0.33, 0.21, 0.13];
 
@@ -271,7 +271,7 @@
 	};
 
 	/* Per-league environment. Everything outside D-I used to run on cfg.pace —
-	   the slider labelled "College season -> Pace" — so dragging it rewrote
+	   the slider labeled "College season -> Pace" — so dragging it rewrote
 	   EuroLeague box scores, and every league was scored over a 40-minute game
 	   even though the G League plays 48, which made G League per-game numbers
 	   ~17% low by construction.
@@ -318,7 +318,7 @@
 
 	/* Class year as a number, 0 = freshman. The string carries decorations —
 	   "Redshirt Junior", "Graduate" — so it cannot be looked up directly, and
-	   a redshirt year IS an extra year in the programme even though it is not
+	   a redshirt year IS an extra year in the program even though it is not
 	   an extra year of eligibility used. */
 	const CLASS_YEAR_INDEX = {
 		Freshman: 0, Sophomore: 1, Junior: 2, Senior: 3, Graduate: 4,
@@ -356,7 +356,7 @@
 		const RB = global.RatingsBuilder;
 		const arch = RB && p ? RB.roleUsage(p.archetype) : 1;
 		/* The independent draw. Scaled by the stat-noise slider, but floored:
-		   a college role is a latent fact about a player and his programme,
+		   a college role is a latent fact about a player and his program,
 		   not a rounding error, so "deterministic from ratings" still leaves
 		   room for two identical prospects to be used differently. */
 		const noise = clamp(Number.isFinite(cfg.statNoise) ? cfg.statNoise : 1, 0, 3);
@@ -364,7 +364,7 @@
 		/* Median 1, not mean 1: the draw is a role, and roles are
 		   right-skewed. The level it implies for the class as a whole is set
 		   by FILLER_USAGE, which is the only place a class's scoring level can
-		   come from at all (usage renormalises to 1 inside a roster). */
+		   come from at all (usage renormalizes to 1 inside a roster). */
 		return experienceUsage(p && p.classYear) * arch * Math.exp(rng.normal(0, sd));
 	}
 
@@ -375,7 +375,7 @@
 	}
 
 	/* Allocate minutes across a rotation by talent, then clamp to something a
-	   real rotation looks like and renormalise back to the team's minutes. */
+	   real rotation looks like and renormalize back to the team's minutes. */
 	function allocateMinutes(members, rng, comps, env, roleMult) {
 		const e = env || NCAA_ENV;
 		const gameMinutes = e.gameMinutes || 40;
@@ -538,7 +538,7 @@
 		const u = TUNING.MINUTES_UNIFORM;
 		const shares = talentShares.map((s) => (1 - u) * s + u * uniform);
 		let mins = shares.map((s) => teamMinutes * s);
-		// Clamp-and-renormalise, ending on a renormalise so team minutes always
+		// Clamp-and-renormalize, ending on a renormalize so team minutes always
 		// sum to the team total.
 		// Adaptive floor: a normal 9-10 man rotation bottoms out at 6 MPG, but
 		// an oversized group (many prospects on one school) must still fit.
@@ -566,12 +566,12 @@
 	   model used neither: team defensive quality had exactly one channel into
 	   an opponent's box score, a flat efficiency shave off oppStrength, so a
 	   front line of rim protectors did not actually reduce anyone's rim FG%.
-	   This is the profile that does it. Values are centred at ~0 for an average
+	   This is the profile that does it. Values are centered at ~0 for an average
 	   D-I rotation and read in points of percentage. */
 	/* Each weight is mins[i] / teamMinutes, so the weights sum to 1 and every
 	   value below is the minutes-weighted average of the rotation. An earlier
 	   version multiplied every weight by an on-floor count and divided every
-	   sum by the same count — arithmetic that cancelled exactly, with a
+	   sum by the same count — arithmetic that canceled exactly, with a
 	   comment claiming it "derived the divisor". It derived nothing, and the
 	   next person to edit one half without the other would have introduced a
 	   real error. */
@@ -638,7 +638,7 @@
 		/* `force` was hardcoded to 0 here while defenseProfile computed a real
 		   value, so opponent ball-pressure reached the model only through the
 		   style constant (ctx.oppPress) and never through the rosters actually
-		   faced. Same 0.49 centring as defenseProfile. */
+		   faced. Same 0.49 centering as defenseProfile. */
 		return {
 			rim: rim / w - 0.46,
 			perimeter: per / w - 0.46,
@@ -654,7 +654,7 @@
 	   other. */
 	function passSkill(comps, ratings) {
 		// The prospect reference shift is applied by astWeight, which knows
-		// whether this is a prospect or a synthesised teammate; this returns
+		// whether this is a prospect or a synthesized teammate; this returns
 		// the raw skill.
 		const raw = ratings && Number.isFinite(ratings.pss) ? ratings.pss / 100 : comps.passing;
 		return clamp((1 - TUNING.AST_PSS) * comps.passing + TUNING.AST_PSS * raw, 0.02, 1);
@@ -768,7 +768,7 @@
 	   everybody else. Any build whose identity rests on those three ratings
 	   was structurally invisible to the model that should express it.
 
-	   Derived from the build's own (normalised) offset vector rather than
+	   Derived from the build's own (normalized) offset vector rather than
 	   tabulated per build, on the same reasoning as ROLE_USAGE: the
 	   ratings a specialist trades toward are the fact; a hand-fitted
 	   constant per name is a second table to keep in sync. Inside scoring
@@ -778,12 +778,12 @@
 	   strength used without feel. Balanced is the origin of both. */
 	const IDENTITY_FTR = { ins: 0.0024, stre: 0.0016, ft: 0.0018, dnk: 0.0006 };
 	const IDENTITY_PF = { stre: 0.010, oiq: -0.008, ins: 0.003 };
-	/* Centred on the table, weighted by rarity: the offset table is
+	/* Centered on the table, weighted by rarity: the offset table is
 	   net-negative on ins (a specialist genuinely trades inside scoring
-	   away), so an uncentred term would move the CLASS free-throw rate off
+	   away), so an uncentered term would move the CLASS free-throw rate off
 	   its anchor by a few percent rather than only moving builds around it.
 	   The anchor is the calibration table's job. */
-	const IDENTITY_CENTRE = { ftr: 0, pf: 0 };
+	const IDENTITY_CENTER = { ftr: 0, pf: 0 };
 	const IDENTITY_CACHE = {};
 	function identityRaw(arch) {
 		let ftr = 0;
@@ -796,7 +796,7 @@
 		const RB = global.RatingsBuilder;
 		if (!RB || !name) return null;
 		if (IDENTITY_CACHE[name]) return IDENTITY_CACHE[name];
-		if (!IDENTITY_CACHE.__centred) {
+		if (!IDENTITY_CACHE.__centered) {
 			let wsum = 0;
 			let ftr = 0;
 			let pf = 0;
@@ -807,20 +807,20 @@
 				ftr += w * r.ftr;
 				pf += w * r.pf;
 			}
-			IDENTITY_CENTRE.ftr = wsum ? ftr / wsum : 0;
-			IDENTITY_CENTRE.pf = wsum ? pf / wsum : 0;
-			IDENTITY_CACHE.__centred = true;
+			IDENTITY_CENTER.ftr = wsum ? ftr / wsum : 0;
+			IDENTITY_CENTER.pf = wsum ? pf / wsum : 0;
+			IDENTITY_CACHE.__centered = true;
 		}
 		const arch = RB.ARCHETYPES.filter((a) => a.name === name)[0];
 		if (!arch || !arch.o) return null;
 		const r = identityRaw(arch);
-		IDENTITY_CACHE[name] = { ftr: r.ftr - IDENTITY_CENTRE.ftr, pf: r.pf - IDENTITY_CENTRE.pf };
+		IDENTITY_CACHE[name] = { ftr: r.ftr - IDENTITY_CENTER.ftr, pf: r.pf - IDENTITY_CENTER.pf };
 		return IDENTITY_CACHE[name];
 	}
 	function archetypeIdentity(name, cfg) {
 		const id = identityOf(name);
 		if (!id) return { ftr: 0, pf: 1 };
-		/* Scaled by specialisation, the same way the offsets reach the
+		/* Scaled by specialization, the same way the offsets reach the
 		   ratings: at 0 every build is BBGM's own and there is no identity to
 		   read. */
 		const spec = clamp(cfg && Number.isFinite(cfg.specialization) ? cfg.specialization : 1, 0, 3);
@@ -880,9 +880,9 @@
 		   0.20 — almost all of it arriving through usage. */
 		const talentAdj = me.filler ? 0 : CAL.talentEffAdj(me.talent);
 		/* Experience -> efficiency. A fourth-year player in a college
-		   programme finishes better than a freshman with the same NBA rating,
+		   program finishes better than a freshman with the same NBA rating,
 		   and until now class year touched nothing but a reserve-year
-		   probability. Centred on a sophomore so the class mean does not move
+		   probability. Centered on a sophomore so the class mean does not move
 		   off the empirical anchor. */
 		const expAdj = me.filler || !Number.isFinite(me.year)
 			? 0 : TUNING.EXP_EFF * clamp(me.year - 1, -1.2, 3.2);
@@ -891,7 +891,7 @@
 		   in every configuration. */
 		const envEff = 0.010 * clamp(cfg.efficiencyEnv || 0, -3, 3) +
 			(me.filler ? CAL.effShift("fieldEff") : 0);
-		// The defences actually faced. `oppDefense` is the minute-weighted
+		// The defenses actually faced. `oppDefense` is the minute-weighted
 		// average defensive profile of this team's schedule, so a prospect in a
 		// conference full of shot-blockers finishes worse at the rim than the
 		// same player in a conference of guards.
@@ -899,7 +899,7 @@
 		// Teammate spacing/passing helps everyone score more efficiently.
 		const synergy = 0.0015 * (teamCtx.support - 50);
 		// Volume tax: a low-usage role player picks his shots, a 33%-usage hub
-		// takes what the defence gives him. Keeps pass-first guards from being
+		// takes what the defense gives him. Keeps pass-first guards from being
 		// the least efficient scorers on the floor.
 		const loadAdj = -0.30 * (usgRate - 0.245);
 
@@ -917,14 +917,14 @@
 		   against 35.2 — a three-point-per-attempt error caused entirely by
 		   measuring the class against the wrong reference player.
 
-		   Returning rotation players are synthesised from talent and already
+		   Returning rotation players are synthesized from talent and already
 		   sit on the reference, so the shift is the prospect's alone. */
 		const refVol = me.filler ? 0 : (ctx.classRefVolume || 0);
 		const refEff = me.filler ? 0 : (ctx.classRefEfficiency || 0);
 
 		// Turnovers: draft-year mean 17.2% of possessions (p5 10.7, p95 24.5),
-		// essentially flat across sizes. A ball-pressure defence forces more.
-		// Skill composites are centred at what a typical prospect of this size
+		// essentially flat across sizes. A ball-pressure defense forces more.
+		// Skill composites are centered at what a typical prospect of this size
 		// actually scores on them (~45 base ratings, hgt = 30+55*bigness), so
 		// only above/below-typical skill moves the rate off its empirical anchor.
 		/* Returning rotation players give the ball away a little more often than
@@ -973,8 +973,8 @@
 
 		// Shot mix: 3PA share anchored to the height buckets (.39 for guards
 		// down to .085 for 6'11"+), stretched by shooting talent.
-		// The system he plays in. A shooter at a four-out programme and the same
-		// shooter in a pack-line offence do not take the same shots.
+		// The system he plays in. A shooter at a four-out program and the same
+		// shooter in a pack-line offense do not take the same shots.
 		const style = teamCtx.style || { three: 0, rim: 0, press: 0 };
 		let share3 = CAL.threeShare(bigness, ratings.tp + refVol * 100) + style.three +
 			rng.normal(0, 0.045 * noise);
@@ -988,10 +988,10 @@
 		const touch = rng.normal(0, 1);
 		const mix = (t, e) => 0.707 * t + 0.707 * e;
 
-		// Percentages. 3P% centres near the draft-year median of .348 for a
+		// Percentages. 3P% centers near the draft-year median of .348 for a
 		// real shooter; the floor lets non-shooters brick their token attempts.
 		// The slope on the shooting composite is steep on purpose: the measured
-		// spread used to run 34.8% for guards to 31.1% for centres with almost
+		// spread used to run 34.8% for guards to 31.1% for centers with almost
 		// nothing between an elite shooting big and a non-shooting guard, when
 		// the real range is 27% to 40% *within* every size band.
 		/* The ceiling used to allow 56% from three on token volume, which is
@@ -1011,13 +1011,13 @@
 		);
 		// Rim/mid split and finishing: rim FG% runs .59 (guards) to .72 (bigs).
 		// The calibration table already carries the height effect, so the skill
-		// composites (which lean heavily on hgt) are centred at what a player of
+		// composites (which lean heavily on hgt) are centered at what a player of
 		// this size typically scores on them, to avoid double-counting height.
 		// Rim attempts are ~50% of 2PA for guards and ~55% for centers in the
 		// data — nearly flat; the size effect lives in rim FG%, not shot mix.
 		const rimMix = clamp(0.49 + 0.06 * bigness + style.rim +
 			0.10 * (comps.shootingAtRim - comps.shootingMidRange), 0.30, 0.75);
-		// Interior defence bites hardest exactly where it should: at the rim.
+		// Interior defense bites hardest exactly where it should: at the rim.
 		const insideEff = CAL.byHeight("rimPct", bigness) + CAL.effShift("inside") + envEff +
 			0.26 * (comps.shootingAtRim - (0.32 + 0.44 * bigness) + refEff) +
 			0.16 * (comps.shootingLowPost - (0.40 + 0.17 * bigness) + refEff) -
@@ -1129,7 +1129,7 @@
 
 		/* --- the defensive box score --------------------------------------
 		   Steals and blocks were the whole of a player's defensive record,
-		   which is why defensive honours had almost nothing to rank on. These
+		   which is why defensive honors had almost nothing to rank on. These
 		   are the plays that decide the other two-thirds of it. All three are
 		   real, tracked college statistics. */
 		/* A defensive breakout multiplies the plays a defensive record is made
@@ -1244,8 +1244,8 @@
 		   AVERAGE D-I rotation scores, so an average roster gets a factor of
 		   exactly 1 and the pool constant beside it means what it says. They
 		   were hand-set and drifted away from the filler bases they mirror: a
-		   returning player's passing composite synthesises to about 0.43 while
-		   the scale was centred on 0.47, so every team in the country was
+		   returning player's passing composite synthesizes to about 0.43 while
+		   the scale was centered on 0.47, so every team in the country was
 		   multiplied by 0.95 and team assists came out 5% light while the pool
 		   constant itself looked correct. See POOL_BASE. */
 
@@ -1311,7 +1311,7 @@
 			   genuine 7'2" rim protector should block 6-7 a game and a team
 			   of guards should block 2, rather than everybody clustering at
 			   3.5. Sensitivity up (1.70 → 2.30) and the floor down, mean
-			   unchanged because scale() is centred on POOL_BASE. */
+			   unchanged because scale() is centered on POOL_BASE. */
 			blkPool: 4.0 * scale(agg("blocking", 0.70), POOL_BASE.blocking, 2.30, 0.45, 2.20),
 			pfPool: TUNING.TEAM_PF * scale(agg("fouling", 0.20), POOL_BASE.fouling, 0.60, 0.80, 1.25),
 		};
@@ -1329,13 +1329,13 @@
 		const fillers = sorted.filter((m) => m.filler);
 		/* At least two returning players even on a prospect-stacked roster: a
 		   school with 12+ prospects used to get a rotation of nothing but
-		   draft picks, which no real programme has ever iced. */
+		   draft picks, which no real program has ever iced. */
 		const size = Math.max(9, prospects.length + (fillers.length ? 2 : 0));
 		const members = prospects
 			.concat(fillers.slice(0, Math.max(0, size - prospects.length)))
 			.sort((a, b) => b.talent - a.talent);
 
-		// Composites: real ones for prospects, synthesised for filler teammates.
+		// Composites: real ones for prospects, synthesized for filler teammates.
 		// Filler bases sit ~12% above the old values so returning players score
 		// composites on the same scale real BBGM rating vectors produce —
 		// otherwise prospects out-composite everyone on top of out-talenting them.
@@ -1358,7 +1358,7 @@
 				   D-I rotation anchor — but it was fitted while the prospects
 				   being tested were drawn from a class averaging 0.450 on the
 				   same composite. A realistically shaped draft class averages
-				   0.394, and the 23% gap in the filler's favour is amplified by
+				   0.394, and the 23% gap in the filler's favor is amplified by
 				   USG_EXP into a large weight gap: real prospects were losing
 				   possessions to invented teammates, which is the whole of the
 				   class-level scoring shortfall. Usage is zero-sum inside a
@@ -1413,22 +1413,22 @@
 		// steep because BBGM's usage composite only spans ~0.22-0.52 in a real
 		// class — a shallow curve leaves the clamp doing all the separating.
 		/* The size tilt is explicit and deliberate. BBGM's usage composite
-		   weights `ins` at 1.5 and `hgt` at 0.5, so in a specialised class the
-		   bigs win it outright and the sim produced centres scoring 13.6 a game
+		   weights `ins` at 1.5 and `hgt` at 0.5, so in a specialized class the
+		   bigs win it outright and the sim produced centers scoring 13.6 a game
 		   against guards' 10.9 — backwards for a draft class, where guards are
 		   the volume scorers. This puts the ordering back without touching the
 		   composite the rest of the model depends on. */
 		const bignessOf = (i) => clamp((comps[i].blocking - 0.18) / 0.55, 0, 1);
 		/* The tilt was strengthened (0.50 -> 0.85). It corrected the ORDERING of
-		   raw usage and then the soft ceiling and the renormalisation absorbed
+		   raw usage and then the soft ceiling and the renormalization absorbed
 		   most of it back: at equal overall rating a seven-footer and a guard
 		   finished on the same 26% usage, so the big won the scoring title on
 		   efficiency alone (58.7% from the floor against 45.2%) and outscored
 		   the guard by 1.7 a game. Efficiency by size is right — real D-I
-		   centres do shoot in the high fifties — so the fix is on the volume
+		   centers do shoot in the high fifties — so the fix is on the volume
 		   side, where a draft class's guards really do carry more of the
-		   offence than its centres. At 1.05 an overall-matched guard, wing and
-		   centre score within half a point of one another, with the guard
+		   offense than its centers. At 1.05 an overall-matched guard, wing and
+		   center score within half a point of one another, with the guard
 		   ahead — which is the ordering a draft board shows. */
 		/* Role usage. BBGM's usage composite reads shot-making, not the role a
 		   coach hands a player, so the archetype says what the composite
@@ -1447,7 +1447,7 @@
 
 		// Physical envelope: while on the floor nobody uses more than USG_CAP of
 		// team chances (Trae Young ran ~34%, Cam Thomas ~34%), and no DRAFTED
-		// player disappears from the offence — the draft-year p5 is USG 17.8,
+		// player disappears from the offense — the draft-year p5 is USG 17.8,
 		// so prospects floor near 15.5% where fillers may fade to 10%. usgShare
 		// is a share of *all* team chances, so the bounds scale with minutes.
 		// Same soft saturation as minutes: 15% of prospects used to sit on
@@ -1479,7 +1479,7 @@
 			   every good prospect converge on the same number.
 
 			   The intercept came down (0.268 -> 0.253) because the cap was only
-			   ever binding for one population: a prospect at a weak programme,
+			   ever binding for one population: a prospect at a weak program,
 			   where nobody else can take a shot. High-major prospects average
 			   25% usage and never reach it; mid-major ones sat on it, which is
 			   most of why the same overall rating produced 16.7 points a game
@@ -1549,7 +1549,7 @@
 		const teamTalent = members.reduce((a, m, i) => a + m.talent * mins[i], 0) / teamMinutes;
 
 		// Pace: D-I takes the slider, every other league takes its own. The
-		// slider is labelled "College season", and it used to silently rewrite
+		// slider is labeled "College season", and it used to silently rewrite
 		// EuroLeague and G League box scores.
 		const stylePace = (team.style && team.style.pace) || 0;
 		const pace = env.pace !== null && env.pace !== undefined
@@ -1614,10 +1614,10 @@
 		// number the pools above were sized with, so statLine and teamPools
 		// agree by construction.
 		teamCtx.pace = jitteredPace;
-		/* Published, so the award model can normalise a counting-stat resume
+		/* Published, so the award model can normalize a counting-stat resume
 		   for tempo. PROGRAM_STYLES moves possessions by +/-5.5 a game and
 		   productionScore was raw per-game volume, which tilted the entire
-		   honours list towards run-and-gun schools. */
+		   honors list towards run-and-gun schools. */
 		team.pace = teamCtx.pace;
 		/* The rating rows the stat model reads, built once. statLine only needs
 		   hgt, ft, tp and pss off a ratings row (everything else comes from the
@@ -1630,7 +1630,7 @@
 		   returning players in the country shot from the identical raw ratings
 		   — no 90% free-throw shooter, no 48% big — while their composites
 		   varied. Backed out of the shooting composites the filler already
-		   drew (deterministic, no extra rng draws), centred on each filler's
+		   drew (deterministic, no extra rng draws), centered on each filler's
 		   own talent-scaled expectation so the FIELD mean stays exactly on
 		   the calibration anchors (43 and 45) while individual fillers spread
 		   ±6-8 rating points around them. */
@@ -1716,7 +1716,10 @@
 				   prospects-only fit down to talent 30 predicted a scoring
 				   line of roughly zero for a low-major's leading scorer). */
 				field.push({ talent: m.talent, rotationIndex: i, mpg: mins[i], line,
-					// Identity, so an award a returner wins can name him.
+					// Identity, so an award a returner wins can name him —
+					// and a key, so a link can reach him. Star returners
+					// took trophies under a name that nothing could click.
+					key: "field:" + team.name + ":" + i,
 					name: m.name, classYear: m.classYear || null,
 					starReturner: m.starReturner || null });
 				continue;
@@ -1737,12 +1740,12 @@
 		   check.
 
 		   Saturating each player's raw share against the pool was not enough:
-		   the per-player noise means the realised team total is not the pool,
+		   the per-player noise means the realized team total is not the pool,
 		   so a player capped at 62% of the pool could still finish with 67% of
 		   what his team actually recorded — measured 0.672 of team assists
 		   against a documented 0.62, and 0.429 of team rebounds against 0.40.
 
-		   One pass here renormalises each category to its pool (so the team
+		   One pass here renormalizes each category to its pool (so the team
 		   total IS the pool) and then clips the tail at the cap, handing the
 		   clipped surplus to the players with room. Below the cap nothing
 		   moves, so the distribution keeps the shape statLine gave it. */
@@ -1786,14 +1789,14 @@
 		return out;
 	}
 
-	/* Renormalise one category to its pool, then clip the tail at `cap` of the
+	/* Renormalize one category to its pool, then clip the tail at `cap` of the
 	   team total and redistribute the surplus to everyone with room. */
 	function fitToPool(values, pool, cap) {
 		/* Clipped first, and the sum taken from the clipped values.
 
-		   A negative input would make its own renormalised share negative and
+		   A negative input would make its own renormalized share negative and
 		   would also shrink the denominator, inflating everyone else — and a
-		   set that summed to zero because its negatives cancelled its
+		   set that summed to zero because its negatives canceled its
 		   positives took the early return and came back unchanged, negatives
 		   included. Nothing upstream produces a negative; clipping here means
 		   nothing downstream has to assume that. */
@@ -1939,28 +1942,62 @@
 		// independent coin flips around the mean.
 		let form = rng.normal(0, 1);
 		const games = [];
+		/* Night-to-night spread. It used to be sd = rel * avg + floor, with
+		   rel 0.34 for points — which put a 27-point scorer at a per-game SD
+		   of 13 against the 7-8 a real high-major volume scorer carries, and
+		   over 47,000 sampled games produced 43 nights of 50, eight of 60 and
+		   an 81. A counting stat is Poisson-like: its spread grows with the
+		   SQUARE ROOT of its average, not with the average, so the SD is
+		   a * sqrt(avg) + b, fitted to real box-score spreads (a 27-point
+		   scorer about 7.7, a 15-point scorer 5.8, a 5-point reserve 3.6).
+		   Fouls are tighter still because a coach manages them — a man on
+		   four sits — and the old 0.42 relative SD against a mean near 3 with
+		   a hard ceiling at 5 fouled a starter out of 20-30% of his games
+		   against a real 3-6%. The third number is how much of the night's
+		   form reaches the stat: scoring rides it, fouls barely do. */
+		const SPREAD = {
+			pts: [1.35, 0.6, 1.0], reb: [1.0, 0.4, 0.8], ast: [0.95, 0.3, 0.8],
+			stl: [0.85, 0.2, 0.4], blk: [0.85, 0.2, 0.4], tov: [0.85, 0.2, 0.5],
+			fouls: [0.45, 0.12, 0.25],
+		};
+		/* A night's ceiling is his minutes, not a flat multiple of his
+		   average: a 12-minute reserve does not score 30, and a 35-minute
+		   scorer's 55 is a once-a-decade line, not a once-a-season one.
+		   Anything drawn above the ceiling is compressed toward it rather
+		   than clipped, so the tail still exists. */
+		const mpg = Number.isFinite(s.mpg) ? s.mpg : 30;
+		const CEIL = {
+			pts: 4 + 1.55 * mpg, reb: 3 + 0.6 * mpg, ast: 2 + 0.42 * mpg,
+			stl: 2 + 0.2 * mpg, blk: 2 + 0.2 * mpg, tov: 2 + 0.25 * mpg,
+			// Below five: a man on four sits, so the draw bends before the cap.
+			fouls: 4.5,
+		};
 		for (let i = 0; i < schedule.length; i++) {
 			if (missed.has(i)) continue;
 			form = 0.62 * form + 0.78 * rng.normal(0, 1);
 			const g = schedule[i];
 			// A little more upside against a good opponent playing at home.
 			const lift = (g.home > 0 ? 0.055 : 0) + (g.quality > 55 ? 0.04 : 0);
-			const draw = (avg, rel, floorAt) => {
-				const sd = rel * avg + floorAt;
-				return Math.max(0, avg * (1 + lift) + sd * (0.55 * form + 0.83 * rng.normal(0, 1)));
+			const draw = (key, avg) => {
+				const [a, b, fw] = SPREAD[key];
+				const sdev = a * Math.sqrt(Math.max(0, avg)) + b;
+				let v = avg * (1 + lift) + sdev * (0.55 * fw * form + 0.83 * rng.normal(0, 1));
+				const ceil = CEIL[key];
+				if (v > ceil) v = ceil + (v - ceil) * (key === "fouls" ? 0.2 : 0.3);
+				return Math.max(0, v);
 			};
 			games.push({
 				i,
 				opp: g.opp, won: g.won, pf: g.pf, pa: g.pa, ot: g.ot, home: g.home,
 				stage: g.stage, round: g.round, quality: g.quality, when: g.when,
 				conference: !!g.conference,
-				pts: draw(s.ppg, 0.34, 2.6),
-				reb: draw(s.rpg, 0.42, 1.1),
-				ast: draw(s.apg, 0.48, 0.9),
-				stl: draw(s.spg, 0.70, 0.5),
-				blk: draw(s.bpg, 0.75, 0.4),
-				tov: draw(s.topg, 0.55, 0.7),
-				fouls: draw(s.pfpg || 0, 0.42, 0.8),
+				pts: draw("pts", s.ppg),
+				reb: draw("reb", s.rpg),
+				ast: draw("ast", s.apg),
+				stl: draw("stl", s.spg),
+				blk: draw("blk", s.bpg),
+				tov: draw("tov", s.topg),
+				fouls: draw("fouls", s.pfpg || 0),
 			});
 		}
 		if (!games.length) return null;
@@ -1978,39 +2015,21 @@
 			stl: s.spg, blk: s.bpg, tov: s.topg, fouls: s.pfpg || 0,
 		};
 		for (const key of Object.keys(targets)) {
-			const cap = key === "fouls" ? 5 : Infinity;
-			const target = targets[key];
-			const total = Math.round(target * games.length);
-			const got = games.reduce((a, g) => a + g[key], 0);
-			const k = got > 1e-9 ? (target * games.length) / got : 0;
-			const scaled = games.map((g) => Math.min(cap, Math.max(0, g[key] * k)));
-			const base = scaled.map((v) => Math.floor(v));
-			let sum = 0;
-			for (const v of base) sum += v;
-			let need = total - sum;
-			const order = scaled
-				.map((v, i) => ({ i, r: v - base[i] }))
-				.sort((a, b) => b.r - a.r);
-			for (let j = 0; need > 0 && j < order.length; j++) {
-				if (base[order[j].i] < cap) { base[order[j].i]++; need--; }
-			}
-			// A capped stat can leave the total short (a season average of
-			// fouls the cap forbids). Fill any room left, then stop: the cap
-			// wins over the total, by construction.
-			let guard = 0;
-			while (need > 0 && guard++ < 8) {
-				for (let i = 0; i < base.length && need > 0; i++) {
-					if (base[i] < cap) { base[i]++; need--; }
-				}
-			}
-			games.forEach((g, i) => { g[key] = base[i]; });
+			allocate(games, key, games.map((g) => g[key]),
+				Math.round(targets[key] * games.length),
+				key === "fouls" ? () => 5 : null);
 		}
+
+		/* Minutes and the shooting line behind the points. The log carried
+		   counting stats only, so "best game" could say he scored 30 and
+		   not whether it was 11-of-15 or a 28-shot night. */
+		attachMinutesAndShooting(games, s, rng);
 
 		/* Plus/minus, which a modern box score carries and this one did
 		   not. His team's margin that night, scaled by how much of it he
 		   was on the floor for, plus the real night-to-night variance of a
 		   lineup number. On/off is the difference between his per-40
-		   plus/minus and the team's margin — an estimate, and labelled as
+		   plus/minus and the team's margin — an estimate, and labeled as
 		   one in the view. */
 		const share = Math.min(1, s.mpg / 40);
 		for (const g of games) {
@@ -2076,6 +2095,202 @@
 			splits: phaseSplits(games),
 			postseason: postseasonSplit(games),
 		};
+	}
+
+	/* Hand out an integer total across games by largest remainder, scaling
+	   the raw draws so they sum to the target first. `capOf(g)` is a per-game
+	   ceiling (five fouls, the minutes a game had); the cap wins over the
+	   total, by construction. */
+	function allocate(games, key, raw, total, capOf) {
+		const got = raw.reduce((a, v) => a + v, 0);
+		const k = got > 1e-9 ? total / got : 0;
+		const cap = (i) => (capOf ? capOf(games[i]) : Infinity);
+		const scaled = raw.map((v, i) => Math.min(cap(i), Math.max(0, v * k)));
+		const base = scaled.map((v) => Math.floor(v));
+		let sum = 0;
+		for (const v of base) sum += v;
+		let need = total - sum;
+		const order = scaled
+			.map((v, i) => ({ i, r: v - base[i] }))
+			.sort((a, b) => b.r - a.r);
+		for (let j = 0; need > 0 && j < order.length; j++) {
+			if (base[order[j].i] < cap(order[j].i)) { base[order[j].i]++; need--; }
+		}
+		// A capped stat can leave the total short. Fill any room left, then
+		// stop.
+		let guard = 0;
+		while (need > 0 && guard++ < 8) {
+			for (let i = 0; i < base.length && need > 0; i++) {
+				if (base[i] < cap(i)) { base[i]++; need--; }
+			}
+		}
+		games.forEach((g, i) => { g[key] = base[i]; });
+	}
+
+	/* Per-game minutes and shooting, reconciled to the season line.
+
+	   Minutes sit around his average, run longer in overtime, and are cut on
+	   the nights he fouled out. Attempts follow the scoring night — a
+	   30-point game is a 20-shot game — and sum to the season's attempts
+	   exactly. Makes are then solved per game so that
+	   2 * (FGM - 3PM) + 3 * 3PM + FTM equals the points already in the log,
+	   and a final exchange pass (a three for a two-and-a-free-throw, a two
+	   for two free throws — both points-neutral) moves the season's FGM
+	   and 3PM totals onto the line's own, so the percentages a reader
+	   recomputes off the log are the percentages beside it. */
+	function attachMinutesAndShooting(games, s, rng) {
+		const n = games.length;
+		const mpg = Number.isFinite(s.mpg) ? s.mpg : 0;
+		const gameMin = (g) => 40 + 5 * (g.ot || 0);
+		const rawMin = games.map((g) => {
+			let m = mpg + rng.normal(0, 0.11 * mpg + 1.4);
+			if (g.ot) m += 2.5 * g.ot * Math.min(1, mpg / 30);
+			if (g.fouls >= 5) m = Math.min(m, Math.max(4, mpg * 0.8));
+			return Math.max(0, Math.min(gameMin(g), m));
+		});
+		allocate(games, "min", rawMin, Math.round(mpg * n), gameMin);
+
+		if (!Number.isFinite(s.fga) || !Number.isFinite(s.fgp) ||
+			!Number.isFinite(s.tpa) || !Number.isFinite(s.fta)) return;
+		const ppg = s.ppg || 0;
+		// Usage moves with the scoring night, less than one-for-one.
+		const shape = (g) => (ppg > 0.5 ? 0.5 + 0.5 * (g.pts / ppg) : 1);
+		allocate(games, "fga",
+			games.map((g) => Math.max(0, s.fga * shape(g) * (1 + rng.normal(0, 0.14)))),
+			Math.round(s.fga * n), null);
+		const tpShare = s.fga > 0 ? s.tpa / s.fga : 0;
+		allocate(games, "tpa",
+			games.map((g) => Math.max(0, g.fga * tpShare * (1 + rng.normal(0, 0.28)))),
+			Math.round(s.tpa * n), (g) => g.fga);
+		allocate(games, "fta",
+			games.map((g) => Math.max(0, s.fta * shape(g) * (1 + rng.normal(0, 0.32)))),
+			Math.round(s.fta * n), null);
+
+		/* Every game has to be scorable from its own attempts: the most a
+		   line can produce is 2 * FGA + 3PA + FTA. Where a big night drew too
+		   few shots, take attempts from the game with the most slack. */
+		const capacity = (g) => 2 * g.fga + g.tpa + g.fta;
+		for (let guard = 0; guard < 200; guard++) {
+			const short = games.filter((g) => capacity(g) < g.pts)
+				.sort((a, b) => (b.pts - capacity(b)) - (a.pts - capacity(a)))[0];
+			if (!short) break;
+			const donor = games.filter((g) => g !== short && g.fga - g.tpa > 0 &&
+				capacity(g) - g.pts >= 2)
+				.sort((a, b) => (capacity(b) - b.pts) - (capacity(a) - a.pts))[0];
+			if (!donor) { short.fga++; continue; }
+			donor.fga--;
+			short.fga++;
+		}
+
+		/* Move one MISSED attempt from another game into `g`. A miss is
+		   points-neutral wherever it sits, so this changes nothing a reader
+		   can recompute; it only gives a game the room it needs. Makes are
+		   solved after the moves, so a "miss" here is an attempt above the
+		   makes the game will end up with. */
+		const spareTwo = (d) => (d.fga - d.tpa) - Math.max(0, (d.fgm || 0) - (d.tpm || 0));
+		const spareThree = (d) => d.tpa - (d.tpm || 0);
+		const spareFt = (d) => d.fta - (d.ftm || 0);
+		const borrow = (g, kind) => {
+			const spare = kind === "2a" ? spareTwo : kind === "3a" ? spareThree : spareFt;
+			const d = games.filter((x) => x !== g && spare(x) >= 1)
+				.sort((a, b) => spare(b) - spare(a))[0];
+			if (!d) return false;
+			if (kind === "2a") { d.fga--; g.fga++; }
+			else if (kind === "3a") { d.fga--; d.tpa--; g.fga++; g.tpa++; }
+			else { d.fta--; g.fta++; }
+			return true;
+		};
+
+		// Season make totals, forced onto the points already in the log.
+		const ptsT = games.reduce((a, g) => a + g.pts, 0);
+		const fgaT = games.reduce((a, g) => a + g.fga, 0);
+		const tpaT = games.reduce((a, g) => a + g.tpa, 0);
+		const ftaT = games.reduce((a, g) => a + g.fta, 0);
+		let tpmT = Math.min(tpaT, Math.round(s.tpa * s.tpp * n));
+		let fgmT = Math.max(tpmT, Math.min(fgaT, Math.round(s.fga * s.fgp * n)));
+		let ftmT = ptsT - 2 * fgmT - tpmT;
+		// Free throws absorb the rounding; a shortfall or an excess beyond
+		// the attempts is taken out of the two-point makes.
+		if (ftmT < 0) { fgmT += Math.ceil(ftmT / 2); ftmT = ptsT - 2 * fgmT - tpmT; }
+		if (ftmT > ftaT) { fgmT += Math.floor((ftmT - ftaT) / 2); ftmT = ptsT - 2 * fgmT - tpmT; }
+		if (ftmT < 0 || ftmT > ftaT || fgmT > fgaT || fgmT < tpmT) {
+			// A line the attempts cannot carry (they were drawn from the
+			// same line, so this is rounding): fall back to the identity
+			// per game and let the totals land where they land.
+			fgmT = null;
+		}
+
+		/* Per-game makes: the fewest moves from the expected makes that
+		   satisfy the points identity within the game's attempts. A game
+		   with no way to make its total (one point and no free throw, two
+		   points from nothing but threes) borrows the attempt it lacks. */
+		const solveGame = (g) => {
+			const twoA = g.fga - g.tpa;
+			const tpm0 = g.tpa * (s.tpp || 0);
+			const ftm0 = g.fta * (s.ftp || 0);
+			let best = null;
+			for (let tpm = 0; tpm <= g.tpa; tpm++) {
+				for (let ftm = 0; ftm <= g.fta; ftm++) {
+					const rest = g.pts - 3 * tpm - ftm;
+					if (rest < 0 || rest % 2 !== 0) continue;
+					const two = rest / 2;
+					if (two > twoA) continue;
+					const cost = Math.abs(tpm - tpm0) + Math.abs(ftm - ftm0) +
+						0.5 * Math.abs(two - twoA * (s.fgp || 0.45));
+					if (!best || cost < best.cost) best = { tpm, ftm, two, cost };
+				}
+			}
+			return best;
+		};
+		for (const g of games) {
+			let best = solveGame(g);
+			for (let tries = 0; !best && tries < 4; tries++) {
+				if (!borrow(g, "fta")) g.fta++;
+				best = solveGame(g);
+			}
+			if (!best) best = { tpm: 0, ftm: Math.min(g.fta, g.pts), two: 0 };
+			g.tpm = best.tpm;
+			g.ftm = best.ftm;
+			g.fgm = best.two + best.tpm;
+		}
+		if (fgmT === null) return;
+
+		/* The exchange pass. Each move is points-neutral inside one game:
+		   a three becomes a two and a free throw (or back), and a two
+		   becomes two free throws (or back). The MAKES a move needs have to
+		   be in the game already; the attempts it needs can be borrowed. */
+		const tot = (k) => games.reduce((a, g) => a + g[k], 0);
+		const madeTwo = (g) => g.fgm - g.tpm;
+		const attempt = (g, kinds) => {
+			for (const k of kinds) {
+				const spare = k === "2a" ? spareTwo : k === "3a" ? spareThree : spareFt;
+				const want = k === "fta" && kinds.filter((x) => x === "fta").length;
+				while (spare(g) < (want || 1)) if (!borrow(g, k)) return false;
+			}
+			return true;
+		};
+		const exchange = (pred, kinds, apply) => {
+			const g = games.filter(pred).sort((a, b) => b.pts - a.pts)[0];
+			if (!g || !attempt(g, kinds)) return false;
+			apply(g);
+			return true;
+		};
+		for (let guard = 0; guard < 400 && tot("tpm") !== tpmT; guard++) {
+			const moved = tot("tpm") < tpmT
+				? exchange((g) => madeTwo(g) >= 1 && g.ftm >= 1, ["3a"],
+					(g) => { g.tpm++; g.ftm--; })
+				: exchange((g) => g.tpm >= 1, ["2a", "fta"],
+					(g) => { g.tpm--; g.ftm++; });
+			if (!moved) break;
+		}
+		for (let guard = 0; guard < 400 && tot("fgm") !== fgmT; guard++) {
+			const moved = tot("fgm") < fgmT
+				? exchange((g) => g.ftm >= 2, ["2a"],
+					(g) => { g.fgm++; g.ftm -= 2; })
+				: exchange((g) => madeTwo(g) >= 1, ["fta", "fta"],
+					(g) => { g.fgm--; g.ftm += 2; });
+			if (!moved) break;
+		}
 	}
 
 	function meanOf(games, key) {

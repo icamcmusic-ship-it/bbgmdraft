@@ -1,4 +1,4 @@
-/* The pipeline: league file in, customised league file (plus a whole simulated
+/* The pipeline: league file in, customized league file (plus a whole simulated
    college season) out.
 
    run() is a thin wrapper over a staged pipeline (see PHASES). Each stage
@@ -13,6 +13,7 @@
 	const BB = global.BBGM;
 	const C = global.Colleges;
 	const RB = global.RatingsBuilder;
+	const Text = global.Text;
 	const T = global.TeamsSim;
 	const S = global.StatsSim;
 	const TN = global.Tournament;
@@ -223,7 +224,7 @@
 	}
 
 	function assignCollege(rng, player, cfg) {
-		if (player.college && player.college.trim() !== "") return player.college;
+		if (player.college && player.college.trim() !== "") return C.canonical(player.college);
 		if (rng.chance(clamp(cfg.pDII, 0, 1))) return "DII NCAA";
 		const loc = player.born && player.born.loc;
 		const weights = cfg.leagueWeights || {};
@@ -448,7 +449,7 @@
 	   "reroll the class and hope the other sixty-nine come back the same". */
 	/* The class-wide variation salt. Appended to every PER-PLAYER stream key
 	   and to nothing else, so cfg.variation re-rolls the sixty-eight men inside
-	   a class whose flavour, build pool, curve and environment are unchanged.
+	   a class whose flavor, build pool, curve and environment are unchanged.
 
 	   Empty at variation 0, which is what keeps every seed and every shareable
 	   link ever made resolving to exactly the class it always did. */
@@ -486,19 +487,19 @@
 
 	/* ------------------------------------------------------------- phase 1 */
 
-	/* Apply a flavour's config bend to the settings the user has left alone.
+	/* Apply a flavor's config bend to the settings the user has left alone.
 	   Compared against Config.DEFAULTS key by key: a value the user moved is
 	   theirs and is not touched. */
 	/* The three legacy destination sliders. Config.make folds these into
 	   `leagueWeights` — which is what assignCollege actually reads — and it does
-	   so at make() time, BEFORE a flavour bend runs. So a flavour that set
+	   so at make() time, BEFORE a flavor bend runs. So a flavor that set
 	   wEuroLeague wrote a number nothing read: measured, the "unusually
-	   international" flavour, whose whole purpose is to put more of the class
+	   international" flavor, whose whole purpose is to put more of the class
 	   abroad, produced EuroLeague at 11.9% of non-NCAA prospects against 11.9%
-	   with no flavour at all. Same for every value it set.
+	   with no flavor at all. Same for every value it set.
 
 	   Folding them again here fixes that, and only when the user has not
-	   touched the destination table themselves — a flavour nudges what the user
+	   touched the destination table themselves — a flavor nudges what the user
 	   has not decided and never overrules what they have, which is the rule the
 	   rest of this function follows. */
 	const LEGACY_LEAGUE = {
@@ -518,11 +519,11 @@
 		if (!bend) return cfg;
 		const out = Object.assign({}, cfg);
 		const D = global.Config.DEFAULTS;
-		/* The bend scales with flavour strength, like the tag multipliers
+		/* The bend scales with flavor strength, like the tag multipliers
 		   always did. It used to be applied at full size whatever the slider
-		   said, so for the narrative flavours whose whole point IS the bend
-		   (injury year, blue bloods down, mid-major year…) the slider labelled
-		   "how strongly the flavour leans" did essentially nothing: measured,
+		   said, so for the narrative flavors whose whole point IS the bend
+		   (injury year, blue bloods down, mid-major year…) the slider labeled
+		   "how strongly the flavor leans" did essentially nothing: measured,
 		   classFlavor 0.1 and classFlavor 2 both returned the identical
 		   {injuryRate: 2}. Interpolated from the default toward the authored
 		   bend; above 1 it extrapolates mildly (half slope, capped at 1.5x)
@@ -561,17 +562,17 @@
 		const rng = state.rng;
 		const season = leagueFile.startingSeason;
 
-		/* This year's flavour, drawn before anything is built because some
-		   flavours bend the class itself and not only its archetype mix.
+		/* This year's flavor, drawn before anything is built because some
+		   flavors bend the class itself and not only its archetype mix.
 
 		   "A weak year", "one-and-done heavy" and "a transfer-portal class" are
 		   the things a draft class is actually remembered as, and none of them
 		   is expressible as a tilt on archetype weights: they are statements
 		   about how good the top of the class is, how old it is, and how it got
-		   where it is. So a flavour carries a config bend, applied here.
+		   where it is. So a flavor carries a config bend, applied here.
 
 		   A user's own setting always wins. The bend is applied only to
-		   settings still sitting at their default, so a flavour moves what the
+		   settings still sitting at their default, so a flavor moves what the
 		   user has not decided and never overrules what they have. */
 		/* The per-player variation salt. Class-level streams below (flavor,
 		   pool, classEnv) deliberately do NOT take it: that is what makes
@@ -636,7 +637,7 @@
 				age: season - Number(p.born.year),
 				draftRound: p.draft && Number.isFinite(p.draft.round) ? p.draft.round : null,
 				draftPick: p.draft && Number.isFinite(p.draft.pick) ? p.draft.pick : null,
-				origCollege: p.college,
+				origCollege: C.canonical(p.college),
 				origRatings: r,
 				origOvr: r.ovr,
 				origPot: r.pot,
@@ -795,7 +796,7 @@
 
 	/* Every class gets two to four forced anomalies.
 
-	   The class-level knobs were flavour and nothing else, and a class made
+	   The class-level knobs were flavor and nothing else, and a class made
 	   entirely of things the sliders predict is a class with no story in it:
 	   measured over 24 rerolls, the class's mean scoring varied by a standard
 	   deviation of 0.45 points and the distinct-archetype count by 2.7. At the
@@ -951,7 +952,7 @@
 					fifthYear: false,
 				};
 				if (p.recruiting) { p.recruiting.rank = 320; p.recruiting.stars = 2; }
-				p.backstory = "did not play organised basketball until junior college";
+				p.backstory = "did not play organized basketball until junior college";
 			},
 		},
 		{
@@ -1060,7 +1061,7 @@
 			pick: (p) => !p.nonNcaa,
 			apply: (p, r) => {
 				p.backstory = "moved to " + r.pick([
-					"point guard", "the wing", "the four", "centre",
+					"point guard", "the wing", "the four", "center",
 				]) + " for the first time this season";
 			},
 		},
@@ -1322,7 +1323,7 @@
 			apply: (p, r) => {
 				/* The composites are left alone on purpose: what makes this
 				   worth putting on a board is a season better than the tools
-				   that produced it, which is a judgement the user gets to make
+				   that produced it, which is a judgment the user gets to make
 				   rather than one the ratings have already made for them. */
 				p.statBend = Object.assign({}, p.statBend,
 					{ defense: r.uniform(0.35, 0.60) });
@@ -1393,6 +1394,15 @@
 		const ncaa = players.filter((p) => !p.nonNcaa);
 		const order = ncaa.slice().sort((a, b) => b.origOvr - a.origOvr);
 		const n = Math.max(1, order.length);
+		/* Each player's score is drawn independently; the RANK is not. A
+		   rank was rounded and clamped straight off the draw, with no
+		   collision check, so every class carried more than one "No. 1
+		   nationally" recruit — one had two No. 1s and two No. 50s in the
+		   same sophomore cohort. A recruiting ranking is a list: within a
+		   recruiting class (the high-school class he came out of, which is
+		   his class year plus his redshirt year) the noised scores are
+		   sorted and each man takes the next free number. */
+		const cohorts = {};
 		order.forEach((p, i) => {
 			const r = rng.child("rec:" + p.key);
 			const prestige = C.prestige(p.newCollege);
@@ -1400,16 +1410,26 @@
 			// with how good his program is: blue bloods get the blue-chippers.
 			const base = (i / n) * 100;
 			const pull = (60 - prestige) * 0.28;
-			const rank = clamp(Math.round(base + pull + r.normal(0, 14)), 1, 320);
-			const stars = rank <= 8 ? 5 : rank <= 40 ? 4 : rank <= 130 ? 3 : 2;
-			p.recruiting = {
-				rank,
-				stars,
-				// A transfer was recruited somewhere else; a freshman was
-				// recruited here.
-				committed: (p.transfer && p.transfer.from) || p.newCollege,
-			};
+			const score = base + pull + r.normal(0, 14);
+			const cohort = priorYears(p.classYear) + (p.redshirt ? 1 : 0);
+			(cohorts[cohort] = cohorts[cohort] || []).push({ p, score });
 		});
+		for (const key of Object.keys(cohorts)) {
+			const group = cohorts[key].sort((a, b) => a.score - b.score);
+			let last = 0;
+			for (const { p, score } of group) {
+				const rank = Math.max(last + 1, clamp(Math.round(score), 1, 400));
+				last = rank;
+				const stars = rank <= 8 ? 5 : rank <= 40 ? 4 : rank <= 130 ? 3 : 2;
+				p.recruiting = {
+					rank,
+					stars,
+					// A transfer was recruited somewhere else; a freshman was
+					// recruited here.
+					committed: (p.transfer && p.transfer.from) || p.newCollege,
+				};
+			}
+		}
 		// Who the headline signing was at each program, and who shared a class.
 		const bySchool = {};
 		for (const p of ncaa) (bySchool[p.newCollege] = bySchool[p.newCollege] || []).push(p);
@@ -1480,10 +1500,15 @@
 				continue;
 			}
 			const r = rng.child("inj:" + p.key);
+			/* The build's own durability (see injuryMultiplier): an
+			   Injury-Prone Talent is hurt about twice as often as the class,
+			   an Iron Man half as often. It moves the injury roll, not the
+			   ordinary absences — a coach's decision is not a knee. */
+			const build = RB.injuryMultiplier(p.archetype);
 			// The draft-year games-played mean is 33.5 against a ~35-game
 			// schedule, so a bit over half a class misses something.
-			if (r.random() >= 0.54 * rate) continue;
-			const hurt = r.random() < 0.55 * rate;
+			if (r.random() >= 0.54 * rate * (0.6 + 0.4 * build)) continue;
+			const hurt = r.random() < Math.min(0.95, 0.55 * rate * build);
 			const table = hurt ? INJURIES : ABSENCES;
 			const pickKind = r.weighted(table);
 			const games = Math.max(1, Math.round(
@@ -1503,12 +1528,12 @@
 	}
 
 	function phaseRegular(state) {
-		/* The EFFECTIVE config, which is the one the flavour bent. The
-		   narrative flavours ("the year everybody got hurt", "the year the
+		/* The EFFECTIVE config, which is the one the flavor bent. The
+		   narrative flavors ("the year everybody got hurt", "the year the
 		   blue bloods fell over") move settings this phase reads —
 		   injuryRate, the realignment rate, the down-year count — and reading
 		   state.cfg here would have silently discarded every one of them.
-		   Safe against the phase cache: the flavour is drawn in the build
+		   Safe against the phase cache: the flavor is drawn in the build
 		   phase, so anything that changes it re-runs this phase too. */
 		const cfg = state.effectiveCfg || state.cfg;
 		const rng = state.rng;
@@ -1546,7 +1571,7 @@
 
 	/* Recruiting class rankings (§8.8). Per-player recruiting data existed —
 	   rank, stars, committed — but the aggregate every fan actually argues
-	   about did not. To rank all 368 programmes the class needs synthetic
+	   about did not. To rank all 368 programs the class needs synthetic
 	   recruits for every school (the same move the returning-talent model
 	   makes); real prospects keep the national rank assignRecruiting gave
 	   them and the synthetics fill the remaining slots in quality order.
@@ -1653,7 +1678,7 @@
 
 	function phasePostseason(state) {
 		// The bent config, for the same reason phaseRegular reads it: the
-		// narrative flavours move upsetFactor.
+		// narrative flavors move upsetFactor.
 		const { teams } = state;
 		const cfg = state.effectiveCfg || state.cfg;
 		const rng = state.rng;
@@ -1709,7 +1734,7 @@
 
 		/* What each program's opponents actually looked like defensively. This
 		   is the channel that lets a conference of rim protectors hold everyone
-		   under their season rim percentage — before it, team defence affected
+		   under their season rim percentage — before it, team defense affected
 		   nothing but the scoreboard. */
 		const profiles = {};
 		const shooting = {};
@@ -1808,7 +1833,7 @@
 	   So a prior season is SIMULATED, through the same stat model the draft
 	   year goes through: the prospect at the ratings he had then, with that
 	   year's class year (so the experience curve and the college-role draw
-	   apply), in a rotation rebuilt at his programme's level for that year.
+	   apply), in a rotation rebuilt at his program's level for that year.
 	   The cost is one team simulation per prior season — a few hundred against
 	   the 368 the season itself runs — and `cfg.priorSeasons` turns it off,
 	   which restores the old reconstruction exactly.
@@ -1841,7 +1866,7 @@
 	   player is one who was further back. */
 	function ovrYearsAgo(p, i) {
 		/* talentPot, not newPot: this runs in the stats phase, and newPot is
-		   finalised by the pot phase after it — so on a cold run this read the
+		   finalized by the pot phase after it — so on a cold run this read the
 		   build-phase provisional and on a warm re-run it read the previous
 		   pass's adjusted value, which made prior seasons differ between the
 		   two. talentPot is set in the build phase for exactly this purpose
@@ -1854,9 +1879,9 @@
 	/* One prior season, simulated. Returns a stat line or null. */
 	function simulatePriorSeason(p, i, teams, season, cfg, rng, classRefVolume, classRefEfficiency) {
 		if (!p.buildCleanBase || !RB.resolveTo) return null;
-		/* The rotation is built at his CURRENT programme's level even when the
+		/* The rotation is built at his CURRENT program's level even when the
 		   row names the school he transferred from, because that school is a
-		   string in a biography and not a simulated programme — a JUCO, "a Big
+		   string in a biography and not a simulated program — a JUCO, "a Big
 		   Ten program", a club in Australia. The row still names it; what the
 		   level stands in for is "a place of roughly this quality", which is
 		   the only thing the simulation needs from it. */
@@ -1880,11 +1905,11 @@
 			availability: null,
 			statSalt: "|prior" + i,
 		};
-		/* A rotation rebuilt at the programme's level for that year, with the
+		/* A rotation rebuilt at the program's level for that year, with the
 		   men he was BEHIND actually on it.
 
 		   Without them a freshman year came out better than the draft year:
-		   nine synthesised role players leave the one real prospect all the
+		   nine synthesized role players leave the one real prospect all the
 		   minutes and all the shots, so a 45-overall sophomore's freshman
 		   season read 32 minutes and 15 points and his actual sophomore season
 		   read 32 and 13. The thing that makes a freshman year a freshman year
@@ -2024,7 +2049,7 @@
 	   "Potential bias" or "Potential spread" should recompute two numbers, not
 	   re-play a season. */
 	/* Mean usage per archetype across this class, so potFromRole can ask
-	   whether a prospect used more or less of the offence than others of his
+	   whether a prospect used more or less of the offense than others of his
 	   build did — rather than more or less than the class average, which for a
 	   Rim Protector is a question about being a Rim Protector. See potFromRole.
 
@@ -2045,7 +2070,7 @@
 			sums[k] = (sums[k] || 0) + p.stats.usg;
 			counts[k] = (counts[k] || 0) + 1;
 		}
-		const classMean = n ? total / n : RB.ROLE_USG_CENTRE;
+		const classMean = n ? total / n : RB.ROLE_USG_CENTER;
 		/* Returned as sums-and-counts rather than a finished mean, so the
 		   caller can exclude the PLAYER HIMSELF from his own reference. In a
 		   17-build pool over sixty players the rarer builds routinely have
@@ -2069,16 +2094,16 @@
 
 	function phasePot(state) {
 		/* The EFFECTIVE config, for the same reason phaseRegular and phaseStats
-		   read it: the narrative flavours bend settings this phase owns.
+		   read it: the narrative flavors bend settings this phase owns.
 
-		   This read state.cfg, so every flavour's potential bend was computed,
-		   stored on state.effectiveCfg and then never looked at. Four flavours
+		   This read state.cfg, so every flavor's potential bend was computed,
+		   stored on state.effectiveCfg and then never looked at. Four flavors
 		   exist mainly to move these two numbers — "a weak year" sets potSpread
 		   1.2, "old and finished" sets potBias -1.3, "a volatile year" sets
 		   potSpread 3.5, "deep and even" sets 2.5 — and measured, the potential
 		   gap's standard deviation came out at 5.5 under every one of them and
-		   under no flavour at all. The most-advertised effect of four of the
-		   twenty-four flavours did nothing, silently, and nothing could see it
+		   under no flavor at all. The most-advertised effect of four of the
+		   twenty-four flavors did nothing, silently, and nothing could see it
 		   because no row anywhere measured the potential DISTRIBUTION. (One
 		   now does; see tools/validate.js.) */
 		const cfg = state.effectiveCfg || state.cfg;
@@ -2115,8 +2140,8 @@
 		state.ranked = AW.assign(state.players, state.teams, state.tourney,
 			state.effectiveCfg || state.cfg, state.rng.child("awards"));
 		// Lifted off the map before anything iterates it, like __realignment.
-		state.fieldHonours = state.teams.__fieldHonours || [];
-		delete state.teams.__fieldHonours;
+		state.fieldHonors = state.teams.__fieldHonors || [];
+		delete state.teams.__fieldHonors;
 		state.fieldTop = state.teams.__fieldTop || [];
 		delete state.teams.__fieldTop;
 		return state;
@@ -2489,15 +2514,15 @@
 				from = 0;
 			}
 			state.cfg = effective;
-			/* Re-derive the flavour's config bend against the NEW settings.
+			/* Re-derive the flavor's config bend against the NEW settings.
 
-			   Later phases read `effectiveCfg` because the narrative flavours
+			   Later phases read `effectiveCfg` because the narrative flavors
 			   bend settings those phases own (injuryRate, upsetFactor, the
 			   realignment rate). `effectiveCfg` was written once, in the build
 			   phase — so a warm re-run that skipped the build phase left the
 			   postseason reading the previous run's upset factor, and a staged
 			   run stopped matching a cold one. The bend itself is a pure
-			   function of the flavour and the settings, so it is cheap to
+			   function of the flavor and the settings, so it is cheap to
 			   recompute here whether or not the build phase runs. */
 			if (state.flavor !== undefined) {
 				const bent = applyFlavorConfig(effective, state.flavor);
@@ -2539,7 +2564,7 @@
 				risers: state.risers,
 				fallers: state.fallers,
 				draftEvents: state.draftEvents || [],
-			fieldHonours: state.fieldHonours || [],
+			fieldHonors: state.fieldHonors || [],
 			fieldTop: state.fieldTop || [],
 				seasonEvents: state.seasonEvents || [],
 				flavor: state.flavor,
@@ -2594,11 +2619,11 @@
 		"Adriatic League": ["the Mega Basket production line",
 			"a Belgrade youth system", "a Croatian academy"],
 		"LNB Pro A": ["INSEP", "a Villeurbanne youth side", "a Pau-Orthez academy"],
-		"Basketball Bundesliga": ["a Bundesliga youth programme",
+		"Basketball Bundesliga": ["a Bundesliga youth program",
 			"the Ulm youth system", "a Bavarian academy"],
 	};
 	const GENERIC_YOUTH = ["the club's own youth system", "a regional academy",
-		"a national development programme"];
+		"a national development program"];
 	const LOAN_TARGETS = ["a second-division side", "a feeder club",
 		"a lower-division team in the same region", "a club two levels down"];
 	const NATIONAL_TEAMS = {
@@ -2758,7 +2783,7 @@
 					p.proDeal = crng.random() < 0.45 ? "on a two-way contract"
 						: crng.random() < 0.5 ? "as an affiliate player" : "on a standard deal";
 				} else if (lg.youth) {
-					p.proDeal = "in the academy programme";
+					p.proDeal = "in the academy program";
 				} else if (crng.random() < 0.30) {
 					const parent = ranked[Math.floor(crng.random() * Math.min(4, ranked.length))];
 					p.proDeal = parent && parent !== club
@@ -2862,7 +2887,7 @@
 			   alongside it, and the note used to say nothing about it: a
 			   prospect at Real Madrid had a Liga ACB table and no EuroLeague.
 			   The run is drawn from the club's own rating against the
-			   competition's strength; it moves the note, the honours (see
+			   competition's strength; it moves the note, the honors (see
 			   js/awards.js) and nothing about the domestic season, which is
 			   what the scaffolding already simulated. */
 			continentalRuns(lgName, table, lrng.child("continental"));
@@ -2965,6 +2990,7 @@
 	   configurable (cfg.noteLines) rather than hardcoded, so the README no
 	   longer has to explain a fixed set of omissions. */
 	const NOTE_LINES = [
+		["summary", "One-line scouting summary"],
 		["team", "School / club, conference, class year"],
 		["path", "How he got here (recruiting, transfer, redshirt)"],
 		["record", "Team record and postseason result"],
@@ -2979,7 +3005,7 @@
 		["injury", "Games missed and why"],
 		["coach", "Who coaches him, and what kind of year the staff is having"],
 		["archetype", "Archetype label"],
-		["awards", "Honours"],
+		["awards", "Honors"],
 		["stock", "Draft stock and mock position"],
 		/* Where his season places him against the rest of Division I. Every
 		   number on the lines above is a number until something says what it
@@ -2987,7 +3013,56 @@
 		   awards. See rankAgainstField in js/awards.js. */
 		["ranks", "Where he finished nationally and in his conference"],
 	];
-	const DEFAULT_NOTE_LINES = ["team", "stats", "shooting", "signature", "awards"];
+	const DEFAULT_NOTE_LINES = ["summary", "team", "stats", "shooting", "signature", "awards"];
+
+	/* The note's opening sentence. It used to start "School (Conf) · Year"
+	   and go straight to stat lines, which reads like a stat export; a
+	   scout's note opens with what the player IS. Built from the things
+	   the engine already knows — hand, size, class year, position, build,
+	   the one number his season was about, and what the jumper looks like
+	   — and drawn from the player's own key so it survives a re-run. */
+	function noteSummary(p, team, season) {
+		const s = p.stats;
+		const r = p.newRatings || {};
+		const rng = new Rng("summary|" + p.key);
+		const year = String(p.classYear || "").toLowerCase();
+		const size = Number.isFinite(p.newHgtInches)
+			? Math.floor(p.newHgtInches / 12) + "'" + (p.newHgtInches % 12) + "\"" : "";
+		const pos = ({ PG: "point guard", SG: "guard", G: "guard", GF: "wing", SF: "wing",
+			F: "forward", PF: "forward", FC: "big", C: "center" })[p.newPos] || "player";
+		const who = [p.hand === "left" ? "left-handed" : "", size, year, pos]
+			.filter(Boolean).join(" ");
+		const build = p.archetype && p.archetype !== "Balanced"
+			? " built as " + Text.withArticle(p.archetype) : "";
+		// The jumper, which is the first thing after the height and the hand.
+		const shot = Number.isFinite(r.tp)
+			? (r.tp >= 62 ? "a real jumper" : r.tp >= 45 ? "a workable jumper"
+				: r.tp >= 28 ? "a jumper still in progress" : "no jumper to speak of")
+			: "";
+		const ft = s && Number.isFinite(s.ftp) && s.fta >= 1.5
+			? " and " + (s.ftp * 100).toFixed(0) + "% from the line" : "";
+		const where = p.nonNcaa
+			? (p.proClub ? p.proClub + " (" + p.newCollege + ")" : p.newCollege)
+			: p.newCollege;
+		const record = team && Number.isFinite(team.w) && Number.isFinite(team.l)
+			? team.w + "-" + team.l + " " : "";
+		const numbers = s && s.gp > 0
+			? (global.News ? global.News.statBlurb(s) : s.ppg.toFixed(1) + " points a game")
+			: "no season on record";
+		const variants = [
+			() => Text.capitalize(Text.withArticle(who) + build + ": " + numbers +
+				" for " + record + where + (shot ? ", with " + shot + ft : "") + "."),
+			() => Text.capitalize(p.archetype && p.archetype !== "Balanced"
+				? Text.withArticle(p.archetype) + " at " + where + ", " + Text.withArticle(who) +
+					" who put up " + numbers + (shot ? "; " + shot + ft : "") + "."
+				: Text.withArticle(who) + " at " + where + " who put up " + numbers +
+					(shot ? "; " + shot + ft : "") + "."),
+			() => Text.capitalize("put up " + numbers + " for " + record + where + " as " +
+				Text.withArticle(who) + build + (shot ? " — " + shot + ft : "") + "."),
+		];
+		void season;
+		return rng.pick(variants)();
+	}
 
 	function buildNote(p, teams, season, cfg, state) {
 		const s = p.stats;
@@ -2996,13 +3071,15 @@
 		const on = (k) => want.indexOf(k) !== -1;
 		const team = p.nonNcaa ? p.proTeam : teams[p.newCollege];
 
+		if (on("summary")) lines.push(noteSummary(p, team, season));
+
 		if (on("team")) {
 			if (p.nonNcaa) {
 				lines.push((p.proClub ? p.proClub + " (" + p.newCollege + ")" : p.newCollege) +
 					" · " + p.classYear + (p.proDeal ? " · " + p.proDeal : ""));
 			} else {
 				lines.push(p.newCollege + " (" + team.conf +
-					// A programme that moved leagues this year says so, because
+					// A program that moved leagues this year says so, because
 					// "first year in the Big Ten" is half the story of a season.
 					(team.movedFrom ? ", first year after leaving the " +
 						team.movedFrom : "") +
@@ -3023,7 +3100,7 @@
 			if (p.proPath && p.proPath.text) bits.push(p.proPath.text);
 			if (p.transfer) {
 				// A walk-on turned starter has no previous school to name, and
-				// a move between two known programmes says which way it went.
+				// a move between two known programs says which way it went.
 				bits.push(p.transfer.from
 					? p.transfer.kind + " — " + (p.transfer.story ||
 						("from " + p.transfer.from))
@@ -3090,7 +3167,7 @@
 		}
 		if (s && on("defense")) {
 			lines.push(
-				"Defence: " + n1(s.cspg) + " contests, " + n1(s.deflpg) +
+				"Defense: " + n1(s.cspg) + " contests, " + n1(s.deflpg) +
 				" deflections, " + n1(s.chgpg) + " charges drawn · DRtg " +
 				s.drtg.toFixed(1),
 			);
@@ -3105,6 +3182,10 @@
 				"Season high: " + g.pts + " points" +
 				(g.reb >= 8 ? " and " + g.reb + " rebounds" :
 					g.ast >= 7 ? " and " + g.ast + " assists" : "") +
+				(Number.isFinite(g.fgm) && g.fga > 0
+					? " on " + g.fgm + "-of-" + g.fga + " shooting" +
+						(g.tpa >= 3 ? " (" + g.tpm + "-of-" + g.tpa + " from three)" : "")
+					: "") +
 				" in " + (g.won ? "a win over " : "a loss to ") + g.opp +
 				(g.round ? " in the " + g.round : "") +
 				(g.pf !== null && g.pf !== undefined
@@ -3116,9 +3197,9 @@
 			const gl = p.gameLog;
 			const bits = ["highs " + gl.highs.pts + "p / " + gl.highs.reb + "r / " +
 				gl.highs.ast + "a"];
-			if (gl.twentyPointGames) bits.push(gl.twentyPointGames + " 20-point games");
-			if (gl.doubleDoubles) bits.push(gl.doubleDoubles + " double-doubles");
-			if (gl.tripleDoubles) bits.push(gl.tripleDoubles + " triple-doubles");
+			if (gl.twentyPointGames) bits.push(Text.plural(gl.twentyPointGames, "20-point game"));
+			if (gl.doubleDoubles) bits.push(Text.plural(gl.doubleDoubles, "double-double"));
+			if (gl.tripleDoubles) bits.push(Text.plural(gl.tripleDoubles, "triple-double"));
 			if (gl.hotStreak) {
 				bits.push("best stretch: " + gl.hotStreak.games + " straight at " +
 					n1(gl.hotStreak.ppg) + " a night");
@@ -3127,7 +3208,7 @@
 		}
 		if (on("march") && p.gameLog && p.gameLog.postseason) {
 			const ps = p.gameLog.postseason;
-			lines.push("Postseason: " + ps.gp + " games, " + n1(ps.ppg) + " PPG, " +
+			lines.push("Postseason: " + Text.plural(ps.gp, "game") + ", " + n1(ps.ppg) + " PPG, " +
 				n1(ps.rpg) + " RPG, " + n1(ps.apg) + " APG");
 		}
 		if (on("injury") && p.gameLog && p.gameLog.injury) {
@@ -3139,7 +3220,7 @@
 			lines.push("Coach: " + team.coach.name +
 				(team.coach.situationLabel ? ", " + team.coach.situationLabel : "") +
 				" (year " + team.coach.tenure + ")" +
-				(team.downYear ? " · a down year for the programme" : ""));
+				(team.downYear ? " · a down year for the program" : ""));
 		}
 		if (s && on("playmaking")) {
 			const bits = [];
@@ -3158,7 +3239,7 @@
 		}
 		if (on("awards") && p.awards && p.awards.length) {
 			// Awards arrive sorted by prestige. A genuine star can collect a
-			// dozen honours across the national, conference and tournament
+			// dozen honors across the national, conference and tournament
 			// lists, and a note that prints all of them buries the ones that
 			// matter — so the top few, then a count.
 			const MAX = 6;
@@ -3218,7 +3299,7 @@
 		const pts = 2 * (fg - tp) + 3 * tp + ft;
 		const row = {
 			season: seasonYear,
-			tid: -1,          // an undrafted amateur, in BBGM's terms
+			tid: -1,          // no team: this season predates the draft
 			playoffs: false,
 			gp,
 			gs: 0,
@@ -3241,9 +3322,21 @@
 	   file this function has always written:
 	     stats:  the simulated draft-year season as a BBGM stats row
 	     prior:  simulated earlier seasons as additional stats rows
-	     awards: every honour as {season, type}, concatenated (a re-imported
+	     awards: every honor as {season, type}, concatenated (a re-imported
 	             file may already carry awards)
-	     highs:  game-log season highs and double-double counts on the row */
+	     highs:  game-log season highs and double-double counts on the row
+
+	   IMPORTANT: BBGM's own Import -> Draft class tool (handleUploadedDraftClass
+	   in its source) unconditionally does `delete p.stats` on every uploaded
+	   player before merging him into the league — confirmed against BBGM's
+	   source, not guessed. So `stats`/`prior`/`highs` never survive the one
+	   import path this tool documents; only `awards` (never deleted there)
+	   and `note` (a plain string field) come through. The rows are still
+	   written here because they are exactly right for the OTHER thing this
+	   tool already produces a file for — a hand-merge into an existing
+	   league file's own `players` array (the same audience "Season as a BBGM
+	   league fragment" serves) — but through Import -> Draft class they are
+	   silently discarded. The export dialog says so. */
 	function exportFile(result, opts) {
 		opts = opts || {};
 		/* The export firewall: a generated (past/future) season carries
@@ -3409,7 +3502,7 @@
 	/* The season as a BBGM-shaped league fragment: `teams` and `teamSeasons`
 	   in the game's own field names, one conference per college league, plus
 	   a `coaches` block this tool defines. exportSeason is a flat report;
-	   this is the same programmes as records a league file can carry, so a
+	   this is the same programs as records a league file can carry, so a
 	   user building a college league in BBGM has the year's standings and
 	   staff in the shape the game reads rather than in a CSV. It is a
 	   fragment — no players, no schedule — and says so in `format`. */

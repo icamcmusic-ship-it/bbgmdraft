@@ -18,7 +18,7 @@
 		return "batch" + Math.floor(Math.random() * 1e9).toString(36);
 	}
 
-	function summarise(res) {
+	function summarize(res) {
 		const withStats = res.players.filter((p) => p.stats);
 		/* NCAA only for the per-player rows. They used to be averaged over
 		   `withStats`, which includes the prospects playing abroad — a
@@ -48,7 +48,7 @@
 			topApg: maxOf(ncaa.map((p) => p.stats.apg)),
 			topBpg: maxOf(ncaa.map((p) => p.stats.bpg)),
 			awards: res.players.reduce((a, p) => a + (p.awards || []).length, 0),
-			honoured: res.players.filter((p) => (p.awards || []).length).length,
+			honored: res.players.filter((p) => (p.awards || []).length).length,
 			teamPpg: mean(teams.map((t) => t.teamTotals.pts)),
 			teamAst: mean(teams.map((t) => t.teamTotals.ast)),
 			archetypes: new Set(res.players.map((p) => p.archetype)).size,
@@ -85,5 +85,5 @@
 		return lo === hi ? s[lo] : s[lo] + (s[hi] - s[lo]) * (i - lo);
 	}
 
-	global.BatchStats = { summarise, batchSeed, mean, maxOf, pct };
+	global.BatchStats = { summarize, batchSeed, mean, maxOf, pct };
 })(typeof window !== "undefined" ? window : self);

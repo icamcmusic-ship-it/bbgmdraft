@@ -198,7 +198,7 @@
 	   more than three columns at once" the audit describes.
 
 	   Two things are needed and only one of them is the class. A card that
-	   stacks forty labelled lines per prospect is not an improvement on a
+	   stacks forty labeled lines per prospect is not an improvement on a
 	   scroll; it is the same information in a taller shape. So the card layout
 	   also has its own column set — the twelve fields a scout reads first —
 	   independent of whichever columns the user has ticked for the desktop
@@ -207,7 +207,7 @@
 
 	   `auto` follows the viewport, which is what a phone user wants and a
 	   desktop user never notices; `on` and `off` are there because a tablet in
-	   landscape is a genuine judgement call and because a narrow window on a
+	   landscape is a genuine judgment call and because a narrow window on a
 	   desktop is not necessarily a phone. */
 	const CARD_COLUMNS = ["pick", "lock", "name", "pos", "year", "board",
 		"newOvr", "newPot", "archetype", "college", "mpg", "ppg", "rpg", "apg",
@@ -250,7 +250,7 @@
 			out.push(byKey[k]);
 		}
 		// Anything the stored order never heard of keeps its place relative to
-		// the columns around it, which is the only behaviour that makes a
+		// the columns around it, which is the only behavior that makes a
 		// partial order safe.
 		COLUMNS.forEach((c, i) => {
 			if (seen[c.key]) return;
@@ -666,7 +666,7 @@
 		case "tpp":
 		case "ftp":
 			return who + ". Shooting composites against a player of his size, " +
-				"the defences he faced, and how much of the offence he carried.";
+				"the defenses he faced, and how much of the offense he carried.";
 		default:
 			return who + ".";
 		}
@@ -818,7 +818,7 @@
 		const st = A().state;
 		const bar = el("div", "filters");
 		const search = searchInput(
-			"Search name, school, archetype, honour…", "Search prospects",
+			"Search name, school, archetype, honor…", "Search prospects",
 			() => st.filter.q, (v) => { st.filter.q = v; });
 		// So "/" has something to focus.
 		search.id = "prospectSearch";
@@ -1033,7 +1033,7 @@
 			"tpar", "ftr", "fgp", "efg", "tpp", "ftp", "ts", "usg"]);
 		preset("Efficiency", ["pos", "college", "mpg", "usg", "ts", "efg", "ortg",
 			"drtg", "astTo", "prod", "ppg", "apg", "topg"]);
-		preset("Defence", ["pos", "college", "mpg", "drpg", "spg", "bpg", "cspg",
+		preset("Defense", ["pos", "college", "mpg", "drpg", "spg", "bpg", "cspg",
 			"deflpg", "chgpg", "drtg", "pfpg", "awards"]);
 		preset("Team context", ["pos", "college", "conf", "record", "apRank", "seed",
 			"newOvr", "mpg", "ppg", "usg", "ts", "awards"]);
@@ -1125,7 +1125,7 @@
 
 		/* On a phone the card layout picks its own columns (see CARD_COLUMNS):
 		   the desktop selection is a choice about a wide table and applying it
-		   to a stack of labelled lines produces a forty-line card. `cardAll`
+		   to a stack of labeled lines produces a forty-line card. `cardAll`
 		   opts back in to everything. */
 		const cards = cardMode();
 		const columns = cards && !st.cardAll
@@ -1302,7 +1302,7 @@
 				case "college":
 					td = el("td");
 					if (p.nonNcaa) {
-						// A professional club and an academy or DII programme are
+						// A professional club and an academy or DII program are
 						// not the same kind of destination.
 						td.appendChild(el("span", p.leaguePro ? "tag pro" : "tag",
 							p.proClub || p.newCollege));
@@ -1698,7 +1698,7 @@
 	/* ---------------------------------------------------------- team views */
 
 	function viewTeams(view, res) {
-		/* A team page. You could follow a programme through the bracket and
+		/* A team page. You could follow a program through the bracket and
 		   never see its roster, its style, its coach, its four prospects and
 		   its schedule in one place. */
 		if (A().state.team) {
@@ -1904,10 +1904,10 @@
 		if (res.recruitingClasses && res.recruitingClasses.length) {
 			view.appendChild(el("h3", null, "Recruiting class rankings"));
 			view.appendChild(el("p", "legendline",
-				"All 368 programmes, scored 247-style: per-signee points decay " +
+				"All 368 programs, scored 247-style: per-signee points decay " +
 				"steeply with national rank, with diminishing returns after the " +
 				"top handful. Prospects in this class keep their real national " +
-				"ranks; the rest of every class is synthesised from programme " +
+				"ranks; the rest of every class is synthesized from program " +
 				"prestige. Top 25 shown."));
 			const rw = el("div", "scroll");
 			const rt = el("table");
@@ -2092,7 +2092,7 @@
 		view.appendChild(el("p", "legendline",
 			"Load several class files (oldest season first) and run them as one " +
 			"continuous world: conference realignment keeps its memory, " +
-			"programme strength drifts season to season instead of being " +
+			"program strength drifts season to season instead of being " +
 			"redrawn, a fired coach is replaced by a named first-year hire, and " +
 			"the build-pool memory spans the whole timeline. A universe re-runs " +
 			"from its seeds — the export stores seeds, not simulated output."));
@@ -2159,7 +2159,7 @@
 		const wrap = el("div", "scroll");
 		const table = el("table");
 		const hr = el("tr");
-		for (const h of ["Season", "Flavour", "AP No. 1", "Champion", "Player of the Year",
+		for (const h of ["Season", "Flavor", "AP No. 1", "Champion", "Player of the Year",
 			"No. 1 pick", "Realignment", "Coaches fired"]) {
 			hr.appendChild(el("th", null, h));
 		}
@@ -2412,19 +2412,19 @@
 			}
 			(i < 2 ? leftCol : rightCol).appendChild(box);
 		});
-		const centre = el("div", "centrecol");
-		centre.appendChild(el("h4", null, "Final Four"));
+		const center = el("div", "centercol");
+		center.appendChild(el("h4", null, "Final Four"));
 		for (const g of t.semis) {
-			centre.appendChild(gameNode(g.a.team, g.b.team, g.winner.team,
+			center.appendChild(gameNode(g.a.team, g.b.team, g.winner.team,
 				g.a.seed, g.b.seed, g.score));
 		}
-		centre.appendChild(el("h4", null, "National championship"));
+		center.appendChild(el("h4", null, "National championship"));
 		if (t.final && t.final.b) {
-			centre.appendChild(gameNode(t.final.a.team, t.final.b.team, t.final.winner.team,
+			center.appendChild(gameNode(t.final.a.team, t.final.b.team, t.final.winner.team,
 				t.final.a.seed, t.final.b.seed, t.final.score));
 		}
 		mirror.appendChild(leftCol);
-		mirror.appendChild(centre);
+		mirror.appendChild(center);
 		mirror.appendChild(rightCol);
 		view.appendChild(mirror);
 
@@ -2460,7 +2460,7 @@
 	   48-minute games at 103 possessions against the NCAA's 40 at ~68, so his
 	   raw per-game totals structurally dominate any mixed board. Rates (TS%,
 	   percentages) are already length-free and rank as-is. The DISPLAYED
-	   number stays the real per-game figure; only the ordering normalises. */
+	   number stays the real per-game figure; only the ordering normalizes. */
 	const RATE_KEYS = { ts: true, fgp: true, tpp: true, ftp: true, usg: true, drtg: true };
 	function leaderValue(p, key) {
 		const v = p.stats[key];
@@ -2520,7 +2520,7 @@
 		   The defensive box score was generated, displayed and never ranked the
 		   way the offensive one is. The award model reads defenseScore() to
 		   decide a defensive player of the year and then discarded the
-		   ordering, so the number the honour was decided on was the one number
+		   ordering, so the number the honor was decided on was the one number
 		   the user could not see — and a prospect's 2.7 deflections a game had
 		   nothing beside it to say whether that was remarkable.
 
@@ -2530,7 +2530,7 @@
 		view.appendChild(el("h3", null, "Defensive leaders"));
 		view.appendChild(el("p", "legendline",
 			"Ranks are against every returning rotation player in Division I, " +
-			"simulated through the same model — the field the defensive honours " +
+			"simulated through the same model — the field the defensive honors " +
 			"are decided against."));
 		const dLeaders = el("div", "cards");
 		dLeaders.appendChild(leaderTable(res, "Blocks", "bpg"));
@@ -2543,7 +2543,7 @@
 		// why it used to sit at the top of the board showing the worst.
 		dLeaders.appendChild(leaderTable(res, "Defensive rating (lowest)", "drtg",
 			(v) => v.toFixed(1), true));
-		// The single number the defensive honours are actually ranked on.
+		// The single number the defensive honors are actually ranked on.
 		const defBox = el("div", "card");
 		defBox.appendChild(el("h4", null, "Defensive score"));
 		const defList = res.players
@@ -2578,10 +2578,10 @@
 		view.appendChild(trBox);
 
 		// The trophies the class LOST — to named returning players.
-		const fh = res.fieldHonours || [];
+		const fh = res.fieldHonors || [];
 		if (fh.length) {
 			const box = el("div", "card");
-			box.appendChild(el("h4", null, "Honours won by returning players"));
+			box.appendChild(el("h4", null, "Honors won by returning players"));
 			const noteBox = el("div", "note");
 			fh.forEach((h, i) => {
 				if (i) noteBox.appendChild(document.createTextNode("\n"));
@@ -2600,7 +2600,7 @@
 				"with him — these are the races the class lost."));
 		}
 
-		view.appendChild(el("h3", null, "Honours"));
+		view.appendChild(el("h3", null, "Honors"));
 		const honored = res.players.filter((p) => p.awards && p.awards.length)
 			.sort((a, b) => (b.scoreTotal || 0) - (a.scoreTotal || 0));
 		if (!honored.length) {
@@ -2669,7 +2669,7 @@
 		const thead = el("thead");
 		const hr = el("tr");
 		for (const h of ["Board", "Rd", "Pick", "Player", "Pos", "Year", "Ovr", "Pot",
-			"School / club", "Preseason", "±", "PPG", "Honours"]) {
+			"School / club", "Preseason", "±", "PPG", "Honors"]) {
 			const th = el("th", ["Board", "Rd", "Pick", "Ovr", "Pot", "Preseason", "±", "PPG"].indexOf(h) >= 0 ? "num" : "", h);
 			th.scope = "col";
 			hr.appendChild(th);
@@ -2990,6 +2990,7 @@
 			"highs " + gl.highs.pts + "p " + gl.highs.reb + "r " + gl.highs.ast + "a",
 			gl.twentyPointGames + " 20-point games",
 			gl.doubleDoubles + " double-doubles",
+			gl.foulOuts + (gl.foulOuts === 1 ? " foul-out" : " foul-outs"),
 		]) head.appendChild(el("span", "pill", t));
 		if (gl.hotStreak) {
 			head.appendChild(el("span", "pill",
@@ -3014,12 +3015,18 @@
 			view.appendChild(sp);
 		}
 
+		view.appendChild(gameLogTable(gl));
+	}
+
+	/* The game-log table itself, shared by the Game log tab and the page
+	   of a returning player who has no row in the prospect table. */
+	function gameLogTable(gl) {
 		const wrap = el("div", "scroll");
 		const table = el("table");
 		const thead = el("thead");
 		const hr = el("tr");
-		for (const h of ["#", "Opponent", "Stage", "Result", "PTS", "REB", "AST", "STL", "BLK", "TO"]) {
-			const th = el("th", ["#", "PTS", "REB", "AST", "STL", "BLK", "TO"].indexOf(h) >= 0 ? "num" : "", h);
+		for (const h of ["#", "Opponent", "Stage", "Result", "MIN", "PTS", "FG", "3P", "FT", "REB", "AST", "STL", "BLK", "TO", "PF"]) {
+			const th = el("th", ["Opponent", "Stage", "Result"].indexOf(h) === -1 ? "num" : "", h);
 			th.scope = "col";
 			hr.appendChild(th);
 		}
@@ -3033,16 +3040,26 @@
 			tr.appendChild(el("td", null, g.round || (g.conference ? "conference" : "non-conference")));
 			tr.appendChild(el("td", null, (g.won ? "W " : "L ") + g.pf + "-" + g.pa +
 				(g.ot ? (g.ot > 1 ? " " + g.ot + "OT" : " OT") : "")));
-			for (const k of ["pts", "reb", "ast", "stl", "blk", "tov"]) {
+			tr.appendChild(el("td", "num", Number.isFinite(g.min) ? String(g.min) : ""));
+			const ptsTd = el("td", "num", String(g.pts));
+			if (g.pts === gl.highs.pts) ptsTd.className = "num up";
+			tr.appendChild(ptsTd);
+			// The shooting behind the points, so a 30 reads as 11-of-15 or
+			// as a 28-shot night rather than as a number.
+			for (const [m, a] of [["fgm", "fga"], ["tpm", "tpa"], ["ftm", "fta"]]) {
+				tr.appendChild(el("td", "num",
+					Number.isFinite(g[m]) ? g[m] + "-" + g[a] : ""));
+			}
+			for (const k of ["reb", "ast", "stl", "blk", "tov", "fouls"]) {
 				const td = el("td", "num", String(g[k]));
-				if (k === "pts" && g.pts === gl.highs.pts) td.className = "num up";
+				if (k === "fouls" && g.fouls >= 5) td.className = "num down";
 				tr.appendChild(td);
 			}
 			tb.appendChild(tr);
 		});
 		table.appendChild(tb);
 		wrap.appendChild(table);
-		view.appendChild(wrap);
+		return wrap;
 	}
 
 	/* --------------------------------------------------------------- compare */
@@ -3063,8 +3080,8 @@
 		}
 		const now = A().snapshot(res);
 		view.appendChild(el("p", "legendline",
-			"Pinned: seed " + pinned.seed + " · " + (pinned.flavor || "no flavour") +
-			"    vs    current: seed " + now.seed + " · " + (now.flavor || "no flavour")));
+			"Pinned: seed " + pinned.seed + " · " + (pinned.flavor || "no flavor") +
+			"    vs    current: seed " + now.seed + " · " + (now.flavor || "no flavor")));
 
 		const cards = el("div", "cards");
 		const num = (label, a, b, digits) => {
@@ -3083,7 +3100,7 @@
 		num("Average PPG", pinned.avgPpg, now.avgPpg);
 		num("Average MPG", pinned.avgMpg, now.avgMpg);
 		num("Scoring leader", pinned.topPpg, now.topPpg);
-		num("Honours handed out", pinned.awards, now.awards, 0);
+		num("Honors handed out", pinned.awards, now.awards, 0);
 		num("Distinct archetypes", pinned.archetypes, now.archetypes, 0);
 		view.appendChild(cards);
 
@@ -3180,6 +3197,7 @@
 		const back = el("button", "tiny", "← All prospects");
 		back.addEventListener("click", () => { A().showPlayer(null); });
 		box.appendChild(back);
+		if (!p && /^field:/.test(String(key))) return fieldPlayerPage(box, res, key);
 		if (!p) {
 			box.appendChild(el("p", "hint", "No such prospect in this class."));
 			return box;
@@ -3249,7 +3267,7 @@
 				String(p.betterEarlier.classYear || "").toLowerCase() + " (" +
 				n1(p.betterEarlier.ppg) + " PPG in " + p.betterEarlier.season + ")");
 		}
-		if (p.awards && p.awards.length) row("Honours", p.awards.join("; "));
+		if (p.awards && p.awards.length) row("Honors", p.awards.join("; "));
 		box.appendChild(dl);
 
 		// Earlier seasons, when they were simulated.
@@ -3324,6 +3342,73 @@
 		}
 		box.appendChild(actions);
 		if (global.Faces) global.Faces.render(face, p);
+		return box;
+	}
+
+	/* A returning player's page. Star returners have names, take trophies
+	   under them and appear in News, and used to be text nobody could click:
+	   they are rotation entries on a program, not draft prospects, so they
+	   have a stat line and a season but no ratings and no export row. The
+	   page says so and shows what there is — the line, the honors he took
+	   off the class, and a game log drawn from his season on demand. */
+	function fieldPlayerPage(box, res, key) {
+		const m = /^field:(.*):(\d+)$/.exec(String(key));
+		const team = m && res.teams[m[1]];
+		const fp = team && (team.fieldPlayers || []).filter((f) => f.key === key)[0];
+		if (!fp) {
+			box.appendChild(el("p", "hint", "No such player in this season."));
+			return box;
+		}
+		const head = el("div", "rowflex playerhead");
+		const idbox = el("div");
+		idbox.appendChild(el("h3", null, fp.name));
+		const line = el("p", "legendline");
+		line.appendChild(teamLink(team.name));
+		line.appendChild(document.createTextNode(
+			" · " + (fp.classYear || "returning player") +
+			(fp.starReturner ? " · " + fp.starReturner : "")));
+		idbox.appendChild(line);
+		const pills = el("div", "rowflex");
+		pills.appendChild(el("span", "pill", "Not in the draft class — no ratings, no export row"));
+		pills.appendChild(el("span", "pill", "Rotation No. " + (fp.rotationIndex + 1)));
+		idbox.appendChild(pills);
+		head.appendChild(idbox);
+		box.appendChild(head);
+
+		const dl = el("dl", "shortcuts");
+		const row = (k, v) => {
+			if (!v) return;
+			dl.appendChild(el("dt", null, k));
+			dl.appendChild(el("dd", null, v));
+		};
+		const s = fp.line;
+		if (s) {
+			row("This season", s.gp + " GP · " + n1(s.mpg) + " MPG · " +
+				n1(s.ppg) + " / " + n1(s.rpg) + " / " + n1(s.apg) +
+				" · " + n1(s.spg) + " stl, " + n1(s.bpg) + " blk");
+			row("Shooting", "FG " + pc(s.fgp) + "% · 3P " + pc(s.tpp) + "% · FT " +
+				pc(s.ftp) + "% · TS " + pc(s.ts) + "%");
+			row("Usage", pc(s.usg) + "% of possessions · " + n1(s.topg) + " TO · " +
+				n1(s.pfpg) + " PF");
+		}
+		const honors = (res.fieldHonors || []).filter((h) => h.key === key || (!h.key && h.name === fp.name && h.school === team.name));
+		if (honors.length) row("Honors", honors.map((h) => h.award).join("; "));
+		box.appendChild(dl);
+
+		if (s && global.StatsSim && global.BBGMRng) {
+			const gl = global.StatsSim.gameLog({ stats: s, availability: null }, team,
+				new global.BBGMRng.Rng("fieldlog|" + key));
+			if (gl && gl.games && gl.games.length) {
+				box.appendChild(el("h4", null, "Game log"));
+				const pillsRow = el("div", "rowflex");
+				pillsRow.appendChild(el("span", "pill", "highs " + gl.highs.pts + "p " +
+					gl.highs.reb + "r " + gl.highs.ast + "a"));
+				pillsRow.appendChild(el("span", "pill", gl.twentyPointGames + " 20-point games"));
+				pillsRow.appendChild(el("span", "pill", gl.doubleDoubles + " double-doubles"));
+				box.appendChild(pillsRow);
+				box.appendChild(gameLogTable(gl));
+			}
+		}
 		return box;
 	}
 
@@ -3403,7 +3488,7 @@
 		return box;
 	}
 
-	/* One programme: who coaches it, how it plays, who is on it, and every game
+	/* One program: who coaches it, how it plays, who is on it, and every game
 	   it played. */
 	function teamPage(view, res, name) {
 		const t = res.teams[name];
@@ -3416,7 +3501,7 @@
 		});
 		box.appendChild(back);
 		if (!t) {
-			box.appendChild(el("p", "hint", "No such programme in this class."));
+			box.appendChild(el("p", "hint", "No such program in this class."));
 			return box;
 		}
 		box.appendChild(el("h3", null, t.name + " — " + t.w + "-" + t.l +
@@ -3435,7 +3520,7 @@
 			row("Coach", t.coach.name + ", year " + t.coach.tenure +
 				" — plays " + t.style.name);
 		}
-		row("Programme level", Math.round(t.level) + " (rating " +
+		row("Program level", Math.round(t.level) + " (rating " +
 			t.rating.toFixed(1) + ")");
 		if (t.recruitClass) {
 			row("Recruiting class", "No. " + t.recruitClass.natRank + " nationally · No. " +
@@ -3501,6 +3586,44 @@
 		}
 		box.appendChild(plist);
 
+		/* The rest of the rotation. Returning players carry names, stat
+		   lines and, when one of them beat the class to a trophy, honors —
+		   and nothing on the team page showed them. Each one links to a
+		   page of his own. */
+		const returners = (t.fieldPlayers || []).slice()
+			.sort((a, b) => b.mpg - a.mpg);
+		if (returners.length) {
+			box.appendChild(el("h4", null, "Returning rotation"));
+			const wrap = el("div", "scroll");
+			const table = el("table");
+			const hr = el("tr");
+			for (const h of ["Player", "Year", "MPG", "PPG", "RPG", "APG", "TS%", "Note"]) {
+				hr.appendChild(el("th", ["Player", "Year", "Note"].indexOf(h) === -1 ? "num" : "", h));
+			}
+			const thead = el("thead");
+			thead.appendChild(hr);
+			table.appendChild(thead);
+			const tb = el("tbody");
+			for (const fp of returners) {
+				const l = fp.line || {};
+				const tr = el("tr");
+				const td = el("td", "sticky");
+				if (fp.key) td.appendChild(playerLink(fp.name, fp.key));
+				else td.textContent = fp.name || "";
+				tr.appendChild(td);
+				tr.appendChild(el("td", null, fp.classYear || ""));
+				tr.appendChild(el("td", "num", n1(fp.mpg || 0)));
+				tr.appendChild(el("td", "num", n1(l.ppg || 0)));
+				tr.appendChild(el("td", "num", n1(l.rpg || 0)));
+				tr.appendChild(el("td", "num", n1(l.apg || 0)));
+				tr.appendChild(el("td", "num", Number.isFinite(l.ts) ? pc(l.ts) : ""));
+				tr.appendChild(el("td", null, fp.starReturner || ""));
+				tb.appendChild(tr);
+			}
+			table.appendChild(tb);
+			wrap.appendChild(table);
+			box.appendChild(wrap);
+		}
 		box.appendChild(el("h4", null, "Schedule"));
 		const wrap = el("div", "scroll");
 		const table = el("table");
@@ -3515,7 +3638,12 @@
 		table.appendChild(thead);
 		const tb = el("tbody");
 		t.log.forEach((g, i) => {
-			const tr = el("tr", g.won ? "" : "down");
+			/* A dedicated class, not the shared .down: that class also carries
+			   a ::before "▼ " pseudo-element meant for a small inline stat
+			   delta, and a browser renders that inserted text as an extra cell
+			   at the start of the row — which is why a loss visibly pushed the
+			   whole schedule row one column to the right. */
+			const tr = el("tr", g.won ? "" : "loss");
 			tr.appendChild(el("td", "num", String(i + 1)));
 			const td = el("td", "sticky");
 			td.appendChild(teamLink(g.opp));

@@ -29,7 +29,7 @@ const CASES = [
 	["Potential bias / spread", { potBias: 1.5 }],
 	["March upsets", { upsetFactor: 1.6 }],
 	["Pace, stat randomness", { pace: 72 }],
-	["Specialisation, archetypes, seed", { seed: "bench-other" }],
+	["Specialization, archetypes, seed", { seed: "bench-other" }],
 ];
 
 function median(v) {
