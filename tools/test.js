@@ -2999,15 +2999,20 @@ console.log("\nAudit regressions (September 2026)");
 			(res.fieldHonors || []).every((h) => !h.key || withKey.some((f) => f.key === h.key)));
 	}
 
-	/* The §8.13 export options (stats/prior/highs), reported as broken by a
-	   user: they show up nowhere after Import -> Draft class in BBGM. That
-	   is confirmed against BBGM's own source: handleUploadedDraftClass does
-	   `delete p.stats` on every uploaded player unconditionally, no matter
-	   what this file writes, which is why only awards (never deleted there)
-	   come through. The fix is the export dialog telling the user that
-	   rather than a code change here — but the rows this function writes
-	   still have to be right for the workflow they DO serve, a manual merge
-	   into an existing league file's player list, so that stays covered. */
+	/* The §8.13 export options (stats/prior/highs).
+
+	   Two separate faults have been reported against these, and the tests
+	   below cover both. The first: nothing shows up after Import -> Draft
+	   class, which is BBGM's own doing — handleUploadedDraftClass does
+	   `delete p.stats` on every uploaded player unconditionally. The route
+	   that does keep them is Tools -> Import players with "include stats"
+	   checked (importPlayers in the same file), so the dialog names it.
+
+	   The second: the rows that route DID import came out mostly blank,
+	   because they were thirteen counting stats and five bare numbers where
+	   BBGM writes seventy-four keys and stores a season high as
+	   [value, gameId]. The checks below are the schema half of that fix —
+	   a row this tool writes has to be a row BBGM could have written. */
 	{
 		const res = global.Engine.run(V.realisticClass(2, 70), global.Config.make({ seed: "statsopt" }));
 		const withStats = res.players.filter((p) => !p.nonNcaa && p.stats && p.stats.gp > 0)[0];
@@ -3019,17 +3024,45 @@ console.log("\nAudit regressions (September 2026)");
 		const withOpts = global.Engine.exportFile(res, { stats: true, prior: true, highs: true, awards: true });
 		const row = withOpts.players[idx];
 		const draftRow = row.stats[row.stats.length - 1];
-		ok("stats:true appends a draft-year row with tid -1 and this season",
+		const BS = global.BBGMStats;
+		ok("stats:true appends a draft-year row with tid DNE and this season",
 			Array.isArray(row.stats) && row.stats.length >= 1 &&
-			draftRow.tid === -1 && draftRow.season === res.leagueFile.startingSeason &&
-			draftRow.gp > 0);
-		ok("highs:true adds the game-log season highs onto that row",
-			Number.isFinite(draftRow.ptsMax) && draftRow.ptsMax >= draftRow.trbMax);
+			draftRow.tid === BS.TID_DOES_NOT_EXIST &&
+			draftRow.season === res.leagueFile.startingSeason && draftRow.gp > 0);
+		ok("every written row carries BBGM's whole stats key set, in its order",
+			row.stats.every((r) =>
+				JSON.stringify(Object.keys(r)) === JSON.stringify(BS.KEYS)));
+		ok("the counting stats reconcile: points, the glass and the shot chart",
+			row.stats.every((r) =>
+				r.pts === 2 * (r.fg - r.tp) + 3 * r.tp + r.ft &&
+				r.fg >= r.tp && r.fga >= r.tpa && r.ft <= r.fta &&
+				r.fgAtRim + r.fgLowPost + r.fgMidRange === r.fg - r.tp &&
+				r.fgaAtRim + r.fgaLowPost + r.fgaMidRange === r.fga - r.tpa &&
+				r.fgAtRim <= r.fgaAtRim && r.fgLowPost <= r.fgaLowPost &&
+				r.fgMidRange <= r.fgaMidRange));
+		ok("highs:true writes every high as [value, gameId], not a bare number",
+			BS.STATS.max.every((k) => Array.isArray(draftRow[k]) &&
+				Number.isFinite(draftRow[k][0]) && draftRow[k][1] < 0));
+		ok("a season high is one night out of the season it sits on",
+			draftRow.ptsMax[0] >= draftRow.trbMax[0] &&
+			draftRow.ptsMax[0] <= draftRow.pts &&
+			draftRow.astMax[0] <= draftRow.ast &&
+			draftRow.minMax[0] <= 40 + 25);
+		ok("the derived statistics are all finite, and PER is on BBGM's scale",
+			BS.STATS.derived.every((k) => Number.isFinite(draftRow[k])) &&
+			draftRow.per > 5 && draftRow.per < 45);
+		ok("a row with no game log behind it writes null highs, not zeroes",
+			row.stats.every((r) => BS.STATS.max.every((k) =>
+				r[k] === null || Array.isArray(r[k]))));
 		if (Array.isArray(withStats.priorSeasons) && withStats.priorSeasons.length) {
 			ok("prior:true adds a row per simulated earlier season",
 				row.stats.length > 1 + (withOpts.players[idx].awards ? 0 : 0) &&
 				row.stats.length - 1 <= withStats.priorSeasons.length);
 		}
+		ok("exporting twice writes the same rows, byte for byte",
+			JSON.stringify(global.Engine.exportFile(res,
+				{ stats: true, prior: true, highs: true, awards: true })
+				.players[idx].stats) === JSON.stringify(row.stats));
 		ok("awards:true concatenates every honor as {season, type}",
 			row.awards.length >= (withStats.awards || []).length &&
 			row.awards.every((a) => Number.isFinite(a.season) && typeof a.type === "string"));

@@ -3593,22 +3593,22 @@
 		const oHighs = opt("highs", "…and game-log season highs");
 		const oAwards = opt("awards", "Include college awards");
 		list.appendChild(optBox);
-		/* Checked against BBGM's own source: its Import -> Draft class tool
-		   deletes a player's stats unconditionally on the way in, so the
-		   three stat options above never reach the game through the one
-		   import path this tool documents. Awards survive that import (it
-		   is never deleted there), which is why they show up in-game and
-		   the statline doesn't. The rows are still worth writing for anyone
-		   merging this file into an existing league's player list by hand
-		   instead — the same audience "Season as a BBGM league fragment"
-		   below is for — so the caption says what actually happens rather
-		   than removing the options. */
+		/* Checked against BBGM's own source, and the reason a user saw
+		   nothing after importing: handleUploadedDraftClass deletes a
+		   player's stats unconditionally on the way in, so Import -> Draft
+		   class cannot show a statline whatever this file writes. Awards
+		   survive it (never deleted there), which is why they do show up.
+		   importPlayers — Tools -> Import players — is the route that keeps
+		   them, and it has its own "include stats" checkbox; it stamps every
+		   imported row's team as DNE, which is what these rows already say
+		   they are. A hand-merge into a league file's player list works too,
+		   the same audience "Season as a BBGM league fragment" serves. */
 		list.appendChild(el("p", "hint",
-			"Basketball GM's Import → Draft class tool deletes a player's " +
-			"stats on import, so the statline options above will not show " +
-			"up in-game that way — only awards survive that import. They " +
-			"still write correctly for a manual merge into an existing " +
-			"league file's player list."));
+			"For the statline to survive, import with Tools → Import players " +
+			"and tick its \u201cinclude stats\u201d box. Import → Draft class " +
+			"deletes every uploaded player's stats — only the awards survive " +
+			"that route. The rows are full Basketball GM season rows, so a " +
+			"hand-merge into a league file's player list works as well."));
 		item("BBGM class file, with the options above", () => {
 			if (exportOne(state.active, {
 				stats: oStats(), prior: oPrior(), highs: oHighs(), awards: oAwards(),
