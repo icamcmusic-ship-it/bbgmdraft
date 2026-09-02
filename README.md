@@ -821,11 +821,33 @@ Two details worth knowing:
 **Which import you use decides whether any of it survives**, and the usual one throws it
 away. Confirmed against BBGM's own source, all three routes in:
 
-| Route | Statline? | Notes |
-| --- | --- | --- |
-| **Draft → [year] → Import** | **No** | `handleUploadedDraftClass` runs `delete p.stats` on every uploaded player before it reads anything else. No file can get a statline through this button — awards survive only because that function never deletes them. It does replace the class cleanly, which is why everyone uses it. |
-| **Tools → Import players** | Yes | Tick *Include stats*. Keeps the rows (stamping each one's team DNE, which is what they already say), but it *adds* players rather than replacing the class, so an imported class lands on top of the one the game generated. |
-| **Merge into a league file** | Yes | What the export dialog's *Merge into a league file…* does: upload your own league export, and the tool writes it back with the class spliced into its `players` — the generated prospects for that draft year dropped, everything else in your file untouched. Load the result with **Create New League → upload**. |
+| Route | Statline | Awards | Season's team | Replaces the class |
+| --- | --- | --- | --- | --- |
+| **Draft → [year] → Import** | **No** | Yes | — | Yes |
+| **Tools → Import players** (*Players file* export) | Yes | **No**, but see below | Always **DNE** | No, it adds |
+| **Create New League → upload** (*Merge into a league file* export) | Yes | Yes | DNE | Yes |
+
+Each of those is a fixed fact about BBGM's own import code, not a preference:
+
+* `handleUploadedDraftClass` — the **Draft → [year] → Import** button — runs `delete p.stats`
+  on every uploaded player before it reads anything else. No file can carry a statline
+  through that button; awards and notes survive because that function never touches them.
+* `importPlayers` — **Tools → Import players** — is the mirror image. It builds each
+  imported player from a fixed list of fields: `stats` is on the list, `awards` is not.
+  So the export writes a player's honors into his **note** as well whenever they are
+  exported (the note *is* on the list, guarded by `noteBool`) — the honors line survives
+  even when the note template drops it. That function also does
+  `row.tid = PLAYER.DOES_NOT_EXIST` on every imported stats row before saving it, so the
+  season's team reads "DNE" in the table no matter what the file said — a college
+  abbreviation cannot be put there from outside the game.
+* A league file is the game's own save format and keeps all of it.
+
+The **Players file** export writes what `importPlayers` wants: `version`, `startingSeason`
+and `players`, each player stripped of the fields BBGM's own player export strips, every
+player marked `tid: -2` so the class arrives as a draft class. It deliberately does **not**
+write `exportedSeason`: the Import players screen uses that field to guess a player's team
+from his stats row for that season, that row's team is DNE here, and the guess fails into
+"free agent" — without the field the screen reads his own `tid` and gets it right.
 
 The merge matches by `pid`, and only onto a player who is himself an undrafted prospect of
 the same draft year — a class exported from a different league has pids that mean other
@@ -834,8 +856,8 @@ is an overlay, not a swap: the league's own player object is the base (his `valu
 `contract`, `statsTids`, `moodTraits` and the rest survive) and only what the tool
 produced goes on top. `tools/test.js` covers all of it.
 
-The **More ▾** button next to it also merges the class into a league file (above),
-exports the prospect table as CSV, the whole simulated
+The **More ▾** button next to it also writes the players file and merges the class into a
+league file (both above), exports the prospect table as CSV, the whole simulated
 season (records, bracket, awards, draft board) as JSON or CSV, the season as a
 **BBGM-shaped league fragment** (`teams` and `teamSeasons` in the game's own
 field names, one conference per college league, plus a `coaches` block this tool

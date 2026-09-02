@@ -366,7 +366,8 @@ function ok(name, condition, detail) {
 	ok("the statline export options name the import that discards them",
 		/Draft.{0,40}Import.{0,80}deletes every uploaded player's stats/.test(menuText),
 		menuText.replace(/\n/g, " · ").slice(0, 400));
-	ok("and the export menu offers the merge that keeps them",
+	ok("and the export menu offers both routes that keep them",
+		/Players file, for Tools/.test(menuText) &&
 		/Merge into a league file/.test(menuText),
 		menuText.replace(/\n/g, " · ").slice(0, 400));
 	await page.locator('#modal button:has-text("Compare two presets")').click();
@@ -632,8 +633,23 @@ function ok(name, condition, detail) {
 		await page.evaluate(() => { window.App.state.columnOrder = null; window.App.render(); });
 		await page.waitForTimeout(300);
 
-		// The row context menu, which is the only path from the table to the
-		// comparison.
+		/* The row context menu, which is the only path from the table to the
+		   comparison.
+
+		   The comparison was filled a few steps up, and this menu offers
+		   "Remove from compare" — not "Add to compare" — for a player who is
+		   already in it. So whether the button this check clicks existed at
+		   all depended on whether the top row of the table happened to be one
+		   of the three prospects picked earlier, which is not what the check
+		   is about and is exactly how it failed on one CI runner and passed on
+		   the next with the same commit. Empty the comparison first, so the
+		   menu is built against known state. */
+		await page.evaluate(() => {
+			const st = window.App.state;
+			st.compare = (st.compare || []).map(() => null);
+			window.App.render();
+		});
+		await page.waitForTimeout(250);
 		await page.locator("table tbody tr").first().click({ button: "right" });
 		await page.waitForTimeout(300);
 		ok("right-clicking a row opens a menu",
@@ -652,7 +668,15 @@ function ok(name, condition, detail) {
 		});
 		ok("a right-button echo does not close the menu",
 			(await page.locator(".rowmenu").count()) === 1);
-		await page.locator(".rowmenu button", { hasText: "Add to compare" }).click();
+		/* Named before it is clicked: a locator that matches nothing spends
+		   thirty seconds timing out and then says only that it found nothing,
+		   which is all CI got out of it. This says what the menu did offer. */
+		const menuLabels = await page.locator(".rowmenu button").allTextContents();
+		ok("the menu offers the comparison verb",
+			menuLabels.some((t) => /Add to compare/.test(t)),
+			menuLabels.join(" · ") || "the menu had no buttons");
+		await page.locator(".rowmenu button", { hasText: "Add to compare" })
+			.click({ timeout: 5000 });
 		await page.waitForTimeout(400);
 		ok("and it can add a prospect to the comparison",
 			await page.evaluate(() =>
