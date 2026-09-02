@@ -3063,6 +3063,68 @@ console.log("\nAudit regressions (September 2026)");
 			JSON.stringify(global.Engine.exportFile(res,
 				{ stats: true, prior: true, highs: true, awards: true })
 				.players[idx].stats) === JSON.stringify(row.stats));
+		/* Merging the class into a whole league file, which is the only route
+		   into the game that keeps a statline: the Draft Scouting import
+		   deletes p.stats, and Tools -> Import players adds to the class
+		   rather than replacing it. */
+		{
+			const maxPid = Math.max.apply(null, res.leagueFile.players.map((x) => x.pid));
+			const ghost = {
+				pid: maxPid + 1, tid: -2, firstName: "Ghost", lastName: "Prospect",
+				draft: { year: res.season }, ratings: [{ season: res.season }],
+			};
+			const roster = {
+				pid: maxPid + 2, tid: 3, firstName: "Real", lastName: "Player",
+				draft: { year: res.season - 4 }, ratings: [{ season: res.season }],
+				stats: [{ season: res.season, tid: 3, gp: 10 }],
+			};
+			const league = {
+				version: res.leagueFile.version,
+				startingSeason: res.season,
+				gameAttributes: { season: res.season },
+				teams: [{ tid: 0, region: "A", name: "B" }],
+				/* A real league export always says what a player's team is;
+				   the fixture class file does not, and the match is
+				   deliberately strict about it. */
+				players: res.leagueFile.players
+					.map((x) => Object.assign({ tid: -2 }, x))
+					.concat([ghost, roster]),
+			};
+			const merged = global.Engine.mergeIntoLeague(res, league,
+				{ stats: true, prior: true, highs: true, awards: true });
+			ok("merge replaces the class in place and drops the generated rest",
+				merged.replaced === res.leagueFile.players.length &&
+				merged.added === 0 && merged.removed === 1 &&
+				!merged.file.players.some((x) => x.lastName === "Prospect"));
+			ok("merge leaves everything else in the league file alone",
+				merged.file.gameAttributes === league.gameAttributes &&
+				merged.file.teams === league.teams &&
+				merged.file.players.includes(roster));
+			ok("the merged prospects carry the statline",
+				merged.file.players.filter((x) => Array.isArray(x.stats) &&
+					x.stats.some((r) => r.tid === global.BBGMStats.TID_DOES_NOT_EXIST)
+				).length > 0);
+			// A class from a different league: the pids mean other people, so
+			// nothing may be overwritten on the strength of a pid alone.
+			const foreign = {
+				version: res.leagueFile.version,
+				startingSeason: res.season,
+				players: res.leagueFile.players.map((x) => ({
+					pid: x.pid, tid: 3, firstName: "Someone", lastName: "Else",
+					draft: { year: res.season - 5 }, ratings: [{ season: res.season }],
+				})),
+			};
+			const m2 = global.Engine.mergeIntoLeague(res, foreign, { stats: true });
+			ok("a pid that belongs to somebody else is appended, never overwritten",
+				m2.replaced === 0 && m2.added === res.leagueFile.players.length &&
+				m2.file.players.filter((x) => x.lastName === "Else").length ===
+					foreign.players.length &&
+				new Set(m2.file.players.map((x) => x.pid)).size === m2.file.players.length);
+			ok("a file with no players array is refused with a sentence", (() => {
+				try { global.Engine.mergeIntoLeague(res, { teams: [] }, {}); return false; }
+				catch (e) { return /league file/.test(e.message); }
+			})());
+		}
 		ok("awards:true concatenates every honor as {season, type}",
 			row.awards.length >= (withStats.awards || []).length &&
 			row.awards.every((a) => Number.isFinite(a.season) && typeof a.type === "string"));

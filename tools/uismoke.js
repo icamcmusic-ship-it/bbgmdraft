@@ -363,8 +363,11 @@ function ok(name, condition, detail) {
 	ok("the export menu offers Markdown notes, a message history and a preset diff",
 		/Markdown/.test(menuText) && /Message history/.test(menuText) &&
 		/Compare two presets/.test(menuText), menuText.replace(/\n/g, " · ").slice(0, 140));
-	ok("the statline export options warn that BBGM's own import discards them",
-		/Import.{0,5}Draft class.{0,40}deletes a player's stats/.test(menuText),
+	ok("the statline export options name the import that discards them",
+		/Draft.{0,40}Import.{0,80}deletes every uploaded player's stats/.test(menuText),
+		menuText.replace(/\n/g, " · ").slice(0, 400));
+	ok("and the export menu offers the merge that keeps them",
+		/Merge into a league file/.test(menuText),
 		menuText.replace(/\n/g, " · ").slice(0, 400));
 	await page.locator('#modal button:has-text("Compare two presets")').click();
 	await page.waitForTimeout(250);

@@ -4099,8 +4099,127 @@
 		return Number.isFinite(x) ? Math.round(x * 100) / 100 : null;
 	}
 
+
+	/* ------------------------------------------------ merge into a league
+
+	   The route that actually gets a college season in front of you.
+
+	   Basketball GM has three ways in, and only one of them keeps a statline:
+
+	     Draft -> [year] -> Import   handleUploadedDraftClass. Does
+	                                 `delete p.stats` on every uploaded player
+	                                 before it reads anything else, so no file
+	                                 can put a statline through this door. It
+	                                 does replace the class cleanly, which is
+	                                 why it is the one everybody uses.
+	     Tools -> Import players     keeps stats (tick "Include stats"), but
+	                                 adds players rather than replacing the
+	                                 class, so a whole class lands on top of
+	                                 the one the game already generated.
+	     A league file               keeps everything, because it is the game's
+	                                 own save format.
+
+	   So this writes the third one: the user's exported league with the
+	   customized class spliced into its `players`, ready to load with
+	   Create New League -> upload. Nothing else in their file is touched —
+	   the same object comes back out with one array rebuilt.
+
+	   Matching is by pid, and only onto a player who is himself an undrafted
+	   prospect of the same draft year. A draft class exported from a DIFFERENT
+	   league has pids that mean somebody else entirely, and silently
+	   overwriting a franchise player because his pid collided with a
+	   prospect's is not a thing to risk: anyone unmatched is appended with a
+	   fresh pid instead. */
+	function mergeIntoLeague(result, league, opts) {
+		if (!league || typeof league !== "object" || !Array.isArray(league.players)) {
+			throw new Error("That file has no players array — it is not a BBGM league file.");
+		}
+		const season = result.season;
+		const ours = exportFile(result, opts).players;
+		const isProspect = (p) => Number(p.tid) === -2 &&
+			p.draft && Number(p.draft.year) === season;
+
+		const byPid = new Map();
+		for (const p of league.players) {
+			const pid = Number(p.pid);
+			if (Number.isFinite(pid) && isProspect(p)) byPid.set(pid, p);
+		}
+		let maxPid = -1;
+		for (const p of league.players) {
+			const pid = Number(p.pid);
+			if (Number.isFinite(pid) && pid > maxPid) maxPid = pid;
+		}
+
+		/* An overlay, not a swap. A draft-class export is a TRIMMED player: a
+		   league file's own prospect carries fields it does not (value,
+		   statsTids, contract, moodTraits, transactions, jerseyNumber…), and
+		   writing the trimmed object over the rich one throws all of that
+		   away. So the league's player is the base and everything the export
+		   actually produced goes on top of him. statsTids is the one field
+		   that has to be recomputed rather than kept, because the rows being
+		   written name a team the player has no history with. */
+		const overlay = (target, p) => {
+			const out = Object.assign({}, target, JSON.parse(JSON.stringify(p)));
+			if (Array.isArray(out.stats) && out.stats.length) {
+				const tids = new Set(Array.isArray(target.statsTids) ? target.statsTids : []);
+				for (const row of out.stats) tids.add(row.tid);
+				out.statsTids = Array.from(tids);
+			}
+			return out;
+		};
+
+		const replacements = new Map();
+		const added = [];
+		for (const p of ours) {
+			const pid = Number(p.pid);
+			const target = byPid.get(pid);
+			if (target) {
+				replacements.set(target, overlay(target, p));
+			} else {
+				const copy = JSON.parse(JSON.stringify(p));
+				copy.pid = ++maxPid;
+				/* An appended player still has to be a prospect of this draft
+				   class; the file he came from may not have said so. */
+				copy.tid = -2;
+				if (!copy.draft || typeof copy.draft !== "object") copy.draft = {};
+				if (!Number.isFinite(Number(copy.draft.year))) copy.draft.year = season;
+				if (Array.isArray(copy.stats) && copy.stats.length) {
+					copy.statsTids = Array.from(new Set(copy.stats.map((row) => row.tid)));
+				}
+				added.push(copy);
+			}
+		}
+
+		/* The class this file already had, minus the men we just replaced:
+		   they are the players the game generated for a draft the user is
+		   replacing, and leaving them in doubles the class. A prospect the
+		   user deliberately kept out of the tool (a class trimmed to 70 of
+		   90, say) goes with them — which is what "replace the class" means,
+		   and why it is a flag. */
+		const replaceClass = !opts || opts.replaceClass !== false;
+		const players = [];
+		let removed = 0;
+		for (const p of league.players) {
+			const swap = replacements.get(p);
+			if (swap) { players.push(swap); continue; }
+			if (replaceClass && isProspect(p)) { removed++; continue; }
+			players.push(p);
+		}
+		for (const p of added) players.push(p);
+
+		const file = Object.assign({}, league, { players });
+		return {
+			file,
+			replaced: replacements.size,
+			added: added.length,
+			removed,
+			season,
+		};
+	}
+
 	global.Engine = {
-		run, createRunner, exportFile, exportSeason, exportLeagueFragment, buildNote, classYear,
+		run, createRunner, exportFile, exportSeason, exportLeagueFragment, mergeIntoLeague,
+		buildNote, classYear,
 		assignClassYears, inchesFromHgtRating, validateLeagueFile, findSeason, playerKey,
 		SIZE_OVERRIDE_KEYS, SURPRISES, DRAFT_EVENTS,
 		MAX_CLASS,

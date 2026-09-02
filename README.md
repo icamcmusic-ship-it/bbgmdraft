@@ -818,15 +818,24 @@ Two details worth knowing:
   stamps on stats rows imported from another league — a college program is not a team in
   your league.
 
-**Which import you use decides whether any of it survives.** Confirmed against BBGM's own
-source: Import → Draft class (`handleUploadedDraftClass`) unconditionally deletes a
-player's `stats` on every upload, whatever this file writes, which is the whole difference
-between "awards show up" and "the statline doesn't." Use **Tools → Import players** with
-its *include stats* box ticked, or merge the file into an existing league file's own
-`players` array by hand. The export dialog says so too, and `tools/test.js` checks the
-rows against the schema.
+**Which import you use decides whether any of it survives**, and the usual one throws it
+away. Confirmed against BBGM's own source, all three routes in:
 
-The **More ▾** button next to it also exports the prospect table as CSV, the whole simulated
+| Route | Statline? | Notes |
+| --- | --- | --- |
+| **Draft → [year] → Import** | **No** | `handleUploadedDraftClass` runs `delete p.stats` on every uploaded player before it reads anything else. No file can get a statline through this button — awards survive only because that function never deletes them. It does replace the class cleanly, which is why everyone uses it. |
+| **Tools → Import players** | Yes | Tick *Include stats*. Keeps the rows (stamping each one's team DNE, which is what they already say), but it *adds* players rather than replacing the class, so an imported class lands on top of the one the game generated. |
+| **Merge into a league file** | Yes | What the export dialog's *Merge into a league file…* does: upload your own league export, and the tool writes it back with the class spliced into its `players` — the generated prospects for that draft year dropped, everything else in your file untouched. Load the result with **Create New League → upload**. |
+
+The merge matches by `pid`, and only onto a player who is himself an undrafted prospect of
+the same draft year — a class exported from a different league has pids that mean other
+people, and those players are appended with fresh pids instead of overwriting anybody. It
+is an overlay, not a swap: the league's own player object is the base (his `value`,
+`contract`, `statsTids`, `moodTraits` and the rest survive) and only what the tool
+produced goes on top. `tools/test.js` covers all of it.
+
+The **More ▾** button next to it also merges the class into a league file (above),
+exports the prospect table as CSV, the whole simulated
 season (records, bracket, awards, draft board) as JSON or CSV, the season as a
 **BBGM-shaped league fragment** (`teams` and `teamSeasons` in the game's own
 field names, one conference per college league, plus a `coaches` block this tool
