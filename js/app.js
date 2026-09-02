@@ -1698,7 +1698,23 @@
 				r.readAsText(f);
 			}),
 		);
-		Promise.all(jobs).then((loaded) => {
+		Promise.all(jobs).then((loaded) => installFiles(loaded, problems));
+	}
+
+	/* A synthetic class for a visitor with nothing to drop. It goes through
+	   exactly the path a real file does — validated, fingerprinted, run —
+	   so everything a real class can do, the sample can too. */
+	function loadSample() {
+		if (!global.Sample) return;
+		const seed = Date.now() % 100000;
+		const data = global.Sample.makeClass(seed, 70, new Date().getFullYear() + 1);
+		const check = global.Engine.validateLeagueFile(data);
+		data.startingSeason = check.season;
+		installFiles([{ name: "sample-class-" + seed + ".json", data, warnings: check.warnings }], []);
+	}
+
+	function installFiles(loaded, problems) {
+		{
 			$("empty").classList.remove("busy");
 			const ok = loaded.filter(Boolean);
 			if (problems.length) showError(new Error(problems.join("\n")));
@@ -1731,7 +1747,7 @@
 			if (warns.length) showWarning(warns.join("\n"));
 			setStatus("");
 			run();
-		});
+		}
 	}
 
 	/* Locks belong to the class they were made against. */
@@ -1795,6 +1811,7 @@
 
 	function bindFiles() {
 		$("btnLoad").addEventListener("click", () => $("file").click());
+		if ($("btnSample")) $("btnSample").addEventListener("click", loadSample);
 		$("file").addEventListener("change", (e) => readFiles(e.target.files));
 		$("fileSelect").addEventListener("change", (e) => {
 			state.active = Number(e.target.value);

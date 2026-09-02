@@ -32,7 +32,7 @@ function loadEngine() {
 		for (const f of [
 			"text", "rng", "bbgm", "colleges", "config", "calibration", "ratings",
 			"teams", "stats", "rankings", "tournament", "awards", "engine", "batch",
-			"news", "universe",
+			"sample", "news", "universe",
 		]) require(path.join(__dirname, "..", "js", f + ".js"));
 	}
 	return global;

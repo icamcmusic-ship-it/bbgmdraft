@@ -53,7 +53,13 @@
 		["an before a consonant sound", /\b[aA]n ([B-DF-HJ-NP-TV-Zb-df-hj-np-tv-z][a-z]+)/],
 		["space before punctuation", / [,.;:!?]/],
 		["doubled punctuation", /([,.;:])\1/],
+		/* "1 triple-doubles", "1 teams in the field": a count of one with a
+		   plural noun after it. "No. 1 seeds" and "1 of 60 first-place
+		   votes" are legal, which is what the lookbehind and the stop list
+		   below are for. */
+		["number agreement", /(?<![\d.]|No\. )\b1 ([a-z][a-z-]*[b-df-hj-np-tv-ze]s)\b/],
 	];
+	const ONE_OK = /^(is|was|has|vs|as|this|plus|its|his|does|goes|us|across|minus|less|unless|yes|thus|always|perhaps|seeds?|points?)$/;
 
 	function textFaults(s) {
 		const str = String(s === undefined || s === null ? "" : s);
@@ -65,9 +71,25 @@
 			// lists live in one place.
 			if (label === "a before a vowel sound" && article(m[1]) === "a") continue;
 			if (label === "an before a consonant sound" && article(m[1]) === "an") continue;
+			if (label === "number agreement" && ONE_OK.test(m[1])) continue;
 			out.push(label);
 		}
 		return out;
+	}
+
+	/* "1 triple-double", "2 triple-doubles". Every stat-line pluralisation
+	   used to be written by hand, and the ones that were not ("1 teams in
+	   the field", "1 triple-doubles") shipped. */
+	function plural(n, word, pluralWord) {
+		const num = Number(n);
+		return num + " " + (num === 1 ? word : (pluralWord || word + "s"));
+	}
+
+	/* Capitalise the first letter of a sentence that begins with generated
+	   text ("a Louisiana dunk was the most-watched clip" as a body). */
+	function capitalise(s) {
+		const str = String(s === undefined || s === null ? "" : s);
+		return str.charAt(0).toUpperCase() + str.slice(1);
 	}
 
 	/* Close a sentence whose last word may already carry its own full stop
@@ -86,5 +108,5 @@
 		return segs.map((x) => (x && x.v !== undefined ? String(x.v) : "")).join("");
 	}
 
-	global.Text = { article, withArticle, endSentence, textFaults, segsToText };
+	global.Text = { article, withArticle, endSentence, textFaults, segsToText, plural, capitalise };
 })(typeof window !== "undefined" ? window : self);

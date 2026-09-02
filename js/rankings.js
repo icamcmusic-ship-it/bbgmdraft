@@ -287,10 +287,24 @@
 					pct: played.length ? w / played.length : 0,
 					sos, qual, bad,
 					prestige: t.prestige || 0,
+					/* What a panel that has watched practice knows. The
+					   preseason ballot used to run on prestige alone, and
+					   the programme's LEVEL this season — the roster it
+					   actually has, the down year, the breakout — is drawn
+					   before the ballot and was hidden from it. Measured
+					   over thirty seasons: the preseason No. 1 missed the
+					   tournament in seven of them, preseason top-25 teams
+					   made the field 58% of the time against a real 80-85%,
+					   and preseason rank correlated with final NET at 0.21.
+					   A real October poll is reputation with a look at the
+					   roster, so reputation is prestige blended with a damped
+					   read of the level. */
+					reputation: 0.4 * (t.prestige || 0) +
+						0.6 * (Number.isFinite(t.level) ? t.level : (t.prestige || 0)),
 				};
 			});
 			const sosPct = pctRank(feats.map((f) => f.sos));
-			const presPct = pctRank(feats.map((f) => f.prestige));
+			const presPct = pctRank(feats.map((f) => f.reputation));
 
 			/* Voters only ever score a CANDIDATE set — the teams a real voter
 			   actually considers: the top of the shared feature score plus
@@ -314,7 +328,7 @@
 			const REP_SCALE = 14;
 			const ramp = (f) => Math.min(1, f.games / REP_GAMES);
 			const resultsScore = (f) => 10 * f.pct + 4 * sosPct(f.sos) + f.qual - 1.4 * f.bad;
-			const reputation = (f) => REP_SCALE * presPct(f.prestige);
+			const reputation = (f) => REP_SCALE * presPct(f.reputation);
 			const shared = new Array(n);
 			for (let i = 0; i < n; i++) {
 				const f = feats[i];

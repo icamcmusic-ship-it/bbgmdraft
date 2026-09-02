@@ -13,6 +13,7 @@
 	const BB = global.BBGM;
 	const C = global.Colleges;
 	const RB = global.RatingsBuilder;
+	const Text = global.Text;
 	const T = global.TeamsSim;
 	const S = global.StatsSim;
 	const TN = global.Tournament;
@@ -223,7 +224,7 @@
 	}
 
 	function assignCollege(rng, player, cfg) {
-		if (player.college && player.college.trim() !== "") return player.college;
+		if (player.college && player.college.trim() !== "") return C.canonical(player.college);
 		if (rng.chance(clamp(cfg.pDII, 0, 1))) return "DII NCAA";
 		const loc = player.born && player.born.loc;
 		const weights = cfg.leagueWeights || {};
@@ -636,7 +637,7 @@
 				age: season - Number(p.born.year),
 				draftRound: p.draft && Number.isFinite(p.draft.round) ? p.draft.round : null,
 				draftPick: p.draft && Number.isFinite(p.draft.pick) ? p.draft.pick : null,
-				origCollege: p.college,
+				origCollege: C.canonical(p.college),
 				origRatings: r,
 				origOvr: r.ovr,
 				origPot: r.pot,
@@ -1393,6 +1394,15 @@
 		const ncaa = players.filter((p) => !p.nonNcaa);
 		const order = ncaa.slice().sort((a, b) => b.origOvr - a.origOvr);
 		const n = Math.max(1, order.length);
+		/* Each player's score is drawn independently; the RANK is not. A
+		   rank was rounded and clamped straight off the draw, with no
+		   collision check, so every class carried more than one "No. 1
+		   nationally" recruit — one had two No. 1s and two No. 50s in the
+		   same sophomore cohort. A recruiting ranking is a list: within a
+		   recruiting class (the high-school class he came out of, which is
+		   his class year plus his redshirt year) the noised scores are
+		   sorted and each man takes the next free number. */
+		const cohorts = {};
 		order.forEach((p, i) => {
 			const r = rng.child("rec:" + p.key);
 			const prestige = C.prestige(p.newCollege);
@@ -1400,16 +1410,26 @@
 			// with how good his program is: blue bloods get the blue-chippers.
 			const base = (i / n) * 100;
 			const pull = (60 - prestige) * 0.28;
-			const rank = clamp(Math.round(base + pull + r.normal(0, 14)), 1, 320);
-			const stars = rank <= 8 ? 5 : rank <= 40 ? 4 : rank <= 130 ? 3 : 2;
-			p.recruiting = {
-				rank,
-				stars,
-				// A transfer was recruited somewhere else; a freshman was
-				// recruited here.
-				committed: (p.transfer && p.transfer.from) || p.newCollege,
-			};
+			const score = base + pull + r.normal(0, 14);
+			const cohort = priorYears(p.classYear) + (p.redshirt ? 1 : 0);
+			(cohorts[cohort] = cohorts[cohort] || []).push({ p, score });
 		});
+		for (const key of Object.keys(cohorts)) {
+			const group = cohorts[key].sort((a, b) => a.score - b.score);
+			let last = 0;
+			for (const { p, score } of group) {
+				const rank = Math.max(last + 1, clamp(Math.round(score), 1, 400));
+				last = rank;
+				const stars = rank <= 8 ? 5 : rank <= 40 ? 4 : rank <= 130 ? 3 : 2;
+				p.recruiting = {
+					rank,
+					stars,
+					// A transfer was recruited somewhere else; a freshman was
+					// recruited here.
+					committed: (p.transfer && p.transfer.from) || p.newCollege,
+				};
+			}
+		}
 		// Who the headline signing was at each program, and who shared a class.
 		const bySchool = {};
 		for (const p of ncaa) (bySchool[p.newCollege] = bySchool[p.newCollege] || []).push(p);
@@ -1480,10 +1500,15 @@
 				continue;
 			}
 			const r = rng.child("inj:" + p.key);
+			/* The build's own durability (see injuryMultiplier): an
+			   Injury-Prone Talent is hurt about twice as often as the class,
+			   an Iron Man half as often. It moves the injury roll, not the
+			   ordinary absences — a coach's decision is not a knee. */
+			const build = RB.injuryMultiplier(p.archetype);
 			// The draft-year games-played mean is 33.5 against a ~35-game
 			// schedule, so a bit over half a class misses something.
-			if (r.random() >= 0.54 * rate) continue;
-			const hurt = r.random() < 0.55 * rate;
+			if (r.random() >= 0.54 * rate * (0.6 + 0.4 * build)) continue;
+			const hurt = r.random() < Math.min(0.95, 0.55 * rate * build);
 			const table = hurt ? INJURIES : ABSENCES;
 			const pickKind = r.weighted(table);
 			const games = Math.max(1, Math.round(
@@ -2965,6 +2990,7 @@
 	   configurable (cfg.noteLines) rather than hardcoded, so the README no
 	   longer has to explain a fixed set of omissions. */
 	const NOTE_LINES = [
+		["summary", "One-line scouting summary"],
 		["team", "School / club, conference, class year"],
 		["path", "How he got here (recruiting, transfer, redshirt)"],
 		["record", "Team record and postseason result"],
@@ -2987,7 +3013,56 @@
 		   awards. See rankAgainstField in js/awards.js. */
 		["ranks", "Where he finished nationally and in his conference"],
 	];
-	const DEFAULT_NOTE_LINES = ["team", "stats", "shooting", "signature", "awards"];
+	const DEFAULT_NOTE_LINES = ["summary", "team", "stats", "shooting", "signature", "awards"];
+
+	/* The note's opening sentence. It used to start "School (Conf) · Year"
+	   and go straight to stat lines, which reads like a stat export; a
+	   scout's note opens with what the player IS. Built from the things
+	   the engine already knows — hand, size, class year, position, build,
+	   the one number his season was about, and what the jumper looks like
+	   — and drawn from the player's own key so it survives a re-run. */
+	function noteSummary(p, team, season) {
+		const s = p.stats;
+		const r = p.newRatings || {};
+		const rng = new Rng("summary|" + p.key);
+		const year = String(p.classYear || "").toLowerCase();
+		const size = Number.isFinite(p.newHgtInches)
+			? Math.floor(p.newHgtInches / 12) + "'" + (p.newHgtInches % 12) + "\"" : "";
+		const pos = ({ PG: "point guard", SG: "guard", G: "guard", GF: "wing", SF: "wing",
+			F: "forward", PF: "forward", FC: "big", C: "centre" })[p.newPos] || "player";
+		const who = [p.hand === "left" ? "left-handed" : "", size, year, pos]
+			.filter(Boolean).join(" ");
+		const build = p.archetype && p.archetype !== "Balanced"
+			? " built as " + Text.withArticle(p.archetype) : "";
+		// The jumper, which is the first thing after the height and the hand.
+		const shot = Number.isFinite(r.tp)
+			? (r.tp >= 62 ? "a real jumper" : r.tp >= 45 ? "a workable jumper"
+				: r.tp >= 28 ? "a jumper still in progress" : "no jumper to speak of")
+			: "";
+		const ft = s && Number.isFinite(s.ftp) && s.fta >= 1.5
+			? " and " + (s.ftp * 100).toFixed(0) + "% from the line" : "";
+		const where = p.nonNcaa
+			? (p.proClub ? p.proClub + " (" + p.newCollege + ")" : p.newCollege)
+			: p.newCollege;
+		const record = team && Number.isFinite(team.w) && Number.isFinite(team.l)
+			? team.w + "-" + team.l + " " : "";
+		const numbers = s && s.gp > 0
+			? (global.News ? global.News.statBlurb(s) : s.ppg.toFixed(1) + " points a game")
+			: "no season on record";
+		const variants = [
+			() => Text.capitalise(Text.withArticle(who) + build + ": " + numbers +
+				" for " + record + where + (shot ? ", with " + shot + ft : "") + "."),
+			() => Text.capitalise(p.archetype && p.archetype !== "Balanced"
+				? Text.withArticle(p.archetype) + " at " + where + ", " + Text.withArticle(who) +
+					" who put up " + numbers + (shot ? "; " + shot + ft : "") + "."
+				: Text.withArticle(who) + " at " + where + " who put up " + numbers +
+					(shot ? "; " + shot + ft : "") + "."),
+			() => Text.capitalise("put up " + numbers + " for " + record + where + " as " +
+				Text.withArticle(who) + build + (shot ? " — " + shot + ft : "") + "."),
+		];
+		void season;
+		return rng.pick(variants)();
+	}
 
 	function buildNote(p, teams, season, cfg, state) {
 		const s = p.stats;
@@ -2995,6 +3070,8 @@
 		const want = (cfg && Array.isArray(cfg.noteLines) ? cfg.noteLines : DEFAULT_NOTE_LINES);
 		const on = (k) => want.indexOf(k) !== -1;
 		const team = p.nonNcaa ? p.proTeam : teams[p.newCollege];
+
+		if (on("summary")) lines.push(noteSummary(p, team, season));
 
 		if (on("team")) {
 			if (p.nonNcaa) {
@@ -3105,6 +3182,10 @@
 				"Season high: " + g.pts + " points" +
 				(g.reb >= 8 ? " and " + g.reb + " rebounds" :
 					g.ast >= 7 ? " and " + g.ast + " assists" : "") +
+				(Number.isFinite(g.fgm) && g.fga > 0
+					? " on " + g.fgm + "-of-" + g.fga + " shooting" +
+						(g.tpa >= 3 ? " (" + g.tpm + "-of-" + g.tpa + " from three)" : "")
+					: "") +
 				" in " + (g.won ? "a win over " : "a loss to ") + g.opp +
 				(g.round ? " in the " + g.round : "") +
 				(g.pf !== null && g.pf !== undefined
@@ -3116,9 +3197,9 @@
 			const gl = p.gameLog;
 			const bits = ["highs " + gl.highs.pts + "p / " + gl.highs.reb + "r / " +
 				gl.highs.ast + "a"];
-			if (gl.twentyPointGames) bits.push(gl.twentyPointGames + " 20-point games");
-			if (gl.doubleDoubles) bits.push(gl.doubleDoubles + " double-doubles");
-			if (gl.tripleDoubles) bits.push(gl.tripleDoubles + " triple-doubles");
+			if (gl.twentyPointGames) bits.push(Text.plural(gl.twentyPointGames, "20-point game"));
+			if (gl.doubleDoubles) bits.push(Text.plural(gl.doubleDoubles, "double-double"));
+			if (gl.tripleDoubles) bits.push(Text.plural(gl.tripleDoubles, "triple-double"));
 			if (gl.hotStreak) {
 				bits.push("best stretch: " + gl.hotStreak.games + " straight at " +
 					n1(gl.hotStreak.ppg) + " a night");
@@ -3127,7 +3208,7 @@
 		}
 		if (on("march") && p.gameLog && p.gameLog.postseason) {
 			const ps = p.gameLog.postseason;
-			lines.push("Postseason: " + ps.gp + " games, " + n1(ps.ppg) + " PPG, " +
+			lines.push("Postseason: " + Text.plural(ps.gp, "game") + ", " + n1(ps.ppg) + " PPG, " +
 				n1(ps.rpg) + " RPG, " + n1(ps.apg) + " APG");
 		}
 		if (on("injury") && p.gameLog && p.gameLog.injury) {
@@ -3164,7 +3245,7 @@
 			const MAX = 6;
 			const shown = p.awards.slice(0, MAX);
 			const extra = p.awards.length - shown.length;
-			lines.push("Honors: " + shown.join("; ") +
+			lines.push("Honours: " + shown.join("; ") +
 				(extra > 0 ? " (+" + extra + " more)" : ""));
 		}
 		if (on("stock") && p.boardRank) {

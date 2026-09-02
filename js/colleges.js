@@ -173,7 +173,7 @@
 		"Houston": [34, "Big 12"],
 		"Houston Baptist": [1, "Southland"],
 		"Howard": [2, "MEAC"],
-		"IUPUI": [1, "Horizon"],
+		"IU Indianapolis": [1, "Horizon"],
 		"Idaho": [4, "Big Sky"],
 		"Idaho State": [6, "Big Sky"],
 		"Illinois": [44, "Big Ten"],
@@ -206,7 +206,7 @@
 		"Long Beach State": [20, "Big West"],
 		"Longwood": [1, "Big South"],
 		"Louisiana Tech": [8, "Conference USA"],
-		"Louisiana-Lafayette": [10, "Sun Belt"],
+		"Louisiana": [10, "Sun Belt"],
 		"Louisiana-Monroe": [6, "Sun Belt"],
 		"Louisville": [60, "ACC"],
 		"Loyola (MD)": [2, "Patriot"],
@@ -403,7 +403,7 @@
 		"West Georgia": [0.1, "ASUN"],
 		"Lindenwood": [0.1, "Ohio Valley"],
 		"Southern Indiana": [0.1, "Ohio Valley"],
-		"Texas A&M-Commerce": [0.1, "Southland"],
+		"East Texas A&M": [0.1, "Southland"],
 		"Tarleton State": [0.2, "WAC"],
 		"UT Rio Grande Valley": [0.2, "Southland"],
 		"Utah Tech": [0.1, "WAC"],
@@ -984,6 +984,25 @@
 		return String(name).toUpperCase().replace(/[^A-Z&]/g, "").slice(0, 6) || "XX";
 	}
 
+	/* Names a BBGM export may still carry for a programme that has since
+	   rebranded. The table is anchored on 2023-26, and three of its names
+	   were stale against 2025-26 membership: IUPUI became IU Indianapolis,
+	   Texas A&M-Commerce became East Texas A&M, and Louisiana-Lafayette is
+	   simply Louisiana. A file that says the old name still lands on the
+	   right programme; the export writes the current one. */
+	const ALIASES = {
+		"IUPUI": "IU Indianapolis",
+		"Texas A&M-Commerce": "East Texas A&M",
+		"Louisiana-Lafayette": "Louisiana",
+		"Louisiana Lafayette": "Louisiana",
+		"UL Lafayette": "Louisiana",
+	};
+	const canonical = (name) => {
+		if (name === undefined || name === null) return name;
+		const key = String(name).trim();
+		return ALIASES[key] || key;
+	};
+
 	const conferenceOf = (name) => (COLLEGES[name] ? COLLEGES[name][1] : null);
 	const frequencyOf = (name) => (COLLEGES[name] ? COLLEGES[name][0] : 1);
 
@@ -1004,6 +1023,7 @@
 	global.Colleges = {
 		COLLEGES, CONFERENCES, NON_NCAA, PRO_CLUBS, byConference,
 		conferenceOf, frequencyOf, prestige, region, isUSA, leagueWeight,
+		ALIASES, canonical,
 		ABBREVS, abbrev,
 		CANADA_HINTS, US_STATES, GEORGIAN_CITIES, EURO_HINTS, OCEANIA_HINTS, ASIA_HINTS, LATAM_HINTS, AFRICA_HINTS,
 		names: Object.keys(COLLEGES),

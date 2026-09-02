@@ -251,7 +251,10 @@ function ok(name, condition, detail) {
 	};
 	ok("the note template re-runs the notes only",
 		(await phases(() => {
-			const i = document.getElementById("noteLines").querySelectorAll("input")[1];
+			// The first line that is OFF by default: ticking one that is
+			// already on is not a change and re-runs nothing.
+			const i = Array.from(document.getElementById("noteLines").querySelectorAll("input"))
+				.filter((x) => !x.checked)[0];
 			i.checked = true;
 			i.dispatchEvent(new Event("change", { bubbles: true }));
 		})) === "notes");
@@ -796,6 +799,41 @@ function ok(name, condition, detail) {
 				return !(st.poolHistory || []).some((p) => p.join("|") === now);
 			}));
 		void pools;
+	}
+
+	console.log("\nGame log detail");
+	{
+		await page.locator("#tabs button", { hasText: "Game log" }).first().click();
+		await page.waitForTimeout(250);
+		const heads = await page.locator("#view table thead th").allTextContents();
+		ok("the game log carries minutes and shooting splits",
+			heads.indexOf("MIN") !== -1 && heads.indexOf("FG") !== -1 &&
+			heads.indexOf("3P") !== -1 && heads.indexOf("FT") !== -1, heads.join(","));
+		const cell = await page.locator("#view table tbody tr").first()
+			.locator("td").nth(6).textContent();
+		ok("a shooting cell reads makes-of-attempts", /^\d+-\d+$/.test(cell.trim()), cell);
+	}
+
+	console.log("\nSample class");
+	{
+		/* A first-time visitor with no export gets a drop-a-file screen and
+		   a button. The button has to produce a class through the same
+		   path a real file takes. */
+		await page.goto(base);
+		await page.evaluate(() => localStorage.clear());
+		await page.goto(base);
+		ok("the empty screen offers a sample class",
+			(await page.locator("#btnSample").count()) === 1);
+		await page.locator("#btnSample").click();
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		ok("the sample class renders a prospect table",
+			(await page.locator("table tbody tr").count()) === 70);
+		ok("the sample class is named as one",
+			/sample/i.test(await page.locator("#fileSummary").textContent()));
+		await page.locator("#tabs button", { hasText: "News" }).first().click();
+		await page.waitForTimeout(250);
+		ok("the sample class writes a News feed",
+			(await page.locator("#view").innerHTML()).length > 2000);
 	}
 
 	console.log("\nNo errors");

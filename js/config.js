@@ -150,7 +150,7 @@
 		archetypeWeights: null,
 
 		// --- notes -----------------------------------------------------------
-		noteLines: ["team", "stats", "shooting", "signature", "awards"],
+		noteLines: ["summary", "team", "stats", "shooting", "signature", "awards"],
 
 		// --- college season ----------------------------------------------
 		// Which era's empirical anchors the stat model targets. See the header

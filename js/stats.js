@@ -1716,7 +1716,10 @@
 				   prospects-only fit down to talent 30 predicted a scoring
 				   line of roughly zero for a low-major's leading scorer). */
 				field.push({ talent: m.talent, rotationIndex: i, mpg: mins[i], line,
-					// Identity, so an award a returner wins can name him.
+					// Identity, so an award a returner wins can name him —
+					// and a key, so a link can reach him. Star returners
+					// took trophies under a name that nothing could click.
+					key: "field:" + team.name + ":" + i,
 					name: m.name, classYear: m.classYear || null,
 					starReturner: m.starReturner || null });
 				continue;
@@ -1939,28 +1942,62 @@
 		// independent coin flips around the mean.
 		let form = rng.normal(0, 1);
 		const games = [];
+		/* Night-to-night spread. It used to be sd = rel * avg + floor, with
+		   rel 0.34 for points — which put a 27-point scorer at a per-game SD
+		   of 13 against the 7-8 a real high-major volume scorer carries, and
+		   over 47,000 sampled games produced 43 nights of 50, eight of 60 and
+		   an 81. A counting stat is Poisson-like: its spread grows with the
+		   SQUARE ROOT of its average, not with the average, so the SD is
+		   a * sqrt(avg) + b, fitted to real box-score spreads (a 27-point
+		   scorer about 7.7, a 15-point scorer 5.8, a 5-point reserve 3.6).
+		   Fouls are tighter still because a coach manages them — a man on
+		   four sits — and the old 0.42 relative SD against a mean near 3 with
+		   a hard ceiling at 5 fouled a starter out of 20-30% of his games
+		   against a real 3-6%. The third number is how much of the night's
+		   form reaches the stat: scoring rides it, fouls barely do. */
+		const SPREAD = {
+			pts: [1.35, 0.6, 1.0], reb: [1.0, 0.4, 0.8], ast: [0.95, 0.3, 0.8],
+			stl: [0.85, 0.2, 0.4], blk: [0.85, 0.2, 0.4], tov: [0.85, 0.2, 0.5],
+			fouls: [0.45, 0.12, 0.25],
+		};
+		/* A night's ceiling is his minutes, not a flat multiple of his
+		   average: a 12-minute reserve does not score 30, and a 35-minute
+		   scorer's 55 is a once-a-decade line, not a once-a-season one.
+		   Anything drawn above the ceiling is compressed toward it rather
+		   than clipped, so the tail still exists. */
+		const mpg = Number.isFinite(s.mpg) ? s.mpg : 30;
+		const CEIL = {
+			pts: 4 + 1.55 * mpg, reb: 3 + 0.6 * mpg, ast: 2 + 0.42 * mpg,
+			stl: 2 + 0.2 * mpg, blk: 2 + 0.2 * mpg, tov: 2 + 0.25 * mpg,
+			// Below five: a man on four sits, so the draw bends before the cap.
+			fouls: 4.5,
+		};
 		for (let i = 0; i < schedule.length; i++) {
 			if (missed.has(i)) continue;
 			form = 0.62 * form + 0.78 * rng.normal(0, 1);
 			const g = schedule[i];
 			// A little more upside against a good opponent playing at home.
 			const lift = (g.home > 0 ? 0.055 : 0) + (g.quality > 55 ? 0.04 : 0);
-			const draw = (avg, rel, floorAt) => {
-				const sd = rel * avg + floorAt;
-				return Math.max(0, avg * (1 + lift) + sd * (0.55 * form + 0.83 * rng.normal(0, 1)));
+			const draw = (key, avg) => {
+				const [a, b, fw] = SPREAD[key];
+				const sdev = a * Math.sqrt(Math.max(0, avg)) + b;
+				let v = avg * (1 + lift) + sdev * (0.55 * fw * form + 0.83 * rng.normal(0, 1));
+				const ceil = CEIL[key];
+				if (v > ceil) v = ceil + (v - ceil) * (key === "fouls" ? 0.2 : 0.3);
+				return Math.max(0, v);
 			};
 			games.push({
 				i,
 				opp: g.opp, won: g.won, pf: g.pf, pa: g.pa, ot: g.ot, home: g.home,
 				stage: g.stage, round: g.round, quality: g.quality, when: g.when,
 				conference: !!g.conference,
-				pts: draw(s.ppg, 0.34, 2.6),
-				reb: draw(s.rpg, 0.42, 1.1),
-				ast: draw(s.apg, 0.48, 0.9),
-				stl: draw(s.spg, 0.70, 0.5),
-				blk: draw(s.bpg, 0.75, 0.4),
-				tov: draw(s.topg, 0.55, 0.7),
-				fouls: draw(s.pfpg || 0, 0.42, 0.8),
+				pts: draw("pts", s.ppg),
+				reb: draw("reb", s.rpg),
+				ast: draw("ast", s.apg),
+				stl: draw("stl", s.spg),
+				blk: draw("blk", s.bpg),
+				tov: draw("tov", s.topg),
+				fouls: draw("fouls", s.pfpg || 0),
 			});
 		}
 		if (!games.length) return null;
@@ -1978,33 +2015,15 @@
 			stl: s.spg, blk: s.bpg, tov: s.topg, fouls: s.pfpg || 0,
 		};
 		for (const key of Object.keys(targets)) {
-			const cap = key === "fouls" ? 5 : Infinity;
-			const target = targets[key];
-			const total = Math.round(target * games.length);
-			const got = games.reduce((a, g) => a + g[key], 0);
-			const k = got > 1e-9 ? (target * games.length) / got : 0;
-			const scaled = games.map((g) => Math.min(cap, Math.max(0, g[key] * k)));
-			const base = scaled.map((v) => Math.floor(v));
-			let sum = 0;
-			for (const v of base) sum += v;
-			let need = total - sum;
-			const order = scaled
-				.map((v, i) => ({ i, r: v - base[i] }))
-				.sort((a, b) => b.r - a.r);
-			for (let j = 0; need > 0 && j < order.length; j++) {
-				if (base[order[j].i] < cap) { base[order[j].i]++; need--; }
-			}
-			// A capped stat can leave the total short (a season average of
-			// fouls the cap forbids). Fill any room left, then stop: the cap
-			// wins over the total, by construction.
-			let guard = 0;
-			while (need > 0 && guard++ < 8) {
-				for (let i = 0; i < base.length && need > 0; i++) {
-					if (base[i] < cap) { base[i]++; need--; }
-				}
-			}
-			games.forEach((g, i) => { g[key] = base[i]; });
+			allocate(games, key, games.map((g) => g[key]),
+				Math.round(targets[key] * games.length),
+				key === "fouls" ? () => 5 : null);
 		}
+
+		/* Minutes and the shooting line behind the points. The log carried
+		   counting stats only, so "best game" could say he scored 30 and
+		   not whether it was 11-of-15 or a 28-shot night. */
+		attachMinutesAndShooting(games, s, rng);
 
 		/* Plus/minus, which a modern box score carries and this one did
 		   not. His team's margin that night, scaled by how much of it he
@@ -2076,6 +2095,202 @@
 			splits: phaseSplits(games),
 			postseason: postseasonSplit(games),
 		};
+	}
+
+	/* Hand out an integer total across games by largest remainder, scaling
+	   the raw draws so they sum to the target first. `capOf(g)` is a per-game
+	   ceiling (five fouls, the minutes a game had); the cap wins over the
+	   total, by construction. */
+	function allocate(games, key, raw, total, capOf) {
+		const got = raw.reduce((a, v) => a + v, 0);
+		const k = got > 1e-9 ? total / got : 0;
+		const cap = (i) => (capOf ? capOf(games[i]) : Infinity);
+		const scaled = raw.map((v, i) => Math.min(cap(i), Math.max(0, v * k)));
+		const base = scaled.map((v) => Math.floor(v));
+		let sum = 0;
+		for (const v of base) sum += v;
+		let need = total - sum;
+		const order = scaled
+			.map((v, i) => ({ i, r: v - base[i] }))
+			.sort((a, b) => b.r - a.r);
+		for (let j = 0; need > 0 && j < order.length; j++) {
+			if (base[order[j].i] < cap(order[j].i)) { base[order[j].i]++; need--; }
+		}
+		// A capped stat can leave the total short. Fill any room left, then
+		// stop.
+		let guard = 0;
+		while (need > 0 && guard++ < 8) {
+			for (let i = 0; i < base.length && need > 0; i++) {
+				if (base[i] < cap(i)) { base[i]++; need--; }
+			}
+		}
+		games.forEach((g, i) => { g[key] = base[i]; });
+	}
+
+	/* Per-game minutes and shooting, reconciled to the season line.
+
+	   Minutes sit around his average, run longer in overtime, and are cut on
+	   the nights he fouled out. Attempts follow the scoring night — a
+	   30-point game is a 20-shot game — and sum to the season's attempts
+	   exactly. Makes are then solved per game so that
+	   2 * (FGM - 3PM) + 3 * 3PM + FTM equals the points already in the log,
+	   and a final exchange pass (a three for a two-and-a-free-throw, a two
+	   for two free throws — both points-neutral) moves the season's FGM
+	   and 3PM totals onto the line's own, so the percentages a reader
+	   recomputes off the log are the percentages beside it. */
+	function attachMinutesAndShooting(games, s, rng) {
+		const n = games.length;
+		const mpg = Number.isFinite(s.mpg) ? s.mpg : 0;
+		const gameMin = (g) => 40 + 5 * (g.ot || 0);
+		const rawMin = games.map((g) => {
+			let m = mpg + rng.normal(0, 0.11 * mpg + 1.4);
+			if (g.ot) m += 2.5 * g.ot * Math.min(1, mpg / 30);
+			if (g.fouls >= 5) m = Math.min(m, Math.max(4, mpg * 0.8));
+			return Math.max(0, Math.min(gameMin(g), m));
+		});
+		allocate(games, "min", rawMin, Math.round(mpg * n), gameMin);
+
+		if (!Number.isFinite(s.fga) || !Number.isFinite(s.fgp) ||
+			!Number.isFinite(s.tpa) || !Number.isFinite(s.fta)) return;
+		const ppg = s.ppg || 0;
+		// Usage moves with the scoring night, less than one-for-one.
+		const shape = (g) => (ppg > 0.5 ? 0.5 + 0.5 * (g.pts / ppg) : 1);
+		allocate(games, "fga",
+			games.map((g) => Math.max(0, s.fga * shape(g) * (1 + rng.normal(0, 0.14)))),
+			Math.round(s.fga * n), null);
+		const tpShare = s.fga > 0 ? s.tpa / s.fga : 0;
+		allocate(games, "tpa",
+			games.map((g) => Math.max(0, g.fga * tpShare * (1 + rng.normal(0, 0.28)))),
+			Math.round(s.tpa * n), (g) => g.fga);
+		allocate(games, "fta",
+			games.map((g) => Math.max(0, s.fta * shape(g) * (1 + rng.normal(0, 0.32)))),
+			Math.round(s.fta * n), null);
+
+		/* Every game has to be scorable from its own attempts: the most a
+		   line can produce is 2 * FGA + 3PA + FTA. Where a big night drew too
+		   few shots, take attempts from the game with the most slack. */
+		const capacity = (g) => 2 * g.fga + g.tpa + g.fta;
+		for (let guard = 0; guard < 200; guard++) {
+			const short = games.filter((g) => capacity(g) < g.pts)
+				.sort((a, b) => (b.pts - capacity(b)) - (a.pts - capacity(a)))[0];
+			if (!short) break;
+			const donor = games.filter((g) => g !== short && g.fga - g.tpa > 0 &&
+				capacity(g) - g.pts >= 2)
+				.sort((a, b) => (capacity(b) - b.pts) - (capacity(a) - a.pts))[0];
+			if (!donor) { short.fga++; continue; }
+			donor.fga--;
+			short.fga++;
+		}
+
+		/* Move one MISSED attempt from another game into `g`. A miss is
+		   points-neutral wherever it sits, so this changes nothing a reader
+		   can recompute; it only gives a game the room it needs. Makes are
+		   solved after the moves, so a "miss" here is an attempt above the
+		   makes the game will end up with. */
+		const spareTwo = (d) => (d.fga - d.tpa) - Math.max(0, (d.fgm || 0) - (d.tpm || 0));
+		const spareThree = (d) => d.tpa - (d.tpm || 0);
+		const spareFt = (d) => d.fta - (d.ftm || 0);
+		const borrow = (g, kind) => {
+			const spare = kind === "2a" ? spareTwo : kind === "3a" ? spareThree : spareFt;
+			const d = games.filter((x) => x !== g && spare(x) >= 1)
+				.sort((a, b) => spare(b) - spare(a))[0];
+			if (!d) return false;
+			if (kind === "2a") { d.fga--; g.fga++; }
+			else if (kind === "3a") { d.fga--; d.tpa--; g.fga++; g.tpa++; }
+			else { d.fta--; g.fta++; }
+			return true;
+		};
+
+		// Season make totals, forced onto the points already in the log.
+		const ptsT = games.reduce((a, g) => a + g.pts, 0);
+		const fgaT = games.reduce((a, g) => a + g.fga, 0);
+		const tpaT = games.reduce((a, g) => a + g.tpa, 0);
+		const ftaT = games.reduce((a, g) => a + g.fta, 0);
+		let tpmT = Math.min(tpaT, Math.round(s.tpa * s.tpp * n));
+		let fgmT = Math.max(tpmT, Math.min(fgaT, Math.round(s.fga * s.fgp * n)));
+		let ftmT = ptsT - 2 * fgmT - tpmT;
+		// Free throws absorb the rounding; a shortfall or an excess beyond
+		// the attempts is taken out of the two-point makes.
+		if (ftmT < 0) { fgmT += Math.ceil(ftmT / 2); ftmT = ptsT - 2 * fgmT - tpmT; }
+		if (ftmT > ftaT) { fgmT += Math.floor((ftmT - ftaT) / 2); ftmT = ptsT - 2 * fgmT - tpmT; }
+		if (ftmT < 0 || ftmT > ftaT || fgmT > fgaT || fgmT < tpmT) {
+			// A line the attempts cannot carry (they were drawn from the
+			// same line, so this is rounding): fall back to the identity
+			// per game and let the totals land where they land.
+			fgmT = null;
+		}
+
+		/* Per-game makes: the fewest moves from the expected makes that
+		   satisfy the points identity within the game's attempts. A game
+		   with no way to make its total (one point and no free throw, two
+		   points from nothing but threes) borrows the attempt it lacks. */
+		const solveGame = (g) => {
+			const twoA = g.fga - g.tpa;
+			const tpm0 = g.tpa * (s.tpp || 0);
+			const ftm0 = g.fta * (s.ftp || 0);
+			let best = null;
+			for (let tpm = 0; tpm <= g.tpa; tpm++) {
+				for (let ftm = 0; ftm <= g.fta; ftm++) {
+					const rest = g.pts - 3 * tpm - ftm;
+					if (rest < 0 || rest % 2 !== 0) continue;
+					const two = rest / 2;
+					if (two > twoA) continue;
+					const cost = Math.abs(tpm - tpm0) + Math.abs(ftm - ftm0) +
+						0.5 * Math.abs(two - twoA * (s.fgp || 0.45));
+					if (!best || cost < best.cost) best = { tpm, ftm, two, cost };
+				}
+			}
+			return best;
+		};
+		for (const g of games) {
+			let best = solveGame(g);
+			for (let tries = 0; !best && tries < 4; tries++) {
+				if (!borrow(g, "fta")) g.fta++;
+				best = solveGame(g);
+			}
+			if (!best) best = { tpm: 0, ftm: Math.min(g.fta, g.pts), two: 0 };
+			g.tpm = best.tpm;
+			g.ftm = best.ftm;
+			g.fgm = best.two + best.tpm;
+		}
+		if (fgmT === null) return;
+
+		/* The exchange pass. Each move is points-neutral inside one game:
+		   a three becomes a two and a free throw (or back), and a two
+		   becomes two free throws (or back). The MAKES a move needs have to
+		   be in the game already; the attempts it needs can be borrowed. */
+		const tot = (k) => games.reduce((a, g) => a + g[k], 0);
+		const madeTwo = (g) => g.fgm - g.tpm;
+		const attempt = (g, kinds) => {
+			for (const k of kinds) {
+				const spare = k === "2a" ? spareTwo : k === "3a" ? spareThree : spareFt;
+				const want = k === "fta" && kinds.filter((x) => x === "fta").length;
+				while (spare(g) < (want || 1)) if (!borrow(g, k)) return false;
+			}
+			return true;
+		};
+		const exchange = (pred, kinds, apply) => {
+			const g = games.filter(pred).sort((a, b) => b.pts - a.pts)[0];
+			if (!g || !attempt(g, kinds)) return false;
+			apply(g);
+			return true;
+		};
+		for (let guard = 0; guard < 400 && tot("tpm") !== tpmT; guard++) {
+			const moved = tot("tpm") < tpmT
+				? exchange((g) => madeTwo(g) >= 1 && g.ftm >= 1, ["3a"],
+					(g) => { g.tpm++; g.ftm--; })
+				: exchange((g) => g.tpm >= 1, ["2a", "fta"],
+					(g) => { g.tpm--; g.ftm++; });
+			if (!moved) break;
+		}
+		for (let guard = 0; guard < 400 && tot("fgm") !== fgmT; guard++) {
+			const moved = tot("fgm") < fgmT
+				? exchange((g) => g.ftm >= 2, ["2a"],
+					(g) => { g.fgm++; g.ftm -= 2; })
+				: exchange((g) => madeTwo(g) >= 1, ["fta", "fta"],
+					(g) => { g.fgm--; g.ftm += 2; });
+			if (!moved) break;
+		}
 	}
 
 	function meanOf(games, key) {

@@ -446,6 +446,56 @@
 	   a raider never takes more than it can fit. Returns the per-run mapping
 	   plus a list of the moves, so the UI can say what happened. */
 	const MIN_CONF_MEMBERS = 7;
+	/* Where each conference lives, coarsely. Realignment was
+	   geography-blind — Tennessee State to the CAA, a New England and
+	   Mid-Atlantic league, in one sampled run — and the database carries no
+	   state per school, so the footprint is a fact about the conference:
+	   NE New England · MA Mid-Atlantic · CAR Carolinas and Virginia ·
+	   SE Deep South and Florida · TN Tennessee and Kentucky · OH Great
+	   Lakes · MW Plains · TX Texas, Louisiana, Arkansas, Oklahoma · MTN
+	   Mountain · W Pacific. A raid reaches into a league whose footprint
+	   overlaps the raider's, which is what the real ones do, and the
+	   national leagues overlap nearly everything. */
+	const CONF_REGIONS = {
+		"ACC": ["NE", "MA", "CAR", "SE", "TN", "OH", "W", "TX"],
+		"SEC": ["SE", "TN", "TX", "MW", "CAR"],
+		"Big Ten": ["OH", "MW", "MA", "W"],
+		"Big 12": ["TX", "MW", "MTN", "W", "OH", "SE", "MA"],
+		"Big East": ["NE", "MA", "OH", "MW"],
+		"WCC": ["W", "MTN"],
+		"American": ["TX", "SE", "TN", "CAR", "MA", "MW"],
+		"Mountain West": ["MTN", "W"],
+		"Atlantic 10": ["MA", "NE", "OH", "MW"],
+		"Missouri Valley": ["MW", "OH", "TN"],
+		"Conference USA": ["TX", "SE", "TN", "MTN"],
+		"MAC": ["OH"],
+		"Sun Belt": ["SE", "TX", "CAR"],
+		"Big West": ["W"],
+		"CAA": ["NE", "MA", "CAR"],
+		"WAC": ["TX", "MTN", "W"],
+		"Horizon": ["OH", "MW"],
+		"MAAC": ["NE", "MA"],
+		"Southern": ["CAR", "SE", "TN"],
+		"Ivy": ["NE", "MA"],
+		"Ohio Valley": ["TN", "OH", "MW", "TX"],
+		"Big Sky": ["MTN", "W"],
+		"Summit": ["MW", "MTN"],
+		"ASUN": ["SE", "TN", "CAR"],
+		"Southland": ["TX"],
+		"Big South": ["CAR", "SE"],
+		"Patriot": ["NE", "MA"],
+		"America East": ["NE", "MA"],
+		"NEC": ["NE", "MA"],
+		"SWAC": ["SE", "TX"],
+		"MEAC": ["MA", "CAR", "SE"],
+		"Pac-12": ["W", "MTN", "TX"],
+	};
+	function regionsOverlap(a, b) {
+		const ra = CONF_REGIONS[a];
+		const rb = CONF_REGIONS[b];
+		if (!ra || !rb) return true;
+		return ra.some((r) => rb.indexOf(r) !== -1);
+	}
 	function realign(rng, cfg) {
 		const confOf = {};
 		/* Universe carry-over: realignment has MEMORY when a previous season's
@@ -477,15 +527,23 @@
 		   Without the lower bound on the raided conference's strength the
 		   model produced "LIU, NEC to Big 12", which is not a realignment,
 		   it is a rounding error — real raids reach one rung down, not five. */
-		const candidates = C.names
-			.filter((n) => {
-				if (confOf[n] === to) return false;
-				const sf = strength(confOf[n]);
-				return sf < strength(to) - 4 && sf > strength(to) - 26 &&
-					C.prestige(n) >= 60;
-			})
+		const tier = (n) => {
+			if (confOf[n] === to) return false;
+			const sf = strength(confOf[n]);
+			return sf < strength(to) - 4 && sf > strength(to) - 26 &&
+				C.prestige(n) >= 60;
+		};
+		let candidates = C.names
+			.filter((n) => tier(n) && regionsOverlap(confOf[n], to))
 			.sort((a, b) => C.prestige(b) - C.prestige(a))
 			.slice(0, 30);
+		// A raider with nobody in reach on the map takes the tier anyway,
+		// which is what a raid across the country is.
+		if (candidates.length < wanted) {
+			candidates = C.names.filter(tier)
+				.sort((a, b) => C.prestige(b) - C.prestige(a))
+				.slice(0, 30);
+		}
 		for (const name of rng.shuffle(candidates)) {
 			if (moves.length >= wanted) break;
 			const from = confOf[name];
@@ -999,6 +1057,11 @@
 		for (const t of all) {
 			for (const g of t.log || []) {
 				if (!g.won || !g.opp) continue;
+				/* Regular season only. The bracket writes its own stories,
+				   and an "upset" read off a March game carried the
+				   regular-season template's "result of the season's first
+				   half" into Championship Week. */
+				if (g.stage && g.stage !== "reg") continue;
 				const opp = teams[g.opp];
 				if (!opp) continue;
 				games.push({ winner: t, loser: opp, g });
@@ -1026,7 +1089,8 @@
 		if (upsets.length && tells(0.8)) {
 			const u = rng.pick(upsets.slice(0, 8));
 			add("upset", u.winner.name + " beat " + u.loser.name + " " +
-				u.g.pf + "-" + u.g.pa + ", the result of the season's first half",
+				u.g.pf + "-" + u.g.pa + ", the result of the " +
+				(u.g.when < 0.5 ? "season's first half" : "conference season"),
 				u.g.when, [u.winner.name, u.loser.name]);
 		}
 
@@ -1049,10 +1113,15 @@
 			C.prestige(t.name) >= 55);
 		if (failing.length && tells(0.7)) {
 			const t = rng.pick(failing);
+			/* The month is drawn first and the date follows it. They used to
+			   be two independent draws, so the text said February while the
+			   dateline (and the "December divorce" headline drawn off it)
+			   said something else. */
+			const month = rng.pick(["January", "February"]);
 			add("coaching change",
 				t.name + " fired " + (t.coach && t.coach.name ? t.coach.name : "its head coach") +
-				" in " + rng.pick(["January", "February"]) + " at " + t.w + "-" + t.l,
-				rng.uniform(0.45, 0.85), [t.name]);
+				" in " + month + " at " + t.w + "-" + t.l,
+				month === "January" ? rng.uniform(0.46, 0.65) : rng.uniform(0.68, 0.87), [t.name]);
 		}
 
 		// A blowout worth naming, because a 40-point game is a fact about a
@@ -1328,7 +1397,7 @@
 	global.TeamsSim = {
 		buildPrograms, simulateRegularSeason, simulateConferenceTournaments,
 		prospectTalent, teamRating, winProb, playGame, playGameScore, ratingOn,
-		realign, makeCoach, COACH_SITUATIONS, COACH_PHILOSOPHIES,
+		realign, makeCoach, COACH_SITUATIONS, COACH_PHILOSOPHIES, CONF_REGIONS, regionsOverlap,
 		gameStrength, TOP_KNEE, TOP_STRETCH, REGULAR_NOISE,
 		capFillers, FILLER_GAP, conferenceDrift, programLevel, applyOutages, makeFiller,
 		PROGRAM_VOL, DOWN_YEAR_RATE, BREAKOUT_RATE, STAR_RETURNER_RATE,

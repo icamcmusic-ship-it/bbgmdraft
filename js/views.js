@@ -105,7 +105,7 @@
 		{ key: "ts", label: "TS%", num: true },
 		{ key: "astTo", label: "A:TO", num: true, off: true, derived: true, title: "Assists per turnover" },
 		{ key: "prod", label: "PROD", num: true, off: true, derived: true, title: "Production score — the single number the award model ranks on" },
-		{ key: "awards", label: "Honors", num: false },
+		{ key: "awards", label: "Honours", num: false },
 	];
 	const PCT_KEYS = { usg: 1, fgp: 1, tpp: 1, ftp: 1, ts: 1, efg: 1 };
 
@@ -2990,6 +2990,7 @@
 			"highs " + gl.highs.pts + "p " + gl.highs.reb + "r " + gl.highs.ast + "a",
 			gl.twentyPointGames + " 20-point games",
 			gl.doubleDoubles + " double-doubles",
+			gl.foulOuts + (gl.foulOuts === 1 ? " foul-out" : " foul-outs"),
 		]) head.appendChild(el("span", "pill", t));
 		if (gl.hotStreak) {
 			head.appendChild(el("span", "pill",
@@ -3014,12 +3015,18 @@
 			view.appendChild(sp);
 		}
 
+		view.appendChild(gameLogTable(gl));
+	}
+
+	/* The game-log table itself, shared by the Game log tab and the page
+	   of a returning player who has no row in the prospect table. */
+	function gameLogTable(gl) {
 		const wrap = el("div", "scroll");
 		const table = el("table");
 		const thead = el("thead");
 		const hr = el("tr");
-		for (const h of ["#", "Opponent", "Stage", "Result", "PTS", "REB", "AST", "STL", "BLK", "TO"]) {
-			const th = el("th", ["#", "PTS", "REB", "AST", "STL", "BLK", "TO"].indexOf(h) >= 0 ? "num" : "", h);
+		for (const h of ["#", "Opponent", "Stage", "Result", "MIN", "PTS", "FG", "3P", "FT", "REB", "AST", "STL", "BLK", "TO", "PF"]) {
+			const th = el("th", ["Opponent", "Stage", "Result"].indexOf(h) === -1 ? "num" : "", h);
 			th.scope = "col";
 			hr.appendChild(th);
 		}
@@ -3033,16 +3040,26 @@
 			tr.appendChild(el("td", null, g.round || (g.conference ? "conference" : "non-conference")));
 			tr.appendChild(el("td", null, (g.won ? "W " : "L ") + g.pf + "-" + g.pa +
 				(g.ot ? (g.ot > 1 ? " " + g.ot + "OT" : " OT") : "")));
-			for (const k of ["pts", "reb", "ast", "stl", "blk", "tov"]) {
+			tr.appendChild(el("td", "num", Number.isFinite(g.min) ? String(g.min) : ""));
+			const ptsTd = el("td", "num", String(g.pts));
+			if (g.pts === gl.highs.pts) ptsTd.className = "num up";
+			tr.appendChild(ptsTd);
+			// The shooting behind the points, so a 30 reads as 11-of-15 or
+			// as a 28-shot night rather than as a number.
+			for (const [m, a] of [["fgm", "fga"], ["tpm", "tpa"], ["ftm", "fta"]]) {
+				tr.appendChild(el("td", "num",
+					Number.isFinite(g[m]) ? g[m] + "-" + g[a] : ""));
+			}
+			for (const k of ["reb", "ast", "stl", "blk", "tov", "fouls"]) {
 				const td = el("td", "num", String(g[k]));
-				if (k === "pts" && g.pts === gl.highs.pts) td.className = "num up";
+				if (k === "fouls" && g.fouls >= 5) td.className = "num down";
 				tr.appendChild(td);
 			}
 			tb.appendChild(tr);
 		});
 		table.appendChild(tb);
 		wrap.appendChild(table);
-		view.appendChild(wrap);
+		return wrap;
 	}
 
 	/* --------------------------------------------------------------- compare */
@@ -3180,6 +3197,7 @@
 		const back = el("button", "tiny", "← All prospects");
 		back.addEventListener("click", () => { A().showPlayer(null); });
 		box.appendChild(back);
+		if (!p && /^field:/.test(String(key))) return fieldPlayerPage(box, res, key);
 		if (!p) {
 			box.appendChild(el("p", "hint", "No such prospect in this class."));
 			return box;
@@ -3324,6 +3342,73 @@
 		}
 		box.appendChild(actions);
 		if (global.Faces) global.Faces.render(face, p);
+		return box;
+	}
+
+	/* A returning player's page. Star returners have names, take trophies
+	   under them and appear in News, and used to be text nobody could click:
+	   they are rotation entries on a programme, not draft prospects, so they
+	   have a stat line and a season but no ratings and no export row. The
+	   page says so and shows what there is — the line, the honours he took
+	   off the class, and a game log drawn from his season on demand. */
+	function fieldPlayerPage(box, res, key) {
+		const m = /^field:(.*):(\d+)$/.exec(String(key));
+		const team = m && res.teams[m[1]];
+		const fp = team && (team.fieldPlayers || []).filter((f) => f.key === key)[0];
+		if (!fp) {
+			box.appendChild(el("p", "hint", "No such player in this season."));
+			return box;
+		}
+		const head = el("div", "rowflex playerhead");
+		const idbox = el("div");
+		idbox.appendChild(el("h3", null, fp.name));
+		const line = el("p", "legendline");
+		line.appendChild(teamLink(team.name));
+		line.appendChild(document.createTextNode(
+			" · " + (fp.classYear || "returning player") +
+			(fp.starReturner ? " · " + fp.starReturner : "")));
+		idbox.appendChild(line);
+		const pills = el("div", "rowflex");
+		pills.appendChild(el("span", "pill", "Not in the draft class — no ratings, no export row"));
+		pills.appendChild(el("span", "pill", "Rotation No. " + (fp.rotationIndex + 1)));
+		idbox.appendChild(pills);
+		head.appendChild(idbox);
+		box.appendChild(head);
+
+		const dl = el("dl", "shortcuts");
+		const row = (k, v) => {
+			if (!v) return;
+			dl.appendChild(el("dt", null, k));
+			dl.appendChild(el("dd", null, v));
+		};
+		const s = fp.line;
+		if (s) {
+			row("This season", s.gp + " GP · " + n1(s.mpg) + " MPG · " +
+				n1(s.ppg) + " / " + n1(s.rpg) + " / " + n1(s.apg) +
+				" · " + n1(s.spg) + " stl, " + n1(s.bpg) + " blk");
+			row("Shooting", "FG " + pc(s.fgp) + "% · 3P " + pc(s.tpp) + "% · FT " +
+				pc(s.ftp) + "% · TS " + pc(s.ts) + "%");
+			row("Usage", pc(s.usg) + "% of possessions · " + n1(s.topg) + " TO · " +
+				n1(s.pfpg) + " PF");
+		}
+		const honours = (res.fieldHonours || []).filter((h) => h.key === key || (!h.key && h.name === fp.name && h.school === team.name));
+		if (honours.length) row("Honours", honours.map((h) => h.award).join("; "));
+		box.appendChild(dl);
+
+		if (s && global.StatsSim && global.BBGMRng) {
+			const gl = global.StatsSim.gameLog({ stats: s, availability: null }, team,
+				new global.BBGMRng.Rng("fieldlog|" + key));
+			if (gl && gl.games && gl.games.length) {
+				box.appendChild(el("h4", null, "Game log"));
+				const pillsRow = el("div", "rowflex");
+				pillsRow.appendChild(el("span", "pill", "highs " + gl.highs.pts + "p " +
+					gl.highs.reb + "r " + gl.highs.ast + "a"));
+				pillsRow.appendChild(el("span", "pill", gl.twentyPointGames + " 20-point games"));
+				pillsRow.appendChild(el("span", "pill", gl.doubleDoubles + " double-doubles"));
+				box.appendChild(pillsRow);
+				box.appendChild(gameLogTable(gl));
+			}
+		}
 		return box;
 	}
 
@@ -3501,6 +3586,44 @@
 		}
 		box.appendChild(plist);
 
+		/* The rest of the rotation. Returning players carry names, stat
+		   lines and, when one of them beat the class to a trophy, honours —
+		   and nothing on the team page showed them. Each one links to a
+		   page of his own. */
+		const returners = (t.fieldPlayers || []).slice()
+			.sort((a, b) => b.mpg - a.mpg);
+		if (returners.length) {
+			box.appendChild(el("h4", null, "Returning rotation"));
+			const wrap = el("div", "scroll");
+			const table = el("table");
+			const hr = el("tr");
+			for (const h of ["Player", "Year", "MPG", "PPG", "RPG", "APG", "TS%", "Note"]) {
+				hr.appendChild(el("th", ["Player", "Year", "Note"].indexOf(h) === -1 ? "num" : "", h));
+			}
+			const thead = el("thead");
+			thead.appendChild(hr);
+			table.appendChild(thead);
+			const tb = el("tbody");
+			for (const fp of returners) {
+				const l = fp.line || {};
+				const tr = el("tr");
+				const td = el("td", "sticky");
+				if (fp.key) td.appendChild(playerLink(fp.name, fp.key));
+				else td.textContent = fp.name || "";
+				tr.appendChild(td);
+				tr.appendChild(el("td", null, fp.classYear || ""));
+				tr.appendChild(el("td", "num", n1(fp.mpg || 0)));
+				tr.appendChild(el("td", "num", n1(l.ppg || 0)));
+				tr.appendChild(el("td", "num", n1(l.rpg || 0)));
+				tr.appendChild(el("td", "num", n1(l.apg || 0)));
+				tr.appendChild(el("td", "num", Number.isFinite(l.ts) ? pc(l.ts) : ""));
+				tr.appendChild(el("td", null, fp.starReturner || ""));
+				tb.appendChild(tr);
+			}
+			table.appendChild(tb);
+			wrap.appendChild(table);
+			box.appendChild(wrap);
+		}
 		box.appendChild(el("h4", null, "Schedule"));
 		const wrap = el("div", "scroll");
 		const table = el("table");

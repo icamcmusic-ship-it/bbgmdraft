@@ -214,6 +214,7 @@
 				const def = fieldDefenseScore(stats);
 				field.push({
 					filler: true,
+					key: fp.key || null,
 					// His own name, when the roster gave him one (it does now);
 					// the slot label survives as a fallback for old callers.
 					name: fp.name || (t.name + " returner " + (fp.rotationIndex + 1)),
@@ -636,6 +637,7 @@
 					fieldHonours.push({
 						award,
 						name: x.name,
+						key: x.key || null,
 						school: x.school || (x.team ? x.team.name : null),
 						classYear: x.classYear || null,
 						starReturner: x.starReturner || null,
@@ -728,7 +730,7 @@
 			if (winner.filler || !winner.awards) {
 				if (winner.filler && winner.name) {
 					fieldHonours.push({
-						award: award.name, name: winner.name,
+						award: award.name, name: winner.name, key: winner.key || null,
 						school: winner.school || (winner.team ? winner.team.name : null),
 						classYear: winner.classYear || null,
 						starReturner: winner.starReturner || null,
@@ -1050,7 +1052,8 @@
 			.sort((a, b) => b.scoreTotal - a.scoreTotal)
 			.slice(0, 5)
 			.map((x) => ({
-				name: x.name, school: x.school || (x.team ? x.team.name : null),
+				name: x.name, key: x.key || null,
+				school: x.school || (x.team ? x.team.name : null),
 				classYear: x.classYear || null, starReturner: x.starReturner || null,
 				pos: x.pos, stats: x.stats,
 			}));

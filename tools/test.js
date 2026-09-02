@@ -2731,6 +2731,275 @@ console.log("\nAudit regressions");
 		global.Text.endSentence("") === "");
 }
 
+
+console.log("\nAudit regressions (September 2026)");
+{
+	/* The September 2026 audit ran independent probes over ~120 classes and
+	   found faults the suite did not assert: game-log variance (50-point
+	   nights once in a thousand games, a 31% foul-out rate), recruiting
+	   ranks that collided (every class had two No. 1 recruits), a preseason
+	   poll with almost no signal (No. 1 missed the tournament in 7 of 30
+	   seasons), a News dateline that split December across two years,
+	   signing-day articles for sophomores, and number-agreement faults the
+	   text sweep did not catch. Each is a check now. */
+	const T = global.Text;
+	const mean = (v) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0);
+	const N = 12;
+	let games = 0;
+	let forty = 0;
+	let foulOuts = 0;
+	let idBad = 0;
+	let attBad = 0;
+	let makesBad = 0;
+	let minBad = 0;
+	const sdHi = [];
+	let dupRanks = 0;
+	let no1Miss = 0;
+	let top25 = 0;
+	let top25In = 0;
+	let decemberWrong = 0;
+	let januaryWrong = 0;
+	let signingNonFresh = 0;
+	let lowerBody = 0;
+	let headMismatch = 0;
+	let realignArticles = 0;
+	let confArticlesMax = 0;
+	let moves = 0;
+	let overlapping = 0;
+	let ratingsN = 0;
+	let ratingsFloor = 0;
+	let origN = 0;
+	let origFloor = 0;
+	let summaryBad = 0;
+	let priorYearsOf = null;
+	for (let s = 0; s < N; s++) {
+		const res = global.Engine.run(V.realisticClass(s % 7, 70),
+			global.Config.make({ seed: "audit" + s, realignmentRate: 1 }));
+		const season = res.leagueFile.startingSeason;
+		const cohorts = {};
+		priorYearsOf = (y) => {
+			const str = String(y || "");
+			return (str.indexOf("Sophomore") !== -1 ? 1 : str.indexOf("Junior") !== -1 ? 2
+				: str.indexOf("Graduate") !== -1 ? 4 : str.indexOf("Senior") !== -1 ? 3 : 0);
+		};
+		for (const p of res.players) {
+			if (p.newRatings) {
+				for (const k of Object.keys(p.newRatings)) {
+					if (k === "hgt" || k === "fuzz") continue;
+					ratingsN++;
+					if (p.newRatings[k] <= 1) ratingsFloor++;
+					if (typeof p.origRatings[k] !== "number") continue;
+					origN++;
+					if (p.origRatings[k] <= 1) origFloor++;
+				}
+			}
+			const first = String(p.note || "").split("\n")[0];
+			if (!/^[A-Z]/.test(first) || !/\.$/.test(first)) summaryBad++;
+			if (p.nonNcaa) continue;
+			if (p.recruiting) {
+				const c = (priorYearsOf(p.classYear) + (p.redshirt ? 1 : 0)) + "|" + p.recruiting.rank;
+				cohorts[c] = (cohorts[c] || 0) + 1;
+			}
+			if (!p.gameLog) continue;
+			const st = p.stats;
+			const gl = p.gameLog.games;
+			let fga = 0;
+			let fgm = 0;
+			let tpa = 0;
+			let tpm = 0;
+			let fta = 0;
+			let ftm = 0;
+			for (const g of gl) {
+				games++;
+				if (g.pts >= 40) forty++;
+				if (g.fouls >= 5) foulOuts++;
+				if (g.pts !== 2 * (g.fgm - g.tpm) + 3 * g.tpm + g.ftm) idBad++;
+				if (!(g.min >= 0 && g.min <= 40 + 5 * (g.ot || 0))) minBad++;
+				fga += g.fga; fgm += g.fgm; tpa += g.tpa; tpm += g.tpm; fta += g.fta; ftm += g.ftm;
+			}
+			if (fga !== Math.round(st.fga * gl.length) || tpa !== Math.round(st.tpa * gl.length) ||
+				fta !== Math.round(st.fta * gl.length)) attBad++;
+			if (Math.abs(fgm - fga * st.fgp) > 2.5 + 0.02 * fga ||
+				Math.abs(tpm - tpa * st.tpp) > 2.5 + 0.02 * tpa ||
+				Math.abs(ftm - fta * st.ftp) > 2.5 + 0.02 * fta) makesBad++;
+			if (st.ppg >= 20) {
+				const m = mean(gl.map((g) => g.pts));
+				sdHi.push(Math.sqrt(mean(gl.map((g) => (g.pts - m) * (g.pts - m)))));
+			}
+		}
+		for (const k of Object.keys(cohorts)) if (cohorts[k] > 1) dupRanks += cohorts[k] - 1;
+		const pre = res.pollHistory[0].ranks;
+		if (!res.teams[pre[0].team].ncaaSeed) no1Miss++;
+		for (const r of pre.slice(0, 25)) { top25++; if (res.teams[r.team].ncaaSeed) top25In++; }
+		for (const m of res.realignment || []) {
+			moves++;
+			if (global.TeamsSim.regionsOverlap(m.from, m.to)) overlapping++;
+		}
+		const news = global.News.build(res);
+		let confArticles = 0;
+		for (const a of news) {
+			const dl = a.dateline;
+			if (/^December/.test(dl) && a.year !== season - 1) decemberWrong++;
+			if (/^(January|February|March|Championship)/.test(dl) && a.year !== season) januaryWrong++;
+			if (/^November/.test(dl) && a.year !== season - 1) januaryWrong++;
+			if (/signing|five-star|decommit|recruiting class/.test(a.kind)) {
+				for (const seg of a.headline.concat(a.body)) {
+					if (seg.t !== "player") continue;
+					const p = res.players.filter((x) => x.key === seg.key)[0];
+					if (p && (p.classYear !== "Freshman" || (p.transfer && p.transfer.from))) signingNonFresh++;
+				}
+			}
+			const body = T.segsToText(a.body);
+			if (/^[a-z]/.test(body)) lowerBody++;
+			const head = T.segsToText(a.headline);
+			// A headline that names a month or a class year has to agree
+			// with the dateline and the body under it.
+			// March is a word headlines use ("March starts early"); the
+			// other months only ever name a date.
+			const month = /\b(November|December|January|February)\b/.exec(head);
+			if (month && dl.indexOf(month[1]) !== 0) headMismatch++;
+			const year = /\b(freshman|sophomore|junior|senior|graduate)\b/i.exec(head);
+			if (year && a.kind === "field honours" && body.toLowerCase().indexOf(year[1].toLowerCase()) === -1) headMismatch++;
+			if (a.kind === "realignment") realignArticles++;
+			if (a.kind === "conf tourney") confArticles++;
+		}
+		confArticlesMax = Math.max(confArticlesMax, confArticles);
+	}
+	ok("no more than one game in five hundred is a 40-point night",
+		forty / games < 0.005, (forty / games * 100).toFixed(2) + "% of " + games);
+	ok("foul-outs are rare, not routine (under 10% of games)",
+		foulOuts / games < 0.10, (foulOuts / games * 100).toFixed(1) + "%");
+	ok("a 20-point scorer's night-to-night spread is 4.5-9 points",
+		sdHi.length > 10 && mean(sdHi) > 4.5 && mean(sdHi) < 9, mean(sdHi).toFixed(1));
+	ok("every game's points equal 2*(FGM-3PM) + 3*3PM + FTM", idBad === 0, String(idBad));
+	ok("the log's attempts sum to the season's attempts exactly", attBad === 0, String(attBad));
+	ok("the log's makes reproduce the season's percentages", makesBad === 0, String(makesBad));
+	ok("no game's minutes exceed the game", minBad === 0, String(minBad));
+	ok("recruiting ranks are unique within a recruiting class",
+		dupRanks === 0, dupRanks + " collisions in " + N + " classes");
+	ok("the preseason No. 1 makes the tournament in nearly every season",
+		no1Miss <= 2, no1Miss + " of " + N + " missed");
+	ok("preseason top-25 teams make the field at a real rate (65%+)",
+		top25In / top25 >= 0.65, (top25In / top25 * 100).toFixed(0) + "%");
+	ok("December belongs to the year before the season, January to the season",
+		decemberWrong === 0 && januaryWrong === 0, decemberWrong + " / " + januaryWrong);
+	ok("signing-day stories are about freshmen", signingNonFresh === 0, String(signingNonFresh));
+	ok("no article body opens in lower case", lowerBody === 0, String(lowerBody));
+	ok("a headline's month or class year agrees with its article",
+		headMismatch === 0, String(headMismatch));
+	ok("a realignment raid runs as one roundup article",
+		realignArticles <= N, realignArticles + " realignment articles in " + N + " classes");
+	ok("conference tournaments run as at most four articles",
+		confArticlesMax <= 4, String(confArticlesMax));
+	ok("realignment moves a programme into a league it shares a map with",
+		moves > 0 && overlapping / moves >= 0.9, overlapping + " of " + moves);
+	/* The realistic fixture itself carries ratings at 1 (its bottom third
+	   is shifted down to a draft-slot curve), so the claim is about what
+	   the builder ADDS: a negative offset scaled by its room, and the
+	   ovr-preserving shift, together put well under a point of the class's
+	   ratings on the floor beyond what arrived there. */
+	ok("the builder adds few ratings on the floor of 1 (under 0.6% over the input)",
+		ratingsFloor / ratingsN - origFloor / origN < 0.006,
+		(ratingsFloor / ratingsN * 100).toFixed(2) + "% against " +
+		(origFloor / origN * 100).toFixed(2) + "% in the input");
+	ok("every default note opens with a scouting sentence", summaryBad === 0, String(summaryBad));
+
+	/* Number agreement in the text sweep. */
+	ok("textFaults() sees a count of one with a plural noun",
+		T.textFaults("has 1 triple-doubles this season").length === 1 &&
+		T.textFaults("put 1 teams in the field").length === 1 &&
+		T.textFaults("No. 1 seeds went 4-0 and 1 of 60 votes").length === 0 &&
+		T.textFaults("has 1 triple-double and 2 double-doubles").length === 0);
+	ok("plural() agrees", T.plural(1, "triple-double") === "1 triple-double" &&
+		T.plural(3, "team") === "3 teams");
+	ok("a team honour is named to, a trophy is won",
+		/^is named a Consensus/.test(global.News.honourPhrase("Consensus First Team All-American")) &&
+		/^wins the /.test(global.News.honourPhrase("Wooden Award")));
+
+	/* The potential gap is derived from the build. */
+	ok("every build has a derived potential gap",
+		RB.ARCHETYPES.every((a) => Number.isFinite(RB.POT_BY_ARCHETYPE[a.name])));
+	ok("a build never seen before gets a potential gap without a table entry",
+		Number.isFinite(RB.computePotGap({ name: "Novel", t: ["raw"], o: { jmp: 12, tp: -10 } })) &&
+		RB.computePotGap({ name: "Novel", t: ["raw"], o: { jmp: 12, tp: -10 } }) > 0);
+	ok("finished skill is a ceiling, raw tools are a bet",
+		RB.POT_BY_ARCHETYPE["Raw Project"] > RB.POT_BY_ARCHETYPE["Floor General"] &&
+		RB.POT_BY_ARCHETYPE["Boom-or-Bust Tools"] > RB.POT_BY_ARCHETYPE["Sharpshooter"]);
+
+	/* The injury axis: a build's rating profile reaches the injury roll. */
+	{
+		const rates = {};
+		for (const arch of ["Injury-Prone Talent", "Iron Man"]) {
+			let hurt = 0;
+			let n = 0;
+			for (let s = 0; s < 4; s++) {
+				const overrides = {};
+				for (let i = 0; i < 70; i++) overrides[i] = { archetype: arch };
+				const res = global.Engine.run(V.realisticClass(s % 7, 70),
+					global.Config.make({ seed: "inj" + s, overrides }));
+				for (const p of res.players) {
+					if (p.nonNcaa || p.archetype !== arch) continue;
+					n++;
+					if (p.availability && p.availability.injury) hurt++;
+				}
+			}
+			rates[arch] = n ? hurt / n : 0;
+		}
+		ok("an Injury-Prone Talent is hurt far more often than an Iron Man",
+			rates["Injury-Prone Talent"] > 2 * rates["Iron Man"] && rates["Iron Man"] < 0.25,
+			JSON.stringify(rates));
+	}
+
+	/* The two builds the audit never saw in forty classes are drawn. */
+	{
+		let crafty = 0;
+		let system = 0;
+		const pools = 400;
+		for (let i = 0; i < pools; i++) {
+			const pool = RB.pickClassPool(new Rng("pool" + i), { archetypePool: 17 }, null) || [];
+			if (pool.some((a) => a.name === "Crafty Finisher")) crafty++;
+			if (pool.some((a) => a.name === "System Player")) system++;
+		}
+		ok("Crafty Finisher and System Player each make the pool",
+			crafty / pools > 0.03 && system / pools > 0.03,
+			(crafty / pools * 100).toFixed(1) + "% / " + (system / pools * 100).toFixed(1) + "%");
+	}
+
+	/* Renamed programmes and the sample class. */
+	ok("a file that says IUPUI lands on IU Indianapolis",
+		global.Colleges.canonical("IUPUI") === "IU Indianapolis" &&
+		global.Colleges.canonical("Louisiana-Lafayette") === "Louisiana" &&
+		global.Colleges.COLLEGES["East Texas A&M"] && !global.Colleges.COLLEGES["IUPUI"]);
+	{
+		const lf = V.realisticClass(3, 12);
+		lf.players[0].college = "Louisiana-Lafayette";
+		const res = global.Engine.run(lf, global.Config.make({ seed: "alias" }));
+		ok("an aliased college runs and exports under its current name",
+			res.players[0].newCollege === "Louisiana" &&
+			global.Engine.exportFile(res).players[0].college === "Louisiana");
+	}
+	{
+		const lf = global.Sample.makeClass(5, 70, 2026);
+		const check = global.Engine.validateLeagueFile(lf);
+		const res = global.Engine.run(lf, global.Config.make({ seed: "sample" }));
+		ok("the sample class validates and runs",
+			check.season === 2026 && res.players.length === 70 &&
+			res.players.every((p) => p.name && Number.isFinite(p.newOvr)));
+		ok("the sample class is deterministic from its seed",
+			JSON.stringify(global.Sample.makeClass(5, 70, 2026)) === JSON.stringify(lf));
+	}
+
+	/* Returning players can be reached. */
+	{
+		const res = global.Engine.run(V.realisticClass(1, 70), global.Config.make({ seed: "field" }));
+		const withKey = Object.values(res.teams).flatMap((t) => t.fieldPlayers || [])
+			.filter((f) => f.key);
+		ok("every returning rotation player carries a key", withKey.length > 3000);
+		ok("a field honour names the player it can link to",
+			(res.fieldHonours || []).every((h) => !h.key || withKey.some((f) => f.key === h.key)));
+	}
+}
+
 console.log("\n" + (failures ? failures + " of " + checks + " checks failed"
 	: "all " + checks + " checks passed"));
 process.exit(failures ? 1 : 0);
