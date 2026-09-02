@@ -1193,6 +1193,16 @@
 			drtg,
 			fgp, tpp, ftp,
 			fga, tpa, fta,
+			/* The shot mix behind fgp, which the line used to average away.
+			   A BBGM stats row splits two-pointers into three zones (at the
+			   rim, the low post, the mid-range) and the model already decides
+			   the split — it just threw it away after folding it into one
+			   two-point percentage. See collegeStatsRow in js/engine.js. */
+			bigness,
+			rimMix,
+			rimPct: insideEff,
+			midPct: midEff,
+			twoPct: twoP,
 			usg: usgRate,        // USG%: share of chances used while on the floor
 			usgShare,            // share of all team chances (sums to 1)
 			ts: fga + 0.44 * fta > 0 ? pts / (2 * (fga + 0.44 * fta)) : 0,
@@ -1763,6 +1773,19 @@
 		}
 		totals.poss = totals.fga - totals.orb + totals.tov + 0.44 * totals.fta;
 		team.teamTotals = totals;
+		/* The same totals as a full box score — makes as well as attempts, and
+		   the defensive glass. `teamTotals` is what the calibration harness
+		   and the award model read and it carries only what they needed;
+		   BBGM's advanced statistics are all ratios against a complete team
+		   line, so the export needs one (see js/bbgmstats.js). Per game, like
+		   teamTotals, and built from the same reconciled lines. */
+		team.box = teamBox(lines, ctx.games, gameMinutes);
+		/* Every line the box was summed from, prospects and returning players
+		   alike, in rotation order. BBGM's advanced statistics are defined on a
+		   whole roster (PER is normalized against the field, BPM adjusts to the
+		   team's own rating), so an export that writes them needs the rotation
+		   and not only its total. */
+		team.lines = lines;
 		team.fieldPlayers = field;
 		team.defense = defenseProfile(comps, mins, teamMinutes, gameMinutes);
 		// Team defensive efficiency: points allowed per 100 possessions, read
@@ -1787,6 +1810,44 @@
 			};
 		}
 		return out;
+	}
+
+	/* A team's complete per-game box score, summed off the rotation's own stat
+	   lines. Everything here is per game and rounds to nothing: the export
+	   multiplies by the games played to get the season totals BBGM's advanced
+	   statistics are defined on. `min` comes out at 5 * gameMinutes by
+	   construction, because that is how the minutes were allocated. */
+	function teamBox(lines, games, gameMinutes) {
+		const box = {
+			gp: Math.max(1, Math.round(games || 0)),
+			min: 0, fg: 0, fga: 0, tp: 0, tpa: 0, ft: 0, fta: 0,
+			orb: 0, drb: 0, trb: 0, ast: 0, tov: 0, stl: 0, blk: 0, pf: 0, pts: 0,
+		};
+		for (const L of lines) {
+			box.min += L.mpg;
+			box.fga += L.fga;
+			box.fg += L.fga * L.fgp;
+			box.tpa += L.tpa;
+			box.tp += L.tpa * L.tpp;
+			box.fta += L.fta;
+			box.ft += L.fta * L.ftp;
+			box.orb += L.orpg;
+			box.drb += L.drpg;
+			box.trb += L.rpg;
+			box.ast += L.apg;
+			box.tov += L.topg;
+			box.stl += L.spg;
+			box.blk += L.bpg;
+			box.pf += L.pfpg;
+			box.pts += L.ppg;
+		}
+		box.poss = box.fga - box.orb + box.tov + 0.44 * box.fta;
+		// Possessions per game IS the pace when a game is one game long; the
+		// distinction matters only for overtime, which the log carries and
+		// these season averages do not.
+		box.pace = box.poss;
+		box.gameMinutes = gameMinutes;
+		return box;
 	}
 
 	/* Renormalize one category to its pool, then clip the tail at `cap` of the
@@ -2326,7 +2387,7 @@
 
 	global.StatsSim = {
 		simulateTeamStats, allocateMinutes, statLine, teamPools, gameLog,
-		fitToPool, reconcileTeamTotals, CONVERGENCE,
+		fitToPool, reconcileTeamTotals, teamBox, CONVERGENCE,
 		defenseProfile, rosterDefenseProfile, rosterShooting,
 		astWeight, stlWeight, rebWeight, passSkill,
 		leagueEnv, LEAGUE_ENV, NCAA_ENV,

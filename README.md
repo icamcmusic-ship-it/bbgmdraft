@@ -793,15 +793,38 @@ source file lacked them), and the file is written with a BOM the same way BBGM w
 its own exports (so is the CSV — Excel reads a BOM-less UTF-8 file as the system
 code page, which turns Dončić into mojibake). Load it back with **Tools → Import → Draft class**.
 
-**The More ▾ dialog's college statline, prior-seasons and season-highs options never reach
-the game through that import.** Confirmed against BBGM's own source: its Import → Draft
-class tool (`handleUploadedDraftClass`) unconditionally deletes a player's `stats` on
-every upload, whatever this file writes — awards survive because that function never
-deletes them, which is the whole difference between "awards show up" and "the statline
-doesn't." The rows are still written correctly (`tools/test.js` covers the shape), because
-they are exactly what a manual merge into an existing league file's own `players` array
-needs — the same audience the league fragment below serves — but dropping this file
-straight into Import → Draft class will not show them. The export dialog says so.
+### The college statline
+
+The **More ▾** dialog's *college statline*, *prior seasons* and *season highs* options
+write the simulated college season into each player's `stats` as **complete Basketball GM
+season rows** — every one of the 74 keys the game's own `addStatsRow` writes, in its
+order: the counting stats, the three-zone shot chart (`fgAtRim` / `fgLowPost` /
+`fgMidRange` and their attempts), `minAvailable`, blocked shots against, the
+double-double / triple-double / five-by-five counts, all 18 derived statistics (PER, EWA,
+the percentages, ORtg / DRtg, win shares, BPM, VORP) and the season highs. See
+`js/bbgmstats.js`, which transcribes the schema and every advanced-stat formula from
+BBGM's source rather than approximating them; the derived numbers are computed over the
+whole simulated field at once, because PER is normalized against the league average and
+BPM adjusts to the league average team.
+
+Two details worth knowing:
+
+* **A season high is `[value, gameId]`, not a number.** The game id points at a game
+  that does not exist in the league you are importing into — the season was played by
+  this simulator, not by BBGM — so it is a stable negative number that can never collide
+  with a real game. The value, which is what every table shows, is exact and comes out of
+  the same game log the totals were summed from.
+* **`tid` is `-7`** (`PLAYER.DOES_NOT_EXIST`, rendered "DNE"), which is what BBGM itself
+  stamps on stats rows imported from another league — a college program is not a team in
+  your league.
+
+**Which import you use decides whether any of it survives.** Confirmed against BBGM's own
+source: Import → Draft class (`handleUploadedDraftClass`) unconditionally deletes a
+player's `stats` on every upload, whatever this file writes, which is the whole difference
+between "awards show up" and "the statline doesn't." Use **Tools → Import players** with
+its *include stats* box ticked, or merge the file into an existing league file's own
+`players` array by hand. The export dialog says so too, and `tools/test.js` checks the
+rows against the schema.
 
 The **More ▾** button next to it also exports the prospect table as CSV, the whole simulated
 season (records, bracket, awards, draft board) as JSON or CSV, the season as a

@@ -30,7 +30,7 @@ function loadEngine() {
 		   wraps the vendored facesjs and draws SVG, which has no business in
 		   a Node harness. */
 		for (const f of [
-			"text", "rng", "bbgm", "colleges", "config", "calibration", "ratings",
+			"text", "rng", "bbgm", "bbgmstats", "colleges", "config", "calibration", "ratings",
 			"teams", "stats", "rankings", "tournament", "awards", "engine", "batch",
 			"sample", "news", "universe",
 		]) require(path.join(__dirname, "..", "js", f + ".js"));

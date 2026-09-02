@@ -1956,7 +1956,12 @@
 			classRefVolume: classRefVolume,
 			classRefEfficiency: classRefEfficiency,
 		}, cfg, rng.child("sim"));
-		return younger.stats ? { line: younger.stats, ovr: younger.newOvr } : null;
+		return younger.stats
+			? {
+				line: younger.stats, ovr: younger.newOvr, box: team.box,
+				lines: team.lines, pos: BB.pos(re.ratings),
+			}
+			: null;
 	}
 
 	function buildPriorSeasons(players, season, rng, teams, cfg, classRefVolume, classRefEfficiency) {
@@ -1986,6 +1991,17 @@
 						apg: L.apg,
 						usg: L.usg,
 						ts: L.ts,
+						/* The whole line and the team it was played on, kept so
+						   the export can write this season as a complete BBGM
+						   stats row instead of guessing its shot mix off the
+						   draft year (see collegeStatsRows). The summary fields
+						   above stay: they are what the views read, and a
+						   reconstructed prior season has them without having
+						   any of this. */
+						line: L,
+						box: sim.box || null,
+						lines: sim.lines || null,
+						pos: sim.pos || null,
 						simulated: true,
 						redshirt: false,
 					});
@@ -3316,6 +3332,508 @@
 		return row;
 	}
 
+
+	/* ------------------------------------------------- BBGM stats rows
+
+	   A college season, written the way Basketball GM writes a season.
+
+	   What used to be here wrote twenty of the seventy-four keys a BBGM stats
+	   row has and, with the highs option on, five bare numbers named ptsMax
+	   and friends. Neither is the shape the game uses (see js/bbgmstats.js): a
+	   season high is [value, gameId], not a number. A row missing two-thirds
+	   of its keys does not display as a smaller row, it displays as a row of
+	   blanks, and a bare ptsMax does not display at all — which is exactly
+	   what a user reported seeing after importing a class exported with the
+	   statline options on.
+
+	   So the export now builds the whole simulated field once — every program,
+	   its rotation, its opponents — and computes the row the same way the game
+	   would: totals off the game log that the season highs come from, the shot
+	   mix off the model that produced the shooting percentages, and every
+	   derived statistic through the ported formulas in js/bbgmstats.js. */
+
+	const BS = global.BBGMStats;
+
+	/* Cached per result object, because the field-wide pass (PER's league
+	   normalization, BPM's team adjustment) is not something to redo per
+	   player, and exportFile can be called several times on one result. */
+	const SEASON_STATS = new WeakMap();
+
+	function statsHash(str) {
+		let h = 5381;
+		for (let i = 0; i < str.length; i++) h = ((h * 33) ^ str.charCodeAt(i)) >>> 0;
+		return h;
+	}
+
+	/* A filler teammate has no ratings row, so his position — which EWA and
+	   BPM both read — is taken off the one thing his line does carry about
+	   his size. */
+	function sizePos(bigness) {
+		const b = Number.isFinite(bigness) ? bigness : 0.45;
+		if (b < 0.20) return "PG";
+		if (b < 0.40) return "SG";
+		if (b < 0.60) return "SF";
+		if (b < 0.80) return "PF";
+		return "C";
+	}
+
+	/* Integers that sum to `total`, apportioned by `weights` and capped by
+	   `caps`, largest remainder first. Used wherever a rounded split has to
+	   stay reconcilable with the number it was split out of. */
+	function apportion(weights, total, caps) {
+		const n = weights.length;
+		const out = new Array(n).fill(0);
+		if (total <= 0) return out;
+		const sum = weights.reduce((a, b) => a + Math.max(0, b), 0);
+		const rem = [];
+		let used = 0;
+		for (let i = 0; i < n; i++) {
+			const want = sum > 0 ? (Math.max(0, weights[i]) / sum) * total : total / n;
+			const cap = caps ? caps[i] : Infinity;
+			const v = Math.min(cap, Math.floor(want));
+			out[i] = v;
+			used += v;
+			rem.push({ i, frac: want - Math.floor(want) });
+		}
+		rem.sort((a, b) => b.frac - a.frac);
+		let guard = 0;
+		while (used < total && guard++ < 10 * n + 50) {
+			let moved = false;
+			for (const r of rem) {
+				if (used >= total) break;
+				const cap = caps ? caps[r.i] : Infinity;
+				if (out[r.i] < cap) { out[r.i]++; used++; moved = true; }
+			}
+			if (!moved) break;
+		}
+		return out;
+	}
+
+	/* The two-point attempts and makes of a season, split into the three zones
+	   BBGM records (at the rim, the low post, the mid-range).
+
+	   The simulation already decides a rim/jumper split and a percentage for
+	   each (see statLine's rimMix, insideEff and midEff) and used to fold them
+	   into one two-point percentage. This unfolds them, and reconciles: the
+	   three zones sum to the attempts and the makes on the row, so nothing a
+	   reader adds up disagrees with anything else on it. The low post is the
+	   one zone the model does not name — a post-up is a two that is not a
+	   layup — so its share of the non-rim twos is taken off size, and it
+	   converts a little worse than the rim. */
+	function zoneSplit(fg, fga, tp, tpa, line) {
+		const L = line || {};
+		const twoA = Math.max(0, fga - tpa);
+		const twoM = Math.max(0, Math.min(twoA, fg - tp));
+		const rimMix = clamp(Number.isFinite(L.rimMix) ? L.rimMix : 0.50, 0.05, 0.95);
+		const postMix = clamp(
+			0.12 + 0.55 * (Number.isFinite(L.bigness) ? L.bigness : 0.45), 0.05, 0.80);
+		const rimA = Math.round(twoA * rimMix);
+		const lowA = Math.round((twoA - rimA) * postMix);
+		const midA = Math.max(0, twoA - rimA - lowA);
+		const rimP = clamp(Number.isFinite(L.rimPct) ? L.rimPct : 0.62, 0.20, 0.90);
+		const midP = clamp(Number.isFinite(L.midPct) ? L.midPct : 0.38, 0.15, 0.70);
+		const lowP = clamp(rimP - 0.12, 0.15, 0.80);
+		const makes = apportion(
+			[rimA * rimP, lowA * lowP, midA * midP], twoM, [rimA, lowA, midA]);
+		return {
+			fgaAtRim: rimA, fgAtRim: makes[0],
+			fgaLowPost: lowA, fgLowPost: makes[1],
+			fgaMidRange: midA, fgMidRange: makes[2],
+		};
+	}
+
+	/* The per-game rows a season row is summed from.
+
+	   The game log is the source wherever there is one, because the season
+	   highs have to come out of the same nights the totals do: a 34-point high
+	   on a 300-point season that was computed separately is a file that
+	   contradicts itself. `null` when the log never got a shooting line
+	   attached (see attachMinutesAndShooting, which returns early on an
+	   incomplete rate line), in which case the caller falls back to the rate
+	   line and writes no highs. */
+	function gameRows(gameLog, line) {
+		if (!gameLog || !gameLog.games || !gameLog.games.length) return null;
+		const games = gameLog.games;
+		for (const g of games) {
+			if (!Number.isFinite(g.fgm) || !Number.isFinite(g.min)) return null;
+		}
+		// The log counts rebounds but does not split the glass; the split is
+		// the season's own, applied every night.
+		const orbShare = line && line.rpg > 0
+			? clamp(line.orpg / line.rpg, 0, 1) : 0.30;
+		return games.map((g) => {
+			const orb = Math.round(g.reb * orbShare);
+			return {
+				min: g.min, fg: g.fgm, fga: g.fga, tp: g.tpm, tpa: g.tpa,
+				ft: g.ftm, fta: g.fta, pts: g.pts,
+				orb, drb: Math.max(0, g.reb - orb),
+				ast: g.ast, tov: g.tov, stl: g.stl, blk: g.blk, pf: g.fouls,
+				pm: Number.isFinite(g.pm) ? g.pm : 0,
+				ba: 0,
+				// Overtime lengthens the night, which is what "minutes
+				// available" counts.
+				available: 40 + 5 * (g.ot || 0),
+			};
+		});
+	}
+
+	function sumGames(games) {
+		const t = {
+			gp: games.length, min: 0, fg: 0, fga: 0, tp: 0, tpa: 0, ft: 0, fta: 0,
+			pts: 0, orb: 0, drb: 0, ast: 0, tov: 0, stl: 0, blk: 0, pf: 0, pm: 0,
+			minAvailable: 0,
+		};
+		for (const g of games) {
+			t.min += g.min; t.fg += g.fg; t.fga += g.fga;
+			t.tp += g.tp; t.tpa += g.tpa; t.ft += g.ft; t.fta += g.fta;
+			t.pts += g.pts; t.orb += g.orb; t.drb += g.drb; t.ast += g.ast;
+			t.tov += g.tov; t.stl += g.stl; t.blk += g.blk; t.pf += g.pf;
+			t.pm += g.pm; t.minAvailable += g.available;
+		}
+		t.trb = t.orb + t.drb;
+		return t;
+	}
+
+	/* Season totals from a rate line, for a season with no game log behind it:
+	   a reconstructed prior year (cfg.priorSeasons = "reconstruct"), or a log
+	   that never got its shooting attached. */
+	function rateTotals(rates, ref, seasonYear) {
+		const row = bbgmStatsRow(rates, ref, seasonYear);
+		const gp = row.gp;
+		const orb = row.orb;
+		return {
+			gp,
+			min: Math.round((rates.mpg || 0) * gp),
+			fg: row.fg, fga: row.fga, tp: row.tp, tpa: row.tpa,
+			ft: row.ft, fta: row.fta, pts: row.pts,
+			orb, drb: row.drb, trb: orb + row.drb,
+			ast: row.ast, tov: row.tov, stl: row.stl, blk: row.blk, pf: row.pf,
+			pm: Number.isFinite(rates.pm) ? Math.round(rates.pm * gp) : 0,
+			minAvailable: 40 * gp,
+		};
+	}
+
+	/* One team of the simulated field, as BBGM's advanced statistics want it:
+	   season totals, with the opponent columns they divide by.
+
+	   The opponent line is the one thing a season simulated at this level of
+	   detail does not record. Every opponent was itself a simulated program,
+	   so the field's own average line is the honest stand-in: it is scaled to
+	   this team's possessions (so a fast team's opponents take a fast team's
+	   shots) and then its makes are scaled again so that the points come out
+	   at what this defense actually gave up. Attempts stay where the pace put
+	   them, which puts the whole difference between a good defense and a bad
+	   one into the opponent's percentages — where most of it belongs. */
+	function opponentTotals(box, avg, margin, gp) {
+		const scale = avg.poss > 0 ? box.poss / avg.poss : 1;
+		const opp = {
+			fga: avg.fga * scale, tpa: avg.tpa * scale, fta: avg.fta * scale,
+			fg: avg.fg * scale, tp: avg.tp * scale, ft: avg.ft * scale,
+			orb: avg.orb * scale, drb: avg.drb * scale, trb: avg.trb * scale,
+			tov: avg.tov * scale,
+		};
+		/* What the opponents scored. The number to match is the MARGIN, not
+		   the points allowed: a team's box score and its scoreboard are two
+		   different sums here — the stat model puts a program at 74.5 points a
+		   game where the season it played says 69.8 — and pairing box points
+		   with scoreboard points allowed hands every team in the country a
+		   +4.5 margin it did not have. Plus/minus, on/off and both team
+		   ratings are all differences, so all four came out wrong. Against a
+		   team with no season behind it (a prior year, whose schedule was
+		   never played) the opponent is the field's average. */
+		const target = Number.isFinite(margin)
+			? Math.max(20, box.pts - margin) : avg.pts;
+		const implied = 2 * (opp.fg - opp.tp) + 3 * opp.tp + opp.ft;
+		const k = implied > 0 ? clamp(target / implied, 0.6, 1.5) : 1;
+		opp.fg *= k; opp.tp *= k; opp.ft *= k;
+		return {
+			oppPts: target * gp,
+			oppFga: opp.fga * gp, oppTpa: opp.tpa * gp, oppFta: opp.fta * gp,
+			oppFg: opp.fg * gp, oppTp: opp.tp * gp, oppFt: opp.ft * gp,
+			oppOrb: opp.orb * gp, oppDrb: opp.drb * gp, oppTrb: opp.trb * gp,
+			oppTov: opp.tov * gp,
+		};
+	}
+
+	/* Every season this class played, as complete BBGM stats rows.
+
+	   Runs once per result: the field is 368 programs and the two statistics
+	   that cannot be computed a team at a time (PER's league normalization,
+	   BPM's adjustment to the league average team) need all of it. */
+	function collegeSeasonStats(result) {
+		const cached = SEASON_STATS.get(result);
+		if (cached) return cached;
+
+		const season = result.season;
+		const rosters = [];   // one per simulated team-season
+		const entries = [];   // one per row this export can write
+
+		/* One team-season: the rotation that played it, and which of its
+		   players this export needs a row for. */
+		const addTeam = (box, lines, margin, wanted) => {
+			if (!box || !lines || !lines.length) return;
+			const gp = Math.max(1, box.gp);
+			const players = [];
+			for (const item of lines) {
+				const line = item.line;
+				const glog = item.log || null;
+				const games = gameRows(glog, line);
+				const totals = games
+					? sumGames(games)
+					: rateTotals(line, null, season);
+				const zones = zoneSplit(totals.fg, totals.fga, totals.tp, totals.tpa, line);
+				players.push({
+					pos: item.pos || sizePos(line.bigness),
+					key: item.key || null,
+					line, games, zones, stats: totals,
+				});
+			}
+			rosters.push({
+				box, gp, margin,
+				stats: null,        // filled in the second pass
+				players,
+			});
+			for (const w of wanted || []) {
+				const i = players.findIndex((pl) => pl.key === w.key);
+				if (i >= 0) entries.push({ roster: rosters[rosters.length - 1], i, meta: w });
+			}
+		};
+
+		// The draft year: every program, its rotation, and a row for every
+		// prospect on it.
+		const teams = result.teams || {};
+		for (const name of Object.keys(teams)) {
+			const team = teams[name];
+			if (!team || !team.box || !team.lines) continue;
+			const byLine = new Map();
+			for (const p of team.prospects || []) {
+				if (p && p.stats) byLine.set(p.stats, p);
+			}
+			const items = team.lines.map((line) => {
+				const p = byLine.get(line);
+				return p
+					? { line, log: p.gameLog, pos: p.newPos, key: p.key }
+					: { line, log: null, pos: null, key: null };
+			});
+			const wanted = (team.prospects || [])
+				.filter((p) => p && p.stats && !p.nonNcaa)
+				.map((p) => ({ key: p.key, player: p, season, team: name, draftYear: true }));
+			const margin = team.log && team.log.length
+				? team.log.reduce((a, g) => a + ((g.pf || 0) - (g.pa || 0)), 0) /
+					team.log.length
+				: null;
+			addTeam(team.box, items, margin, wanted);
+		}
+
+		// The seasons before it, each one its own simulated team.
+		for (const p of result.players || []) {
+			if (p.nonNcaa || !Array.isArray(p.priorSeasons)) continue;
+			for (const row of p.priorSeasons) {
+				if (row.redshirt || !row.line) continue;
+				if (!row.box || !row.lines) continue;
+				const key = p.key + "|" + row.season;
+				const items = row.lines.map((line) => ({
+					line,
+					log: null,
+					pos: line === row.line ? row.pos : null,
+					key: line === row.line ? key : null,
+				}));
+				addTeam(row.box, items, null, [{
+					key, player: p, season: row.season, team: row.team,
+					draftYear: false, prior: row,
+				}]);
+			}
+		}
+
+		if (!rosters.length) {
+			const empty = new Map();
+			SEASON_STATS.set(result, empty);
+			return empty;
+		}
+
+		/* Pass two: the field's average line, which the opponent columns and
+		   the blocked-shot model are both read off. */
+		const avg = { fga: 0, tpa: 0, fta: 0, fg: 0, tp: 0, ft: 0, orb: 0, drb: 0,
+			trb: 0, tov: 0, pts: 0, poss: 0, blk: 0 };
+		for (const r of rosters) {
+			for (const k of Object.keys(avg)) avg[k] += r.box[k] || 0;
+		}
+		for (const k of Object.keys(avg)) avg[k] /= rosters.length;
+
+		/* Blocked shots against, which the simulation does not record: a
+		   defense's blocks have to land on somebody. The field blocks a fixed
+		   share of the two-pointers it faces, and a player's share of that is
+		   how many of his own shots he takes where shots get blocked. The
+		   weights are normalized on the field's own mean, so the total handed
+		   out is the total blocked. */
+		const rimWeight = (pl) => {
+			const z = pl.zones;
+			return 1.6 * z.fgaAtRim + 1.1 * z.fgaLowPost + 0.35 * z.fgaMidRange;
+		};
+		let twoTotal = 0;
+		let weightTotal = 0;
+		for (const r of rosters) {
+			for (const pl of r.players) {
+				twoTotal += Math.max(0, pl.stats.fga - pl.stats.tpa);
+				weightTotal += rimWeight(pl);
+			}
+		}
+		// Blocks per two-point attempt, field-wide, converted into a rate per
+		// unit of the weight above.
+		const blkRate = avg.poss > 0 && weightTotal > 0
+			? (avg.blk * twoTotal) / (Math.max(1, avg.fga - avg.tpa) * weightTotal)
+			: 0;
+		for (const r of rosters) {
+			for (const pl of r.players) {
+				const ba = Math.round(blkRate * rimWeight(pl));
+				pl.stats.ba = ba;
+				if (pl.games && pl.games.length) {
+					// Spread over the nights he took the shots on, so baMax is
+					// a number that could have happened.
+					const w = pl.games.map((g) => Math.max(0, g.fga - g.tpa));
+					const per = apportion(w, ba, w.map((v) => v));
+					pl.games.forEach((g, i) => { g.ba = per[i]; });
+				}
+			}
+		}
+
+		/* Pass three: team season totals, and the whole field through the
+		   ported advanced-statistic formulas. */
+		for (const r of rosters) {
+			const b = r.box;
+			const gp = r.gp;
+			const t = {
+				gp,
+				min: b.min * gp,
+				fg: b.fg * gp, fga: b.fga * gp, tp: b.tp * gp, tpa: b.tpa * gp,
+				ft: b.ft * gp, fta: b.fta * gp,
+				orb: b.orb * gp, drb: b.drb * gp, trb: b.trb * gp,
+				ast: b.ast * gp, tov: b.tov * gp, stl: b.stl * gp,
+				blk: b.blk * gp, pf: b.pf * gp, pts: b.pts * gp,
+				poss: b.poss * gp,
+				pace: b.pace,
+			};
+			Object.assign(t, opponentTotals(b, avg, r.margin, gp));
+			t.ortg = b.poss > 0 ? (100 * b.pts) / b.poss : 100;
+			t.drtg = b.poss > 0 ? (100 * (t.oppPts / gp)) / b.poss : 100;
+			r.stats = t;
+			/* Plus/minus for a season with no game log behind it. The log
+			   estimates it as the team's margin scaled by how much of the game
+			   he was on the floor for; without one, the same estimate off the
+			   season margin is the answer, and it matters — leaving it at zero
+			   tells the on/off calculation that the team was exactly even
+			   whenever he played, which then reports a large negative on/off
+			   for a good player on a good team. */
+			const marginPerMin = t.min > 0 ? (t.pts - t.oppPts) / (t.min / 5) : 0;
+			for (const pl of r.players) {
+				if (!pl.games) pl.stats.pm = Math.round(marginPerMin * pl.stats.min);
+			}
+		}
+		/* Every team-season at once, earlier years included. A prior season is
+		   a real simulated team-season of the same model at the same program
+		   level, so it belongs in the field it is normalized against; the
+		   alternative — normalizing one man's freshman year against a league
+		   of one team — is not an approximation of the right answer, it is a
+		   different number entirely. */
+		const adv = BS.leagueAdvanced(rosters, {
+			gameMinutes: 40, numPlayersOnCourt: 5,
+		});
+		let flat = 0;
+		for (const r of rosters) {
+			for (const pl of r.players) pl.adv = adv[flat++];
+		}
+
+		/* Pass four: the rows themselves. */
+		const rows = new Map();
+		for (const e of entries) {
+			const pl = e.roster.players[e.i];
+			const meta = e.meta;
+			const p = meta.player;
+			const s = pl.stats;
+			const number = String(statsHash(String(p.key || p.name || "")) % 55);
+			const row = BS.blankRow(meta.season, BS.TID_DOES_NOT_EXIST, number);
+			row.gp = s.gp;
+			/* Games started. The season model decides who is in a rotation
+			   and where, not who was announced before tip-off, so the draft
+			   year reads the reserve flag the award model already set and an
+			   earlier season is called a starting year at a starter's
+			   minutes. */
+			const starter = meta.draftYear
+				? !p.isReserve
+				: !!(meta.prior && meta.prior.mpg >= 24);
+			row.gs = starter ? s.gp : 0;
+			row.min = Math.round(s.min);
+			row.minAvailable = Math.round(s.minAvailable);
+			row.fg = s.fg; row.fga = s.fga;
+			row.tp = s.tp; row.tpa = s.tpa;
+			row.ft = s.ft; row.fta = s.fta;
+			Object.assign(row, pl.zones);
+			row.pm = Math.round(s.pm);
+			row.orb = s.orb; row.drb = s.drb;
+			row.ast = s.ast; row.tov = s.tov; row.stl = s.stl; row.blk = s.blk;
+			row.ba = s.ba; row.pf = s.pf; row.pts = s.pts;
+			for (const k of BS.STATS.derived) {
+				const v = pl.adv ? pl.adv[k] : 0;
+				row[k] = Number.isFinite(v) ? v : 0;
+			}
+			if (pl.games) {
+				Object.assign(row, BS.doubleCounts(pl.games));
+			}
+			rows.set(meta.key, { row, games: pl.games, meta });
+		}
+		SEASON_STATS.set(result, rows);
+		return rows;
+	}
+
+
+	/* One player's row for one season, ready to write.
+
+	   The rows collegeSeasonStats built are cached and shared, so this hands
+	   back a copy — exportFile can be called repeatedly on one result, and a
+	   caller that edited a row would otherwise be editing every later export
+	   of it too.
+
+	   `prior` is the earlier-season row this is for, or null for the draft
+	   year. A prior season that was reconstructed rather than simulated
+	   (cfg.priorSeasons = "reconstruct") has no team and no rotation behind
+	   it, so it takes the fallback: the counting stats are real, and the
+	   derived statistics — every one of which is a ratio against a team that
+	   was never simulated — stay at zero rather than being invented. */
+	function seasonRow(built, p, season, prior, opts) {
+		const key = prior ? p.key + "|" + season : p.key;
+		const where = prior ? (prior.team || p.newCollege) : p.newCollege;
+		const entry = built.get(key);
+		if (entry) {
+			const row = JSON.parse(JSON.stringify(entry.row));
+			if (opts.highs && entry.games) {
+				const highs = BS.seasonHighs(entry.games, season);
+				if (highs) Object.assign(row, highs);
+			}
+			row.__team = where;
+			return row;
+		}
+		const rates = prior || p.stats;
+		const totals = rateTotals(rates, prior ? p.stats : null, season);
+		const row = BS.blankRow(season, BS.TID_DOES_NOT_EXIST,
+			String(statsHash(String(p.key || p.name || "")) % 55));
+		row.gp = totals.gp;
+		row.gs = prior ? 0 : (p.isReserve ? 0 : totals.gp);
+		row.min = totals.min;
+		row.minAvailable = totals.minAvailable;
+		row.fg = totals.fg; row.fga = totals.fga;
+		row.tp = totals.tp; row.tpa = totals.tpa;
+		row.ft = totals.ft; row.fta = totals.fta;
+		Object.assign(row, zoneSplit(totals.fg, totals.fga, totals.tp, totals.tpa,
+			prior ? prior.line : p.stats));
+		row.pm = totals.pm;
+		row.orb = totals.orb; row.drb = totals.drb;
+		row.ast = totals.ast; row.tov = totals.tov;
+		row.stl = totals.stl; row.blk = totals.blk;
+		row.pf = totals.pf; row.pts = totals.pts;
+		row.__team = where;
+		return row;
+	}
+
 	/* Produce the modified BBGM draft class file.
 
 	   `opts` is the §8.13 opt-in surface — every flag off writes exactly the
@@ -3329,14 +3847,18 @@
 	   IMPORTANT: BBGM's own Import -> Draft class tool (handleUploadedDraftClass
 	   in its source) unconditionally does `delete p.stats` on every uploaded
 	   player before merging him into the league — confirmed against BBGM's
-	   source, not guessed. So `stats`/`prior`/`highs` never survive the one
-	   import path this tool documents; only `awards` (never deleted there)
-	   and `note` (a plain string field) come through. The rows are still
-	   written here because they are exactly right for the OTHER thing this
-	   tool already produces a file for — a hand-merge into an existing
-	   league file's own `players` array (the same audience "Season as a BBGM
-	   league fragment" serves) — but through Import -> Draft class they are
-	   silently discarded. The export dialog says so. */
+	   source, not guessed. So `stats`/`prior`/`highs` never survive THAT
+	   import; only `awards` (never deleted there) and `note` (a plain string
+	   field) come through.
+
+	   The route that does keep them is Tools -> Import players (importPlayers
+	   in the same file), which has an "include stats" option and copies the
+	   rows across as they are, stamping each one's tid as DOES_NOT_EXIST —
+	   the same value these rows already carry, because a college program is
+	   not a team in the league. A hand-merge into an existing league file's
+	   own `players` array works too. Both of those read the row as BBGM
+	   writes rows, which is why collegeSeasonStats builds a complete one.
+	   The export dialog says which import is which. */
 	function exportFile(result, opts) {
 		opts = opts || {};
 		/* The export firewall: a generated (past/future) season carries
@@ -3405,24 +3927,29 @@
 					.concat(p.awards.map((type) => ({ season: result.season, type })));
 			}
 			if (opts.stats && p.stats && !p.nonNcaa) {
+				const built = collegeSeasonStats(result);
 				const rows = [];
 				if (opts.prior && Array.isArray(p.priorSeasons)) {
 					for (const r of p.priorSeasons) {
 						if (r.redshirt) continue;
-						rows.push(bbgmStatsRow(r, p.stats, r.season));
+						rows.push(seasonRow(built, p, r.season, r, opts));
 					}
 				}
-				const now = bbgmStatsRow(p.stats, null, result.season);
-				now.gs = p.isReserve ? 0 : now.gp;
-				if (opts.highs && p.gameLog) {
-					const h = p.gameLog.highs || {};
-					Object.assign(now, {
-						ptsMax: h.pts, trbMax: h.reb, astMax: h.ast,
-						stlMax: h.stl, blkMax: h.blk,
-						dd: p.gameLog.doubleDoubles, td: p.gameLog.tripleDoubles,
-					});
+				rows.push(seasonRow(built, p, result.season, null, opts));
+				/* yearsWithTeam counts consecutive seasons at the same
+				   program, which is what a transfer breaks — the one thing
+				   about a multi-season row that a reader would notice being
+				   wrong, since the rows do not name the school. */
+				let years = 0;
+				let last = null;
+				for (const r of rows) {
+					const where = r.__team;
+					years = last && last.team === where && last.season === r.season - 1
+						? years + 1 : 1;
+					r.yearsWithTeam = years;
+					last = { team: where, season: r.season };
+					delete r.__team;
 				}
-				rows.push(now);
 				out.stats = (Array.isArray(out.stats) ? out.stats : []).concat(rows);
 			}
 			return out;
