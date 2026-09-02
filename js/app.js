@@ -3593,29 +3593,56 @@
 		const oHighs = opt("highs", "…and game-log season highs");
 		const oAwards = opt("awards", "Include college awards");
 		list.appendChild(optBox);
-		/* Checked against BBGM's own source, and the reason a user saw nothing
-		   after importing twice: the Draft Scouting page's Import button calls
-		   handleUploadedDraftClass, which deletes a player's stats
-		   unconditionally on the way in. No file can show a statline through
-		   that button. Awards survive it (never deleted there), which is why
-		   they do show up. Two routes keep the rows: Tools -> Import players
-		   with its "Include stats" box, which adds players rather than
-		   replacing the class, and the merge below, which writes the user's
-		   own league file back out with the class in it. */
+		/* Every one of these sentences is a fixed fact about BBGM's own import
+		   code, not a preference:
+
+		     handleUploadedDraftClass (Draft -> [year] -> Import) runs
+		     `delete p.stats` on every uploaded player, so no file shows a
+		     statline through it. Awards and notes survive.
+
+		     importPlayers (Tools -> Import players) builds the imported player
+		     from a fixed list of fields. `stats` is on it, `awards` is not, so
+		     that route is the mirror image: the statline arrives and the
+		     honors do not (which is why the export folds them into the note,
+		     and the note is on the list). It also stamps every imported stats
+		     row's team as DOES_NOT_EXIST before saving it — "DNE" in the
+		     table, whatever team the file named — and it adds players rather
+		     than replacing the class.
+
+		     A league file is the game's own save format and keeps everything.
+
+		   So the dialog says which door gives you what rather than pretending
+		   there is one right answer. */
 		list.appendChild(el("p", "hint",
-			"Importing on the Draft → [year] → Import button deletes every " +
-			"uploaded player's stats before it reads the file, so no statline " +
-			"can come through it — only the awards do. Use “Merge into a " +
-			"league file” below and load the result with Create New League → " +
-			"upload, or import the players with Tools → Import players and " +
-			"tick its “Include stats” box (that one adds to the class instead " +
-			"of replacing it)."));
+			"Draft → [year] → Import deletes every uploaded player's stats " +
+			"before it reads the file: awards and notes come through it, the " +
+			"statline cannot. Tools → Import players (“Include stats”) is the " +
+			"mirror image — the statline comes through, honors do not, so the " +
+			"export writes them into the note as well, and BBGM stamps every " +
+			"imported season's team “DNE” itself. Only a league file keeps " +
+			"both, which is what the merge does."));
 		item("BBGM class file, with the options above", () => {
 			if (exportOne(state.active, {
 				stats: oStats(), prior: oPrior(), highs: oHighs(), awards: oAwards(),
 			})) setStatus("Exported " + state.files[state.active].name + ".");
 		});
-		item("Merge into a league file… (the route that keeps the statline)", () => {
+		item("Players file, for Tools → Import players (keeps the statline)", () => {
+			const res2 = ensureResult(state.active);
+			if (!res2) return;
+			try {
+				const out = global.Engine.exportPlayersFile(res2, {
+					stats: oStats(), prior: oPrior(), highs: oHighs(), awards: oAwards(),
+				});
+				const base = state.files[state.active].name.replace(/\.json$/i, "");
+				download(base + "_players.json", "\ufeff" + JSON.stringify(out, null, 2),
+					"application/json");
+				setStatus("Wrote " + out.players.length + " players. Load it with " +
+					"Tools → Import players, select them all and tick “Include stats”.");
+			} catch (err) {
+				setStatus("Could not export: " + (err && err.message ? err.message : err));
+			}
+		});
+		item("Merge into a league file… (keeps the statline AND the awards)", () => {
 			state.mergeOpts = {
 				stats: oStats(), prior: oPrior(), highs: oHighs(), awards: oAwards(),
 			};

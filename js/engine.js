@@ -3917,15 +3917,29 @@
 				ovr: p.newOvr, pot: p.newPot, skills: p.newSkills.slice(),
 			});
 			out.note = p.note;
-			/* The flag matches the note: writing noteBool = 1 beside an
-			   empty note made BBGM flag a note the player doesn't have. */
-			if (p.note && String(p.note).trim()) out.noteBool = 1;
-			else delete out.noteBool;
 
 			if (opts.awards && p.awards && p.awards.length) {
 				out.awards = (Array.isArray(out.awards) ? out.awards : [])
 					.concat(p.awards.map((type) => ({ season: result.season, type })));
+				/* `awards` does not survive Tools -> Import players: that
+				   function builds the imported player from a fixed list of
+				   fields (born, college, contract, draft, face, names, hgt,
+				   imgURL, injuries, ratings, salaries, srID, stats, tid,
+				   weight, jerseyNumber) and `awards` is not on it. `note` IS,
+				   guarded by noteBool. So when a player's honors are being
+				   exported, they are also guaranteed a line in the note —
+				   which is the only way an import that keeps his statline can
+				   also tell you he was an All-American. The note template can
+				   drop the honors line (see NOTE_LINES); this does not. */
+				if (String(out.note || "").indexOf("Honors:") === -1) {
+					out.note = (out.note ? out.note + "\n" : "") +
+						"Honors: " + p.awards.join("; ");
+				}
 			}
+			/* The flag matches the note: writing noteBool = 1 beside an
+			   empty note made BBGM flag a note the player doesn't have. */
+			if (out.note && String(out.note).trim()) out.noteBool = 1;
+			else delete out.noteBool;
 			if (opts.stats && p.stats && !p.nonNcaa) {
 				const built = collegeSeasonStats(result);
 				const rows = [];
@@ -4100,6 +4114,56 @@
 	}
 
 
+
+	/* ------------------------------------------------- a players file
+
+	   The file to hand Tools -> Import players: a league file whose only
+	   content is the class, in the shape BBGM's own Export players writes.
+
+	   The plain class export is the file the user uploaded with the class
+	   rewritten inside it, which is right for a draft-class import and is
+	   whatever their file happened to contain — a full league export trimmed
+	   to its class, another tool's output, an old version. This one is built
+	   rather than edited: version, startingSeason, players, nothing else, and
+	   each player stripped of the fields BBGM's exporter strips because they
+	   are about a player's place in the league he came from and mean nothing
+	   in the league he is going to.
+
+	   Deliberately NO `exportedSeason`, even though BBGM writes one. The
+	   Import players screen reads it to guess which team a player should
+	   arrive on, and it guesses off the stats row for that season — whose tid
+	   is DOES_NOT_EXIST here, because these seasons were played for a college.
+	   That guess fails into "free agent", and every prospect in the class
+	   would arrive as one. Without the field the screen falls back to the
+	   player's own tid, which is UNDRAFTED, and the class arrives as a draft
+	   class. (BBGM's own player exports carry a real team's tid on that row,
+	   which is why the field works for them and not for us.) */
+	const PLAYERS_FILE_STRIP = [
+		"gamesUntilTradable", "numDaysFreeAgent", "ptModifier", "rosterOrder",
+		"statsTids", "value", "valueFuzz", "valueNoPot", "valueNoPotFuzz",
+		"valueWithContract", "watch", "yearsFreeAgent",
+	];
+
+	function exportPlayersFile(result, opts) {
+		const full = exportFile(result, opts);
+		const players = full.players.map((p) => {
+			const out = JSON.parse(JSON.stringify(p));
+			for (const key of PLAYERS_FILE_STRIP) delete out[key];
+			/* Everyone in a draft class is an undrafted prospect, and the
+			   Import players screen decides how a player arrives by reading
+			   exactly this field. A source file that never said so (some
+			   third-party class files do not) would otherwise import the
+			   whole class as free agents. */
+			if (!Number.isFinite(Number(out.tid))) out.tid = -2;
+			return out;
+		});
+		return {
+			version: full.version,
+			startingSeason: full.startingSeason,
+			players,
+		};
+	}
+
 	/* ------------------------------------------------ merge into a league
 
 	   The route that actually gets a college season in front of you.
@@ -4218,7 +4282,8 @@
 	}
 
 	global.Engine = {
-		run, createRunner, exportFile, exportSeason, exportLeagueFragment, mergeIntoLeague,
+		run, createRunner, exportFile, exportPlayersFile, exportSeason,
+		exportLeagueFragment, mergeIntoLeague,
 		buildNote, classYear,
 		assignClassYears, inchesFromHgtRating, validateLeagueFile, findSeason, playerKey,
 		SIZE_OVERRIDE_KEYS, SURPRISES, DRAFT_EVENTS,

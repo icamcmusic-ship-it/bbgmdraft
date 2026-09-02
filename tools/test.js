@@ -3063,6 +3063,47 @@ console.log("\nAudit regressions (September 2026)");
 			JSON.stringify(global.Engine.exportFile(res,
 				{ stats: true, prior: true, highs: true, awards: true })
 				.players[idx].stats) === JSON.stringify(row.stats));
+		/* The players file: what Tools -> Import players wants. Its shape is
+		   load-bearing — see exportPlayersFile on why there is no
+		   exportedSeason and why tid has to say UNDRAFTED. */
+		{
+			const pf = global.Engine.exportPlayersFile(res,
+				{ stats: true, prior: true, highs: true, awards: true });
+			ok("the players file is version, startingSeason and players, nothing else",
+				JSON.stringify(Object.keys(pf)) ===
+				JSON.stringify(["version", "startingSeason", "players"]) &&
+				pf.players.length === res.leagueFile.players.length);
+			ok("every player in it is an undrafted prospect with no exportedSeason",
+				pf.players.every((x) => x.tid === -2 && x.exportedSeason === undefined));
+			ok("it strips the fields BBGM's own player export strips",
+				pf.players.every((x) => ["statsTids", "value", "watch", "ptModifier",
+					"rosterOrder", "yearsFreeAgent"].every((k) => x[k] === undefined)));
+			ok("and it still carries the statline",
+				pf.players.some((x) => Array.isArray(x.stats) && x.stats.length > 0));
+			/* awards is not on importPlayers' field list and note is, so a
+			   player whose honors are exported has them in his note too. */
+			const honored = pf.players.filter((x) => x.awards && x.awards.length);
+			ok("an exported honor is also written into the note, which does survive",
+				honored.length > 0 &&
+				honored.every((x) => /Honors:/.test(String(x.note || "")) && x.noteBool === 1));
+			const plain = global.Engine.exportFile(res, {});
+			const noteByPid = new Map(plain.players.map((x) => [x.pid, String(x.note || "")]));
+			const noAwards = global.Engine.exportPlayersFile(res, { stats: true });
+			ok("with awards off the note is exactly what the template wrote",
+				noAwards.players.every((x) =>
+					String(x.note || "") === noteByPid.get(x.pid)));
+			/* The guarantee has to hold when the note template is the thing
+			   that dropped the honors line, which is the case it exists for. */
+			const bare = global.Engine.run(res.leagueFile, global.Config.make({
+				seed: "statsopt", noteLines: ["summary", "stats"],
+			}));
+			const bareOut = global.Engine.exportPlayersFile(bare, { awards: true });
+			const bareHonored = bareOut.players.filter((x) => x.awards && x.awards.length);
+			ok("a note template with no honors line still gets one when awards export",
+				bareHonored.length > 0 &&
+				bareHonored.every((x) => /^Honors: /m.test(String(x.note || ""))));
+		}
+
 		/* Merging the class into a whole league file, which is the only route
 		   into the game that keeps a statline: the Draft Scouting import
 		   deletes p.stats, and Tools -> Import players adds to the class

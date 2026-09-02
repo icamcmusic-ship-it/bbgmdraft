@@ -366,7 +366,8 @@ function ok(name, condition, detail) {
 	ok("the statline export options name the import that discards them",
 		/Draft.{0,40}Import.{0,80}deletes every uploaded player's stats/.test(menuText),
 		menuText.replace(/\n/g, " · ").slice(0, 400));
-	ok("and the export menu offers the merge that keeps them",
+	ok("and the export menu offers both routes that keep them",
+		/Players file, for Tools/.test(menuText) &&
 		/Merge into a league file/.test(menuText),
 		menuText.replace(/\n/g, " · ").slice(0, 400));
 	await page.locator('#modal button:has-text("Compare two presets")').click();
