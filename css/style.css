@@ -809,9 +809,112 @@ th.dropafter { box-shadow: inset -2px 0 0 0 var(--accent); }
 .newsitem h5 { margin: 0 0 3px; font-size: 14px; }
 .newsitem p { margin: 0; font-size: 12.5px; color: var(--text); }
 .newsitem .newskind { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: .07em; margin-top: 3px; }
+/* Paragraphs the voice system added under the lede: a stat block, a context
+   note, a quote. Indented and slightly dimmed so the lede still reads as the
+   story and these read as what a paper puts under it. */
+.newsitem .newspara { margin-top: 4px; color: var(--dim); }
 .playerhead { align-items: flex-start; gap: 14px; margin-bottom: 10px; }
 /* facesjs draws on a 400x600 viewBox, so the box carries that 2:3 ratio —
    a square one crops the jersey off at the chest. */
 .facebox { width: 120px; aspect-ratio: 2 / 3; flex: none; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel-2); }
 .facebox > svg { display: block; width: 100%; height: 100%; }
 .facebox.small { width: 40px; border-radius: 5px; }
+
+/* Scouting traits on the player page. Each one is a tag with its full note in
+   the title, so the page can carry five of them without becoming a paragraph. */
+.traitlist { display: flex; flex-wrap: wrap; gap: 4px; }
+.tag.trait {
+	background: var(--chip, rgba(127, 127, 127, .12));
+	border: 1px solid var(--line, rgba(127, 127, 127, .28));
+	border-radius: 3px;
+	padding: 1px 5px;
+	font-size: 11px;
+	cursor: help;
+}
+
+/* Randomizer scope chips. A row of one-click chips where an eight-item
+   <select> used to be: the control is pressed repeatedly and the current
+   scope should be readable without opening a menu. */
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chips .chip {
+	font-size: 11px;
+	padding: 2px 7px;
+	border-radius: 10px;
+	border: 1px solid var(--line, rgba(127, 127, 127, .3));
+	background: transparent;
+	cursor: pointer;
+}
+.chips .chip.on {
+	background: var(--accent, #3b82f6);
+	border-color: var(--accent, #3b82f6);
+	color: #fff;
+}
+.ctl .lbl { display: block; font-size: 11px; margin-bottom: 3px; }
+/* The settings filter sits above the groups and is not itself a setting. */
+#settingSearchBox { border-bottom: 1px solid var(--line, rgba(127,127,127,.2)); padding-bottom: 8px; }
+#settingSearch { width: 100%; }
+
+/* PHASE COST, colour-coded. The panel already said which phases a setting
+   re-runs; saying it in text means reading it while dragging, which is when
+   nobody reads. Green: milliseconds. Amber: the season is re-simulated.
+   Red: the whole class is rebuilt. */
+.ctl .phasecost { font-size: 10px; letter-spacing: .04em; }
+.ctl .phasecost.cheap { color: var(--ok, #16a34a); }
+.ctl .phasecost.mid { color: var(--warn, #d97706); }
+.ctl .phasecost.dear { color: var(--bad, #dc2626); }
+
+/* Modal buttons are thumb targets on a phone. */
+@media (max-width: 520px) {
+	#modal .checks button, #modal .btngroup button { width: 100%; }
+	#modal .checks { gap: 6px; }
+}
+
+/* The always-present live region. Off screen rather than display:none, because
+   a screen reader ignores a node that is not rendered. */
+.visually-hidden {
+	position: absolute !important;
+	width: 1px; height: 1px;
+	margin: -1px; padding: 0; border: 0;
+	overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%);
+	white-space: nowrap;
+}
+
+/* A quadrant record as a shape. Segment width is games played in that
+   quadrant; the filled part is the share of them won. */
+.quadbar { display: flex; gap: 2px; width: 100%; max-width: 380px; height: 20px; }
+.quadseg {
+	position: relative; min-width: 18px; border-radius: 2px;
+	background: var(--panel-2, rgba(127,127,127,.16));
+	overflow: hidden;
+}
+.quadseg .quadwon { position: absolute; inset: 0 auto 0 0; background: var(--accent, #3b82f6); opacity: .55; }
+.quadseg .quadlabel {
+	position: relative; display: block; text-align: center;
+	font-size: 9px; line-height: 20px; letter-spacing: .03em;
+	white-space: nowrap; overflow: hidden;
+}
+.quadseg.q1 .quadwon { opacity: .8; }
+.quadseg.q4 .quadwon { opacity: .3; }
+
+/* Inline sparkline for a team's week-by-week AP ranking. Rank 1 is the top
+   edge, 25 the bottom, and an unranked week is a tick along the floor. */
+svg.spark { display: block; width: 160px; height: 26px; margin-top: 3px; color: var(--accent, #3b82f6); }
+
+/* The compare tab's rating radar. Fifteen axes on one 0-100 scale, which is
+   what makes the shape readable rather than decorative. */
+.radarbox { margin: 8px 0; }
+svg.radar { display: block; width: 260px; max-width: 100%; height: auto; color: var(--dim); }
+.radarlegend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; margin-top: 4px; }
+.radaritem { display: inline-flex; align-items: center; gap: 4px; }
+.radarswatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+/* The six player-of-the-year ballots, top five each. */
+ol.ballot { margin: 4px 0 0; padding-left: 20px; font-size: 12px; }
+ol.ballot li { margin-bottom: 2px; }
+ol.ballot .unit { display: inline; margin: 0; }
+
+/* Destination weights, grouped by region: twenty-three number boxes in a flat
+   list is a list nobody edits, and what people want from it is a region. */
+.leaguegroup > summary { cursor: pointer; font-size: 11px; padding: 3px 0; }
+.leaguegroup > summary button { margin-left: 6px; }
+.leaguegroup .archrow { padding-left: 8px; }

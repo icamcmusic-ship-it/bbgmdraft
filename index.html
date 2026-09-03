@@ -79,17 +79,8 @@
 		<button id="btnDeletePreset" type="button" title="Delete the selected saved preset">Delete</button>
 	</div>
 	<div class="ctl">
-		<label for="randomScope">Randomize</label>
-		<select id="randomScope" aria-label="Randomize scope">
-			<option value="gentle">Everything, gently</option>
-			<option value="wide">Everything, wide open</option>
-			<option value="quality">Class quality &amp; depth only</option>
-			<option value="builds">Builds only</option>
-			<option value="years">Class years &amp; paths only</option>
-			<option value="destinations">Destinations only</option>
-			<option value="season">College season only</option>
-			<option value="awards">Awards only</option>
-		</select>
+		<span class="lbl" id="randomScopeLabel">Randomize</span>
+		<div class="chips" id="randomScope" role="radiogroup" aria-labelledby="randomScopeLabel"></div>
 	</div>
 	<div class="btngroup wide">
 		<button id="btnRandomize" type="button" title="Randomize the settings in the chosen scope (g). Ctrl+Z restores them in one step.">🎲 Randomize</button>
@@ -98,6 +89,13 @@
 	<div class="ctl">
 		<label for="seed">Seed <b id="seedNote">random</b></label>
 		<input type="text" id="seed" placeholder="blank = random each reroll">
+	</div>
+
+	<div class="ctl" id="settingSearchBox">
+		<label for="settingSearch">Find a setting</label>
+		<input type="search" id="settingSearch" placeholder="pace, awards, freshmen…" aria-describedby="settingSearchNote">
+		<label class="check"><input type="checkbox" id="onlyChanged"> Show only what I have changed</label>
+		<p class="unit" id="settingSearchNote"></p>
 	</div>
 
 	<details class="grp" id="grp-quality" open>
@@ -124,6 +122,9 @@
 		<div class="ctl"><label for="classFlavor">Flavor strength <b></b></label><input type="range" id="classFlavor" min="0" max="2" step="0.05"></div>
 		<div class="ctl"><label for="archetypePool">Builds per class <b></b></label><input type="range" id="archetypePool" min="0" max="40" step="1"></div>
 		<div class="ctl"><label for="surpriseBudget">Anomalies per class <b></b></label><input type="range" id="surpriseBudget" min="0" max="6" step="1"></div>
+		<div class="ctl"><label for="traitCount">Scouting traits per prospect <b></b></label><input type="range" id="traitCount" min="0" max="6" step="1"></div>
+		<div class="ctl"><label for="anomalyMemory">Avoid repeating recent anomalies <b></b></label><input type="range" id="anomalyMemory" min="0" max="3" step="0.1"></div>
+		<div class="ctl"><label for="flavorReach">Flavor reaches settings you changed <b></b></label><input type="range" id="flavorReach" min="0" max="100" step="5"></div>
 		<div class="ctl"><label for="buildNoise">Build noise <b></b></label><input type="range" id="buildNoise" min="0" max="14" step="0.5"></div>
 		<div class="ctl">
 			<label for="flavorHint">Class flavor</label>
@@ -152,6 +153,16 @@
 		<div class="ctl"><label for="pDII">DII NCAA chance <b></b></label><input type="range" id="pDII" min="0" max="0.15" step="0.005"></div>
 	</details>
 
+	<details class="grp" id="grp-world">
+		<summary>The world</summary>
+		<div class="ctl"><label><input type="checkbox" id="universe"> Universe mode — run every loaded file as one continuous world</label></div>
+		<p class="hint" id="universeHint">With this on, the loaded classes run oldest season first and each one hands its conference map, program strength, coaches and star returners to the next — and every tab, and the export, show that world rather than a fresh re-simulation. Load two or more class files for it to mean anything.</p>
+		<div class="ctl"><label for="coachTurnover">Coaching turnover <b></b></label><input type="range" id="coachTurnover" min="0" max="200" step="5"></div>
+		<div class="ctl"><label for="realignmentMemory">Realignment memory <b></b></label><input type="range" id="realignmentMemory" min="0" max="100" step="5"></div>
+		<div class="ctl"><label for="starReturners">Star returners <b></b></label><input type="range" id="starReturners" min="0" max="300" step="10"></div>
+		<div class="ctl"><label for="portalRate">Transfer portal <b></b></label><input type="range" id="portalRate" min="0" max="300" step="10"></div>
+	</details>
+
 	<details class="grp" id="grp-season">
 		<summary>College season</summary>
 		<div class="ctl">
@@ -169,6 +180,9 @@
 		<div class="ctl"><label for="bluebloodDownYears">Blue bloods having a down year <b></b></label><input type="range" id="bluebloodDownYears" min="0" max="6" step="1"></div>
 		<div class="ctl"><label for="midMajorLift">Mid-major surge <b></b></label><input type="range" id="midMajorLift" min="0" max="12" step="1"></div>
 		<div class="ctl"><label for="teamMomentum">Hot and cold streaks <b></b></label><input type="range" id="teamMomentum" min="0" max="2.5" step="0.05"></div>
+		<div class="ctl"><label for="styleDrift">Coaching style drift <b></b></label><input type="range" id="styleDrift" min="0" max="3" step="0.1"></div>
+		<div class="ctl"><label><input type="checkbox" id="narrative"> Draw two or three storylines for the season</label></div>
+		<p class="hint" id="narrativeHint">A class flavor says what kind of PLAYERS this year has. A narrative says what kind of SEASON they played — a wide-open year, a mid-major surge, a scoring explosion, a chaotic sideline. Two or three of them stack.</p>
 		<div class="ctl"><label for="seasonEvents">Events during the season <b></b></label><input type="range" id="seasonEvents" min="0" max="14" step="1"></div>
 		<div class="ctl"><label for="draftEvents">Draft-day events <b></b></label><input type="range" id="draftEvents" min="0" max="8" step="1"></div>
 		<div class="ctl">
@@ -295,6 +309,7 @@
 <script src="js/config.js"></script>
 <script src="js/calibration.js"></script>
 <script src="js/ratings.js"></script>
+<script src="js/traits.js"></script>
 <script src="js/teams.js"></script>
 <script src="js/stats.js"></script>
 <script src="js/rankings.js"></script>

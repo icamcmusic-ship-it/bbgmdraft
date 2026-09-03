@@ -7,6 +7,7 @@
 	"use strict";
 
 	const C = global.Colleges;
+	const { clamp } = global.BBGMRng;
 	const RB = global.RatingsBuilder;
 
 	const A = () => global.App;
@@ -390,7 +391,25 @@
 	function sortStack() {
 		const st = A().state;
 		const bar = el("div", "sortstack");
+		/* The stack is rebuilt on every render, so it cannot itself be the
+		   live region — a screen reader watching a node that is replaced hears
+		   nothing. It reports through the app's own region instead, and only
+		   when the stack has actually changed, or every unrelated re-render
+		   would announce the sort again. */
+		const summary = st.sort.length
+			? "Sorted by " + st.sort.map((k, i) => {
+				const c = COLUMNS.filter((x) => x.key === k.key)[0];
+				return ((c && c.label) || k.key) +
+					(k.dir < 0 ? " descending" : " ascending") +
+					(i < st.sort.length - 1 ? ", then" : "");
+			}).join(" ")
+			: "Sort cleared";
+		if (st.__lastSortSummary !== undefined && st.__lastSortSummary !== summary) {
+			A().announce(summary);
+		}
+		st.__lastSortSummary = summary;
 		if (!st.sort.length) return bar;
+		bar.setAttribute("aria-label", summary);
 		bar.appendChild(el("span", "hint", "sorted by "));
 		st.sort.forEach((k, i) => {
 			const col = COLUMNS.filter((c) => c.key === k.key)[0];
@@ -1093,6 +1112,12 @@
 		if (res.flavor && res.flavor.name !== "balanced") {
 			pills.push("this class is " + res.flavor.label);
 		}
+		/* The season's storylines, beside the class's flavor. The two are
+		   different statements — a flavor is about the players and a narrative
+		   about the season they played — and showing them together is the only
+		   way a reader can tell which one produced what they are looking at.
+		   See NARRATIVES in js/engine.js. */
+		for (const n of res.narrative || []) pills.push(n.name);
 		/* What makes THIS class this one. The class is drawn from a pool of
 		   builds and given two to four forced anomalies, and both were
 		   invisible: a user rerolling had no way to see that the year was a
@@ -1102,6 +1127,10 @@
 		}
 		for (const t of pills) summary.appendChild(el("span", "pill", t));
 		view.appendChild(summary);
+		if ((res.narrative || []).length) {
+			view.appendChild(el("p", "legendline",
+				"The season: " + res.narrative.map((n) => n.blurb).join("; ") + "."));
+		}
 		if (res.surprises && res.surprises.length) {
 			const line = el("p", "legendline");
 			line.appendChild(document.createTextNode("Story of the class: "));
@@ -1177,6 +1206,17 @@
 				e.preventDefault();
 				moveRow(tr, d, st.editing !== null);
 			});
+			/* The one-line scouting sentence on hover.
+
+			   A forty-column table tells you every number about a player and
+			   nothing about who he is, and the sentence that says so was one
+			   click away on his page — seventy clicks to read a class. The
+			   note's first line IS that sentence (see noteSummary), so the
+			   row carries it and the second line under it. */
+			if (p.note) {
+				const lines = String(p.note).split("\n");
+				tr.title = lines.slice(0, 2).join("\n");
+			}
 			const sortVals = {};
 			for (const col of columns) {
 				let td;
@@ -1701,6 +1741,12 @@
 		/* A team page. You could follow a program through the bracket and
 		   never see its roster, its style, its coach, its four prospects and
 		   its schedule in one place. */
+		/* A single game's box score is a page under the Teams tab, because it
+		   is reached from a team's schedule and belongs beside it. */
+		if (A().state.game) {
+			view.appendChild(gamePage(view, res, A().state.game));
+			return;
+		}
 		if (A().state.team) {
 			view.appendChild(teamPage(view, res, A().state.team));
 			return;
@@ -2063,9 +2109,80 @@
 				"events, anomalies or draft-day events in the settings."));
 			return;
 		}
+		/* A hundred kinds and eighty-odd articles a season is a feed you scroll
+		   past rather than read, so it filters. Three controls, because they
+		   are the three questions people actually ask of it: what kind of
+		   story, whose story, and "did anything happen to MY prospects". */
+		const st = A().state;
+		st.newsFilter = st.newsFilter || { kind: "", text: "", mine: false };
+		const f = st.newsFilter;
+		const bar = el("div", "filters");
+		const kindSel = el("select");
+		kindSel.appendChild(new Option("every kind", ""));
+		const groups = {};
+		for (const a of articles) {
+			groups[a.group || "the season"] = groups[a.group || "the season"] || {};
+			groups[a.group || "the season"][a.kind] = 1;
+		}
+		for (const g of Object.keys(groups).sort()) {
+			const og = document.createElement("optgroup");
+			og.label = g;
+			for (const k of Object.keys(groups[g]).sort()) og.appendChild(new Option(k, k));
+			kindSel.appendChild(og);
+		}
+		kindSel.value = f.kind;
+		kindSel.addEventListener("change", () => { f.kind = kindSel.value; A().render(); });
+		bar.appendChild(kindSel);
+		const box = el("input");
+		box.type = "search";
+		box.placeholder = "team or player…";
+		box.value = f.text;
+		box.addEventListener("input", () => { f.text = box.value; A().render(); });
+		bar.appendChild(box);
+		const mineLab = el("label", "check");
+		const mine = el("input");
+		mine.type = "checkbox";
+		mine.checked = !!f.mine;
+		mine.addEventListener("change", () => { f.mine = mine.checked; A().render(); });
+		mineLab.appendChild(mine);
+		mineLab.appendChild(document.createTextNode(" only my prospects"));
+		bar.appendChild(mineLab);
+		view.appendChild(bar);
+
+		/* "My prospects" means the rows the prospect table is currently
+		   showing, so a filtered board and a filtered feed agree. */
+		const mineKeys = new Set();
+		if (f.mine) {
+			for (const p of res.players || []) {
+				if (matchesFilter(p, res)) mineKeys.add(p.key);
+			}
+		}
+		const needle = f.text.trim().toLowerCase();
+		const shown = articles.filter((a) => {
+			if (f.kind && a.kind !== f.kind) return false;
+			if (f.mine) {
+				const hit = [].concat(a.headline, a.body, ...(a.paras || []))
+					.some((seg) => seg && seg.t === "player" && mineKeys.has(seg.key));
+				if (!hit) return false;
+			}
+			if (needle) {
+				const hay = [].concat(a.headline, a.body, ...(a.paras || []))
+					.map((seg) => seg && seg.v).join(" ").toLowerCase();
+				if (hay.indexOf(needle) === -1) return false;
+			}
+			return true;
+		});
+		view.appendChild(el("p", "legendline",
+			shown.length === articles.length
+				? articles.length + " articles"
+				: shown.length + " of " + articles.length + " articles"));
+		if (!shown.length) {
+			view.appendChild(el("p", "hint", "Nothing in the feed matches that."));
+			return;
+		}
 		let lastDate = null;
 		const wrap = el("div", "news");
-		for (const a of articles) {
+		for (const a of shown) {
 			if (a.dateline !== lastDate) {
 				wrap.appendChild(el("h4", "newsdate", a.dateline));
 				lastDate = a.dateline;
@@ -2077,7 +2194,15 @@
 			const body = el("p");
 			renderSegs(body, a.body, res);
 			art.appendChild(body);
-			art.appendChild(el("p", "newskind", a.kind));
+			/* Extra paragraphs — a stat block, a context note, a quote — drawn
+			   per article by the voice system. See decorate() in js/news.js. */
+			for (const para of a.paras || []) {
+				const pEl = el("p", "newspara");
+				renderSegs(pEl, para, res);
+				art.appendChild(pEl);
+			}
+			art.appendChild(el("p", "newskind",
+				a.kind + (a.byline ? " · " + a.byline : "")));
 			wrap.appendChild(art);
 		}
 		view.appendChild(wrap);
@@ -2098,16 +2223,37 @@
 			"from its seeds — the export stores seeds, not simulated output."));
 
 		const bar = el("div", "filters");
-		const run = el("button", u.running ? "warn" : "primary",
+		/* Universe mode is a setting now (see the "The world" group in the
+		   settings panel), so this is a REFRESH rather than the only way in:
+		   with the setting on, the chain re-runs whenever anything invalidates
+		   it and every tab reads the result. With the setting off the button
+		   still builds a one-off timeline, which is what it always did — it
+		   just no longer leaves the other tabs disagreeing with it. */
+		const on = !!A().state.cfg.universe;
+		const run = el("button", u.running ? "warn" : on ? null : "primary",
 			u.running ? "Running… " + (u.done || 0) + "/" + (u.total || "?")
-				: "Run universe");
+				: on ? "Rebuild the timeline" : "Build a timeline (one-off)");
 		run.disabled = !!u.running;
+		run.title = on
+			? "Universe mode is on: every tab already shows this world."
+			: "Universe mode is off, so this builds a timeline without changing " +
+				"what the other tabs show. Turn on Universe mode under “The " +
+				"world” in the settings panel to make it the world.";
 		run.addEventListener("click", () => { A().runUniverse(); });
 		bar.appendChild(run);
 		const exp = el("button", null, "Export universe JSON");
 		exp.disabled = !u.rows.length || !!u.running;
-		exp.addEventListener("click", () => { A().exportUniverse(); });
+		exp.title = "Seeds, settings and player biographies. Small, and it " +
+			"replays exactly — as long as whoever opens it has the same class " +
+			"files.";
+		exp.addEventListener("click", () => { A().exportUniverse(false); });
 		bar.appendChild(exp);
+		const expAll = el("button", null, "Export with class files");
+		expAll.disabled = !u.rows.length || !!u.running;
+		expAll.title = "The same file with the class exports inlined, so the " +
+			"whole universe is one file to hand somebody. Larger.";
+		expAll.addEventListener("click", () => { A().exportUniverse(true); });
+		bar.appendChild(expAll);
 		const impBtn = el("button", null, "Import universe…");
 		impBtn.disabled = !!u.running;
 		const impInput = el("input");
@@ -2156,11 +2302,18 @@
 		if (!u.rows.length) return;
 
 		view.appendChild(el("h4", null, "Timeline"));
+		if (!A().state.cfg.universe) {
+			view.appendChild(el("p", "hint",
+				"Universe mode is off, so this timeline is a report about a " +
+				"world the other tabs are not showing. Turn it on under “The " +
+				"world” in the settings panel and every tab — and the export — " +
+				"will show this world instead."));
+		}
 		const wrap = el("div", "scroll");
 		const table = el("table");
 		const hr = el("tr");
 		for (const h of ["Season", "Flavor", "AP No. 1", "Champion", "Player of the Year",
-			"No. 1 pick", "Realignment", "Coaches fired"]) {
+			"No. 1 pick", "Realignment", "Sideline changes"]) {
 			hr.appendChild(el("th", null, h));
 		}
 		const thead = el("thead");
@@ -2187,7 +2340,16 @@
 				? r.no1.name + " (" + r.no1.school + ")" : "—"));
 			tr.appendChild(el("td", null, r.realignment && r.realignment.length
 				? r.realignment.join("; ") : "—"));
-			tr.appendChild(el("td", "num", String(r.coachChanges || 0)));
+			/* Fired / retired / hired away, rather than one number that used
+			   to be the count of "coaching change" news items and so was
+			   almost always 1. See coachingCarousel in js/teams.js. */
+			tr.appendChild(el("td", "num", r.coachChanges
+				? r.coachChanges + " (" + [
+					r.coachFired ? r.coachFired + " out" : null,
+					r.coachRetired ? r.coachRetired + " retired" : null,
+					r.coachHiredAway ? r.coachHiredAway + " hired away" : null,
+				].filter(Boolean).join(", ") + ")"
+				: "0"));
 			tb.appendChild(tr);
 		}
 		table.appendChild(tb);
@@ -2204,7 +2366,8 @@
 				"The names this world remembers, season by season — what a later " +
 				"class's news can refer back to."));
 			view.appendChild(el("div", "note", u.alumni.map((a) =>
-				a.season + "  " + a.name + " (" + a.school + ") — " + a.why).join("\n")));
+				a.season + "  " + a.name + " (" + a.school +
+				(a.club ? ", then " + a.club : "") + ") — " + a.why).join("\n")));
 		}
 	}
 
@@ -2504,7 +2667,58 @@
 		return n + (["th", "st", "nd", "rd"][n % 10] || "th");
 	}
 
+	/* THE PLAYER-OF-THE-YEAR BALLOTS.
+
+	   Six trophies with six electorates is the mechanism that makes
+	   "consensus" mean something, and it was invisible: the model computed a
+	   full ordered ballot for each and kept only the name at the top, so in a
+	   split year — the interesting year, and the whole reason the six exist —
+	   a reader could see two men win three trophies each and had no way to see
+	   how close any of the six was.
+
+	   Reported as a MARGIN from the winner rather than as a score, because the
+	   scores are on an arbitrary internal scale and a margin is a fact a
+	   reader can use. `resume lean` is how much this electorate weighted what
+	   the player's team did, which is usually the whole of the disagreement. */
+	function ballotCards(res) {
+		const rows = res.poyBallots || [];
+		if (!rows.length) return null;
+		const wrap = el("div");
+		wrap.appendChild(el("h3", null, "Player of the year, ballot by ballot"));
+		const winners = new Set(rows.map((b) => b.top[0] && b.top[0].name));
+		wrap.appendChild(el("p", "legendline", winners.size === 1
+			? "All six electorates agreed: a sweep, which is what a consensus " +
+				"national player of the year is."
+			: winners.size + " different winners across the six trophies. Each " +
+				"electorate weighs what a player's team did differently — that " +
+				"weight is the “résumé lean” under each name."));
+		const cards = el("div", "cards");
+		for (const b of rows) {
+			const card = el("div", "card");
+			card.appendChild(el("h4", null, b.award));
+			card.appendChild(el("p", "unit", "résumé lean " + b.resumeLean.toFixed(2)));
+			const list = el("ol", "ballot");
+			for (const r of b.top) {
+				const li = el("li");
+				if (r.inClass && r.key) li.appendChild(playerLink(r.name, r.key));
+				else li.appendChild(document.createTextNode(r.name));
+				li.appendChild(document.createTextNode(" — "));
+				li.appendChild(teamLink(r.school));
+				li.appendChild(el("span", "unit",
+					r.rank === 1 ? "  winner" : "  −" + r.behind.toFixed(2)));
+				if (!r.inClass) li.appendChild(el("span", "unit", "  not in the class"));
+				list.appendChild(li);
+			}
+			card.appendChild(list);
+			cards.appendChild(card);
+		}
+		wrap.appendChild(cards);
+		return wrap;
+	}
+
 	function viewAwards(view, res) {
+		const ballots = ballotCards(res);
+		if (ballots) view.appendChild(ballots);
 		view.appendChild(el("h3", null, "Statistical leaders"));
 		view.appendChild(el("p", "legendline",
 			"The first thing to check when sanity-testing a class."));
@@ -3234,6 +3448,44 @@
 			else dd.appendChild(v);
 			dl.appendChild(dd);
 		};
+		/* THE SCOUTING TRAITS, before the numbers.
+
+		   A scout's report opens with what the player IS and the numbers come
+		   after, so the traits sit above the stat rows. Grouped, because a
+		   flat list of five traits reads as a shuffle and the group is what
+		   says which question each one answers. See js/traits.js. */
+		if (p.traits && p.traits.length) {
+			const wrap = el("div", "traitlist");
+			for (const t of p.traits) {
+				const tag = el("span", "tag trait", t.name);
+				tag.title = t.group + " — " + t.note +
+					(t.mood ? " (BBGM mood: " + t.mood + ")" : "");
+				tag.setAttribute("aria-label", t.group + ": " + t.name);
+				wrap.appendChild(tag);
+			}
+			row("Scouting", wrap);
+			const eff = [];
+			if (Number.isFinite(p.volatility) && Math.abs(p.volatility - 1) > 0.06) {
+				eff.push(p.volatility > 1
+					? "night to night, more volatile than his average implies (x" +
+						p.volatility.toFixed(2) + ")"
+					: "unusually consistent night to night (x" + p.volatility.toFixed(2) + ")");
+			}
+			if (Number.isFinite(p.orbBias) && Math.abs(p.orbBias) > 0.02) {
+				eff.push(p.orbBias > 0
+					? "lives on the offensive glass"
+					: "a defensive-glass rebounder");
+			}
+			if (Number.isFinite(p.traitInjuryMult) && Math.abs(p.traitInjuryMult - 1) > 0.1) {
+				eff.push(p.traitInjuryMult > 1
+					? "a medical file that raises the injury risk"
+					: "a clean medical file");
+			}
+			if (p.moodTraits && p.moodTraits.length) {
+				eff.push("exports with BBGM mood traits " + p.moodTraits.join(", "));
+			}
+			if (eff.length) row("What that changes", eff.join(" · "));
+		}
 		const s = p.stats;
 		if (s) {
 			row("This season", s.gp + " GP · " + n1(s.mpg) + " MPG · " +
@@ -3490,6 +3742,85 @@
 
 	/* One program: who coaches it, how it plays, who is on it, and every game
 	   it played. */
+	/* A QUADRANT RECORD, AS A BAR.
+
+	   "Q1 2-5 · Q2 4-3 · Q3/Q4 losses 1" is the single most-read line on a
+	   team's résumé and it was a string of numbers, which is the one format a
+	   reader cannot compare two teams in at a glance. The committee reads it
+	   as a shape: how much of the season was played against good teams, and
+	   how much of that was won. So it is a shape. */
+	function quadBar(quads) {
+		if (!quads) return null;
+		const rows = [
+			["Q1", quads.q1w, quads.q1l], ["Q2", quads.q2w, quads.q2l],
+			["Q3", quads.q3w, quads.q3l], ["Q4", quads.q4w, quads.q4l],
+		];
+		const total = rows.reduce((a, r) => a + r[1] + r[2], 0);
+		if (!total) return null;
+		const wrap = el("div", "quadbar");
+		for (const [label, w, l] of rows) {
+			if (!(w + l)) continue;
+			const seg = el("div", "quadseg q" + label[1]);
+			seg.style.flexGrow = String(w + l);
+			seg.title = label + ": " + w + "-" + l;
+			const won = el("div", "quadwon");
+			won.style.width = ((w / (w + l)) * 100).toFixed(1) + "%";
+			seg.appendChild(won);
+			seg.appendChild(el("span", "quadlabel", label + " " + w + "-" + l));
+			wrap.appendChild(seg);
+		}
+		return wrap;
+	}
+
+	/* THE POLL, AS A LINE.
+
+	   `[· · 18 15 11 9 12 ...]` is a sparkline written in numbers, and the
+	   thing a reader wants from it — did they climb all year or fall off a
+	   cliff in February — is exactly what a sparkline shows and a list of
+	   numbers does not. Inline SVG, no library, and the numbers stay in the
+	   title so nothing is lost. */
+	function pollSpark(history) {
+		const weeks = (history || []).map((r) => (r ? Number(r) : null));
+		if (weeks.filter((x) => x).length < 3) return null;
+		const W = 160;
+		const H = 26;
+		const n = weeks.length;
+		const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+		svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+		svg.setAttribute("class", "spark");
+		svg.setAttribute("role", "img");
+		svg.setAttribute("aria-label", "AP ranking by week: " +
+			weeks.map((r) => (r ? "No. " + r : "unranked")).join(", "));
+		// Rank 1 at the top, 25 at the bottom, unranked off the bottom edge.
+		const x = (i) => (n < 2 ? 0 : (i / (n - 1)) * (W - 2) + 1);
+		const y = (r) => 2 + ((clamp(r, 1, 26) - 1) / 25) * (H - 4);
+		let d = "";
+		let open = false;
+		weeks.forEach((r, i) => {
+			if (!r) { open = false; return; }
+			d += (open ? "L" : "M") + x(i).toFixed(1) + " " + y(r).toFixed(1) + " ";
+			open = true;
+		});
+		const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+		path.setAttribute("d", d.trim());
+		path.setAttribute("fill", "none");
+		path.setAttribute("stroke", "currentColor");
+		path.setAttribute("stroke-width", "1.5");
+		svg.appendChild(path);
+		// The weeks they were unranked, as ticks along the bottom.
+		weeks.forEach((r, i) => {
+			if (r) return;
+			const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+			c.setAttribute("cx", x(i).toFixed(1));
+			c.setAttribute("cy", String(H - 1.5));
+			c.setAttribute("r", "1");
+			c.setAttribute("fill", "currentColor");
+			c.setAttribute("opacity", "0.35");
+			svg.appendChild(c);
+		});
+		return svg;
+	}
+
 	function teamPage(view, res, name) {
 		const t = res.teams[name];
 		const box = el("div");
@@ -3509,7 +3840,10 @@
 		const dl = el("dl", "shortcuts");
 		const row = (k, v) => {
 			dl.appendChild(el("dt", null, k));
-			dl.appendChild(el("dd", null, v));
+			const dd = el("dd");
+			if (typeof v === "string") dd.textContent = v;
+			else if (v) dd.appendChild(v);
+			dl.appendChild(dd);
 		};
 		row("Conference", t.conf + " " + t.cw + "-" + t.cl +
 			(t.confRegularChamp ? " · regular-season champion" : "") +
@@ -3537,16 +3871,31 @@
 		}
 		if (t.netRank) {
 			row("NET", "No. " + t.netRank +
-				(t.quads ? " · Q1 " + t.quads.q1w + "-" + t.quads.q1l +
-					" · Q2 " + t.quads.q2w + "-" + t.quads.q2l +
-					" · Q3/Q4 losses " + (t.quads.q3l + t.quads.q4l) : "") +
 				(Number.isFinite(t.roadW) ? " · road " + t.roadW + "-" + t.roadL : ""));
+			const bar = quadBar(t.quads);
+			if (bar) {
+				const cell = el("div");
+				cell.appendChild(bar);
+				cell.appendChild(el("p", "unit",
+					"Width is how many games; the filled part is how many were won."));
+				row("Quadrant record", cell);
+			}
 		}
 		if (t.apHistory && t.apHistory.some((r) => r)) {
-			row("AP poll", "Peak No. " + t.apPeak +
-				(t.apPreseason ? " · preseason No. " + t.apPreseason : " · unranked in the preseason") +
-				(t.apRank ? " · final No. " + t.apRank : " · unranked at the end") +
-				"  [" + t.apHistory.map((r) => (r ? r : "·")).join(" ") + "]");
+			const spark = pollSpark(t.apHistory);
+			const cell = el("div");
+			cell.appendChild(document.createTextNode("Peak No. " + t.apPeak +
+				(t.apPreseason ? " · preseason No. " + t.apPreseason
+					: " · unranked in the preseason") +
+				(t.apRank ? " · final No. " + t.apRank : " · unranked at the end")));
+			if (spark) {
+				cell.appendChild(spark);
+				cell.title = t.apHistory.map((r) => (r ? r : "·")).join(" ");
+			} else {
+				cell.appendChild(document.createTextNode(
+					"  [" + t.apHistory.map((r) => (r ? r : "·")).join(" ") + "]"));
+			}
+			row("AP poll", cell);
 		}
 		row("Postseason", t.ncaaSeed ? "No. " + t.ncaaSeed + " seed, " + t.ncaaResult
 			: (t.nitResult || "Did not make the field"));
@@ -3644,7 +3993,17 @@
 			   at the start of the row — which is why a loss visibly pushed the
 			   whole schedule row one column to the right. */
 			const tr = el("tr", g.won ? "" : "loss");
-			tr.appendChild(el("td", "num", String(i + 1)));
+			const num = el("td", "num");
+			/* The game number is the way into the box score: the opponent cell
+			   already links to the opponent's page and a cell cannot mean two
+			   things. */
+			const open = el("button", "linky", String(i + 1));
+			open.title = "Box score";
+			open.addEventListener("click", function () {
+				A().showGame(gameKeyFor(t.name, i));
+			});
+			num.appendChild(open);
+			tr.appendChild(num);
 			const td = el("td", "sticky");
 			td.appendChild(teamLink(g.opp));
 			tr.appendChild(td);
@@ -3661,6 +4020,219 @@
 		wrap.appendChild(table);
 		box.appendChild(wrap);
 		return box;
+	}
+
+	/* ONE GAME, BOTH TEAMS.
+
+	   The game log was per player: to see what happened in a game you opened
+	   one prospect's log, read his line, and then went and found the other
+	   prospect's log to read his. A box score is a page, and the model already
+	   has every number on it — the score and the result from the team's
+	   schedule, and every prospect's own line from his game log, which is
+	   reconciled to his season totals and therefore cannot disagree with
+	   anything else in the tool.
+
+	   What it deliberately does NOT do is invent per-game lines for the
+	   returning players. Their season averages exist; their nights do not, and
+	   a box score whose bench rows were season averages divided by games would
+	   be a fabrication sitting inside the one view in this tool whose whole
+	   claim is that it is a record. The page says so rather than filling the
+	   space. */
+	function gameKeyFor(team, index) { return team + "|" + index; }
+
+	function gamePage(view, res, ref) {
+		const box = el("div");
+		const cut = String(ref || "").lastIndexOf("|");
+		const home = res.teams[String(ref || "").slice(0, cut)];
+		const idx = Number(String(ref || "").slice(cut + 1));
+		const back = el("button", "tiny", "← Back to the schedule");
+		back.addEventListener("click", () => { A().showGame(null); });
+		box.appendChild(back);
+		if (!home || !home.log || !home.log[idx]) {
+			box.appendChild(el("p", "hint", "No such game in this season."));
+			return box;
+		}
+		const g = home.log[idx];
+		const away = res.teams[g.opp];
+		/* The same game from the other side, matched on the date rather than
+		   on the index: the two schedules are sorted independently. */
+		let awayIdx = -1;
+		if (away && away.log) {
+			awayIdx = away.log.findIndex(function (x) {
+				return x.opp === home.name &&
+					Math.abs((x.when || 0) - (g.when || 0)) < 1e-9;
+			});
+		}
+
+		const title = el("h3");
+		title.appendChild(teamLink(g.opp));
+		title.appendChild(document.createTextNode(" " + g.pa + " at "));
+		title.appendChild(teamLink(home.name));
+		title.appendChild(document.createTextNode(" " + g.pf +
+			(g.ot ? " (" + (g.ot > 1 ? g.ot + "OT" : "OT") + ")" : "")));
+		box.appendChild(title);
+		const when = global.News ? global.News.dateline(g.when || 0) : "";
+		box.appendChild(el("p", "legendline",
+			when + " · " + (g.home > 0 ? "at " + home.name
+				: g.home < 0 ? "at " + g.opp : "neutral floor") +
+			" · " + (g.round || (g.conference ? "conference game" : g.stage)) +
+			(away ? " · " + g.opp + " " + away.w + "-" + away.l +
+				" · " + home.name + " " + home.w + "-" + home.l : "")));
+
+		const side = function (team, gameIndex, score) {
+			if (!team) return;
+			box.appendChild(el("h4", null, team.name + " — " + score));
+			const rows = [];
+			for (const p of team.prospects || []) {
+				const gl = p.gameLog && p.gameLog.games;
+				if (!gl) continue;
+				const line = gl.filter(function (x) { return x.i === gameIndex; })[0];
+				if (line) rows.push({ p: p, line: line });
+			}
+			if (!rows.length) {
+				box.appendChild(el("p", "hint", team.prospects && team.prospects.length
+					? "Every prospect on this roster missed this game."
+					: "No draft prospects on this roster — the returning " +
+						"rotation carries season averages, not per-game lines."));
+				return;
+			}
+			rows.sort(function (a, b) { return b.line.min - a.line.min; });
+			const wrap = el("div", "scroll");
+			const table = el("table");
+			const hr = el("tr");
+			for (const h of ["Player", "MIN", "PTS", "REB", "AST", "STL", "BLK",
+				"TO", "PF", "FG", "3P", "FT", "+/-"]) {
+				const th = el("th", h === "Player" ? "" : "num", h);
+				th.scope = "col";
+				hr.appendChild(th);
+			}
+			const thead = el("thead");
+			thead.appendChild(hr);
+			table.appendChild(thead);
+			const tb = el("tbody");
+			let pts = 0;
+			let reb = 0;
+			let ast = 0;
+			for (const r of rows) {
+				const line = r.line;
+				const tr = el("tr");
+				const td = el("td", "sticky");
+				td.appendChild(playerLink(r.p));
+				tr.appendChild(td);
+				for (const v of [line.min, line.pts, line.reb, line.ast, line.stl,
+					line.blk, line.tov, line.fouls]) {
+					tr.appendChild(el("td", "num", String(Math.round(v))));
+				}
+				tr.appendChild(el("td", "num", line.fgm + "-" + line.fga));
+				tr.appendChild(el("td", "num", line.tpm + "-" + line.tpa));
+				tr.appendChild(el("td", "num", line.ftm + "-" + line.fta));
+				tr.appendChild(el("td", "num",
+					(line.pm >= 0 ? "+" : "") + Math.round(line.pm)));
+				tb.appendChild(tr);
+				pts += line.pts; reb += line.reb; ast += line.ast;
+			}
+			table.appendChild(tb);
+			wrap.appendChild(table);
+			box.appendChild(wrap);
+			box.appendChild(el("p", "unit",
+				"Prospects accounted for " + Math.round(pts) + " of " + score +
+				" points, " + Math.round(reb) + " rebounds and " + Math.round(ast) +
+				" assists. The rest belongs to the returning rotation, which " +
+				"carries season averages rather than per-game lines."));
+		};
+		side(home, idx, g.pf);
+		side(away, awayIdx, g.pa);
+		return box;
+	}
+
+	/* THE RATING VECTOR, AS A SHAPE.
+
+	   The compare tab is a table of thirty numbers, which is the right format
+	   for "is he better" and the wrong one for "what kind of player is he".
+	   The scouting graphic for that question is a radar over the rating
+	   vector, and everything it needs is already on the player: BBGM's fifteen
+	   ratings are all on the same 0-100 scale, which is what makes a radar
+	   legible rather than a lie.
+
+	   Inline SVG, no library: fifteen axes and four polygons is a hundred
+	   lines of trigonometry, and a dependency for that is a dependency.
+
+	   Colour is by SLOT, not by value, and the slots match the compare table's
+	   column order, so the reader is never asked to remember which shape is
+	   which — the legend is the same names in the same order above it. */
+	const RADAR_AXES = [
+		["hgt", "Size"], ["stre", "Str"], ["spd", "Spd"], ["jmp", "Jump"],
+		["endu", "Endu"], ["ins", "Ins"], ["dnk", "Dunk"], ["ft", "FT"],
+		["fg", "Mid"], ["tp", "3PT"], ["oiq", "oIQ"], ["diq", "dIQ"],
+		["drb", "Hand"], ["pss", "Pass"], ["reb", "Reb"],
+	];
+	const RADAR_COLORS = ["#3b82f6", "#ef4444", "#16a34a", "#a855f7"];
+
+	function ratingRadar(players) {
+		const SIZE = 260;
+		const c = SIZE / 2;
+		const R = c - 30;
+		const n = RADAR_AXES.length;
+		const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+		svg.setAttribute("viewBox", "0 0 " + SIZE + " " + SIZE);
+		svg.setAttribute("class", "radar");
+		svg.setAttribute("role", "img");
+		svg.setAttribute("aria-label", "Rating profiles: " +
+			players.map(function (p) {
+				return p.name + " — " + RADAR_AXES.map(function (a) {
+					return a[1] + " " + (p.newRatings[a[0]] || 0);
+				}).join(", ");
+			}).join("; "));
+		const mk = function (tag, attrs) {
+			const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+			for (const k of Object.keys(attrs)) node.setAttribute(k, String(attrs[k]));
+			return node;
+		};
+		const pt = function (i, v) {
+			// Straight up for the first axis, clockwise from there.
+			const ang = (i / n) * Math.PI * 2 - Math.PI / 2;
+			const r = (clamp(v, 0, 100) / 100) * R;
+			return [c + r * Math.cos(ang), c + r * Math.sin(ang)];
+		};
+		// The rings, at 25/50/75/100, so a reader can read a value off it.
+		for (const ring of [25, 50, 75, 100]) {
+			const d = RADAR_AXES.map(function (a, i) {
+				const q = pt(i, ring);
+				void a;
+				return (i ? "L" : "M") + q[0].toFixed(1) + " " + q[1].toFixed(1);
+			}).join(" ") + " Z";
+			svg.appendChild(mk("path", {
+				d: d, fill: "none", stroke: "currentColor",
+				"stroke-width": ring === 100 ? 1 : 0.5,
+				opacity: ring === 100 ? 0.35 : 0.15,
+			}));
+		}
+		// The axis labels.
+		RADAR_AXES.forEach(function (a, i) {
+			const q = pt(i, 118);
+			const t = mk("text", {
+				x: q[0].toFixed(1), y: q[1].toFixed(1),
+				"text-anchor": "middle", "dominant-baseline": "middle",
+				"font-size": "8", fill: "currentColor", opacity: "0.7",
+			});
+			t.textContent = a[1];
+			svg.appendChild(t);
+		});
+		// The players.
+		players.forEach(function (p, slot) {
+			const r = p.newRatings || {};
+			const d = RADAR_AXES.map(function (a, i) {
+				const q = pt(i, Number(r[a[0]]) || 0);
+				return (i ? "L" : "M") + q[0].toFixed(1) + " " + q[1].toFixed(1);
+			}).join(" ") + " Z";
+			svg.appendChild(mk("path", {
+				d: d, fill: RADAR_COLORS[slot % RADAR_COLORS.length],
+				"fill-opacity": players.length > 2 ? 0.10 : 0.16,
+				stroke: RADAR_COLORS[slot % RADAR_COLORS.length],
+				"stroke-width": 1.6,
+			}));
+		});
+		return svg;
 	}
 
 	/* Two prospects side by side, on every row that has a number in it. */
@@ -3812,6 +4384,27 @@
 			}
 			return p.stats[key];
 		};
+		/* The shapes first, the numbers under them. A radar answers "what kind
+		   of player is he" in one look and the table answers "is he better",
+		   and putting the table first means the second question is asked
+		   before the first one has been. */
+		const radarBox = el("div", "radarbox");
+		radarBox.appendChild(ratingRadar(picked));
+		const legend = el("div", "radarlegend");
+		picked.forEach(function (p, i) {
+			const item = el("span", "radaritem");
+			const swatch = el("span", "radarswatch");
+			swatch.style.background = RADAR_COLORS[i % RADAR_COLORS.length];
+			item.appendChild(swatch);
+			item.appendChild(document.createTextNode(p.name));
+			legend.appendChild(item);
+		});
+		radarBox.appendChild(legend);
+		radarBox.appendChild(el("p", "unit",
+			"BBGM's fifteen ratings, all on the same 0-100 scale. The rings are " +
+			"25, 50, 75 and 100."));
+		box.appendChild(radarBox);
+
 		const table = el("table", "mini compare");
 		const head = el("tr");
 		head.appendChild(el("th", null, ""));
@@ -3868,10 +4461,11 @@
 		awards: viewAwards, board: viewBoard, distribution: viewDistribution, tournamentCard,
 		notes: viewNotes, gamelog: viewGameLog, compare: viewCompare,
 		news: viewNews, universe: viewUniverse, playerLink, teamLink, playerPage,
+		gamePage, gameKeyFor, quadBar, pollSpark, ballotCards,
 		COLUMNS, STAT_MODES, PCT_KEYS, DERIVED, derived, cellValue, statValue,
 		CARD_COLUMNS, CARD_BREAKPOINT, cardMode, orderedColumns, moveColumn,
 		dropColumn, setColumnOrder,
 		matchesFilter, numericColumns, histogram, feet, closeRowMenu,
-		el, n1, pc, wrapCell, COMPARE_MAX,
+		el, n1, pc, wrapCell, COMPARE_MAX, ratingRadar, RADAR_AXES,
 	};
 })(window);

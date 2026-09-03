@@ -291,6 +291,65 @@
 		{ name: "Grab-and-Go Big", min: 60, max: 80, w: 0.9, t: ["big", "playmaking", "raw"], o: { pss: 16, drb: 12, reb: 8, spd: 8, oiq: -14, tp: -10, ft: -8 } },
 		{ name: "Tweener Forward", min: 58, max: 74, w: 1.3, t: ["wing", "big", "raw", "rebounding"], o: { jmp: 12, stre: 6, reb: 8, endu: 6, tp: -10, pss: -8, ins: -6, diq: -8 } },
 
+		/* --- shapes the table did not have -------------------------------
+
+		   Ten builds that exist in every real draft class and had no row. The
+		   test is not "is this a player" but "is this a SHAPE the table
+		   cannot already draw": each of these was checked against the
+		   cosine-similarity sweep in tools/test.js, which is what stopped the
+		   table growing to 121 names for 65 shapes.
+
+		   Where a build is close to an existing one the difference is stated
+		   in the comment, because a reader looking for redundancy will find
+		   these first. */
+		/* Offensive Rebounding Menace is all-glass (reb +20 with no split).
+		   This one lives entirely on the offensive board and is a liability
+		   on the defensive one, which is a real and distinct player: the
+		   6'8" energy four who gets six second-chance points and lets his
+		   man run past him to the other end. The stat model can express the
+		   difference now that rebWeight splits the two. */
+		{ name: "Putback Specialist", min: 50, max: 84, w: 1.0, t: ["big", "rebounding", "athletic"], o: { reb: 18, jmp: 16, dnk: 12, endu: 8, stre: 6, tp: -18, ft: -12, pss: -14, drb: -14, diq: -8, oiq: -6 } },
+		/* Crafty Finisher is rim-only. This is the mid-range and floater
+		   guard — the man who gets to eight feet and stops, which is a
+		   different shot chart and a different set of tools. */
+		{ name: "Floater Guard", min: 0, max: 46, w: 1.1, t: ["guard", "scoring"], o: { fg: 16, ins: 12, oiq: 10, drb: 8, ft: 6, tp: -14, dnk: -14, jmp: -10, stre: -8, reb: -8 } },
+		/* Post-Up Guard stops at hgt 46. A post-up WING is the other end of
+		   the same idea and had nowhere to live: too tall for that build and
+		   too small for the big builds. */
+		{ name: "Post-Up Wing", min: 40, max: 68, w: 0.9, t: ["wing", "scoring"], o: { ins: 18, stre: 14, ft: 8, oiq: 6, reb: 4, tp: -12, spd: -10, drb: -8, jmp: -6 } },
+		/* Rim Runner and Lob Threat both carry +reb. A lob target who cannot
+		   rebound is the most common version of this player in a real class
+		   and the table could not draw him. */
+		{ name: "Rolling Lob Target", min: 56, max: 92, w: 1.2, pot: 2, t: ["big", "athletic"], o: { dnk: 24, spd: 14, endu: 10, reb: -14, jmp: 6, tp: -14, ft: -10, pss: -12, drb: -10, diq: -8 } },
+		/* Every defensive build produces EVENTS. This one is the 0.8 steals,
+		   0.3 blocks, elite defensive rating player — position, hands, charges
+		   — and had no way to exist: the identity multipliers added for the
+		   defense tag would have made him a shot-blocker. Negative on stl and
+		   blk sources, positive on diq and oiq. */
+		{ name: "Help-Side Anchor", min: 44, max: 84, w: 1.0, t: ["defense"], o: { diq: 20, oiq: 12, stre: 10, endu: 8, jmp: -10, spd: -8, tp: -10, ins: -8, dnk: -10, pss: -6 } },
+		/* Glue Guy is any-size and is a biography as much as a shape. This is
+		   the specific one: a wing who guards and genuinely does not want the
+		   ball, which the usage intent of the tags now says out loud. */
+		{ name: "Two-Way Non-Scorer", min: 36, max: 70, w: 1.2, t: ["wing", "defense"], o: { diq: 18, endu: 12, oiq: 8, stre: 8, reb: 6, fg: -14, ins: -12, tp: -8, dnk: -8, pss: -4 } },
+		/* Point Center handles; Grab-and-Go pushes. Neither SCREENS. The
+		   inverted pick-and-roll big is the one who sets it and then handles
+		   it out of the short roll, which is drb and pss on top of stre. */
+		{ name: "Inverted Screener", min: 62, max: 92, w: 0.7, pot: 2, t: ["big", "playmaking", "scoring"], o: { pss: 16, drb: 14, stre: 12, oiq: 10, fg: 6, tp: -8, spd: -8, diq: -8, jmp: -6 } },
+		/* Streaky Volume Scorer is a usage offset with the same night-to-night
+		   spread as everybody else. This build carries `vol`, which the game
+		   log reads (see gameLog): the same average, a much wider distribution
+		   around it. */
+		{ name: "Heat-Check Scorer", min: 0, max: 60, w: 0.85, vol: 1.35, t: ["guard", "scoring", "shooting"], o: { tp: 18, fg: 16, dnk: 6, oiq: -12, diq: -12, pss: -10, reb: -8, endu: -4 } },
+		/* Nothing in the table loaded `ft` negatively enough to matter, so the
+		   hack-a-candidate — a genuinely good big who cannot shoot a free
+		   throw — did not exist. -26 is the point at which the FT term in the
+		   stat model produces a sub-50% shooter. */
+		{ name: "Hack-a-Candidate", min: 64, max: 100, w: 0.7, t: ["big", "rebounding"], o: { stre: 16, reb: 14, ins: 10, dnk: 8, ft: -26, tp: -18, pss: -10, drb: -12, spd: -8 } },
+		/* The other half of the Vertical Spacer: a five who can shoot and
+		   cannot do anything else. Stretch Five exists at the good end; this
+		   is the specialist version with the defensive cost priced in. */
+		{ name: "Standstill Stretch Five", min: 62, max: 100, w: 0.8, t: ["big", "shooting"], o: { tp: 22, ft: 14, oiq: 6, spd: -14, jmp: -12, diq: -12, reb: -8, drb: -8, dnk: -6 } },
+
 		{ name: "Balanced", min: 0, max: 100, w: 1.0, t: [], o: {} },
 	];
 

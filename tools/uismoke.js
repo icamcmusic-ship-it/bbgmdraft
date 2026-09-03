@@ -266,12 +266,22 @@ function ok(name, condition, detail) {
 		})) === "awards,stock,notes");
 
 	console.log("\nEra and efficiency");
+	/* Returns the mean team scoring, or — when the run failed — the error
+	   banner, because "oldPpg.toFixed is not a function" is not something
+	   anybody can act on and the banner says exactly what broke. */
 	const teamPpg = async () => page.evaluate(() => {
 		const res = window.App.state.results[window.App.state.active];
+		if (!res) {
+			return "no result: " +
+				((document.querySelector("#errBanner .bannertext") || {}).textContent ||
+					"(no error banner either)");
+		}
 		const t = Object.values(res.teams).filter((x) => x.teamTotals);
 		return t.reduce((a, x) => a + x.teamTotals.pts, 0) / t.length;
 	});
 	const modernPpg = await teamPpg();
+	ok("the class re-runs after a settings change", typeof modernPpg === "number",
+		String(modernPpg));
 	await page.evaluate(() => {
 		const sel = document.getElementById("era");
 		sel.value = "2009-2021";
@@ -279,8 +289,10 @@ function ok(name, condition, detail) {
 	});
 	await page.waitForTimeout(800);
 	const oldPpg = await teamPpg();
+	ok("and again after the era switch", typeof oldPpg === "number", String(oldPpg));
 	ok("the era switch moves the whole scoring environment",
-		modernPpg - oldPpg > 2, modernPpg.toFixed(1) + " -> " + oldPpg.toFixed(1));
+		typeof modernPpg === "number" && typeof oldPpg === "number" &&
+		modernPpg - oldPpg > 2, String(modernPpg) + " -> " + String(oldPpg));
 	await page.evaluate(() => {
 		const sel = document.getElementById("era");
 		sel.value = "modern";
@@ -363,9 +375,36 @@ function ok(name, condition, detail) {
 	ok("the export menu offers Markdown notes, a message history and a preset diff",
 		/Markdown/.test(menuText) && /Message history/.test(menuText) &&
 		/Compare two presets/.test(menuText), menuText.replace(/\n/g, " · ").slice(0, 140));
-	ok("the statline export options name the import that discards them",
-		/Draft.{0,40}Import.{0,80}deletes every uploaded player's stats/.test(menuText),
-		menuText.replace(/\n/g, " · ").slice(0, 400));
+	/* The three import routes, as a table. Which checkbox matters depends
+	   entirely on which door the user is about to walk through, so the table
+	   has to say per route what survives it — a paragraph saying the same
+	   thing is what this replaced. */
+	const routeRows = await page.locator("#modal table.routes tbody tr").allInnerTexts();
+	ok("the export dialog tables what each BBGM import route keeps",
+		routeRows.length === 3 &&
+		/Draft/.test(routeRows[0]) && /deleted on upload/.test(routeRows[0]) &&
+		/Import players/.test(routeRows[1]) && /Include stats/.test(routeRows[1]) &&
+		/folded into the note/.test(routeRows[1]) &&
+		/league file/.test(routeRows[2]),
+		routeRows.join(" || ").replace(/\n/g, " · ").slice(0, 400));
+	/* The award scope, and the count it promises to write. */
+	ok("the export dialog offers a major-awards scope with a live count",
+		/major honors only/.test(menuText) && /honor rows in this class/.test(menuText),
+		menuText.replace(/\n/g, " · ").slice(0, 300));
+	{
+		const before = await page.locator("#modal .unit", { hasText: "honor rows" })
+			.first().innerText();
+		await page.locator("#exportAwardsScope").selectOption("major");
+		await page.waitForTimeout(150);
+		const after = await page.locator("#modal .unit", { hasText: "honor rows" })
+			.first().innerText();
+		const n = (t) => Number((t.match(/(\d+)/) || [0, 0])[1]);
+		ok("choosing major honors reports a smaller count",
+			n(after) > 0 && n(after) < n(before), before + " -> " + after);
+		ok("and reveals the conference list to edit",
+			await page.locator("#exportMajorConfs").isVisible());
+		await page.locator("#exportAwardsScope").selectOption("all");
+	}
 	ok("and the export menu offers both routes that keep them",
 		/Players file, for Tools/.test(menuText) &&
 		/Merge into a league file/.test(menuText),
@@ -880,6 +919,456 @@ function ok(name, condition, detail) {
 		await page.waitForTimeout(250);
 		ok("the sample class writes a News feed",
 			(await page.locator("#view").innerHTML()).length > 2000);
+	}
+
+	console.log("\nThe settings filter");
+	{
+		const visibleCtls = async () => page.evaluate(() =>
+			Array.from(document.querySelectorAll("#settings details.grp .ctl"))
+				.filter((c) => !c.classList.contains("settings-hidden")).length);
+		/* One search box for SETTINGS. The archetype panel has its own, which
+		   filters builds rather than settings and is a different control. */
+		ok("there is exactly one settings search box",
+			(await page.locator("#settings input[type=search]:not(#archSearch)")
+				.count()) === 1);
+		const all = await visibleCtls();
+		ok("the panel has enough controls to need a filter", all > 40, String(all));
+		await page.locator("#settingSearch").fill("pace");
+		await page.waitForTimeout(200);
+		const few = await visibleCtls();
+		ok("searching narrows the panel", few > 0 && few < all, few + " of " + all);
+		ok("and says how many matched",
+			/\d+ of \d+ settings/.test(await page.locator("#settingSearchNote").innerText()),
+			await page.locator("#settingSearchNote").innerText());
+		await page.locator("#settingSearch").fill("zzzznothing");
+		await page.waitForTimeout(200);
+		ok("a search with no matches says so",
+			/nothing matches/.test(await page.locator("#settingSearchNote").innerText()));
+		await page.locator("#settingSearch").fill("");
+		await page.waitForTimeout(200);
+		ok("clearing it restores every control", (await visibleCtls()) === all);
+		/* Only-changed. Nothing has been changed by hand at this point except
+		   the era, which was set back, so one deliberate change is made. */
+		await page.evaluate(() => {
+			const i = document.getElementById("upsetFactor");
+			i.value = "1.7";
+			i.dispatchEvent(new Event("input", { bubbles: true }));
+		});
+		await page.waitForTimeout(900);
+		await page.locator("#onlyChanged").check();
+		await page.waitForTimeout(250);
+		const changed = await visibleCtls();
+		ok("only-changed shows a handful, not the panel",
+			changed > 0 && changed < all / 2, changed + " of " + all);
+		const labels = await page.evaluate(() =>
+			Array.from(document.querySelectorAll("#settings details.grp .ctl"))
+				.filter((c) => !c.classList.contains("settings-hidden"))
+				.map((c) => (c.querySelector("label") || {}).textContent || "").join(" "));
+		ok("and one of them is the setting that was changed",
+			/March upsets/.test(labels), labels.slice(0, 120));
+		await page.locator("#onlyChanged").uncheck();
+		await page.waitForTimeout(200);
+	}
+
+	console.log("\nDestination weights by region");
+	{
+		await page.evaluate(() => {
+			document.getElementById("grp-leagues").open = true;
+		});
+		await page.waitForTimeout(150);
+		const groups = await page.locator("#leagueWeights details.leaguegroup").count();
+		ok("the destinations are grouped rather than a flat list of 23",
+			groups >= 3 && groups <= 8, String(groups));
+		const inputs = await page.locator("#leagueWeights input").count();
+		ok("and every league is still there", inputs === 23, String(inputs));
+		/* Europe is the group that has to exist, and the EuroLeague has to be
+		   in it: the grouping is derived from each league's own birthplace
+		   multipliers, so this is the check that the derivation works. */
+		const euro = await page.evaluate(() => {
+			const g = Array.from(
+				document.querySelectorAll("#leagueWeights details.leaguegroup"))
+				.filter((d) => /Europe/.test(d.querySelector("summary").textContent))[0];
+			if (!g) return null;
+			return Array.from(g.querySelectorAll("input")).map((i) => i.dataset.league);
+		});
+		ok("the EuroLeague is grouped under Europe",
+			!!euro && euro.indexOf("EuroLeague") !== -1, (euro || []).join(", "));
+		/* The group multiplier. */
+		await page.evaluate(() => {
+			const g = Array.from(
+				document.querySelectorAll("#leagueWeights details.leaguegroup"))
+				.filter((d) => /Europe/.test(d.querySelector("summary").textContent))[0];
+			g.open = true;
+			window.__before = Array.from(g.querySelectorAll("input"))
+				.map((i) => Number(i.value));
+			g.querySelector("summary button").click();
+		});
+		await page.waitForTimeout(700);
+		const doubled = await page.evaluate(() => {
+			const g = Array.from(
+				document.querySelectorAll("#leagueWeights details.leaguegroup"))
+				.filter((d) => /Europe/.test(d.querySelector("summary").textContent))[0];
+			const now = Array.from(g.querySelectorAll("input")).map((i) => Number(i.value));
+			return now.every((v, i) => v === Math.min(100, window.__before[i] * 2));
+		});
+		ok("doubling a region doubles every weight in it", doubled);
+		ok("and the change reaches the settings",
+			await page.evaluate(() => {
+				const w = window.App.state.cfg.leagueWeights;
+				return w && w.EuroLeague === Math.min(100, window.__before[0] * 2);
+			}));
+	}
+
+	console.log("\nThe randomizer scopes");
+	{
+		const chips = await page.locator("#randomScope .chip").allInnerTexts();
+		ok("the randomizer offers its scopes as chips",
+			chips.length === 8, chips.join(", "));
+		ok("exactly one is selected",
+			(await page.locator("#randomScope .chip.on").count()) === 1);
+		await page.locator("#randomScope .chip", { hasText: "builds" }).click();
+		await page.waitForTimeout(150);
+		ok("clicking one selects it",
+			(await page.evaluate(() => window.App.state.randomScope)) === "builds");
+		ok("and marks it for a screen reader",
+			(await page.locator("#randomScope .chip.on").getAttribute("aria-checked")) === "true");
+		await page.locator("#randomScope .chip", { hasText: "gently" }).click();
+		await page.waitForTimeout(150);
+	}
+
+	console.log("\nThe compare radar");
+	{
+		await page.locator("#tabs button", { hasText: "Compare" }).first().click();
+		await page.waitForTimeout(300);
+		await page.evaluate(() => {
+			const st = window.App.state;
+			const res = st.results[st.active];
+			const keys = res.players.slice()
+				.sort((a, b) => (a.boardRank || 999) - (b.boardRank || 999))
+				.slice(0, 3).map((p) => p.key);
+			st.compare = keys.concat([null]).slice(0, 4);
+			window.App.render();
+		});
+		await page.waitForTimeout(300);
+		ok("the compare tab draws a rating radar",
+			(await page.locator("#view svg.radar").count()) === 1);
+		const paths = await page.locator("#view svg.radar path").count();
+		/* Four rings plus one polygon per player. */
+		ok("with a ring per level and a polygon per player", paths === 7, String(paths));
+		const labels = await page.locator("#view svg.radar text").allInnerTexts();
+		ok("and all fifteen rating axes labelled", labels.length === 15, labels.join(","));
+		const legend = await page.locator("#view .radaritem").allInnerTexts();
+		ok("with a legend naming the players in order", legend.length === 3, legend.join(" / "));
+		const aria = await page.locator("#view svg.radar").getAttribute("aria-label");
+		ok("and the numbers behind it in the aria-label",
+			/Size \d+/.test(String(aria)) && /Pass \d+/.test(String(aria)),
+			String(aria).slice(0, 100));
+	}
+
+	console.log("\nA game's box score");
+	{
+		await page.evaluate(() => {
+			const st = window.App.state;
+			const res = st.results[st.active];
+			const t = Object.values(res.teams).filter((x) => x.prospects.length >= 1)[0];
+			window.App.showTeam(t.name);
+		});
+		await page.waitForTimeout(350);
+		const gameLinks = page.locator("#view table tbody td.num button.linky");
+		ok("every schedule row opens a box score",
+			(await gameLinks.count()) >= 25, String(await gameLinks.count()));
+		await gameLinks.first().click();
+		await page.waitForTimeout(350);
+		const text = await page.locator("#view").innerText();
+		ok("the box score names both teams and the score",
+			/ at .+\d/.test(text.split("\n")[1] || ""), text.split("\n").slice(0, 3).join(" | "));
+		const heads = await page.locator("#view table thead th").allInnerTexts();
+		ok("and carries a real box-score header",
+			heads.indexOf("MIN") !== -1 && heads.indexOf("+/-") !== -1 &&
+			heads.indexOf("FG") !== -1, heads.join(","));
+		const cell = await page.locator("#view table tbody tr td").nth(9).innerText();
+		ok("with makes-of-attempts shooting", /^\d+-\d+$/.test(cell.trim()), cell);
+		ok("and says what it is not showing",
+			/returning rotation/.test(text));
+		/* The two lines have to be the same game seen from two sides. */
+		const consistent = await page.evaluate(() => {
+			const st = window.App.state;
+			const res = st.results[st.active];
+			const cut = st.game.lastIndexOf("|");
+			const home = res.teams[st.game.slice(0, cut)];
+			const g = home.log[Number(st.game.slice(cut + 1))];
+			const away = res.teams[g.opp];
+			const mirror = away.log.filter((x) => x.opp === home.name &&
+				Math.abs(x.when - g.when) < 1e-9)[0];
+			return !!mirror && mirror.pf === g.pa && mirror.pa === g.pf;
+		});
+		ok("and the opponent's schedule agrees with it", consistent);
+		await page.evaluate(() => { window.App.showGame(null); window.App.showTeam(null); });
+		await page.waitForTimeout(250);
+	}
+
+	console.log("\nThe season's storylines");
+	{
+		await page.locator("#tabs button", { hasText: "Prospects" }).first().click();
+		await page.waitForTimeout(300);
+		const text = await page.locator("#view").innerText();
+		const narrative = await page.evaluate(() => {
+			const st = window.App.state;
+			return (st.results[st.active].narrative || []).map((n) => n.name);
+		});
+		ok("a class draws season storylines", narrative.length >= 2, narrative.join(" + "));
+		ok("and the prospects tab names them",
+			narrative.every((n) => text.indexOf(n) !== -1), narrative.join(" + "));
+		ok("and says what each one means",
+			/The season: .{20,}/.test(text),
+			(text.match(/The season: [^\n]{0,120}/) || [""])[0]);
+	}
+
+	console.log("\nScouting traits on the player page");
+	{
+		await page.evaluate(() => {
+			const st = window.App.state;
+			const res = st.results[st.active];
+			window.App.showPlayer(res.players.filter((p) => !p.nonNcaa)[0].key);
+		});
+		await page.waitForTimeout(400);
+		const tags = await page.locator("#view .traitlist .tag.trait").allInnerTexts();
+		ok("the player page lists his scouting traits",
+			tags.length >= 2 && tags.every((t) => t.length > 3), tags.join(" / "));
+		const title = await page.locator("#view .traitlist .tag.trait").first()
+			.getAttribute("title");
+		ok("each trait carries its group and its note in a tooltip",
+			/ — .{15,}/.test(String(title)), String(title).slice(0, 90));
+		const dt = await page.locator("#view dl.shortcuts dt").allInnerTexts();
+		ok("and the page says what the traits change",
+			dt.indexOf("Scouting") !== -1, dt.join(", "));
+	}
+
+	console.log("\nThe news feed filters");
+	{
+		await page.locator("#tabs button", { hasText: "News" }).first().click();
+		await page.waitForTimeout(300);
+		const countText = async () => (await page.locator("#view .legendline")
+			.nth(1).innerText());
+		const all = await countText();
+		ok("the feed says how many articles it is showing",
+			/\d+ articles/.test(all), all);
+		const total = Number((all.match(/(\d+) articles/) || [0, 0])[1]);
+		ok("and there are enough of them to need filtering", total >= 40, all);
+		/* Filter by kind. */
+		const opts = await page.locator("#view select option").allInnerTexts();
+		ok("the kind filter lists the kinds in the feed, grouped",
+			opts.length > 20 &&
+			(await page.locator("#view select optgroup").count()) >= 3,
+			opts.length + " options");
+		await page.locator("#view select").selectOption({ index: 2 });
+		await page.waitForTimeout(250);
+		const filtered = await countText();
+		ok("choosing a kind narrows the feed",
+			/ of \d+ articles/.test(filtered) &&
+			Number(filtered.split(" ")[0]) < total, filtered);
+		await page.locator("#view select").selectOption("");
+		await page.waitForTimeout(250);
+		/* Filter by text. */
+		await page.locator("#view input[type=search]").fill("zzzznothing");
+		await page.waitForTimeout(250);
+		ok("a search with no matches says so",
+			/Nothing in the feed matches/.test(await page.locator("#view").innerText()));
+		await page.locator("#view input[type=search]").fill("");
+		await page.waitForTimeout(250);
+		ok("clearing the search restores the feed", (await countText()) === all);
+	}
+
+	console.log("\nUniverse mode as a setting");
+	{
+		/* THE BUG THIS EXISTS FOR.
+
+		   The universe used to finish by nulling every cached result, so the
+		   next render of any tab re-ran the file with the plain config — no
+		   carry-over, and the base seed instead of the season's own. The
+		   Timeline said one team won the title and the Bracket tab for the
+		   same file showed another. Nothing in any harness could see it,
+		   because both halves were individually correct.
+
+		   Two class files, universe mode on, and the champion the Timeline
+		   names has to be the champion the cached result carries. */
+		await page.goto(base);
+		await page.evaluate(() => localStorage.clear());
+		await page.goto(base);
+		await page.evaluate(() => {
+			const S = window.Sample;
+			const A = window.App;
+			const files = [2026, 2027].map((season) => {
+				const data = S.makeClass(season, 70, season);
+				return { name: "class-" + season + ".json", data };
+			});
+			A.installFiles(files, []);
+		});
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		await page.evaluate(() => {
+			window.App.state.cfg.universe = true;
+			window.App.state.cfg.seed = "smoke-universe";
+		});
+		await page.evaluate(() => window.App.runUniverse());
+		await page.waitForFunction(() => !window.App.state.universe.running &&
+			window.App.state.universe.rows.length >= 2, null, { timeout: 60000 });
+		const agree = await page.evaluate(() => {
+			const st = window.App.state;
+			const out = [];
+			for (const row of st.universe.rows) {
+				const i = st.files.findIndex((f) => f.name === row.fileName);
+				const res = st.results[i];
+				out.push({
+					file: row.fileName,
+					timeline: row.champion,
+					cached: res && res.tourney && res.tourney.champion
+						? res.tourney.champion.team.name : null,
+					seedRow: row.seed,
+					seedCached: res ? res.seed : null,
+				});
+			}
+			return out;
+		});
+		ok("the chain keeps a result for every season it ran",
+			agree.length >= 2 && agree.every((a) => a.cached), JSON.stringify(agree));
+		ok("every tab reads the champion the timeline names",
+			agree.every((a) => a.timeline === a.cached),
+			agree.map((a) => a.file + ": " + a.timeline + " vs " + a.cached).join(" | "));
+		ok("and the season's own seed, not the base seed",
+			agree.every((a) => a.seedRow === a.seedCached),
+			JSON.stringify(agree.map((a) => [a.seedRow, a.seedCached])));
+		/* And the other half: the export writes the universe's world rather
+		   than a re-simulation of the file. The note carries the season's own
+		   record, so comparing the exported note against the cached result is
+		   a comparison of the two worlds. */
+		const exportAgrees = await page.evaluate(() => {
+			const st = window.App.state;
+			const res = st.results[st.active];
+			const file = window.Engine.exportFile(res, {});
+			const i = res.players.findIndex((p) => p.note && !p.nonNcaa);
+			return i >= 0 && file.players[i].note === res.players[i].note;
+		});
+		ok("the export writes the universe's world", exportAgrees);
+		/* Turning the setting off drops the chain's configs, so the tabs go
+		   back to standalone runs rather than silently keeping a world the
+		   user has switched out of. */
+		await page.evaluate(() => {
+			window.App.state.cfg.universe = false;
+			window.App.state.universe.cfgs = {};
+		});
+		ok("turning universe mode off clears the cached chain configs",
+			(await page.evaluate(() =>
+				Object.keys(window.App.state.universe.cfgs).length)) === 0);
+	}
+
+	console.log("\nThe table's own numbers");
+	{
+		/* A GOLDEN SNAPSHOT OF THE VIEW LAYER.
+
+		   Every number in this tool is banded somewhere — except the last step,
+		   which is the view turning it into text. cellValue, statValue, the
+		   per-40 and totals conversions, the percent columns and the +/- signs
+		   are a hundred lines of formatting that nothing reads back, and the
+		   failure they produce is the worst kind: two columns swapped, or per-40
+		   quietly showing per-game, in a table that still looks entirely
+		   plausible. This smoke test was checking for console errors, which that
+		   does not raise.
+
+		   So: the sample class, a fixed seed, a fixed column set, and the first
+		   ten rows as text in all three stat modes. Any change to what a column
+		   means shows up as a one-line diff in review; an intended one is
+		   re-recorded with --update-golden.
+
+		   The sample class is used rather than a loaded file because it is the
+		   one input the harness can produce identically every time. */
+		await page.goto(base);
+		await page.evaluate(() => localStorage.clear());
+		await page.goto(base);
+		/* The sample-class BUTTON seeds itself from the clock, so the class it
+		   builds is different every run and cannot be a snapshot. The sample
+		   generator takes a seed; this uses a stated one, through the same
+		   installFiles path a real file takes. */
+		await page.evaluate(() => {
+			const data = window.Sample.makeClass(4242, 70, 2027);
+			window.App.state.cfg.seed = "uismoke-golden";
+			window.App.installFiles([{ name: "golden-sample.json", data }], []);
+		});
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		const snap = await page.evaluate(() => {
+			const A = window.App;
+			const V = window.Views;
+			const res = A.state.results[A.state.active];
+			const out = {};
+			/* The identity columns are rendered straight off the player in the
+			   row builder rather than through cellValue, so they are captured
+			   from the same place the row builder reads them: a swap there is
+			   as invisible as a swap in the numbers. */
+			const ID = (p) => [p.name, p.newPos, p.classYear, p.archetype,
+				p.newCollege].join("~");
+			const KEYS = ["newOvr", "newPot", "board", "move", "hgtInches", "weight",
+				"gp", "mpg", "ppg", "rpg", "orpg", "drpg", "apg", "spg", "bpg", "topg",
+				"pfpg", "fga", "tpa", "fta", "usg", "fgp", "tpp", "ftp", "ts",
+				"tpar", "ftr", "efg", "astTo", "ortg", "prod", "drtg", "record"];
+			for (const mode of ["perGame", "totals", "per40"]) {
+				const rows = res.players.slice()
+					.sort((a, b) => b.newOvr - a.newOvr || (a.key < b.key ? -1 : 1))
+					.slice(0, 10);
+				out[mode] = rows.map((p) => ID(p) + "|" + KEYS.map((k) => {
+					const v = V.cellValue(p, k, res, mode);
+					if (v === undefined || v === null) return "";
+					if (typeof v === "number") return v.toFixed(4);
+					return String(v);
+				}).join("|"));
+			}
+			return out;
+		});
+		const file = path.join(__dirname, "golden-table.json");
+		if (process.argv.includes("--update-golden")) {
+			fs.writeFileSync(file, JSON.stringify(snap, null, "\t") + "\n");
+			console.log("  --   recorded tools/golden-table.json");
+		} else {
+			let want = null;
+			try { want = JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { want = null; }
+			if (!want) {
+				ok("the table snapshot exists", false,
+					"tools/golden-table.json is missing — run: node tools/uismoke.js --update-golden");
+			} else {
+				for (const mode of ["perGame", "totals", "per40"]) {
+					const a = (want[mode] || []).join("\n");
+					const b = (snap[mode] || []).join("\n");
+					/* Point at the FIELD that moved, not at the first 120
+					   characters of the row: a per-40 conversion that changed
+					   leaves the first eight columns identical, and a diff
+					   that shows those and stops is a diff that says nothing. */
+					let firstDiff = "";
+					if (a !== b) {
+						const la = a.split("\n");
+						const lb = b.split("\n");
+						outer:
+						for (let i = 0; i < Math.max(la.length, lb.length); i++) {
+							if (la[i] === lb[i]) continue;
+							const fa = String(la[i]).split("|");
+							const fb = String(lb[i]).split("|");
+							for (let j = 0; j < Math.max(fa.length, fb.length); j++) {
+								if (fa[j] === fb[j]) continue;
+								firstDiff = "row " + i + " (" + fa[0] + "), field " + j +
+									": want " + fa[j] + ", got " + fb[j];
+								break outer;
+							}
+							firstDiff = "row " + i + " differs in length";
+							break;
+						}
+					}
+					ok("the prospect table's " + mode + " numbers are unchanged",
+						a === b, firstDiff);
+				}
+				/* And the three modes are actually different, or the snapshot
+				   is pinning a conversion that stopped happening. */
+				ok("per-game, totals and per-40 are three different tables",
+					snap.perGame.join() !== snap.totals.join() &&
+					snap.perGame.join() !== snap.per40.join());
+			}
+		}
 	}
 
 	console.log("\nNo errors");

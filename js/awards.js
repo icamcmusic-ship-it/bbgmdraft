@@ -655,6 +655,15 @@
 		   something. Only a sweep gets the consensus label. */
 		const poyWins = new Map();
 		const top = nation.slice(0, Math.max(6, slots(8)));
+		/* THE BALLOTS.
+
+		   Six trophies, six electorates, and the model computed a full ordered
+		   ballot for each of them and then kept only the name at the top. In a
+		   split year — which is the interesting year, and the reason the six
+		   electorates exist at all — a reader could see that two men won three
+		   trophies each and had no way to see how close any of the six was.
+		   Kept, top five per trophy, so the Awards tab can show the vote. */
+		const ballotRows = [];
 		/* This season's mood. Some years the whole electorate is arguing about
 		   the best player and some years it is arguing about the best team, and
 		   an electorate whose lean is a constant produces the same argument
@@ -689,6 +698,22 @@
 			ballots.sort((a, b) => b.score - a.score);
 			const winner = ballots.length ? ballots[0].x : null;
 			if (!winner) continue;
+			/* Scores are on an arbitrary internal scale, so the ballot is
+			   reported as a MARGIN from the winner: "0.4 behind" is a fact a
+			   reader can use and "score 41.7" is not. */
+			ballotRows.push({
+				award: award.name,
+				resumeLean: Number((lean).toFixed(3)),
+				top: ballots.slice(0, 5).map((b, i) => ({
+					rank: i + 1,
+					name: b.x.name,
+					key: b.x.key || null,
+					school: b.x.school || (b.x.team ? b.x.team.name : null),
+					// `filler` is what buildField stamps on a returning player.
+					inClass: !b.x.filler,
+					behind: Number((ballots[0].score - b.score).toFixed(2)),
+				})),
+			});
 			giveNat(winner, award.name);
 			poyWins.set(winner, (poyWins.get(winner) || 0) + 1);
 		}
@@ -1042,13 +1067,29 @@
 			if (p.awards && p.awards.length) p.awards = sortAwards(p.awards);
 		}
 
+		/* RETURNED, NOT STASHED ON THE TEAM MAP.
+
+		   These three used to be written onto `teams` as `__`-prefixed keys
+		   and lifted off by the caller. That works exactly as long as every
+		   one of them is remembered at both ends: `teams` is iterated with
+		   Object.keys in the stats phase, so a key left behind is a "team"
+		   with no members, and a warm re-run — a slider that re-runs stats but
+		   not awards — dies on it. Adding a fourth key here and forgetting the
+		   matching delete is a one-line change with a failure three phases
+		   away, which is exactly the kind of coupling that should not be
+		   possible.
+
+		   So `assign` returns them. The old keys are still written for one
+		   release because js/batch.js and any external caller may read them,
+		   and the caller deletes what it reads. */
 		teams.__fieldHonors = fieldHonors;
+		teams.__poyBallots = ballotRows;
 		/* The best of the field, independent of whether he won anything —
 		   for the News item that says the country's best player this year
 		   was not in the draft class at all. Trimmed to what a spotlight
 		   article needs; the rest of `field` (the fitted improvement scores,
 		   the defensive approximations) stays internal to this function. */
-		teams.__fieldTop = field.slice()
+		const fieldTop = field.slice()
 			.sort((a, b) => b.scoreTotal - a.scoreTotal)
 			.slice(0, 5)
 			.map((x) => ({
@@ -1057,7 +1098,113 @@
 				classYear: x.classYear || null, starReturner: x.starReturner || null,
 				pos: x.pos, stats: x.stats,
 			}));
-		return ranked;
+		/* Still written onto the map as well, for one release, in case an
+		   external caller reads them; the engine deletes every `__` key it
+		   finds after this returns. */
+		teams.__fieldTop = fieldTop;
+		return { ranked, fieldHonors, fieldTop, poyBallots: ballotRows };
+	}
+
+	/* ------------------------------------------------------- award scope
+
+	   A good prospect finishes a season holding fifteen to twenty-two honors,
+	   and BBGM's player page renders every one of them as its own row. Most of
+	   that is conference filler — All-Sun Belt Newcomer Team, All-MAC
+	   Tournament Team, an Ohio Valley all-freshman nod — and it buries the
+	   three lines a reader actually wants. Measured over six classes: 114
+	   distinct types, 2.4 honors a player, 22 on the most decorated.
+
+	   `major` is the answer to "what would a broadcast graphic list". It is
+	   deliberately a predicate over the award STRING rather than a flag set
+	   where each award is created: awards are minted in a dozen places here,
+	   several of them by template from a conference name, and a flag would
+	   have to be remembered at every one of them forever.
+
+	   MAJOR_CONFERENCES is overridable per export (opts.majorConferences), so
+	   a user who cares about the WCC can say so. */
+	const MAJOR_CONFERENCES = [
+		"ACC", "Big Ten", "Big 12", "Big East", "SEC",
+		// The mid-major exception the audit asks for: a conference POY at one
+		// of these is a national name, not filler.
+		"WCC", "Mountain West", "Atlantic 10", "American", "AAC", "Missouri Valley",
+	];
+
+	/* Nothing below the line, whatever it is attached to. Checked first, so a
+	   "Naismith Trophy finalist" loses to the finalist rule and not to the
+	   national-trophy rule that also matches it. */
+	const MINOR_SUFFIX = /(finalist|watch list|honorable mention|Late Season Top \d+|Midseason Top \d+)/i;
+	const MINOR_ALWAYS = [
+		/All-\w+ All-Region Team$/,          // NCAA East/West/Midwest/South
+		/^NCAA \w+ All-Region Team$/,
+		/^Academic All-American$/,
+		/Cup Final MVP$/,                    // domestic cups abroad
+		/Most Improved Player$/,
+		/Sixth Man of the Year$/,
+	];
+
+	const MAJOR_NATIONAL = [
+		/^Consensus National Player of the Year$/,
+		/^(Naismith Trophy|John R\. Wooden Award|Oscar Robertson Trophy)$/,
+		/^(AP|NABC|Sporting News) Player of the Year$/,
+		/^Consensus (First|Second) Team All-American$/,
+		/^Third Team All-American$/,
+		/^(Naismith|NABC) Defensive Player of the Year$/,
+		/^Lefty Driesell Award$/,
+		/^(Bob Cousy|Jerry West|Julius Erving|Karl Malone|Kareem Abdul-Jabbar) Award$/,
+		/^Final Four Most Outstanding Player$/,
+		/^NCAA All-Tournament Team$/,
+		/^NIT Most Valuable Player$/,
+	];
+
+	/* Abroad and in the G League: the same shape of rule, one league up. */
+	const MAJOR_PRO = [
+		/\bMVP$/, /\bFinals MVP$/, /^All-[\w .]+ First Team$/,
+		/Rising Star$/, /Best Young Player$/, /Rookie of the Year$/,
+	];
+	/* Which of those are conference rows rather than pro rows: "All-ACC First
+	   Team" matches the pro First Team pattern too, so conferences are decided
+	   before the pro list is consulted. */
+	function conferenceIn(award, confs) {
+		for (const c of confs) {
+			if (award === c + " Player of the Year" ||
+				award === c + " Defensive Player of the Year" ||
+				award === c + " Freshman of the Year" ||
+				award === "All-" + c + " First Team" ||
+				award === c + " Tournament MVP") return true;
+		}
+		return false;
+	}
+	/* Any conference at all — used to reject a NON-major conference row before
+	   the pro patterns can claim it. */
+	const CONF_SHAPED =
+		/(Player of the Year|Freshman of the Year|Tournament MVP|Defensive Player of the Year)$|^All-.+ (First|Second|Freshman|Newcomer|Defensive|Tournament) Team$/;
+
+	function isMajorAward(award, confs) {
+		const a = String(award || "").trim();
+		if (!a) return false;
+		if (MINOR_SUFFIX.test(a)) return false;
+		for (const re of MINOR_ALWAYS) if (re.test(a)) return false;
+		for (const re of MAJOR_NATIONAL) if (re.test(a)) return true;
+		const list = confs && confs.length ? confs : MAJOR_CONFERENCES;
+		if (conferenceIn(a, list)) return true;
+		/* A conference-shaped row that did not match the list above is filler
+		   by construction — second teams, all-freshman, all-newcomer, and
+		   every award of a conference the user did not name. */
+		if (CONF_SHAPED.test(a)) {
+			// ...unless it is a professional league's own award, which is
+			// conference-shaped only by coincidence of wording.
+			if (/^All-(EuroLeague|EuroCup|ABA|BBL|LNB|BSL|B\.League|G League|BAL|East Asia Super League) First Team$/.test(a)) return true;
+			return false;
+		}
+		for (const re of MAJOR_PRO) if (re.test(a)) return true;
+		return false;
+	}
+
+	/* Filter a player's honor list to a scope. "all" is the identity, so the
+	   caller never has to branch. */
+	function scopeAwards(list, scope, confs) {
+		if (scope !== "major") return (list || []).slice();
+		return (list || []).filter((a) => isMajorAward(a, confs));
 	}
 
 	global.Awards = {
@@ -1067,5 +1214,6 @@
 		buildField, fitScores, fitTalentToScore, awardRank, sortAwards,
 		NATIONAL_POY, NATIONAL_DPOY, POSITION_AWARDS, AWARD_TIERS,
 		NCAA_BONUS, NIT_BONUS, GATES,
+		MAJOR_CONFERENCES, isMajorAward, scopeAwards,
 	};
 })(typeof window !== "undefined" ? window : self);

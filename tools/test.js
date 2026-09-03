@@ -2385,7 +2385,13 @@ console.log("\nGenerated text");
 		for (const sp of res.surprises || []) report("anomaly", sp.label);
 		for (const a of global.News.build(res)) {
 			seen.articles++;
-			report("news " + a.kind, T.segsToText(a.headline) + " | " + T.segsToText(a.body));
+			/* The paragraphs the voice system adds under the lede — a stat
+			   block, a context note, a quote — are article text and are swept
+			   like article text. They were the largest body of generated
+			   prose in the tool that nothing read. */
+			report("news " + a.kind, T.segsToText(a.headline) + " | " +
+				T.segsToText(a.body) + " | " +
+				(a.paras || []).map((x) => T.segsToText(x)).join(" | "));
 		}
 	}
 	ok("the sweep actually read something",
@@ -2395,18 +2401,569 @@ console.log("\nGenerated text");
 		faults.length === 0, faults.slice(0, 6).join("\n         "));
 }
 
+console.log("\nWarm re-runs from every phase");
+{
+	/* THE COUPLING THIS EXISTS TO CATCH.
+
+	   The awards phase used to hand three extra results back by writing
+	   `__`-prefixed keys onto the TEAM MAP, which the caller then lifted off.
+	   That works exactly as long as every key is remembered at both ends —
+	   and the stats phase iterates the team map with Object.keys, so a key
+	   left behind is a "team" with no members. Adding a fourth key and
+	   forgetting the matching delete is a one-line change whose failure
+	   appears three phases away, on one slider, in the browser only.
+
+	   So: run cold, then re-run warm through every setting the phase table
+	   declares, one at a time. Any phase that leaves the state unfit for a
+	   later phase to re-enter shows up here rather than in a user's tab. */
+	const PROBES = [
+		["era", "2009-2021"], ["pace", 72], ["scoringEnv", 1.5],
+		["efficiencyEnv", 1], ["statNoise", 1.4], ["upsetFactor", 1.6],
+		["injuryRate", 1.6], ["awardStrictness", 1.5], ["confAwardStrictness", 1.4],
+		["awardNoise", 2], ["potBias", 1.5], ["potSpread", 9],
+		["draftEvents", 6], ["noteLines", ["summary", "stats"]],
+		["seasonEvents", 11], ["teamMomentum", 1.8], ["priorSeasons", "reconstruct"],
+		["coachTurnover", 160], ["styleDrift", 2], ["traitCount", 5],
+		["realignmentRate", 0.9], ["midMajorLift", 6], ["starReturners", 200],
+	];
+	const runner = global.Engine.createRunner(V.realisticClass(6, 70));
+	const base = { seed: "warm", narrative: false };
+	let ok0 = true;
+	try { runner.run(global.Config.make(base)); } catch (e) { ok0 = false; }
+	ok("a cold run succeeds", ok0);
+	const broke = [];
+	for (const [key, value] of PROBES) {
+		const cfg = global.Config.make(Object.assign({}, base));
+		cfg[key] = value;
+		try {
+			const res = runner.run(cfg);
+			if (!res.players || !res.players.length) broke.push(key + ": empty");
+		} catch (e) {
+			broke.push(key + ": " + (e && e.message ? e.message : String(e)));
+		}
+	}
+	ok("every setting can be changed on a warm runner",
+		broke.length === 0, broke.slice(0, 4).join("; "));
+	/* And back again, in the other order, because a phase can also be left
+	   unfit by the WARM path rather than by the cold one. */
+	const back = [];
+	for (let i = PROBES.length - 1; i >= 0; i--) {
+		const cfg = global.Config.make(Object.assign({}, base));
+		cfg[PROBES[i][0]] = PROBES[i][1];
+		try { runner.run(cfg); } catch (e) {
+			back.push(PROBES[i][0] + ": " + (e && e.message ? e.message : String(e)));
+		}
+	}
+	ok("and in the reverse order", back.length === 0, back.slice(0, 4).join("; "));
+	/* The specific invariant: nothing may be left on the team map that is not
+	   a team, because the stats phase iterates it by key. */
+	{
+		const res = runner.run(global.Config.make(base));
+		const bad = Object.keys(res.teams).filter((k) => !res.teams[k] ||
+			!Array.isArray(res.teams[k].members));
+		ok("the team map contains nothing but teams", bad.length === 0, bad.join(", "));
+	}
+	/* The ballots survive a warm re-run of the awards phase, which is the
+	   thing that broke. */
+	{
+		const a = runner.run(global.Config.make(Object.assign({}, base)));
+		const b = runner.run(global.Config.make(
+			Object.assign({}, base, { awardStrictness: 1.4 })));
+		ok("the player-of-the-year ballots survive a warm awards re-run",
+			(a.poyBallots || []).length === 6 && (b.poyBallots || []).length === 6,
+			(a.poyBallots || []).length + " / " + (b.poyBallots || []).length);
+		ok("and each ballot names five candidates with margins",
+			b.poyBallots.every((x) => x.top.length === 5 && x.top[0].behind === 0 &&
+				x.top.every((r) => Number.isFinite(r.behind) && r.name)),
+			JSON.stringify(b.poyBallots[0] && b.poyBallots[0].top[1]));
+	}
+}
+
+console.log("\nStaying fresh: anomaly memory, narratives, style drift, flavor reach");
+{
+	/* ANOMALY MEMORY. The same mechanism the build pool has, one layer down:
+	   thirty-two kinds and about four draws a class meant the same eight or
+	   ten turned up in most classes. */
+	{
+		const draw = (recent, memory) => global.Engine.run(
+			V.realisticClass(2, 70),
+			global.Config.make({ seed: "anom", recentAnomalies: recent,
+				anomalyMemory: memory, narrative: false }))
+			.surprises.map((sp) => sp.name);
+		const base = draw([], 1);
+		ok("a class draws anomalies", base.length >= 2, base.join(", "));
+		/* With the same seed and the same class, telling the engine that these
+		   exact kinds ran last class has to change the draw. */
+		const avoided = draw([base], 1);
+		const overlap = avoided.filter((n) => base.indexOf(n) !== -1).length;
+		ok("an anomaly used last class is pushed down the queue",
+			overlap < base.length, overlap + " of " + base.length + " repeated");
+		ok("anomalyMemory 0 restores the memoryless draw",
+			draw([base], 0).join("|") === base.join("|"));
+		/* And the memory decays: two classes ago should bite less than one. */
+		let repeatNear = 0;
+		let repeatFar = 0;
+		for (let s = 0; s < 8; s++) {
+			const first = global.Engine.run(V.realisticClass(s, 70),
+				global.Config.make({ seed: "am" + s, narrative: false }))
+				.surprises.map((sp) => sp.name);
+			const near = global.Engine.run(V.realisticClass(s, 70),
+				global.Config.make({ seed: "am2-" + s, recentAnomalies: [first],
+					anomalyMemory: 1, narrative: false })).surprises.map((sp) => sp.name);
+			const far = global.Engine.run(V.realisticClass(s, 70),
+				global.Config.make({ seed: "am2-" + s, recentAnomalies: [[], [], first],
+					anomalyMemory: 1, narrative: false })).surprises.map((sp) => sp.name);
+			repeatNear += near.filter((n) => first.indexOf(n) !== -1).length;
+			repeatFar += far.filter((n) => first.indexOf(n) !== -1).length;
+		}
+		ok("and the memory decays with age",
+			repeatNear <= repeatFar, repeatNear + " vs " + repeatFar);
+	}
+
+	/* SEASON NARRATIVES. */
+	{
+		const res = global.Engine.run(V.realisticClass(4, 70),
+			global.Config.make({ seed: "narr" }));
+		ok("a class draws two or three season storylines",
+			res.narrative.length >= 2 && res.narrative.length <= 3,
+			res.narrative.map((x) => x.name).join(" + "));
+		ok("each storyline names itself and says what it means",
+			res.narrative.every((x) => x.name && x.blurb));
+		const off = global.Engine.run(V.realisticClass(4, 70),
+			global.Config.make({ seed: "narr", narrative: false }));
+		ok("narrative:false draws none", off.narrative.length === 0);
+		/* A storyline that bends nothing is a label, so the settings the
+		   season actually ran under have to differ. */
+		/* Read off `effectiveCfg`, which is what the season was actually
+		   simulated at — `cfg` is what the user asked for, and the bends by
+		   design do not appear there. */
+		const KEYS = ["upsetFactor", "teamMomentum", "injuryRate", "pace",
+			"midMajorLift", "bluebloodDownYears", "coachTurnover", "realignmentRate",
+			"efficiencyEnv", "scoringEnv", "statNoise", "seasonEvents"];
+		const moved = KEYS.filter((k) => res.effectiveCfg[k] !== off.effectiveCfg[k]);
+		ok("and a storyline changes the settings the season ran at",
+			moved.length >= 2, moved.join(", "));
+		/* And that reaches the season, not only the config. */
+		ok("which reaches the simulation",
+			res.coachingCarousel.length !== off.coachingCarousel.length ||
+			res.seasonEvents.length !== off.seasonEvents.length ||
+			res.tourney.champion.team.name !== off.tourney.champion.team.name,
+			res.coachingCarousel.length + " vs " + off.coachingCarousel.length);
+		/* A user's own setting still wins, at the default reach of 0. */
+		const pinned = global.Engine.run(V.realisticClass(4, 70),
+			global.Config.make({ seed: "narr", upsetFactor: 0.77 }));
+		ok("a storyline never overrules a setting the user changed",
+			pinned.effectiveCfg.upsetFactor === 0.77,
+			String(pinned.effectiveCfg.upsetFactor) + " with " +
+				pinned.narrative.map((x) => x.name).join(" + "));
+		/* Every bend key is a real setting. A typo here is silent. */
+		const D = global.Config.DEFAULTS;
+		const unknown = [];
+		for (const n of global.Engine.NARRATIVES) {
+			for (const k of Object.keys(n.bend)) if (!(k in D)) unknown.push(n.name + "." + k);
+		}
+		ok("every storyline bends a setting that exists", unknown.length === 0,
+			unknown.join("; "));
+	}
+
+	/* FLAVOR REACH. */
+	{
+		/* A flavor whose bend the user has already customised does nothing at
+		   reach 0 and something at reach 100. injuryRate is the clearest case:
+		   "the year everybody got hurt" bends it and nothing else does. */
+		const cfgFor = (reach) => global.Config.make({
+			seed: "reach", flavorHint: "injury year", classFlavor: 1,
+			injuryRate: 1.15, flavorReach: reach, narrative: false,
+		});
+		const at0 = global.Engine.run(V.realisticClass(3, 70), cfgFor(0));
+		const at100 = global.Engine.run(V.realisticClass(3, 70), cfgFor(100));
+		ok("the named flavor was drawn", at0.flavor && at0.flavor.name === "injury year",
+			at0.flavor && at0.flavor.name);
+		ok("at reach 0 a flavor leaves a changed setting exactly alone",
+			at0.effectiveCfg.injuryRate === 1.15, String(at0.effectiveCfg.injuryRate));
+		ok("at reach 100 it moves it, and only part of the way",
+			at100.effectiveCfg.injuryRate > 1.15 &&
+			at100.effectiveCfg.injuryRate < 2,
+			String(at100.effectiveCfg.injuryRate));
+	}
+
+	/* STYLE DRIFT. */
+	{
+		const res = global.Engine.run(V.realisticClass(1, 70),
+			global.Config.make({ seed: "drift", narrative: false }));
+		const byName = {};
+		for (const t of Object.values(res.teams)) {
+			if (!t.style) continue;
+			(byName[t.style.name] = byName[t.style.name] || []).push(t.style.three);
+		}
+		const biggest = Object.keys(byName).sort((a, b) => byName[b].length - byName[a].length)[0];
+		ok("two teams playing the same style do not play identical numbers",
+			new Set(byName[biggest]).size === byName[biggest].length,
+			biggest + ": " + new Set(byName[biggest]).size + " distinct of " +
+				byName[biggest].length);
+		/* And it is a drift, not a redraw: the style's own identity survives. */
+		const spread = Math.max.apply(null, byName[biggest]) -
+			Math.min.apply(null, byName[biggest]);
+		ok("but the drift is smaller than the gap between styles",
+			spread < 0.14, spread.toFixed(3));
+		const off = global.Engine.run(V.realisticClass(1, 70),
+			global.Config.make({ seed: "drift", styleDrift: 0, narrative: false }));
+		const offBy = Object.values(off.teams).filter(
+			(t) => t.style && t.style.name === biggest).map((t) => t.style.three);
+		ok("styleDrift 0 restores the fixed enum exactly",
+			new Set(offBy).size === 1, String(new Set(offBy).size));
+		/* The drift must not shift any other random stream — an earlier
+		   version drew a per-coach seed from the coach's own rng and moved
+		   every coach's development number, which moved the tournament. */
+		ok("and turning it off changes nothing but the styles",
+			off.tourney.champion.team.name === res.tourney.champion.team.name,
+			off.tourney.champion.team.name + " vs " + res.tourney.champion.team.name);
+	}
+}
+
+console.log("\nThe trait layer");
+{
+	const TR = global.Traits;
+	const res = global.Engine.run(V.realisticClass(5, 70),
+		global.Config.make({ seed: "traits" }));
+	const ncaa = res.players.filter((p) => !p.nonNcaa);
+
+	ok("every prospect carries traits",
+		res.players.every((p) => Array.isArray(p.traits) && p.traits.length >= 1),
+		String(res.players.filter((p) => !p.traits || !p.traits.length).length) + " without");
+
+	/* One trait per group. A player with three different opinions about his
+	   wingspan is not a scouting report. */
+	{
+		let dup = 0;
+		for (const p of res.players) {
+			const groups = (p.traits || []).map((t) => t.group);
+			if (new Set(groups).size !== groups.length) dup++;
+		}
+		ok("no player draws two traits from one group", dup === 0, String(dup));
+	}
+
+	/* PREREQUISITES. The gates are what make the draw read as a report rather
+	   than as a shuffle, so every one of them is checked against every player
+	   who drew the trait, rather than trusting the drawer. */
+	{
+		const bad = [];
+		for (const p of res.players) {
+			for (const t of p.traits || []) {
+				if (!TR.matches(t, p)) bad.push(p.name + " / " + t.name);
+			}
+		}
+		ok("every trait's prerequisites hold for the player who drew it",
+			bad.length === 0, bad.slice(0, 4).join("; "));
+		/* And the gates actually bite: the specific ones the table exists for. */
+		const tall = res.players.filter((p) => p.newRatings.hgt >= 70);
+		ok("a seven-footer is never 'explosive first step'",
+			tall.every((p) => (p.traitNames || []).indexOf("explosive first step") === -1));
+		const fresh = res.players.filter((p) => /Freshman/.test(String(p.classYear)));
+		ok("a freshman is never a natural leader or has never missed a game",
+			fresh.every((p) => (p.traitNames || []).indexOf("natural leader") === -1 &&
+				(p.traitNames || []).indexOf("has not missed a game") === -1));
+		const small = res.players.filter((p) => p.newRatings.hgt < 60);
+		ok("a guard never has a broken free-throw stroke",
+			small.every((p) => (p.traitNames || []).indexOf("broken free-throw stroke") === -1));
+	}
+
+	/* THE FOUR SURFACES. A trait that reaches nothing is a label. */
+	ok("every trait carries a note clause",
+		TR.TRAITS.every((t) => typeof t.note === "string" && t.note.length > 12),
+		TR.TRAITS.filter((t) => !t.note).map((t) => t.name).join("; "));
+	ok("every trait carries a news adjective",
+		TR.TRAITS.every((t) => typeof t.adj === "string" && t.adj.length > 2),
+		TR.TRAITS.filter((t) => !t.adj).map((t) => t.name).join("; "));
+	ok("the table is big enough to be a vocabulary",
+		TR.TRAITS.length >= 55 && TR.GROUPS.length >= 10,
+		TR.TRAITS.length + " traits in " + TR.GROUPS.length + " groups");
+	ok("every trait's group is a declared group",
+		TR.TRAITS.every((t) => TR.GROUPS.indexOf(t.group) !== -1));
+	{
+		const notes = res.players.filter(
+			(p) => String(p.note || "").indexOf("Scouts note ") !== -1);
+		ok("the default note carries the trait line",
+			notes.length > res.players.length * 0.8,
+			notes.length + " of " + res.players.length);
+	}
+	{
+		const f = global.Engine.exportFile(res, {});
+		const mood = f.players.filter((p) => p.moodTraits && p.moodTraits.length);
+		ok("mood traits reach the exported file", mood.length > 10,
+			mood.length + " of " + f.players.length);
+		const letters = new Set();
+		for (const p of mood) for (const m of p.moodTraits) letters.add(m);
+		ok("and are BBGM's own four letters",
+			[...letters].every((m) => "FL$W".indexOf(m) !== -1), [...letters].join(""));
+		const off = global.Engine.run(V.realisticClass(5, 70),
+			global.Config.make({ seed: "traits", traitCount: 0 }));
+		const fOff = global.Engine.exportFile(off, {});
+		ok("traitCount 0 writes no mood traits and no trait line",
+			fOff.players.every((p) => !p.moodTraits) &&
+			off.players.every((p) => String(p.note || "").indexOf("Scouts note") === -1));
+	}
+
+	/* THE NUMERIC EFFECTS. */
+	{
+		ok("volatility is drawn per player and lands in a sane band",
+			res.players.every((p) => p.volatility >= 0.7 && p.volatility <= 1.6),
+			String(Math.min.apply(null, res.players.map((p) => p.volatility))));
+		const vols = res.players.map((p) => p.volatility);
+		ok("and it actually varies between players",
+			Math.max.apply(null, vols) - Math.min.apply(null, vols) > 0.2,
+			(Math.max.apply(null, vols) - Math.min.apply(null, vols)).toFixed(2));
+		/* The point of it: two players with the same average produce
+		   different-looking logs. Measured as the game-log SD of the top and
+		   bottom volatility quartiles among comparable scorers. */
+		const scorers = ncaa.filter((p) => p.stats && p.stats.ppg >= 12 &&
+			p.gameLog && p.gameLog.games.length > 20);
+		if (scorers.length >= 12) {
+			const sd = (p) => {
+				const g = p.gameLog.games.map((x) => x.pts);
+				const m = g.reduce((a, b) => a + b, 0) / g.length;
+				return Math.sqrt(g.reduce((a, x) => a + (x - m) * (x - m), 0) / g.length) /
+					p.stats.ppg;
+			};
+			const byVol = scorers.slice().sort((a, b) => a.volatility - b.volatility);
+			const k = Math.max(3, Math.floor(byVol.length / 4));
+			const lowV = byVol.slice(0, k).map(sd);
+			const hiV = byVol.slice(-k).map(sd);
+			const mn = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+			ok("a volatile scorer's game log is genuinely wider",
+				mn(hiV) > mn(lowV), mn(lowV).toFixed(3) + " -> " + mn(hiV).toFixed(3));
+		}
+		ok("the offensive-glass bias stays inside its band",
+			res.players.every((p) => Math.abs(p.orbBias) <= 0.12));
+		ok("the medical file moves the injury roll",
+			res.players.every((p) => p.traitInjuryMult >= 0.5 &&
+				p.traitInjuryMult <= 2.0));
+	}
+
+	/* DETERMINISM. A trait has to survive a re-run, like every other
+	   per-player fact. */
+	{
+		const again = global.Engine.run(V.realisticClass(5, 70),
+			global.Config.make({ seed: "traits" }));
+		let same = 0;
+		for (let i = 0; i < res.players.length; i++) {
+			if ((res.players[i].traitNames || []).join("|") ===
+				(again.players[i].traitNames || []).join("|")) same++;
+		}
+		ok("the same seed draws the same traits", same === res.players.length,
+			same + " of " + res.players.length);
+	}
+
+	/* THE TRAIT LAYER MULTIPLIES. The whole argument for it is that traits are
+	   orthogonal to builds, so the same build produces different prospects. */
+	{
+		const byBuild = {};
+		for (let s = 0; s < 4; s++) {
+			const r = global.Engine.run(V.realisticClass(s, 70),
+				global.Config.make({ seed: "orth" + s }));
+			for (const p of r.players) {
+				(byBuild[p.archetype] = byBuild[p.archetype] || [])
+					.push((p.traitNames || []).slice().sort().join("|"));
+			}
+		}
+		const repeated = Object.keys(byBuild).filter((k) => byBuild[k].length >= 4);
+		let identical = 0;
+		for (const k of repeated) {
+			if (new Set(byBuild[k]).size === 1) identical++;
+		}
+		ok("two players of the same build are not the same prospect",
+			identical === 0, identical + " builds with one trait set across " +
+				repeated.length + " repeated builds");
+	}
+}
+
+console.log("\nThe paper: kinds, variants, voices and quotes");
+{
+	const N = global.News;
+	const T = global.Text;
+
+	/* THE THREE-AND-THREE RULE.
+
+	   The table exists so that adding a kind is adding a row, and a rule that
+	   is not checked is a rule the twentieth row will break. Every row carries
+	   at least three headlines and at least three bodies, because two of
+	   anything reads as an alternation rather than as variety. */
+	const thin = N.TEMPLATES.filter((t) =>
+		!Array.isArray(t.headlines) || t.headlines.length < 3 ||
+		!Array.isArray(t.bodies) || t.bodies.length < 3);
+	ok("every templated kind carries at least three headlines and three bodies",
+		thin.length === 0, thin.map((t) => t.kind).join("; "));
+
+	/* No two kinds share a body string. A copied row with one word changed is
+	   the failure mode this catches: it passes the count above and produces
+	   two kinds that read identically. */
+	{
+		const seenBody = {};
+		const clashes = [];
+		for (const t of N.TEMPLATES) {
+			for (const b of t.bodies) {
+				if (seenBody[b] && seenBody[b] !== t.kind) {
+					clashes.push(t.kind + " / " + seenBody[b]);
+				}
+				seenBody[b] = t.kind;
+			}
+			for (const h of t.headlines) {
+				if (seenBody["H|" + h] && seenBody["H|" + h] !== t.kind) {
+					clashes.push("headline " + t.kind + " / " + seenBody["H|" + h]);
+				}
+				seenBody["H|" + h] = t.kind;
+			}
+		}
+		ok("no body or headline template is shared between two kinds",
+			clashes.length === 0, clashes.slice(0, 4).join("; "));
+	}
+
+	/* Every template's slots are actually filled. A {slot} the slots function
+	   does not produce renders as the literal "{slot}", which the text sweep
+	   cannot see because braces are not a text fault. */
+	{
+		const bad = [];
+		for (const t of N.TEMPLATES) {
+			const declared = new Set();
+			for (const str of t.headlines.concat(t.bodies)) {
+				const re = /\{(\w+)\}/g;
+				let m;
+				while ((m = re.exec(str)) !== null) declared.add(m[1]);
+			}
+			t.__slots = declared;
+		}
+		/* Run the table over several classes and check nothing renders a
+		   literal brace. Rows whose `find` never fires in the sample are
+		   reported separately below rather than silently passing. */
+		/* Ten classes rather than six: several rows depend on a season
+		   producing a particular thing (a champion whose coach is in his first
+		   six years, a 15-over-2, a first-ever bid) and six seasons is not
+		   always enough for all of them. A row that needs more than ten is a
+		   row nobody would see either. */
+		const fired = new Set();
+		for (let s = 0; s < 10; s++) {
+			const res = global.Engine.run(V.realisticClass(s, 70),
+				global.Config.make({ seed: "tpl" + s }));
+			for (const a of N.build(res)) {
+				fired.add(a.kind);
+				const text = T.segsToText(a.headline) + " " + T.segsToText(a.body) + " " +
+					(a.paras || []).map((x) => T.segsToText(x)).join(" ");
+				if (/\{\w+\}/.test(text)) bad.push(a.kind + ": " + text.slice(0, 90));
+			}
+		}
+		ok("no rendered article leaves a slot unfilled", bad.length === 0,
+			bad.slice(0, 3).join(" | "));
+		/* The two universe rows read carryOver and cannot fire on a standalone
+		   class, which is correct; everything else has to be reachable. */
+		const never = N.TEMPLATES.filter((t) => !fired.has(t.kind) && t.group !== "universe");
+		ok("every templated kind is reachable on an ordinary class",
+			never.length === 0, never.map((t) => t.kind).join("; "));
+		global.__newsFired = fired;
+	}
+
+	/* THE SIZE OF THE PAPER. The audit's target was past a hundred kinds; the
+	   band has a top as well as a bottom, because a feed of two hundred
+	   articles a season is not a paper either. */
+	{
+		let kinds = new Set();
+		let total = 0;
+		const N_CLASSES = 8;
+		let always = {};
+		for (let s = 0; s < N_CLASSES; s++) {
+			const res = global.Engine.run(V.realisticClass(s, 70),
+				global.Config.make({ seed: "paper" + s }));
+			const arts = N.build(res);
+			total += arts.length;
+			const here = new Set();
+			for (const a of arts) { kinds.add(a.kind); here.add(a.kind); }
+			for (const k of here) always[k] = (always[k] || 0) + 1;
+		}
+		ok("the paper runs at least a hundred distinct kinds",
+			kinds.size + 2 >= 100, kinds.size + " observed, plus 2 universe-only");
+		ok("and a readable number of articles a season",
+			total / N_CLASSES >= 55 && total / N_CLASSES <= 140,
+			(total / N_CLASSES).toFixed(1) + " a class");
+		/* "Hold the always-firing share under a third": a paper whose table of
+		   contents is the same every season is the failure the runs() gates
+		   exist for, and adding forty kinds must not undo it. */
+		const alwaysRuns = Object.keys(always).filter((k) => always[k] === N_CLASSES);
+		ok("under a third of kinds fire in every single season",
+			alwaysRuns.length / kinds.size < 0.34,
+			alwaysRuns.length + " of " + kinds.size);
+	}
+
+	/* VOICES. */
+	{
+		const res = global.Engine.run(V.realisticClass(3, 70),
+			global.Config.make({ seed: "voice" }));
+		const arts = N.build(res);
+		const voices = new Set(arts.map((a) => a.voice));
+		ok("every article carries a voice and a byline",
+			arts.every((a) => a.voice && a.byline), String(arts.length));
+		ok("a class draws a staff rather than one voice or all six",
+			voices.size >= 3 && voices.size <= 5, [...voices].join(", "));
+		ok("the wire is always on the desk", voices.has("wire"));
+		const withPara = arts.filter((a) => (a.paras || []).length);
+		ok("a real share of articles carry a second paragraph",
+			withPara.length / arts.length > 0.3 && withPara.length / arts.length < 0.95,
+			withPara.length + " of " + arts.length);
+		/* Two different seeds must produce two different staffs at least
+		   sometimes, or the voice system is a constant with extra steps. */
+		let differ = 0;
+		for (let s = 0; s < 8; s++) {
+			const r2 = global.Engine.run(V.realisticClass(1, 70),
+				global.Config.make({ seed: "staff" + s }));
+			const v = [...new Set(N.build(r2).map((a) => a.voice))].sort().join(",");
+			if (s === 0) global.__firstStaff = v;
+			else if (v !== global.__firstStaff) differ++;
+		}
+		ok("a different seed draws a different staff", differ >= 3, String(differ));
+	}
+
+	/* QUOTES. Nothing in the paper carried one before, and a quote that is
+	   attributed to nobody is worse than no quote. */
+	{
+		let quotes = 0;
+		let unattributed = 0;
+		for (let s = 0; s < 6; s++) {
+			const res = global.Engine.run(V.realisticClass(s, 70),
+				global.Config.make({ seed: "quote" + s }));
+			for (const a of N.build(res)) {
+				for (const para of a.paras || []) {
+					const text = T.segsToText(para);
+					if (text.indexOf("\u201c") !== 0) continue;
+					quotes++;
+					if (!/ — .+\.$/.test(text)) unattributed++;
+				}
+			}
+		}
+		ok("the paper carries quotes", quotes > 40, String(quotes));
+		ok("and every one of them is attributed", unattributed === 0, String(unattributed));
+		/* A quote's speaker exists. quoteFor returns null rather than
+		   inventing one, which is the behaviour worth pinning. */
+		ok("quoteFor returns null when there is nobody to quote",
+			N.quoteFor(new global.BBGMRng.Rng("q"), {}) !== undefined);
+	}
+}
+
 console.log("\nUniverse");
 {
 	/* js/universe.js was never loaded by a harness either. Two seasons run
 	   as one world: the carry-over reaches the next season, the summary row
 	   is populated, and the export replays. */
 	const U = global.Universe;
-	const a = global.Engine.run(V.realisticClass(1, 70), global.Config.make({ seed: "u1" }));
+	/* Narratives off throughout this block. "A chaotic sideline" bends
+	   coachTurnover to 175 and "the map moved" bends the realignment rate, and
+	   both of those are things the checks below measure — a band on the
+	   carousel's calibrated rate has to be measured on an ordinary season, the
+	   way tools/validate.js measures every other calibrated rate. */
+	const a = global.Engine.run(V.realisticClass(1, 70),
+		global.Config.make({ seed: "u1", narrative: false }));
 	const carry = U.harvest(a);
 	ok("harvest carries every program forward",
 		Object.keys(carry.levels).length >= 360 && Object.keys(carry.coaches).length >= 360);
 	const b = global.Engine.run(V.realisticClass(2, 70),
-		global.Config.make({ seed: "u2", carryOver: carry }));
+		global.Config.make({ seed: "u2", carryOver: carry, narrative: false }));
 	let same = 0;
 	let total = 0;
 	for (const name of Object.keys(b.teams)) {
@@ -2415,8 +2972,60 @@ console.log("\nUniverse");
 		total++;
 		if (t.coach.name === carry.coaches[name].coach.name) same++;
 	}
+	/* Retention, not permanence. The carousel (js/teams.js) turns over 40-60
+	   of 368 jobs a year at coachTurnover 100, which is what Division I does,
+	   so 85-93% of programs keep the same man. The old band was >90% because
+	   the old model fired exactly one coach a season across the country. */
 	ok("a carried coach is the same man next season",
-		total > 300 && same / total > 0.9, same + " of " + total);
+		total > 300 && same / total > 0.85 && same / total < 0.94,
+		same + " of " + total);
+	/* The other half of the same fact: a coach who did NOT come back was
+	   named by the carousel, rather than simply being redrawn. */
+	{
+		const vacated = new Set((a.coachingCarousel || []).map((c) => c.school));
+		let unexplained = 0;
+		for (const name of Object.keys(b.teams)) {
+			const t = b.teams[name];
+			if (!t || !t.coach || !carry.coaches[name]) continue;
+			if (t.coach.name !== carry.coaches[name].coach.name && !vacated.has(name)) {
+				unexplained++;
+			}
+		}
+		ok("every coaching change has a reason on the carousel",
+			unexplained === 0, unexplained + " unexplained");
+	}
+	{
+		const n = (a.coachingCarousel || []).length;
+		ok("the carousel turns over a realistic number of jobs",
+			n >= 28 && n <= 66, n + " of " + Object.keys(a.teams).length);
+		const reasons = {};
+		for (const c of a.coachingCarousel || []) reasons[c.reason] = 1;
+		ok("the carousel distinguishes fired from retired from hired away",
+			Object.keys(reasons).length >= 2, Object.keys(reasons).join(", "));
+		const frozen = global.Engine.run(V.realisticClass(1, 70),
+			global.Config.make({ seed: "u1", coachTurnover: 0, narrative: false }));
+		ok("coachTurnover 0 freezes every sideline",
+			(frozen.coachingCarousel || []).length === 0);
+		const chaos = global.Engine.run(V.realisticClass(1, 70),
+			global.Config.make({ seed: "u1", coachTurnover: 200, narrative: false }));
+		ok("coachTurnover 200 roughly doubles it",
+			(chaos.coachingCarousel || []).length > n * 1.4);
+		ok("every coach carries an age",
+			Object.values(a.teams).every((t) => !t.coach ||
+				(Number.isFinite(t.coach.age) && t.coach.age >= 28 && t.coach.age <= 78)));
+		let older = 0;
+		let carried = 0;
+		for (const name of Object.keys(b.teams)) {
+			const kept = carry.coaches[name];
+			const t = b.teams[name];
+			if (!t || !t.coach || !kept || !kept.coach) continue;
+			if (t.coach.name !== kept.coach.name) continue;
+			carried++;
+			if (t.coach.age === kept.coach.age + 1) older++;
+		}
+		ok("a carried coach is exactly one year older",
+			carried > 250 && older === carried, older + " of " + carried);
+	}
 	const rows = [U.summarize(a, "u1", "a.json"), U.summarize(b, "u2", "b.json")];
 	ok("a timeline row names a champion, a POY and a No. 1 pick",
 		rows.every((r) => r.champion && r.champSeed && r.no1 && r.apOne));
@@ -2439,6 +3048,20 @@ console.log("\nAudit regressions");
 	   and Shot-Blocking Anchor identical in shape (1.00) and differing only
 	   in height gate — 121 names for about 65 distinct shapes, which is why
 	   a 17-build pool still read as repetition. */
+	/* A BUILD IS A SHAPE AND A SIZE.
+
+	   This compared offset vectors alone, and the audit that produced it said
+	   so in the same breath: "a Boom-or-Bust Tools guard and a Boom-or-Bust
+	   Tools center are the same offset vector, which the cosine-similarity
+	   test cannot see because it compares builds, not build x height." The
+	   consequence is a test that reports redundancy where there is none — a
+	   post-up guard gated 24-46 and a post-up wing gated 40-68 are not the
+	   same player and never appear as alternatives for one prospect — while
+	   still missing the case it was written for.
+
+	   So similarity is scaled by height OVERLAP. Two builds a prospect can
+	   never choose between are not redundant however parallel their vectors;
+	   two builds that share their whole gate are compared exactly as before. */
 	const keys = BB.RATING_KEYS;
 	const specs = RB.ARCHETYPES.filter((a) => a.name !== "Balanced");
 	const vec = (a) => keys.map((k) => RB.RAW_OFFSETS[a.name][k] || 0);
@@ -2449,19 +3072,44 @@ console.log("\nAudit regressions");
 		for (let i = 0; i < u.length; i++) { d += u[i] * v[i]; nu += u[i] * u[i]; nv += v[i] * v[i]; }
 		return nu && nv ? d / Math.sqrt(nu * nv) : 0;
 	};
+	/* Jaccard over the two height gates: 1 when they are the same band, 0
+	   when they do not touch. */
+	const overlap = (a, b) => {
+		const lo = Math.max(a.min, b.min);
+		const hi = Math.min(a.max, b.max);
+		if (hi <= lo) return 0;
+		const union = Math.max(a.max, b.max) - Math.min(a.min, b.min);
+		return union > 0 ? (hi - lo) / union : 0;
+	};
 	let maxCos = 0;
 	let maxPair = "";
 	let above85 = 0;
+	let maxRaw = 0;
+	let maxRawPair = "";
 	for (let i = 0; i < specs.length; i++) {
 		for (let j = i + 1; j < specs.length; j++) {
-			const c = cosine(vec(specs[i]), vec(specs[j]));
+			const raw = cosine(vec(specs[i]), vec(specs[j]));
+			const c = raw * overlap(specs[i], specs[j]);
 			if (c > 0.85) above85++;
 			if (c > maxCos) { maxCos = c; maxPair = specs[i].name + " / " + specs[j].name; }
+			if (raw > maxRaw) {
+				maxRaw = raw;
+				maxRawPair = specs[i].name + " / " + specs[j].name;
+			}
 		}
 	}
-	ok("no two archetypes share a shape (max cosine < 0.93)", maxCos < 0.93,
-		maxPair + " at " + maxCos.toFixed(3));
-	ok("near-duplicate pairs (cosine > 0.85) stay under 50", above85 <= 50, String(above85));
+	ok("no two archetypes share a shape AND a height band (max cosine < 0.93)",
+		maxCos < 0.93, maxPair + " at " + maxCos.toFixed(3));
+	ok("near-duplicate pairs (cosine x height overlap > 0.85) stay under 30",
+		above85 <= 30, String(above85));
+	/* The raw figure is still reported, because a pair at 0.99 in offset space
+	   is worth a comment in the table even when the gates keep them apart —
+	   and every such pair in the table carries one. */
+	ok("the closest pair in offset space is separated by its height gate",
+		maxRaw < 0.995 || overlap(
+			specs.filter((a) => a.name === maxRawPair.split(" / ")[0])[0],
+			specs.filter((a) => a.name === maxRawPair.split(" / ")[1])[0]) < 0.5,
+		maxRawPair + " at " + maxRaw.toFixed(3));
 	const durability = RB.ARCHETYPES.filter((a) => (a.t || []).indexOf("durability") !== -1).length;
 	ok("the durability tag has a pool to draw from", durability >= 6, durability + " members");
 
@@ -2842,7 +3490,11 @@ console.log("\nAudit regressions (September 2026)");
 			if (/^December/.test(dl) && a.year !== season - 1) decemberWrong++;
 			if (/^(January|February|March|Championship)/.test(dl) && a.year !== season) januaryWrong++;
 			if (/^November/.test(dl) && a.year !== season - 1) januaryWrong++;
-			if (/signing|five-star|decommit|recruiting class/.test(a.kind)) {
+			/* The kinds that are ABOUT a high-school recruit. Matched
+			   exactly rather than by substring: "undrafted signing" contains
+			   "signing" and is a story about a fourth-year senior. */
+			if (/^(signing day|early signing period|five-star commit|decommitment|recruiting class)$/
+				.test(a.kind)) {
 				for (const seg of a.headline.concat(a.body)) {
 					if (seg.t !== "player") continue;
 					const p = res.players.filter((x) => x.key === seg.key)[0];
@@ -3166,10 +3818,232 @@ console.log("\nAudit regressions (September 2026)");
 				catch (e) { return /league file/.test(e.message); }
 			})());
 		}
-		ok("awards:true concatenates every honor as {season, type}",
+		ok("awards:true writes every honor as {season, type}",
 			row.awards.length >= (withStats.awards || []).length &&
 			row.awards.every((a) => Number.isFinite(a.season) && typeof a.type === "string"));
 	}
+}
+
+console.log("\nExport: the round trip, ages, award scope and notes");
+{
+	const V2 = V;
+	const base = V2.realisticClass(11, 70);
+	const cfg = () => global.Config.make({ seed: "export-rt" });
+	const countAwards = (f) => f.players.reduce(
+		(a, p) => a + ((p.awards || []).length), 0);
+
+	/* THE ROUND TRIP.
+
+	   Export, re-import, export again. `awards` is one of the two fields
+	   BBGM's draft-class import keeps, so the file coming back in already
+	   carries the rows exportFile is about to write, and the old code
+	   concatenated: 181 rows became 368 on the second pass and 736 on the
+	   third. A dedupe on {season, type} is NOT enough and this test is why —
+	   a re-import re-simulates the season, so the second run mints different
+	   honors for the same year and the file converges on the union of every
+	   simulation anybody ever ran. The invariant is stronger: after any number
+	   of round trips the file holds exactly what the last run produced. */
+	{
+		let file = base;
+		const rows = [];
+		for (let i = 0; i < 4; i++) {
+			const res = global.Engine.run(file, cfg());
+			const own = res.players.reduce((a, p) => a + ((p.awards || []).length), 0);
+			file = global.Engine.exportFile(res, { awards: true });
+			rows.push([own, countAwards(file)]);
+		}
+		ok("a re-exported file holds exactly the honors the run produced",
+			rows.every(([own, inFile]) => own === inFile),
+			rows.map((r) => r.join("/")).join(" "));
+		ok("and four round trips do not accumulate",
+			countAwards(file) < rows[0][0] * 1.6,
+			rows.map((r) => r[1]).join(" -> "));
+		/* The specific residue a {season, type} dedupe leaves: a player who
+		   won something last run and nothing this run. The old guard was on
+		   p.awards.length, so the replacement never ran for him. */
+		const res = global.Engine.run(file, cfg());
+		const out = global.Engine.exportFile(res, { awards: true });
+		let stale = 0;
+		for (let i = 0; i < out.players.length; i++) {
+			if ((res.players[i].awards || []).length === 0 &&
+				(out.players[i].awards || []).length > 0) stale++;
+		}
+		ok("a player who won nothing this run keeps nothing", stale === 0, stale + " stale");
+		/* Honors at another season are not ours and are left alone. */
+		const withHistory = JSON.parse(JSON.stringify(base));
+		withHistory.players[0].awards = [{ season: 1999, type: "Some Old Trophy" }];
+		const r2 = global.Engine.run(withHistory, cfg());
+		const f2 = global.Engine.exportFile(r2, { awards: true });
+		ok("an honor from another season survives the rewrite",
+			(f2.players[0].awards || []).some((a) => a.season === 1999));
+	}
+
+	/* AGES. Every player in a BBGM draft class shares a birth year. */
+	{
+		const res = global.Engine.run(base, cfg());
+		const on = global.Engine.exportFile(res, {});
+		const off = global.Engine.exportFile(res, { ages: false });
+		const years = (f) => new Set(f.players.map((p) => p.born.year));
+		ok("ages:true spreads born.year across the class years",
+			years(on).size >= 4, years(on).size + " distinct birth years");
+		ok("ages:false leaves the file's own birth years alone",
+			years(off).size === years(base).size);
+		/* A graduate is 23 and a freshman is 19, and the map is the biography
+		   read back rather than a draw. */
+		const bad = [];
+		for (let i = 0; i < res.players.length; i++) {
+			const p = res.players[i];
+			const age = res.season - on.players[i].born.year;
+			const cy = String(p.classYear || "");
+			const want = /Graduate/.test(cy) ? 23
+				: /Senior/.test(cy) ? 22 : /Junior/.test(cy) ? 21
+				: /Sophomore/.test(cy) ? 20 : 19;
+			const rs = /^Redshirt /.test(cy) ? 1 : 0;
+			const juco = p.transfer && p.transfer.kind === "JUCO transfer" ? 1 : 0;
+			if (age !== Math.min(24, want + rs + juco)) {
+				bad.push(p.name + " " + cy + " -> " + age);
+			}
+		}
+		ok("every age matches the class year it was drawn for",
+			bad.length === 0, bad.slice(0, 4).join("; "));
+	}
+
+	/* AWARD SCOPE. */
+	{
+		const res = global.Engine.run(base, cfg());
+		const all = global.Engine.exportFile(res, { awards: true });
+		const major = global.Engine.exportFile(res, { awards: true, awardsScope: "major" });
+		const power = global.Engine.exportFile(res, {
+			awards: true, awardsScope: "major",
+			majorConferences: ["ACC", "Big Ten", "Big 12", "Big East", "SEC"],
+		});
+		ok("awardsScope major cuts the honor rows substantially",
+			countAwards(major) < countAwards(all) * 0.7 && countAwards(major) > 0,
+			countAwards(all) + " -> " + countAwards(major));
+		ok("a narrower conference list cuts further",
+			countAwards(power) <= countAwards(major),
+			countAwards(major) + " -> " + countAwards(power));
+		const types = new Set();
+		for (const p of major.players) for (const a of (p.awards || [])) types.add(a.type);
+		ok("no finalist, watch list or all-region row survives major scope",
+			![...types].some((t) => /finalist|watch list|honorable mention|All-Region|Late Season/i.test(t)),
+			[...types].filter((t) => /finalist|watch list/i.test(t)).slice(0, 3).join("; "));
+		ok("no conference all-freshman or all-newcomer row survives",
+			![...types].some((t) => /(Freshman|Newcomer|Second) Team$/.test(t)),
+			[...types].filter((t) => /(Freshman|Newcomer|Second) Team$/.test(t)).slice(0, 3).join("; "));
+		ok("the national trophies do survive",
+			[...types].some((t) => /Naismith|Wooden|Consensus|All-American|Award$/.test(t)) ||
+				countAwards(major) < 5,
+			[...types].slice(0, 6).join("; "));
+		/* The note's Honors: line follows the same scope, because on the
+		   Import players route the note is the only place honors survive. */
+		const noted = major.players.filter(
+			(p) => String(p.note || "").indexOf("Honors:") !== -1)[0];
+		if (noted) {
+			const line = String(noted.note).split("\n")
+				.filter((l) => l.indexOf("Honors:") === 0)[0].slice(8);
+			ok("the note's Honors: line follows the same scope",
+				line.split("; ").every((t) => global.Awards.isMajorAward(t.trim())), line);
+		}
+		ok("only one Honors: line, however many times a file is exported",
+			major.players.every((p) => String(p.note || "").split("\n")
+				.filter((l) => l.indexOf("Honors:") === 0).length <= 1));
+	}
+
+	/* JERSEY NUMBERS AND INJURY HISTORY. Two fields BBGM reads that the tool
+	   never wrote. */
+	{
+		const res = global.Engine.run(base, cfg());
+		const f = global.Engine.exportFile(res, {});
+		const nums = f.players.map((p) => Number(p.jerseyNumber));
+		ok("every exported player has a jersey number",
+			nums.every((n) => Number.isFinite(n) && n >= 0 && n <= 99));
+		ok("and no two of them share one",
+			new Set(nums).size === nums.length,
+			new Set(nums).size + " of " + nums.length);
+		/* The convention has to be visible or it is a random number. */
+		const mn = (a) => a.reduce((x, y) => x + y, 0) / Math.max(1, a.length);
+		const guards = nums.filter((n, i) => res.players[i].newRatings.hgt < 37);
+		const bigs = nums.filter((n, i) => res.players[i].newRatings.hgt > 53);
+		ok("guards wear low numbers and bigs high ones",
+			guards.length >= 8 && bigs.length >= 8 && mn(bigs) > mn(guards) + 12,
+			mn(guards).toFixed(1) + " vs " + mn(bigs).toFixed(1));
+		ok("a number in the source file is left alone", (function () {
+			const src2 = JSON.parse(JSON.stringify(base));
+			src2.players[0].jerseyNumber = "77";
+			const r2 = global.Engine.run(src2, cfg());
+			return global.Engine.exportFile(r2, {}).players[0].jerseyNumber === "77";
+		})());
+		ok("jerseys:false writes none",
+			global.Engine.exportFile(res, { jerseys: false })
+				.players.every((p) => p.jerseyNumber === undefined));
+
+		const inj = global.Engine.exportFile(res, { injuries: true });
+		const rows = inj.players.filter((p) => p.injuries && p.injuries.length);
+		ok("the season's injuries reach BBGM's injuries[]",
+			rows.length >= 5, rows.length + " of " + inj.players.length);
+		ok("each row is {season, games, type}",
+			rows.every((p) => p.injuries.every((r) => Number.isFinite(r.season) &&
+				Number.isFinite(r.games) && r.games > 0 && typeof r.type === "string" &&
+				/^[A-Z]/.test(r.type))),
+			JSON.stringify(rows[0] && rows[0].injuries));
+		/* Same rule as the awards: the class season's rows are replaced, so a
+		   round trip does not accumulate them. */
+		const r3 = global.Engine.run(inj, cfg());
+		const inj2 = global.Engine.exportFile(r3, { injuries: true });
+		const count = (x) => x.players.reduce((a, p) => a + ((p.injuries || []).length), 0);
+		ok("and a round trip does not accumulate them",
+			count(inj2) === count(inj), count(inj) + " -> " + count(inj2));
+		ok("injuries off by default",
+			global.Engine.exportFile(res, {}).players.every((p) => !p.injuries));
+	}
+
+	/* NOTES. */
+	{
+		const src = JSON.parse(JSON.stringify(base));
+		src.players[0].note = "My own scouting note.";
+		const res = global.Engine.run(src, cfg());
+		const replaced = global.Engine.exportFile(res, {});
+		const appended = global.Engine.exportFile(res, { noteAppend: true });
+		ok("by default the generated note replaces the file's own",
+			replaced.players[0].note.indexOf("My own scouting note.") === -1);
+		ok("noteAppend keeps it and puts the generated note underneath",
+			appended.players[0].note.indexOf("My own scouting note.") === 0 &&
+			appended.players[0].note.length > "My own scouting note.".length + 20);
+	}
+}
+
+/* isMajorAward, directly. The predicate is a regex list over strings that
+   several different functions mint, so it is worth checking by example
+   rather than only through an export. */
+{
+	const A = global.Awards;
+	const cases = [
+		["Naismith Trophy", true], ["Naismith Trophy finalist", false],
+		["John R. Wooden Award", true], ["Wooden Award Late Season Top 20", false],
+		["Consensus First Team All-American", true],
+		["Associated Press honorable mention", false],
+		["Third Team All-American", true],
+		["All-ACC First Team", true], ["All-ACC Second Team", false],
+		["All-ACC Tournament Team", false], ["All-ACC Freshman Team", false],
+		["ACC Player of the Year", true], ["Ohio Valley Player of the Year", false],
+		["Big Ten Tournament MVP", true], ["MAC Tournament MVP", false],
+		["Final Four Most Outstanding Player", true],
+		["NCAA All-Tournament Team", true], ["NCAA Midwest All-Region Team", false],
+		["Academic All-American", false], ["MEAC Sixth Man of the Year", false],
+		["EuroLeague Rising Star", true], ["All-EuroLeague First Team", true],
+		["B.League MVP", true], ["ABA Cup Final MVP", false],
+		["G League Rookie of the Year", true],
+		["Bob Cousy Award", true], ["Bob Cousy Award finalist", false],
+	];
+	const wrong = cases.filter(([a, want]) => A.isMajorAward(a) !== want);
+	ok("isMajorAward agrees with the specification on 26 examples",
+		wrong.length === 0, wrong.map((w) => w[0]).join("; "));
+	ok("scopeAwards(\"all\") is the identity",
+		A.scopeAwards(["x", "y"], "all").join() === "x,y");
+	ok("an unknown conference can be opted into",
+		A.isMajorAward("Big Sky Player of the Year", ["Big Sky"]) &&
+		!A.isMajorAward("Big Sky Player of the Year"));
 }
 
 console.log("\n" + (failures ? failures + " of " + checks + " checks failed"

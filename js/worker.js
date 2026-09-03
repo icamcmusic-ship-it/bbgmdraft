@@ -14,7 +14,7 @@
 
 self.importScripts(
 	"text.js", "rng.js", "bbgm.js", "bbgmstats.js", "colleges.js", "config.js", "calibration.js",
-	"ratings.js", "teams.js", "stats.js", "rankings.js", "tournament.js", "awards.js",
+	"ratings.js", "traits.js", "teams.js", "stats.js", "rankings.js", "tournament.js", "awards.js",
 	"engine.js", "batch.js", "news.js", "universe.js",
 );
 
@@ -35,7 +35,20 @@ self.onmessage = function (e) {
 			cfg.seed = base + "#" + i;
 			cfg.overrides = msg.cfg.overrides || {};
 			out.push(self.BatchStats.summarize(runner.run(cfg)));
-			self.postMessage({ type: "progress", done: i + 1, total: msg.n });
+			/* The rows so far travel with the progress message.
+
+			   Cancelling a 200-class sweep at class 180 used to throw away all
+			   180 — the worker was terminated and its `out` went with it — so
+			   "this is taking longer than I thought" and "I have no results"
+			   were the same button. The rows are small (one summary object a
+			   class), so shipping the tail on every tick costs a structured
+			   clone of a few kilobytes and buys a cancel that keeps its work.
+
+			   Sent as a tail rather than the whole array so the clone stays
+			   O(1) per tick instead of O(n^2) over the batch. */
+			self.postMessage({
+				type: "progress", done: i + 1, total: msg.n, row: out[out.length - 1],
+			});
 		}
 		self.postMessage({ type: "done", rows: out, baseSeed: base });
 	} catch (err) {

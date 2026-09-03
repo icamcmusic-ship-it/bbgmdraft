@@ -36,6 +36,9 @@
 		// The build pools of the last few classes, newest first. See
 		// rememberPool: the engine reads it and never writes it.
 		poolHistory: [],
+		/* The anomaly kinds the last few classes used, newest first. Same
+		   mechanism as poolHistory, one layer down. */
+		anomalyHistory: [],
 		presetName: "default",
 		presetDirty: false,
 		customPresets: {},
@@ -53,6 +56,9 @@
 		compare: [null, null, null, null],
 		// The program whose page the Teams tab is showing, if any.
 		team: null,
+		/* The box score currently open, as "Team|gameIndex". A game is a
+		   destination like a team or a player page. */
+		game: null,
 		standingsConf: null,
 		compactBracket: false,
 		theme: "system", // see THEMES below
@@ -65,7 +71,16 @@
 		/* Universe mode: the timeline of the last universe run. rows are
 		   compact summaries (seeds, champions, names), not simulated output —
 		   a universe re-runs from its seeds. */
-		universe: { rows: [], threads: [], alumni: [], baseSeed: "", running: false },
+		/* `cfgs` is the load-bearing addition: fileIndex -> the exact config
+		   the chain ran that file with (its universe seed, the carry-over
+		   state handed to it, and the pool memory at that point). Without it
+		   every other tab re-simulated the file from scratch — see
+		   ensureResult. Not persisted: carryOver is a map of 368 programs and
+		   it is cheap to rebuild by re-running the chain. */
+		universe: {
+			rows: [], threads: [], alumni: [], baseSeed: "", running: false,
+			cfgs: {},
+		},
 		// The randomizer's scope select, persisted like every other control.
 		randomScope: "gentle",
 		// Settings the randomizer must not touch. {key: true}.
@@ -90,7 +105,45 @@
 	/* Bumped whenever the shape of the persisted payload changes. STORE_KEY was
 	   versioned and the payload inside it was not, so a future settings change
 	   would read stale keys out of an old blob and silently half-apply them. */
-	const STORE_VERSION = 2;
+	const STORE_VERSION = 3;
+
+	/* MIGRATIONS.
+
+	   The version existed and the only thing it did was throw the payload
+	   away: a schema bump cost every user their presets, their locks, their
+	   column layouts, their seed history and their pinned class, and the
+	   settings themselves — which is a heavy price for adding a slider, and
+	   heavy enough that it discourages adding one.
+
+	   Each entry upgrades a payload from that version to the next. They are
+	   deliberately tiny, because most schema changes are additive: `cfg` goes
+	   through Config.make on the way in, so a config that predates a setting
+	   simply gets its default. A migration is only needed when a key changes
+	   MEANING or shape, and then it is a few lines here rather than a lost
+	   session for everybody.
+
+	   A payload from a version with no path (a downgrade, or a corrupted `v`)
+	   still falls back to discarding it, which is the safe end. */
+	const MIGRATIONS = {
+		/* 2 -> 3: the audit release. Everything it added is additive — the
+		   World and staleness settings, the trait count, the box-score route,
+		   the anomaly memory — so nothing in the payload changes meaning and
+		   the only work is stamping the new version. `anomalyHistory` is
+		   absent in a v2 payload and an absent memory is the correct starting
+		   state for one. */
+		2: (payload) => Object.assign({}, payload, { v: 3 }),
+	};
+
+	function migrate(payload) {
+		let p = payload;
+		let guard = 0;
+		while (Number(p.v || 1) !== STORE_VERSION && guard++ < 20) {
+			const step = MIGRATIONS[Number(p.v || 1)];
+			if (!step) return null;
+			p = step(p);
+		}
+		return Number(p.v || 1) === STORE_VERSION ? p : null;
+	}
 	let quotaWarned = false;
 
 	function persist() {
@@ -102,6 +155,7 @@
 				overrideFingerprint: state.overrideFingerprint,
 				history: state.history.slice(0, 12),
 				poolHistory: state.poolHistory,
+				anomalyHistory: state.anomalyHistory,
 				presetName: state.presetName,
 				presetDirty: state.presetDirty,
 				customPresets: state.customPresets,
@@ -113,6 +167,7 @@
 				standingsConf: state.standingsConf,
 				player: state.player,
 				team: state.team,
+				game: state.game,
 				universe: {
 					rows: state.universe.rows, threads: state.universe.threads,
 					alumni: state.universe.alumni, baseSeed: state.universe.baseSeed,
@@ -199,13 +254,17 @@
 		let saved = null;
 		try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) { saved = null; }
 		if (!saved || typeof saved !== "object" || Array.isArray(saved)) return null;
-		/* A payload from a different schema is discarded rather than
-		   half-applied. Only `theme` is carried across, because it is a
-		   preference about the browser rather than about a draft class and
-		   losing it is pure annoyance. */
+		/* A payload from an older schema is MIGRATED. One that cannot be
+		   migrated is discarded rather than half-applied, and only `theme` is
+		   carried across, because it is a preference about the browser rather
+		   than about a draft class and losing it is pure annoyance. */
 		if (Number(saved.v || 1) !== STORE_VERSION) {
-			if (saved.theme) state.theme = saved.theme;
-			return null;
+			const upgraded = migrate(saved);
+			if (!upgraded) {
+				if (saved.theme) state.theme = saved.theme;
+				return null;
+			}
+			saved = upgraded;
 		}
 		if (saved.cfg && typeof saved.cfg === "object") state.cfg = CFG.make(saved.cfg);
 		if (saved.overrides && typeof saved.overrides === "object" &&
@@ -218,6 +277,11 @@
 		}
 		if (Array.isArray(saved.poolHistory)) {
 			state.poolHistory = saved.poolHistory
+				.filter(Array.isArray)
+				.map((a) => a.filter((n) => typeof n === "string"));
+		}
+		if (Array.isArray(saved.anomalyHistory)) {
+			state.anomalyHistory = saved.anomalyHistory
 				.filter(Array.isArray)
 				.map((a) => a.filter((n) => typeof n === "string"));
 		}
@@ -259,6 +323,7 @@
 			};
 		}
 		if (validString(saved.team)) state.team = saved.team;
+		if (validString(saved.game)) state.game = saved.game;
 		if (validString(saved.density, ["normal", "compact", "comfortable"])) state.density = saved.density;
 		if (validString(saved.cardView, ["auto", "on", "off"])) state.cardView = saved.cardView;
 		state.cardAll = !!saved.cardAll;
@@ -316,6 +381,10 @@
 			   the restored class was rebuilt against a memory it had never
 			   been drawn with and came back as somebody else's. */
 			poolHistory: (state.poolHistory || []).map((a) => a.slice()),
+			// The anomaly memory is undone with the pool memory, for exactly
+			// the reason stated above: a restored class rebuilt against a
+			// memory it was never drawn with comes back as somebody else.
+			anomalyHistory: (state.anomalyHistory || []).map((a) => a.slice()),
 		};
 	}
 
@@ -333,6 +402,7 @@
 		state.overrides = snap.overrides;
 		if (snap.lastSeed !== undefined) state.lastSeed = snap.lastSeed;
 		if (Array.isArray(snap.poolHistory)) state.poolHistory = snap.poolHistory;
+		if (Array.isArray(snap.anomalyHistory)) state.anomalyHistory = snap.anomalyHistory;
 		// A restored class is a different class, so an editor open on somebody
 		// who may not be in it any more has to close.
 		state.editing = null;
@@ -391,8 +461,10 @@
 		"specialization", "archetypeDiversity", "classFlavor", "buildNoise",
 		"freshmanShare", "transferShare", "redshirtShare", "reclassShare", "pDII",
 		"pace", "scoringEnv", "efficiencyEnv", "statNoise", "upsetFactor",
-		"archetypePool", "surpriseBudget", "injuryRate",
+		"archetypePool", "surpriseBudget", "injuryRate", "traitCount",
+		"anomalyMemory", "flavorReach", "styleDrift",
 		"realignmentRate", "bluebloodDownYears", "midMajorLift",
+		"coachTurnover", "realignmentMemory", "starReturners", "portalRate",
 		"awardStrictness", "confAwardStrictness", "proAwardStrictness",
 		"variation", "poolMemory", "teamMomentum", "awardNoise",
 		"seasonEvents", "draftEvents",
@@ -525,7 +597,63 @@
 			: v < 0.9 ? "more conference honors" : "realistic conference award volume",
 		proAwardStrictness: (v) => v > 1.2 ? "a higher bar for honors abroad"
 			: v < 0.9 ? "a lower bar for honors abroad" : "a realistic bar abroad",
+		anomalyMemory: (v) => (v <= 0
+			? "each class draws its anomalies with no memory of the last"
+			: "an anomaly used last class is " + Math.round(Math.pow(3, v)) +
+				"x less likely to return"),
+		flavorReach: (v) => (v <= 0
+			? "a flavor only moves settings you have left alone"
+			: "a flavor may also move about " + v + "% of the settings you have " +
+				"changed, and only part of the way"),
+		styleDrift: (v) => (v <= 0
+			? "every team playing a given style plays it identically"
+			: "two four-out teams are not the same four-out team, and neither is " +
+				"the same one next season"),
+		traitCount: (v) => (v <= 0
+			? "no traits: a plain note, and no medical file, volatility or " +
+				"offensive-glass bias"
+			: "about " + v + " traits a prospect — frame, motor, hands, " +
+				"medical, background, role"),
+		coachTurnover: (v) => (v <= 0 ? "no sideline changes at all"
+			: "about " + Math.round(v * 0.43) + " of 368 head coaches change job" +
+				(v === 100 ? " — what Division I actually does" : "")),
+		realignmentMemory: (v) => (v >= 100
+			? "a program that moved conference stays moved, season after season"
+			: v <= 0 ? "the map is redrawn from the base alignment every season"
+			: "about " + v + "% of last season's map carries forward"),
+		starReturners: (v) => (v <= 0
+			? "no named non-prospect stars; the class wins every award by default"
+			: "about " + Math.round(v * 0.26) + " named college stars who are not " +
+				"in this draft class"),
+		portalRate: (v) => (v <= 0 ? "every star returner comes back to the same program"
+			: "about " + Math.round(v * 0.18) + "% of returning stars leave through " +
+				"the portal each year (universe mode only)"),
 	};
+
+	/* What universe mode will actually do with what is loaded right now. A
+	   checkbox that says "run every loaded file as one world" is a promise the
+	   tool cannot keep with one file in it, and the old tab said so only after
+	   you pressed the button. */
+	function paintUniverseHint() {
+		const hint = $("universeHint");
+		if (!hint) return;
+		const n = state.files.length;
+		if (!state.cfg.universe) {
+			hint.textContent = "Off: each loaded file is its own world, drawn " +
+				"from the same settings and seed. Turn this on to chain them — " +
+				"oldest season first, each one handing its conference map, " +
+				"program strength, coaches and star returners to the next. Every " +
+				"tab and the export then show that world.";
+			return;
+		}
+		hint.textContent = n === 0
+			? "On, but no class files are loaded yet."
+			: n === 1
+			? "On, with one file loaded: it runs as a single season with nothing " +
+				"to carry over. Load more classes and they chain."
+			: "On: " + n + " files run as one continuous world, oldest season " +
+				"first. Every tab, the export and the Timeline show that world.";
+	}
 
 	function awardInteractionHint() {
 		const fresh = state.cfg.freshmanShare;
@@ -570,11 +698,16 @@
 		paintModifiedMarkerFor("ovrMode", state.cfg.ovrMode);
 		paintModifiedMarkerFor("priorSeasons", state.cfg.priorSeasons);
 		paintModifiedMarkerFor("varySize", state.cfg.varySize);
+		paintModifiedMarkerFor("universe", state.cfg.universe);
+		paintModifiedMarkerFor("narrative", state.cfg.narrative);
 		$("flavorHint").value = state.cfg.flavorHint || "";
 		paintModifiedMarkerFor("flavorHint", state.cfg.flavorHint || "");
 		$("ovrMode").value = state.cfg.ovrMode;
 		$("priorSeasons").value = state.cfg.priorSeasons;
 		$("varySize").checked = !!state.cfg.varySize;
+		$("universe").checked = !!state.cfg.universe;
+		$("narrative").checked = !!state.cfg.narrative;
+		paintUniverseHint();
 		$("seed").value = state.cfg.seed;
 		const curve = state.cfg.ovrMode === "curve";
 		for (const n of document.querySelectorAll("[data-curve]")) {
@@ -585,6 +718,9 @@
 			? "Overalls are re-dealt along a configurable curve; the class can get better or worse."
 			: "Each prospect keeps the overall BBGM gave him. Only his build changes.";
 		$("awardInteractionHint").textContent = awardInteractionHint();
+		/* The filter reads the labels and hints paintConfig just wrote, so it
+		   runs after it rather than only on a keystroke. */
+		applySettingFilter();
 		paintEra();
 		paintPhaseCosts();
 		paintPresets();
@@ -653,10 +789,22 @@
 			if ((phases[i].deps || []).indexOf(key) !== -1 && best === -1) best = i;
 		}
 		if (best === -1) return null;
-		return PHASE_COST[phases[best].name] || phases[best].name;
+		return {
+			text: PHASE_COST[phases[best].name] || phases[best].name,
+			phase: phases[best].name,
+			/* Three bands, because a reader dragging a slider needs to know
+			   which of three things happens and not a number of milliseconds:
+			   green is a repaint, amber re-simulates the season, red rebuilds
+			   the class. The text was there and it was text, which is not
+			   something anybody reads while dragging. */
+			band: phases[best].name === "build" ? "dear"
+				: (phases[best].name === "regular" || phases[best].name === "postseason" ||
+					phases[best].name === "stats") ? "mid" : "cheap",
+		};
 	}
 	function paintPhaseCosts() {
-		for (const key of SLIDERS.concat(["era", "ovrMode", "varySize", "priorSeasons"])) {
+		for (const key of SLIDERS.concat(
+			["era", "ovrMode", "varySize", "priorSeasons", "universe", "narrative"])) {
 			const input = $(key);
 			if (!input) continue;
 			const ctl = input.closest(".ctl");
@@ -668,7 +816,14 @@
 				tag = el("p", "rerun");
 				ctl.appendChild(tag);
 			}
-			tag.textContent = "re-runs: " + cost;
+			tag.className = "rerun phasecost " + cost.band;
+			tag.textContent = (cost.band === "cheap" ? "● " : cost.band === "mid" ? "◐ " : "○ ") +
+				"re-runs: " + cost.text;
+			tag.title = cost.band === "cheap"
+				? "Milliseconds: nothing is re-simulated."
+				: cost.band === "mid"
+				? "The season is re-simulated — a few hundred milliseconds."
+				: "The whole class is rebuilt, and every player in it changes.";
 		}
 	}
 
@@ -832,35 +987,20 @@
 			"\nrarity weight " + (a.w === undefined ? 1 : a.w);
 	}
 
-	/* ---- settings search (Part 5B) ----------------------------------------- */
+	/* ---- settings search --------------------------------------------------
 
+	   There were two of these: one injected an <input> at the top of the panel
+	   and toggled a `settings-hidden` class, and the other (bindSettingFilter,
+	   below) filters the same controls from a markup-declared box that also
+	   carries "show only what I have changed". Two search boxes over one panel
+	   is worse than either, and the second one is the one with the second
+	   filter on it, so this became the shim that removes the first.
+
+	   The `settings-hidden` CSS rule stays: it is what a stylesheet override or
+	   a bookmarklet would target, and it costs one line. */
 	function bindSettingsSearch() {
-		const aside = $("settings");
-		if (!aside) return;
-		const search = el("input");
-		search.type = "search";
-		search.id = "settingsSearch";
-		search.placeholder = "Search settings…";
-		search.setAttribute("aria-label", "Filter settings by name");
-		aside.insertBefore(search, aside.firstChild);
-		search.addEventListener("input", () => {
-			const q = search.value.trim().toLowerCase();
-			// Show/hide individual .ctl elements
-			for (const ctl of aside.querySelectorAll(".ctl")) {
-				const label = ctl.querySelector("label");
-				const text = label ? label.textContent.toLowerCase() : "";
-				ctl.classList.toggle("settings-hidden", q !== "" && text.indexOf(q) === -1);
-			}
-			// Show/hide details groups: hidden if ALL their .ctl children are hidden
-			for (const grp of aside.querySelectorAll("details.grp")) {
-				const ctls = grp.querySelectorAll(".ctl");
-				const allHidden = ctls.length > 0 &&
-					Array.from(ctls).every((c) => c.classList.contains("settings-hidden"));
-				grp.classList.toggle("settings-hidden", q !== "" && allHidden);
-				// Auto-open groups that have matches when searching
-				if (q && !allHidden) grp.open = true;
-			}
-		});
+		const stale = document.getElementById("settingsSearch");
+		if (stale && stale.parentNode) stale.parentNode.removeChild(stale);
 	}
 
 	/* ---- numeric input for each slider (Part 5A) + modified markers (Part 5C) */
@@ -1084,16 +1224,144 @@
 			". Ctrl+Z restores them in one step.");
 	}
 
-	function bindRandomize() {
-		const scope = $("randomScope");
+	/* The randomizer's scopes, as chips rather than a <select>.
+
+	   Eight scopes in a dropdown is two clicks and a menu to read every time,
+	   for a control whose whole point is that you press it repeatedly. A row
+	   of chips is one click and the current scope is visible without opening
+	   anything. */
+	const SCOPE_CHIPS = [
+		["gentle", "gently", "Draw near each setting's default"],
+		["wide", "wide open", "Draw across each slider's whole range"],
+		["quality", "quality", "Class quality and depth only"],
+		["builds", "builds", "Builds only"],
+		["years", "years", "Class years and paths only"],
+		["destinations", "destinations", "Destinations only"],
+		["season", "season", "College season only"],
+		["awards", "awards", "Awards only"],
+	];
+	function paintRandomScope() {
+		const box = $("randomScope");
+		if (!box) return;
+		/* The button says what it will do, since the scope is now a chip row
+		   rather than a labelled <select> and the button is what gets pressed. */
 		const btn = $("btnRandomize");
-		if (!scope || !btn) return;
-		scope.value = state.randomScope;
-		scope.addEventListener("change", () => {
-			state.randomScope = scope.value;
-			persist();
-		});
-		btn.addEventListener("click", () => randomizeSettings(scope.value));
+		if (btn) {
+			const row = SCOPE_CHIPS.filter((r) => r[0] === state.randomScope)[0];
+			btn.title = "Randomize: " + (row ? row[2] : state.randomScope) +
+				" (g). Ctrl+Z restores them in one step.";
+		}
+		/* The chips have to be the scopes the randomizer knows, or a chip is a
+		   button that silently falls back to "gently". RANDOM_SCOPES is the
+		   authority; this asserts the two agree rather than trusting them to.
+		   Cheap, and the failure it prevents is invisible. */
+		for (const [value] of SCOPE_CHIPS) {
+			if (RANDOM_SCOPES.indexOf(value) === -1) {
+				setStatus("Internal: unknown randomize scope " + value);
+			}
+		}
+		box.innerHTML = "";
+		for (const [value, label, title] of SCOPE_CHIPS) {
+			const b = el("button", "chip" + (state.randomScope === value ? " on" : ""), label);
+			b.type = "button";
+			b.title = title;
+			b.setAttribute("role", "radio");
+			b.setAttribute("aria-checked", state.randomScope === value ? "true" : "false");
+			b.dataset.scope = value;
+			b.addEventListener("click", () => {
+				state.randomScope = value;
+				persist();
+				paintRandomScope();
+			});
+			box.appendChild(b);
+		}
+	}
+
+	function bindRandomize() {
+		const btn = $("btnRandomize");
+		if (!btn) return;
+		paintRandomScope();
+		btn.addEventListener("click", () => randomizeSettings(state.randomScope));
+	}
+
+	/* ------------------------------------------------- the settings filter
+
+	   Eighty-odd controls in one column, and the only way to find one was to
+	   scroll. Two filters, because they answer the two questions people
+	   actually have: "where is the pace slider" and "what have I changed".
+
+	   Implemented over the live DOM rather than by rebuilding the panel: the
+	   panel carries open/closed state, focus and scroll position, and
+	   rebuilding it would throw all three away every keystroke. */
+	function settingText(ctl) {
+		const label = ctl.querySelector("label");
+		const input = ctl.querySelector("input, select");
+		return ((label ? label.textContent : "") + " " +
+			(input ? input.id : "") + " " +
+			(ctl.querySelector(".unit") ? ctl.querySelector(".unit").textContent : ""))
+			.toLowerCase();
+	}
+	function applySettingFilter() {
+		const box = $("settingSearch");
+		const onlyChanged = $("onlyChanged");
+		const note = $("settingSearchNote");
+		if (!box) return;
+		const q = box.value.trim().toLowerCase();
+		const changedOnly = onlyChanged && onlyChanged.checked;
+		const D = CFG.DEFAULTS;
+		let shown = 0;
+		let total = 0;
+		for (const grp of document.querySelectorAll("#settings details.grp")) {
+			let any = 0;
+			const ctls = grp.querySelectorAll(".ctl");
+			for (const ctl of ctls) {
+				const input = ctl.querySelector("input, select");
+				const key = input && input.id;
+				total++;
+				let show = true;
+				if (q && settingText(ctl).indexOf(q) === -1) show = false;
+				if (show && changedOnly && key && key in D) {
+					const cur = state.cfg[key];
+					const def = D[key];
+					const same = typeof cur === "object" || typeof def === "object"
+						? JSON.stringify(cur) === JSON.stringify(def)
+						: cur === def;
+					if (same) show = false;
+				}
+				/* The stylesheet's own class, not the `hidden` attribute: a
+				   .ctl inside a <details> that is closed is already not
+				   rendered, and mixing the two mechanisms made "show only what
+				   I changed" leave empty gaps where a control used to be. */
+				ctl.classList.toggle("settings-hidden", !show);
+				if (show) { any++; shown++; }
+			}
+			/* A group with nothing in it is hidden rather than left as an
+			   empty heading, and a group with a match is opened — otherwise
+			   searching finds a setting inside a collapsed section and shows
+			   you the section's title. */
+			/* A group with no .ctl children at all is not a group of settings
+			   — the archetype panel is a weight table with its own search box
+			   — and hiding it because "none of its controls matched" hid a
+			   panel that has no controls to match. Only a group that HAS
+			   controls and matched none of them is hidden. */
+			grp.classList.toggle("settings-hidden", ctls.length > 0 && any === 0);
+			if ((q || changedOnly) && any > 0) grp.open = true;
+		}
+		if (note) {
+			note.textContent = (q || changedOnly)
+				? shown + " of " + total + " settings" +
+					(shown === 0 ? " — nothing matches" : "")
+				: "";
+		}
+	}
+	function bindSettingFilter() {
+		const box = $("settingSearch");
+		const onlyChanged = $("onlyChanged");
+		if (box) {
+			box.addEventListener("input", applySettingFilter);
+			box.addEventListener("search", applySettingFilter);
+		}
+		if (onlyChanged) onlyChanged.addEventListener("change", applySettingFilter);
 	}
 
 	/* Per-setting locks. Locks existed per-player per-field and presets exist
@@ -1190,6 +1458,23 @@
 			state.cfg.varySize = $("varySize").checked;
 			markDirty();
 			scheduleRun();
+		});
+		$("narrative").addEventListener("change", () => {
+			pushUndo("toggled season storylines");
+			state.cfg.narrative = $("narrative").checked;
+			markDirty();
+			scheduleRun();
+		});
+		$("universe").addEventListener("change", () => {
+			pushUndo("toggled Universe mode");
+			state.cfg.universe = $("universe").checked;
+			/* Turning it off has to drop the chain's cached configs, or
+			   ensureResult would keep handing back universe results for a
+			   world the user has switched out of. */
+			if (!state.cfg.universe) state.universe.cfgs = {};
+			markDirty();
+			paintConfig();
+			run();
 		});
 		$("seed").addEventListener("change", () => {
 			state.cfg.seed = $("seed").value.trim();
@@ -1461,39 +1746,101 @@
 			run();
 		});
 
-		// Destination weights, one row per non-NCAA league.
+		/* Destination weights, GROUPED BY REGION.
+
+		   Twenty-three number boxes in one flat list, and the thing a user
+		   actually wants from them is almost never one league — it is "more
+		   Europe", "fewer prep and postgrad", "this is an international
+		   class". So the leagues are grouped, each group collapses, and each
+		   group carries the same x2 / x1/2 buttons the archetype weights have.
+
+		   The grouping is DERIVED rather than authored: every league already
+		   carries a `regions` map of birthplace multipliers, and the region it
+		   most rewards is the region it belongs to. That means adding a league
+		   to js/colleges.js puts it in the right group with no second edit —
+		   which is the whole reason not to author a second table. */
 		const lw = $("leagueWeights");
+		const REGION_LABEL = {
+			europe: "Europe", usa: "United States", canada: "Canada",
+			oceania: "Australia and New Zealand", asia: "Asia",
+			latam: "Latin America", africa: "Africa", other: "Everywhere else",
+		};
+		const regionOf = (lg) => {
+			const r = lg.regions || {};
+			let best = "other";
+			let bestV = -Infinity;
+			for (const k of Object.keys(r)) {
+				// "other" is the fallback multiplier, not a place.
+				if (k === "other") continue;
+				if (r[k] > bestV) { bestV = r[k]; best = k; }
+			}
+			return bestV > 1.05 ? best : "other";
+		};
+		const commit = (label) => {
+			pushUndo(label);
+			const w = {};
+			for (const i of lw.querySelectorAll("input")) w[i.dataset.league] = Number(i.value);
+			state.cfg.leagueWeights = w;
+			// The three legacy sliders are folded in by Config.make, so they
+			// have to stop overriding once the user edits the table.
+			state.cfg.wEuroLeague = null;
+			state.cfg.wGLeague = null;
+			state.cfg.wNBL = null;
+			markDirty();
+			scheduleRun();
+		};
+		const byRegion = {};
 		for (const name of Object.keys(C.NON_NCAA)) {
 			if (name === "DII NCAA") continue;
-			const lg = C.NON_NCAA[name];
-			const row = el("div", "archrow");
-			const label = el("span", "archname", name);
-			label.title = name + "\nstrength " + lg.strength +
-				"\n" + (lg.pro ? "professional" : "amateur") +
-				"\ndefault weight " + lg.w;
-			row.appendChild(label);
-			const inp = el("input");
-			inp.type = "number";
-			inp.step = "1";
-			inp.min = "0";
-			inp.max = "100";
-			inp.dataset.league = name;
-			inp.setAttribute("aria-label", "Weight for " + name);
-			inp.addEventListener("change", () => {
-				pushUndo("changed destination weights");
-				const w = {};
-				for (const i of lw.querySelectorAll("input")) w[i.dataset.league] = Number(i.value);
-				state.cfg.leagueWeights = w;
-				// The three legacy sliders are folded in by Config.make, so they
-				// have to stop overriding once the user edits the table.
-				state.cfg.wEuroLeague = null;
-				state.cfg.wGLeague = null;
-				state.cfg.wNBL = null;
-				markDirty();
-				scheduleRun();
-			});
-			row.appendChild(inp);
-			lw.appendChild(row);
+			const key = regionOf(C.NON_NCAA[name]);
+			(byRegion[key] = byRegion[key] || []).push(name);
+		}
+		const order = Object.keys(byRegion)
+			.sort((a, b) => byRegion[b].length - byRegion[a].length);
+		for (const region of order) {
+			const group = el("details", "leaguegroup");
+			const sum = el("summary");
+			sum.appendChild(document.createTextNode(
+				(REGION_LABEL[region] || region) + " (" + byRegion[region].length + ")"));
+			const scale = (k, verb) => {
+				const b = el("button", "tiny", k > 1 ? "x2" : "x\u00bd");
+				b.type = "button";
+				b.title = verb + " every weight in this group";
+				b.addEventListener("click", (e) => {
+					e.preventDefault();
+					e.stopPropagation();
+					for (const i of lw.querySelectorAll("input")) {
+						if (byRegion[region].indexOf(i.dataset.league) === -1) continue;
+						i.value = String(Math.round(
+							Math.max(0, Math.min(100, Number(i.value) * k))));
+					}
+					commit(verb + " the " + (REGION_LABEL[region] || region) + " weights");
+				});
+				sum.appendChild(b);
+			};
+			scale(2, "Doubled");
+			scale(0.5, "Halved");
+			group.appendChild(sum);
+			for (const name of byRegion[region]) {
+				const lg = C.NON_NCAA[name];
+				const row = el("div", "archrow");
+				const label = el("span", "archname", name);
+				label.title = name + "\nstrength " + lg.strength +
+					"\n" + (lg.pro ? "professional" : "amateur") +
+					"\ndefault weight " + lg.w;
+				row.appendChild(label);
+				const inp = el("input");
+				inp.type = "number";
+				inp.step = "1";
+				inp.min = "0";
+				inp.max = "100";
+				inp.dataset.league = name;
+				inp.setAttribute("aria-label", "Weight for " + name);
+				inp.addEventListener("change", () => commit("changed destination weights"));
+				row.appendChild(inp);
+				group.appendChild(row);
+			}
+			lw.appendChild(group);
 		}
 		$("btnLeagueReset").addEventListener("click", () => {
 			pushUndo("reset the destination weights");
@@ -1882,6 +2229,9 @@
 		   only thing here that knows what "the last few classes" means — the
 		   engine sees one run. */
 		cfg.recentPools = (state.poolHistory || []).slice(0, POOL_HISTORY);
+		// The same memory one layer down: the anomalies the last few classes
+		// were given, so this one is unlikely to repeat them.
+		cfg.recentAnomalies = (state.anomalyHistory || []).slice(0, ANOMALY_HISTORY);
 		return cfg;
 	}
 
@@ -1889,6 +2239,8 @@
 	   RatingsBuilder.POOL_MEMORY_DEPTH, which is what actually consumes it;
 	   storing more would persist a list nothing reads. */
 	const POOL_HISTORY = (RB.POOL_MEMORY_DEPTH || 3);
+	/* Matches Engine.ANOMALY_MEMORY_DEPTH, which is what consumes it. */
+	const ANOMALY_HISTORY = (global.Engine.ANOMALY_MEMORY_DEPTH || 3);
 
 	/* Record what the class ON SCREEN was made of, so the NEXT one avoids it.
 
@@ -1908,11 +2260,58 @@
 	       dragged a slider. */
 	function rememberPool() {
 		const res = state.results[state.active];
-		if (!res || !Array.isArray(res.archetypePool) || !res.archetypePool.length) return;
-		const hist = (state.poolHistory || []).slice();
-		if (hist.length && hist[0].join("|") === res.archetypePool.join("|")) return;
-		hist.unshift(res.archetypePool.slice());
-		state.poolHistory = hist.slice(0, POOL_HISTORY);
+		if (!res) return;
+		if (Array.isArray(res.archetypePool) && res.archetypePool.length) {
+			const hist = (state.poolHistory || []).slice();
+			if (!hist.length || hist[0].join("|") !== res.archetypePool.join("|")) {
+				hist.unshift(res.archetypePool.slice());
+				state.poolHistory = hist.slice(0, POOL_HISTORY);
+			}
+		}
+		/* THE ANOMALY MEMORY, on exactly the same terms as the build pool's.
+
+		   Thirty-two anomaly kinds and about four draws a class means the same
+		   eight or ten turn up in most classes, and the feature that exists to
+		   keep classes fresh was the first thing to go stale. Recorded here
+		   and nowhere else, for the same two load-bearing reasons the pool
+		   memory is: it has to be constant while one class is on screen, or
+		   re-applying the same seed would hand back a different class; and
+		   only a reroll counts, or the memory becomes a record of how much the
+		   user fiddled with the sliders. */
+		if (Array.isArray(res.surprises) && res.surprises.length) {
+			const names = res.surprises.map((sp) => sp.name);
+			const hist = (state.anomalyHistory || []).slice();
+			if (!hist.length || hist[0].join("|") !== names.join("|")) {
+				hist.unshift(names);
+				state.anomalyHistory = hist.slice(0, ANOMALY_HISTORY);
+			}
+		}
+	}
+
+	/* THE FILE, AS THE WORLD SEES IT.
+
+	   With universe mode on, a file is not a standalone class: it is one
+	   season of a chain, run with that season's own seed and handed the state
+	   the previous season produced. Every tab that renders a file has to run
+	   it the same way the chain did, or the Timeline says Boston College won
+	   the 2027 title while the Bracket tab for the same file shows Villanova —
+	   which is exactly what happened, because the chain used to finish by
+	   throwing its own results away (`state.results.map(() => null)`) and
+	   leaving the next render to re-simulate with the plain config, no
+	   carry-over and the wrong seed. Export then wrote the non-universe world.
+
+	   universeCfgFor is the answer: the chain records what it ran each file
+	   with, and this reads it back. */
+	function universeCfgFor(i) {
+		if (!state.cfg.universe) return null;
+		const saved = state.universe.cfgs && state.universe.cfgs[i];
+		if (!saved) return null;
+		const cfg = CFG.make(state.cfg);
+		cfg.overrides = state.overrides;
+		cfg.seed = saved.seed;
+		cfg.carryOver = saved.carryOver || null;
+		cfg.recentPools = (saved.recentPools || []).map((a) => a.slice());
+		return cfg;
 	}
 
 	function ensureResult(i) {
@@ -1920,7 +2319,7 @@
 		const runner = state.runners[i];
 		if (!runner) return null;
 		// Every file in a batch shares the seed, so they stay one set.
-		state.results[i] = runner.run(effectiveCfg());
+		state.results[i] = runner.run(universeCfgFor(i) || effectiveCfg());
 		return state.results[i];
 	}
 
@@ -2024,21 +2423,11 @@
 		});
 	}
 
-	function runNow() {
-		if (!state.files.length) return;
-		let res;
-		const t0 = performance.now();
-		try {
-			state.results = new Array(state.files.length).fill(null);
-			res = state.runners[state.active].run(effectiveCfg());
-			state.results[state.active] = res;
-			state.lastSeed = res.seed;
-			clearError();
-		} catch (err) {
-			showError(err);
-			return;
-		}
-		const ms = performance.now() - t0;
+	/* The header's seed pill and the browser tab title, for whichever result
+	   is on screen. Split out of runNow because the universe chain has to
+	   stamp it too — it produces the result the tabs are showing, and the pill
+	   used to keep saying whatever the last standalone run had said. */
+	function stampSeedPill(res, ms) {
 		$("seedPill").hidden = false;
 		/* A short hash OF THE CLASS, not of the seed. Two people can share a
 		   seed and still be looking at different classes — a different source
@@ -2054,8 +2443,38 @@
 			" — BBGM Draft Class Workshop";
 		$("seedPill").title = "Seed and class fingerprint — two people with the same " +
 			"fingerprint are looking at the same seventy players. " +
-			"Click to copy the seed, shift-click or right-click to paste one · " + Math.round(ms) + "ms (" +
-			(res.phasesRun.length ? res.phasesRun.join(" → ") : "nothing to redo") + ")";
+			"Click to copy the seed, shift-click or right-click to paste one" +
+			(Number.isFinite(ms) ? " · " + Math.round(ms) + "ms (" +
+				(res.phasesRun && res.phasesRun.length
+					? res.phasesRun.join(" → ") : "nothing to redo") + ")" : "");
+	}
+
+	function runNow() {
+		if (!state.files.length) return;
+		/* Universe mode is a setting, not a tab. With it on, one file is one
+		   season of a chain and running it alone would produce a world the
+		   Timeline disagrees with, so the chain is what runs. It is async (a
+		   season is ~330ms and fifty of them is a progress bar, not a click),
+		   so this returns and the chain finishes the job. */
+		if (state.cfg.universe && state.files.length && !state.universe.running) {
+			state.results = new Array(state.files.length).fill(null);
+			runUniverse();
+			return;
+		}
+		let res;
+		const t0 = performance.now();
+		try {
+			state.results = new Array(state.files.length).fill(null);
+			res = state.runners[state.active].run(effectiveCfg());
+			state.results[state.active] = res;
+			state.lastSeed = res.seed;
+			clearError();
+		} catch (err) {
+			showError(err);
+			return;
+		}
+		const ms = performance.now() - t0;
+		stampSeedPill(res, ms);
 		if (state.history[0] !== res.seed) {
 			state.history.unshift(res.seed);
 			state.history = state.history.slice(0, 12);
@@ -2184,7 +2603,7 @@
 	   pool memory) from each season to the next. Asynchronous in slices so
 	   the page stays alive; ~330ms a season means 50 classes is a progress
 	   bar, not a click. */
-	function runUniverse() {
+	function runUniverse(after) {
 		const U = global.Universe;
 		if (!state.files.length) {
 			setStatus("Load two or more class files to run a universe.");
@@ -2205,24 +2624,30 @@
 			? state.cfg.seed.trim()
 			: "universe-" + Math.floor(Math.random() * 1e9);
 		state.universe = {
-			rows: [], threads: [], alumni: [], baseSeed,
+			rows: [], threads: [], alumni: [], baseSeed, cfgs: {},
 			running: true, diags, total: runnable.length, done: 0,
 		};
-		state.tab = "universe";
+		/* Only jump to the Timeline when the user asked for a universe
+		   explicitly. With universe mode on as a SETTING the chain re-runs
+		   whenever anything invalidates it, and stealing the tab every time
+		   somebody moved a slider would make the tool unusable. */
+		if (!state.cfg.universe) state.tab = "universe";
 		render();
 		let carry = null;
 		let recentPools = [];
 		const step = (k) => {
 			if (k >= runnable.length) {
 				state.universe.running = false;
-				// Every runner just ran with universe seeds and carry-over;
-				// the cached per-file results no longer describe them.
-				state.results = state.results.map(() => null);
 				state.universe.threads = U.threads(state.universe.rows);
 				persist();
 				setStatus("Universe complete: " + state.universe.rows.length +
 					" seasons, " + state.universe.threads.length + " threads.");
+				/* The active file's seed pill and title describe the universe
+				   run now, not a standalone re-simulation of it. */
+				const active = state.results[state.active];
+				if (active) stampSeedPill(active, null);
 				render();
+				if (typeof after === "function") after();
 				return;
 			}
 			const d = runnable[k];
@@ -2233,6 +2658,17 @@
 				cfg.recentPools = recentPools.map((a) => a.slice());
 				cfg.carryOver = carry;
 				const res = state.runners[d.index].run(cfg);
+				/* KEEP the result and the config that produced it. The chain
+				   used to discard both, which is the whole of bug B1: every
+				   other tab then re-simulated the file with no carry-over and
+				   the base seed, and disagreed with the timeline it had just
+				   drawn. */
+				state.results[d.index] = res;
+				state.universe.cfgs[d.index] = {
+					seed: cfg.seed,
+					carryOver: cfg.carryOver,
+					recentPools: (cfg.recentPools || []).map((a) => a.slice()),
+				};
 				state.universe.rows.push(Object.assign(
 					U.summarize(res, cfg.seed, d.name),
 					{ fingerprint: state.files[d.index].fingerprint || null }));
@@ -2257,20 +2693,30 @@
 		setTimeout(() => step(0), 0);
 	}
 
-	function exportUniverse() {
+	function exportUniverse(embedFiles) {
 		const U = global.Universe;
 		if (!state.universe.rows.length) {
-			setStatus("Run a universe first.");
+			setStatus("Build a timeline first.");
 			return;
 		}
-		const blob = new Blob(
-			[JSON.stringify(U.exportUniverse(state.universe), null, "\t")],
+		/* Settings and biographies travel with the seeds now. A universe is
+		   only reproducible if the settings it ran under are part of it —
+		   replaying somebody's fifty-season world at your own coachTurnover
+		   and your own era gives you a different world with the same seeds. */
+		const payload = U.exportUniverse(Object.assign({}, state.universe, {
+			settings: CFG.make(state.cfg),
+			biography: U.biographyOf(state.results.filter(Boolean)),
+		}), { embedFiles: !!embedFiles, files: state.files });
+		const blob = new Blob([JSON.stringify(payload, null, "\t")],
 			{ type: "application/json" });
 		const a = document.createElement("a");
 		a.href = URL.createObjectURL(blob);
-		a.download = "universe.json";
+		a.download = embedFiles ? "universe-with-classes.json" : "universe.json";
 		a.click();
 		setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+		setStatus(embedFiles
+			? "Exported the universe with its class files embedded."
+			: "Exported the universe (seeds and settings; load the class files beside it).");
 	}
 
 	/* Re-import: a universe file carries seeds and file fingerprints, not
@@ -2281,16 +2727,63 @@
 			showError(new Error("Not a universe export."));
 			return;
 		}
+		/* An embedded universe carries its own classes, so there is nothing to
+		   go and find. */
+		if (Array.isArray(json.files) && json.files.length) {
+			const loaded = [];
+			const problems = [];
+			for (const f of json.files) {
+				if (!f || !f.data) continue;
+				try {
+					const check = global.Engine.validateLeagueFile(f.data);
+					loaded.push({ name: f.name || "embedded.json", data: f.data,
+						warnings: check.warnings });
+				} catch (e) {
+					problems.push((f.name || "embedded file") + ": " +
+						(e && e.message ? e.message : String(e)));
+				}
+			}
+			if (loaded.length) installFiles(loaded, problems);
+		}
 		const have = new Set(state.files.map((f) => f.fingerprint));
 		const missing = (json.seasons || []).filter(
 			(s) => s.fingerprint && !have.has(s.fingerprint));
-		if (missing.length) {
-			showError(new Error("Load these class files first: " +
-				missing.map((m) => m.fileName).join(", ")));
+		/* PARTIAL IMPORT. Refusing outright was the wrong call: a fifty-season
+		   universe whose 2031 class the user does not have is still forty-nine
+		   seasons they can replay, and the old behaviour was to import none of
+		   it and name the missing file. Now the seasons that are present run
+		   and the ones that are not are reported. */
+		if (missing.length && missing.length >= (json.seasons || []).length) {
+			showError(new Error("None of this universe's class files are loaded. " +
+				"Load them first: " + missing.map((m) => m.fileName).join(", ")));
 			return;
 		}
+		/* The settings the universe was built under, if it carries them. A
+		   version 1 export does not, and replaying it under the current
+		   settings is the best that can be done — which is said out loud
+		   rather than silently producing a different world. */
+		let note = "";
+		if (json.settings) {
+			const seed = json.settings.seed;
+			state.cfg = CFG.make(json.settings);
+			state.cfg.seed = seed || state.cfg.seed;
+			note = " Settings from the file were applied.";
+		} else {
+			note = " This export predates settings capture (version " +
+				(json.version || 1) + "), so it replays under your current settings.";
+		}
+		state.cfg.universe = true;
 		state.cfg.seed = json.baseSeed || state.cfg.seed;
 		$("seed").value = state.cfg.seed;
+		paintConfig();
+		if (missing.length) {
+			setStatus("Replaying " +
+				((json.seasons || []).length - missing.length) + " of " +
+				(json.seasons || []).length + " seasons — not loaded: " +
+				missing.map((m) => m.fileName).join(", ") + "." + note);
+		} else {
+			setStatus("Replaying " + (json.seasons || []).length + " seasons." + note);
+		}
 		runUniverse();
 	}
 
@@ -2301,7 +2794,10 @@
 	   settings+seed payload stays in the hash exactly as before — this rides
 	   on pushState so the two never fight over the URL. */
 	function navState() {
-		return { tab: state.tab, team: state.team || null, player: state.player || null };
+		return {
+			tab: state.tab, team: state.team || null, player: state.player || null,
+			game: state.game || null,
+		};
 	}
 
 	function pushNav() {
@@ -2320,7 +2816,18 @@
 
 	function showTeam(name) {
 		state.team = name || null;
+		// A team page and a box score are two destinations, not one nested in
+		// the other: opening a team clears whatever game was open.
+		state.game = null;
 		if (name) state.tab = "teams";
+		pushNav();
+		persist();
+		render();
+	}
+
+	function showGame(ref) {
+		state.game = ref || null;
+		if (ref) state.tab = "teams";
 		pushNav();
 		persist();
 		render();
@@ -2332,6 +2839,7 @@
 		state.tab = st.tab || state.tab;
 		state.team = st.team;
 		state.player = st.player;
+		state.game = st.game || null;
 		render();
 	});
 
@@ -3171,6 +3679,12 @@
 
 	function copyText(text, button, restore) {
 		const done = () => {
+			/* Announce it. The seed pill's copy changed the BUTTON's text and
+			   nothing else, so a screen reader user pressing it got no
+			   confirmation at all — and the pill itself is not a button, so
+			   there was not even that. announce() is the tool's own live
+			   region and costs nothing. */
+			announce("Copied: " + String(text).slice(0, 60));
 			if (!button) return;
 			button.textContent = "Copied ✓";
 			setTimeout(() => { button.textContent = restore; }, 1400);
@@ -3201,11 +3715,36 @@
 		if (messages.length > 200) messages.shift();
 	}
 
+	/* THE LIVE REGION.
+
+	   #status carries role="status", and it is also hidden and unhidden — and
+	   an assistive technology does not reliably announce text that appears in
+	   an element that was `hidden` a moment ago, because the element was not in
+	   the accessibility tree to be watched. So there is one region that is
+	   always present, visually hidden, and only ever has text written into it.
+
+	   Everything that used to be announced only by changing a button's label —
+	   a copy, a sort level added or removed — goes through here too. */
+	function announce(text) {
+		let live = $("liveRegion");
+		if (!live) {
+			live = el("p", "visually-hidden");
+			live.id = "liveRegion";
+			live.setAttribute("role", "status");
+			live.setAttribute("aria-live", "polite");
+			document.body.appendChild(live);
+		}
+		/* Same string twice in a row is not announced twice by most screen
+		   readers; a zero-width space makes it a new string without making it
+		   a different sentence. */
+		live.textContent = live.textContent === text ? text + "\u200b" : text;
+	}
+
 	function setStatus(text, sticky) {
 		const s = $("status");
 		s.textContent = text;
 		s.hidden = !text;
-		if (text) remember(text);
+		if (text) { remember(text); announce(text); }
 		if (!sticky) setTimeout(() => { if (s.textContent === text) s.hidden = true; }, 3500);
 	}
 
@@ -3300,6 +3839,12 @@
 	function csvJoin(lines) { return lines.join(CSV_EOL) + CSV_EOL; }
 
 	function exportCsv(res, everyone) {
+		/* The CSV honours the award scope the export dialog is set to, for the
+		   same reason the JSON does: a spreadsheet of prospects whose Awards
+		   column runs to twenty-two conference rows is a spreadsheet nobody
+		   reads either. */
+		const scope = state.exportAwardsScope || "all";
+		const confs = state.exportMajorConfs || null;
 		const lines = [CSV_COLS.join(",")];
 		let skipped = 0;
 		for (const p of res.players) {
@@ -3320,7 +3865,7 @@
 				s.fga, s.tpa, s.fta, d("tpar"), d("ftr"), d("efg"), d("astTo"),
 				d("ortg"), d("prod"),
 				s.usg, s.fgp, s.tpp, s.ftp, s.ts,
-				(p.awards || []).join("; "),
+				global.Awards.scopeAwards(p.awards, scope, confs).join("; "),
 			].map((v) => esc(typeof v === "number" && Number.isFinite(v)
 				? Number(v.toFixed(3)) : v)).join(","));
 		}
@@ -3364,7 +3909,10 @@
 				.map(esc).join(","));
 		}
 		for (const a of season.awards) {
-			lines.push(["award", a.name, a.school, a.awards.join("; "), "", ""].map(esc).join(","));
+			const scoped = global.Awards.scopeAwards(
+				a.awards, state.exportAwardsScope || "all", state.exportMajorConfs || null);
+			if (!scoped.length) continue;
+			lines.push(["award", a.name, a.school, scoped.join("; "), "", ""].map(esc).join(","));
 		}
 		for (const b of season.board) {
 			lines.push(["board", b.rank, b.name, b.school, b.round || "", b.pick || ""]
@@ -3592,7 +4140,101 @@
 		const oPrior = opt("prior", "…and prior seasons");
 		const oHighs = opt("highs", "…and game-log season highs");
 		const oAwards = opt("awards", "Include college awards");
+		/* WHICH awards. A good prospect finishes a season holding fifteen to
+		   twenty-two honors and BBGM renders every one as its own row, so a
+		   player page arrives buried under All-Sun Belt Newcomer Team and
+		   conference all-freshman nods with the three lines a reader wants
+		   somewhere in the middle. Measured over six classes: 114 distinct
+		   types, 2.4 honors a player, 22 on the most decorated. "Major" is
+		   the national trophies plus the power and named-conference rows —
+		   see isMajorAward in js/awards.js for exactly what counts. */
+		const scopeWrap = el("div", "ctl");
+		const scopeLab = el("label", null, "Which awards");
+		scopeLab.htmlFor = "exportAwardsScope";
+		const scopeSel = el("select");
+		scopeSel.id = "exportAwardsScope";
+		scopeSel.appendChild(new Option("every honor (the default)", "all"));
+		scopeSel.appendChild(new Option("major honors only", "major"));
+		scopeSel.value = state.exportAwardsScope || "all";
+		const scopeHint = el("p", "unit");
+		const confWrap = el("div", "ctl");
+		const confLab = el("label", null, "Conferences that count");
+		confLab.htmlFor = "exportMajorConfs";
+		const confInput = el("input");
+		confInput.id = "exportMajorConfs";
+		confInput.type = "text";
+		confInput.value = (state.exportMajorConfs ||
+			global.Awards.MAJOR_CONFERENCES).join(", ");
+		confWrap.appendChild(confLab);
+		confWrap.appendChild(confInput);
+		confWrap.appendChild(el("p", "unit",
+			"A conference player of the year, defensive player of the year, " +
+			"freshman of the year, all-conference first team and tournament MVP " +
+			"count for these; every other conference's rows are dropped."));
+		const paintScope = () => {
+			const major = scopeSel.value === "major";
+			confWrap.hidden = !major;
+			if (!res) { scopeHint.textContent = ""; return; }
+			const conf = confInput.value.split(",").map((x) => x.trim()).filter(Boolean);
+			let all = 0;
+			let kept = 0;
+			for (const p of res.players || []) {
+				all += (p.awards || []).length;
+				kept += global.Awards.scopeAwards(p.awards, "major", conf).length;
+			}
+			scopeHint.textContent = major
+				? kept + " of " + all + " honor rows in this class survive."
+				: all + " honor rows in this class.";
+		};
+		scopeSel.addEventListener("change", () => {
+			state.exportAwardsScope = scopeSel.value;
+			paintScope();
+		});
+		confInput.addEventListener("input", () => {
+			state.exportMajorConfs = confInput.value.split(",")
+				.map((x) => x.trim()).filter(Boolean);
+			paintScope();
+		});
+		scopeWrap.appendChild(scopeLab);
+		scopeWrap.appendChild(scopeSel);
+		scopeWrap.appendChild(scopeHint);
+		optBox.appendChild(scopeWrap);
+		optBox.appendChild(confWrap);
+		/* Age. Off is the old behaviour — every prospect keeps the birth year
+		   BBGM gave the whole class, which puts a fifth-year senior on the
+		   draft screen at 19 and hands him a nineteen-year-old's development
+		   curve. See AGE_FOR_CLASS in js/engine.js. */
+		const oAges = opt("ages", "Rewrite ages to match the class years", true);
+		optBox.appendChild(el("p", "unit",
+			"Every player in a BBGM draft class shares a birth year, so without " +
+			"this a graduate transfer imports as a 19-year-old and BBGM develops " +
+			"him like one. Skipped automatically when the source file's own ages " +
+			"already vary."));
+		const oInjuries = opt("injuries", "Write the season's injuries into BBGM's injuries[]", true);
+		optBox.appendChild(el("p", "unit",
+			"BBGM's player schema carries an injury history and the tool never " +
+			"wrote one, so “injury-prone” was a sentence in a note and nothing " +
+			"inside the game. Survives the draft-class import."));
+		const oJerseys = opt("jerseys", "Assign jersey numbers by position", true);
+		optBox.appendChild(el("p", "unit",
+			"Guards take the single digits and low teens, wings the teens and " +
+			"twenties, bigs the thirties and up — unique within the class, " +
+			"because a class becomes a roster. Skipped for a player who already " +
+			"has a number."));
+		const oNoteAppend = opt("noteAppend", "Keep any note already in the file");
+		optBox.appendChild(el("p", "unit",
+			"The generated note replaces whatever the file carried. Tick this to " +
+			"add it underneath instead, for a file whose notes you edited in BBGM."));
 		list.appendChild(optBox);
+		paintScope();
+		const exportOpts = () => ({
+			stats: oStats(), prior: oPrior(), highs: oHighs(), awards: oAwards(),
+			ages: oAges(), noteAppend: oNoteAppend(),
+			injuries: oInjuries(), jerseys: oJerseys(),
+			awardsScope: scopeSel.value,
+			majorConferences: confInput.value.split(",")
+				.map((x) => x.trim()).filter(Boolean),
+		});
 		/* Every one of these sentences is a fixed fact about BBGM's own import
 		   code, not a preference:
 
@@ -3613,26 +4255,49 @@
 
 		   So the dialog says which door gives you what rather than pretending
 		   there is one right answer. */
+		/* The three routes as a TABLE, beside the checkboxes rather than as a
+		   paragraph above them: which checkbox matters depends entirely on
+		   which door the user is about to walk through, and a reader deciding
+		   between three doors should not have to parse a sentence to find the
+		   column he is in. Every cell is a fixed fact about BBGM's own import
+		   code (see the comment above), not a preference. */
+		const routes = el("div", "scroll");
+		const rt = el("table", "routes");
+		const rhead = el("thead");
+		const rhr = el("tr");
+		for (const h of ["Route", "Statline", "Awards", "Note", "Replaces the class"]) {
+			rhr.appendChild(el("th", null, h));
+		}
+		rhead.appendChild(rhr);
+		rt.appendChild(rhead);
+		const rtb = el("tbody");
+		for (const row of [
+			["Draft → [year] → Import", "no — deleted on upload", "yes", "yes", "yes"],
+			["Tools → Import players", "yes, tick “Include stats”", "no — folded into the note",
+				"yes", "no, it adds"],
+			["Merge into a league file", "yes", "yes", "yes", "yes"],
+		]) {
+			const tr = el("tr");
+			for (const c of row) tr.appendChild(el("td", null, c));
+			rtb.appendChild(tr);
+		}
+		rt.appendChild(rtb);
+		routes.appendChild(rt);
+		list.appendChild(routes);
 		list.appendChild(el("p", "hint",
-			"Draft → [year] → Import deletes every uploaded player's stats " +
-			"before it reads the file: awards and notes come through it, the " +
-			"statline cannot. Tools → Import players (“Include stats”) is the " +
-			"mirror image — the statline comes through, honors do not, so the " +
-			"export writes them into the note as well, and BBGM stamps every " +
-			"imported season's team “DNE” itself. Only a league file keeps " +
-			"both, which is what the merge does."));
+			"Tools → Import players also stamps every imported season's team " +
+			"“DNE” itself, whatever team the file named — that is BBGM, not " +
+			"this export."));
 		item("BBGM class file, with the options above", () => {
-			if (exportOne(state.active, {
-				stats: oStats(), prior: oPrior(), highs: oHighs(), awards: oAwards(),
-			})) setStatus("Exported " + state.files[state.active].name + ".");
+			if (exportOne(state.active, exportOpts())) {
+				setStatus("Exported " + state.files[state.active].name + ".");
+			}
 		});
 		item("Players file, for Tools → Import players (keeps the statline)", () => {
 			const res2 = ensureResult(state.active);
 			if (!res2) return;
 			try {
-				const out = global.Engine.exportPlayersFile(res2, {
-					stats: oStats(), prior: oPrior(), highs: oHighs(), awards: oAwards(),
-				});
+				const out = global.Engine.exportPlayersFile(res2, exportOpts());
 				const base = state.files[state.active].name.replace(/\.json$/i, "");
 				download(base + "_players.json", "\ufeff" + JSON.stringify(out, null, 2),
 					"application/json");
@@ -3643,9 +4308,7 @@
 			}
 		});
 		item("Merge into a league file… (keeps the statline AND the awards)", () => {
-			state.mergeOpts = {
-				stats: oStats(), prior: oPrior(), highs: oHighs(), awards: oAwards(),
-			};
+			state.mergeOpts = exportOpts();
 			$("leagueMergeFile").click();
 		});
 		item("Prospect table as CSV (the current filter)", () => exportCsv(res));
@@ -3716,14 +4379,25 @@
 		$("batchNote").textContent = done + " of " + total + " classes";
 	}
 
+	/* The classes a running batch has already finished. A cancelled sweep used
+	   to report "Batch canceled" and show nothing, however far it had got —
+	   180 of 200 simulated seasons discarded because the user decided at class
+	   180 that 200 was too many. */
+	let batchPartial = [];
+
 	function batchDone(rows) {
 		$("batchProgress").hidden = true;
 		$("btnBatch").disabled = false;
 		$("btnBatchCancel").hidden = true;
 		batchWorker = null;
-		if (!rows || !rows.length) { setStatus("Batch canceled."); return; }
-		renderBatch(rows);
-		setStatus("");
+		const use = (rows && rows.length) ? rows : batchPartial;
+		if (!use.length) { setStatus("Batch canceled before any class finished."); return; }
+		renderBatch(use);
+		setStatus(rows && rows.length
+			? ""
+			: "Cancelled — showing the " + use.length + " " +
+				(use.length === 1 ? "class" : "classes") + " that finished.");
+		batchPartial = [];
 	}
 
 	/* Held batches, for comparison. The whole point of running a calibration
@@ -3863,6 +4537,7 @@
 		const file = activeFile();
 		if (!file) return;
 		batchCancel = false;
+		batchPartial = [];
 		$("btnBatch").disabled = true;
 		$("btnBatchCancel").hidden = false;
 		batchProgress(0, n);
@@ -3879,8 +4554,11 @@
 			batchWorker = new Worker("js/worker.js");
 			batchWorker.onmessage = (e) => {
 				const m = e.data;
-				if (m.type === "progress") batchProgress(m.done, m.total);
-				else if (m.type === "done") batchDone(m.rows);
+				if (m.type === "progress") {
+					// Keep the finished classes, so a cancel keeps its work.
+					if (m.row) batchPartial.push(m.row);
+					batchProgress(m.done, m.total);
+				} else if (m.type === "done") batchDone(m.rows);
 				else if (m.type === "error") {
 					showError(new Error(m.message));
 					batchDone(null);
@@ -3912,6 +4590,10 @@
 			c.overrides = cfg.overrides || {};
 			try {
 				rows.push(global.BatchStats.summarize(runner.run(c)));
+				// The inline path keeps its own array, so partial results come
+				// for free — but batchDone reads batchPartial, so it has to
+				// see them too.
+				batchPartial = rows.slice();
 			} catch (err) {
 				showError(err);
 				batchDone(null);
@@ -4018,9 +4700,11 @@
 	Object.assign(global.App, {
 		state, render, run, persist, openEditor, revealPlayer, visibleRows,
 		editorPanel, modal, closeModal,
-		clearLock, showPlayer, showTeam,
+		clearLock, showPlayer, showTeam, showGame,
 		runUniverse, exportUniverse, importUniverse,
-		copyText, bulkApply, bulkShiftOvr, bulkLockAsIs, bulkClear, refreshBulkBar,
+		// Exposed for tools/uismoke.js, which loads files without a file input.
+		installFiles, paintConfig,
+		copyText, announce, bulkApply, bulkShiftOvr, bulkLockAsIs, bulkClear, refreshBulkBar,
 		snapshot,
 		exportCsv, setStatus, showError, indexSnapshot,
 	});
@@ -4036,6 +4720,7 @@
 	bindConfig();
 	bindSliderNumbers();
 	bindRandomize();
+	bindSettingFilter();
 	bindFiles();
 	applyTheme();
 	paintConfig();

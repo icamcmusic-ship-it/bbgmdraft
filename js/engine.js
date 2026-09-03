@@ -20,6 +20,7 @@
 	const RK = global.Rankings;
 	const AW = global.Awards;
 	const CAL = global.Calibration;
+	const TR = global.Traits;
 
 	/* Season length per non-NCAA destination. */
 	const PRO_GAMES = {
@@ -514,6 +515,127 @@
 		return keys.every((k) => have[k] === built[k]);
 	}
 
+	/* ============================================== THE SEASON'S NARRATIVE
+
+	   The class flavor is a statement about the PLAYERS: this is a guard-rich
+	   year, a year of raw bigs, an injury year. Nothing was a statement about
+	   the SEASON — so a wide-open year with no dominant team, a March where
+	   the mid-majors ran, a scandal that cost somebody their season, all had
+	   to arrive by coincidence, and across forty classes the shape of the
+	   season was the same shape every time with different names in it.
+
+	   A narrative is two or three macro storylines drawn per class, each of
+	   which bends a handful of settings the season simulation already reads.
+	   They stack: "a wide-open year" and "the mid-majors run" is a recognisable
+	   season and so is either one alone.
+
+	   Deliberately NOT a second flavor table. A flavor bends the class and is
+	   drawn once; these bend the season and are drawn two or three at a time,
+	   and the difference is what makes a season feel composed rather than
+	   labelled. */
+	const NARRATIVES = [
+		{
+			name: "a dominant favourite", w: 2.0,
+			blurb: "one team was better than everybody all year",
+			bend: { teamMomentum: 1.5, upsetFactor: 0.72, bluebloodDownYears: 0 },
+		},
+		{
+			name: "a wide-open year", w: 2.2,
+			blurb: "nobody separated themselves and March was chaos",
+			bend: { upsetFactor: 1.45, teamMomentum: 0.6, bluebloodDownYears: 2 },
+		},
+		{
+			name: "the mid-majors run", w: 1.6,
+			blurb: "the leagues nobody watches were the story",
+			bend: { midMajorLift: 7, upsetFactor: 1.25 },
+		},
+		{
+			name: "a blue-blood down year", w: 1.5,
+			blurb: "the names on the door had nothing",
+			bend: { bluebloodDownYears: 3, midMajorLift: 3 },
+		},
+		{
+			name: "an attrition season", w: 1.2,
+			blurb: "everybody who mattered missed time",
+			bend: { injuryRate: 1.7, teamMomentum: 1.4 },
+		},
+		{
+			name: "the year of the whistle", w: 1.0,
+			blurb: "officials called everything and nobody scored in the flow",
+			bend: { pace: -3, efficiencyEnv: -0.8 },
+		},
+		{
+			name: "a scoring explosion", w: 1.3,
+			blurb: "the numbers went up everywhere and nobody could guard",
+			bend: { pace: 4, efficiencyEnv: 1.0, scoringEnv: 1 },
+		},
+		{
+			name: "a defensive slog", w: 1.2,
+			blurb: "nothing was easy anywhere",
+			bend: { pace: -4, efficiencyEnv: -1.0, scoringEnv: -1 },
+		},
+		{
+			name: "the map moved", w: 1.1,
+			blurb: "realignment was the offseason's only story",
+			bend: { realignmentRate: 0.95, seasonEvents: 10 },
+		},
+		{
+			name: "a chaotic sideline", w: 1.0,
+			blurb: "coaches were fired all year and hired all April",
+			bend: { coachTurnover: 175, seasonEvents: 10 },
+		},
+		{
+			name: "a season of streaks", w: 1.4,
+			blurb: "every team in the country ran hot and cold",
+			bend: { teamMomentum: 1.9, statNoise: 1.25 },
+		},
+		{
+			name: "chalk all the way", w: 1.1,
+			blurb: "the seeds held and the favourites won",
+			bend: { upsetFactor: 0.5, teamMomentum: 1.2, midMajorLift: 0 },
+		},
+	];
+
+	/* Draw the season's storylines and fold their bends into the config.
+
+	   Same rule as the class flavor: a setting the user has changed is left
+	   alone (subject to flavorReach), so a narrative moves what nobody has
+	   decided. Where two storylines bend the same setting the LAST one drawn
+	   wins rather than the two being averaged — "a wide-open year" and "chalk
+	   all the way" is a contradiction, and averaging two contradictions gives
+	   an ordinary season, which is the outcome this exists to avoid. */
+	function applyNarrative(cfg, rng) {
+		if (!cfg || cfg.narrative === false) return { cfg, narrative: [] };
+		const pool = NARRATIVES.slice();
+		const n = rng.random() < 0.35 ? 3 : 2;
+		const drawn = [];
+		for (let i = 0; i < n && pool.length; i++) {
+			const pick = rng.weighted(pool, (x) => x.w);
+			pool.splice(pool.indexOf(pick), 1);
+			drawn.push(pick);
+		}
+		const D = global.Config.DEFAULTS;
+		const reach = clamp(
+			(cfg.flavorReach === undefined ? 0 : cfg.flavorReach) / 100, 0, 1);
+		const out = Object.assign({}, cfg);
+		for (const story of drawn) {
+			for (const k of Object.keys(story.bend)) {
+				const touched = cfg[k] !== D[k];
+				if (touched) {
+					if (reach <= 0 || rng.random() >= reach) continue;
+					out[k] = cfg[k] + (story.bend[k] - cfg[k]) * 0.5 * reach;
+					if (global.Config.isCount(k)) out[k] = Math.round(out[k]);
+					continue;
+				}
+				out[k] = story.bend[k];
+			}
+		}
+		return {
+			cfg: out,
+			narrative: drawn.map((x) => ({ name: x.name, blurb: x.blurb })),
+		};
+	}
+
 	function applyFlavorConfig(cfg, flavor) {
 		const bend = RB.flavorConfig(flavor);
 		if (!bend) return cfg;
@@ -531,16 +653,45 @@
 		   full-strength statement and 2x "freshmanShare: 68" is 90. */
 		const s = flavor && Number.isFinite(flavor.strength) ? flavor.strength : 1;
 		const t = s <= 1 ? Math.max(0, s) : Math.min(1.5, 1 + 0.5 * (s - 1));
+		/* THE REACH. See cfg.flavorReach: at 0 a flavor never touches a
+		   setting the user has changed, which is the principle above and the
+		   old behaviour. Above 0 it may move a random subset of them, and only
+		   partway — the user's own value is the anchor and the bend pulls
+		   toward the authored one rather than replacing it, so a flavor can
+		   still be itself on a config somebody has been playing with without
+		   throwing their work away.
+
+		   Drawn off the flavor's own name so the same flavor on the same
+		   config reaches the same settings; a flavor that picked a different
+		   subset every re-run would make the setting panel unreadable. */
+		const reach = clamp(
+			(cfg.flavorReach === undefined ? 0 : cfg.flavorReach) / 100, 0, 1);
+		const reachRng = reach > 0
+			? new Rng("flavorreach|" + (flavor.name || "") + "|" + (cfg.seed || "")) : null;
 		let moved = false;
 		let league = false;
 		for (const k of Object.keys(bend)) {
-			if (cfg[k] !== D[k]) continue;
+			const touched = cfg[k] !== D[k];
+			if (touched) {
+				if (!reachRng || reachRng.random() >= reach) continue;
+				/* Half of the way from the user's value to the authored one,
+				   scaled by reach — full reach is still a compromise, not a
+				   takeover. */
+				if (typeof bend[k] === "number" && typeof cfg[k] === "number") {
+					out[k] = cfg[k] + (bend[k] - cfg[k]) * (0.5 * reach * t);
+					if (global.Config.isCount(k)) out[k] = Math.round(out[k]);
+					moved = true;
+					if (k === "leagueWeights") league = true;
+				}
+				continue;
+			}
 			if (typeof bend[k] === "number" && typeof D[k] === "number") {
 				const v = D[k] + (bend[k] - D[k]) * t;
-				// A count stays a count: eliteCount 1.5 is not a class anyone
-				// can build.
-				out[k] = (Number.isInteger(D[k]) && Number.isInteger(bend[k]))
-					? Math.round(v) : v;
+				/* A count stays a count: eliteCount 1.5 is not a class anyone
+				   can build. Which settings those are is declared in
+				   js/config.js rather than inferred from whether two
+				   particular numbers happen to be whole — see COUNTS. */
+				out[k] = global.Config.isCount(k) ? Math.round(v) : v;
 			} else {
 				out[k] = bend[k];
 			}
@@ -580,7 +731,14 @@
 		const vsalt = variationSalt(state.cfg);
 		const flavor = RB.pickFlavor(rng.child("flavor"), state.cfg);
 		state.flavor = flavor;
-		const cfg = applyFlavorConfig(state.cfg, flavor);
+		/* The class's flavor, then the season's storylines on top of it. The
+		   order matters: a flavor is a statement about the players and a
+		   narrative about the season they played, so the narrative gets the
+		   last word on the season dials. */
+		const narr = applyNarrative(
+			applyFlavorConfig(state.cfg, flavor), rng.child("narrative"));
+		state.narrative = narr.narrative;
+		const cfg = narr.cfg;
 
 		/* Class-level environment jitter. Every class plays in a slightly
 		   different scoring environment — some years run faster, some shoot
@@ -652,7 +810,11 @@
 		const ageSd = Math.sqrt(
 			ages.reduce((a, x) => a + (x - ageMean) * (x - ageMean), 0) / ages.length);
 		state.classAge = ageMean;
-		assignClassYears(players, cfg, rng.child("classyears" + vsalt), ageSd >= 0.75);
+		/* Whether the source file's own ages carry information. Read twice now:
+		   assignClassYears takes them at face value when they do, and exportFile
+		   leaves born.year alone when they do (see AGE_FOR_CLASS). */
+		state.ageIsInformative = ageSd >= 0.75;
+		assignClassYears(players, cfg, rng.child("classyears" + vsalt), state.ageIsInformative);
 
 		// --- colleges -------------------------------------------------
 		// Per-player overrides ("lock this guy at 55 ovr / to Duke / as a Rim
@@ -785,6 +947,23 @@
 			p.newPot = clamp(Math.round(targetOvr + gap), p.newOvr, 100);
 		});
 
+		/* TRAITS. Drawn after the build, because every prerequisite in the
+		   table is about the finished player: his height, his class year, his
+		   build's tags, his overall. See js/traits.js. */
+		{
+			const trng = rng.child("traits" + vsalt);
+			for (const p of players) {
+				const t = TR.assign(p, trng.child("tr:" + p.key + rerollSalt(p, "traits")), cfg);
+				p.traits = t.traits;
+				p.traitNames = t.names;
+				/* Read by the game log (night-to-night spread), the rebound
+				   share and the injury roll respectively. */
+				p.volatility = t.volatility;
+				p.orbBias = t.orbBias;
+				p.traitInjuryMult = t.injuryMult;
+				p.moodTraits = t.mood;
+			}
+		}
 		state.players = players;
 		state.season = season;
 		assignRecruiting(players, rng.child("recruiting" + vsalt));
@@ -1355,6 +1534,11 @@
 		},
 	];
 
+	/* How many classes back the anomaly memory reaches. Matches the build
+	   pool's POOL_MEMORY_DEPTH, for the same reason: further back than three
+	   and the penalty is smaller than the draw's own noise. */
+	const ANOMALY_MEMORY_DEPTH = 3;
+
 	function assignSurprises(players, rng, cfg) {
 		const budget = clamp(
 			cfg && cfg.surpriseBudget !== undefined ? cfg.surpriseBudget : 4, 0, 10);
@@ -1370,8 +1554,33 @@
 		   the first thing to go stale. The ordering survives; the gap does
 		   not compound. */
 		const compressed = (k) => Math.pow(k.w === undefined ? 1 : k.w, 0.5);
+		/* ANOMALY MEMORY, the same mechanism the build pool has.
+
+		   Thirty-two kinds and about four draws a class means the same eight
+		   or ten kinds turn up in most classes — the log-space compression
+		   above flattened the rarity ordering and did not touch the fact that
+		   a draw with no memory repeats. `cfg.recentAnomalies` is the last few
+		   classes' kinds, newest first, written by the UI exactly as
+		   `recentPools` is: a kind used last class is pushed hard down the
+		   queue, one used two classes ago less so. `anomalyMemory` scales it,
+		   and 0 is the old behaviour. */
+		const memory = clamp(
+			cfg && cfg.anomalyMemory !== undefined ? cfg.anomalyMemory : 1, 0, 3);
+		const recent = Array.isArray(cfg && cfg.recentAnomalies)
+			? cfg.recentAnomalies : [];
+		const penalty = {};
+		if (memory > 0) {
+			recent.slice(0, ANOMALY_MEMORY_DEPTH).forEach((list, age) => {
+				for (const name of list || []) {
+					// Newest class counts most; each class back halves it.
+					penalty[name] = (penalty[name] || 0) + Math.pow(0.5, age);
+				}
+			});
+		}
+		const weightOf = (k) => compressed(k) *
+			Math.pow(3, -memory * (penalty[k.name] || 0));
 		for (let i = 0; i < n && kinds.length; i++) {
-			const kind = rng.weighted(kinds, compressed);
+			const kind = rng.weighted(kinds, weightOf);
 			kinds.splice(kinds.indexOf(kind), 1);
 			const options = players.filter((p) => !used.has(p.key) && kind.pick(p));
 			if (!options.length) continue;
@@ -1504,7 +1713,12 @@
 			   Injury-Prone Talent is hurt about twice as often as the class,
 			   an Iron Man half as often. It moves the injury roll, not the
 			   ordinary absences — a coach's decision is not a knee. */
-			const build = RB.injuryMultiplier(p.archetype);
+			/* And the medical file. A prior surgery, a chronic knee and a
+			   clean bill of health are the three things a scout writes about
+			   an injury history, and until the trait layer existed the draw
+			   was the same for all three. See js/traits.js. */
+			const build = RB.injuryMultiplier(p.archetype) *
+				(Number.isFinite(p.traitInjuryMult) ? p.traitInjuryMult : 1);
 			// The draft-year games-played mean is 33.5 against a ~35-game
 			// schedule, so a bit over half a class misses something.
 			if (r.random() >= 0.54 * rate * (0.6 + 0.4 * build)) continue;
@@ -1544,7 +1758,10 @@
 		}
 		state.bySchool = bySchool;
 		assignAvailability(state.players, rng.child("availability" + variationSalt(state.cfg)), cfg);
-		const teams = T.buildPrograms(bySchool, rng.child("programs"), cfg);
+		/* The class's season travels with the config, so a coach's style drifts
+		   year to year across a universe rather than being redrawn. */
+		const progCfg = Object.assign({}, cfg, { __season: state.season || 0 });
+		const teams = T.buildPrograms(bySchool, rng.child("programs"), progCfg);
 		/* buildPrograms returns the season's realignment alongside the teams;
 		   lift it off before anything iterates the map. */
 		state.realignment = teams.__realignment || [];
@@ -1698,6 +1915,15 @@
 		state.tourney = TN.simulate(teams, cfg, rng.child("ncaa"));
 		// Chronological order and full records, now that March has happened.
 		T.finalizeSchedule(teams);
+		/* The April carousel, drawn per program off the season that just
+		   finished. Not a news event — the news layer reports the notable ones
+		   out of this list, rather than this list being one of seven stories
+		   the feed happened to have room for. See coachingCarousel. */
+		state.coachingCarousel = T.coachingCarousel(
+			teams, rng.child("carousel"), cfg,
+			(state.seasonEvents || [])
+				.filter((e) => e.kind === "coaching change" && e.teams && e.teams[0])
+				.map((e) => e.teams[0]));
 		return state;
 	}
 
@@ -1718,10 +1944,15 @@
 		   a realistic draft-slot-curve class gets ~0.11 (full correction).
 		   Computed once here, passed through ctx to every team simulation. */
 		const prospectComps = [];
+		const compSums = {};
 		for (const name of Object.keys(teams)) {
 			for (const m of teams[name].members) {
-				if (!m.filler && m.player && m.player.newRatings)
-					prospectComps.push(BB.composites(m.player.newRatings).usage);
+				if (m.filler || !m.player || !m.player.newRatings) continue;
+				const c = BB.composites(m.player.newRatings);
+				prospectComps.push(c.usage);
+				for (const k of Object.keys(S.TUNING.PROSPECT_COMP_BASES)) {
+					compSums[k] = (compSums[k] || 0) + c[k];
+				}
 			}
 		}
 		const meanUsageComposite = prospectComps.length > 0
@@ -1731,6 +1962,48 @@
 			: 0;
 		const classRefVolume = S.TUNING.PROSPECT_COMP_SCALE * Math.max(0, rawRef);
 		const classRefEfficiency = S.TUNING.PROSPECT_COMP_SCALE_EFF * rawRef;
+		/* THE PER-COMPOSITE REFERENCE, AND WHY IT IS A MULTIPLIER.
+
+		   classRefVolume above is one number — the gap between this class's
+		   USAGE composite and the level the stat model's intercepts were fitted
+		   at — and it used to be added to the rebounding, passing and stealing
+		   composites as well. Two things are wrong with that and they compound.
+
+		   The first is that it is the wrong number for those composites: a
+		   class sits low on each of them by its own amount (measured against
+		   the N(45,13) calibration fixture: usage -0.059, rebounding -0.054,
+		   passing -0.062, stealing -0.050), and there is no reason the usage
+		   gap should speak for the rest.
+
+		   The second is the one that shows up in the box score. Those three
+		   composites are used to compute SHARES of a team pool, as
+		   pow(composite, exponent) * minutes. Adding a constant to a share
+		   weight compresses it: a prospect point guard at 0.60 and a prospect
+		   centre at 0.30 stand in a ratio of 2.00, and the same two with +0.06
+		   on each stand at 1.83 — then REB_EXP/AST_EXP raise the compressed
+		   ratio and the position gradient the model was supposed to have comes
+		   out a quarter flatter than it was drawn. That is the whole of the
+		   reported "guards rebound too much and pass too little", together with
+		   the flat filler rosters that assignFillerSlots fixes.
+
+		   So the share weights take a MULTIPLIER instead. It corrects the level
+		   exactly as the addition did — mean passing 0.3919 x 1.157 = 0.4535 is
+		   the same 0.4545 the addition produced — while leaving every ratio
+		   between two prospects untouched, which is what a gradient is. It is
+		   capped, because a pathological class (one centre and 69 point guards)
+		   should not be handed an unbounded correction.
+
+		   The RATE terms in statLine (turnover rate, free-throw rate, three
+		   share) keep the additive shift, because there it is not a share: the
+		   composite appears as a difference from a stated reference point and
+		   moving the reference point IS an addition. */
+		const classRefMult = {};
+		for (const k of Object.keys(S.TUNING.PROSPECT_COMP_BASES)) {
+			const mean = prospectComps.length > 0
+				? compSums[k] / prospectComps.length : 0;
+			classRefMult[k] = mean > 0.02
+				? clamp(S.TUNING.PROSPECT_COMP_BASES[k] / mean, 1, 1.35) : 1;
+		}
 
 		/* What each program's opponents actually looked like defensively. This
 		   is the channel that lets a conference of rim protectors hold everyone
@@ -1790,6 +2063,7 @@
 				league: S.NCAA_ENV,
 				pro: false,
 				classRefVolume,
+				classRefMult,
 				classRefEfficiency,
 			}, cfg, statRng.child(school));
 		}
@@ -1814,7 +2088,7 @@
 			}
 		}
 		buildPriorSeasons(state.players, state.season, state.rng.child("prior"),
-			teams, cfg, classRefVolume, classRefEfficiency);
+			teams, cfg, classRefVolume, classRefEfficiency, classRefMult);
 		return state;
 	}
 
@@ -1877,7 +2151,7 @@
 	}
 
 	/* One prior season, simulated. Returns a stat line or null. */
-	function simulatePriorSeason(p, i, teams, season, cfg, rng, classRefVolume, classRefEfficiency) {
+	function simulatePriorSeason(p, i, teams, season, cfg, rng, classRefVolume, classRefEfficiency, classRefMult) {
 		if (!p.buildCleanBase || !RB.resolveTo) return null;
 		/* The rotation is built at his CURRENT program's level even when the
 		   row names the school he transferred from, because that school is a
@@ -1955,6 +2229,7 @@
 			pro: false,
 			classRefVolume: classRefVolume,
 			classRefEfficiency: classRefEfficiency,
+			classRefMult: classRefMult,
 		}, cfg, rng.child("sim"));
 		return younger.stats
 			? {
@@ -1964,7 +2239,7 @@
 			: null;
 	}
 
-	function buildPriorSeasons(players, season, rng, teams, cfg, classRefVolume, classRefEfficiency) {
+	function buildPriorSeasons(players, season, rng, teams, cfg, classRefVolume, classRefEfficiency, classRefMult) {
 		const simulate = !cfg || cfg.priorSeasons !== "reconstruct";
 		for (const p of players) {
 			p.priorSeasons = null;
@@ -1974,7 +2249,8 @@
 			const rows = [];
 			for (let i = n; i >= 1; i--) {
 				const sim = simulate && !p.nonNcaa
-					? simulatePriorSeason(p, i, teams, season, cfg, r.child("y" + i), classRefVolume, classRefEfficiency)
+					? simulatePriorSeason(p, i, teams, season, cfg, r.child("y" + i),
+						classRefVolume, classRefEfficiency, classRefMult)
 					: null;
 				if (sim) {
 					const L = sim.line;
@@ -2153,13 +2429,22 @@
 	/* ------------------------------------------------------------- phase 6 */
 
 	function phaseAwards(state) {
-		state.ranked = AW.assign(state.players, state.teams, state.tourney,
+		const out = AW.assign(state.players, state.teams, state.tourney,
 			state.effectiveCfg || state.cfg, state.rng.child("awards"));
-		// Lifted off the map before anything iterates it, like __realignment.
-		state.fieldHonors = state.teams.__fieldHonors || [];
-		delete state.teams.__fieldHonors;
-		state.fieldTop = state.teams.__fieldTop || [];
-		delete state.teams.__fieldTop;
+		state.ranked = out.ranked;
+		state.fieldHonors = out.fieldHonors || [];
+		state.fieldTop = out.fieldTop || [];
+		/* The player-of-the-year ballots, so a split year is legible. */
+		state.poyBallots = out.poyBallots || [];
+		/* Every `__`-prefixed key assign leaves on the team map, off. `teams`
+		   is iterated with Object.keys in the stats phase, so a leftover key
+		   is a "team" with no members — and a warm re-run that redoes stats
+		   without redoing awards dies on it, three phases from the line that
+		   caused it. Sweeping the prefix means adding a key cannot reintroduce
+		   that, which naming each one individually did not. */
+		for (const k of Object.keys(state.teams)) {
+			if (k.indexOf("__") === 0) delete state.teams[k];
+		}
 		return state;
 	}
 
@@ -2451,10 +2736,16 @@
 				"archetypeWeights", "classFlavor", "freshmanShare", "transferShare",
 				"redshirtShare", "reclassShare", "leagueWeights", "wEuroLeague",
 				"wGLeague", "wNBL", "pDII", "overrides",
-				"archetypePool", "surpriseBudget",
+				"archetypePool", "surpriseBudget", "traitCount",
 				// See variationSalt / pickClassPool: both reshape the class
 				// from the build phase down.
 				"variation", "flavorHint", "poolMemory", "recentPools",
+				"anomalyMemory", "recentAnomalies", "flavorReach", "narrative",
+				/* Universe mode is a whole-chain fact, not a phase input: the
+				   runner is handed a different seed and a carryOver when it is
+				   on. Declared here so that turning it on invalidates
+				   everything, which is what it does. */
+				"universe",
 			],
 			run: phaseBuild,
 		},
@@ -2463,10 +2754,12 @@
 		{
 			name: "regular",
 			deps: ["pace", "scoringEnv", "injuryRate", "realignmentRate",
-				"bluebloodDownYears", "midMajorLift", "teamMomentum", "seasonEvents"],
+				"bluebloodDownYears", "midMajorLift", "teamMomentum", "seasonEvents",
+				// The world dials: all three are read by buildPrograms.
+				"realignmentMemory", "starReturners", "portalRate", "styleDrift"],
 			run: phaseRegular,
 		},
-		{ name: "postseason", deps: ["upsetFactor"], run: phasePostseason },
+		{ name: "postseason", deps: ["upsetFactor", "coachTurnover"], run: phasePostseason },
 		{
 			name: "stats",
 			deps: ["era", "pace", "scoringEnv", "efficiencyEnv", "statNoise",
@@ -2541,7 +2834,16 @@
 			   function of the flavor and the settings, so it is cheap to
 			   recompute here whether or not the build phase runs. */
 			if (state.flavor !== undefined) {
-				const bent = applyFlavorConfig(effective, state.flavor);
+				/* The narrative's bends live on effectiveCfg the same way the
+				   flavor's do, and for the same reason have to be recomputed
+				   on a warm re-run that skips the build phase — otherwise a
+				   slider move loses the season's storylines and a staged run
+				   stops matching a cold one. Both are pure functions of the
+				   settings and a deterministic stream, so recomputing is
+				   cheap and exact. */
+				const bent = applyNarrative(
+					applyFlavorConfig(effective, state.flavor),
+					new Rng(seed).child("narrative")).cfg;
 				/* Re-apply class-level environment jitter (same deterministic
 				   stream the build phase used). Without this a warm re-run that
 				   skips the build phase would lose the jitter. */
@@ -2568,6 +2870,12 @@
 				seed: state.seed,
 				season: state.season,
 				cfg: effective,
+				/* The settings the season was actually simulated at, which is
+				   `cfg` plus the class flavor's bend, the season narrative's
+				   bends and the class-level environment jitter. Without it the
+				   only way to see what a storyline did was to read the box
+				   scores and guess. */
+				effectiveCfg: state.effectiveCfg || effective,
 				players: state.players,
 				teams: state.teams,
 				poll: state.poll,
@@ -2581,9 +2889,19 @@
 				fallers: state.fallers,
 				draftEvents: state.draftEvents || [],
 			fieldHonors: state.fieldHonors || [],
+				poyBallots: state.poyBallots || [],
 			fieldTop: state.fieldTop || [],
 				seasonEvents: state.seasonEvents || [],
+				coachingCarousel: state.coachingCarousel || [],
 				flavor: state.flavor,
+				/* The season's storylines, so the UI can say what kind of year
+				   this was rather than only what kind of class it was. */
+				narrative: state.narrative || [],
+				/* Whether the source file's own ages carry information. Read
+				   by exportFile, which without it on the result was reading
+				   `undefined` and rewriting born.year even for a file whose
+				   ages were already the thing the class years were read from. */
+				ageIsInformative: !!state.ageIsInformative,
 				// The builds this class was drawn from, and the anomalies it
 				// was given, so the UI can say what makes this class this one.
 				archetypePool: state.archetypePool
@@ -3021,6 +3339,10 @@
 		["injury", "Games missed and why"],
 		["coach", "Who coaches him, and what kind of year the staff is having"],
 		["archetype", "Archetype label"],
+		/* Everything a scout writes down that is not a shape: wingspan, motor,
+		   the off hand, the medical file, whether he wants it late. See
+		   js/traits.js — this line is the trait layer's main surface. */
+		["traits", "Scouting traits (frame, motor, hands, medical)"],
 		["awards", "Honors"],
 		["stock", "Draft stock and mock position"],
 		/* Where his season places him against the rest of Division I. Every
@@ -3029,7 +3351,7 @@
 		   awards. See rankAgainstField in js/awards.js. */
 		["ranks", "Where he finished nationally and in his conference"],
 	];
-	const DEFAULT_NOTE_LINES = ["summary", "team", "stats", "shooting", "signature", "awards"];
+	const DEFAULT_NOTE_LINES = ["summary", "team", "traits", "stats", "shooting", "signature", "awards"];
 
 	/* The note's opening sentence. It used to start "School (Conf) · Year"
 	   and go straight to stat lines, which reads like a stat export; a
@@ -3153,6 +3475,16 @@
 				}
 			}
 			lines.push(rec);
+		}
+		/* The traits, as a sentence rather than a list. Two of them at most in
+		   the prose clause because a scouting note is written and not tabulated;
+		   the rest follow as a compact tail, which is how a real report does it
+		   too. See js/traits.js. */
+		if (on("traits") && p.traits && p.traits.length) {
+			const clause = TR.noteClause(p.traits);
+			const rest = p.traits.slice(2).map((t) => t.name);
+			lines.push("Scouts note " + clause + "." +
+				(rest.length ? " Also: " + rest.join("; ") + "." : ""));
 		}
 		if (s && on("stats")) {
 			lines.push(
@@ -3834,6 +4166,98 @@
 		return row;
 	}
 
+	/* THE AGE A CLASS YEAR IMPLIES.
+
+	   Every player in a BBGM draft class is born in the same year, because
+	   BBGM generates a class as one cohort. assignClassYears rolls a spread of
+	   class years on top of that — correct, and the whole point of the class
+	   mechanic — but the export used to leave born.year exactly as the file
+	   had it. So a fifth-year senior arrived on BBGM's draft screen reading
+	   Age 19, and BBGM's own progression then developed him on a
+	   nineteen-year-old's curve: the largest development bump in the game
+	   handed to the one man in the class who is a finished product. The
+	   opposite of what "graduate transfer" means.
+
+	   The map is deliberately plain: a freshman is 19 in the draft year he is
+	   scouted, and every year of eligibility is a year of age. A redshirt
+	   costs a year without costing eligibility, and junior college costs two.
+	   Nothing here is a draw — the biography already happened, this only reads
+	   it back. */
+	const AGE_FOR_CLASS = {
+		Freshman: 19, Sophomore: 20, Junior: 21, Senior: 22, Graduate: 23,
+	};
+	const AGE_CAP = 24;
+	function ageForClassYear(classYear, transfer) {
+		const cy = String(classYear || "Freshman");
+		const redshirt = /^Redshirt /.test(cy);
+		const base = AGE_FOR_CLASS[cy.replace(/^Redshirt /, "")];
+		let age = Number.isFinite(base) ? base : AGE_FOR_CLASS.Freshman;
+		if (redshirt) age += 1;
+		// A JUCO man spent two years somewhere that does not appear on his
+		// D-I class year at all.
+		if (transfer && transfer.kind === "JUCO transfer") age += 1;
+		return clamp(age, 18, AGE_CAP);
+	}
+
+	/* Jersey numbers by position convention.
+
+	   Guards wear single digits and the low teens, wings the teens and
+	   twenties, bigs the thirties through fifties — the convention every
+	   basketball roster in the world follows, loosely enough that a 6'10"
+	   man in number 3 is a thing that happens. Drawn off the player's own
+	   key so a re-run gives him the same shirt, and deduplicated within the
+	   class because a draft class imported into BBGM becomes a roster.
+
+	   BBGM stores it as a string, and 0 and 00 are both legal and different,
+	   which is why this returns a number and the caller stringifies. */
+	const JERSEY_BY_SIZE = {
+		// Two tiers per size: the conventional numbers first, then the ones a
+		// player of that size still plausibly wears. A seventy-man class is
+		// far more people than any roster, so the first tier runs out.
+		guard: [
+			[0, 1, 2, 3, 4, 5, 10, 11, 12, 13, 14, 15, 20, 21, 22, 23, 24, 25],
+			[6, 7, 8, 9, 16, 17, 18, 19, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35],
+		],
+		wing: [
+			[1, 2, 3, 4, 5, 11, 12, 13, 14, 15, 20, 21, 22, 23, 24, 25, 30, 32, 33, 34, 35],
+			[0, 6, 7, 8, 9, 10, 16, 17, 18, 19, 26, 27, 28, 29, 31, 40, 41, 42, 43, 44, 45],
+		],
+		big: [
+			[0, 5, 12, 13, 21, 23, 30, 31, 32, 33, 34, 35, 40, 41, 42, 44, 45, 50, 51, 52, 54, 55],
+			[1, 2, 3, 4, 10, 11, 14, 15, 20, 22, 24, 25, 43, 53, 56, 57, 58, 59, 60],
+		],
+	};
+	function jerseyFor(p, taken) {
+		const hgt = p.newRatings ? p.newRatings.hgt : 45;
+		const size = hgt < 37 ? "guard" : hgt <= 53 ? "wing" : "big";
+		const r = new Rng("jersey:" + p.key);
+		/* Try the conventional numbers, then the plausible ones, and only then
+		   walk the whole range. Two tiers rather than one because a class is
+		   three or four rosters' worth of people: with one tier the first
+		   twenty guards took every guard number and the rest fell through to
+		   "the lowest free integer", which put half the guards in the fifties
+		   and made the convention read as noise. */
+		for (const pool of JERSEY_BY_SIZE[size]) {
+			for (let i = 0; i < 60; i++) {
+				const n = pool[r.int(0, pool.length - 1)];
+				if (!taken.has(n)) { taken.add(n); return n; }
+			}
+			// Deterministic sweep of this tier before moving to the next.
+			for (const n of pool) if (!taken.has(n)) { taken.add(n); return n; }
+		}
+		// Every plausible number is gone: walk the legal range.
+		for (let n = 0; n <= 99; n++) if (!taken.has(n)) { taken.add(n); return n; }
+		return 0;
+	}
+
+	/* opts.awardsScope: "all" (every honor, the old behaviour and the default)
+	   or "major" (national honors plus the power/named-conference rows). The
+	   predicate lives in js/awards.js because that is where the strings are
+	   minted. opts.majorConferences overrides which conferences count. */
+	function awardsInScope(list, scope, confs) {
+		return AW.scopeAwards(list, scope, confs);
+	}
+
 	/* Produce the modified BBGM draft class file.
 
 	   `opts` is the §8.13 opt-in surface — every flag off writes exactly the
@@ -3873,6 +4297,13 @@
 		// otherwise silently give every duplicate the same rebuilt ratings.
 		const byIdx = result.players;
 		let passthroughs = 0;
+		/* Shirt numbers already spoken for, so a class does not import with
+		   three number 23s. Seeded with whatever the source file had. */
+		const jerseysTaken = new Set();
+		for (const orig of src.players) {
+			const n = Number(orig && orig.jerseyNumber);
+			if (Number.isFinite(n)) jerseysTaken.add(n);
+		}
 
 		const players = src.players.map((orig, i) => {
 			const p = byIdx[i] && byIdx[i].src === orig ? byIdx[i] : null;
@@ -3904,6 +4335,18 @@
 				SIZE_OVERRIDE_KEYS.some((k) => Number.isFinite(ov[k]));
 			if (sized || !Number.isFinite(orig.hgt)) out.hgt = p.newHgtInches;
 			if (sized || !Number.isFinite(orig.weight)) out.weight = p.newWeight;
+			/* Age. See AGE_FOR_CLASS: a class year that the tool rolled has to
+			   reach the file, or BBGM shows a graduate transfer as 19 and then
+			   develops him like one. Skipped when the source file's own ages
+			   already vary (ageIsInformative) — there the class years were READ
+			   from those ages and rewriting them would be a round trip through
+			   a coarser map — and skipped when the flag is off. */
+			if (opts.ages !== false && !result.ageIsInformative &&
+				out.born && Number.isFinite(Number(out.born.year))) {
+				out.born = Object.assign({}, out.born, {
+					year: result.season - ageForClassYear(p.classYear, p.transfer),
+				});
+			}
 			const last = out.ratings.length - 1;
 			const r = out.ratings[last];
 			for (const k of BB.RATING_KEYS) {
@@ -3916,11 +4359,102 @@
 			out.draft = Object.assign({}, out.draft, {
 				ovr: p.newOvr, pot: p.newPot, skills: p.newSkills.slice(),
 			});
-			out.note = p.note;
+			/* BBGM's mood traits, which the tool never wrote — so an imported
+			   class arrived with whatever BBGM happened to roll, and a leader
+			   and a mercenary were the same free agent. The four letters are F
+			   (fame), L (loyalty), $ (money) and W (winning); the trait layer
+			   decides which of them a player has earned. See js/traits.js.
 
-			if (opts.awards && p.awards && p.awards.length) {
-				out.awards = (Array.isArray(out.awards) ? out.awards : [])
-					.concat(p.awards.map((type) => ({ season: result.season, type })));
+			   Written only when the trait layer produced some: a file that
+			   never had the field does not acquire an empty one, and a
+			   traitCount of 0 leaves BBGM's own roll alone. */
+			if (opts.moodTraits !== false && p.moodTraits && p.moodTraits.length) {
+				out.moodTraits = p.moodTraits.slice();
+			}
+			/* JERSEY NUMBER. BBGM reads `jerseyNumber` and the tool never
+			   wrote one, so a whole imported class arrived numberless or with
+			   BBGM's own draw. Assigned by position convention off the
+			   player's own key, so it survives a re-run: guards take the
+			   single digits and the low teens, wings the teens and twenties,
+			   bigs the thirties, forties and fifties. Unique within the class
+			   because a class becomes a roster. */
+			if (opts.jerseys !== false && !Number.isFinite(Number(orig.jerseyNumber))) {
+				out.jerseyNumber = String(jerseyFor(p, jerseysTaken));
+			}
+			/* INJURY HISTORY. BBGM's player schema carries `injuries[]` as
+			   {season, games, type}, and the season the tool simulates already
+			   knows exactly that — it decides who missed games, for how many,
+			   and why. Writing it makes "injury-prone" a fact inside the game
+			   rather than a sentence in a note. */
+			if (opts.injuries && p.availability && p.availability.injury &&
+				p.availability.games > 0) {
+				const rows = (Array.isArray(out.injuries) ? out.injuries : [])
+					.filter((r) => !r || Number(r.season) !== Number(result.season));
+				rows.push({
+					season: result.season,
+					games: Math.round(p.availability.games),
+					// BBGM's own strings are capitalised nouns; ours read "a
+					// back strain" because they are written into prose.
+					type: Text.capitalize(String(p.availability.kind || "injury")
+						.replace(/^an? /, "")),
+				});
+				out.injuries = rows;
+			}
+			/* opts.noteAppend: keep a note the file already carried and put
+			   the generated one underneath. Off by default, because the
+			   generated note is a complete replacement and a user who never
+			   edited notes in BBGM does not want two of them — but a user who
+			   DID edit them had no way to keep his own, and the export
+			   silently overwrote them. Any previous Honors: line is dropped
+			   either way; that one is ours. */
+			if (opts.noteAppend && String(orig.note || "").trim()) {
+				const keep = String(orig.note).split("\n")
+					.filter((l) => l.indexOf("Honors:") !== 0).join("\n").trim();
+				out.note = keep && keep !== String(p.note || "").trim()
+					? keep + "\n\n" + p.note : p.note;
+			} else {
+				out.note = p.note;
+			}
+
+			/* Guarded on the FLAG, not on whether this player won anything.
+			   Keying it on p.awards.length left a man who was an All-American in
+			   the previous export and nobody in this one still holding the old
+			   honors: the replacement below never ran for him. Six players a
+			   class, which is exactly the sort of residue that survives a dozen
+			   round trips unnoticed. */
+			if (opts.awards) {
+				/* THE CLASS SEASON'S HONORS ARE REPLACED, NOT APPENDED.
+
+				   Exporting a class, importing the result and exporting it
+				   again used to double every honor, and a third round trip
+				   tripled them: `awards` is one of the two fields BBGM's
+				   draft-class import keeps, so the file coming back in already
+				   carries the rows this line is about to write. Measured at 181
+				   rows on the first export and 368 on the second. The `Honors:`
+				   note line was guarded against exactly this and the array was
+				   not.
+
+				   Deduping on {season, type} is not enough, and that is worth
+				   saying because it is the obvious fix and it does not work: a
+				   re-import re-SIMULATES the season, so the second run hands
+				   out a different set of honors for the same year. Under a
+				   dedupe the file converges on the union of every season
+				   anybody ever simulated — 181, then 235, then 279, then 307 —
+				   and the player ends up holding two conferences' player of
+				   the year awards in one year.
+
+				   So rows AT THE CLASS'S OWN SEASON are dropped and rewritten.
+				   Every award this tool writes carries result.season, and the
+				   players being written are draft prospects who have not
+				   played a season in the league, so a row at that season on one
+				   of them is ours by construction. Anything at another season —
+				   a real league history, a hand-added honor — is left alone. */
+				const scoped = awardsInScope(
+					p.awards, opts.awardsScope, opts.majorConferences);
+				const kept = (Array.isArray(out.awards) ? out.awards : [])
+					.filter((a) => !a || Number(a.season) !== Number(result.season));
+				out.awards = kept.concat(
+					scoped.map((type) => ({ season: result.season, type })));
 				/* `awards` does not survive Tools -> Import players: that
 				   function builds the imported player from a fixed list of
 				   fields (born, college, contract, draft, face, names, hgt,
@@ -3931,9 +4465,17 @@
 				   which is the only way an import that keeps his statline can
 				   also tell you he was an All-American. The note template can
 				   drop the honors line (see NOTE_LINES); this does not. */
-				if (String(out.note || "").indexOf("Honors:") === -1) {
+				/* Same reasoning one level down: a note carried in from a
+				   previous export holds the PREVIOUS run's honors line, so it
+				   is replaced rather than skipped. p.note is built fresh each
+				   run, so the only way a stale line survives is a template
+				   that omits the honors line while awards are being written —
+				   which is exactly the case the old guard silently kept. */
+				out.note = String(out.note || "")
+					.split("\n").filter((l) => l.indexOf("Honors:") !== 0).join("\n");
+				if (scoped.length) {
 					out.note = (out.note ? out.note + "\n" : "") +
-						"Honors: " + p.awards.join("; ");
+						"Honors: " + scoped.join("; ");
 				}
 			}
 			/* The flag matches the note: writing noteBool = 1 beside an
@@ -4287,7 +4829,7 @@
 		buildNote, classYear,
 		assignClassYears, inchesFromHgtRating, validateLeagueFile, findSeason, playerKey,
 		SIZE_OVERRIDE_KEYS, SURPRISES, DRAFT_EVENTS,
-		MAX_CLASS,
+		MAX_CLASS, ANOMALY_MEMORY_DEPTH, NARRATIVES,
 		rerollSalt,
 		signatureGame, simulateProLeagues, assignRecruiting,
 		NOTE_LINES, DEFAULT_NOTE_LINES, PHASES, PRO_GAMES,
