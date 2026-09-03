@@ -7,6 +7,7 @@
 	"use strict";
 
 	const C = global.Colleges;
+	const { clamp } = global.BBGMRng;
 	const RB = global.RatingsBuilder;
 
 	const A = () => global.App;
@@ -390,7 +391,25 @@
 	function sortStack() {
 		const st = A().state;
 		const bar = el("div", "sortstack");
+		/* The stack is rebuilt on every render, so it cannot itself be the
+		   live region — a screen reader watching a node that is replaced hears
+		   nothing. It reports through the app's own region instead, and only
+		   when the stack has actually changed, or every unrelated re-render
+		   would announce the sort again. */
+		const summary = st.sort.length
+			? "Sorted by " + st.sort.map((k, i) => {
+				const c = COLUMNS.filter((x) => x.key === k.key)[0];
+				return ((c && c.label) || k.key) +
+					(k.dir < 0 ? " descending" : " ascending") +
+					(i < st.sort.length - 1 ? ", then" : "");
+			}).join(" ")
+			: "Sort cleared";
+		if (st.__lastSortSummary !== undefined && st.__lastSortSummary !== summary) {
+			A().announce(summary);
+		}
+		st.__lastSortSummary = summary;
 		if (!st.sort.length) return bar;
+		bar.setAttribute("aria-label", summary);
 		bar.appendChild(el("span", "hint", "sorted by "));
 		st.sort.forEach((k, i) => {
 			const col = COLUMNS.filter((c) => c.key === k.key)[0];
@@ -1187,6 +1206,17 @@
 				e.preventDefault();
 				moveRow(tr, d, st.editing !== null);
 			});
+			/* The one-line scouting sentence on hover.
+
+			   A forty-column table tells you every number about a player and
+			   nothing about who he is, and the sentence that says so was one
+			   click away on his page — seventy clicks to read a class. The
+			   note's first line IS that sentence (see noteSummary), so the
+			   row carries it and the second line under it. */
+			if (p.note) {
+				const lines = String(p.note).split("\n");
+				tr.title = lines.slice(0, 2).join("\n");
+			}
 			const sortVals = {};
 			for (const col of columns) {
 				let td;
@@ -1711,6 +1741,12 @@
 		/* A team page. You could follow a program through the bracket and
 		   never see its roster, its style, its coach, its four prospects and
 		   its schedule in one place. */
+		/* A single game's box score is a page under the Teams tab, because it
+		   is reached from a team's schedule and belongs beside it. */
+		if (A().state.game) {
+			view.appendChild(gamePage(view, res, A().state.game));
+			return;
+		}
 		if (A().state.team) {
 			view.appendChild(teamPage(view, res, A().state.team));
 			return;
@@ -3655,6 +3691,85 @@
 
 	/* One program: who coaches it, how it plays, who is on it, and every game
 	   it played. */
+	/* A QUADRANT RECORD, AS A BAR.
+
+	   "Q1 2-5 · Q2 4-3 · Q3/Q4 losses 1" is the single most-read line on a
+	   team's résumé and it was a string of numbers, which is the one format a
+	   reader cannot compare two teams in at a glance. The committee reads it
+	   as a shape: how much of the season was played against good teams, and
+	   how much of that was won. So it is a shape. */
+	function quadBar(quads) {
+		if (!quads) return null;
+		const rows = [
+			["Q1", quads.q1w, quads.q1l], ["Q2", quads.q2w, quads.q2l],
+			["Q3", quads.q3w, quads.q3l], ["Q4", quads.q4w, quads.q4l],
+		];
+		const total = rows.reduce((a, r) => a + r[1] + r[2], 0);
+		if (!total) return null;
+		const wrap = el("div", "quadbar");
+		for (const [label, w, l] of rows) {
+			if (!(w + l)) continue;
+			const seg = el("div", "quadseg q" + label[1]);
+			seg.style.flexGrow = String(w + l);
+			seg.title = label + ": " + w + "-" + l;
+			const won = el("div", "quadwon");
+			won.style.width = ((w / (w + l)) * 100).toFixed(1) + "%";
+			seg.appendChild(won);
+			seg.appendChild(el("span", "quadlabel", label + " " + w + "-" + l));
+			wrap.appendChild(seg);
+		}
+		return wrap;
+	}
+
+	/* THE POLL, AS A LINE.
+
+	   `[· · 18 15 11 9 12 ...]` is a sparkline written in numbers, and the
+	   thing a reader wants from it — did they climb all year or fall off a
+	   cliff in February — is exactly what a sparkline shows and a list of
+	   numbers does not. Inline SVG, no library, and the numbers stay in the
+	   title so nothing is lost. */
+	function pollSpark(history) {
+		const weeks = (history || []).map((r) => (r ? Number(r) : null));
+		if (weeks.filter((x) => x).length < 3) return null;
+		const W = 160;
+		const H = 26;
+		const n = weeks.length;
+		const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+		svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+		svg.setAttribute("class", "spark");
+		svg.setAttribute("role", "img");
+		svg.setAttribute("aria-label", "AP ranking by week: " +
+			weeks.map((r) => (r ? "No. " + r : "unranked")).join(", "));
+		// Rank 1 at the top, 25 at the bottom, unranked off the bottom edge.
+		const x = (i) => (n < 2 ? 0 : (i / (n - 1)) * (W - 2) + 1);
+		const y = (r) => 2 + ((clamp(r, 1, 26) - 1) / 25) * (H - 4);
+		let d = "";
+		let open = false;
+		weeks.forEach((r, i) => {
+			if (!r) { open = false; return; }
+			d += (open ? "L" : "M") + x(i).toFixed(1) + " " + y(r).toFixed(1) + " ";
+			open = true;
+		});
+		const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+		path.setAttribute("d", d.trim());
+		path.setAttribute("fill", "none");
+		path.setAttribute("stroke", "currentColor");
+		path.setAttribute("stroke-width", "1.5");
+		svg.appendChild(path);
+		// The weeks they were unranked, as ticks along the bottom.
+		weeks.forEach((r, i) => {
+			if (r) return;
+			const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+			c.setAttribute("cx", x(i).toFixed(1));
+			c.setAttribute("cy", String(H - 1.5));
+			c.setAttribute("r", "1");
+			c.setAttribute("fill", "currentColor");
+			c.setAttribute("opacity", "0.35");
+			svg.appendChild(c);
+		});
+		return svg;
+	}
+
 	function teamPage(view, res, name) {
 		const t = res.teams[name];
 		const box = el("div");
@@ -3674,7 +3789,10 @@
 		const dl = el("dl", "shortcuts");
 		const row = (k, v) => {
 			dl.appendChild(el("dt", null, k));
-			dl.appendChild(el("dd", null, v));
+			const dd = el("dd");
+			if (typeof v === "string") dd.textContent = v;
+			else if (v) dd.appendChild(v);
+			dl.appendChild(dd);
 		};
 		row("Conference", t.conf + " " + t.cw + "-" + t.cl +
 			(t.confRegularChamp ? " · regular-season champion" : "") +
@@ -3702,16 +3820,31 @@
 		}
 		if (t.netRank) {
 			row("NET", "No. " + t.netRank +
-				(t.quads ? " · Q1 " + t.quads.q1w + "-" + t.quads.q1l +
-					" · Q2 " + t.quads.q2w + "-" + t.quads.q2l +
-					" · Q3/Q4 losses " + (t.quads.q3l + t.quads.q4l) : "") +
 				(Number.isFinite(t.roadW) ? " · road " + t.roadW + "-" + t.roadL : ""));
+			const bar = quadBar(t.quads);
+			if (bar) {
+				const cell = el("div");
+				cell.appendChild(bar);
+				cell.appendChild(el("p", "unit",
+					"Width is how many games; the filled part is how many were won."));
+				row("Quadrant record", cell);
+			}
 		}
 		if (t.apHistory && t.apHistory.some((r) => r)) {
-			row("AP poll", "Peak No. " + t.apPeak +
-				(t.apPreseason ? " · preseason No. " + t.apPreseason : " · unranked in the preseason") +
-				(t.apRank ? " · final No. " + t.apRank : " · unranked at the end") +
-				"  [" + t.apHistory.map((r) => (r ? r : "·")).join(" ") + "]");
+			const spark = pollSpark(t.apHistory);
+			const cell = el("div");
+			cell.appendChild(document.createTextNode("Peak No. " + t.apPeak +
+				(t.apPreseason ? " · preseason No. " + t.apPreseason
+					: " · unranked in the preseason") +
+				(t.apRank ? " · final No. " + t.apRank : " · unranked at the end")));
+			if (spark) {
+				cell.appendChild(spark);
+				cell.title = t.apHistory.map((r) => (r ? r : "·")).join(" ");
+			} else {
+				cell.appendChild(document.createTextNode(
+					"  [" + t.apHistory.map((r) => (r ? r : "·")).join(" ") + "]"));
+			}
+			row("AP poll", cell);
 		}
 		row("Postseason", t.ncaaSeed ? "No. " + t.ncaaSeed + " seed, " + t.ncaaResult
 			: (t.nitResult || "Did not make the field"));
@@ -3809,7 +3942,17 @@
 			   at the start of the row — which is why a loss visibly pushed the
 			   whole schedule row one column to the right. */
 			const tr = el("tr", g.won ? "" : "loss");
-			tr.appendChild(el("td", "num", String(i + 1)));
+			const num = el("td", "num");
+			/* The game number is the way into the box score: the opponent cell
+			   already links to the opponent's page and a cell cannot mean two
+			   things. */
+			const open = el("button", "linky", String(i + 1));
+			open.title = "Box score";
+			open.addEventListener("click", function () {
+				A().showGame(gameKeyFor(t.name, i));
+			});
+			num.appendChild(open);
+			tr.appendChild(num);
 			const td = el("td", "sticky");
 			td.appendChild(teamLink(g.opp));
 			tr.appendChild(td);
@@ -3825,6 +3968,129 @@
 		table.appendChild(tb);
 		wrap.appendChild(table);
 		box.appendChild(wrap);
+		return box;
+	}
+
+	/* ONE GAME, BOTH TEAMS.
+
+	   The game log was per player: to see what happened in a game you opened
+	   one prospect's log, read his line, and then went and found the other
+	   prospect's log to read his. A box score is a page, and the model already
+	   has every number on it — the score and the result from the team's
+	   schedule, and every prospect's own line from his game log, which is
+	   reconciled to his season totals and therefore cannot disagree with
+	   anything else in the tool.
+
+	   What it deliberately does NOT do is invent per-game lines for the
+	   returning players. Their season averages exist; their nights do not, and
+	   a box score whose bench rows were season averages divided by games would
+	   be a fabrication sitting inside the one view in this tool whose whole
+	   claim is that it is a record. The page says so rather than filling the
+	   space. */
+	function gameKeyFor(team, index) { return team + "|" + index; }
+
+	function gamePage(view, res, ref) {
+		const box = el("div");
+		const cut = String(ref || "").lastIndexOf("|");
+		const home = res.teams[String(ref || "").slice(0, cut)];
+		const idx = Number(String(ref || "").slice(cut + 1));
+		const back = el("button", "tiny", "← Back to the schedule");
+		back.addEventListener("click", () => { A().showGame(null); });
+		box.appendChild(back);
+		if (!home || !home.log || !home.log[idx]) {
+			box.appendChild(el("p", "hint", "No such game in this season."));
+			return box;
+		}
+		const g = home.log[idx];
+		const away = res.teams[g.opp];
+		/* The same game from the other side, matched on the date rather than
+		   on the index: the two schedules are sorted independently. */
+		let awayIdx = -1;
+		if (away && away.log) {
+			awayIdx = away.log.findIndex(function (x) {
+				return x.opp === home.name &&
+					Math.abs((x.when || 0) - (g.when || 0)) < 1e-9;
+			});
+		}
+
+		const title = el("h3");
+		title.appendChild(teamLink(g.opp));
+		title.appendChild(document.createTextNode(" " + g.pa + " at "));
+		title.appendChild(teamLink(home.name));
+		title.appendChild(document.createTextNode(" " + g.pf +
+			(g.ot ? " (" + (g.ot > 1 ? g.ot + "OT" : "OT") + ")" : "")));
+		box.appendChild(title);
+		const when = global.News ? global.News.dateline(g.when || 0) : "";
+		box.appendChild(el("p", "legendline",
+			when + " · " + (g.home > 0 ? "at " + home.name
+				: g.home < 0 ? "at " + g.opp : "neutral floor") +
+			" · " + (g.round || (g.conference ? "conference game" : g.stage)) +
+			(away ? " · " + g.opp + " " + away.w + "-" + away.l +
+				" · " + home.name + " " + home.w + "-" + home.l : "")));
+
+		const side = function (team, gameIndex, score) {
+			if (!team) return;
+			box.appendChild(el("h4", null, team.name + " — " + score));
+			const rows = [];
+			for (const p of team.prospects || []) {
+				const gl = p.gameLog && p.gameLog.games;
+				if (!gl) continue;
+				const line = gl.filter(function (x) { return x.i === gameIndex; })[0];
+				if (line) rows.push({ p: p, line: line });
+			}
+			if (!rows.length) {
+				box.appendChild(el("p", "hint", team.prospects && team.prospects.length
+					? "Every prospect on this roster missed this game."
+					: "No draft prospects on this roster — the returning " +
+						"rotation carries season averages, not per-game lines."));
+				return;
+			}
+			rows.sort(function (a, b) { return b.line.min - a.line.min; });
+			const wrap = el("div", "scroll");
+			const table = el("table");
+			const hr = el("tr");
+			for (const h of ["Player", "MIN", "PTS", "REB", "AST", "STL", "BLK",
+				"TO", "PF", "FG", "3P", "FT", "+/-"]) {
+				const th = el("th", h === "Player" ? "" : "num", h);
+				th.scope = "col";
+				hr.appendChild(th);
+			}
+			const thead = el("thead");
+			thead.appendChild(hr);
+			table.appendChild(thead);
+			const tb = el("tbody");
+			let pts = 0;
+			let reb = 0;
+			let ast = 0;
+			for (const r of rows) {
+				const line = r.line;
+				const tr = el("tr");
+				const td = el("td", "sticky");
+				td.appendChild(playerLink(r.p));
+				tr.appendChild(td);
+				for (const v of [line.min, line.pts, line.reb, line.ast, line.stl,
+					line.blk, line.tov, line.fouls]) {
+					tr.appendChild(el("td", "num", String(Math.round(v))));
+				}
+				tr.appendChild(el("td", "num", line.fgm + "-" + line.fga));
+				tr.appendChild(el("td", "num", line.tpm + "-" + line.tpa));
+				tr.appendChild(el("td", "num", line.ftm + "-" + line.fta));
+				tr.appendChild(el("td", "num",
+					(line.pm >= 0 ? "+" : "") + Math.round(line.pm)));
+				tb.appendChild(tr);
+				pts += line.pts; reb += line.reb; ast += line.ast;
+			}
+			table.appendChild(tb);
+			wrap.appendChild(table);
+			box.appendChild(wrap);
+			box.appendChild(el("p", "unit",
+				"Prospects accounted for " + Math.round(pts) + " of " + score +
+				" points, " + Math.round(reb) + " rebounds and " + Math.round(ast) +
+				" assists. The rest belongs to the returning rotation, which " +
+				"carries season averages rather than per-game lines."));
+		};
+		side(home, idx, g.pf);
+		side(away, awayIdx, g.pa);
 		return box;
 	}
 
@@ -4033,6 +4299,7 @@
 		awards: viewAwards, board: viewBoard, distribution: viewDistribution, tournamentCard,
 		notes: viewNotes, gamelog: viewGameLog, compare: viewCompare,
 		news: viewNews, universe: viewUniverse, playerLink, teamLink, playerPage,
+		gamePage, gameKeyFor, quadBar, pollSpark,
 		COLUMNS, STAT_MODES, PCT_KEYS, DERIVED, derived, cellValue, statValue,
 		CARD_COLUMNS, CARD_BREAKPOINT, cardMode, orderedColumns, moveColumn,
 		dropColumn, setColumnOrder,

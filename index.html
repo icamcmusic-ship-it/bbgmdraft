@@ -79,17 +79,8 @@
 		<button id="btnDeletePreset" type="button" title="Delete the selected saved preset">Delete</button>
 	</div>
 	<div class="ctl">
-		<label for="randomScope">Randomize</label>
-		<select id="randomScope" aria-label="Randomize scope">
-			<option value="gentle">Everything, gently</option>
-			<option value="wide">Everything, wide open</option>
-			<option value="quality">Class quality &amp; depth only</option>
-			<option value="builds">Builds only</option>
-			<option value="years">Class years &amp; paths only</option>
-			<option value="destinations">Destinations only</option>
-			<option value="season">College season only</option>
-			<option value="awards">Awards only</option>
-		</select>
+		<span class="lbl" id="randomScopeLabel">Randomize</span>
+		<div class="chips" id="randomScope" role="radiogroup" aria-labelledby="randomScopeLabel"></div>
 	</div>
 	<div class="btngroup wide">
 		<button id="btnRandomize" type="button" title="Randomize the settings in the chosen scope (g). Ctrl+Z restores them in one step.">🎲 Randomize</button>
@@ -98,6 +89,13 @@
 	<div class="ctl">
 		<label for="seed">Seed <b id="seedNote">random</b></label>
 		<input type="text" id="seed" placeholder="blank = random each reroll">
+	</div>
+
+	<div class="ctl" id="settingSearchBox">
+		<label for="settingSearch">Find a setting</label>
+		<input type="search" id="settingSearch" placeholder="pace, awards, freshmen…" aria-describedby="settingSearchNote">
+		<label class="check"><input type="checkbox" id="onlyChanged"> Show only what I have changed</label>
+		<p class="unit" id="settingSearchNote"></p>
 	</div>
 
 	<details class="grp" id="grp-quality" open>

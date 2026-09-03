@@ -831,3 +831,71 @@ th.dropafter { box-shadow: inset -2px 0 0 0 var(--accent); }
 	font-size: 11px;
 	cursor: help;
 }
+
+/* Randomizer scope chips. A row of one-click chips where an eight-item
+   <select> used to be: the control is pressed repeatedly and the current
+   scope should be readable without opening a menu. */
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chips .chip {
+	font-size: 11px;
+	padding: 2px 7px;
+	border-radius: 10px;
+	border: 1px solid var(--line, rgba(127, 127, 127, .3));
+	background: transparent;
+	cursor: pointer;
+}
+.chips .chip.on {
+	background: var(--accent, #3b82f6);
+	border-color: var(--accent, #3b82f6);
+	color: #fff;
+}
+.ctl .lbl { display: block; font-size: 11px; margin-bottom: 3px; }
+/* The settings filter sits above the groups and is not itself a setting. */
+#settingSearchBox { border-bottom: 1px solid var(--line, rgba(127,127,127,.2)); padding-bottom: 8px; }
+#settingSearch { width: 100%; }
+
+/* PHASE COST, colour-coded. The panel already said which phases a setting
+   re-runs; saying it in text means reading it while dragging, which is when
+   nobody reads. Green: milliseconds. Amber: the season is re-simulated.
+   Red: the whole class is rebuilt. */
+.ctl .phasecost { font-size: 10px; letter-spacing: .04em; }
+.ctl .phasecost.cheap { color: var(--ok, #16a34a); }
+.ctl .phasecost.mid { color: var(--warn, #d97706); }
+.ctl .phasecost.dear { color: var(--bad, #dc2626); }
+
+/* Modal buttons are thumb targets on a phone. */
+@media (max-width: 520px) {
+	#modal .checks button, #modal .btngroup button { width: 100%; }
+	#modal .checks { gap: 6px; }
+}
+
+/* The always-present live region. Off screen rather than display:none, because
+   a screen reader ignores a node that is not rendered. */
+.visually-hidden {
+	position: absolute !important;
+	width: 1px; height: 1px;
+	margin: -1px; padding: 0; border: 0;
+	overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%);
+	white-space: nowrap;
+}
+
+/* A quadrant record as a shape. Segment width is games played in that
+   quadrant; the filled part is the share of them won. */
+.quadbar { display: flex; gap: 2px; width: 100%; max-width: 380px; height: 20px; }
+.quadseg {
+	position: relative; min-width: 18px; border-radius: 2px;
+	background: var(--panel-2, rgba(127,127,127,.16));
+	overflow: hidden;
+}
+.quadseg .quadwon { position: absolute; inset: 0 auto 0 0; background: var(--accent, #3b82f6); opacity: .55; }
+.quadseg .quadlabel {
+	position: relative; display: block; text-align: center;
+	font-size: 9px; line-height: 20px; letter-spacing: .03em;
+	white-space: nowrap; overflow: hidden;
+}
+.quadseg.q1 .quadwon { opacity: .8; }
+.quadseg.q4 .quadwon { opacity: .3; }
+
+/* Inline sparkline for a team's week-by-week AP ranking. Rank 1 is the top
+   edge, 25 the bottom, and an unranked week is a tick along the floor. */
+svg.spark { display: block; width: 160px; height: 26px; margin-top: 3px; color: var(--accent, #3b82f6); }

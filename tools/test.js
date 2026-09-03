@@ -3872,6 +3872,54 @@ console.log("\nExport: the round trip, ages, award scope and notes");
 				.filter((l) => l.indexOf("Honors:") === 0).length <= 1));
 	}
 
+	/* JERSEY NUMBERS AND INJURY HISTORY. Two fields BBGM reads that the tool
+	   never wrote. */
+	{
+		const res = global.Engine.run(base, cfg());
+		const f = global.Engine.exportFile(res, {});
+		const nums = f.players.map((p) => Number(p.jerseyNumber));
+		ok("every exported player has a jersey number",
+			nums.every((n) => Number.isFinite(n) && n >= 0 && n <= 99));
+		ok("and no two of them share one",
+			new Set(nums).size === nums.length,
+			new Set(nums).size + " of " + nums.length);
+		/* The convention has to be visible or it is a random number. */
+		const mn = (a) => a.reduce((x, y) => x + y, 0) / Math.max(1, a.length);
+		const guards = nums.filter((n, i) => res.players[i].newRatings.hgt < 37);
+		const bigs = nums.filter((n, i) => res.players[i].newRatings.hgt > 53);
+		ok("guards wear low numbers and bigs high ones",
+			guards.length >= 8 && bigs.length >= 8 && mn(bigs) > mn(guards) + 12,
+			mn(guards).toFixed(1) + " vs " + mn(bigs).toFixed(1));
+		ok("a number in the source file is left alone", (function () {
+			const src2 = JSON.parse(JSON.stringify(base));
+			src2.players[0].jerseyNumber = "77";
+			const r2 = global.Engine.run(src2, cfg());
+			return global.Engine.exportFile(r2, {}).players[0].jerseyNumber === "77";
+		})());
+		ok("jerseys:false writes none",
+			global.Engine.exportFile(res, { jerseys: false })
+				.players.every((p) => p.jerseyNumber === undefined));
+
+		const inj = global.Engine.exportFile(res, { injuries: true });
+		const rows = inj.players.filter((p) => p.injuries && p.injuries.length);
+		ok("the season's injuries reach BBGM's injuries[]",
+			rows.length >= 5, rows.length + " of " + inj.players.length);
+		ok("each row is {season, games, type}",
+			rows.every((p) => p.injuries.every((r) => Number.isFinite(r.season) &&
+				Number.isFinite(r.games) && r.games > 0 && typeof r.type === "string" &&
+				/^[A-Z]/.test(r.type))),
+			JSON.stringify(rows[0] && rows[0].injuries));
+		/* Same rule as the awards: the class season's rows are replaced, so a
+		   round trip does not accumulate them. */
+		const r3 = global.Engine.run(inj, cfg());
+		const inj2 = global.Engine.exportFile(r3, { injuries: true });
+		const count = (x) => x.players.reduce((a, p) => a + ((p.injuries || []).length), 0);
+		ok("and a round trip does not accumulate them",
+			count(inj2) === count(inj), count(inj) + " -> " + count(inj2));
+		ok("injuries off by default",
+			global.Engine.exportFile(res, {}).players.every((p) => !p.injuries));
+	}
+
 	/* NOTES. */
 	{
 		const src = JSON.parse(JSON.stringify(base));

@@ -4189,6 +4189,57 @@
 		return clamp(age, 18, AGE_CAP);
 	}
 
+	/* Jersey numbers by position convention.
+
+	   Guards wear single digits and the low teens, wings the teens and
+	   twenties, bigs the thirties through fifties — the convention every
+	   basketball roster in the world follows, loosely enough that a 6'10"
+	   man in number 3 is a thing that happens. Drawn off the player's own
+	   key so a re-run gives him the same shirt, and deduplicated within the
+	   class because a draft class imported into BBGM becomes a roster.
+
+	   BBGM stores it as a string, and 0 and 00 are both legal and different,
+	   which is why this returns a number and the caller stringifies. */
+	const JERSEY_BY_SIZE = {
+		// Two tiers per size: the conventional numbers first, then the ones a
+		// player of that size still plausibly wears. A seventy-man class is
+		// far more people than any roster, so the first tier runs out.
+		guard: [
+			[0, 1, 2, 3, 4, 5, 10, 11, 12, 13, 14, 15, 20, 21, 22, 23, 24, 25],
+			[6, 7, 8, 9, 16, 17, 18, 19, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35],
+		],
+		wing: [
+			[1, 2, 3, 4, 5, 11, 12, 13, 14, 15, 20, 21, 22, 23, 24, 25, 30, 32, 33, 34, 35],
+			[0, 6, 7, 8, 9, 10, 16, 17, 18, 19, 26, 27, 28, 29, 31, 40, 41, 42, 43, 44, 45],
+		],
+		big: [
+			[0, 5, 12, 13, 21, 23, 30, 31, 32, 33, 34, 35, 40, 41, 42, 44, 45, 50, 51, 52, 54, 55],
+			[1, 2, 3, 4, 10, 11, 14, 15, 20, 22, 24, 25, 43, 53, 56, 57, 58, 59, 60],
+		],
+	};
+	function jerseyFor(p, taken) {
+		const hgt = p.newRatings ? p.newRatings.hgt : 45;
+		const size = hgt < 37 ? "guard" : hgt <= 53 ? "wing" : "big";
+		const r = new Rng("jersey:" + p.key);
+		/* Try the conventional numbers, then the plausible ones, and only then
+		   walk the whole range. Two tiers rather than one because a class is
+		   three or four rosters' worth of people: with one tier the first
+		   twenty guards took every guard number and the rest fell through to
+		   "the lowest free integer", which put half the guards in the fifties
+		   and made the convention read as noise. */
+		for (const pool of JERSEY_BY_SIZE[size]) {
+			for (let i = 0; i < 60; i++) {
+				const n = pool[r.int(0, pool.length - 1)];
+				if (!taken.has(n)) { taken.add(n); return n; }
+			}
+			// Deterministic sweep of this tier before moving to the next.
+			for (const n of pool) if (!taken.has(n)) { taken.add(n); return n; }
+		}
+		// Every plausible number is gone: walk the legal range.
+		for (let n = 0; n <= 99; n++) if (!taken.has(n)) { taken.add(n); return n; }
+		return 0;
+	}
+
 	/* opts.awardsScope: "all" (every honor, the old behaviour and the default)
 	   or "major" (national honors plus the power/named-conference rows). The
 	   predicate lives in js/awards.js because that is where the strings are
@@ -4236,6 +4287,13 @@
 		// otherwise silently give every duplicate the same rebuilt ratings.
 		const byIdx = result.players;
 		let passthroughs = 0;
+		/* Shirt numbers already spoken for, so a class does not import with
+		   three number 23s. Seeded with whatever the source file had. */
+		const jerseysTaken = new Set();
+		for (const orig of src.players) {
+			const n = Number(orig && orig.jerseyNumber);
+			if (Number.isFinite(n)) jerseysTaken.add(n);
+		}
 
 		const players = src.players.map((orig, i) => {
 			const p = byIdx[i] && byIdx[i].src === orig ? byIdx[i] : null;
@@ -4302,6 +4360,35 @@
 			   traitCount of 0 leaves BBGM's own roll alone. */
 			if (opts.moodTraits !== false && p.moodTraits && p.moodTraits.length) {
 				out.moodTraits = p.moodTraits.slice();
+			}
+			/* JERSEY NUMBER. BBGM reads `jerseyNumber` and the tool never
+			   wrote one, so a whole imported class arrived numberless or with
+			   BBGM's own draw. Assigned by position convention off the
+			   player's own key, so it survives a re-run: guards take the
+			   single digits and the low teens, wings the teens and twenties,
+			   bigs the thirties, forties and fifties. Unique within the class
+			   because a class becomes a roster. */
+			if (opts.jerseys !== false && !Number.isFinite(Number(orig.jerseyNumber))) {
+				out.jerseyNumber = String(jerseyFor(p, jerseysTaken));
+			}
+			/* INJURY HISTORY. BBGM's player schema carries `injuries[]` as
+			   {season, games, type}, and the season the tool simulates already
+			   knows exactly that — it decides who missed games, for how many,
+			   and why. Writing it makes "injury-prone" a fact inside the game
+			   rather than a sentence in a note. */
+			if (opts.injuries && p.availability && p.availability.injury &&
+				p.availability.games > 0) {
+				const rows = (Array.isArray(out.injuries) ? out.injuries : [])
+					.filter((r) => !r || Number(r.season) !== Number(result.season));
+				rows.push({
+					season: result.season,
+					games: Math.round(p.availability.games),
+					// BBGM's own strings are capitalised nouns; ours read "a
+					// back strain" because they are written into prose.
+					type: Text.capitalize(String(p.availability.kind || "injury")
+						.replace(/^an? /, "")),
+				});
+				out.injuries = rows;
 			}
 			/* opts.noteAppend: keep a note the file already carried and put
 			   the generated one underneath. Off by default, because the

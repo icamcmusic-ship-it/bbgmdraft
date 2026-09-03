@@ -909,6 +909,48 @@ function ok(name, condition, detail) {
 			(await page.locator("#view").innerHTML()).length > 2000);
 	}
 
+	console.log("\nA game's box score");
+	{
+		await page.evaluate(() => {
+			const st = window.App.state;
+			const res = st.results[st.active];
+			const t = Object.values(res.teams).filter((x) => x.prospects.length >= 1)[0];
+			window.App.showTeam(t.name);
+		});
+		await page.waitForTimeout(350);
+		const gameLinks = page.locator("#view table tbody td.num button.linky");
+		ok("every schedule row opens a box score",
+			(await gameLinks.count()) >= 25, String(await gameLinks.count()));
+		await gameLinks.first().click();
+		await page.waitForTimeout(350);
+		const text = await page.locator("#view").innerText();
+		ok("the box score names both teams and the score",
+			/ at .+\d/.test(text.split("\n")[1] || ""), text.split("\n").slice(0, 3).join(" | "));
+		const heads = await page.locator("#view table thead th").allInnerTexts();
+		ok("and carries a real box-score header",
+			heads.indexOf("MIN") !== -1 && heads.indexOf("+/-") !== -1 &&
+			heads.indexOf("FG") !== -1, heads.join(","));
+		const cell = await page.locator("#view table tbody tr td").nth(9).innerText();
+		ok("with makes-of-attempts shooting", /^\d+-\d+$/.test(cell.trim()), cell);
+		ok("and says what it is not showing",
+			/returning rotation/.test(text));
+		/* The two lines have to be the same game seen from two sides. */
+		const consistent = await page.evaluate(() => {
+			const st = window.App.state;
+			const res = st.results[st.active];
+			const cut = st.game.lastIndexOf("|");
+			const home = res.teams[st.game.slice(0, cut)];
+			const g = home.log[Number(st.game.slice(cut + 1))];
+			const away = res.teams[g.opp];
+			const mirror = away.log.filter((x) => x.opp === home.name &&
+				Math.abs(x.when - g.when) < 1e-9)[0];
+			return !!mirror && mirror.pf === g.pa && mirror.pa === g.pf;
+		});
+		ok("and the opponent's schedule agrees with it", consistent);
+		await page.evaluate(() => { window.App.showGame(null); window.App.showTeam(null); });
+		await page.waitForTimeout(250);
+	}
+
 	console.log("\nThe season's storylines");
 	{
 		await page.locator("#tabs button", { hasText: "Prospects" }).first().click();

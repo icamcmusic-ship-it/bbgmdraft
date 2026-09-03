@@ -56,6 +56,9 @@
 		compare: [null, null, null, null],
 		// The program whose page the Teams tab is showing, if any.
 		team: null,
+		/* The box score currently open, as "Team|gameIndex". A game is a
+		   destination like a team or a player page. */
+		game: null,
 		standingsConf: null,
 		compactBracket: false,
 		theme: "system", // see THEMES below
@@ -126,6 +129,7 @@
 				standingsConf: state.standingsConf,
 				player: state.player,
 				team: state.team,
+				game: state.game,
 				universe: {
 					rows: state.universe.rows, threads: state.universe.threads,
 					alumni: state.universe.alumni, baseSeed: state.universe.baseSeed,
@@ -277,6 +281,7 @@
 			};
 		}
 		if (validString(saved.team)) state.team = saved.team;
+		if (validString(saved.game)) state.game = saved.game;
 		if (validString(saved.density, ["normal", "compact", "comfortable"])) state.density = saved.density;
 		if (validString(saved.cardView, ["auto", "on", "off"])) state.cardView = saved.cardView;
 		state.cardAll = !!saved.cardAll;
@@ -671,6 +676,9 @@
 			? "Overalls are re-dealt along a configurable curve; the class can get better or worse."
 			: "Each prospect keeps the overall BBGM gave him. Only his build changes.";
 		$("awardInteractionHint").textContent = awardInteractionHint();
+		/* The filter reads the labels and hints paintConfig just wrote, so it
+		   runs after it rather than only on a keystroke. */
+		applySettingFilter();
 		paintEra();
 		paintPhaseCosts();
 		paintPresets();
@@ -739,7 +747,18 @@
 			if ((phases[i].deps || []).indexOf(key) !== -1 && best === -1) best = i;
 		}
 		if (best === -1) return null;
-		return PHASE_COST[phases[best].name] || phases[best].name;
+		return {
+			text: PHASE_COST[phases[best].name] || phases[best].name,
+			phase: phases[best].name,
+			/* Three bands, because a reader dragging a slider needs to know
+			   which of three things happens and not a number of milliseconds:
+			   green is a repaint, amber re-simulates the season, red rebuilds
+			   the class. The text was there and it was text, which is not
+			   something anybody reads while dragging. */
+			band: phases[best].name === "build" ? "dear"
+				: (phases[best].name === "regular" || phases[best].name === "postseason" ||
+					phases[best].name === "stats") ? "mid" : "cheap",
+		};
 	}
 	function paintPhaseCosts() {
 		for (const key of SLIDERS.concat(
@@ -755,7 +774,14 @@
 				tag = el("p", "rerun");
 				ctl.appendChild(tag);
 			}
-			tag.textContent = "re-runs: " + cost;
+			tag.className = "rerun phasecost " + cost.band;
+			tag.textContent = (cost.band === "cheap" ? "● " : cost.band === "mid" ? "◐ " : "○ ") +
+				"re-runs: " + cost.text;
+			tag.title = cost.band === "cheap"
+				? "Milliseconds: nothing is re-simulated."
+				: cost.band === "mid"
+				? "The season is re-simulated — a few hundred milliseconds."
+				: "The whole class is rebuilt, and every player in it changes.";
 		}
 	}
 
@@ -1171,16 +1197,127 @@
 			". Ctrl+Z restores them in one step.");
 	}
 
+	/* The randomizer's scopes, as chips rather than a <select>.
+
+	   Eight scopes in a dropdown is two clicks and a menu to read every time,
+	   for a control whose whole point is that you press it repeatedly. A row
+	   of chips is one click and the current scope is visible without opening
+	   anything. */
+	const SCOPE_CHIPS = [
+		["gentle", "gently", "Draw near each setting's default"],
+		["wide", "wide open", "Draw across each slider's whole range"],
+		["quality", "quality", "Class quality and depth only"],
+		["builds", "builds", "Builds only"],
+		["years", "years", "Class years and paths only"],
+		["destinations", "destinations", "Destinations only"],
+		["season", "season", "College season only"],
+		["awards", "awards", "Awards only"],
+	];
+	function paintRandomScope() {
+		const box = $("randomScope");
+		if (!box) return;
+		/* The chips have to be the scopes the randomizer knows, or a chip is a
+		   button that silently falls back to "gently". RANDOM_SCOPES is the
+		   authority; this asserts the two agree rather than trusting them to.
+		   Cheap, and the failure it prevents is invisible. */
+		for (const [value] of SCOPE_CHIPS) {
+			if (RANDOM_SCOPES.indexOf(value) === -1) {
+				setStatus("Internal: unknown randomize scope " + value);
+			}
+		}
+		box.innerHTML = "";
+		for (const [value, label, title] of SCOPE_CHIPS) {
+			const b = el("button", "chip" + (state.randomScope === value ? " on" : ""), label);
+			b.type = "button";
+			b.title = title;
+			b.setAttribute("role", "radio");
+			b.setAttribute("aria-checked", state.randomScope === value ? "true" : "false");
+			b.dataset.scope = value;
+			b.addEventListener("click", () => {
+				state.randomScope = value;
+				persist();
+				paintRandomScope();
+				paintRandomizeHint();
+			});
+			box.appendChild(b);
+		}
+	}
+
 	function bindRandomize() {
-		const scope = $("randomScope");
 		const btn = $("btnRandomize");
-		if (!scope || !btn) return;
-		scope.value = state.randomScope;
-		scope.addEventListener("change", () => {
-			state.randomScope = scope.value;
-			persist();
-		});
-		btn.addEventListener("click", () => randomizeSettings(scope.value));
+		if (!btn) return;
+		paintRandomScope();
+		btn.addEventListener("click", () => randomizeSettings(state.randomScope));
+	}
+
+	/* ------------------------------------------------- the settings filter
+
+	   Eighty-odd controls in one column, and the only way to find one was to
+	   scroll. Two filters, because they answer the two questions people
+	   actually have: "where is the pace slider" and "what have I changed".
+
+	   Implemented over the live DOM rather than by rebuilding the panel: the
+	   panel carries open/closed state, focus and scroll position, and
+	   rebuilding it would throw all three away every keystroke. */
+	function settingText(ctl) {
+		const label = ctl.querySelector("label");
+		const input = ctl.querySelector("input, select");
+		return ((label ? label.textContent : "") + " " +
+			(input ? input.id : "") + " " +
+			(ctl.querySelector(".unit") ? ctl.querySelector(".unit").textContent : ""))
+			.toLowerCase();
+	}
+	function applySettingFilter() {
+		const box = $("settingSearch");
+		const onlyChanged = $("onlyChanged");
+		const note = $("settingSearchNote");
+		if (!box) return;
+		const q = box.value.trim().toLowerCase();
+		const changedOnly = onlyChanged && onlyChanged.checked;
+		const D = CFG.DEFAULTS;
+		let shown = 0;
+		let total = 0;
+		for (const grp of document.querySelectorAll("#panel details.grp")) {
+			let any = 0;
+			for (const ctl of grp.querySelectorAll(".ctl")) {
+				const input = ctl.querySelector("input, select");
+				const key = input && input.id;
+				total++;
+				let show = true;
+				if (q && settingText(ctl).indexOf(q) === -1) show = false;
+				if (show && changedOnly && key && key in D) {
+					const cur = state.cfg[key];
+					const def = D[key];
+					const same = typeof cur === "object" || typeof def === "object"
+						? JSON.stringify(cur) === JSON.stringify(def)
+						: cur === def;
+					if (same) show = false;
+				}
+				ctl.hidden = !show;
+				if (show) { any++; shown++; }
+			}
+			/* A group with nothing in it is hidden rather than left as an
+			   empty heading, and a group with a match is opened — otherwise
+			   searching finds a setting inside a collapsed section and shows
+			   you the section's title. */
+			grp.hidden = any === 0;
+			if ((q || changedOnly) && any > 0) grp.open = true;
+		}
+		if (note) {
+			note.textContent = (q || changedOnly)
+				? shown + " of " + total + " settings" +
+					(shown === 0 ? " — nothing matches" : "")
+				: "";
+		}
+	}
+	function bindSettingFilter() {
+		const box = $("settingSearch");
+		const onlyChanged = $("onlyChanged");
+		if (box) {
+			box.addEventListener("input", applySettingFilter);
+			box.addEventListener("search", applySettingFilter);
+		}
+		if (onlyChanged) onlyChanged.addEventListener("change", applySettingFilter);
 	}
 
 	/* Per-setting locks. Locks existed per-player per-field and presets exist
@@ -2551,7 +2688,10 @@
 	   settings+seed payload stays in the hash exactly as before — this rides
 	   on pushState so the two never fight over the URL. */
 	function navState() {
-		return { tab: state.tab, team: state.team || null, player: state.player || null };
+		return {
+			tab: state.tab, team: state.team || null, player: state.player || null,
+			game: state.game || null,
+		};
 	}
 
 	function pushNav() {
@@ -2570,7 +2710,18 @@
 
 	function showTeam(name) {
 		state.team = name || null;
+		// A team page and a box score are two destinations, not one nested in
+		// the other: opening a team clears whatever game was open.
+		state.game = null;
 		if (name) state.tab = "teams";
+		pushNav();
+		persist();
+		render();
+	}
+
+	function showGame(ref) {
+		state.game = ref || null;
+		if (ref) state.tab = "teams";
 		pushNav();
 		persist();
 		render();
@@ -2582,6 +2733,7 @@
 		state.tab = st.tab || state.tab;
 		state.team = st.team;
 		state.player = st.player;
+		state.game = st.game || null;
 		render();
 	});
 
@@ -3421,6 +3573,12 @@
 
 	function copyText(text, button, restore) {
 		const done = () => {
+			/* Announce it. The seed pill's copy changed the BUTTON's text and
+			   nothing else, so a screen reader user pressing it got no
+			   confirmation at all — and the pill itself is not a button, so
+			   there was not even that. announce() is the tool's own live
+			   region and costs nothing. */
+			announce("Copied: " + String(text).slice(0, 60));
 			if (!button) return;
 			button.textContent = "Copied ✓";
 			setTimeout(() => { button.textContent = restore; }, 1400);
@@ -3451,11 +3609,36 @@
 		if (messages.length > 200) messages.shift();
 	}
 
+	/* THE LIVE REGION.
+
+	   #status carries role="status", and it is also hidden and unhidden — and
+	   an assistive technology does not reliably announce text that appears in
+	   an element that was `hidden` a moment ago, because the element was not in
+	   the accessibility tree to be watched. So there is one region that is
+	   always present, visually hidden, and only ever has text written into it.
+
+	   Everything that used to be announced only by changing a button's label —
+	   a copy, a sort level added or removed — goes through here too. */
+	function announce(text) {
+		let live = $("liveRegion");
+		if (!live) {
+			live = el("p", "visually-hidden");
+			live.id = "liveRegion";
+			live.setAttribute("role", "status");
+			live.setAttribute("aria-live", "polite");
+			document.body.appendChild(live);
+		}
+		/* Same string twice in a row is not announced twice by most screen
+		   readers; a zero-width space makes it a new string without making it
+		   a different sentence. */
+		live.textContent = live.textContent === text ? text + "\u200b" : text;
+	}
+
 	function setStatus(text, sticky) {
 		const s = $("status");
 		s.textContent = text;
 		s.hidden = !text;
-		if (text) remember(text);
+		if (text) { remember(text); announce(text); }
 		if (!sticky) setTimeout(() => { if (s.textContent === text) s.hidden = true; }, 3500);
 	}
 
@@ -3921,6 +4104,17 @@
 			"this a graduate transfer imports as a 19-year-old and BBGM develops " +
 			"him like one. Skipped automatically when the source file's own ages " +
 			"already vary."));
+		const oInjuries = opt("injuries", "Write the season's injuries into BBGM's injuries[]", true);
+		optBox.appendChild(el("p", "unit",
+			"BBGM's player schema carries an injury history and the tool never " +
+			"wrote one, so “injury-prone” was a sentence in a note and nothing " +
+			"inside the game. Survives the draft-class import."));
+		const oJerseys = opt("jerseys", "Assign jersey numbers by position", true);
+		optBox.appendChild(el("p", "unit",
+			"Guards take the single digits and low teens, wings the teens and " +
+			"twenties, bigs the thirties and up — unique within the class, " +
+			"because a class becomes a roster. Skipped for a player who already " +
+			"has a number."));
 		const oNoteAppend = opt("noteAppend", "Keep any note already in the file");
 		optBox.appendChild(el("p", "unit",
 			"The generated note replaces whatever the file carried. Tick this to " +
@@ -3930,6 +4124,7 @@
 		const exportOpts = () => ({
 			stats: oStats(), prior: oPrior(), highs: oHighs(), awards: oAwards(),
 			ages: oAges(), noteAppend: oNoteAppend(),
+			injuries: oInjuries(), jerseys: oJerseys(),
 			awardsScope: scopeSel.value,
 			majorConferences: confInput.value.split(",")
 				.map((x) => x.trim()).filter(Boolean),
@@ -4380,11 +4575,11 @@
 	Object.assign(global.App, {
 		state, render, run, persist, openEditor, revealPlayer, visibleRows,
 		editorPanel, modal, closeModal,
-		clearLock, showPlayer, showTeam,
+		clearLock, showPlayer, showTeam, showGame,
 		runUniverse, exportUniverse, importUniverse,
 		// Exposed for tools/uismoke.js, which loads files without a file input.
 		installFiles, paintConfig,
-		copyText, bulkApply, bulkShiftOvr, bulkLockAsIs, bulkClear, refreshBulkBar,
+		copyText, announce, bulkApply, bulkShiftOvr, bulkLockAsIs, bulkClear, refreshBulkBar,
 		snapshot,
 		exportCsv, setStatus, showError, indexSnapshot,
 	});
@@ -4400,6 +4595,7 @@
 	bindConfig();
 	bindSliderNumbers();
 	bindRandomize();
+	bindSettingFilter();
 	bindFiles();
 	applyTheme();
 	paintConfig();
