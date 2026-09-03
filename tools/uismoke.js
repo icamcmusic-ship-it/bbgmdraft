@@ -363,9 +363,36 @@ function ok(name, condition, detail) {
 	ok("the export menu offers Markdown notes, a message history and a preset diff",
 		/Markdown/.test(menuText) && /Message history/.test(menuText) &&
 		/Compare two presets/.test(menuText), menuText.replace(/\n/g, " · ").slice(0, 140));
-	ok("the statline export options name the import that discards them",
-		/Draft.{0,40}Import.{0,80}deletes every uploaded player's stats/.test(menuText),
-		menuText.replace(/\n/g, " · ").slice(0, 400));
+	/* The three import routes, as a table. Which checkbox matters depends
+	   entirely on which door the user is about to walk through, so the table
+	   has to say per route what survives it — a paragraph saying the same
+	   thing is what this replaced. */
+	const routeRows = await page.locator("#modal table.routes tbody tr").allInnerTexts();
+	ok("the export dialog tables what each BBGM import route keeps",
+		routeRows.length === 3 &&
+		/Draft/.test(routeRows[0]) && /deleted on upload/.test(routeRows[0]) &&
+		/Import players/.test(routeRows[1]) && /Include stats/.test(routeRows[1]) &&
+		/folded into the note/.test(routeRows[1]) &&
+		/league file/.test(routeRows[2]),
+		routeRows.join(" || ").replace(/\n/g, " · ").slice(0, 400));
+	/* The award scope, and the count it promises to write. */
+	ok("the export dialog offers a major-awards scope with a live count",
+		/major honors only/.test(menuText) && /honor rows in this class/.test(menuText),
+		menuText.replace(/\n/g, " · ").slice(0, 300));
+	{
+		const before = await page.locator("#modal .unit", { hasText: "honor rows" })
+			.first().innerText();
+		await page.locator("#exportAwardsScope").selectOption("major");
+		await page.waitForTimeout(150);
+		const after = await page.locator("#modal .unit", { hasText: "honor rows" })
+			.first().innerText();
+		const n = (t) => Number((t.match(/(\d+)/) || [0, 0])[1]);
+		ok("choosing major honors reports a smaller count",
+			n(after) > 0 && n(after) < n(before), before + " -> " + after);
+		ok("and reveals the conference list to edit",
+			await page.locator("#exportMajorConfs").isVisible());
+		await page.locator("#exportAwardsScope").selectOption("all");
+	}
 	ok("and the export menu offers both routes that keep them",
 		/Players file, for Tools/.test(menuText) &&
 		/Merge into a league file/.test(menuText),
