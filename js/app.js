@@ -3484,6 +3484,12 @@
 	function csvJoin(lines) { return lines.join(CSV_EOL) + CSV_EOL; }
 
 	function exportCsv(res, everyone) {
+		/* The CSV honours the award scope the export dialog is set to, for the
+		   same reason the JSON does: a spreadsheet of prospects whose Awards
+		   column runs to twenty-two conference rows is a spreadsheet nobody
+		   reads either. */
+		const scope = state.exportAwardsScope || "all";
+		const confs = state.exportMajorConfs || null;
 		const lines = [CSV_COLS.join(",")];
 		let skipped = 0;
 		for (const p of res.players) {
@@ -3504,7 +3510,7 @@
 				s.fga, s.tpa, s.fta, d("tpar"), d("ftr"), d("efg"), d("astTo"),
 				d("ortg"), d("prod"),
 				s.usg, s.fgp, s.tpp, s.ftp, s.ts,
-				(p.awards || []).join("; "),
+				global.Awards.scopeAwards(p.awards, scope, confs).join("; "),
 			].map((v) => esc(typeof v === "number" && Number.isFinite(v)
 				? Number(v.toFixed(3)) : v)).join(","));
 		}
@@ -3548,7 +3554,10 @@
 				.map(esc).join(","));
 		}
 		for (const a of season.awards) {
-			lines.push(["award", a.name, a.school, a.awards.join("; "), "", ""].map(esc).join(","));
+			const scoped = global.Awards.scopeAwards(
+				a.awards, state.exportAwardsScope || "all", state.exportMajorConfs || null);
+			if (!scoped.length) continue;
+			lines.push(["award", a.name, a.school, scoped.join("; "), "", ""].map(esc).join(","));
 		}
 		for (const b of season.board) {
 			lines.push(["board", b.rank, b.name, b.school, b.round || "", b.pick || ""]
@@ -3776,7 +3785,89 @@
 		const oPrior = opt("prior", "…and prior seasons");
 		const oHighs = opt("highs", "…and game-log season highs");
 		const oAwards = opt("awards", "Include college awards");
+		/* WHICH awards. A good prospect finishes a season holding fifteen to
+		   twenty-two honors and BBGM renders every one as its own row, so a
+		   player page arrives buried under All-Sun Belt Newcomer Team and
+		   conference all-freshman nods with the three lines a reader wants
+		   somewhere in the middle. Measured over six classes: 114 distinct
+		   types, 2.4 honors a player, 22 on the most decorated. "Major" is
+		   the national trophies plus the power and named-conference rows —
+		   see isMajorAward in js/awards.js for exactly what counts. */
+		const scopeWrap = el("div", "ctl");
+		const scopeLab = el("label", null, "Which awards");
+		scopeLab.htmlFor = "exportAwardsScope";
+		const scopeSel = el("select");
+		scopeSel.id = "exportAwardsScope";
+		scopeSel.appendChild(new Option("every honor (the default)", "all"));
+		scopeSel.appendChild(new Option("major honors only", "major"));
+		scopeSel.value = state.exportAwardsScope || "all";
+		const scopeHint = el("p", "unit");
+		const confWrap = el("div", "ctl");
+		const confLab = el("label", null, "Conferences that count");
+		confLab.htmlFor = "exportMajorConfs";
+		const confInput = el("input");
+		confInput.id = "exportMajorConfs";
+		confInput.type = "text";
+		confInput.value = (state.exportMajorConfs ||
+			global.Awards.MAJOR_CONFERENCES).join(", ");
+		confWrap.appendChild(confLab);
+		confWrap.appendChild(confInput);
+		confWrap.appendChild(el("p", "unit",
+			"A conference player of the year, defensive player of the year, " +
+			"freshman of the year, all-conference first team and tournament MVP " +
+			"count for these; every other conference's rows are dropped."));
+		const paintScope = () => {
+			const major = scopeSel.value === "major";
+			confWrap.hidden = !major;
+			if (!res) { scopeHint.textContent = ""; return; }
+			const conf = confInput.value.split(",").map((x) => x.trim()).filter(Boolean);
+			let all = 0;
+			let kept = 0;
+			for (const p of res.players || []) {
+				all += (p.awards || []).length;
+				kept += global.Awards.scopeAwards(p.awards, "major", conf).length;
+			}
+			scopeHint.textContent = major
+				? kept + " of " + all + " honor rows in this class survive."
+				: all + " honor rows in this class.";
+		};
+		scopeSel.addEventListener("change", () => {
+			state.exportAwardsScope = scopeSel.value;
+			paintScope();
+		});
+		confInput.addEventListener("input", () => {
+			state.exportMajorConfs = confInput.value.split(",")
+				.map((x) => x.trim()).filter(Boolean);
+			paintScope();
+		});
+		scopeWrap.appendChild(scopeLab);
+		scopeWrap.appendChild(scopeSel);
+		scopeWrap.appendChild(scopeHint);
+		optBox.appendChild(scopeWrap);
+		optBox.appendChild(confWrap);
+		/* Age. Off is the old behaviour — every prospect keeps the birth year
+		   BBGM gave the whole class, which puts a fifth-year senior on the
+		   draft screen at 19 and hands him a nineteen-year-old's development
+		   curve. See AGE_FOR_CLASS in js/engine.js. */
+		const oAges = opt("ages", "Rewrite ages to match the class years", true);
+		optBox.appendChild(el("p", "unit",
+			"Every player in a BBGM draft class shares a birth year, so without " +
+			"this a graduate transfer imports as a 19-year-old and BBGM develops " +
+			"him like one. Skipped automatically when the source file's own ages " +
+			"already vary."));
+		const oNoteAppend = opt("noteAppend", "Keep any note already in the file");
+		optBox.appendChild(el("p", "unit",
+			"The generated note replaces whatever the file carried. Tick this to " +
+			"add it underneath instead, for a file whose notes you edited in BBGM."));
 		list.appendChild(optBox);
+		paintScope();
+		const exportOpts = () => ({
+			stats: oStats(), prior: oPrior(), highs: oHighs(), awards: oAwards(),
+			ages: oAges(), noteAppend: oNoteAppend(),
+			awardsScope: scopeSel.value,
+			majorConferences: confInput.value.split(",")
+				.map((x) => x.trim()).filter(Boolean),
+		});
 		/* Every one of these sentences is a fixed fact about BBGM's own import
 		   code, not a preference:
 
@@ -3797,26 +3888,49 @@
 
 		   So the dialog says which door gives you what rather than pretending
 		   there is one right answer. */
+		/* The three routes as a TABLE, beside the checkboxes rather than as a
+		   paragraph above them: which checkbox matters depends entirely on
+		   which door the user is about to walk through, and a reader deciding
+		   between three doors should not have to parse a sentence to find the
+		   column he is in. Every cell is a fixed fact about BBGM's own import
+		   code (see the comment above), not a preference. */
+		const routes = el("div", "scroll");
+		const rt = el("table", "routes");
+		const rhead = el("thead");
+		const rhr = el("tr");
+		for (const h of ["Route", "Statline", "Awards", "Note", "Replaces the class"]) {
+			rhr.appendChild(el("th", null, h));
+		}
+		rhead.appendChild(rhr);
+		rt.appendChild(rhead);
+		const rtb = el("tbody");
+		for (const row of [
+			["Draft → [year] → Import", "no — deleted on upload", "yes", "yes", "yes"],
+			["Tools → Import players", "yes, tick “Include stats”", "no — folded into the note",
+				"yes", "no, it adds"],
+			["Merge into a league file", "yes", "yes", "yes", "yes"],
+		]) {
+			const tr = el("tr");
+			for (const c of row) tr.appendChild(el("td", null, c));
+			rtb.appendChild(tr);
+		}
+		rt.appendChild(rtb);
+		routes.appendChild(rt);
+		list.appendChild(routes);
 		list.appendChild(el("p", "hint",
-			"Draft → [year] → Import deletes every uploaded player's stats " +
-			"before it reads the file: awards and notes come through it, the " +
-			"statline cannot. Tools → Import players (“Include stats”) is the " +
-			"mirror image — the statline comes through, honors do not, so the " +
-			"export writes them into the note as well, and BBGM stamps every " +
-			"imported season's team “DNE” itself. Only a league file keeps " +
-			"both, which is what the merge does."));
+			"Tools → Import players also stamps every imported season's team " +
+			"“DNE” itself, whatever team the file named — that is BBGM, not " +
+			"this export."));
 		item("BBGM class file, with the options above", () => {
-			if (exportOne(state.active, {
-				stats: oStats(), prior: oPrior(), highs: oHighs(), awards: oAwards(),
-			})) setStatus("Exported " + state.files[state.active].name + ".");
+			if (exportOne(state.active, exportOpts())) {
+				setStatus("Exported " + state.files[state.active].name + ".");
+			}
 		});
 		item("Players file, for Tools → Import players (keeps the statline)", () => {
 			const res2 = ensureResult(state.active);
 			if (!res2) return;
 			try {
-				const out = global.Engine.exportPlayersFile(res2, {
-					stats: oStats(), prior: oPrior(), highs: oHighs(), awards: oAwards(),
-				});
+				const out = global.Engine.exportPlayersFile(res2, exportOpts());
 				const base = state.files[state.active].name.replace(/\.json$/i, "");
 				download(base + "_players.json", "\ufeff" + JSON.stringify(out, null, 2),
 					"application/json");
@@ -3827,9 +3941,7 @@
 			}
 		});
 		item("Merge into a league file… (keeps the statline AND the awards)", () => {
-			state.mergeOpts = {
-				stats: oStats(), prior: oPrior(), highs: oHighs(), awards: oAwards(),
-			};
+			state.mergeOpts = exportOpts();
 			$("leagueMergeFile").click();
 		});
 		item("Prospect table as CSV (the current filter)", () => exportCsv(res));

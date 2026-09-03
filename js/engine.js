@@ -4040,7 +4040,21 @@
 			out.draft = Object.assign({}, out.draft, {
 				ovr: p.newOvr, pot: p.newPot, skills: p.newSkills.slice(),
 			});
-			out.note = p.note;
+			/* opts.noteAppend: keep a note the file already carried and put
+			   the generated one underneath. Off by default, because the
+			   generated note is a complete replacement and a user who never
+			   edited notes in BBGM does not want two of them — but a user who
+			   DID edit them had no way to keep his own, and the export
+			   silently overwrote them. Any previous Honors: line is dropped
+			   either way; that one is ours. */
+			if (opts.noteAppend && String(orig.note || "").trim()) {
+				const keep = String(orig.note).split("\n")
+					.filter((l) => l.indexOf("Honors:") !== 0).join("\n").trim();
+				out.note = keep && keep !== String(p.note || "").trim()
+					? keep + "\n\n" + p.note : p.note;
+			} else {
+				out.note = p.note;
+			}
 
 			/* Guarded on the FLAG, not on whether this player won anything.
 			   Keying it on p.awards.length left a man who was an All-American in

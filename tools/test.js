@@ -3218,10 +3218,184 @@ console.log("\nAudit regressions (September 2026)");
 				catch (e) { return /league file/.test(e.message); }
 			})());
 		}
-		ok("awards:true concatenates every honor as {season, type}",
+		ok("awards:true writes every honor as {season, type}",
 			row.awards.length >= (withStats.awards || []).length &&
 			row.awards.every((a) => Number.isFinite(a.season) && typeof a.type === "string"));
 	}
+}
+
+console.log("\nExport: the round trip, ages, award scope and notes");
+{
+	const V2 = V;
+	const base = V2.realisticClass(11, 70);
+	const cfg = () => global.Config.make({ seed: "export-rt" });
+	const countAwards = (f) => f.players.reduce(
+		(a, p) => a + ((p.awards || []).length), 0);
+
+	/* THE ROUND TRIP.
+
+	   Export, re-import, export again. `awards` is one of the two fields
+	   BBGM's draft-class import keeps, so the file coming back in already
+	   carries the rows exportFile is about to write, and the old code
+	   concatenated: 181 rows became 368 on the second pass and 736 on the
+	   third. A dedupe on {season, type} is NOT enough and this test is why —
+	   a re-import re-simulates the season, so the second run mints different
+	   honors for the same year and the file converges on the union of every
+	   simulation anybody ever ran. The invariant is stronger: after any number
+	   of round trips the file holds exactly what the last run produced. */
+	{
+		let file = base;
+		const rows = [];
+		for (let i = 0; i < 4; i++) {
+			const res = global.Engine.run(file, cfg());
+			const own = res.players.reduce((a, p) => a + ((p.awards || []).length), 0);
+			file = global.Engine.exportFile(res, { awards: true });
+			rows.push([own, countAwards(file)]);
+		}
+		ok("a re-exported file holds exactly the honors the run produced",
+			rows.every(([own, inFile]) => own === inFile),
+			rows.map((r) => r.join("/")).join(" "));
+		ok("and four round trips do not accumulate",
+			countAwards(file) < rows[0][0] * 1.6,
+			rows.map((r) => r[1]).join(" -> "));
+		/* The specific residue a {season, type} dedupe leaves: a player who
+		   won something last run and nothing this run. The old guard was on
+		   p.awards.length, so the replacement never ran for him. */
+		const res = global.Engine.run(file, cfg());
+		const out = global.Engine.exportFile(res, { awards: true });
+		let stale = 0;
+		for (let i = 0; i < out.players.length; i++) {
+			if ((res.players[i].awards || []).length === 0 &&
+				(out.players[i].awards || []).length > 0) stale++;
+		}
+		ok("a player who won nothing this run keeps nothing", stale === 0, stale + " stale");
+		/* Honors at another season are not ours and are left alone. */
+		const withHistory = JSON.parse(JSON.stringify(base));
+		withHistory.players[0].awards = [{ season: 1999, type: "Some Old Trophy" }];
+		const r2 = global.Engine.run(withHistory, cfg());
+		const f2 = global.Engine.exportFile(r2, { awards: true });
+		ok("an honor from another season survives the rewrite",
+			(f2.players[0].awards || []).some((a) => a.season === 1999));
+	}
+
+	/* AGES. Every player in a BBGM draft class shares a birth year. */
+	{
+		const res = global.Engine.run(base, cfg());
+		const on = global.Engine.exportFile(res, {});
+		const off = global.Engine.exportFile(res, { ages: false });
+		const years = (f) => new Set(f.players.map((p) => p.born.year));
+		ok("ages:true spreads born.year across the class years",
+			years(on).size >= 4, years(on).size + " distinct birth years");
+		ok("ages:false leaves the file's own birth years alone",
+			years(off).size === years(base).size);
+		/* A graduate is 23 and a freshman is 19, and the map is the biography
+		   read back rather than a draw. */
+		const bad = [];
+		for (let i = 0; i < res.players.length; i++) {
+			const p = res.players[i];
+			const age = res.season - on.players[i].born.year;
+			const cy = String(p.classYear || "");
+			const want = /Graduate/.test(cy) ? 23
+				: /Senior/.test(cy) ? 22 : /Junior/.test(cy) ? 21
+				: /Sophomore/.test(cy) ? 20 : 19;
+			const rs = /^Redshirt /.test(cy) ? 1 : 0;
+			const juco = p.transfer && p.transfer.kind === "JUCO transfer" ? 1 : 0;
+			if (age !== Math.min(24, want + rs + juco)) {
+				bad.push(p.name + " " + cy + " -> " + age);
+			}
+		}
+		ok("every age matches the class year it was drawn for",
+			bad.length === 0, bad.slice(0, 4).join("; "));
+	}
+
+	/* AWARD SCOPE. */
+	{
+		const res = global.Engine.run(base, cfg());
+		const all = global.Engine.exportFile(res, { awards: true });
+		const major = global.Engine.exportFile(res, { awards: true, awardsScope: "major" });
+		const power = global.Engine.exportFile(res, {
+			awards: true, awardsScope: "major",
+			majorConferences: ["ACC", "Big Ten", "Big 12", "Big East", "SEC"],
+		});
+		ok("awardsScope major cuts the honor rows substantially",
+			countAwards(major) < countAwards(all) * 0.7 && countAwards(major) > 0,
+			countAwards(all) + " -> " + countAwards(major));
+		ok("a narrower conference list cuts further",
+			countAwards(power) <= countAwards(major),
+			countAwards(major) + " -> " + countAwards(power));
+		const types = new Set();
+		for (const p of major.players) for (const a of (p.awards || [])) types.add(a.type);
+		ok("no finalist, watch list or all-region row survives major scope",
+			![...types].some((t) => /finalist|watch list|honorable mention|All-Region|Late Season/i.test(t)),
+			[...types].filter((t) => /finalist|watch list/i.test(t)).slice(0, 3).join("; "));
+		ok("no conference all-freshman or all-newcomer row survives",
+			![...types].some((t) => /(Freshman|Newcomer|Second) Team$/.test(t)),
+			[...types].filter((t) => /(Freshman|Newcomer|Second) Team$/.test(t)).slice(0, 3).join("; "));
+		ok("the national trophies do survive",
+			[...types].some((t) => /Naismith|Wooden|Consensus|All-American|Award$/.test(t)) ||
+				countAwards(major) < 5,
+			[...types].slice(0, 6).join("; "));
+		/* The note's Honors: line follows the same scope, because on the
+		   Import players route the note is the only place honors survive. */
+		const noted = major.players.filter(
+			(p) => String(p.note || "").indexOf("Honors:") !== -1)[0];
+		if (noted) {
+			const line = String(noted.note).split("\n")
+				.filter((l) => l.indexOf("Honors:") === 0)[0].slice(8);
+			ok("the note's Honors: line follows the same scope",
+				line.split("; ").every((t) => global.Awards.isMajorAward(t.trim())), line);
+		}
+		ok("only one Honors: line, however many times a file is exported",
+			major.players.every((p) => String(p.note || "").split("\n")
+				.filter((l) => l.indexOf("Honors:") === 0).length <= 1));
+	}
+
+	/* NOTES. */
+	{
+		const src = JSON.parse(JSON.stringify(base));
+		src.players[0].note = "My own scouting note.";
+		const res = global.Engine.run(src, cfg());
+		const replaced = global.Engine.exportFile(res, {});
+		const appended = global.Engine.exportFile(res, { noteAppend: true });
+		ok("by default the generated note replaces the file's own",
+			replaced.players[0].note.indexOf("My own scouting note.") === -1);
+		ok("noteAppend keeps it and puts the generated note underneath",
+			appended.players[0].note.indexOf("My own scouting note.") === 0 &&
+			appended.players[0].note.length > "My own scouting note.".length + 20);
+	}
+}
+
+/* isMajorAward, directly. The predicate is a regex list over strings that
+   several different functions mint, so it is worth checking by example
+   rather than only through an export. */
+{
+	const A = global.Awards;
+	const cases = [
+		["Naismith Trophy", true], ["Naismith Trophy finalist", false],
+		["John R. Wooden Award", true], ["Wooden Award Late Season Top 20", false],
+		["Consensus First Team All-American", true],
+		["Associated Press honorable mention", false],
+		["Third Team All-American", true],
+		["All-ACC First Team", true], ["All-ACC Second Team", false],
+		["All-ACC Tournament Team", false], ["All-ACC Freshman Team", false],
+		["ACC Player of the Year", true], ["Ohio Valley Player of the Year", false],
+		["Big Ten Tournament MVP", true], ["MAC Tournament MVP", false],
+		["Final Four Most Outstanding Player", true],
+		["NCAA All-Tournament Team", true], ["NCAA Midwest All-Region Team", false],
+		["Academic All-American", false], ["MEAC Sixth Man of the Year", false],
+		["EuroLeague Rising Star", true], ["All-EuroLeague First Team", true],
+		["B.League MVP", true], ["ABA Cup Final MVP", false],
+		["G League Rookie of the Year", true],
+		["Bob Cousy Award", true], ["Bob Cousy Award finalist", false],
+	];
+	const wrong = cases.filter(([a, want]) => A.isMajorAward(a) !== want);
+	ok("isMajorAward agrees with the specification on 26 examples",
+		wrong.length === 0, wrong.map((w) => w[0]).join("; "));
+	ok("scopeAwards(\"all\") is the identity",
+		A.scopeAwards(["x", "y"], "all").join() === "x,y");
+	ok("an unknown conference can be opted into",
+		A.isMajorAward("Big Sky Player of the Year", ["Big Sky"]) &&
+		!A.isMajorAward("Big Sky Player of the Year"));
 }
 
 console.log("\n" + (failures ? failures + " of " + checks + " checks failed"
