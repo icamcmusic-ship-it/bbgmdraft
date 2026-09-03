@@ -515,6 +515,127 @@
 		return keys.every((k) => have[k] === built[k]);
 	}
 
+	/* ============================================== THE SEASON'S NARRATIVE
+
+	   The class flavor is a statement about the PLAYERS: this is a guard-rich
+	   year, a year of raw bigs, an injury year. Nothing was a statement about
+	   the SEASON — so a wide-open year with no dominant team, a March where
+	   the mid-majors ran, a scandal that cost somebody their season, all had
+	   to arrive by coincidence, and across forty classes the shape of the
+	   season was the same shape every time with different names in it.
+
+	   A narrative is two or three macro storylines drawn per class, each of
+	   which bends a handful of settings the season simulation already reads.
+	   They stack: "a wide-open year" and "the mid-majors run" is a recognisable
+	   season and so is either one alone.
+
+	   Deliberately NOT a second flavor table. A flavor bends the class and is
+	   drawn once; these bend the season and are drawn two or three at a time,
+	   and the difference is what makes a season feel composed rather than
+	   labelled. */
+	const NARRATIVES = [
+		{
+			name: "a dominant favourite", w: 2.0,
+			blurb: "one team was better than everybody all year",
+			bend: { teamMomentum: 1.5, upsetFactor: 0.72, bluebloodDownYears: 0 },
+		},
+		{
+			name: "a wide-open year", w: 2.2,
+			blurb: "nobody separated themselves and March was chaos",
+			bend: { upsetFactor: 1.45, teamMomentum: 0.6, bluebloodDownYears: 2 },
+		},
+		{
+			name: "the mid-majors run", w: 1.6,
+			blurb: "the leagues nobody watches were the story",
+			bend: { midMajorLift: 7, upsetFactor: 1.25 },
+		},
+		{
+			name: "a blue-blood down year", w: 1.5,
+			blurb: "the names on the door had nothing",
+			bend: { bluebloodDownYears: 3, midMajorLift: 3 },
+		},
+		{
+			name: "an attrition season", w: 1.2,
+			blurb: "everybody who mattered missed time",
+			bend: { injuryRate: 1.7, teamMomentum: 1.4 },
+		},
+		{
+			name: "the year of the whistle", w: 1.0,
+			blurb: "officials called everything and nobody scored in the flow",
+			bend: { pace: -3, efficiencyEnv: -0.8 },
+		},
+		{
+			name: "a scoring explosion", w: 1.3,
+			blurb: "the numbers went up everywhere and nobody could guard",
+			bend: { pace: 4, efficiencyEnv: 1.0, scoringEnv: 1 },
+		},
+		{
+			name: "a defensive slog", w: 1.2,
+			blurb: "nothing was easy anywhere",
+			bend: { pace: -4, efficiencyEnv: -1.0, scoringEnv: -1 },
+		},
+		{
+			name: "the map moved", w: 1.1,
+			blurb: "realignment was the offseason's only story",
+			bend: { realignmentRate: 0.95, seasonEvents: 10 },
+		},
+		{
+			name: "a chaotic sideline", w: 1.0,
+			blurb: "coaches were fired all year and hired all April",
+			bend: { coachTurnover: 175, seasonEvents: 10 },
+		},
+		{
+			name: "a season of streaks", w: 1.4,
+			blurb: "every team in the country ran hot and cold",
+			bend: { teamMomentum: 1.9, statNoise: 1.25 },
+		},
+		{
+			name: "chalk all the way", w: 1.1,
+			blurb: "the seeds held and the favourites won",
+			bend: { upsetFactor: 0.5, teamMomentum: 1.2, midMajorLift: 0 },
+		},
+	];
+
+	/* Draw the season's storylines and fold their bends into the config.
+
+	   Same rule as the class flavor: a setting the user has changed is left
+	   alone (subject to flavorReach), so a narrative moves what nobody has
+	   decided. Where two storylines bend the same setting the LAST one drawn
+	   wins rather than the two being averaged — "a wide-open year" and "chalk
+	   all the way" is a contradiction, and averaging two contradictions gives
+	   an ordinary season, which is the outcome this exists to avoid. */
+	function applyNarrative(cfg, rng) {
+		if (!cfg || cfg.narrative === false) return { cfg, narrative: [] };
+		const pool = NARRATIVES.slice();
+		const n = rng.random() < 0.35 ? 3 : 2;
+		const drawn = [];
+		for (let i = 0; i < n && pool.length; i++) {
+			const pick = rng.weighted(pool, (x) => x.w);
+			pool.splice(pool.indexOf(pick), 1);
+			drawn.push(pick);
+		}
+		const D = global.Config.DEFAULTS;
+		const reach = clamp(
+			(cfg.flavorReach === undefined ? 0 : cfg.flavorReach) / 100, 0, 1);
+		const out = Object.assign({}, cfg);
+		for (const story of drawn) {
+			for (const k of Object.keys(story.bend)) {
+				const touched = cfg[k] !== D[k];
+				if (touched) {
+					if (reach <= 0 || rng.random() >= reach) continue;
+					out[k] = cfg[k] + (story.bend[k] - cfg[k]) * 0.5 * reach;
+					if (global.Config.isCount(k)) out[k] = Math.round(out[k]);
+					continue;
+				}
+				out[k] = story.bend[k];
+			}
+		}
+		return {
+			cfg: out,
+			narrative: drawn.map((x) => ({ name: x.name, blurb: x.blurb })),
+		};
+	}
+
 	function applyFlavorConfig(cfg, flavor) {
 		const bend = RB.flavorConfig(flavor);
 		if (!bend) return cfg;
@@ -532,16 +653,45 @@
 		   full-strength statement and 2x "freshmanShare: 68" is 90. */
 		const s = flavor && Number.isFinite(flavor.strength) ? flavor.strength : 1;
 		const t = s <= 1 ? Math.max(0, s) : Math.min(1.5, 1 + 0.5 * (s - 1));
+		/* THE REACH. See cfg.flavorReach: at 0 a flavor never touches a
+		   setting the user has changed, which is the principle above and the
+		   old behaviour. Above 0 it may move a random subset of them, and only
+		   partway — the user's own value is the anchor and the bend pulls
+		   toward the authored one rather than replacing it, so a flavor can
+		   still be itself on a config somebody has been playing with without
+		   throwing their work away.
+
+		   Drawn off the flavor's own name so the same flavor on the same
+		   config reaches the same settings; a flavor that picked a different
+		   subset every re-run would make the setting panel unreadable. */
+		const reach = clamp(
+			(cfg.flavorReach === undefined ? 0 : cfg.flavorReach) / 100, 0, 1);
+		const reachRng = reach > 0
+			? new Rng("flavorreach|" + (flavor.name || "") + "|" + (cfg.seed || "")) : null;
 		let moved = false;
 		let league = false;
 		for (const k of Object.keys(bend)) {
-			if (cfg[k] !== D[k]) continue;
+			const touched = cfg[k] !== D[k];
+			if (touched) {
+				if (!reachRng || reachRng.random() >= reach) continue;
+				/* Half of the way from the user's value to the authored one,
+				   scaled by reach — full reach is still a compromise, not a
+				   takeover. */
+				if (typeof bend[k] === "number" && typeof cfg[k] === "number") {
+					out[k] = cfg[k] + (bend[k] - cfg[k]) * (0.5 * reach * t);
+					if (global.Config.isCount(k)) out[k] = Math.round(out[k]);
+					moved = true;
+					if (k === "leagueWeights") league = true;
+				}
+				continue;
+			}
 			if (typeof bend[k] === "number" && typeof D[k] === "number") {
 				const v = D[k] + (bend[k] - D[k]) * t;
-				// A count stays a count: eliteCount 1.5 is not a class anyone
-				// can build.
-				out[k] = (Number.isInteger(D[k]) && Number.isInteger(bend[k]))
-					? Math.round(v) : v;
+				/* A count stays a count: eliteCount 1.5 is not a class anyone
+				   can build. Which settings those are is declared in
+				   js/config.js rather than inferred from whether two
+				   particular numbers happen to be whole — see COUNTS. */
+				out[k] = global.Config.isCount(k) ? Math.round(v) : v;
 			} else {
 				out[k] = bend[k];
 			}
@@ -581,7 +731,14 @@
 		const vsalt = variationSalt(state.cfg);
 		const flavor = RB.pickFlavor(rng.child("flavor"), state.cfg);
 		state.flavor = flavor;
-		const cfg = applyFlavorConfig(state.cfg, flavor);
+		/* The class's flavor, then the season's storylines on top of it. The
+		   order matters: a flavor is a statement about the players and a
+		   narrative about the season they played, so the narrative gets the
+		   last word on the season dials. */
+		const narr = applyNarrative(
+			applyFlavorConfig(state.cfg, flavor), rng.child("narrative"));
+		state.narrative = narr.narrative;
+		const cfg = narr.cfg;
 
 		/* Class-level environment jitter. Every class plays in a slightly
 		   different scoring environment — some years run faster, some shoot
@@ -1377,6 +1534,11 @@
 		},
 	];
 
+	/* How many classes back the anomaly memory reaches. Matches the build
+	   pool's POOL_MEMORY_DEPTH, for the same reason: further back than three
+	   and the penalty is smaller than the draw's own noise. */
+	const ANOMALY_MEMORY_DEPTH = 3;
+
 	function assignSurprises(players, rng, cfg) {
 		const budget = clamp(
 			cfg && cfg.surpriseBudget !== undefined ? cfg.surpriseBudget : 4, 0, 10);
@@ -1392,8 +1554,33 @@
 		   the first thing to go stale. The ordering survives; the gap does
 		   not compound. */
 		const compressed = (k) => Math.pow(k.w === undefined ? 1 : k.w, 0.5);
+		/* ANOMALY MEMORY, the same mechanism the build pool has.
+
+		   Thirty-two kinds and about four draws a class means the same eight
+		   or ten kinds turn up in most classes — the log-space compression
+		   above flattened the rarity ordering and did not touch the fact that
+		   a draw with no memory repeats. `cfg.recentAnomalies` is the last few
+		   classes' kinds, newest first, written by the UI exactly as
+		   `recentPools` is: a kind used last class is pushed hard down the
+		   queue, one used two classes ago less so. `anomalyMemory` scales it,
+		   and 0 is the old behaviour. */
+		const memory = clamp(
+			cfg && cfg.anomalyMemory !== undefined ? cfg.anomalyMemory : 1, 0, 3);
+		const recent = Array.isArray(cfg && cfg.recentAnomalies)
+			? cfg.recentAnomalies : [];
+		const penalty = {};
+		if (memory > 0) {
+			recent.slice(0, ANOMALY_MEMORY_DEPTH).forEach((list, age) => {
+				for (const name of list || []) {
+					// Newest class counts most; each class back halves it.
+					penalty[name] = (penalty[name] || 0) + Math.pow(0.5, age);
+				}
+			});
+		}
+		const weightOf = (k) => compressed(k) *
+			Math.pow(3, -memory * (penalty[k.name] || 0));
 		for (let i = 0; i < n && kinds.length; i++) {
-			const kind = rng.weighted(kinds, compressed);
+			const kind = rng.weighted(kinds, weightOf);
 			kinds.splice(kinds.indexOf(kind), 1);
 			const options = players.filter((p) => !used.has(p.key) && kind.pick(p));
 			if (!options.length) continue;
@@ -1571,7 +1758,10 @@
 		}
 		state.bySchool = bySchool;
 		assignAvailability(state.players, rng.child("availability" + variationSalt(state.cfg)), cfg);
-		const teams = T.buildPrograms(bySchool, rng.child("programs"), cfg);
+		/* The class's season travels with the config, so a coach's style drifts
+		   year to year across a universe rather than being redrawn. */
+		const progCfg = Object.assign({}, cfg, { __season: state.season || 0 });
+		const teams = T.buildPrograms(bySchool, rng.child("programs"), progCfg);
 		/* buildPrograms returns the season's realignment alongside the teams;
 		   lift it off before anything iterates the map. */
 		state.realignment = teams.__realignment || [];
@@ -2541,6 +2731,7 @@
 				// See variationSalt / pickClassPool: both reshape the class
 				// from the build phase down.
 				"variation", "flavorHint", "poolMemory", "recentPools",
+				"anomalyMemory", "recentAnomalies", "flavorReach", "narrative",
 				/* Universe mode is a whole-chain fact, not a phase input: the
 				   runner is handed a different seed and a carryOver when it is
 				   on. Declared here so that turning it on invalidates
@@ -2556,7 +2747,7 @@
 			deps: ["pace", "scoringEnv", "injuryRate", "realignmentRate",
 				"bluebloodDownYears", "midMajorLift", "teamMomentum", "seasonEvents",
 				// The world dials: all three are read by buildPrograms.
-				"realignmentMemory", "starReturners", "portalRate"],
+				"realignmentMemory", "starReturners", "portalRate", "styleDrift"],
 			run: phaseRegular,
 		},
 		{ name: "postseason", deps: ["upsetFactor", "coachTurnover"], run: phasePostseason },
@@ -2634,7 +2825,16 @@
 			   function of the flavor and the settings, so it is cheap to
 			   recompute here whether or not the build phase runs. */
 			if (state.flavor !== undefined) {
-				const bent = applyFlavorConfig(effective, state.flavor);
+				/* The narrative's bends live on effectiveCfg the same way the
+				   flavor's do, and for the same reason have to be recomputed
+				   on a warm re-run that skips the build phase — otherwise a
+				   slider move loses the season's storylines and a staged run
+				   stops matching a cold one. Both are pure functions of the
+				   settings and a deterministic stream, so recomputing is
+				   cheap and exact. */
+				const bent = applyNarrative(
+					applyFlavorConfig(effective, state.flavor),
+					new Rng(seed).child("narrative")).cfg;
 				/* Re-apply class-level environment jitter (same deterministic
 				   stream the build phase used). Without this a warm re-run that
 				   skips the build phase would lose the jitter. */
@@ -2661,6 +2861,12 @@
 				seed: state.seed,
 				season: state.season,
 				cfg: effective,
+				/* The settings the season was actually simulated at, which is
+				   `cfg` plus the class flavor's bend, the season narrative's
+				   bends and the class-level environment jitter. Without it the
+				   only way to see what a storyline did was to read the box
+				   scores and guess. */
+				effectiveCfg: state.effectiveCfg || effective,
 				players: state.players,
 				teams: state.teams,
 				poll: state.poll,
@@ -2678,6 +2884,14 @@
 				seasonEvents: state.seasonEvents || [],
 				coachingCarousel: state.coachingCarousel || [],
 				flavor: state.flavor,
+				/* The season's storylines, so the UI can say what kind of year
+				   this was rather than only what kind of class it was. */
+				narrative: state.narrative || [],
+				/* Whether the source file's own ages carry information. Read
+				   by exportFile, which without it on the result was reading
+				   `undefined` and rewriting born.year even for a file whose
+				   ages were already the thing the class years were read from. */
+				ageIsInformative: !!state.ageIsInformative,
 				// The builds this class was drawn from, and the anomalies it
 				// was given, so the UI can say what makes this class this one.
 				archetypePool: state.archetypePool
@@ -4518,7 +4732,7 @@
 		buildNote, classYear,
 		assignClassYears, inchesFromHgtRating, validateLeagueFile, findSeason, playerKey,
 		SIZE_OVERRIDE_KEYS, SURPRISES, DRAFT_EVENTS,
-		MAX_CLASS,
+		MAX_CLASS, ANOMALY_MEMORY_DEPTH, NARRATIVES,
 		rerollSalt,
 		signatureGame, simulateProLeagues, assignRecruiting,
 		NOTE_LINES, DEFAULT_NOTE_LINES, PHASES, PRO_GAMES,

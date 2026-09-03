@@ -4,7 +4,7 @@
 (function (global) {
 	"use strict";
 
-	const { clamp } = global.BBGMRng;
+	const { clamp, Rng } = global.BBGMRng;
 	const C = global.Colleges;
 
 	// "College talent" scale, 0-100. Distinct from BBGM ovr: an 18-year-old
@@ -464,6 +464,52 @@
 	const SITUATION_BY_NAME = {};
 	for (const c of COACH_SITUATIONS) SITUATION_BY_NAME[c.name] = c;
 
+	/* STYLE DRIFT.
+
+	   PROGRAM_STYLES is fourteen rows of fixed numbers, and a team's style IS
+	   its coach — so every "four-out, three-heavy" programme in the country
+	   ran the same shot chart as every other one, and ran it again the next
+	   season, and the season after. The style tells you what KIND of team it
+	   is; it should not tell you its three-point share to the third decimal.
+
+	   So the style a team plays is its row plus a small per-coach, per-season
+	   perturbation. Three things about how it is drawn:
+
+	     - it is keyed on the COACH'S NAME and the season, which are facts the
+	       model already carries. That is not a stylistic preference: drawing a
+	       per-coach seed from the coach's own rng consumed a number and
+	       shifted every draw after it — `dev` and `rep` — so every team's
+	       March form moved and the tournament came out differently. A derived
+	       key changes the style and nothing else;
+	     - keying on the season means a carried coach in a universe drifts
+	       season to season rather than being redrawn into a different coach;
+	     - it is small. About a third of the gap between adjacent styles, so a
+	       four-out team never becomes a pack-line team; it becomes a four-out
+	       team that shot a bit more, or a bit less, than the four-out team
+	       down the road.
+
+	   `cfg.styleDrift` scales it; 0 is the old fixed enum exactly. */
+	function seasonOf(cfg) {
+		return cfg && Number.isFinite(cfg.__season) ? cfg.__season : 0;
+	}
+	function driftStyle(style, coach, season, cfg) {
+		const amount = clamp(
+			cfg && cfg.styleDrift !== undefined ? cfg.styleDrift : 1, 0, 3);
+		if (!style || amount <= 0) return style;
+		const r = new Rng("style|" + ((coach && coach.name) || "?") + "|" +
+			((coach && coach.tenure) || 0) + "|" + (season || 0));
+		return Object.assign({}, style, {
+			three: style.three + r.normal(0, 0.022) * amount,
+			pace: style.pace + r.normal(0, 1.3) * amount,
+			rim: style.rim + r.normal(0, 0.018) * amount,
+			press: Math.max(0, style.press + r.normal(0, 0.010) * amount),
+			/* The scheme is a fact about the staff, not a dial: a pack-line
+			   team does not drift into a press. */
+			defScheme: style.defScheme,
+			drifted: true,
+		});
+	}
+
 	function makeCoach(rng, level, prestige) {
 		// A better program usually has a longer-tenured coach, because a coach
 		// who wins keeps his job and a coach who wins is hired by better
@@ -776,8 +822,11 @@
 				// (selection, the note, the harness) reads the same number the
 				// program was built from.
 				confStrength: confStrength[confAt(name)],
-				// The style IS the coach; it used to be an independent roll.
-				style: coach.style,
+				/* The style IS the coach; it used to be an independent roll.
+				   Drifted per season, so two programmes running the same style
+				   are not running the same numbers — and the same programme is
+				   not running last season's numbers either. */
+				style: driftStyle(coach.style, coach, seasonOf(cfg), cfg),
 				conf: confAt(name),
 				// Where this program played last season, when it moved
 				// THIS season (a carried move from an earlier universe season
@@ -1751,6 +1800,7 @@
 		realign, makeCoach, COACH_SITUATIONS, COACH_PHILOSOPHIES, CONF_REGIONS, regionsOverlap,
 		gameStrength, TOP_KNEE, TOP_STRETCH, REGULAR_NOISE,
 		capFillers, FILLER_GAP, conferenceDrift, programLevel, applyOutages, makeFiller,
+		driftStyle, seasonOf,
 		assignFillerSlots, slotTypeOf, SLOT_HGT, SLOT_TARGET,
 		PROGRAM_VOL, DOWN_YEAR_RATE, BREAKOUT_RATE, STAR_RETURNER_RATE,
 		rotationWeights, pairUp, record, recordPostseason, finalizeSchedule,

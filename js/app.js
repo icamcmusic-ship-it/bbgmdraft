@@ -36,6 +36,9 @@
 		// The build pools of the last few classes, newest first. See
 		// rememberPool: the engine reads it and never writes it.
 		poolHistory: [],
+		/* The anomaly kinds the last few classes used, newest first. Same
+		   mechanism as poolHistory, one layer down. */
+		anomalyHistory: [],
 		presetName: "default",
 		presetDirty: false,
 		customPresets: {},
@@ -111,6 +114,7 @@
 				overrideFingerprint: state.overrideFingerprint,
 				history: state.history.slice(0, 12),
 				poolHistory: state.poolHistory,
+				anomalyHistory: state.anomalyHistory,
 				presetName: state.presetName,
 				presetDirty: state.presetDirty,
 				customPresets: state.customPresets,
@@ -230,6 +234,11 @@
 				.filter(Array.isArray)
 				.map((a) => a.filter((n) => typeof n === "string"));
 		}
+		if (Array.isArray(saved.anomalyHistory)) {
+			state.anomalyHistory = saved.anomalyHistory
+				.filter(Array.isArray)
+				.map((a) => a.filter((n) => typeof n === "string"));
+		}
 		if (validString(saved.presetName)) state.presetName = saved.presetName;
 		state.presetDirty = !!saved.presetDirty;
 		if (saved.customPresets && typeof saved.customPresets === "object" &&
@@ -325,6 +334,10 @@
 			   the restored class was rebuilt against a memory it had never
 			   been drawn with and came back as somebody else's. */
 			poolHistory: (state.poolHistory || []).map((a) => a.slice()),
+			// The anomaly memory is undone with the pool memory, for exactly
+			// the reason stated above: a restored class rebuilt against a
+			// memory it was never drawn with comes back as somebody else.
+			anomalyHistory: (state.anomalyHistory || []).map((a) => a.slice()),
 		};
 	}
 
@@ -342,6 +355,7 @@
 		state.overrides = snap.overrides;
 		if (snap.lastSeed !== undefined) state.lastSeed = snap.lastSeed;
 		if (Array.isArray(snap.poolHistory)) state.poolHistory = snap.poolHistory;
+		if (Array.isArray(snap.anomalyHistory)) state.anomalyHistory = snap.anomalyHistory;
 		// A restored class is a different class, so an editor open on somebody
 		// who may not be in it any more has to close.
 		state.editing = null;
@@ -401,6 +415,7 @@
 		"freshmanShare", "transferShare", "redshirtShare", "reclassShare", "pDII",
 		"pace", "scoringEnv", "efficiencyEnv", "statNoise", "upsetFactor",
 		"archetypePool", "surpriseBudget", "injuryRate", "traitCount",
+		"anomalyMemory", "flavorReach", "styleDrift",
 		"realignmentRate", "bluebloodDownYears", "midMajorLift",
 		"coachTurnover", "realignmentMemory", "starReturners", "portalRate",
 		"awardStrictness", "confAwardStrictness", "proAwardStrictness",
@@ -535,6 +550,18 @@
 			: v < 0.9 ? "more conference honors" : "realistic conference award volume",
 		proAwardStrictness: (v) => v > 1.2 ? "a higher bar for honors abroad"
 			: v < 0.9 ? "a lower bar for honors abroad" : "a realistic bar abroad",
+		anomalyMemory: (v) => (v <= 0
+			? "each class draws its anomalies with no memory of the last"
+			: "an anomaly used last class is " + Math.round(Math.pow(3, v)) +
+				"x less likely to return"),
+		flavorReach: (v) => (v <= 0
+			? "a flavor only moves settings you have left alone"
+			: "a flavor may also move about " + v + "% of the settings you have " +
+				"changed, and only part of the way"),
+		styleDrift: (v) => (v <= 0
+			? "every team playing a given style plays it identically"
+			: "two four-out teams are not the same four-out team, and neither is " +
+				"the same one next season"),
 		traitCount: (v) => (v <= 0
 			? "no traits: a plain note, and no medical file, volatility or " +
 				"offensive-glass bias"
@@ -625,12 +652,14 @@
 		paintModifiedMarkerFor("priorSeasons", state.cfg.priorSeasons);
 		paintModifiedMarkerFor("varySize", state.cfg.varySize);
 		paintModifiedMarkerFor("universe", state.cfg.universe);
+		paintModifiedMarkerFor("narrative", state.cfg.narrative);
 		$("flavorHint").value = state.cfg.flavorHint || "";
 		paintModifiedMarkerFor("flavorHint", state.cfg.flavorHint || "");
 		$("ovrMode").value = state.cfg.ovrMode;
 		$("priorSeasons").value = state.cfg.priorSeasons;
 		$("varySize").checked = !!state.cfg.varySize;
 		$("universe").checked = !!state.cfg.universe;
+		$("narrative").checked = !!state.cfg.narrative;
 		paintUniverseHint();
 		$("seed").value = state.cfg.seed;
 		const curve = state.cfg.ovrMode === "curve";
@@ -714,7 +743,7 @@
 	}
 	function paintPhaseCosts() {
 		for (const key of SLIDERS.concat(
-			["era", "ovrMode", "varySize", "priorSeasons", "universe"])) {
+			["era", "ovrMode", "varySize", "priorSeasons", "universe", "narrative"])) {
 			const input = $(key);
 			if (!input) continue;
 			const ctl = input.closest(".ctl");
@@ -1246,6 +1275,12 @@
 		$("varySize").addEventListener("change", () => {
 			pushUndo("toggled Vary size");
 			state.cfg.varySize = $("varySize").checked;
+			markDirty();
+			scheduleRun();
+		});
+		$("narrative").addEventListener("change", () => {
+			pushUndo("toggled season storylines");
+			state.cfg.narrative = $("narrative").checked;
 			markDirty();
 			scheduleRun();
 		});
@@ -1951,6 +1986,9 @@
 		   only thing here that knows what "the last few classes" means — the
 		   engine sees one run. */
 		cfg.recentPools = (state.poolHistory || []).slice(0, POOL_HISTORY);
+		// The same memory one layer down: the anomalies the last few classes
+		// were given, so this one is unlikely to repeat them.
+		cfg.recentAnomalies = (state.anomalyHistory || []).slice(0, ANOMALY_HISTORY);
 		return cfg;
 	}
 
@@ -1958,6 +1996,8 @@
 	   RatingsBuilder.POOL_MEMORY_DEPTH, which is what actually consumes it;
 	   storing more would persist a list nothing reads. */
 	const POOL_HISTORY = (RB.POOL_MEMORY_DEPTH || 3);
+	/* Matches Engine.ANOMALY_MEMORY_DEPTH, which is what consumes it. */
+	const ANOMALY_HISTORY = (global.Engine.ANOMALY_MEMORY_DEPTH || 3);
 
 	/* Record what the class ON SCREEN was made of, so the NEXT one avoids it.
 
@@ -1977,11 +2017,32 @@
 	       dragged a slider. */
 	function rememberPool() {
 		const res = state.results[state.active];
-		if (!res || !Array.isArray(res.archetypePool) || !res.archetypePool.length) return;
-		const hist = (state.poolHistory || []).slice();
-		if (hist.length && hist[0].join("|") === res.archetypePool.join("|")) return;
-		hist.unshift(res.archetypePool.slice());
-		state.poolHistory = hist.slice(0, POOL_HISTORY);
+		if (!res) return;
+		if (Array.isArray(res.archetypePool) && res.archetypePool.length) {
+			const hist = (state.poolHistory || []).slice();
+			if (!hist.length || hist[0].join("|") !== res.archetypePool.join("|")) {
+				hist.unshift(res.archetypePool.slice());
+				state.poolHistory = hist.slice(0, POOL_HISTORY);
+			}
+		}
+		/* THE ANOMALY MEMORY, on exactly the same terms as the build pool's.
+
+		   Thirty-two anomaly kinds and about four draws a class means the same
+		   eight or ten turn up in most classes, and the feature that exists to
+		   keep classes fresh was the first thing to go stale. Recorded here
+		   and nowhere else, for the same two load-bearing reasons the pool
+		   memory is: it has to be constant while one class is on screen, or
+		   re-applying the same seed would hand back a different class; and
+		   only a reroll counts, or the memory becomes a record of how much the
+		   user fiddled with the sliders. */
+		if (Array.isArray(res.surprises) && res.surprises.length) {
+			const names = res.surprises.map((sp) => sp.name);
+			const hist = (state.anomalyHistory || []).slice();
+			if (!hist.length || hist[0].join("|") !== names.join("|")) {
+				hist.unshift(names);
+				state.anomalyHistory = hist.slice(0, ANOMALY_HISTORY);
+			}
+		}
 	}
 
 	/* THE FILE, AS THE WORLD SEES IT.

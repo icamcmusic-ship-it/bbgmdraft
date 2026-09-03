@@ -164,6 +164,35 @@
 		// further scaled by where the player was born (see Colleges.regions).
 		leagueWeights: null,   // null = each league's built-in default weight
 
+		/* How hard a class avoids the anomalies the last few classes used.
+		   Thirty-two kinds and four draws a class is not enough separation on
+		   its own: the same eight or ten turned up in most classes. 0 draws
+		   with no memory; 1 makes a kind used last class about three times
+		   less likely; 3 nearly rules it out. Mirrors "Avoid repeating recent
+		   builds", which does the same job one layer up. */
+		anomalyMemory: 1,
+		/* How far a class flavor reaches into settings the user has CHANGED.
+
+		   A flavor bends settings still sitting at their default and never
+		   overrules a decision the user made — which is the right principle
+		   and does mean that a user who has customized the exact settings a
+		   flavor wants to move gets a flavor that does less. This is the
+		   escape hatch: at 0 the principle is absolute (the old behaviour); at
+		   100 a flavor moves every setting it wants to. In between it moves a
+		   random subset, and only partway, so an injury-year flavor can still
+		   be an injury year on a config somebody has been playing with. */
+		flavorReach: 0,
+		/* Whether a class draws two or three macro STORYLINES for its season
+		   on top of the class flavor — a dominant No. 1, a wide-open year, a
+		   mid-major surge, a scandal, a superteam that flops. The flavor
+		   system does this for the CLASS; nothing did it for the SEASON, so
+		   every season had the same shape whatever kind of class played it. */
+		narrative: true,
+		/* How much a coach's style wanders from season to season. A style is a
+		   fixed enum, so every "four-out" team in the country produced an
+		   identical shot chart and produced it again next year. */
+		styleDrift: 1,
+
 		// --- class years and how a prospect got here ------------------------
 		// BBGM draft classes are nearly all age 19, so class year has to be
 		// rolled rather than read off the birthday. This is the share of the
@@ -328,5 +357,30 @@
 		return cfg;
 	}
 
-	global.Config = { DEFAULTS, PRESETS, make, defaultLeagueWeights };
+	/* WHICH SETTINGS ARE COUNTS.
+
+	   A flavor or a narrative interpolates between a setting's current value
+	   and the one it wants, and the result has to stay a legal value: an
+	   eliteCount of 1.5 is not a class anybody can build. The old test was
+	   `Number.isInteger(default) && Number.isInteger(bend)`, which is a
+	   question about two particular numbers rather than about the setting —
+	   and it got `injuryRate` wrong, because its default is 1 and one flavor
+	   bends it to 2 while the dial itself runs in steps of 0.05. Interpolating
+	   1.15 toward 2 gave 1.575 and the guard rounded it to 2, so a flavor at
+	   full reach took the setting over completely rather than meeting the user
+	   half way.
+
+	   So the set is declared. A setting in it is rounded; everything else is
+	   left alone, whatever its default happens to look like. */
+	const COUNTS = new Set([
+		"eliteCount", "bluebloodDownYears", "midMajorLift", "seasonEvents",
+		"draftEvents", "archetypePool", "surpriseBudget", "traitCount",
+		"freshmanShare", "transferShare", "redshirtShare", "reclassShare",
+		"archetypeDiversity", "pace", "buildNoise", "variation",
+		"coachTurnover", "realignmentMemory", "starReturners", "portalRate",
+		"flavorReach", "wEuroLeague", "wGLeague", "wNBL",
+	]);
+	function isCount(key) { return COUNTS.has(key); }
+
+	global.Config = { DEFAULTS, PRESETS, make, defaultLeagueWeights, COUNTS, isCount };
 })(typeof window !== "undefined" ? window : self);

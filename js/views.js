@@ -1093,6 +1093,12 @@
 		if (res.flavor && res.flavor.name !== "balanced") {
 			pills.push("this class is " + res.flavor.label);
 		}
+		/* The season's storylines, beside the class's flavor. The two are
+		   different statements — a flavor is about the players and a narrative
+		   about the season they played — and showing them together is the only
+		   way a reader can tell which one produced what they are looking at.
+		   See NARRATIVES in js/engine.js. */
+		for (const n of res.narrative || []) pills.push(n.name);
 		/* What makes THIS class this one. The class is drawn from a pool of
 		   builds and given two to four forced anomalies, and both were
 		   invisible: a user rerolling had no way to see that the year was a
@@ -1102,6 +1108,10 @@
 		}
 		for (const t of pills) summary.appendChild(el("span", "pill", t));
 		view.appendChild(summary);
+		if ((res.narrative || []).length) {
+			view.appendChild(el("p", "legendline",
+				"The season: " + res.narrative.map((n) => n.blurb).join("; ") + "."));
+		}
 		if (res.surprises && res.surprises.length) {
 			const line = el("p", "legendline");
 			line.appendChild(document.createTextNode("Story of the class: "));

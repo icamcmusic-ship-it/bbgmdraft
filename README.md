@@ -163,6 +163,38 @@ wingspan and a great motor and a Rim Protector with short arms and questions
 about the effort are two different prospects out of one row of the archetype
 table. *Scouting traits per prospect* turns the whole layer off at 0.
 
+**A class flavor is about the players; a season narrative is about the season
+they played.** Nothing was the second one, so across forty classes the *shape*
+of a season was the same shape every time with different names in it. Each
+class now draws two or three **storylines** — a dominant favourite, a wide-open
+year, a mid-major surge, an attrition season, a scoring explosion, a defensive
+slog, a chaotic sideline, chalk all the way — and each bends a handful of the
+settings the season simulation already reads. They stack, and where two of them
+want the same setting the last one drawn wins rather than the two being
+averaged: "a wide-open year" and "chalk all the way" is a contradiction and
+averaging two contradictions gives an ordinary season, which is the outcome
+this exists to avoid. Measured over sixteen classes, the season-to-season
+spread in team scoring is about twice what it is with storylines off. A
+setting the user has changed is still left alone.
+
+That last rule has an escape hatch now. A flavor moved only settings sitting at
+their default — the right principle, and it does mean a user who has customized
+the exact settings a flavor wants gets a flavor that does less. *Flavor reaches
+settings you changed* is 0 by default (the principle absolute), and above 0 a
+flavor may move a random subset of them and only part of the way, so an
+injury-year flavor can still be an injury year on a config somebody has been
+playing with.
+
+Two more places sameness was leaking. The **anomaly** draw had no memory —
+thirty-two kinds and four draws a class meant the same eight or ten turned up
+in most classes — so it now avoids what the last few classes used, exactly as
+the build pool does. And a **coach's style** was a fixed row of numbers, so
+every "four-out, three-heavy" programme in the country ran the same shot chart
+and ran it again the next season; the style now drifts a little per coach and
+per season, about a third of the gap between adjacent styles, so a four-out
+team never becomes a pack-line team but is not the four-out team down the road
+either.
+
 Every class is also given about four **forced anomalies**, drawn from
 thirty-two kinds — a five-star bust, an unranked recruit who turns into a
 lottery pick, a 24-year-old JUCO who took the long road, a 7'4" project, a

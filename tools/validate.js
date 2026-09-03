@@ -333,8 +333,23 @@ function collect(nSeeds, cfgOverrides, fixture) {
 	const pollWeek1 = [];
 	for (let s = 0; s < nSeeds; s++) {
 		const lf = makeFixture(s, 70);
+		/* NARRATIVES OFF, deliberately.
+
+		   A season narrative (see NARRATIVES in js/engine.js) is a stated
+		   deviation from an ordinary season — a scoring explosion, a defensive
+		   slog, an attrition year — and it moves pace, efficiency, injuries and
+		   the upset factor on purpose. Every band in this file is a claim
+		   about the MODEL's agreement with an empirical anchor, so measuring
+		   it against a season that has announced itself as unusual measures
+		   the wrong thing: the class maximum was landing above its band about
+		   one run in three purely because that run drew "a scoring explosion".
+
+		   The narratives are banded separately, and wider, at the bottom of
+		   this file — which is the check that actually matters for them: that
+		   they move the season without leaving the sport. */
 		const res = global.Engine.run(
-			lf, global.Config.make(Object.assign({ seed: "v" + s }, cfgOverrides)));
+			lf, global.Config.make(Object.assign(
+				{ seed: "v" + s, narrative: false }, cfgOverrides)));
 		const ncaa = res.players.filter((p) => !p.nonNcaa && p.stats);
 		for (const p of ncaa) {
 			const t = res.teams[p.newCollege];
@@ -1255,6 +1270,67 @@ function main() {
 		if (b.ovr !== t) miss++;
 	}
 	checks.push({ name: "Solver off-target /2000", value: miss, lo: 0, hi: 0, ok: miss === 0 });
+
+	/* THE SEASON NARRATIVES.
+
+	   Every band above is measured with narratives OFF, because a narrative is
+	   a stated deviation and banding the model against a season that has
+	   announced itself as unusual measures the wrong thing. These are the
+	   checks that matter for the narratives themselves, and they are a
+	   different kind of claim: that the storylines MOVE the season (or they
+	   are decoration) and that they do not move it out of the sport.
+
+	   Run over sixteen classes, which is enough to draw most of the twelve. */
+	{
+		const withN = [];
+		const withoutN = [];
+		const names = new Set();
+		let stories = 0;
+		for (let s = 0; s < 16; s++) {
+			const lf = realisticClass(s, 70);
+			const on = global.Engine.run(lf,
+				global.Config.make({ seed: "narr" + s }));
+			const off = global.Engine.run(lf,
+				global.Config.make({ seed: "narr" + s, narrative: false }));
+			for (const x of on.narrative || []) { names.add(x.name); stories++; }
+			const teamPts = (r) => {
+				const ts = Object.values(r.teams).filter((t) => t.teamTotals);
+				return ts.reduce((a, t) => a + t.teamTotals.pts, 0) / Math.max(1, ts.length);
+			};
+			withN.push(teamPts(on));
+			withoutN.push(teamPts(off));
+		}
+		const mn = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+		const sdOf = (a) => {
+			const m = mn(a);
+			return Math.sqrt(a.reduce((x, y) => x + (y - m) * (y - m), 0) / a.length);
+		};
+		checks.push({
+			name: "Narrative: storylines drawn per class",
+			value: stories / 16, lo: 1.9, hi: 3.1, ok: stories / 16 >= 1.9 && stories / 16 <= 3.1,
+		});
+		checks.push({
+			name: "Narrative: distinct storylines over 16 classes",
+			value: names.size, lo: 7, hi: 12, ok: names.size >= 7 && names.size <= 12,
+		});
+		/* The point of them: a season with storylines varies more class to
+		   class than one without. If this ratio is near 1 the narratives are
+		   a label. */
+		const ratio = sdOf(withN) / Math.max(0.01, sdOf(withoutN));
+		checks.push({
+			name: "Narrative: season-to-season spread vs off",
+			value: ratio, lo: 1.15, hi: 6, ok: ratio >= 1.15 && ratio <= 6,
+		});
+		/* And they stay in the sport: no narrative may push a season's team
+		   scoring outside what Division I has ever produced. */
+		const lo = Math.min.apply(null, withN);
+		const hi = Math.max.apply(null, withN);
+		checks.push({
+			name: "Narrative: team PPG stays in range",
+			value: Math.round(lo) + Math.round(hi) / 1000, lo: 0, hi: 1e9,
+			ok: lo >= 58 && hi <= 92,
+		});
+	}
 
 	const fail = perEra.reduce((a, e) => a + e.checks.filter((c) => !c.ok).length, 0) +
 		checks.filter((c) => !c.ok).length;

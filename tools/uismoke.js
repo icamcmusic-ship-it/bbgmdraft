@@ -909,6 +909,23 @@ function ok(name, condition, detail) {
 			(await page.locator("#view").innerHTML()).length > 2000);
 	}
 
+	console.log("\nThe season's storylines");
+	{
+		await page.locator("#tabs button", { hasText: "Prospects" }).first().click();
+		await page.waitForTimeout(300);
+		const text = await page.locator("#view").innerText();
+		const narrative = await page.evaluate(() => {
+			const st = window.App.state;
+			return (st.results[st.active].narrative || []).map((n) => n.name);
+		});
+		ok("a class draws season storylines", narrative.length >= 2, narrative.join(" + "));
+		ok("and the prospects tab names them",
+			narrative.every((n) => text.indexOf(n) !== -1), narrative.join(" + "));
+		ok("and says what each one means",
+			/The season: .{20,}/.test(text),
+			(text.match(/The season: [^\n]{0,120}/) || [""])[0]);
+	}
+
 	console.log("\nScouting traits on the player page");
 	{
 		await page.evaluate(() => {

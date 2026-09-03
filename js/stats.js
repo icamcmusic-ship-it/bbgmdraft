@@ -150,7 +150,7 @@
 		   lose assists to, the floor is no longer what stops a big printing
 		   0.4 a game — the gradient is — so it comes down to where it is a
 		   guard against absurdity rather than a shaper of the distribution. */
-		AST_FLOOR: 0.24,
+		AST_FLOOR: 0.30,
 		/* Rebounds. At 1.25 a center out-rebounded a guard by 2.4x; the real
 		   defensive-rebound-rate ratio between those two is 4-5x. 1.55 got
 		   the big:guard RPG ratio to 1.9x against a real ~2.4x, so another
