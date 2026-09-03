@@ -2098,16 +2098,37 @@
 			"from its seeds — the export stores seeds, not simulated output."));
 
 		const bar = el("div", "filters");
-		const run = el("button", u.running ? "warn" : "primary",
+		/* Universe mode is a setting now (see the "The world" group in the
+		   settings panel), so this is a REFRESH rather than the only way in:
+		   with the setting on, the chain re-runs whenever anything invalidates
+		   it and every tab reads the result. With the setting off the button
+		   still builds a one-off timeline, which is what it always did — it
+		   just no longer leaves the other tabs disagreeing with it. */
+		const on = !!A().state.cfg.universe;
+		const run = el("button", u.running ? "warn" : on ? null : "primary",
 			u.running ? "Running… " + (u.done || 0) + "/" + (u.total || "?")
-				: "Run universe");
+				: on ? "Rebuild the timeline" : "Build a timeline (one-off)");
 		run.disabled = !!u.running;
+		run.title = on
+			? "Universe mode is on: every tab already shows this world."
+			: "Universe mode is off, so this builds a timeline without changing " +
+				"what the other tabs show. Turn on Universe mode under “The " +
+				"world” in the settings panel to make it the world.";
 		run.addEventListener("click", () => { A().runUniverse(); });
 		bar.appendChild(run);
 		const exp = el("button", null, "Export universe JSON");
 		exp.disabled = !u.rows.length || !!u.running;
-		exp.addEventListener("click", () => { A().exportUniverse(); });
+		exp.title = "Seeds, settings and player biographies. Small, and it " +
+			"replays exactly — as long as whoever opens it has the same class " +
+			"files.";
+		exp.addEventListener("click", () => { A().exportUniverse(false); });
 		bar.appendChild(exp);
+		const expAll = el("button", null, "Export with class files");
+		expAll.disabled = !u.rows.length || !!u.running;
+		expAll.title = "The same file with the class exports inlined, so the " +
+			"whole universe is one file to hand somebody. Larger.";
+		expAll.addEventListener("click", () => { A().exportUniverse(true); });
+		bar.appendChild(expAll);
 		const impBtn = el("button", null, "Import universe…");
 		impBtn.disabled = !!u.running;
 		const impInput = el("input");
@@ -2156,11 +2177,18 @@
 		if (!u.rows.length) return;
 
 		view.appendChild(el("h4", null, "Timeline"));
+		if (!A().state.cfg.universe) {
+			view.appendChild(el("p", "hint",
+				"Universe mode is off, so this timeline is a report about a " +
+				"world the other tabs are not showing. Turn it on under “The " +
+				"world” in the settings panel and every tab — and the export — " +
+				"will show this world instead."));
+		}
 		const wrap = el("div", "scroll");
 		const table = el("table");
 		const hr = el("tr");
 		for (const h of ["Season", "Flavor", "AP No. 1", "Champion", "Player of the Year",
-			"No. 1 pick", "Realignment", "Coaches fired"]) {
+			"No. 1 pick", "Realignment", "Sideline changes"]) {
 			hr.appendChild(el("th", null, h));
 		}
 		const thead = el("thead");
@@ -2187,7 +2215,16 @@
 				? r.no1.name + " (" + r.no1.school + ")" : "—"));
 			tr.appendChild(el("td", null, r.realignment && r.realignment.length
 				? r.realignment.join("; ") : "—"));
-			tr.appendChild(el("td", "num", String(r.coachChanges || 0)));
+			/* Fired / retired / hired away, rather than one number that used
+			   to be the count of "coaching change" news items and so was
+			   almost always 1. See coachingCarousel in js/teams.js. */
+			tr.appendChild(el("td", "num", r.coachChanges
+				? r.coachChanges + " (" + [
+					r.coachFired ? r.coachFired + " out" : null,
+					r.coachRetired ? r.coachRetired + " retired" : null,
+					r.coachHiredAway ? r.coachHiredAway + " hired away" : null,
+				].filter(Boolean).join(", ") + ")"
+				: "0"));
 			tb.appendChild(tr);
 		}
 		table.appendChild(tb);

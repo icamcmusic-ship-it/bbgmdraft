@@ -65,7 +65,16 @@
 		/* Universe mode: the timeline of the last universe run. rows are
 		   compact summaries (seeds, champions, names), not simulated output —
 		   a universe re-runs from its seeds. */
-		universe: { rows: [], threads: [], alumni: [], baseSeed: "", running: false },
+		/* `cfgs` is the load-bearing addition: fileIndex -> the exact config
+		   the chain ran that file with (its universe seed, the carry-over
+		   state handed to it, and the pool memory at that point). Without it
+		   every other tab re-simulated the file from scratch — see
+		   ensureResult. Not persisted: carryOver is a map of 368 programs and
+		   it is cheap to rebuild by re-running the chain. */
+		universe: {
+			rows: [], threads: [], alumni: [], baseSeed: "", running: false,
+			cfgs: {},
+		},
 		// The randomizer's scope select, persisted like every other control.
 		randomScope: "gentle",
 		// Settings the randomizer must not touch. {key: true}.
@@ -393,6 +402,7 @@
 		"pace", "scoringEnv", "efficiencyEnv", "statNoise", "upsetFactor",
 		"archetypePool", "surpriseBudget", "injuryRate",
 		"realignmentRate", "bluebloodDownYears", "midMajorLift",
+		"coachTurnover", "realignmentMemory", "starReturners", "portalRate",
 		"awardStrictness", "confAwardStrictness", "proAwardStrictness",
 		"variation", "poolMemory", "teamMomentum", "awardNoise",
 		"seasonEvents", "draftEvents",
@@ -525,7 +535,46 @@
 			: v < 0.9 ? "more conference honors" : "realistic conference award volume",
 		proAwardStrictness: (v) => v > 1.2 ? "a higher bar for honors abroad"
 			: v < 0.9 ? "a lower bar for honors abroad" : "a realistic bar abroad",
+		coachTurnover: (v) => (v <= 0 ? "no sideline changes at all"
+			: "about " + Math.round(v * 0.43) + " of 368 head coaches change job" +
+				(v === 100 ? " — what Division I actually does" : "")),
+		realignmentMemory: (v) => (v >= 100
+			? "a program that moved conference stays moved, season after season"
+			: v <= 0 ? "the map is redrawn from the base alignment every season"
+			: "about " + v + "% of last season's map carries forward"),
+		starReturners: (v) => (v <= 0
+			? "no named non-prospect stars; the class wins every award by default"
+			: "about " + Math.round(v * 0.26) + " named college stars who are not " +
+				"in this draft class"),
+		portalRate: (v) => (v <= 0 ? "every star returner comes back to the same program"
+			: "about " + Math.round(v * 0.18) + "% of returning stars leave through " +
+				"the portal each year (universe mode only)"),
 	};
+
+	/* What universe mode will actually do with what is loaded right now. A
+	   checkbox that says "run every loaded file as one world" is a promise the
+	   tool cannot keep with one file in it, and the old tab said so only after
+	   you pressed the button. */
+	function paintUniverseHint() {
+		const hint = $("universeHint");
+		if (!hint) return;
+		const n = state.files.length;
+		if (!state.cfg.universe) {
+			hint.textContent = "Off: each loaded file is its own world, drawn " +
+				"from the same settings and seed. Turn this on to chain them — " +
+				"oldest season first, each one handing its conference map, " +
+				"program strength, coaches and star returners to the next. Every " +
+				"tab and the export then show that world.";
+			return;
+		}
+		hint.textContent = n === 0
+			? "On, but no class files are loaded yet."
+			: n === 1
+			? "On, with one file loaded: it runs as a single season with nothing " +
+				"to carry over. Load more classes and they chain."
+			: "On: " + n + " files run as one continuous world, oldest season " +
+				"first. Every tab, the export and the Timeline show that world.";
+	}
 
 	function awardInteractionHint() {
 		const fresh = state.cfg.freshmanShare;
@@ -570,11 +619,14 @@
 		paintModifiedMarkerFor("ovrMode", state.cfg.ovrMode);
 		paintModifiedMarkerFor("priorSeasons", state.cfg.priorSeasons);
 		paintModifiedMarkerFor("varySize", state.cfg.varySize);
+		paintModifiedMarkerFor("universe", state.cfg.universe);
 		$("flavorHint").value = state.cfg.flavorHint || "";
 		paintModifiedMarkerFor("flavorHint", state.cfg.flavorHint || "");
 		$("ovrMode").value = state.cfg.ovrMode;
 		$("priorSeasons").value = state.cfg.priorSeasons;
 		$("varySize").checked = !!state.cfg.varySize;
+		$("universe").checked = !!state.cfg.universe;
+		paintUniverseHint();
 		$("seed").value = state.cfg.seed;
 		const curve = state.cfg.ovrMode === "curve";
 		for (const n of document.querySelectorAll("[data-curve]")) {
@@ -656,7 +708,8 @@
 		return PHASE_COST[phases[best].name] || phases[best].name;
 	}
 	function paintPhaseCosts() {
-		for (const key of SLIDERS.concat(["era", "ovrMode", "varySize", "priorSeasons"])) {
+		for (const key of SLIDERS.concat(
+			["era", "ovrMode", "varySize", "priorSeasons", "universe"])) {
 			const input = $(key);
 			if (!input) continue;
 			const ctl = input.closest(".ctl");
@@ -1190,6 +1243,17 @@
 			state.cfg.varySize = $("varySize").checked;
 			markDirty();
 			scheduleRun();
+		});
+		$("universe").addEventListener("change", () => {
+			pushUndo("toggled Universe mode");
+			state.cfg.universe = $("universe").checked;
+			/* Turning it off has to drop the chain's cached configs, or
+			   ensureResult would keep handing back universe results for a
+			   world the user has switched out of. */
+			if (!state.cfg.universe) state.universe.cfgs = {};
+			markDirty();
+			paintConfig();
+			run();
 		});
 		$("seed").addEventListener("change", () => {
 			state.cfg.seed = $("seed").value.trim();
@@ -1915,12 +1979,38 @@
 		state.poolHistory = hist.slice(0, POOL_HISTORY);
 	}
 
+	/* THE FILE, AS THE WORLD SEES IT.
+
+	   With universe mode on, a file is not a standalone class: it is one
+	   season of a chain, run with that season's own seed and handed the state
+	   the previous season produced. Every tab that renders a file has to run
+	   it the same way the chain did, or the Timeline says Boston College won
+	   the 2027 title while the Bracket tab for the same file shows Villanova —
+	   which is exactly what happened, because the chain used to finish by
+	   throwing its own results away (`state.results.map(() => null)`) and
+	   leaving the next render to re-simulate with the plain config, no
+	   carry-over and the wrong seed. Export then wrote the non-universe world.
+
+	   universeCfgFor is the answer: the chain records what it ran each file
+	   with, and this reads it back. */
+	function universeCfgFor(i) {
+		if (!state.cfg.universe) return null;
+		const saved = state.universe.cfgs && state.universe.cfgs[i];
+		if (!saved) return null;
+		const cfg = CFG.make(state.cfg);
+		cfg.overrides = state.overrides;
+		cfg.seed = saved.seed;
+		cfg.carryOver = saved.carryOver || null;
+		cfg.recentPools = (saved.recentPools || []).map((a) => a.slice());
+		return cfg;
+	}
+
 	function ensureResult(i) {
 		if (state.results[i]) return state.results[i];
 		const runner = state.runners[i];
 		if (!runner) return null;
 		// Every file in a batch shares the seed, so they stay one set.
-		state.results[i] = runner.run(effectiveCfg());
+		state.results[i] = runner.run(universeCfgFor(i) || effectiveCfg());
 		return state.results[i];
 	}
 
@@ -2024,21 +2114,11 @@
 		});
 	}
 
-	function runNow() {
-		if (!state.files.length) return;
-		let res;
-		const t0 = performance.now();
-		try {
-			state.results = new Array(state.files.length).fill(null);
-			res = state.runners[state.active].run(effectiveCfg());
-			state.results[state.active] = res;
-			state.lastSeed = res.seed;
-			clearError();
-		} catch (err) {
-			showError(err);
-			return;
-		}
-		const ms = performance.now() - t0;
+	/* The header's seed pill and the browser tab title, for whichever result
+	   is on screen. Split out of runNow because the universe chain has to
+	   stamp it too — it produces the result the tabs are showing, and the pill
+	   used to keep saying whatever the last standalone run had said. */
+	function stampSeedPill(res, ms) {
 		$("seedPill").hidden = false;
 		/* A short hash OF THE CLASS, not of the seed. Two people can share a
 		   seed and still be looking at different classes — a different source
@@ -2054,8 +2134,38 @@
 			" — BBGM Draft Class Workshop";
 		$("seedPill").title = "Seed and class fingerprint — two people with the same " +
 			"fingerprint are looking at the same seventy players. " +
-			"Click to copy the seed, shift-click or right-click to paste one · " + Math.round(ms) + "ms (" +
-			(res.phasesRun.length ? res.phasesRun.join(" → ") : "nothing to redo") + ")";
+			"Click to copy the seed, shift-click or right-click to paste one" +
+			(Number.isFinite(ms) ? " · " + Math.round(ms) + "ms (" +
+				(res.phasesRun && res.phasesRun.length
+					? res.phasesRun.join(" → ") : "nothing to redo") + ")" : "");
+	}
+
+	function runNow() {
+		if (!state.files.length) return;
+		/* Universe mode is a setting, not a tab. With it on, one file is one
+		   season of a chain and running it alone would produce a world the
+		   Timeline disagrees with, so the chain is what runs. It is async (a
+		   season is ~330ms and fifty of them is a progress bar, not a click),
+		   so this returns and the chain finishes the job. */
+		if (state.cfg.universe && state.files.length && !state.universe.running) {
+			state.results = new Array(state.files.length).fill(null);
+			runUniverse();
+			return;
+		}
+		let res;
+		const t0 = performance.now();
+		try {
+			state.results = new Array(state.files.length).fill(null);
+			res = state.runners[state.active].run(effectiveCfg());
+			state.results[state.active] = res;
+			state.lastSeed = res.seed;
+			clearError();
+		} catch (err) {
+			showError(err);
+			return;
+		}
+		const ms = performance.now() - t0;
+		stampSeedPill(res, ms);
 		if (state.history[0] !== res.seed) {
 			state.history.unshift(res.seed);
 			state.history = state.history.slice(0, 12);
@@ -2184,7 +2294,7 @@
 	   pool memory) from each season to the next. Asynchronous in slices so
 	   the page stays alive; ~330ms a season means 50 classes is a progress
 	   bar, not a click. */
-	function runUniverse() {
+	function runUniverse(after) {
 		const U = global.Universe;
 		if (!state.files.length) {
 			setStatus("Load two or more class files to run a universe.");
@@ -2205,24 +2315,30 @@
 			? state.cfg.seed.trim()
 			: "universe-" + Math.floor(Math.random() * 1e9);
 		state.universe = {
-			rows: [], threads: [], alumni: [], baseSeed,
+			rows: [], threads: [], alumni: [], baseSeed, cfgs: {},
 			running: true, diags, total: runnable.length, done: 0,
 		};
-		state.tab = "universe";
+		/* Only jump to the Timeline when the user asked for a universe
+		   explicitly. With universe mode on as a SETTING the chain re-runs
+		   whenever anything invalidates it, and stealing the tab every time
+		   somebody moved a slider would make the tool unusable. */
+		if (!state.cfg.universe) state.tab = "universe";
 		render();
 		let carry = null;
 		let recentPools = [];
 		const step = (k) => {
 			if (k >= runnable.length) {
 				state.universe.running = false;
-				// Every runner just ran with universe seeds and carry-over;
-				// the cached per-file results no longer describe them.
-				state.results = state.results.map(() => null);
 				state.universe.threads = U.threads(state.universe.rows);
 				persist();
 				setStatus("Universe complete: " + state.universe.rows.length +
 					" seasons, " + state.universe.threads.length + " threads.");
+				/* The active file's seed pill and title describe the universe
+				   run now, not a standalone re-simulation of it. */
+				const active = state.results[state.active];
+				if (active) stampSeedPill(active, null);
 				render();
+				if (typeof after === "function") after();
 				return;
 			}
 			const d = runnable[k];
@@ -2233,6 +2349,17 @@
 				cfg.recentPools = recentPools.map((a) => a.slice());
 				cfg.carryOver = carry;
 				const res = state.runners[d.index].run(cfg);
+				/* KEEP the result and the config that produced it. The chain
+				   used to discard both, which is the whole of bug B1: every
+				   other tab then re-simulated the file with no carry-over and
+				   the base seed, and disagreed with the timeline it had just
+				   drawn. */
+				state.results[d.index] = res;
+				state.universe.cfgs[d.index] = {
+					seed: cfg.seed,
+					carryOver: cfg.carryOver,
+					recentPools: (cfg.recentPools || []).map((a) => a.slice()),
+				};
 				state.universe.rows.push(Object.assign(
 					U.summarize(res, cfg.seed, d.name),
 					{ fingerprint: state.files[d.index].fingerprint || null }));
@@ -2257,20 +2384,30 @@
 		setTimeout(() => step(0), 0);
 	}
 
-	function exportUniverse() {
+	function exportUniverse(embedFiles) {
 		const U = global.Universe;
 		if (!state.universe.rows.length) {
-			setStatus("Run a universe first.");
+			setStatus("Build a timeline first.");
 			return;
 		}
-		const blob = new Blob(
-			[JSON.stringify(U.exportUniverse(state.universe), null, "\t")],
+		/* Settings and biographies travel with the seeds now. A universe is
+		   only reproducible if the settings it ran under are part of it —
+		   replaying somebody's fifty-season world at your own coachTurnover
+		   and your own era gives you a different world with the same seeds. */
+		const payload = U.exportUniverse(Object.assign({}, state.universe, {
+			settings: CFG.make(state.cfg),
+			biography: U.biographyOf(state.results.filter(Boolean)),
+		}), { embedFiles: !!embedFiles, files: state.files });
+		const blob = new Blob([JSON.stringify(payload, null, "\t")],
 			{ type: "application/json" });
 		const a = document.createElement("a");
 		a.href = URL.createObjectURL(blob);
-		a.download = "universe.json";
+		a.download = embedFiles ? "universe-with-classes.json" : "universe.json";
 		a.click();
 		setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+		setStatus(embedFiles
+			? "Exported the universe with its class files embedded."
+			: "Exported the universe (seeds and settings; load the class files beside it).");
 	}
 
 	/* Re-import: a universe file carries seeds and file fingerprints, not
@@ -2281,16 +2418,63 @@
 			showError(new Error("Not a universe export."));
 			return;
 		}
+		/* An embedded universe carries its own classes, so there is nothing to
+		   go and find. */
+		if (Array.isArray(json.files) && json.files.length) {
+			const loaded = [];
+			const problems = [];
+			for (const f of json.files) {
+				if (!f || !f.data) continue;
+				try {
+					const check = global.Engine.validateLeagueFile(f.data);
+					loaded.push({ name: f.name || "embedded.json", data: f.data,
+						warnings: check.warnings });
+				} catch (e) {
+					problems.push((f.name || "embedded file") + ": " +
+						(e && e.message ? e.message : String(e)));
+				}
+			}
+			if (loaded.length) installFiles(loaded, problems);
+		}
 		const have = new Set(state.files.map((f) => f.fingerprint));
 		const missing = (json.seasons || []).filter(
 			(s) => s.fingerprint && !have.has(s.fingerprint));
-		if (missing.length) {
-			showError(new Error("Load these class files first: " +
-				missing.map((m) => m.fileName).join(", ")));
+		/* PARTIAL IMPORT. Refusing outright was the wrong call: a fifty-season
+		   universe whose 2031 class the user does not have is still forty-nine
+		   seasons they can replay, and the old behaviour was to import none of
+		   it and name the missing file. Now the seasons that are present run
+		   and the ones that are not are reported. */
+		if (missing.length && missing.length >= (json.seasons || []).length) {
+			showError(new Error("None of this universe's class files are loaded. " +
+				"Load them first: " + missing.map((m) => m.fileName).join(", ")));
 			return;
 		}
+		/* The settings the universe was built under, if it carries them. A
+		   version 1 export does not, and replaying it under the current
+		   settings is the best that can be done — which is said out loud
+		   rather than silently producing a different world. */
+		let note = "";
+		if (json.settings) {
+			const seed = json.settings.seed;
+			state.cfg = CFG.make(json.settings);
+			state.cfg.seed = seed || state.cfg.seed;
+			note = " Settings from the file were applied.";
+		} else {
+			note = " This export predates settings capture (version " +
+				(json.version || 1) + "), so it replays under your current settings.";
+		}
+		state.cfg.universe = true;
 		state.cfg.seed = json.baseSeed || state.cfg.seed;
 		$("seed").value = state.cfg.seed;
+		paintConfig();
+		if (missing.length) {
+			setStatus("Replaying " +
+				((json.seasons || []).length - missing.length) + " of " +
+				(json.seasons || []).length + " seasons — not loaded: " +
+				missing.map((m) => m.fileName).join(", ") + "." + note);
+		} else {
+			setStatus("Replaying " + (json.seasons || []).length + " seasons." + note);
+		}
 		runUniverse();
 	}
 
@@ -4020,6 +4204,8 @@
 		editorPanel, modal, closeModal,
 		clearLock, showPlayer, showTeam,
 		runUniverse, exportUniverse, importUniverse,
+		// Exposed for tools/uismoke.js, which loads files without a file input.
+		installFiles, paintConfig,
 		copyText, bulkApply, bulkShiftOvr, bulkLockAsIs, bulkClear, refreshBulkBar,
 		snapshot,
 		exportCsv, setStatus, showError, indexSnapshot,

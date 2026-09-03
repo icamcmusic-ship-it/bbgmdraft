@@ -882,6 +882,88 @@ function ok(name, condition, detail) {
 			(await page.locator("#view").innerHTML()).length > 2000);
 	}
 
+	console.log("\nUniverse mode as a setting");
+	{
+		/* THE BUG THIS EXISTS FOR.
+
+		   The universe used to finish by nulling every cached result, so the
+		   next render of any tab re-ran the file with the plain config — no
+		   carry-over, and the base seed instead of the season's own. The
+		   Timeline said one team won the title and the Bracket tab for the
+		   same file showed another. Nothing in any harness could see it,
+		   because both halves were individually correct.
+
+		   Two class files, universe mode on, and the champion the Timeline
+		   names has to be the champion the cached result carries. */
+		await page.goto(base);
+		await page.evaluate(() => localStorage.clear());
+		await page.goto(base);
+		await page.evaluate(() => {
+			const S = window.Sample;
+			const A = window.App;
+			const files = [2026, 2027].map((season) => {
+				const data = S.makeClass(season, 70, season);
+				return { name: "class-" + season + ".json", data };
+			});
+			A.installFiles(files, []);
+		});
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		await page.evaluate(() => {
+			window.App.state.cfg.universe = true;
+			window.App.state.cfg.seed = "smoke-universe";
+		});
+		await page.evaluate(() => window.App.runUniverse());
+		await page.waitForFunction(() => !window.App.state.universe.running &&
+			window.App.state.universe.rows.length >= 2, null, { timeout: 60000 });
+		const agree = await page.evaluate(() => {
+			const st = window.App.state;
+			const out = [];
+			for (const row of st.universe.rows) {
+				const i = st.files.findIndex((f) => f.name === row.fileName);
+				const res = st.results[i];
+				out.push({
+					file: row.fileName,
+					timeline: row.champion,
+					cached: res && res.tourney && res.tourney.champion
+						? res.tourney.champion.team.name : null,
+					seedRow: row.seed,
+					seedCached: res ? res.seed : null,
+				});
+			}
+			return out;
+		});
+		ok("the chain keeps a result for every season it ran",
+			agree.length >= 2 && agree.every((a) => a.cached), JSON.stringify(agree));
+		ok("every tab reads the champion the timeline names",
+			agree.every((a) => a.timeline === a.cached),
+			agree.map((a) => a.file + ": " + a.timeline + " vs " + a.cached).join(" | "));
+		ok("and the season's own seed, not the base seed",
+			agree.every((a) => a.seedRow === a.seedCached),
+			JSON.stringify(agree.map((a) => [a.seedRow, a.seedCached])));
+		/* And the other half: the export writes the universe's world rather
+		   than a re-simulation of the file. The note carries the season's own
+		   record, so comparing the exported note against the cached result is
+		   a comparison of the two worlds. */
+		const exportAgrees = await page.evaluate(() => {
+			const st = window.App.state;
+			const res = st.results[st.active];
+			const file = window.Engine.exportFile(res, {});
+			const i = res.players.findIndex((p) => p.note && !p.nonNcaa);
+			return i >= 0 && file.players[i].note === res.players[i].note;
+		});
+		ok("the export writes the universe's world", exportAgrees);
+		/* Turning the setting off drops the chain's configs, so the tabs go
+		   back to standalone runs rather than silently keeping a world the
+		   user has switched out of. */
+		await page.evaluate(() => {
+			window.App.state.cfg.universe = false;
+			window.App.state.universe.cfgs = {};
+		});
+		ok("turning universe mode off clears the cached chain configs",
+			(await page.evaluate(() =>
+				Object.keys(window.App.state.universe.cfgs).length)) === 0);
+	}
+
 	console.log("\nNo errors");
 	ok("no console or page errors", errors.length === 0, errors.join("\n         "));
 

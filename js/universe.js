@@ -13,7 +13,7 @@
 (function (global) {
 	"use strict";
 
-	const VERSION = 1;
+	const VERSION = 2;
 
 	/* --------------------------------------------------------- validation
 
@@ -260,22 +260,78 @@
 		return out;
 	}
 
-	function exportUniverse(u) {
-		return {
+	/* The universe as a file.
+
+	   The format is still seeds and fingerprints rather than simulated output,
+	   because that is what the deterministic RNG design buys and it keeps a
+	   fifty-season world under a kilobyte. Three things are added:
+
+	     - `settings`, because a universe is only reproducible if the settings
+	       it ran under travel with it. Without them, importing somebody's
+	       fifty-season world at YOUR coachTurnover and YOUR era replays
+	       something else entirely and calls it the same universe.
+	     - `biography`, the class year and transfer path drawn for each player
+	       key. Once a prospect appears in more than one season these have to be
+	       a fact about the WORLD rather than about one run.
+	     - `files`, optional, so a universe can be one file you hand somebody
+	       instead of a file plus a folder of class exports.
+
+	   `version` goes to 2. Version 1 files still import — see importUniverse,
+	   which reads what is present and says what is missing. */
+	function exportUniverse(u, opts) {
+		opts = opts || {};
+		const out = {
 			format: "bbgm-draft-workshop/universe",
 			version: VERSION,
 			name: u.name || "Universe",
 			createdAt: u.createdAt || new Date().toISOString(),
 			baseSeed: u.baseSeed,
+			settings: u.settings || null,
 			seasons: (u.rows || []).map((r) => ({
 				season: r.season, fileName: r.fileName,
 				fingerprint: r.fingerprint || null, seed: r.seed,
 			})),
 		};
+		if (u.biography && Object.keys(u.biography).length) out.biography = u.biography;
+		if (opts.embedFiles && Array.isArray(opts.files)) {
+			out.files = opts.files.map((f) => ({
+				name: f.name, fingerprint: f.fingerprint || null, data: f.data,
+			}));
+		}
+		return out;
+	}
+
+	/* Every player's class year and transfer path, keyed by player key.
+
+	   A biography is drawn per run today, which is correct while a file is one
+	   world on its own and wrong the moment a prospect appears in more than one
+	   season of a chain: a man who is a junior in the 2027 class has to have
+	   been a sophomore in 2026, and re-drawing it each season would make him a
+	   different person every time somebody moved a slider. Exported so that a
+	   shared universe replays the same men, not merely the same seeds. */
+	function biographyOf(results) {
+		const out = {};
+		for (const res of results || []) {
+			if (!res || !res.players) continue;
+			for (const p of res.players) {
+				if (!p.key || out[p.key]) continue;
+				out[p.key] = {
+					classYear: p.classYear,
+					redshirt: p.redshirt || null,
+					reclassified: p.reclassified || null,
+					transfer: p.transfer
+						? { kind: p.transfer.kind, from: p.transfer.from || null,
+							fifthYear: !!p.transfer.fifthYear }
+						: null,
+					college: p.newCollege,
+				};
+			}
+		}
+		return out;
 	}
 
 	global.Universe = {
 		VERSION, validate, harvest, returnersOf, alumniOf, summarize, threads,
-		exportUniverse,
+		exportUniverse, biographyOf,
 	};
 })(typeof window !== "undefined" ? window : self);
