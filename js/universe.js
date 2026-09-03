@@ -40,9 +40,14 @@
 				row.ok = false;
 				row.errors.push("no players in the file");
 			}
-			if (row.players > 250) {
+			/* The cap is Engine.MAX_CLASS, read rather than retyped: it used
+			   to be the literal 250 here and a named constant there, which is
+			   two numbers that have to be changed together and one place that
+			   says so. */
+			const cap = global.Engine.MAX_CLASS;
+			if (row.players > cap) {
 				row.ok = false;
-				row.errors.push(row.players + " players — above the 250 cap");
+				row.errors.push(row.players + " players — above the " + cap + " cap");
 			}
 			return row;
 		});
@@ -86,7 +91,8 @@
 		return {
 			name: c.name, tenure: c.tenure, philosophy: c.philosophy,
 			style: c.style, dev: c.dev, usageBias: c.usageBias,
-			defEmphasis: c.defEmphasis, rep: c.rep,
+			// Age, so the same man can get a year older and eventually retire.
+			defEmphasis: c.defEmphasis, rep: c.rep, age: c.age,
 		};
 	}
 
@@ -108,11 +114,23 @@
 	/* What one finished season hands the next. */
 	function harvest(res) {
 		const carry = { confOf: {}, levels: {}, coaches: {}, returners: {} };
+		/* Which programs have a vacancy. Read from the April carousel (a
+		   per-program draw over record, prestige, situation, tenure and age),
+		   not from the news feed: the feed carried at most one "coaching
+		   change" a season out of a budget of seven stories, so a decade of
+		   universe used to move about ten jobs across 368 programs.
+
+		   `fired` is a misnomer kept for the shape of the carry object: a
+		   retirement and a coach hired away are the same fact to the next
+		   season, which is that somebody else is on the sideline. The reason
+		   travels beside it so the next season's team page and the news can
+		   tell the three apart. */
 		const fired = new Set();
-		for (const e of res.seasonEvents || []) {
-			if (e.kind === "coaching change" && e.teams && e.teams[0]) {
-				fired.add(e.teams[0]);
-			}
+		const why = {};
+		for (const c of res.coachingCarousel || []) {
+			if (!c || !c.school) continue;
+			fired.add(c.school);
+			why[c.school] = c.reason;
 		}
 		for (const t of Object.values(res.teams || {})) {
 			if (!t || !t.name || !t.log) continue;
@@ -121,6 +139,7 @@
 			carry.coaches[t.name] = {
 				coach: stripCoach(t.coach),
 				fired: fired.has(t.name),
+				reason: why[t.name] || null,
 			};
 			const ret = returnersOf(t);
 			if (ret.length) carry.returners[t.name] = ret;
@@ -138,14 +157,35 @@
 			seen.add(p.key);
 			out.push({
 				season, name: p.name, key: p.key,
-				school: p.proClub || p.newCollege,
+				/* The NCAA program, always — `proClub || newCollege` put a
+				   EuroLeague club name here and the alumni link then pointed
+				   at a team page that does not exist. The club is kept beside
+				   it so the view can still say where he played, without
+				   pretending it is somewhere you can click. */
+				school: p.newCollege,
+				club: p.proClub || null,
+				nonNcaa: !!p.nonNcaa,
 				boardRank: p.boardRank || null,
 				why,
 			});
 		};
+		/* The national player-of-the-year trophies, named. The old test was
+		   /Player of the Year/ minus /Defensive|Conference/, which is a rule
+		   about the WORD "conference" and not about conferences: an ACC Player
+		   of the Year does not contain it, and neither does a National Prep
+		   Player of the Year or a Sporting News Player of the Year. Six alumni
+		   a season came back tagged "player of the year" when there is one.
+
+		   AW.NATIONAL_POY is the list the awards module actually mints from,
+		   plus the consensus row it derives; reading it here means a trophy
+		   added there is picked up rather than missed. */
+		const nationalPOY = new Set(
+			(global.Awards.NATIONAL_POY || []).map((a) => a.name)
+				.concat(["Consensus National Player of the Year"]));
 		for (const p of res.players || []) {
-			if ((p.awards || []).some((a) => /Player of the Year/.test(a) &&
-				!/Defensive|Conference/.test(a))) add(p, "player of the year");
+			if ((p.awards || []).some((a) => nationalPOY.has(a))) {
+				add(p, "player of the year");
+			}
 		}
 		const board = (res.players || []).slice()
 			.sort((a, b) => (a.boardRank || 999) - (b.boardRank || 999));
@@ -177,8 +217,13 @@
 			apOne: res.poll && res.poll[0] ? res.poll[0].name : null,
 			realignment: (res.realignment || [])
 				.map((m) => m.school + " → " + m.to),
-			coachChanges: (res.seasonEvents || [])
-				.filter((e) => e.kind === "coaching change").length,
+			coachChanges: (res.coachingCarousel || []).length,
+			coachFired: (res.coachingCarousel || [])
+				.filter((c) => c.reason === "fired" || c.reason === "not retained").length,
+			coachRetired: (res.coachingCarousel || [])
+				.filter((c) => c.reason === "retired").length,
+			coachHiredAway: (res.coachingCarousel || [])
+				.filter((c) => c.reason === "hired away").length,
 		};
 	}
 

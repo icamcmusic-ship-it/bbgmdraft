@@ -95,6 +95,39 @@
 		   engine never writes it. */
 		recentPools: null,
 
+		/* --- the world -----------------------------------------------------
+
+		   These four decide how much the SIDELINE and the roster around the
+		   class change from one season to the next. Alone in a single-class
+		   run they are flavor; in a universe they are what makes a decade of
+		   play feel like a decade. */
+		/* Universe mode. `false` runs each loaded file as its own world (and
+		   the Timeline view has nothing to show); `true` runs every loaded
+		   file as one continuous chain, oldest season first, with each season
+		   handing conference map, program levels, coaches, star returners and
+		   build-pool memory to the next — and every other tab then shows THAT
+		   world rather than a fresh re-simulation of the same file. It used to
+		   be a button on a tab, which is exactly why the tabs disagreed with
+		   it. */
+		universe: false,
+		/* Head-coaching turnover, as a percentage of the built-in rates. 100
+		   turns over 40-60 of the 368 programs a year, which is what Division
+		   I does; 0 freezes every sideline; 200 is a bloodbath. */
+		coachTurnover: 100,
+		/* How strongly a universe remembers last season's conference map. 100
+		   means a program that moved stays moved (realignment accumulates);
+		   0 means every season redraws the map from the base alignment, which
+		   is the pre-universe behaviour. */
+		realignmentMemory: 100,
+		/* Roughly how many named non-prospect stars the country carries, as a
+		   percentage of the built-in rate. These are the men a prospect loses
+		   an award to; without them the class wins everything by default. */
+		starReturners: 100,
+		/* How much of a program's returning rotation left through the portal
+		   between seasons, as a percentage. Only meaningful in a universe,
+		   where there is a previous season to leave. */
+		portalRate: 100,
+
 		// --- the season's own story ----------------------------------------
 		/* How often the map of college basketball changes. Conference STRENGTH
 		   already drifted from year to year; membership never did, so the one
@@ -135,7 +168,13 @@
 		// BBGM draft classes are nearly all age 19, so class year has to be
 		// rolled rather than read off the birthday. This is the share of the
 		// class that stayed one year; the rest spread across the other three.
-		freshmanShare: 46,
+		/* 46 produced a measured 46-48% freshmen, and a real 60-70 man draft
+		   class is 30-35%: one-and-done is the story of the top ten picks, not
+		   of the class. The draw tilts steeply with board rank (pFresh scales
+		   by 1.75 - 1.45*rank), so the setting and the outcome agree to about
+		   a point — 32 measures 33%. "One-and-done era" still carries 78 for
+		   anyone who wants the old shape and more. */
+		freshmanShare: 32,
 		// Modern college basketball is a transfer league. This is the share of
 		// upperclassmen who arrived from somewhere else — a mid-major jump, a
 		// JUCO year, a fifth-year transfer.
@@ -218,7 +257,7 @@
 		"Deep, no stars": { classDepth: 2, eliteCount: 0, ovrMode: "curve" },
 		"Specialist league": { specialization: 1.8, archetypeDiversity: 95, buildNoise: 7, classFlavor: 1.6 },
 		"Guard-heavy class": { classFlavor: 2, archetypeDiversity: 92 },
-		"Transfer-portal era": { transferShare: 62, freshmanShare: 32 },
+		"Transfer-portal era": { transferShare: 62, freshmanShare: 26 },
 		"International class": {
 			leagueWeights: {
 				"EuroLeague": 40, "Liga ACB": 22, "EuroCup": 20,
@@ -230,6 +269,7 @@
 		},
 		"Vanilla builds": { specialization: 0.2, archetypeDiversity: 20 },
 		"One-and-done era": { freshmanShare: 78 },
+		"Blue-blood freshman wave": { freshmanShare: 46, eliteCount: 3 },
 		"Veteran-heavy class": { freshmanShare: 16 },
 		"2015 scoring drought": { era: "2009-2021", pace: 64, efficiencyEnv: -1 },
 		"Chalk March": { upsetFactor: 0.35 },

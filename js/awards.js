@@ -1060,6 +1060,108 @@
 		return ranked;
 	}
 
+	/* ------------------------------------------------------- award scope
+
+	   A good prospect finishes a season holding fifteen to twenty-two honors,
+	   and BBGM's player page renders every one of them as its own row. Most of
+	   that is conference filler — All-Sun Belt Newcomer Team, All-MAC
+	   Tournament Team, an Ohio Valley all-freshman nod — and it buries the
+	   three lines a reader actually wants. Measured over six classes: 114
+	   distinct types, 2.4 honors a player, 22 on the most decorated.
+
+	   `major` is the answer to "what would a broadcast graphic list". It is
+	   deliberately a predicate over the award STRING rather than a flag set
+	   where each award is created: awards are minted in a dozen places here,
+	   several of them by template from a conference name, and a flag would
+	   have to be remembered at every one of them forever.
+
+	   MAJOR_CONFERENCES is overridable per export (opts.majorConferences), so
+	   a user who cares about the WCC can say so. */
+	const MAJOR_CONFERENCES = [
+		"ACC", "Big Ten", "Big 12", "Big East", "SEC",
+		// The mid-major exception the audit asks for: a conference POY at one
+		// of these is a national name, not filler.
+		"WCC", "Mountain West", "Atlantic 10", "American", "AAC", "Missouri Valley",
+	];
+
+	/* Nothing below the line, whatever it is attached to. Checked first, so a
+	   "Naismith Trophy finalist" loses to the finalist rule and not to the
+	   national-trophy rule that also matches it. */
+	const MINOR_SUFFIX = /(finalist|watch list|honorable mention|Late Season Top \d+|Midseason Top \d+)/i;
+	const MINOR_ALWAYS = [
+		/All-\w+ All-Region Team$/,          // NCAA East/West/Midwest/South
+		/^NCAA \w+ All-Region Team$/,
+		/^Academic All-American$/,
+		/Cup Final MVP$/,                    // domestic cups abroad
+		/Most Improved Player$/,
+		/Sixth Man of the Year$/,
+	];
+
+	const MAJOR_NATIONAL = [
+		/^Consensus National Player of the Year$/,
+		/^(Naismith Trophy|John R\. Wooden Award|Oscar Robertson Trophy)$/,
+		/^(AP|NABC|Sporting News) Player of the Year$/,
+		/^Consensus (First|Second) Team All-American$/,
+		/^Third Team All-American$/,
+		/^(Naismith|NABC) Defensive Player of the Year$/,
+		/^Lefty Driesell Award$/,
+		/^(Bob Cousy|Jerry West|Julius Erving|Karl Malone|Kareem Abdul-Jabbar) Award$/,
+		/^Final Four Most Outstanding Player$/,
+		/^NCAA All-Tournament Team$/,
+		/^NIT Most Valuable Player$/,
+	];
+
+	/* Abroad and in the G League: the same shape of rule, one league up. */
+	const MAJOR_PRO = [
+		/\bMVP$/, /\bFinals MVP$/, /^All-[\w .]+ First Team$/,
+		/Rising Star$/, /Best Young Player$/, /Rookie of the Year$/,
+	];
+	/* Which of those are conference rows rather than pro rows: "All-ACC First
+	   Team" matches the pro First Team pattern too, so conferences are decided
+	   before the pro list is consulted. */
+	function conferenceIn(award, confs) {
+		for (const c of confs) {
+			if (award === c + " Player of the Year" ||
+				award === c + " Defensive Player of the Year" ||
+				award === c + " Freshman of the Year" ||
+				award === "All-" + c + " First Team" ||
+				award === c + " Tournament MVP") return true;
+		}
+		return false;
+	}
+	/* Any conference at all — used to reject a NON-major conference row before
+	   the pro patterns can claim it. */
+	const CONF_SHAPED =
+		/(Player of the Year|Freshman of the Year|Tournament MVP|Defensive Player of the Year)$|^All-.+ (First|Second|Freshman|Newcomer|Defensive|Tournament) Team$/;
+
+	function isMajorAward(award, confs) {
+		const a = String(award || "").trim();
+		if (!a) return false;
+		if (MINOR_SUFFIX.test(a)) return false;
+		for (const re of MINOR_ALWAYS) if (re.test(a)) return false;
+		for (const re of MAJOR_NATIONAL) if (re.test(a)) return true;
+		const list = confs && confs.length ? confs : MAJOR_CONFERENCES;
+		if (conferenceIn(a, list)) return true;
+		/* A conference-shaped row that did not match the list above is filler
+		   by construction — second teams, all-freshman, all-newcomer, and
+		   every award of a conference the user did not name. */
+		if (CONF_SHAPED.test(a)) {
+			// ...unless it is a professional league's own award, which is
+			// conference-shaped only by coincidence of wording.
+			if (/^All-(EuroLeague|EuroCup|ABA|BBL|LNB|BSL|B\.League|G League|BAL|East Asia Super League) First Team$/.test(a)) return true;
+			return false;
+		}
+		for (const re of MAJOR_PRO) if (re.test(a)) return true;
+		return false;
+	}
+
+	/* Filter a player's honor list to a scope. "all" is the identity, so the
+	   caller never has to branch. */
+	function scopeAwards(list, scope, confs) {
+		if (scope !== "major") return (list || []).slice();
+		return (list || []).filter((a) => isMajorAward(a, confs));
+	}
+
 	global.Awards = {
 		assign, productionScore, defenseScore, fieldDefenseScore, resumeScore,
 		rankAgainstField, rankHighlights, RANKED_STATS,
@@ -1067,5 +1169,6 @@
 		buildField, fitScores, fitTalentToScore, awardRank, sortAwards,
 		NATIONAL_POY, NATIONAL_DPOY, POSITION_AWARDS, AWARD_TIERS,
 		NCAA_BONUS, NIT_BONUS, GATES,
+		MAJOR_CONFERENCES, isMajorAward, scopeAwards,
 	};
 })(typeof window !== "undefined" ? window : self);

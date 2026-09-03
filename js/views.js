@@ -2204,7 +2204,8 @@
 				"The names this world remembers, season by season — what a later " +
 				"class's news can refer back to."));
 			view.appendChild(el("div", "note", u.alumni.map((a) =>
-				a.season + "  " + a.name + " (" + a.school + ") — " + a.why).join("\n")));
+				a.season + "  " + a.name + " (" + a.school +
+				(a.club ? ", then " + a.club : "") + ") — " + a.why).join("\n")));
 		}
 	}
 

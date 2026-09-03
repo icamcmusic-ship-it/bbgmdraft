@@ -98,6 +98,44 @@
 		"The week in college basketball",
 	];
 
+	/* Turn a plain sentence into segments with every mention of every named
+	   team linked.
+
+	   The old loop walked the team list once and took the FIRST occurrence of
+	   each name, so "Duke beat Duke's own record" left the second Duke plain,
+	   and — worse for the common case — a body that names the loser before the
+	   winner linked whichever the loop reached first and then searched the
+	   REMAINDER of the string for the other, missing it entirely when it
+	   appeared earlier.
+
+	   Scanning left to right and, at each position, taking the LONGEST team
+	   name that matches there fixes both, and the longest-match rule is what
+	   keeps "Miami" from being linked inside "Miami (OH)". */
+	function linkTeams(text, names, teams) {
+		const known = (names || []).filter((nm) => nm && String(nm).length)
+			.slice().sort((a, b) => b.length - a.length);
+		const segs = [];
+		let buf = "";
+		let i = 0;
+		while (i < text.length) {
+			let hit = null;
+			for (const nm of known) {
+				if (text.startsWith(nm, i)) { hit = nm; break; }
+			}
+			if (hit) {
+				if (buf) { segs.push(T(buf)); buf = ""; }
+				segs.push(teams && teams[hit] ? TM(hit) : T(hit));
+				i += hit.length;
+			} else {
+				buf += text[i];
+				i++;
+			}
+		}
+		if (buf) segs.push(T(buf));
+		if (!segs.length) segs.push(T(text));
+		return segs;
+	}
+
 	function pushEvent(articles, rng, e, teams) {
 		const heads = EVENT_HEADS[e.kind] || GENERIC_HEADS;
 		const names = e.teams || [];
@@ -108,17 +146,7 @@
 			// names one agrees with the dateline under it.
 			month: T(dateline(e.when === undefined ? 0.5 : e.when)),
 		};
-		const bodySegs = [];
-		// The event text mentions its teams by name; link them in place.
-		let rest = e.text;
-		for (const nm of names) {
-			const i = rest.indexOf(nm);
-			if (i === -1) continue;
-			if (i > 0) bodySegs.push(T(rest.slice(0, i)));
-			bodySegs.push(TM(nm));
-			rest = rest.slice(i + nm.length);
-		}
-		bodySegs.push(T(rest + "."));
+		const bodySegs = linkTeams(e.text + ".", names, teams);
 		// A body that opens with generated text opens a sentence.
 		if (bodySegs[0].t === "text") bodySegs[0].v = global.Text.capitalize(bodySegs[0].v);
 		articles.push({

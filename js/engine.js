@@ -652,7 +652,11 @@
 		const ageSd = Math.sqrt(
 			ages.reduce((a, x) => a + (x - ageMean) * (x - ageMean), 0) / ages.length);
 		state.classAge = ageMean;
-		assignClassYears(players, cfg, rng.child("classyears" + vsalt), ageSd >= 0.75);
+		/* Whether the source file's own ages carry information. Read twice now:
+		   assignClassYears takes them at face value when they do, and exportFile
+		   leaves born.year alone when they do (see AGE_FOR_CLASS). */
+		state.ageIsInformative = ageSd >= 0.75;
+		assignClassYears(players, cfg, rng.child("classyears" + vsalt), state.ageIsInformative);
 
 		// --- colleges -------------------------------------------------
 		// Per-player overrides ("lock this guy at 55 ovr / to Duke / as a Rim
@@ -1698,6 +1702,15 @@
 		state.tourney = TN.simulate(teams, cfg, rng.child("ncaa"));
 		// Chronological order and full records, now that March has happened.
 		T.finalizeSchedule(teams);
+		/* The April carousel, drawn per program off the season that just
+		   finished. Not a news event — the news layer reports the notable ones
+		   out of this list, rather than this list being one of seven stories
+		   the feed happened to have room for. See coachingCarousel. */
+		state.coachingCarousel = T.coachingCarousel(
+			teams, rng.child("carousel"), cfg,
+			(state.seasonEvents || [])
+				.filter((e) => e.kind === "coaching change" && e.teams && e.teams[0])
+				.map((e) => e.teams[0]));
 		return state;
 	}
 
@@ -2455,6 +2468,11 @@
 				// See variationSalt / pickClassPool: both reshape the class
 				// from the build phase down.
 				"variation", "flavorHint", "poolMemory", "recentPools",
+				/* Universe mode is a whole-chain fact, not a phase input: the
+				   runner is handed a different seed and a carryOver when it is
+				   on. Declared here so that turning it on invalidates
+				   everything, which is what it does. */
+				"universe",
 			],
 			run: phaseBuild,
 		},
@@ -2463,10 +2481,12 @@
 		{
 			name: "regular",
 			deps: ["pace", "scoringEnv", "injuryRate", "realignmentRate",
-				"bluebloodDownYears", "midMajorLift", "teamMomentum", "seasonEvents"],
+				"bluebloodDownYears", "midMajorLift", "teamMomentum", "seasonEvents",
+				// The world dials: all three are read by buildPrograms.
+				"realignmentMemory", "starReturners", "portalRate"],
 			run: phaseRegular,
 		},
-		{ name: "postseason", deps: ["upsetFactor"], run: phasePostseason },
+		{ name: "postseason", deps: ["upsetFactor", "coachTurnover"], run: phasePostseason },
 		{
 			name: "stats",
 			deps: ["era", "pace", "scoringEnv", "efficiencyEnv", "statNoise",
@@ -2583,6 +2603,7 @@
 			fieldHonors: state.fieldHonors || [],
 			fieldTop: state.fieldTop || [],
 				seasonEvents: state.seasonEvents || [],
+				coachingCarousel: state.coachingCarousel || [],
 				flavor: state.flavor,
 				// The builds this class was drawn from, and the anomalies it
 				// was given, so the UI can say what makes this class this one.
@@ -3834,6 +3855,47 @@
 		return row;
 	}
 
+	/* THE AGE A CLASS YEAR IMPLIES.
+
+	   Every player in a BBGM draft class is born in the same year, because
+	   BBGM generates a class as one cohort. assignClassYears rolls a spread of
+	   class years on top of that — correct, and the whole point of the class
+	   mechanic — but the export used to leave born.year exactly as the file
+	   had it. So a fifth-year senior arrived on BBGM's draft screen reading
+	   Age 19, and BBGM's own progression then developed him on a
+	   nineteen-year-old's curve: the largest development bump in the game
+	   handed to the one man in the class who is a finished product. The
+	   opposite of what "graduate transfer" means.
+
+	   The map is deliberately plain: a freshman is 19 in the draft year he is
+	   scouted, and every year of eligibility is a year of age. A redshirt
+	   costs a year without costing eligibility, and junior college costs two.
+	   Nothing here is a draw — the biography already happened, this only reads
+	   it back. */
+	const AGE_FOR_CLASS = {
+		Freshman: 19, Sophomore: 20, Junior: 21, Senior: 22, Graduate: 23,
+	};
+	const AGE_CAP = 24;
+	function ageForClassYear(classYear, transfer) {
+		const cy = String(classYear || "Freshman");
+		const redshirt = /^Redshirt /.test(cy);
+		const base = AGE_FOR_CLASS[cy.replace(/^Redshirt /, "")];
+		let age = Number.isFinite(base) ? base : AGE_FOR_CLASS.Freshman;
+		if (redshirt) age += 1;
+		// A JUCO man spent two years somewhere that does not appear on his
+		// D-I class year at all.
+		if (transfer && transfer.kind === "JUCO transfer") age += 1;
+		return clamp(age, 18, AGE_CAP);
+	}
+
+	/* opts.awardsScope: "all" (every honor, the old behaviour and the default)
+	   or "major" (national honors plus the power/named-conference rows). The
+	   predicate lives in js/awards.js because that is where the strings are
+	   minted. opts.majorConferences overrides which conferences count. */
+	function awardsInScope(list, scope, confs) {
+		return AW.scopeAwards(list, scope, confs);
+	}
+
 	/* Produce the modified BBGM draft class file.
 
 	   `opts` is the §8.13 opt-in surface — every flag off writes exactly the
@@ -3904,6 +3966,18 @@
 				SIZE_OVERRIDE_KEYS.some((k) => Number.isFinite(ov[k]));
 			if (sized || !Number.isFinite(orig.hgt)) out.hgt = p.newHgtInches;
 			if (sized || !Number.isFinite(orig.weight)) out.weight = p.newWeight;
+			/* Age. See AGE_FOR_CLASS: a class year that the tool rolled has to
+			   reach the file, or BBGM shows a graduate transfer as 19 and then
+			   develops him like one. Skipped when the source file's own ages
+			   already vary (ageIsInformative) — there the class years were READ
+			   from those ages and rewriting them would be a round trip through
+			   a coarser map — and skipped when the flag is off. */
+			if (opts.ages !== false && !result.ageIsInformative &&
+				out.born && Number.isFinite(Number(out.born.year))) {
+				out.born = Object.assign({}, out.born, {
+					year: result.season - ageForClassYear(p.classYear, p.transfer),
+				});
+			}
 			const last = out.ratings.length - 1;
 			const r = out.ratings[last];
 			for (const k of BB.RATING_KEYS) {
@@ -3918,9 +3992,45 @@
 			});
 			out.note = p.note;
 
-			if (opts.awards && p.awards && p.awards.length) {
-				out.awards = (Array.isArray(out.awards) ? out.awards : [])
-					.concat(p.awards.map((type) => ({ season: result.season, type })));
+			/* Guarded on the FLAG, not on whether this player won anything.
+			   Keying it on p.awards.length left a man who was an All-American in
+			   the previous export and nobody in this one still holding the old
+			   honors: the replacement below never ran for him. Six players a
+			   class, which is exactly the sort of residue that survives a dozen
+			   round trips unnoticed. */
+			if (opts.awards) {
+				/* THE CLASS SEASON'S HONORS ARE REPLACED, NOT APPENDED.
+
+				   Exporting a class, importing the result and exporting it
+				   again used to double every honor, and a third round trip
+				   tripled them: `awards` is one of the two fields BBGM's
+				   draft-class import keeps, so the file coming back in already
+				   carries the rows this line is about to write. Measured at 181
+				   rows on the first export and 368 on the second. The `Honors:`
+				   note line was guarded against exactly this and the array was
+				   not.
+
+				   Deduping on {season, type} is not enough, and that is worth
+				   saying because it is the obvious fix and it does not work: a
+				   re-import re-SIMULATES the season, so the second run hands
+				   out a different set of honors for the same year. Under a
+				   dedupe the file converges on the union of every season
+				   anybody ever simulated — 181, then 235, then 279, then 307 —
+				   and the player ends up holding two conferences' player of
+				   the year awards in one year.
+
+				   So rows AT THE CLASS'S OWN SEASON are dropped and rewritten.
+				   Every award this tool writes carries result.season, and the
+				   players being written are draft prospects who have not
+				   played a season in the league, so a row at that season on one
+				   of them is ours by construction. Anything at another season —
+				   a real league history, a hand-added honor — is left alone. */
+				const scoped = awardsInScope(
+					p.awards, opts.awardsScope, opts.majorConferences);
+				const kept = (Array.isArray(out.awards) ? out.awards : [])
+					.filter((a) => !a || Number(a.season) !== Number(result.season));
+				out.awards = kept.concat(
+					scoped.map((type) => ({ season: result.season, type })));
 				/* `awards` does not survive Tools -> Import players: that
 				   function builds the imported player from a fixed list of
 				   fields (born, college, contract, draft, face, names, hgt,
@@ -3931,9 +4041,17 @@
 				   which is the only way an import that keeps his statline can
 				   also tell you he was an All-American. The note template can
 				   drop the honors line (see NOTE_LINES); this does not. */
-				if (String(out.note || "").indexOf("Honors:") === -1) {
+				/* Same reasoning one level down: a note carried in from a
+				   previous export holds the PREVIOUS run's honors line, so it
+				   is replaced rather than skipped. p.note is built fresh each
+				   run, so the only way a stale line survives is a template
+				   that omits the honors line while awards are being written —
+				   which is exactly the case the old guard silently kept. */
+				out.note = String(out.note || "")
+					.split("\n").filter((l) => l.indexOf("Honors:") !== 0).join("\n");
+				if (scoped.length) {
 					out.note = (out.note ? out.note + "\n" : "") +
-						"Honors: " + p.awards.join("; ");
+						"Honors: " + scoped.join("; ");
 				}
 			}
 			/* The flag matches the note: writing noteBool = 1 beside an

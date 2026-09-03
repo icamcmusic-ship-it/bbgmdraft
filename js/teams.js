@@ -89,7 +89,7 @@
 	   which the higher intercept puts back at the top). Flattening also closes
 	   the tier gap from the other end: measured PPG ran 10.3 at a high major
 	   against 17.1 at a low major for the same ovr, when the real gap is 4-7. */
-	function makeFiller(rng, level, i) {
+	function makeFiller(rng, level, i, cfg) {
 		const mean = 0.60 * level + 12.6;
 		/* The decay was steepened again (1.9 -> 2.4). At 1.9 a level-90 blue
 		   blood's returning core still averaged 66.6 against a prospect at
@@ -118,7 +118,12 @@
 		   came back" produce different boosts, and the `starReturner` tag lets
 		   the award model recognize who this player is. */
 		let starReturner = null;
-		if (i <= 2 && rng.random() < STAR_RETURNER_RATE) {
+		/* cfg.starReturners scales the built-in rate, so a user can decide how
+		   crowded the field a prospect wins his awards against is. The count
+		   used to be ~26 in the country with no way to move it. */
+		const starRate = STAR_RETURNER_RATE * clamp(
+			(cfg && cfg.starReturners !== undefined ? cfg.starReturners : 100) / 100, 0, 6);
+		if (i <= 2 && rng.random() < starRate) {
 			const kind = rng.weighted(STAR_RETURNER_KINDS);
 			talent = clamp(talent + rng.uniform(kind.boostLo, kind.boostHi), 6, 96);
 			starReturner = kind.name;
@@ -408,9 +413,21 @@
 		   a "defensive-minded" coach's prospect blocks more shots and steals
 		   more balls. The philosophy is drawn per-coach, not per-season. */
 		const philosophy = rng.weighted(COACH_PHILOSOPHIES);
+		/* AGE.
+
+		   The README said the same coach came back "one year older" and the
+		   coach object had no age on it, so nothing could get old and nothing
+		   ever retired: across a twenty-file universe every man who was not
+		   fired coached forever. A first-year hire is a 38-year-old more often
+		   than he is a 55-year-old, and a sixteen-year fixture is not 40, so
+		   age is drawn AROUND the tenure rather than independently of it —
+		   which also means it agrees with the situation the tenure produced. */
+		const age = clamp(Math.round(
+			34 + tenure + rng.normal(0, 5.5)), 30, 74);
 		return {
 			name: rng.pick(COACH_FIRST) + " " + rng.pick(COACH_LAST),
 			tenure,
+			age,
 			situation,
 			situationLabel: sit.label,
 			levelAdj: sit.levelAdj,
@@ -503,10 +520,23 @@
 		   than the static table, so two consecutive seasons can never move the
 		   same school in opposite directions — this season's raid happens on
 		   top of last season's map. */
+		/* cfg.realignmentMemory: how much of last season's map this season
+		   starts from. 100 means realignment accumulates across a universe (a
+		   program that moved stays moved); 0 redraws from the static base
+		   alignment every season, which is what the tool did before universes
+		   existed. Between the two it is a per-program draw, so a partial
+		   memory produces a map that is mostly last season's with a few
+		   programs snapping back — which is the honest reading of "partly". */
+		const memory = clamp(
+			(cfg && cfg.realignmentMemory !== undefined
+				? cfg.realignmentMemory : 100) / 100, 0, 1);
 		const carried = cfg && cfg.carryOver && cfg.carryOver.confOf;
 		for (const name of C.names) {
-			confOf[name] = (carried && carried[name]) ||
-				C.conferenceOf(name) || "Independent";
+			const base = C.conferenceOf(name) || "Independent";
+			const remembered = carried && carried[name];
+			confOf[name] = remembered &&
+				(memory >= 1 || rng.child("memory:" + name).random() < memory)
+				? remembered : base;
 		}
 		const rate = clamp(
 			cfg && cfg.realignmentRate !== undefined ? cfg.realignmentRate : 0.35, 0, 1);
@@ -590,7 +620,7 @@
 			}));
 			const nFill = Math.max(6, 10 - members.length);
 			const fillers = [];
-			for (let i = 0; i < nFill; i++) fillers.push(makeFiller(trng, level, i));
+			for (let i = 0; i < nFill; i++) fillers.push(makeFiller(trng, level, i, cfg));
 			/* Universe carry-over: last season's named star returners come
 			   back as the same men, a year older, if they have eligibility
 			   left. A returning conference player of the year who was a
@@ -598,9 +628,20 @@
 			   name — and nothing about him used to survive the season. A
 			   senior or a graduate has left, which is the story too. */
 			if (carry && carry.returners && carry.returners[name]) {
+				/* The portal. A star returner with eligibility left does not
+				   automatically come back to the same program any more: some
+				   share of them leave, which is what the portal IS and what a
+				   universe had no way to express. cfg.portalRate scales a base
+				   of 18% a man a year — the real figure for high-usage
+				   returning players is in that neighbourhood — so 0 is the old
+				   behaviour and 200 is a roster that empties every April. */
+				const portal = 0.18 * clamp(
+					(cfg && cfg.portalRate !== undefined ? cfg.portalRate : 100) / 100, 0, 5);
 				for (const r of carry.returners[name]) {
 					const next = NEXT_CLASS_YEAR[r.classYear];
 					if (!next) continue;
+					if (portal > 0 &&
+						trng.child("portal:" + r.name).random() < portal) continue;
 					const slot = Math.min(Math.max(0, r.slotIndex || 0), fillers.length - 1);
 					const f = fillers[slot];
 					if (!f) continue;
@@ -624,6 +665,8 @@
 				   the program sits under him now. */
 				coach = Object.assign({}, kept.coach);
 				coach.tenure = (coach.tenure || 1) + 1;
+				// One year older, which is what the README always promised.
+				coach.age = clamp((coach.age || 34 + coach.tenure) + 1, 30, 78);
 				const roll = trng.child("coach").random();
 				coach.situation = coach.tenure >= 16 && roll < 0.55 ? "fixture"
 					: level < C.prestige(name) - 12 && roll < 0.40 ? "hot seat"
@@ -1394,6 +1437,146 @@
 		return results;
 	}
 
+	/* ----------------------------------------------------- the carousel
+
+	   Head-coaching turnover used to be one line of the season-events feed:
+	   `harvest()` read firings out of `seasonEvents`, one of ~4 stories drawn
+	   from a budget of seven, and a "coaching change" fired at most once a
+	   season. Measured over ten universes: exactly one fired coach a year
+	   across 368 programs. Real Division I turns over 40-60 head coaches every
+	   April, and in Universe mode the old number meant a decade of play left
+	   the sidelines essentially untouched.
+
+	   So firing is a per-program draw at season end and the news layer merely
+	   REPORTS the notable ones. The draw is over four things a real April
+	   decision is over:
+
+	     - the record against what the program expects of itself, which is
+	       prestige, not the conference. A 14-17 season at a blue blood is a
+	       firing and a 14-17 season at a low-major is Tuesday;
+	     - the situation, because "on the hot seat" is a fact the model already
+	       carries and is by definition a statement about this exact draw;
+	     - tenure, which protects. A man in year two rarely goes and a man in
+	       year twelve has capital;
+	     - and age, which is how a coach leaves without being fired.
+
+	   Two other exits produce a vacancy and are not firings, which matters
+	   because the story is different and the news layer wants to say so: a
+	   retirement, and a coach hired away — up a level after a deep March run,
+	   or to the NBA. Both are drawn here so that one function owns every reason
+	   a program has a new coach in it.
+
+	   `cfg.coachTurnover` scales the whole thing (100 = the rates below), so a
+	   universe can be stable or chaotic on purpose. */
+	const RETIRE_AGE = 62;
+	function coachingCarousel(teams, rng, cfg, alreadyGone) {
+		const scale = clamp(
+			(cfg && cfg.coachTurnover !== undefined ? cfg.coachTurnover : 100) / 100, 0, 4);
+		const out = [];
+		if (scale <= 0) return out;
+		/* A coach fired in January is already gone, and the news feed said so.
+		   He is still a vacancy the next season has to fill, so he is reported
+		   here — but he is not drawn again, or a program could fire two men
+		   for one season. */
+		const gone = new Set(alreadyGone || []);
+		const names = Object.keys(teams).sort();
+		for (const name of names) {
+			const t = teams[name];
+			if (!t || !t.coach) continue;
+			if (gone.has(name)) {
+				out.push({
+					school: name, coach: t.coach.name, reason: "fired in-season",
+					w: t.w, l: t.l, age: t.coach.age, tenure: t.coach.tenure,
+				});
+				continue;
+			}
+			const r = rng.child("carousel|" + name);
+			const coach = t.coach;
+			const games = Math.max(1, t.games || (t.w + t.l) || 1);
+			const winPct = t.w / games;
+			const prestige = C.prestige(name);
+			/* What this program expects to win.
+
+			   Fitted to the simulation's OWN relation between prestige and
+			   record rather than to an assumed one, because the two disagree
+			   and the firing rate is the difference between them: measured
+			   over three seasons of 368 programs, median win rate runs .344 at
+			   prestige 0 to .657 at prestige 80, which is 0.35 + 0.0037p. An
+			   earlier 0.40 + 0.0045p put every blue blood permanently below its
+			   own bar and fired Arizona at 21-14.
+
+			   The deadband is the other half of it: p25 sits about eight points
+			   of win rate under the median at every prestige, so a season has
+			   to be worse than an ordinary bad one before it counts against
+			   anybody. */
+			const expected = clamp(0.35 + 0.0037 * prestige, 0.32, 0.72);
+			const shortfall = Math.max(0, expected - winPct - 0.06);
+
+			/* --- hired away. Drawn first, because a coach who just took a
+			   16-seed to the Sweet 16 is not also being fired. */
+			const deepRun = t.ncaaResult && /Final Four|Elite Eight|Sweet 16|Champion|Runner/i
+				.test(String(t.ncaaResult));
+			let pAway = 0;
+			if (deepRun) pAway += prestige < 62 ? 0.30 : 0.06;
+			if (winPct > 0.80) pAway += 0.05;
+			/* A coach at the very top of the profession has nowhere to be
+			   hired to except the NBA — and nobody is hired anywhere off a
+			   losing season, which the flat term used to allow: it produced
+			   "Indiana, 13-18, hired away". */
+			if (winPct >= expected) pAway += prestige >= 80 ? 0.020 : 0.006;
+			if (coach.age >= 58) pAway *= 0.35;
+			if (r.random() < clamp(pAway * scale, 0, 0.75)) {
+				out.push({
+					school: name, coach: coach.name, reason: "hired away",
+					to: prestige >= 78 ? "an NBA job" : "a bigger program",
+					w: t.w, l: t.l, age: coach.age, tenure: coach.tenure,
+				});
+				continue;
+			}
+
+			/* --- retirement. Steep after 62 and near-certain by 74. */
+			const age = Number.isFinite(coach.age) ? coach.age : 45;
+			let pRetire = age < RETIRE_AGE ? 0.002 : 0.03 + 0.055 * (age - RETIRE_AGE);
+			// A bad last season is how a long career actually ends.
+			if (shortfall > 0.06) pRetire *= 1.8;
+			if (r.random() < clamp(pRetire * scale, 0, 0.95)) {
+				out.push({
+					school: name, coach: coach.name, reason: "retired",
+					w: t.w, l: t.l, age, tenure: coach.tenure,
+				});
+				continue;
+			}
+
+			/* --- fired. The base rate is set so that the whole country turns
+			   over 40-60 jobs a year at scale 1, which is what tools/test.js
+			   asserts a band on. */
+			let pFire = 0.045;
+			pFire += 1.70 * shortfall;
+			if (coach.situation === "hot seat") pFire += 0.22;
+			// Nobody is fired after one season, and an interim is not fired,
+			// he simply is not retained — which is the same vacancy.
+			if (coach.situation === "first year") pFire *= 0.10;
+			if (coach.situation === "interim") pFire = 0.62;
+			if (coach.situation === "fixture") pFire *= 0.30;
+			if ((coach.tenure || 1) === 2) pFire *= 0.45;
+			/* A program that expects nothing fires nobody for winning nothing —
+			   but a low-major sideline is not still, either: it is where a
+			   coach leaves for a high-major assistant job, or is quietly not
+			   renewed. The floor is 0.55 rather than 0.35 for that reason, and
+			   because two thirds of Division I sits under prestige 40: a floor
+			   fitted to the blue bloods decides the national rate. */
+			pFire *= clamp(0.55 + 0.010 * prestige, 0.55, 1.35);
+			if (r.random() < clamp(pFire * scale, 0, 0.95)) {
+				out.push({
+					school: name, coach: coach.name,
+					reason: coach.situation === "interim" ? "not retained" : "fired",
+					w: t.w, l: t.l, age, tenure: coach.tenure,
+				});
+			}
+		}
+		return out;
+	}
+
 	global.TeamsSim = {
 		buildPrograms, simulateRegularSeason, simulateConferenceTournaments,
 		prospectTalent, teamRating, winProb, playGame, playGameScore, ratingOn,
@@ -1403,7 +1586,7 @@
 		PROGRAM_VOL, DOWN_YEAR_RATE, BREAKOUT_RATE, STAR_RETURNER_RATE,
 		rotationWeights, pairUp, record, recordPostseason, finalizeSchedule,
 		REGULAR_NOISE, momentumArc, arcAt, ARC_KNOTS,
-		midSeasonEvents, longestRun,
+		midSeasonEvents, longestRun, coachingCarousel, RETIRE_AGE,
 		label, adoptConference, conferencePools, PROGRAM_STYLES,
 		CONF_GAMES, NON_CONF_GAMES,
 	};

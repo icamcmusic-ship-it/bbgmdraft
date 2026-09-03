@@ -2415,8 +2415,60 @@ console.log("\nUniverse");
 		total++;
 		if (t.coach.name === carry.coaches[name].coach.name) same++;
 	}
+	/* Retention, not permanence. The carousel (js/teams.js) turns over 40-60
+	   of 368 jobs a year at coachTurnover 100, which is what Division I does,
+	   so 85-93% of programs keep the same man. The old band was >90% because
+	   the old model fired exactly one coach a season across the country. */
 	ok("a carried coach is the same man next season",
-		total > 300 && same / total > 0.9, same + " of " + total);
+		total > 300 && same / total > 0.85 && same / total < 0.94,
+		same + " of " + total);
+	/* The other half of the same fact: a coach who did NOT come back was
+	   named by the carousel, rather than simply being redrawn. */
+	{
+		const vacated = new Set((a.coachingCarousel || []).map((c) => c.school));
+		let unexplained = 0;
+		for (const name of Object.keys(b.teams)) {
+			const t = b.teams[name];
+			if (!t || !t.coach || !carry.coaches[name]) continue;
+			if (t.coach.name !== carry.coaches[name].coach.name && !vacated.has(name)) {
+				unexplained++;
+			}
+		}
+		ok("every coaching change has a reason on the carousel",
+			unexplained === 0, unexplained + " unexplained");
+	}
+	{
+		const n = (a.coachingCarousel || []).length;
+		ok("the carousel turns over a realistic number of jobs",
+			n >= 28 && n <= 66, n + " of " + Object.keys(a.teams).length);
+		const reasons = {};
+		for (const c of a.coachingCarousel || []) reasons[c.reason] = 1;
+		ok("the carousel distinguishes fired from retired from hired away",
+			Object.keys(reasons).length >= 2, Object.keys(reasons).join(", "));
+		const frozen = global.Engine.run(V.realisticClass(1, 70),
+			global.Config.make({ seed: "u1", coachTurnover: 0 }));
+		ok("coachTurnover 0 freezes every sideline",
+			(frozen.coachingCarousel || []).length === 0);
+		const chaos = global.Engine.run(V.realisticClass(1, 70),
+			global.Config.make({ seed: "u1", coachTurnover: 200 }));
+		ok("coachTurnover 200 roughly doubles it",
+			(chaos.coachingCarousel || []).length > n * 1.4);
+		ok("every coach carries an age",
+			Object.values(a.teams).every((t) => !t.coach ||
+				(Number.isFinite(t.coach.age) && t.coach.age >= 28 && t.coach.age <= 78)));
+		let older = 0;
+		let carried = 0;
+		for (const name of Object.keys(b.teams)) {
+			const kept = carry.coaches[name];
+			const t = b.teams[name];
+			if (!t || !t.coach || !kept || !kept.coach) continue;
+			if (t.coach.name !== kept.coach.name) continue;
+			carried++;
+			if (t.coach.age === kept.coach.age + 1) older++;
+		}
+		ok("a carried coach is exactly one year older",
+			carried > 250 && older === carried, older + " of " + carried);
+	}
 	const rows = [U.summarize(a, "u1", "a.json"), U.summarize(b, "u2", "b.json")];
 	ok("a timeline row names a champion, a POY and a No. 1 pick",
 		rows.every((r) => r.champion && r.champSeed && r.no1 && r.apOne));
