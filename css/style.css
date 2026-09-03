@@ -809,6 +809,10 @@ th.dropafter { box-shadow: inset -2px 0 0 0 var(--accent); }
 .newsitem h5 { margin: 0 0 3px; font-size: 14px; }
 .newsitem p { margin: 0; font-size: 12.5px; color: var(--text); }
 .newsitem .newskind { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: .07em; margin-top: 3px; }
+/* Paragraphs the voice system added under the lede: a stat block, a context
+   note, a quote. Indented and slightly dimmed so the lede still reads as the
+   story and these read as what a paper puts under it. */
+.newsitem .newspara { margin-top: 4px; color: var(--dim); }
 .playerhead { align-items: flex-start; gap: 14px; margin-bottom: 10px; }
 /* facesjs draws on a 400x600 viewBox, so the box carries that 2:3 ratio —
    a square one crops the jersey off at the chest. */

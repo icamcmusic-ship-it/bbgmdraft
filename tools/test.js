@@ -2385,7 +2385,13 @@ console.log("\nGenerated text");
 		for (const sp of res.surprises || []) report("anomaly", sp.label);
 		for (const a of global.News.build(res)) {
 			seen.articles++;
-			report("news " + a.kind, T.segsToText(a.headline) + " | " + T.segsToText(a.body));
+			/* The paragraphs the voice system adds under the lede — a stat
+			   block, a context note, a quote — are article text and are swept
+			   like article text. They were the largest body of generated
+			   prose in the tool that nothing read. */
+			report("news " + a.kind, T.segsToText(a.headline) + " | " +
+				T.segsToText(a.body) + " | " +
+				(a.paras || []).map((x) => T.segsToText(x)).join(" | "));
 		}
 	}
 	ok("the sweep actually read something",
@@ -2393,6 +2399,170 @@ console.log("\nGenerated text");
 		JSON.stringify(seen));
 	ok("no generated note, article or event carries a text fault",
 		faults.length === 0, faults.slice(0, 6).join("\n         "));
+}
+
+console.log("\nThe paper: kinds, variants, voices and quotes");
+{
+	const N = global.News;
+	const T = global.Text;
+
+	/* THE THREE-AND-THREE RULE.
+
+	   The table exists so that adding a kind is adding a row, and a rule that
+	   is not checked is a rule the twentieth row will break. Every row carries
+	   at least three headlines and at least three bodies, because two of
+	   anything reads as an alternation rather than as variety. */
+	const thin = N.TEMPLATES.filter((t) =>
+		!Array.isArray(t.headlines) || t.headlines.length < 3 ||
+		!Array.isArray(t.bodies) || t.bodies.length < 3);
+	ok("every templated kind carries at least three headlines and three bodies",
+		thin.length === 0, thin.map((t) => t.kind).join("; "));
+
+	/* No two kinds share a body string. A copied row with one word changed is
+	   the failure mode this catches: it passes the count above and produces
+	   two kinds that read identically. */
+	{
+		const seenBody = {};
+		const clashes = [];
+		for (const t of N.TEMPLATES) {
+			for (const b of t.bodies) {
+				if (seenBody[b] && seenBody[b] !== t.kind) {
+					clashes.push(t.kind + " / " + seenBody[b]);
+				}
+				seenBody[b] = t.kind;
+			}
+			for (const h of t.headlines) {
+				if (seenBody["H|" + h] && seenBody["H|" + h] !== t.kind) {
+					clashes.push("headline " + t.kind + " / " + seenBody["H|" + h]);
+				}
+				seenBody["H|" + h] = t.kind;
+			}
+		}
+		ok("no body or headline template is shared between two kinds",
+			clashes.length === 0, clashes.slice(0, 4).join("; "));
+	}
+
+	/* Every template's slots are actually filled. A {slot} the slots function
+	   does not produce renders as the literal "{slot}", which the text sweep
+	   cannot see because braces are not a text fault. */
+	{
+		const bad = [];
+		for (const t of N.TEMPLATES) {
+			const declared = new Set();
+			for (const str of t.headlines.concat(t.bodies)) {
+				const re = /\{(\w+)\}/g;
+				let m;
+				while ((m = re.exec(str)) !== null) declared.add(m[1]);
+			}
+			t.__slots = declared;
+		}
+		/* Run the table over several classes and check nothing renders a
+		   literal brace. Rows whose `find` never fires in the sample are
+		   reported separately below rather than silently passing. */
+		const fired = new Set();
+		for (let s = 0; s < 6; s++) {
+			const res = global.Engine.run(V.realisticClass(s, 70),
+				global.Config.make({ seed: "tpl" + s }));
+			for (const a of N.build(res)) {
+				fired.add(a.kind);
+				const text = T.segsToText(a.headline) + " " + T.segsToText(a.body) + " " +
+					(a.paras || []).map((x) => T.segsToText(x)).join(" ");
+				if (/\{\w+\}/.test(text)) bad.push(a.kind + ": " + text.slice(0, 90));
+			}
+		}
+		ok("no rendered article leaves a slot unfilled", bad.length === 0,
+			bad.slice(0, 3).join(" | "));
+		/* The two universe rows read carryOver and cannot fire on a standalone
+		   class, which is correct; everything else has to be reachable. */
+		const never = N.TEMPLATES.filter((t) => !fired.has(t.kind) && t.group !== "universe");
+		ok("every templated kind is reachable on an ordinary class",
+			never.length === 0, never.map((t) => t.kind).join("; "));
+		global.__newsFired = fired;
+	}
+
+	/* THE SIZE OF THE PAPER. The audit's target was past a hundred kinds; the
+	   band has a top as well as a bottom, because a feed of two hundred
+	   articles a season is not a paper either. */
+	{
+		let kinds = new Set();
+		let total = 0;
+		const N_CLASSES = 8;
+		let always = {};
+		for (let s = 0; s < N_CLASSES; s++) {
+			const res = global.Engine.run(V.realisticClass(s, 70),
+				global.Config.make({ seed: "paper" + s }));
+			const arts = N.build(res);
+			total += arts.length;
+			const here = new Set();
+			for (const a of arts) { kinds.add(a.kind); here.add(a.kind); }
+			for (const k of here) always[k] = (always[k] || 0) + 1;
+		}
+		ok("the paper runs at least a hundred distinct kinds",
+			kinds.size + 2 >= 100, kinds.size + " observed, plus 2 universe-only");
+		ok("and a readable number of articles a season",
+			total / N_CLASSES >= 55 && total / N_CLASSES <= 140,
+			(total / N_CLASSES).toFixed(1) + " a class");
+		/* "Hold the always-firing share under a third": a paper whose table of
+		   contents is the same every season is the failure the runs() gates
+		   exist for, and adding forty kinds must not undo it. */
+		const alwaysRuns = Object.keys(always).filter((k) => always[k] === N_CLASSES);
+		ok("under a third of kinds fire in every single season",
+			alwaysRuns.length / kinds.size < 0.34,
+			alwaysRuns.length + " of " + kinds.size);
+	}
+
+	/* VOICES. */
+	{
+		const res = global.Engine.run(V.realisticClass(3, 70),
+			global.Config.make({ seed: "voice" }));
+		const arts = N.build(res);
+		const voices = new Set(arts.map((a) => a.voice));
+		ok("every article carries a voice and a byline",
+			arts.every((a) => a.voice && a.byline), String(arts.length));
+		ok("a class draws a staff rather than one voice or all six",
+			voices.size >= 3 && voices.size <= 5, [...voices].join(", "));
+		ok("the wire is always on the desk", voices.has("wire"));
+		const withPara = arts.filter((a) => (a.paras || []).length);
+		ok("a real share of articles carry a second paragraph",
+			withPara.length / arts.length > 0.3 && withPara.length / arts.length < 0.95,
+			withPara.length + " of " + arts.length);
+		/* Two different seeds must produce two different staffs at least
+		   sometimes, or the voice system is a constant with extra steps. */
+		let differ = 0;
+		for (let s = 0; s < 8; s++) {
+			const r2 = global.Engine.run(V.realisticClass(1, 70),
+				global.Config.make({ seed: "staff" + s }));
+			const v = [...new Set(N.build(r2).map((a) => a.voice))].sort().join(",");
+			if (s === 0) global.__firstStaff = v;
+			else if (v !== global.__firstStaff) differ++;
+		}
+		ok("a different seed draws a different staff", differ >= 3, String(differ));
+	}
+
+	/* QUOTES. Nothing in the paper carried one before, and a quote that is
+	   attributed to nobody is worse than no quote. */
+	{
+		let quotes = 0;
+		let unattributed = 0;
+		for (let s = 0; s < 6; s++) {
+			const res = global.Engine.run(V.realisticClass(s, 70),
+				global.Config.make({ seed: "quote" + s }));
+			for (const a of N.build(res)) {
+				for (const para of a.paras || []) {
+					const text = T.segsToText(para);
+					if (text.indexOf("\u201c") !== 0) continue;
+					quotes++;
+					if (!/ — .+\.$/.test(text)) unattributed++;
+				}
+			}
+		}
+		ok("the paper carries quotes", quotes > 40, String(quotes));
+		ok("and every one of them is attributed", unattributed === 0, String(unattributed));
+		/* A quote's speaker exists. quoteFor returns null rather than
+		   inventing one, which is the behaviour worth pinning. */
+		ok("quoteFor returns null when there is nobody to quote",
+			N.quoteFor(new global.BBGMRng.Rng("q"), {}) !== undefined);
+	}
 }
 
 console.log("\nUniverse");
@@ -2894,7 +3064,11 @@ console.log("\nAudit regressions (September 2026)");
 			if (/^December/.test(dl) && a.year !== season - 1) decemberWrong++;
 			if (/^(January|February|March|Championship)/.test(dl) && a.year !== season) januaryWrong++;
 			if (/^November/.test(dl) && a.year !== season - 1) januaryWrong++;
-			if (/signing|five-star|decommit|recruiting class/.test(a.kind)) {
+			/* The kinds that are ABOUT a high-school recruit. Matched
+			   exactly rather than by substring: "undrafted signing" contains
+			   "signing" and is a story about a fourth-year senior. */
+			if (/^(signing day|early signing period|five-star commit|decommitment|recruiting class)$/
+				.test(a.kind)) {
 				for (const seg of a.headline.concat(a.body)) {
 					if (seg.t !== "player") continue;
 					const p = res.players.filter((x) => x.key === seg.key)[0];

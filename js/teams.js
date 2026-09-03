@@ -1207,10 +1207,24 @@
 				(a.loser.rating - a.winner.rating));
 		if (upsets.length && tells(0.8)) {
 			const u = rng.pick(upsets.slice(0, 8));
-			add("upset", u.winner.name + " beat " + u.loser.name + " " +
-				u.g.pf + "-" + u.g.pa + ", the result of the " +
-				(u.g.when < 0.5 ? "season's first half" : "conference season"),
-				u.g.when, [u.winner.name, u.loser.name]);
+			/* Three texts per event kind rather than one.
+
+			   The headline table in js/news.js has always had variants and the
+			   BODY did not, so an upset was three headlines over one sentence
+			   and read the same every season with different names in it. The
+			   text is the body of the article — see pushEvent — so this is
+			   where the variety has to be. */
+			const half = u.g.when < 0.5 ? "season's first half" : "conference season";
+			add("upset", rng.pick([
+				u.winner.name + " beat " + u.loser.name + " " + u.g.pf + "-" + u.g.pa +
+					", the result of the " + half,
+				u.loser.name + " lost at " + u.winner.name + ", " + u.g.pa + "-" + u.g.pf +
+					", and did not lead in the second half",
+				u.winner.name + " had no business in that game and won it anyway, " +
+					u.g.pf + "-" + u.g.pa + " over " + u.loser.name,
+				u.loser.name + " was ranked and is now " + u.g.pa + "-" + u.g.pf +
+					" worse off, beaten by " + u.winner.name + " in the " + half,
+			]), u.g.when, [u.winner.name, u.loser.name]);
 		}
 
 		// The game of the year: the closest game between two good teams.
@@ -1219,11 +1233,19 @@
 			Math.abs(g.pf - g.pa) <= 3);
 		if (good.length && tells(0.75)) {
 			const gm = rng.pick(good);
-			add("game of the year",
-				gm.winner.name + " " + gm.g.pf + ", " + gm.loser.name + " " +
-				gm.g.pa + (gm.g.ot ? " (" + (gm.g.ot > 1 ? gm.g.ot + "OT" : "OT") + ")" : "") +
-				" — the game of the year",
-				gm.g.when, [gm.winner.name, gm.loser.name]);
+			const otTag = gm.g.ot
+				? " (" + (gm.g.ot > 1 ? gm.g.ot + "OT" : "OT") + ")" : "";
+			add("game of the year", rng.pick([
+				gm.winner.name + " " + gm.g.pf + ", " + gm.loser.name + " " + gm.g.pa +
+					otTag + " — the game of the year",
+				gm.winner.name + " beat " + gm.loser.name + " " + gm.g.pf + "-" + gm.g.pa +
+					otTag + " in the best game anybody has played this season",
+				"Nobody deserved to lose it: " + gm.winner.name + " " + gm.g.pf + ", " +
+					gm.loser.name + " " + gm.g.pa + otTag,
+				gm.loser.name + " and " + gm.winner.name + " traded the lead nine times " +
+					"before " + gm.winner.name + " took it for good, " + gm.g.pf + "-" +
+					gm.g.pa + otTag,
+			]), gm.g.when, [gm.winner.name, gm.loser.name]);
 		}
 
 		// A coach fired in-season: a program with real expectations losing.
@@ -1237,10 +1259,17 @@
 			   dateline (and the "December divorce" headline drawn off it)
 			   said something else. */
 			const month = rng.pick(["January", "February"]);
-			add("coaching change",
-				t.name + " fired " + (t.coach && t.coach.name ? t.coach.name : "its head coach") +
-				" in " + month + " at " + t.w + "-" + t.l,
-				month === "January" ? rng.uniform(0.46, 0.65) : rng.uniform(0.68, 0.87), [t.name]);
+			const who = t.coach && t.coach.name ? t.coach.name : "its head coach";
+			add("coaching change", rng.pick([
+				t.name + " fired " + who + " in " + month + " at " + t.w + "-" + t.l,
+				t.name + " and " + who + " parted ways in " + month + ", with the team " +
+					t.w + "-" + t.l,
+				who + " coached his last game at " + t.name + " in " + month + "; the " +
+					"record was " + t.w + "-" + t.l,
+				t.name + " made the change in " + month + " rather than waiting for " +
+					"April, which at " + t.w + "-" + t.l + " surprised nobody",
+			]), month === "January" ? rng.uniform(0.46, 0.65) : rng.uniform(0.68, 0.87),
+				[t.name]);
 		}
 
 		// A blowout worth naming, because a 40-point game is a fact about a
@@ -1249,8 +1278,16 @@
 			.sort((a, b) => (b.g.pf - b.g.pa) - (a.g.pf - a.g.pa));
 		if (blowouts.length && tells(0.65)) {
 			const b = blowouts[0];
-			add("blowout", b.winner.name + " beat " + b.loser.name + " by " +
-				(b.g.pf - b.g.pa), b.g.when, [b.winner.name, b.loser.name]);
+			const by = b.g.pf - b.g.pa;
+			add("blowout", rng.pick([
+				b.winner.name + " beat " + b.loser.name + " by " + by,
+				b.winner.name + " led " + b.loser.name + " by more than thirty at the " +
+					"half and won by " + by,
+				b.loser.name + " lost by " + by + " at " + b.winner.name + ", the " +
+					"largest margin of the season",
+				b.winner.name + " " + b.g.pf + ", " + b.loser.name + " " + b.g.pa +
+					" — a " + by + "-point game that stopped being one early",
+			]), b.g.when, [b.winner.name, b.loser.name]);
 		}
 
 		// A winning streak that changed a team's season.
@@ -1258,8 +1295,14 @@
 			.filter((x) => x.n >= 12).sort((a, b) => b.n - a.n);
 		if (streaks.length && tells(0.7)) {
 			const st = rng.pick(streaks.slice(0, 5));
-			add("streak", st.t.name + " won " + st.n + " in a row",
-				rng.uniform(0.3, 0.8), [st.t.name]);
+			add("streak", rng.pick([
+				st.t.name + " won " + st.n + " in a row",
+				st.t.name + " has not lost in " + st.n + " games",
+				st.n + " straight for " + st.t.name + ", and the schedule ahead does " +
+					"not obviously end it",
+				st.t.name + " put together a " + st.n + "-game winning streak that " +
+					"turned its season around",
+			]), rng.uniform(0.3, 0.8), [st.t.name]);
 		}
 
 		/* Color, which changes nothing and is the point: a season with only
@@ -1278,28 +1321,77 @@
 			(r) => {
 				const [t, host] = twoTeams(r);
 				if (t === host) return null;
-				return ["postponement", t.name + "'s trip to " +
-					host.name + " was postponed by " +
-					r.pick(["a snowstorm", "a frozen floor", "an arena roof leak",
-						"a travel failure"]), [t.name, host.name]];
+				const cause = r.pick(["a snowstorm", "a frozen floor",
+					"an arena roof leak", "a travel failure", "an ice storm",
+					"a burst pipe under the north stand", "a power cut at the arena"]);
+				return ["postponement", r.pick([
+					t.name + "'s trip to " + host.name + " was postponed by " + cause,
+					host.name + " and " + t.name + " will play later in the year after " +
+						cause + " closed the building",
+					cause.charAt(0).toUpperCase() + cause.slice(1) + " cost " + host.name +
+						" its home date with " + t.name,
+				]), [t.name, host.name]];
 			},
 			(r) => {
 				const t = r.pick(ranked.slice(0, 60));
 				// "a Arizona State dunk": the article has to agree with the
 				// name, and js/text.js is where that rule lives.
-				return ["viral", global.Text.withArticle(t.name + " dunk") +
-					" was the most-watched clip of the college season", [t.name]];
+				return ["viral", r.pick([
+					global.Text.withArticle(t.name + " dunk") +
+						" was the most-watched clip of the college season",
+					global.Text.withArticle(t.name + " lob") +
+						" has been reposted more times than anybody at the school can count",
+					"The clip of the year so far is " +
+						global.Text.withArticle(t.name + " chase-down block") +
+						" that nobody in the building saw coming",
+				]), [t.name]];
 			},
 			(r) => {
 				const [a, b] = twoTeams(r);
 				if (a === b) return null;
-				return ["altercation", a.name + " and " + b.name +
-					" cleared the benches with four minutes left", [a.name, b.name]];
+				return ["altercation", r.pick([
+					a.name + " and " + b.name + " cleared the benches with four minutes left",
+					"Six players were ejected when " + a.name + " and " + b.name +
+						" stopped playing basketball in the second half",
+					a.name + " and " + b.name + " needed eleven minutes of review and " +
+						"four ejections to finish a game neither will forget",
+				]), [a.name, b.name]];
 			},
 			(r) => {
 				const t = r.pick(ranked.slice(0, 40));
-				return ["storm", t.name + " played three ranked opponents in eight days " +
-					"and won " + r.int(1, 3) + " of them", [t.name]];
+				const n = r.int(1, 3);
+				return ["storm", r.pick([
+					t.name + " played three ranked opponents in eight days and won " +
+						n + " of them",
+					t.name + " came out of the hardest week on anybody's schedule " +
+						n + "-" + (3 - n),
+					"Three ranked teams in eight days for " + t.name + ", and " +
+						global.Text.plural(n, "win") + " to show for it",
+				]), [t.name]];
+			},
+			/* Two more flavor kinds, because four of them drawn three at a
+			   time meant a season's color was nearly always the same three. */
+			(r) => {
+				const t = r.pick(ranked.slice(0, 80));
+				return ["attendance", r.pick([
+					t.name + " played in front of the largest home crowd in the " +
+						"programme's history",
+					"The student section at " + t.name + " camped out for two nights " +
+						"and filled the building an hour before tip",
+					t.name + " sold out its arena for the first time in eleven years",
+				]), [t.name]];
+			},
+			(r) => {
+				const [a, b] = twoTeams(r);
+				if (a === b) return null;
+				return ["officiating", r.pick([
+					"The last call in " + a.name + "'s win over " + b.name +
+						" was reviewed for six minutes and is still being argued about",
+					b.name + " filed a formal complaint about the officiating in its " +
+						"loss at " + a.name,
+					"Two technical fouls in the last minute decided " + a.name +
+						" against " + b.name + ", which is not how anybody wanted it decided",
+				]), [a.name, b.name]];
 			},
 		];
 		const picked = rng.shuffle(flavor).slice(0, Math.max(0, budget - events.length));

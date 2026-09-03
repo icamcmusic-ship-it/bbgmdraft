@@ -2063,9 +2063,80 @@
 				"events, anomalies or draft-day events in the settings."));
 			return;
 		}
+		/* A hundred kinds and eighty-odd articles a season is a feed you scroll
+		   past rather than read, so it filters. Three controls, because they
+		   are the three questions people actually ask of it: what kind of
+		   story, whose story, and "did anything happen to MY prospects". */
+		const st = A().state;
+		st.newsFilter = st.newsFilter || { kind: "", text: "", mine: false };
+		const f = st.newsFilter;
+		const bar = el("div", "filters");
+		const kindSel = el("select");
+		kindSel.appendChild(new Option("every kind", ""));
+		const groups = {};
+		for (const a of articles) {
+			groups[a.group || "the season"] = groups[a.group || "the season"] || {};
+			groups[a.group || "the season"][a.kind] = 1;
+		}
+		for (const g of Object.keys(groups).sort()) {
+			const og = document.createElement("optgroup");
+			og.label = g;
+			for (const k of Object.keys(groups[g]).sort()) og.appendChild(new Option(k, k));
+			kindSel.appendChild(og);
+		}
+		kindSel.value = f.kind;
+		kindSel.addEventListener("change", () => { f.kind = kindSel.value; A().render(); });
+		bar.appendChild(kindSel);
+		const box = el("input");
+		box.type = "search";
+		box.placeholder = "team or player…";
+		box.value = f.text;
+		box.addEventListener("input", () => { f.text = box.value; A().render(); });
+		bar.appendChild(box);
+		const mineLab = el("label", "check");
+		const mine = el("input");
+		mine.type = "checkbox";
+		mine.checked = !!f.mine;
+		mine.addEventListener("change", () => { f.mine = mine.checked; A().render(); });
+		mineLab.appendChild(mine);
+		mineLab.appendChild(document.createTextNode(" only my prospects"));
+		bar.appendChild(mineLab);
+		view.appendChild(bar);
+
+		/* "My prospects" means the rows the prospect table is currently
+		   showing, so a filtered board and a filtered feed agree. */
+		const mineKeys = new Set();
+		if (f.mine) {
+			for (const p of res.players || []) {
+				if (matchesFilter(p, res)) mineKeys.add(p.key);
+			}
+		}
+		const needle = f.text.trim().toLowerCase();
+		const shown = articles.filter((a) => {
+			if (f.kind && a.kind !== f.kind) return false;
+			if (f.mine) {
+				const hit = [].concat(a.headline, a.body, ...(a.paras || []))
+					.some((seg) => seg && seg.t === "player" && mineKeys.has(seg.key));
+				if (!hit) return false;
+			}
+			if (needle) {
+				const hay = [].concat(a.headline, a.body, ...(a.paras || []))
+					.map((seg) => seg && seg.v).join(" ").toLowerCase();
+				if (hay.indexOf(needle) === -1) return false;
+			}
+			return true;
+		});
+		view.appendChild(el("p", "legendline",
+			shown.length === articles.length
+				? articles.length + " articles"
+				: shown.length + " of " + articles.length + " articles"));
+		if (!shown.length) {
+			view.appendChild(el("p", "hint", "Nothing in the feed matches that."));
+			return;
+		}
 		let lastDate = null;
 		const wrap = el("div", "news");
-		for (const a of articles) {
+		for (const a of shown) {
 			if (a.dateline !== lastDate) {
 				wrap.appendChild(el("h4", "newsdate", a.dateline));
 				lastDate = a.dateline;
@@ -2077,7 +2148,15 @@
 			const body = el("p");
 			renderSegs(body, a.body, res);
 			art.appendChild(body);
-			art.appendChild(el("p", "newskind", a.kind));
+			/* Extra paragraphs — a stat block, a context note, a quote — drawn
+			   per article by the voice system. See decorate() in js/news.js. */
+			for (const para of a.paras || []) {
+				const pEl = el("p", "newspara");
+				renderSegs(pEl, para, res);
+				art.appendChild(pEl);
+			}
+			art.appendChild(el("p", "newskind",
+				a.kind + (a.byline ? " · " + a.byline : "")));
 			wrap.appendChild(art);
 		}
 		view.appendChild(wrap);

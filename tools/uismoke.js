@@ -909,6 +909,41 @@ function ok(name, condition, detail) {
 			(await page.locator("#view").innerHTML()).length > 2000);
 	}
 
+	console.log("\nThe news feed filters");
+	{
+		await page.locator("#tabs button", { hasText: "News" }).first().click();
+		await page.waitForTimeout(300);
+		const countText = async () => (await page.locator("#view .legendline")
+			.nth(1).innerText());
+		const all = await countText();
+		ok("the feed says how many articles it is showing",
+			/\d+ articles/.test(all), all);
+		const total = Number((all.match(/(\d+) articles/) || [0, 0])[1]);
+		ok("and there are enough of them to need filtering", total >= 40, all);
+		/* Filter by kind. */
+		const opts = await page.locator("#view select option").allInnerTexts();
+		ok("the kind filter lists the kinds in the feed, grouped",
+			opts.length > 20 &&
+			(await page.locator("#view select optgroup").count()) >= 3,
+			opts.length + " options");
+		await page.locator("#view select").selectOption({ index: 2 });
+		await page.waitForTimeout(250);
+		const filtered = await countText();
+		ok("choosing a kind narrows the feed",
+			/ of \d+ articles/.test(filtered) &&
+			Number(filtered.split(" ")[0]) < total, filtered);
+		await page.locator("#view select").selectOption("");
+		await page.waitForTimeout(250);
+		/* Filter by text. */
+		await page.locator("#view input[type=search]").fill("zzzznothing");
+		await page.waitForTimeout(250);
+		ok("a search with no matches says so",
+			/Nothing in the feed matches/.test(await page.locator("#view").innerText()));
+		await page.locator("#view input[type=search]").fill("");
+		await page.waitForTimeout(250);
+		ok("clearing the search restores the feed", (await countText()) === all);
+	}
+
 	console.log("\nUniverse mode as a setting");
 	{
 		/* THE BUG THIS EXISTS FOR.
