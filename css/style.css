@@ -918,3 +918,7 @@ ol.ballot .unit { display: inline; margin: 0; }
 .leaguegroup > summary { cursor: pointer; font-size: 11px; padding: 3px 0; }
 .leaguegroup > summary button { margin-left: 6px; }
 .leaguegroup .archrow { padding-left: 8px; }
+
+/* The class picker in "Merge into a league file" — one row per loaded file. */
+.checklist { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.checklist label { display: flex; align-items: center; gap: 6px; font-size: 12px; }

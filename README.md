@@ -987,6 +987,24 @@ write `exportedSeason`: the Import players screen uses that field to guess a pla
 from his stats row for that season, that row's team is DNE here, and the guess fails into
 "free agent" — without the field the screen reads his own `tid` and gets it right.
 
+The draft year the merge works on comes from the **players being merged**, not from the
+file's `startingSeason`: BBGM writes a class a year ahead with `startingSeason` on the
+current season and `draft.year` on the draft, and matching on `startingSeason` used to
+delete the league's *current* class as "the one being replaced" while appending the merged
+class beside the real one. Whatever happens, everyone who is not a prospect of that draft
+year comes out the other side — the merge counts them and refuses to write a file that
+lost anybody.
+
+More than one class can go into one league file in a single pass: with several class files
+loaded, the merge asks which ones (all ticked), and each replaces the generated class for
+its own draft year. Players an earlier class in the same merge wrote are protected from the
+next one's sweep, and two classes for the *same* draft year are refused rather than one
+silently winning.
+
+Gzipped league files (`.json.gz`, which is how BBGM exports a big save) are accepted
+anywhere a `.json` is — the gzip magic number is checked rather than the extension, and the
+browser's own `DecompressionStream` unzips it.
+
 The merge matches by `pid`, and only onto a player who is himself an undrafted prospect of
 the same draft year — a class exported from a different league has pids that mean other
 people, and those players are appended with fresh pids instead of overwriting anybody. It
