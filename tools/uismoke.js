@@ -266,12 +266,22 @@ function ok(name, condition, detail) {
 		})) === "awards,stock,notes");
 
 	console.log("\nEra and efficiency");
+	/* Returns the mean team scoring, or — when the run failed — the error
+	   banner, because "oldPpg.toFixed is not a function" is not something
+	   anybody can act on and the banner says exactly what broke. */
 	const teamPpg = async () => page.evaluate(() => {
 		const res = window.App.state.results[window.App.state.active];
+		if (!res) {
+			return "no result: " +
+				((document.querySelector("#errBanner .bannertext") || {}).textContent ||
+					"(no error banner either)");
+		}
 		const t = Object.values(res.teams).filter((x) => x.teamTotals);
 		return t.reduce((a, x) => a + x.teamTotals.pts, 0) / t.length;
 	});
 	const modernPpg = await teamPpg();
+	ok("the class re-runs after a settings change", typeof modernPpg === "number",
+		String(modernPpg));
 	await page.evaluate(() => {
 		const sel = document.getElementById("era");
 		sel.value = "2009-2021";
@@ -279,8 +289,10 @@ function ok(name, condition, detail) {
 	});
 	await page.waitForTimeout(800);
 	const oldPpg = await teamPpg();
+	ok("and again after the era switch", typeof oldPpg === "number", String(oldPpg));
 	ok("the era switch moves the whole scoring environment",
-		modernPpg - oldPpg > 2, modernPpg.toFixed(1) + " -> " + oldPpg.toFixed(1));
+		typeof modernPpg === "number" && typeof oldPpg === "number" &&
+		modernPpg - oldPpg > 2, String(modernPpg) + " -> " + String(oldPpg));
 	await page.evaluate(() => {
 		const sel = document.getElementById("era");
 		sel.value = "modern";
@@ -909,6 +921,35 @@ function ok(name, condition, detail) {
 			(await page.locator("#view").innerHTML()).length > 2000);
 	}
 
+	console.log("\nThe compare radar");
+	{
+		await page.locator("#tabs button", { hasText: "Compare" }).first().click();
+		await page.waitForTimeout(300);
+		await page.evaluate(() => {
+			const st = window.App.state;
+			const res = st.results[st.active];
+			const keys = res.players.slice()
+				.sort((a, b) => (a.boardRank || 999) - (b.boardRank || 999))
+				.slice(0, 3).map((p) => p.key);
+			st.compare = keys.concat([null]).slice(0, 4);
+			window.App.render();
+		});
+		await page.waitForTimeout(300);
+		ok("the compare tab draws a rating radar",
+			(await page.locator("#view svg.radar").count()) === 1);
+		const paths = await page.locator("#view svg.radar path").count();
+		/* Four rings plus one polygon per player. */
+		ok("with a ring per level and a polygon per player", paths === 7, String(paths));
+		const labels = await page.locator("#view svg.radar text").allInnerTexts();
+		ok("and all fifteen rating axes labelled", labels.length === 15, labels.join(","));
+		const legend = await page.locator("#view .radaritem").allInnerTexts();
+		ok("with a legend naming the players in order", legend.length === 3, legend.join(" / "));
+		const aria = await page.locator("#view svg.radar").getAttribute("aria-label");
+		ok("and the numbers behind it in the aria-label",
+			/Size \d+/.test(String(aria)) && /Pass \d+/.test(String(aria)),
+			String(aria).slice(0, 100));
+	}
+
 	console.log("\nA game's box score");
 	{
 		await page.evaluate(() => {
@@ -1103,6 +1144,116 @@ function ok(name, condition, detail) {
 		ok("turning universe mode off clears the cached chain configs",
 			(await page.evaluate(() =>
 				Object.keys(window.App.state.universe.cfgs).length)) === 0);
+	}
+
+	console.log("\nThe table's own numbers");
+	{
+		/* A GOLDEN SNAPSHOT OF THE VIEW LAYER.
+
+		   Every number in this tool is banded somewhere — except the last step,
+		   which is the view turning it into text. cellValue, statValue, the
+		   per-40 and totals conversions, the percent columns and the +/- signs
+		   are a hundred lines of formatting that nothing reads back, and the
+		   failure they produce is the worst kind: two columns swapped, or per-40
+		   quietly showing per-game, in a table that still looks entirely
+		   plausible. This smoke test was checking for console errors, which that
+		   does not raise.
+
+		   So: the sample class, a fixed seed, a fixed column set, and the first
+		   ten rows as text in all three stat modes. Any change to what a column
+		   means shows up as a one-line diff in review; an intended one is
+		   re-recorded with --update-golden.
+
+		   The sample class is used rather than a loaded file because it is the
+		   one input the harness can produce identically every time. */
+		await page.goto(base);
+		await page.evaluate(() => localStorage.clear());
+		await page.goto(base);
+		/* The sample-class BUTTON seeds itself from the clock, so the class it
+		   builds is different every run and cannot be a snapshot. The sample
+		   generator takes a seed; this uses a stated one, through the same
+		   installFiles path a real file takes. */
+		await page.evaluate(() => {
+			const data = window.Sample.makeClass(4242, 70, 2027);
+			window.App.state.cfg.seed = "uismoke-golden";
+			window.App.installFiles([{ name: "golden-sample.json", data }], []);
+		});
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		const snap = await page.evaluate(() => {
+			const A = window.App;
+			const V = window.Views;
+			const res = A.state.results[A.state.active];
+			const out = {};
+			/* The identity columns are rendered straight off the player in the
+			   row builder rather than through cellValue, so they are captured
+			   from the same place the row builder reads them: a swap there is
+			   as invisible as a swap in the numbers. */
+			const ID = (p) => [p.name, p.newPos, p.classYear, p.archetype,
+				p.newCollege].join("~");
+			const KEYS = ["newOvr", "newPot", "board", "move", "hgtInches", "weight",
+				"gp", "mpg", "ppg", "rpg", "orpg", "drpg", "apg", "spg", "bpg", "topg",
+				"pfpg", "fga", "tpa", "fta", "usg", "fgp", "tpp", "ftp", "ts",
+				"tpar", "ftr", "efg", "astTo", "ortg", "prod", "drtg", "record"];
+			for (const mode of ["perGame", "totals", "per40"]) {
+				const rows = res.players.slice()
+					.sort((a, b) => b.newOvr - a.newOvr || (a.key < b.key ? -1 : 1))
+					.slice(0, 10);
+				out[mode] = rows.map((p) => ID(p) + "|" + KEYS.map((k) => {
+					const v = V.cellValue(p, k, res, mode);
+					if (v === undefined || v === null) return "";
+					if (typeof v === "number") return v.toFixed(4);
+					return String(v);
+				}).join("|"));
+			}
+			return out;
+		});
+		const file = path.join(__dirname, "golden-table.json");
+		if (process.argv.includes("--update-golden")) {
+			fs.writeFileSync(file, JSON.stringify(snap, null, "\t") + "\n");
+			console.log("  --   recorded tools/golden-table.json");
+		} else {
+			let want = null;
+			try { want = JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { want = null; }
+			if (!want) {
+				ok("the table snapshot exists", false,
+					"tools/golden-table.json is missing — run: node tools/uismoke.js --update-golden");
+			} else {
+				for (const mode of ["perGame", "totals", "per40"]) {
+					const a = (want[mode] || []).join("\n");
+					const b = (snap[mode] || []).join("\n");
+					/* Point at the FIELD that moved, not at the first 120
+					   characters of the row: a per-40 conversion that changed
+					   leaves the first eight columns identical, and a diff
+					   that shows those and stops is a diff that says nothing. */
+					let firstDiff = "";
+					if (a !== b) {
+						const la = a.split("\n");
+						const lb = b.split("\n");
+						outer:
+						for (let i = 0; i < Math.max(la.length, lb.length); i++) {
+							if (la[i] === lb[i]) continue;
+							const fa = String(la[i]).split("|");
+							const fb = String(lb[i]).split("|");
+							for (let j = 0; j < Math.max(fa.length, fb.length); j++) {
+								if (fa[j] === fb[j]) continue;
+								firstDiff = "row " + i + " (" + fa[0] + "), field " + j +
+									": want " + fa[j] + ", got " + fb[j];
+								break outer;
+							}
+							firstDiff = "row " + i + " differs in length";
+							break;
+						}
+					}
+					ok("the prospect table's " + mode + " numbers are unchanged",
+						a === b, firstDiff);
+				}
+				/* And the three modes are actually different, or the snapshot
+				   is pinning a conversion that stopped happening. */
+				ok("per-game, totals and per-40 are three different tables",
+					snap.perGame.join() !== snap.totals.join() &&
+					snap.perGame.join() !== snap.per40.join());
+			}
+		}
 	}
 
 	console.log("\nNo errors");

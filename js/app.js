@@ -105,7 +105,45 @@
 	/* Bumped whenever the shape of the persisted payload changes. STORE_KEY was
 	   versioned and the payload inside it was not, so a future settings change
 	   would read stale keys out of an old blob and silently half-apply them. */
-	const STORE_VERSION = 2;
+	const STORE_VERSION = 3;
+
+	/* MIGRATIONS.
+
+	   The version existed and the only thing it did was throw the payload
+	   away: a schema bump cost every user their presets, their locks, their
+	   column layouts, their seed history and their pinned class, and the
+	   settings themselves — which is a heavy price for adding a slider, and
+	   heavy enough that it discourages adding one.
+
+	   Each entry upgrades a payload from that version to the next. They are
+	   deliberately tiny, because most schema changes are additive: `cfg` goes
+	   through Config.make on the way in, so a config that predates a setting
+	   simply gets its default. A migration is only needed when a key changes
+	   MEANING or shape, and then it is a few lines here rather than a lost
+	   session for everybody.
+
+	   A payload from a version with no path (a downgrade, or a corrupted `v`)
+	   still falls back to discarding it, which is the safe end. */
+	const MIGRATIONS = {
+		/* 2 -> 3: the audit release. Everything it added is additive — the
+		   World and staleness settings, the trait count, the box-score route,
+		   the anomaly memory — so nothing in the payload changes meaning and
+		   the only work is stamping the new version. `anomalyHistory` is
+		   absent in a v2 payload and an absent memory is the correct starting
+		   state for one. */
+		2: (payload) => Object.assign({}, payload, { v: 3 }),
+	};
+
+	function migrate(payload) {
+		let p = payload;
+		let guard = 0;
+		while (Number(p.v || 1) !== STORE_VERSION && guard++ < 20) {
+			const step = MIGRATIONS[Number(p.v || 1)];
+			if (!step) return null;
+			p = step(p);
+		}
+		return Number(p.v || 1) === STORE_VERSION ? p : null;
+	}
 	let quotaWarned = false;
 
 	function persist() {
@@ -216,13 +254,17 @@
 		let saved = null;
 		try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) { saved = null; }
 		if (!saved || typeof saved !== "object" || Array.isArray(saved)) return null;
-		/* A payload from a different schema is discarded rather than
-		   half-applied. Only `theme` is carried across, because it is a
-		   preference about the browser rather than about a draft class and
-		   losing it is pure annoyance. */
+		/* A payload from an older schema is MIGRATED. One that cannot be
+		   migrated is discarded rather than half-applied, and only `theme` is
+		   carried across, because it is a preference about the browser rather
+		   than about a draft class and losing it is pure annoyance. */
 		if (Number(saved.v || 1) !== STORE_VERSION) {
-			if (saved.theme) state.theme = saved.theme;
-			return null;
+			const upgraded = migrate(saved);
+			if (!upgraded) {
+				if (saved.theme) state.theme = saved.theme;
+				return null;
+			}
+			saved = upgraded;
 		}
 		if (saved.cfg && typeof saved.cfg === "object") state.cfg = CFG.make(saved.cfg);
 		if (saved.overrides && typeof saved.overrides === "object" &&
@@ -4273,14 +4315,25 @@
 		$("batchNote").textContent = done + " of " + total + " classes";
 	}
 
+	/* The classes a running batch has already finished. A cancelled sweep used
+	   to report "Batch canceled" and show nothing, however far it had got —
+	   180 of 200 simulated seasons discarded because the user decided at class
+	   180 that 200 was too many. */
+	let batchPartial = [];
+
 	function batchDone(rows) {
 		$("batchProgress").hidden = true;
 		$("btnBatch").disabled = false;
 		$("btnBatchCancel").hidden = true;
 		batchWorker = null;
-		if (!rows || !rows.length) { setStatus("Batch canceled."); return; }
-		renderBatch(rows);
-		setStatus("");
+		const use = (rows && rows.length) ? rows : batchPartial;
+		if (!use.length) { setStatus("Batch canceled before any class finished."); return; }
+		renderBatch(use);
+		setStatus(rows && rows.length
+			? ""
+			: "Cancelled — showing the " + use.length + " " +
+				(use.length === 1 ? "class" : "classes") + " that finished.");
+		batchPartial = [];
 	}
 
 	/* Held batches, for comparison. The whole point of running a calibration
@@ -4420,6 +4473,7 @@
 		const file = activeFile();
 		if (!file) return;
 		batchCancel = false;
+		batchPartial = [];
 		$("btnBatch").disabled = true;
 		$("btnBatchCancel").hidden = false;
 		batchProgress(0, n);
@@ -4436,8 +4490,11 @@
 			batchWorker = new Worker("js/worker.js");
 			batchWorker.onmessage = (e) => {
 				const m = e.data;
-				if (m.type === "progress") batchProgress(m.done, m.total);
-				else if (m.type === "done") batchDone(m.rows);
+				if (m.type === "progress") {
+					// Keep the finished classes, so a cancel keeps its work.
+					if (m.row) batchPartial.push(m.row);
+					batchProgress(m.done, m.total);
+				} else if (m.type === "done") batchDone(m.rows);
 				else if (m.type === "error") {
 					showError(new Error(m.message));
 					batchDone(null);
@@ -4469,6 +4526,10 @@
 			c.overrides = cfg.overrides || {};
 			try {
 				rows.push(global.BatchStats.summarize(runner.run(c)));
+				// The inline path keeps its own array, so partial results come
+				// for free — but batchDone reads batchPartial, so it has to
+				// see them too.
+				batchPartial = rows.slice();
 			} catch (err) {
 				showError(err);
 				batchDone(null);

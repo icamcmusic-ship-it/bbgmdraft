@@ -899,3 +899,16 @@ th.dropafter { box-shadow: inset -2px 0 0 0 var(--accent); }
 /* Inline sparkline for a team's week-by-week AP ranking. Rank 1 is the top
    edge, 25 the bottom, and an unranked week is a tick along the floor. */
 svg.spark { display: block; width: 160px; height: 26px; margin-top: 3px; color: var(--accent, #3b82f6); }
+
+/* The compare tab's rating radar. Fifteen axes on one 0-100 scale, which is
+   what makes the shape readable rather than decorative. */
+.radarbox { margin: 8px 0; }
+svg.radar { display: block; width: 260px; max-width: 100%; height: auto; color: var(--dim); }
+.radarlegend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; margin-top: 4px; }
+.radaritem { display: inline-flex; align-items: center; gap: 4px; }
+.radarswatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+/* The six player-of-the-year ballots, top five each. */
+ol.ballot { margin: 4px 0 0; padding-left: 20px; font-size: 12px; }
+ol.ballot li { margin-bottom: 2px; }
+ol.ballot .unit { display: inline; margin: 0; }

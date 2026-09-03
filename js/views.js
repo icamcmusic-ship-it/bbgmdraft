@@ -2667,7 +2667,58 @@
 		return n + (["th", "st", "nd", "rd"][n % 10] || "th");
 	}
 
+	/* THE PLAYER-OF-THE-YEAR BALLOTS.
+
+	   Six trophies with six electorates is the mechanism that makes
+	   "consensus" mean something, and it was invisible: the model computed a
+	   full ordered ballot for each and kept only the name at the top, so in a
+	   split year — the interesting year, and the whole reason the six exist —
+	   a reader could see two men win three trophies each and had no way to see
+	   how close any of the six was.
+
+	   Reported as a MARGIN from the winner rather than as a score, because the
+	   scores are on an arbitrary internal scale and a margin is a fact a
+	   reader can use. `resume lean` is how much this electorate weighted what
+	   the player's team did, which is usually the whole of the disagreement. */
+	function ballotCards(res) {
+		const rows = res.poyBallots || [];
+		if (!rows.length) return null;
+		const wrap = el("div");
+		wrap.appendChild(el("h3", null, "Player of the year, ballot by ballot"));
+		const winners = new Set(rows.map((b) => b.top[0] && b.top[0].name));
+		wrap.appendChild(el("p", "legendline", winners.size === 1
+			? "All six electorates agreed: a sweep, which is what a consensus " +
+				"national player of the year is."
+			: winners.size + " different winners across the six trophies. Each " +
+				"electorate weighs what a player's team did differently — that " +
+				"weight is the “résumé lean” under each name."));
+		const cards = el("div", "cards");
+		for (const b of rows) {
+			const card = el("div", "card");
+			card.appendChild(el("h4", null, b.award));
+			card.appendChild(el("p", "unit", "résumé lean " + b.resumeLean.toFixed(2)));
+			const list = el("ol", "ballot");
+			for (const r of b.top) {
+				const li = el("li");
+				if (r.inClass && r.key) li.appendChild(playerLink(r.name, r.key));
+				else li.appendChild(document.createTextNode(r.name));
+				li.appendChild(document.createTextNode(" — "));
+				li.appendChild(teamLink(r.school));
+				li.appendChild(el("span", "unit",
+					r.rank === 1 ? "  winner" : "  −" + r.behind.toFixed(2)));
+				if (!r.inClass) li.appendChild(el("span", "unit", "  not in the class"));
+				list.appendChild(li);
+			}
+			card.appendChild(list);
+			cards.appendChild(card);
+		}
+		wrap.appendChild(cards);
+		return wrap;
+	}
+
 	function viewAwards(view, res) {
+		const ballots = ballotCards(res);
+		if (ballots) view.appendChild(ballots);
 		view.appendChild(el("h3", null, "Statistical leaders"));
 		view.appendChild(el("p", "legendline",
 			"The first thing to check when sanity-testing a class."));
@@ -4094,6 +4145,96 @@
 		return box;
 	}
 
+	/* THE RATING VECTOR, AS A SHAPE.
+
+	   The compare tab is a table of thirty numbers, which is the right format
+	   for "is he better" and the wrong one for "what kind of player is he".
+	   The scouting graphic for that question is a radar over the rating
+	   vector, and everything it needs is already on the player: BBGM's fifteen
+	   ratings are all on the same 0-100 scale, which is what makes a radar
+	   legible rather than a lie.
+
+	   Inline SVG, no library: fifteen axes and four polygons is a hundred
+	   lines of trigonometry, and a dependency for that is a dependency.
+
+	   Colour is by SLOT, not by value, and the slots match the compare table's
+	   column order, so the reader is never asked to remember which shape is
+	   which — the legend is the same names in the same order above it. */
+	const RADAR_AXES = [
+		["hgt", "Size"], ["stre", "Str"], ["spd", "Spd"], ["jmp", "Jump"],
+		["endu", "Endu"], ["ins", "Ins"], ["dnk", "Dunk"], ["ft", "FT"],
+		["fg", "Mid"], ["tp", "3PT"], ["oiq", "oIQ"], ["diq", "dIQ"],
+		["drb", "Hand"], ["pss", "Pass"], ["reb", "Reb"],
+	];
+	const RADAR_COLORS = ["#3b82f6", "#ef4444", "#16a34a", "#a855f7"];
+
+	function ratingRadar(players) {
+		const SIZE = 260;
+		const c = SIZE / 2;
+		const R = c - 30;
+		const n = RADAR_AXES.length;
+		const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+		svg.setAttribute("viewBox", "0 0 " + SIZE + " " + SIZE);
+		svg.setAttribute("class", "radar");
+		svg.setAttribute("role", "img");
+		svg.setAttribute("aria-label", "Rating profiles: " +
+			players.map(function (p) {
+				return p.name + " — " + RADAR_AXES.map(function (a) {
+					return a[1] + " " + (p.newRatings[a[0]] || 0);
+				}).join(", ");
+			}).join("; "));
+		const mk = function (tag, attrs) {
+			const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+			for (const k of Object.keys(attrs)) node.setAttribute(k, String(attrs[k]));
+			return node;
+		};
+		const pt = function (i, v) {
+			// Straight up for the first axis, clockwise from there.
+			const ang = (i / n) * Math.PI * 2 - Math.PI / 2;
+			const r = (clamp(v, 0, 100) / 100) * R;
+			return [c + r * Math.cos(ang), c + r * Math.sin(ang)];
+		};
+		// The rings, at 25/50/75/100, so a reader can read a value off it.
+		for (const ring of [25, 50, 75, 100]) {
+			const d = RADAR_AXES.map(function (a, i) {
+				const q = pt(i, ring);
+				void a;
+				return (i ? "L" : "M") + q[0].toFixed(1) + " " + q[1].toFixed(1);
+			}).join(" ") + " Z";
+			svg.appendChild(mk("path", {
+				d: d, fill: "none", stroke: "currentColor",
+				"stroke-width": ring === 100 ? 1 : 0.5,
+				opacity: ring === 100 ? 0.35 : 0.15,
+			}));
+		}
+		// The axis labels.
+		RADAR_AXES.forEach(function (a, i) {
+			const q = pt(i, 118);
+			const t = mk("text", {
+				x: q[0].toFixed(1), y: q[1].toFixed(1),
+				"text-anchor": "middle", "dominant-baseline": "middle",
+				"font-size": "8", fill: "currentColor", opacity: "0.7",
+			});
+			t.textContent = a[1];
+			svg.appendChild(t);
+		});
+		// The players.
+		players.forEach(function (p, slot) {
+			const r = p.newRatings || {};
+			const d = RADAR_AXES.map(function (a, i) {
+				const q = pt(i, Number(r[a[0]]) || 0);
+				return (i ? "L" : "M") + q[0].toFixed(1) + " " + q[1].toFixed(1);
+			}).join(" ") + " Z";
+			svg.appendChild(mk("path", {
+				d: d, fill: RADAR_COLORS[slot % RADAR_COLORS.length],
+				"fill-opacity": players.length > 2 ? 0.10 : 0.16,
+				stroke: RADAR_COLORS[slot % RADAR_COLORS.length],
+				"stroke-width": 1.6,
+			}));
+		});
+		return svg;
+	}
+
 	/* Two prospects side by side, on every row that has a number in it. */
 	const COMPARE_ROWS = [
 		["newOvr", "Overall", 0], ["newPot", "Potential", 0],
@@ -4243,6 +4384,27 @@
 			}
 			return p.stats[key];
 		};
+		/* The shapes first, the numbers under them. A radar answers "what kind
+		   of player is he" in one look and the table answers "is he better",
+		   and putting the table first means the second question is asked
+		   before the first one has been. */
+		const radarBox = el("div", "radarbox");
+		radarBox.appendChild(ratingRadar(picked));
+		const legend = el("div", "radarlegend");
+		picked.forEach(function (p, i) {
+			const item = el("span", "radaritem");
+			const swatch = el("span", "radarswatch");
+			swatch.style.background = RADAR_COLORS[i % RADAR_COLORS.length];
+			item.appendChild(swatch);
+			item.appendChild(document.createTextNode(p.name));
+			legend.appendChild(item);
+		});
+		radarBox.appendChild(legend);
+		radarBox.appendChild(el("p", "unit",
+			"BBGM's fifteen ratings, all on the same 0-100 scale. The rings are " +
+			"25, 50, 75 and 100."));
+		box.appendChild(radarBox);
+
 		const table = el("table", "mini compare");
 		const head = el("tr");
 		head.appendChild(el("th", null, ""));
@@ -4299,11 +4461,11 @@
 		awards: viewAwards, board: viewBoard, distribution: viewDistribution, tournamentCard,
 		notes: viewNotes, gamelog: viewGameLog, compare: viewCompare,
 		news: viewNews, universe: viewUniverse, playerLink, teamLink, playerPage,
-		gamePage, gameKeyFor, quadBar, pollSpark,
+		gamePage, gameKeyFor, quadBar, pollSpark, ballotCards,
 		COLUMNS, STAT_MODES, PCT_KEYS, DERIVED, derived, cellValue, statValue,
 		CARD_COLUMNS, CARD_BREAKPOINT, cardMode, orderedColumns, moveColumn,
 		dropColumn, setColumnOrder,
 		matchesFilter, numericColumns, histogram, feet, closeRowMenu,
-		el, n1, pc, wrapCell, COMPARE_MAX,
+		el, n1, pc, wrapCell, COMPARE_MAX, ratingRadar, RADAR_AXES,
 	};
 })(window);

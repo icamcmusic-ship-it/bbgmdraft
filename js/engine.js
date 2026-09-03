@@ -2429,13 +2429,22 @@
 	/* ------------------------------------------------------------- phase 6 */
 
 	function phaseAwards(state) {
-		state.ranked = AW.assign(state.players, state.teams, state.tourney,
+		const out = AW.assign(state.players, state.teams, state.tourney,
 			state.effectiveCfg || state.cfg, state.rng.child("awards"));
-		// Lifted off the map before anything iterates it, like __realignment.
-		state.fieldHonors = state.teams.__fieldHonors || [];
-		delete state.teams.__fieldHonors;
-		state.fieldTop = state.teams.__fieldTop || [];
-		delete state.teams.__fieldTop;
+		state.ranked = out.ranked;
+		state.fieldHonors = out.fieldHonors || [];
+		state.fieldTop = out.fieldTop || [];
+		/* The player-of-the-year ballots, so a split year is legible. */
+		state.poyBallots = out.poyBallots || [];
+		/* Every `__`-prefixed key assign leaves on the team map, off. `teams`
+		   is iterated with Object.keys in the stats phase, so a leftover key
+		   is a "team" with no members — and a warm re-run that redoes stats
+		   without redoing awards dies on it, three phases from the line that
+		   caused it. Sweeping the prefix means adding a key cannot reintroduce
+		   that, which naming each one individually did not. */
+		for (const k of Object.keys(state.teams)) {
+			if (k.indexOf("__") === 0) delete state.teams[k];
+		}
 		return state;
 	}
 
@@ -2880,6 +2889,7 @@
 				fallers: state.fallers,
 				draftEvents: state.draftEvents || [],
 			fieldHonors: state.fieldHonors || [],
+				poyBallots: state.poyBallots || [],
 			fieldTop: state.fieldTop || [],
 				seasonEvents: state.seasonEvents || [],
 				coachingCarousel: state.coachingCarousel || [],

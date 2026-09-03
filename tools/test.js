@@ -2401,6 +2401,84 @@ console.log("\nGenerated text");
 		faults.length === 0, faults.slice(0, 6).join("\n         "));
 }
 
+console.log("\nWarm re-runs from every phase");
+{
+	/* THE COUPLING THIS EXISTS TO CATCH.
+
+	   The awards phase used to hand three extra results back by writing
+	   `__`-prefixed keys onto the TEAM MAP, which the caller then lifted off.
+	   That works exactly as long as every key is remembered at both ends —
+	   and the stats phase iterates the team map with Object.keys, so a key
+	   left behind is a "team" with no members. Adding a fourth key and
+	   forgetting the matching delete is a one-line change whose failure
+	   appears three phases away, on one slider, in the browser only.
+
+	   So: run cold, then re-run warm through every setting the phase table
+	   declares, one at a time. Any phase that leaves the state unfit for a
+	   later phase to re-enter shows up here rather than in a user's tab. */
+	const PROBES = [
+		["era", "2009-2021"], ["pace", 72], ["scoringEnv", 1.5],
+		["efficiencyEnv", 1], ["statNoise", 1.4], ["upsetFactor", 1.6],
+		["injuryRate", 1.6], ["awardStrictness", 1.5], ["confAwardStrictness", 1.4],
+		["awardNoise", 2], ["potBias", 1.5], ["potSpread", 9],
+		["draftEvents", 6], ["noteLines", ["summary", "stats"]],
+		["seasonEvents", 11], ["teamMomentum", 1.8], ["priorSeasons", "reconstruct"],
+		["coachTurnover", 160], ["styleDrift", 2], ["traitCount", 5],
+		["realignmentRate", 0.9], ["midMajorLift", 6], ["starReturners", 200],
+	];
+	const runner = global.Engine.createRunner(V.realisticClass(6, 70));
+	const base = { seed: "warm", narrative: false };
+	let ok0 = true;
+	try { runner.run(global.Config.make(base)); } catch (e) { ok0 = false; }
+	ok("a cold run succeeds", ok0);
+	const broke = [];
+	for (const [key, value] of PROBES) {
+		const cfg = global.Config.make(Object.assign({}, base));
+		cfg[key] = value;
+		try {
+			const res = runner.run(cfg);
+			if (!res.players || !res.players.length) broke.push(key + ": empty");
+		} catch (e) {
+			broke.push(key + ": " + (e && e.message ? e.message : String(e)));
+		}
+	}
+	ok("every setting can be changed on a warm runner",
+		broke.length === 0, broke.slice(0, 4).join("; "));
+	/* And back again, in the other order, because a phase can also be left
+	   unfit by the WARM path rather than by the cold one. */
+	const back = [];
+	for (let i = PROBES.length - 1; i >= 0; i--) {
+		const cfg = global.Config.make(Object.assign({}, base));
+		cfg[PROBES[i][0]] = PROBES[i][1];
+		try { runner.run(cfg); } catch (e) {
+			back.push(PROBES[i][0] + ": " + (e && e.message ? e.message : String(e)));
+		}
+	}
+	ok("and in the reverse order", back.length === 0, back.slice(0, 4).join("; "));
+	/* The specific invariant: nothing may be left on the team map that is not
+	   a team, because the stats phase iterates it by key. */
+	{
+		const res = runner.run(global.Config.make(base));
+		const bad = Object.keys(res.teams).filter((k) => !res.teams[k] ||
+			!Array.isArray(res.teams[k].members));
+		ok("the team map contains nothing but teams", bad.length === 0, bad.join(", "));
+	}
+	/* The ballots survive a warm re-run of the awards phase, which is the
+	   thing that broke. */
+	{
+		const a = runner.run(global.Config.make(Object.assign({}, base)));
+		const b = runner.run(global.Config.make(
+			Object.assign({}, base, { awardStrictness: 1.4 })));
+		ok("the player-of-the-year ballots survive a warm awards re-run",
+			(a.poyBallots || []).length === 6 && (b.poyBallots || []).length === 6,
+			(a.poyBallots || []).length + " / " + (b.poyBallots || []).length);
+		ok("and each ballot names five candidates with margins",
+			b.poyBallots.every((x) => x.top.length === 5 && x.top[0].behind === 0 &&
+				x.top.every((r) => Number.isFinite(r.behind) && r.name)),
+			JSON.stringify(b.poyBallots[0] && b.poyBallots[0].top[1]));
+	}
+}
+
 console.log("\nStaying fresh: anomaly memory, narratives, style drift, flavor reach");
 {
 	/* ANOMALY MEMORY. The same mechanism the build pool has, one layer down:

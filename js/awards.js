@@ -655,6 +655,15 @@
 		   something. Only a sweep gets the consensus label. */
 		const poyWins = new Map();
 		const top = nation.slice(0, Math.max(6, slots(8)));
+		/* THE BALLOTS.
+
+		   Six trophies, six electorates, and the model computed a full ordered
+		   ballot for each of them and then kept only the name at the top. In a
+		   split year — which is the interesting year, and the reason the six
+		   electorates exist at all — a reader could see that two men won three
+		   trophies each and had no way to see how close any of the six was.
+		   Kept, top five per trophy, so the Awards tab can show the vote. */
+		const ballotRows = [];
 		/* This season's mood. Some years the whole electorate is arguing about
 		   the best player and some years it is arguing about the best team, and
 		   an electorate whose lean is a constant produces the same argument
@@ -689,6 +698,22 @@
 			ballots.sort((a, b) => b.score - a.score);
 			const winner = ballots.length ? ballots[0].x : null;
 			if (!winner) continue;
+			/* Scores are on an arbitrary internal scale, so the ballot is
+			   reported as a MARGIN from the winner: "0.4 behind" is a fact a
+			   reader can use and "score 41.7" is not. */
+			ballotRows.push({
+				award: award.name,
+				resumeLean: Number((lean).toFixed(3)),
+				top: ballots.slice(0, 5).map((b, i) => ({
+					rank: i + 1,
+					name: b.x.name,
+					key: b.x.key || null,
+					school: b.x.school || (b.x.team ? b.x.team.name : null),
+					// `filler` is what buildField stamps on a returning player.
+					inClass: !b.x.filler,
+					behind: Number((ballots[0].score - b.score).toFixed(2)),
+				})),
+			});
 			giveNat(winner, award.name);
 			poyWins.set(winner, (poyWins.get(winner) || 0) + 1);
 		}
@@ -1042,13 +1067,29 @@
 			if (p.awards && p.awards.length) p.awards = sortAwards(p.awards);
 		}
 
+		/* RETURNED, NOT STASHED ON THE TEAM MAP.
+
+		   These three used to be written onto `teams` as `__`-prefixed keys
+		   and lifted off by the caller. That works exactly as long as every
+		   one of them is remembered at both ends: `teams` is iterated with
+		   Object.keys in the stats phase, so a key left behind is a "team"
+		   with no members, and a warm re-run — a slider that re-runs stats but
+		   not awards — dies on it. Adding a fourth key here and forgetting the
+		   matching delete is a one-line change with a failure three phases
+		   away, which is exactly the kind of coupling that should not be
+		   possible.
+
+		   So `assign` returns them. The old keys are still written for one
+		   release because js/batch.js and any external caller may read them,
+		   and the caller deletes what it reads. */
 		teams.__fieldHonors = fieldHonors;
+		teams.__poyBallots = ballotRows;
 		/* The best of the field, independent of whether he won anything —
 		   for the News item that says the country's best player this year
 		   was not in the draft class at all. Trimmed to what a spotlight
 		   article needs; the rest of `field` (the fitted improvement scores,
 		   the defensive approximations) stays internal to this function. */
-		teams.__fieldTop = field.slice()
+		const fieldTop = field.slice()
 			.sort((a, b) => b.scoreTotal - a.scoreTotal)
 			.slice(0, 5)
 			.map((x) => ({
@@ -1057,7 +1098,11 @@
 				classYear: x.classYear || null, starReturner: x.starReturner || null,
 				pos: x.pos, stats: x.stats,
 			}));
-		return ranked;
+		/* Still written onto the map as well, for one release, in case an
+		   external caller reads them; the engine deletes every `__` key it
+		   finds after this returns. */
+		teams.__fieldTop = fieldTop;
+		return { ranked, fieldHonors, fieldTop, poyBallots: ballotRows };
 	}
 
 	/* ------------------------------------------------------- award scope
