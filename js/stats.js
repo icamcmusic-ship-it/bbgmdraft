@@ -137,14 +137,34 @@
 		   moving the ceiling (the pool is fixed, so the best passer barely
 		   notices). */
 		AST_EXP: 2.4,
-		AST_FLOOR: 0.42,
+		/* 0.42 was raised to stop bigs finishing under half an assist a game,
+		   and it worked by making every big identical: a college centre's
+		   passing composite runs around 0.30, so the floor bound for the whole
+		   of that end of the roster — prospect and returning player alike — and
+		   a passing big and a non-passing big took the same share of the pool.
+		   0.42^2.4 is 12.5% of a point guard's 0.65^2.4, so a seven-footer was
+		   handed an eighth of a point guard's weight when the real figure for a
+		   non-passer is nearer a twentieth.
+
+		   With assignFillerSlots giving every rotation a real point guard to
+		   lose assists to, the floor is no longer what stops a big printing
+		   0.4 a game — the gradient is — so it comes down to where it is a
+		   guard against absurdity rather than a shaper of the distribution. */
+		AST_FLOOR: 0.24,
 		/* Rebounds. At 1.25 a center out-rebounded a guard by 2.4x; the real
 		   defensive-rebound-rate ratio between those two is 4-5x. 1.55 got
 		   the big:guard RPG ratio to 1.9x against a real ~2.4x, so another
 		   step to 1.9, offset by a softer REB_CAP below so the ceiling stops
 		   binding exactly at the measured maximum. */
 		REB_EXP: 1.9,
-		REB_FLOOR: 0.30,
+		REB_FLOOR: 0.33,
+		/* Explicit height terms on the rebound share, on top of the composite.
+		   See rebWeight: the composite treats one inch of height and one point
+		   of the reb rating as the same thing, and they are not. Steeper on
+		   the defensive glass, where reach decides, than on the offensive
+		   glass, where effort does. */
+		REB_HGT_ORB: 0.03,
+		REB_HGT_DRB: 0.06,
 		AST_PSS: 0.45,
 		STL_EXP: 2.1,
 		/* 2.6 gave a big:guard BPG ratio of 4.1x against a real 8-10x, with
@@ -178,6 +198,12 @@
 		ASSISTED_SHARE: 0.52,
 		// Documented per-player ceilings, now actually enforced (see capNoisy).
 		AST_CAP: 0.62,
+		/* Absolute per-40-minute ceilings, applied after the share caps. See
+		   clipPer40: a share of a team pool cannot say "no college player
+		   rebounds at this rate". 14.5 and 10.0 sit just above the real
+		   draft-class maxima of 12-13 and 8-9 a game at 32-34 minutes. */
+		REB_PER40_CAP: 14.5,
+		AST_PER40_CAP: 10.0,
 		/* Measured max share was 0.40 against a cap of 0.40 — binding
 		   exactly. Softened so the steeper REB_EXP has headroom. */
 		REB_CAP: 0.46,
@@ -251,6 +277,17 @@
 		   PROSPECT_COMP_SCALE: amplification, because the ref feeds into
 		   channels whose sensitivity differs from the raw composite gap. */
 		PROSPECT_COMP_BASE: 0.428,
+		/* Per-composite reference levels: the mean each composite scores on
+		   the N(45, 13) calibration fixture the stat model's intercepts were
+		   fitted against, measured rather than assumed. Used as a ratio
+		   against the class's own mean to build classRefMult — see the long
+		   comment in js/engine.js for why a share weight takes a multiplier
+		   and a rate term takes an addition. */
+		PROSPECT_COMP_BASES: {
+			usage: 0.4395, rebounding: 0.4700, passing: 0.4535,
+			stealing: 0.4613, drawingFouls: 0.4544, turnovers: 0.4393,
+			shootingThreePointer: 0.4387,
+		},
 		PROSPECT_COMP_SCALE: 1.32,
 		PROSPECT_COMP_SCALE_EFF: 0.82,
 	};
@@ -647,6 +684,37 @@
 		};
 	}
 
+	/* How a returning player's composites differ by roster slot.
+
+	   One row per composite the size of a player actually decides. Every row
+	   sums to zero over the three slots — see the comment at the call site for
+	   why that is not a nicety — and the magnitudes are the gaps a real
+	   rotation shows: a college point guard's passing composite runs around
+	   0.60 against a centre's 0.30, and the rebounding gap is the mirror of
+	   it. Wings carry the small residual that makes the three sum to zero
+	   rather than sitting exactly at the old flat value, because a wing is not
+	   the average of a guard and a centre on every axis. */
+	const SLOT_SHAPE = {
+		guard: {
+			passing: +0.15, rebounding: -0.10, blocking: -0.17, stealing: +0.07,
+			three: +0.06, rim: -0.05, post: -0.09, mid: +0.03,
+			drawingFouls: -0.03, defInt: -0.10, defPer: +0.08,
+			athleticism: +0.05, fouling: +0.04, turnovers: -0.02,
+		},
+		wing: {
+			passing: 0.00, rebounding: 0.00, blocking: -0.01, stealing: +0.01,
+			three: +0.03, rim: 0.00, post: 0.00, mid: +0.02,
+			drawingFouls: 0.00, defInt: 0.00, defPer: +0.02,
+			athleticism: +0.02, fouling: +0.01, turnovers: +0.01,
+		},
+		big: {
+			passing: -0.15, rebounding: +0.10, blocking: +0.18, stealing: -0.08,
+			three: -0.09, rim: +0.05, post: +0.09, mid: -0.05,
+			drawingFouls: +0.03, defInt: +0.10, defPer: -0.10,
+			athleticism: -0.07, fouling: -0.05, turnovers: +0.01,
+		},
+	};
+
 	/* The weights that share out a team's assist and steal pools. They live
 	   here rather than inline because statLine and the denominator loop in
 	   simulateTeamStats have to agree on them exactly, and did not have to
@@ -668,17 +736,48 @@
 	   than the returning walk-on beside him, purely because the reference never
 	   moved with the fixture. Median assists came out 1.6 a game against a real
 	   2.5-3.0 and rebounds 4.7 against 5.5. Same correction, same reason. */
-	function astWeight(comps, ratings, minShare, refVol) {
-		return Math.pow(Math.max(TUNING.AST_FLOOR, passSkill(comps, ratings) + (refVol || 0)),
+	/* `mult` is the per-composite reference MULTIPLIER (see the long comment
+	   at classRefMult in js/engine.js). 1 for a returning player, who already
+	   sits on the reference; a number a little above 1 for a prospect, whose
+	   class sits below it. A multiplier rather than the old addition because
+	   these are share weights and an addition compresses them — which is what
+	   flattened the position gradient. */
+	function refOf(mult, k) {
+		return mult && Number.isFinite(mult[k]) ? mult[k] : 1;
+	}
+	function astWeight(comps, ratings, minShare, mult) {
+		return Math.pow(
+			Math.max(TUNING.AST_FLOOR, passSkill(comps, ratings) * refOf(mult, "passing")),
 			TUNING.AST_EXP) * minShare;
 	}
-	function stlWeight(comps, minShare, refVol) {
-		return Math.pow(Math.max(0.02, comps.stealing + (refVol || 0)), TUNING.STL_EXP) *
+	function stlWeight(comps, minShare, mult, refVol) {
+		return Math.pow(Math.max(0.02, comps.stealing * refOf(mult, "stealing")),
+			TUNING.STL_EXP) *
+			/* Athleticism enters as a CENTERED term, not as a share, so the
+			   additive reference is the right one here and stays. */
 			(1 + TUNING.STL_ATH * (comps.athleticism + (refVol || 0) - 0.50)) * minShare;
 	}
-	function rebWeight(comps, minShare, offensive, refVol) {
-		return Math.pow(Math.max(TUNING.REB_FLOOR, comps.rebounding + (refVol || 0)),
-			TUNING.REB_EXP + (offensive ? 0.35 : 0)) * minShare;
+	/* Rebounding, with height in it.
+
+	   BBGM's rebounding composite is hgt*2 + reb*2 + oiq*0.5 + diq*0.5, so a
+	   Glass-Eating Center's +reb offset buys exactly as many boards as one
+	   inch of height does, and reading only that composite made the
+	   `rebounding` archetype tag invisible in the box score — measured, bigs
+	   carrying the tag averaged 8.46 rebounds against 8.65 for bigs without
+	   it. Size is not a linear input to rebounding: a seven-footer standing
+	   next to the rim gets to a defensive board a 6'2" guard cannot reach at
+	   all, whatever either of them wants.
+
+	   So the weight carries an explicit height term on top of the composite.
+	   It is deliberately mild on the offensive glass (where effort and
+	   positioning matter more relative to reach) and steeper on the defensive
+	   glass, which is where the real height gradient lives. */
+	function rebWeight(comps, minShare, offensive, mult, bigness) {
+		const bg = Number.isFinite(bigness) ? clamp(bigness, 0, 1) : 0.5;
+		const size = Math.pow(0.62 + 0.76 * bg, offensive ? TUNING.REB_HGT_ORB : TUNING.REB_HGT_DRB);
+		return Math.pow(
+			Math.max(TUNING.REB_FLOOR, comps.rebounding * refOf(mult, "rebounding")),
+			TUNING.REB_EXP + (offensive ? 0.35 : 0)) * size * minShare;
 	}
 
 	/* How well a roster shoots, before a single stat line exists, so the engine
@@ -778,19 +877,73 @@
 	   strength used without feel. Balanced is the origin of both. */
 	const IDENTITY_FTR = { ins: 0.0024, stre: 0.0016, ft: 0.0018, dnk: 0.0006 };
 	const IDENTITY_PF = { stre: 0.010, oiq: -0.008, ins: 0.003 };
+	/* REBOUNDING INTENT.
+
+	   The `rebounding` archetype tag did nothing in the box score. Measured
+	   over ten classes before this: builds carrying the tag averaged 8.46
+	   rebounds a game and bigs WITHOUT it averaged 8.65 — the tag was a label,
+	   which is exactly what the archetype table's own README forbids.
+
+	   The cause is that BBGM's rebounding composite is hgt*2 + reb*2 +
+	   oiq*0.5 + diq*0.5, so a Glass-Eating Center's +26 on `reb` is worth
+	   thirteen inches of height and nothing else; a build could be drawn as a
+	   rebounding specialist and share the glass with everybody. The composite
+	   is also the only thing rebWeight could read, and ROLE_INTENT declares a
+	   rebounder's SCORING intent (-0.9 points) with no rebounds term beside it.
+
+	   So intent gets its own multiplier on the share weight, read off the same
+	   authored offsets: `reb` mostly, with strength (boxing out) and jumping
+	   (going and getting one) behind it. Rebounding builds average +14.3 on
+	   reb against -3.3 for everything else, so the gap this opens is real
+	   without being a second height gradient. */
+	const IDENTITY_REB = { reb: 0.0090, stre: 0.0020, jmp: 0.0016, oiq: 0.0005 };
+	/* DEFENSIVE-EVENT INTENT.
+
+	   Same failure one tag over: builds tagged `defense` produced 2.13 steals
+	   plus blocks against 1.76 for everything else, a 1.21x separation where
+	   the real gap between a defensive specialist and a rotation player is
+	   nearer 1.6x. The steal share reads (50 + spd + 2*diq) / 400, whose
+	   constant 50 halves the range of everything that follows it, and blocks
+	   read only the composite.
+
+	   Split in two because they are two different players: a Ball Hawk is
+	   quick hands and anticipation, a Rim Protector is length and timing, and
+	   a build that is one is usually not the other. */
+	/* PLAYMAKING INTENT.
+
+	   The third of the same family. Builds tagged `playmaking` produced 4.21
+	   assists against 3.20 for other guards, a 1.32x separation where the real
+	   gap between a lead guard and a scoring guard is nearer 2.5x. BBGM's
+	   passing composite is 0.4*drb + 1.0*pss + 0.5*oiq, so it rewards every
+	   guard who can dribble — which is why a Sharpshooter finished within 1.7
+	   assists of a Floor General — and AST_PSS already reads some raw pss back
+	   to correct that. This is the rest of it: what the build is FOR, as
+	   against what its ratings incidentally add up to. */
+	const IDENTITY_AST = { pss: 0.0100, oiq: 0.0022, drb: 0.0012, ins: -0.0008 };
+	const IDENTITY_STL = { diq: 0.0145, spd: 0.0058, oiq: 0.0018, jmp: 0.0010 };
+	const IDENTITY_BLK = { diq: 0.0105, jmp: 0.0098, hgt: 0.0030, stre: 0.0020 };
 	/* Centered on the table, weighted by rarity: the offset table is
 	   net-negative on ins (a specialist genuinely trades inside scoring
 	   away), so an uncentered term would move the CLASS free-throw rate off
 	   its anchor by a few percent rather than only moving builds around it.
 	   The anchor is the calibration table's job. */
-	const IDENTITY_CENTER = { ftr: 0, pf: 0 };
+	/* One table per axis, so adding an axis is a row rather than five edits. */
+	const IDENTITY_AXES = {
+		ftr: IDENTITY_FTR, pf: IDENTITY_PF,
+		reb: IDENTITY_REB, ast: IDENTITY_AST, stl: IDENTITY_STL, blk: IDENTITY_BLK,
+	};
+	const IDENTITY_KEYS = Object.keys(IDENTITY_AXES);
+	const IDENTITY_CENTER = {};
 	const IDENTITY_CACHE = {};
 	function identityRaw(arch) {
-		let ftr = 0;
-		let pf = 0;
-		for (const k of Object.keys(IDENTITY_FTR)) ftr += IDENTITY_FTR[k] * (arch.o[k] || 0);
-		for (const k of Object.keys(IDENTITY_PF)) pf += IDENTITY_PF[k] * (arch.o[k] || 0);
-		return { ftr, pf };
+		const out = {};
+		for (const axis of IDENTITY_KEYS) {
+			const tbl = IDENTITY_AXES[axis];
+			let v = 0;
+			for (const k of Object.keys(tbl)) v += tbl[k] * (arch.o[k] || 0);
+			out[axis] = v;
+		}
+		return out;
 	}
 	function identityOf(name) {
 		const RB = global.RatingsBuilder;
@@ -798,33 +951,46 @@
 		if (IDENTITY_CACHE[name]) return IDENTITY_CACHE[name];
 		if (!IDENTITY_CACHE.__centered) {
 			let wsum = 0;
-			let ftr = 0;
-			let pf = 0;
+			const acc = {};
 			for (const a of RB.ARCHETYPES) {
 				const w = a.w === undefined ? 1 : a.w;
 				const r = identityRaw(a);
 				wsum += w;
-				ftr += w * r.ftr;
-				pf += w * r.pf;
+				for (const axis of IDENTITY_KEYS) acc[axis] = (acc[axis] || 0) + w * r[axis];
 			}
-			IDENTITY_CENTER.ftr = wsum ? ftr / wsum : 0;
-			IDENTITY_CENTER.pf = wsum ? pf / wsum : 0;
+			for (const axis of IDENTITY_KEYS) {
+				IDENTITY_CENTER[axis] = wsum ? acc[axis] / wsum : 0;
+			}
 			IDENTITY_CACHE.__centered = true;
 		}
 		const arch = RB.ARCHETYPES.filter((a) => a.name === name)[0];
 		if (!arch || !arch.o) return null;
 		const r = identityRaw(arch);
-		IDENTITY_CACHE[name] = { ftr: r.ftr - IDENTITY_CENTER.ftr, pf: r.pf - IDENTITY_CENTER.pf };
-		return IDENTITY_CACHE[name];
+		const out = {};
+		for (const axis of IDENTITY_KEYS) out[axis] = r[axis] - IDENTITY_CENTER[axis];
+		IDENTITY_CACHE[name] = out;
+		return out;
 	}
+	const IDENTITY_NONE = { ftr: 0, pf: 1, reb: 1, ast: 1, stl: 1, blk: 1 };
 	function archetypeIdentity(name, cfg) {
 		const id = identityOf(name);
-		if (!id) return { ftr: 0, pf: 1 };
+		if (!id) return IDENTITY_NONE;
 		/* Scaled by specialization, the same way the offsets reach the
 		   ratings: at 0 every build is BBGM's own and there is no identity to
 		   read. */
 		const spec = clamp(cfg && Number.isFinite(cfg.specialization) ? cfg.specialization : 1, 0, 3);
-		return { ftr: clamp(id.ftr * spec, -0.09, 0.12), pf: Math.exp(clamp(id.pf * spec, -0.45, 0.55)) };
+		/* ftr is a rate and adds; the rest are share multipliers and multiply,
+		   so they go through exp() and land on 1 for a build with no intent.
+		   The clamps stop a specialization of 3 on the most extreme build in
+		   the table turning into a different sport. */
+		return {
+			ftr: clamp(id.ftr * spec, -0.09, 0.12),
+			pf: Math.exp(clamp(id.pf * spec, -0.45, 0.55)),
+			reb: Math.exp(clamp(id.reb * spec, -0.42, 0.45)),
+			ast: Math.exp(clamp(id.ast * spec, -0.40, 0.45)),
+			stl: Math.exp(clamp(id.stl * spec, -0.45, 0.60)),
+			blk: Math.exp(clamp(id.blk * spec, -0.45, 0.55)),
+		};
 	}
 
 	function statLine(rng, ratings, comps, minutes, usgShare, ctx, cfg, teamCtx, who) {
@@ -921,6 +1087,9 @@
 		   sit on the reference, so the shift is the prospect's alone. */
 		const refVol = me.filler ? 0 : (ctx.classRefVolume || 0);
 		const refEff = me.filler ? 0 : (ctx.classRefEfficiency || 0);
+		/* The share-weight half of the same correction. Null for a filler, who
+		   is synthesized on the reference already. */
+		const refMult = me.filler ? null : (ctx.classRefMult || null);
 
 		// Turnovers: draft-year mean 17.2% of possessions (p5 10.7, p95 24.5),
 		// essentially flat across sizes. A ball-pressure defense forces more.
@@ -994,20 +1163,40 @@
 		// spread used to run 34.8% for guards to 31.1% for centers with almost
 		// nothing between an elite shooting big and a non-shooting guard, when
 		// the real range is 27% to 40% *within* every size band.
-		/* The ceiling used to allow 56% from three on token volume, which is
-		   not a number, it is a joke line; 50% on low volume is already
-		   generous. The slope was steepened once on purpose (see above) and
-		   over-shot: the Sharpshooter archetype came out at 43.7% from three on
-		   28.4% usage as a COHORT AVERAGE, when the real ceiling for a whole
-		   cohort of shooting specialists is 38-40%. */
-		const tpCeil = clamp(0.435 + 0.08 * Math.max(0, 1 - tpa / 3.5), 0.435, 0.50);
-		const tpp = clamp(
+		/* THE THREE-POINT CEILING, AND WHY IT IS NOT A CLAMP.
+
+		   The ceiling used to allow 56% from three on token volume, which is
+		   not a number, it is a joke line, and the correction over-shot the
+		   other way: `clamp(0.435 + 0.08 * max(0, 1 - tpa/3.5), 0.435, 0.50)`
+		   is a HARD WALL at exactly .435 for anybody taking three and a half
+		   attempts a game. Measured over ten classes, the p90 of every shooter
+		   at two or more attempts was 43.5% to the decimal and the maximum was
+		   44.3 — a tenth of the shooters in the country pinned onto one value,
+		   which is precisely the failure the usage-distribution band in
+		   tools/validate.js exists to catch and was never asked to catch here.
+		   Real draft classes produce a 45-48% shooter on six attempts most
+		   years, and that man is the entire point of the Sharpshooter build.
+
+		   So the wall becomes a soft saturation. Below the knee nothing moves —
+		   which protects the finding the old comment records, that a COHORT of
+		   shooting specialists should average 38-40% and not 43.7% — and above
+		   it the curve bends asymptotically toward a limit instead of stacking
+		   everyone on the limit. A volume shooter can now reach the high
+		   forties and essentially nobody reaches 50. */
+		const tpLim = 0.470 + 0.055 * Math.max(0, 1 - tpa / 3.5);
+		const softCeil = (x, lim, knee) => {
+			const t = lim * knee;
+			if (x <= t) return x;
+			return t + (lim - t) * (1 - Math.exp(-(x - t) / (lim - t)));
+		};
+		const tpp = clamp(softCeil(
 			(bend && bend.tpp ? bend.tpp : 0) +
 			0.339 + CAL.effShift("three") + envEff +
 				0.40 * (comps.shootingThreePointer - (0.50 - 0.20 * bigness) + refEff) +
 				compAdj + synergy + talentAdj + expAdj + loadAdj * 0.6 - 0.055 * od.perimeter +
 				mix(touch, rng.normal(0, 1)) * 0.030 * noise,
-			0.15, tpCeil,
+			tpLim, 0.86),
+			0.15, 0.52,
 		);
 		// Rim/mid split and finishing: rim FG% runs .59 (guards) to .72 (bigs).
 		// The calibration table already carries the height effect, so the skill
@@ -1054,8 +1243,14 @@
 		const sh = (comp, exp) => Math.pow(comp, exp) * minShare;
 		// Offensive rebounds lean a little more on size and effort than the
 		// defensive glass, where everyone boxes out.
-		const orbW = rebWeight(comps, minShare, true, refVol);
-		const drbW = rebWeight(comps, minShare, false, refVol);
+		/* identity.reb is the build's rebounding INTENT — what the offset
+		   table says this man goes and gets that his composite cannot see.
+		   See IDENTITY_REB. Like the fouling identity below, it redistributes
+		   inside a roster and reconcileTeamTotals refits the team to its pool
+		   afterwards, so a Glass-Eating Center's extra boards come off his
+		   teammates' rather than out of thin air. */
+		const orbW = rebWeight(comps, minShare, true, refMult, bigness) * identity.reb;
+		const drbW = rebWeight(comps, minShare, false, refMult, bigness) * identity.reb;
 		// No single player takes an unbounded share of a team total: the record
 		// books top out near 60-70% of team assists and blocks, so saturate the
 		// share smoothly rather than letting one dominant composite run away
@@ -1091,7 +1286,8 @@
 		const orb = orbRaw * rebScale;
 		const drb = drbRaw * rebScale;
 		const ast = capNoisy(
-			((teamCtx.astPool * astWeight(comps, ratings, minShare, refVol)) / teamCtx.astDen) *
+			((teamCtx.astPool * astWeight(comps, ratings, minShare, refMult) * identity.ast) /
+				teamCtx.astDen) *
 				(1 + (bend && bend.ast ? bend.ast : 0)),
 			0.10, teamCtx.astPool, TUNING.AST_CAP);
 		/* Athleticism finally reaches the steal column. BBGM's stealing
@@ -1102,10 +1298,12 @@
 		   The composite is left alone — half the model reads it — and the share
 		   is tilted here instead. */
 		const stl = capNoisy(
-			(teamCtx.stlPool * stlWeight(comps, minShare, refVol)) / teamCtx.stlDen,
+			(teamCtx.stlPool * stlWeight(comps, minShare, refMult, refVol) * identity.stl) /
+				teamCtx.stlDen,
 			0.13, teamCtx.stlPool, TUNING.STL_CAP);
 		const blk = capNoisy(
-			(teamCtx.blkPool * sh(comps.blocking, TUNING.BLK_EXP)) / teamCtx.blkDen,
+			(teamCtx.blkPool * sh(comps.blocking, TUNING.BLK_EXP) * identity.blk) /
+				teamCtx.blkDen,
 			0.16, teamCtx.blkPool, TUNING.BLK_CAP);
 		// Personal fouls: BBGM's fouling composite finally does something, so
 		// the Foul-Prone Enforcer archetype has an on-court identity.
@@ -1363,6 +1561,18 @@
 			   off: 3P 30.3 against 33.8 and FT 73.7 against 70.6, which by
 			   itself put the average program 2.3 points of offensive
 			   efficiency light. */
+			/* THE SLOT. See assignFillerSlots in js/teams.js: every returning
+			   player now has a size, and a size is what a composite vector is
+			   mostly about. `d` reads the per-slot offset off SLOT_SHAPE.
+
+			   Every row of SLOT_SHAPE sums to zero across the three slots, so
+			   a nine-man rotation of three guards, three wings and three bigs
+			   averages exactly what the flat bases averaged before. That is
+			   load-bearing: the whole-field anchors in js/calibration.js (USG
+			   20.2, TS 53.4, 3P 33.8, FT 70.6, ORtg 102.6) were fitted on the
+			   flat bases, and shaping the rotation must redistribute those
+			   numbers without moving them. */
+			const d = SLOT_SHAPE[m.slotType || "wing"];
 			return {
 				/* 0.485 was fitted so the whole simulated field landed on the
 				   D-I rotation anchor — but it was fitted while the prospects
@@ -1372,18 +1582,29 @@
 				   USG_EXP into a large weight gap: real prospects were losing
 				   possessions to invented teammates, which is the whole of the
 				   class-level scoring shortfall. Usage is zero-sum inside a
-				   roster, so the level of a class can only be raised here. */
-				usage: f(TUNING.FILLER_USAGE, 0.07), passing: f(0.45, 0.09), turnovers: f(0.47, 0.07),
-				shootingAtRim: f(0.515, 0.09), shootingLowPost: f(0.45, 0.09),
-				shootingMidRange: f(0.455, 0.08), shootingThreePointer: f(0.505, 0.10),
-				rebounding: f(0.47, 0.10), stealing: f(0.48, 0.07), blocking: f(0.45, 0.10),
-				drawingFouls: f(0.47, 0.08), defense: f(0.48, 0.08), fouling: f(0.47, 0.08),
-				defenseInterior: f(0.46, 0.09), defensePerimeter: f(0.46, 0.09),
+				   roster, so the level of a class can only be raised here.
+
+				   Usage carries NO slot offset on purpose: it is the one dial
+				   the class's scoring level is set by, and tilting it by size
+				   would move that level as a side effect of a positional fix. */
+				usage: f(TUNING.FILLER_USAGE, 0.07),
+				passing: f(0.45 + d.passing, 0.09), turnovers: f(0.47 + d.turnovers, 0.07),
+				shootingAtRim: f(0.515 + d.rim, 0.09),
+				shootingLowPost: f(0.45 + d.post, 0.09),
+				shootingMidRange: f(0.455 + d.mid, 0.08),
+				shootingThreePointer: f(0.505 + d.three, 0.10),
+				rebounding: f(0.47 + d.rebounding, 0.10),
+				stealing: f(0.48 + d.stealing, 0.07),
+				blocking: f(0.45 + d.blocking, 0.10),
+				drawingFouls: f(0.47 + d.drawingFouls, 0.08),
+				defense: f(0.48, 0.08), fouling: f(0.47 + d.fouling, 0.08),
+				defenseInterior: f(0.46 + d.defInt, 0.09),
+				defensePerimeter: f(0.46 + d.defPer, 0.09),
 				endurance: f(0.50, 0.09),
 				// Athleticism reaches the steal share now, so a filler needs it
 				// too — without it every returning player's steal weight came
 				// out NaN and took the whole team steal pool with it.
-				athleticism: f(0.48, 0.09),
+				athleticism: f(0.48 + d.athleticism, 0.09),
 			};
 		});
 
@@ -1650,7 +1871,13 @@
 			const dMid = comps[i].shootingMidRange - 0.455 * tscale;
 			const dTp = comps[i].shootingThreePointer - 0.505 * tscale;
 			return {
-				hgt: clamp(30 + 55 * comps[i].blocking * 0.8, 5, 95),
+				/* The slot's own height, now that a filler has one. It used to
+				   be inferred from the blocking composite, which made every
+				   good shot-blocker tall and every tall man a shot-blocker —
+				   and, with the composite flat across the roster, made every
+				   returning player the same 6'6". */
+				hgt: Number.isFinite(m.hgt)
+					? m.hgt : clamp(30 + 55 * comps[i].blocking * 0.8, 5, 95),
 				ft: clamp(43 + 40 * dMid + 35 * dTp, 5, 95),
 				tp: clamp(45 + 80 * dTp, 5, 95),
 				pss: clamp(comps[i].passing * 100, 5, 95),
@@ -1662,10 +1889,14 @@
 			// Same reference the line itself will use, or the shares would not
 			// sum to the pool.
 			const cr = members[i].filler ? 0 : (ctx.classRefVolume || 0);
-			teamCtx.rebDen += rebWeight(comps[i], ms, false, cr);
-			teamCtx.orbDen += rebWeight(comps[i], ms, true, cr);
-			teamCtx.astDen += astWeight(comps[i], ratingRows[i], ms, cr);
-			teamCtx.stlDen += stlWeight(comps[i], ms, cr);
+			const cm = members[i].filler ? null : (ctx.classRefMult || null);
+			// bigness exactly as statLine computes it, or the shares would not
+			// sum to the pool the denominator was built from.
+			const bg = clamp((ratingRows[i].hgt - 30) / 55, 0, 1);
+			teamCtx.rebDen += rebWeight(comps[i], ms, false, cm, bg);
+			teamCtx.orbDen += rebWeight(comps[i], ms, true, cm, bg);
+			teamCtx.astDen += astWeight(comps[i], ratingRows[i], ms, cm);
+			teamCtx.stlDen += stlWeight(comps[i], ms, cm, cr);
 			teamCtx.blkDen += Math.pow(comps[i].blocking, TUNING.BLK_EXP) * ms;
 			teamCtx.pfDen += Math.pow(comps[i].fouling, TUNING.PF_EXP) * Math.pow(ms, 0.82);
 		}
@@ -1759,7 +1990,7 @@
 		   total IS the pool) and then clips the tail at the cap, handing the
 		   clipped surplus to the players with room. Below the cap nothing
 		   moves, so the distribution keeps the shape statLine gave it. */
-		reconcileTeamTotals(lines, pools);
+		reconcileTeamTotals(lines, pools, gameMinutes);
 		totals.ast = 0; totals.stl = 0; totals.blk = 0; totals.pf = 0;
 		totals.orb = 0; totals.trb = 0; totals.tov = 0;
 		for (const line of lines) {
@@ -1892,7 +2123,41 @@
 	   about the run that used to be invisible. */
 	const CONVERGENCE = { usageBisectionAtBound: 0, fitToPoolUnconverged: 0 };
 
-	function reconcileTeamTotals(lines, pools) {
+	/* An ABSOLUTE per-40-minute ceiling, on top of the share cap.
+
+	   REB_CAP and AST_CAP are shares of a team pool, so on a low-pool team the
+	   share cap binds late and the multiplicative jitter on top of it (0.14 on
+	   offensive rebounds) widens the tail further. Measured over ten classes:
+	   a maximum of 17.1 rebounds and 10.9 assists a game, and a Pick-and-Roll
+	   Maestro at 45 overall printing 8.8 assists and 6.8 rebounds in 29
+	   minutes. Real draft-class maxima run 12-13 rebounds and 8-9 assists.
+
+	   A share cap cannot express "no college player rebounds at this rate",
+	   because that is a statement about a player and not about his team. This
+	   is that statement. The surplus is handed to teammates with room, exactly
+	   as fitToPool does, so the team total is unchanged and the pool identity
+	   the calibration harness checks still holds. */
+	function clipPer40(lines, key, per40Cap, gameMinutes) {
+		const gm = gameMinutes || 40;
+		const limit = lines.map((l) => Math.max(0, per40Cap * ((l.mpg || 0) / gm)));
+		let surplus = 0;
+		for (let i = 0; i < lines.length; i++) {
+			const v = lines[i][key] || 0;
+			if (v > limit[i]) { surplus += v - limit[i]; lines[i][key] = limit[i]; }
+		}
+		if (surplus <= 1e-9) return;
+		let room = 0;
+		for (let i = 0; i < lines.length; i++) {
+			room += Math.max(0, limit[i] - (lines[i][key] || 0));
+		}
+		if (room <= 1e-9) return;
+		const share = Math.min(1, surplus / room);
+		for (let i = 0; i < lines.length; i++) {
+			lines[i][key] += Math.max(0, limit[i] - (lines[i][key] || 0)) * share;
+		}
+	}
+
+	function reconcileTeamTotals(lines, pools, gameMinutes) {
 		const set = (key, pool, cap) => {
 			const fitted = fitToPool(lines.map((l) => l[key]), pool, cap);
 			lines.forEach((l, i) => { l[key] = fitted[i]; });
@@ -1937,6 +2202,18 @@
 			   player per team. */
 			l.orpg = Math.max(0, l.orpg);
 			l.drpg = Math.max(0, l.drpg);
+			l.rpg = l.orpg + l.drpg;
+		});
+		/* The absolute ceilings, last, so nothing downstream can walk a line
+		   back over them. Rebounds are clipped on the total and the two halves
+		   are rescaled to match, the same way the share cap above works. */
+		clipPer40(lines, "apg", TUNING.AST_PER40_CAP, gameMinutes);
+		const before = lines.map((l) => l.rpg);
+		clipPer40(lines, "rpg", TUNING.REB_PER40_CAP, gameMinutes);
+		lines.forEach((l, i) => {
+			const k = before[i] > 1e-9 ? l.rpg / before[i] : 1;
+			l.orpg = Math.max(0, l.orpg * k);
+			l.drpg = Math.max(0, l.drpg * k);
 			l.rpg = l.orpg + l.drpg;
 		});
 	}
@@ -2393,5 +2670,6 @@
 		leagueEnv, LEAGUE_ENV, NCAA_ENV,
 		TUNING, ROTATION_SHAPE, classYearIndex, experienceUsage, collegeRole,
 		archetypeIdentity, IDENTITY_FTR, IDENTITY_PF,
+		IDENTITY_REB, IDENTITY_AST, IDENTITY_STL, IDENTITY_BLK, IDENTITY_AXES,
 	};
 })(typeof window !== "undefined" ? window : self);

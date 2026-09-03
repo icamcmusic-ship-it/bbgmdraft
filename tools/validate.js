@@ -261,6 +261,13 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		const b = perClass(lo, hi);
 		return [Math.max(0, b[0]), Math.min(1, b[1])];
 	};
+	/* Tags for a player's build. Read off the archetype table rather than off
+	   the player, because a player carries the build's NAME and the tags are
+	   what the rows below are about. Built once. */
+	const ARCH_TAGS = {};
+	for (const a of global.RatingsBuilder.ARCHETYPES) ARCH_TAGS[a.name] = a.t || [];
+	const archTags = (p) => ARCH_TAGS[p.archetype] || [];
+
 	const all = [];
 	const field = [];
 	const leaders = [];
@@ -699,6 +706,136 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		["FG% mean", mean(g((p) => p.stats.fgp)) * 100].concat(within(48, 4)),
 		["FTA mean", mean(g((p) => p.stats.fta))].concat(within(4.2, 1.2)),
 		["GP mean", mean(g((p) => p.stats.gp))].concat(within(dy.gp.mean, 2.5)),
+
+		/* THE POSITION GRADIENT.
+
+		   Every row above bands a MEAN or a percentile of the whole class, and
+		   a mean cannot see a gradient. That is not a hypothetical: the model
+		   shipped with a centre-to-point-guard assist ratio of 2.3x against a
+		   real 3.8x, and every assist row in this file passed, because the
+		   assist POOL was correctly calibrated at the team level and only the
+		   SHARE was flat. The audit that found it measured a position table by
+		   hand. These rows are that table, so the next one is measured here.
+
+		   Positions are read off the height rating rather than newPos, because
+		   newPos is itself derived from the ratings and a change to the
+		   position solver would move the band without moving the basketball.
+
+		   Reference, drafted players' final college season (2015-24): PG 3.6
+		   rebounds and 5.3 assists, C 8.8 and 1.4. That is a rebound ratio of
+		   2.4x and an assist ratio of 3.8x. */
+		["C:PG rebound ratio", (function () {
+			const g2 = all.filter((p) => p.newRatings.hgt < 30).map((p) => p.stats.rpg);
+			const c = all.filter((p) => p.newRatings.hgt >= 62).map((p) => p.stats.rpg);
+			if (!g2.length || !c.length) return 2.6;
+			return mean(c) / Math.max(0.2, mean(g2));
+		})()].concat(perClass(2.05, 3.3)),
+		["PG:C assist ratio", (function () {
+			const g2 = all.filter((p) => p.newRatings.hgt < 30).map((p) => p.stats.apg);
+			const c = all.filter((p) => p.newRatings.hgt >= 62).map((p) => p.stats.apg);
+			if (!g2.length || !c.length) return 3.8;
+			return mean(g2) / Math.max(0.15, mean(c));
+		})()].concat(perClass(2.45, 5.2)),
+		/* The gradient as a correlation, which is the shape of it rather than
+		   its endpoints: a model that gets the two extremes right and puts
+		   everybody in between on the same number passes both rows above. */
+		["corr(height, RPG)", corr(g((p) => p.newRatings.hgt),
+			g((p) => p.stats.rpg))].concat(corrBand(0.55, 0.85)),
+		["corr(height, APG)", corr(g((p) => p.newRatings.hgt),
+			g((p) => p.stats.apg))].concat(corrBand(-0.75, -0.35)),
+
+		/* ABSOLUTE MAXIMA. The share caps are shares of a team pool, so on a
+		   low-pool team they bind late; before clipPer40 the class maximum ran
+		   17.1 rebounds and 10.9 assists a game against a real 12-13 and 8-9. */
+		["RPG max", Math.max.apply(null, g((p) => p.stats.rpg))].concat(extreme(10.5, 13.8)),
+		["APG max", Math.max.apply(null, g((p) => p.stats.apg))].concat(extreme(7.0, 9.6)),
+		["RPG per 40 max", Math.max.apply(null, all.filter((p) => p.stats.mpg >= 8)
+			.map((p) => (p.stats.rpg * 40) / p.stats.mpg))].concat(extreme(11, 15.2)),
+		["APG per 40 max", Math.max.apply(null, all.filter((p) => p.stats.mpg >= 8)
+			.map((p) => (p.stats.apg * 40) / p.stats.mpg))].concat(extreme(7.5, 10.6)),
+
+		/* THE THREE-POINT WALL.
+
+		   A marginal band on 3P% cannot see a CLAMP, and the median row above
+		   is proof: `tpCeil` used to be `clamp(0.435 + 0.08*max(0, 1 -
+		   tpa/3.5), 0.435, 0.50)`, a hard wall at exactly .435 for anybody
+		   taking three and a half attempts a game, and the median row passed
+		   comfortably throughout.
+
+		   The rows are conditioned on FOUR attempts a game, because that is the
+		   population the wall was built for; the whole shooting population
+		   includes low-volume men whose ceiling floated above it and who
+		   therefore hid it. Measured on the old model over sixteen classes: of
+		   383 volume shooters, 30.5% finished within a third of a point of the
+		   class maximum and the p90-to-max gap was 0.00 to the decimal.
+
+		   Two statistics, because either alone can be gamed by a differently
+		   shaped ceiling: the p90-to-max gap, which cannot be zero unless
+		   something is pinning the top; and the share of the population sitting
+		   on the maximum, which is the wall's own signature. The class maximum
+		   sits beside them because a real class has a 45-48% shooter on volume
+		   most years and a soft ceiling has to actually reach it. */
+		["3P% max (4+ 3PA)", (function () {
+			const v = all.filter((p) => p.stats.tpa >= 4).map((p) => p.stats.tpp);
+			return v.length ? Math.max.apply(null, v) * 100 : 46;
+		})()].concat(extreme(43.8, 50.5)),
+		["3P% p90-to-max gap (4+)", (function () {
+			const v = all.filter((p) => p.stats.tpa >= 4).map((p) => p.stats.tpp);
+			if (v.length < 30) return 1.5;
+			return (Math.max.apply(null, v) - pct(v, 0.90)) * 100;
+		})()].concat(perClass(0.4, 6)),
+		["3P% share pinned at class max", (function () {
+			const v = all.filter((p) => p.stats.tpa >= 4).map((p) => p.stats.tpp);
+			if (v.length < 30) return 0.02;
+			const mx = Math.max.apply(null, v);
+			return v.filter((x) => x > mx - 0.003).length / v.length;
+		})()].concat(rateBand(0, 0.06)),
+		["3P% median (4+ 3PA)", (function () {
+			const v = all.filter((p) => p.stats.tpa >= 4).map((p) => p.stats.tpp);
+			return v.length >= 30 ? pct(v, 0.50) * 100 : 39.7;
+		})()].concat(within(39.7, 1.8)),
+		/* And the other side of the same coin: a cohort of shooting
+		   specialists should average 38-40% from three, not 43.7%. Removing a
+		   wall must not raise the middle. */
+		["Shooting-tag cohort 3P%", (function () {
+			const tagged = all.filter((p) => p.stats.tpa >= 2 && archTags(p).indexOf("shooting") >= 0)
+				.map((p) => p.stats.tpp);
+			return tagged.length >= 5 ? mean(tagged) * 100 : 39;
+		})(), 36.5, 41.5],
+
+		/* THE ARCHETYPE TAGS, IN THE BOX SCORE.
+
+		   "A specialization you cannot see in the box score is a label" is the
+		   archetype table's own standard, and nothing enforced it: builds
+		   tagged `rebounding` averaged 8.46 rebounds against 8.65 for bigs
+		   WITHOUT the tag, a separation of 0.98x. Each row is the tagged
+		   cohort against the untagged cohort of comparable size. */
+		["rebounding tag separation", (function () {
+			const bigs = all.filter((p) => p.newRatings.hgt >= 55);
+			const on = bigs.filter((p) => archTags(p).indexOf("rebounding") >= 0)
+				.map((p) => p.stats.rpg);
+			const off = bigs.filter((p) => archTags(p).indexOf("rebounding") < 0)
+				.map((p) => p.stats.rpg);
+			if (on.length < 4 || off.length < 4) return 1.3;
+			return mean(on) / Math.max(0.5, mean(off));
+		})()].concat(perClass(1.12, 1.70)),
+		["playmaking tag separation", (function () {
+			const gs = all.filter((p) => p.newRatings.hgt < 45);
+			const on = gs.filter((p) => archTags(p).indexOf("playmaking") >= 0)
+				.map((p) => p.stats.apg);
+			const off = gs.filter((p) => archTags(p).indexOf("playmaking") < 0)
+				.map((p) => p.stats.apg);
+			if (on.length < 4 || off.length < 4) return 1.5;
+			return mean(on) / Math.max(0.3, mean(off));
+		})()].concat(perClass(1.15, 2.6)),
+		["defense tag separation", (function () {
+			const gs = all.filter((p) => p.newRatings.hgt < 45);
+			const val = (p) => p.stats.spg + p.stats.bpg;
+			const on = gs.filter((p) => archTags(p).indexOf("defense") >= 0).map(val);
+			const off = gs.filter((p) => archTags(p).indexOf("defense") < 0).map(val);
+			if (on.length < 4 || off.length < 4) return 1.3;
+			return mean(on) / Math.max(0.2, mean(off));
+		})()].concat(perClass(1.10, 1.9)),
 
 		/* THE POTENTIAL DISTRIBUTION, as an aggregate.
 

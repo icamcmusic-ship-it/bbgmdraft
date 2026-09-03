@@ -89,7 +89,73 @@
 	   which the higher intercept puts back at the top). Flattening also closes
 	   the tier gap from the other end: measured PPG ran 10.3 at a high major
 	   against 17.1 at a low major for the same ovr, when the real gap is 4-7. */
-	function makeFiller(rng, level, i, cfg) {
+	/* --------------------------------------------- filler roster slots
+
+	   A returning rotation player used to have a talent number and nothing
+	   else — no size, no position — and every one of the seven to nine of
+	   them on a roster synthesized the same composites: rebounding 0.47,
+	   passing 0.45, blocking 0.45, whoever he was. So no program in the
+	   country had a returning seven-footer to eat a quarter of its defensive
+	   glass, and none had a returning point guard to take a third of its
+	   assists. A prospect shooting guard therefore took an AVERAGE share of
+	   both, which is the whole of the reported "guards rebound too much,
+	   guards pass too little": measured, the class's centre-to-point-guard
+	   assist ratio was 2.3x against a real 3.8x, and a prospect SG averaged
+	   1.27 offensive rebounds a game against a real 0.8.
+
+	   The fix is not a constant. It is that a rotation has SHAPE: two or three
+	   bigs, two or three guards, the rest wings, and which of those a program
+	   needs depends on which of them its prospects already are. A school with
+	   two prospect centres returns a guard-heavy supporting cast, which is
+	   what actually happens.
+
+	   The height bands come from the class's own position mapping, measured:
+	   point guards run hgt 5-36 (median 21), shooting guards 28-45, small
+	   forwards 37-55, centres 52-95 (median 70). */
+	const SLOT_GUARD_MAX = 37;
+	const SLOT_WING_MAX = 53;
+	function slotTypeOf(hgtRating) {
+		return hgtRating < SLOT_GUARD_MAX ? "guard"
+			: hgtRating <= SLOT_WING_MAX ? "wing" : "big";
+	}
+	/* Height per slot, on BBGM's own 0-100 hgt scale. Means sit at the middle
+	   of each measured band; the spread is what keeps a "guard" slot from
+	   producing nine identical 6'2" men across the country. */
+	const SLOT_HGT = { guard: [20, 8], wing: [45, 6], big: [67, 8] };
+	/* What a nine-man rotation is made of. Deliberately three-three-three
+	   rather than a positional depth chart: the model has no positions, only
+	   sizes, and three of each is what a two-big lineup with a sixth-man wing
+	   and a backup point guard adds up to. */
+	const SLOT_TARGET = { guard: 3, wing: 3, big: 3 };
+	function assignFillerSlots(prospects, nFill, rng) {
+		const have = { guard: 0, wing: 0, big: 0 };
+		for (const p of prospects) {
+			const r = p.player && p.player.newRatings;
+			if (!r || !Number.isFinite(r.hgt)) continue;
+			have[slotTypeOf(r.hgt)]++;
+		}
+		const need = [];
+		// Bigs first: a roster with no centre at all is the failure that
+		// matters, and the depth cycle below can afford to be a cycle.
+		for (const k of ["big", "guard", "wing"]) {
+			for (let j = 0; j < Math.max(0, SLOT_TARGET[k] - have[k]); j++) need.push(k);
+		}
+		const cycle = ["wing", "guard", "big", "wing", "guard", "big"];
+		let c = 0;
+		while (need.length < nFill) { need.push(cycle[c % cycle.length]); c++; }
+		need.length = nFill;
+		/* Shuffled against the talent rank, because a program's best returning
+		   player is not systematically its centre. Without this, slot type and
+		   minutes would be the same fact and the gradient would come back as
+		   an artefact of the ordering rather than of size. */
+		for (let i = need.length - 1; i > 0; i--) {
+			const j = rng.int(0, i);
+			const t = need[i]; need[i] = need[j]; need[j] = t;
+		}
+		return need;
+	}
+
+	function makeFiller(rng, level, i, cfg, slotType) {
 		const mean = 0.60 * level + 12.6;
 		/* The decay was steepened again (1.9 -> 2.4). At 1.9 a level-90 blue
 		   blood's returning core still averaged 66.6 against a prospect at
@@ -144,11 +210,18 @@
 		const year = starReturner
 			? rng.pick(["Junior", "Senior", "Senior", "Graduate"])
 			: rng.pick(["Sophomore", "Junior", "Junior", "Senior", "Senior"]);
+		const slot = slotType || "wing";
+		const hs = SLOT_HGT[slot];
 		return {
 			filler: true, talent, name: displayName, slot: "roster" + i,
 			classYear: year,
 			endurance: endu,
 			starReturner,
+			/* Size, so the stat model can shape this man's composites the way
+			   it shapes a prospect's. `hgt` is on BBGM's rating scale, which is
+			   what statLine's `bigness` term reads. */
+			slotType: slot,
+			hgt: clamp(rng.normal(hs[0], hs[1]), 5, 95),
 		};
 	}
 
@@ -619,8 +692,11 @@
 				talent: prospectTalent(p.newOvr, p.newPot),
 			}));
 			const nFill = Math.max(6, 10 - members.length);
+			const slots = assignFillerSlots(members, nFill, trng.child("slots"));
 			const fillers = [];
-			for (let i = 0; i < nFill; i++) fillers.push(makeFiller(trng, level, i, cfg));
+			for (let i = 0; i < nFill; i++) {
+				fillers.push(makeFiller(trng, level, i, cfg, slots[i]));
+			}
 			/* Universe carry-over: last season's named star returners come
 			   back as the same men, a year older, if they have eligibility
 			   left. A returning conference player of the year who was a
@@ -1583,6 +1659,7 @@
 		realign, makeCoach, COACH_SITUATIONS, COACH_PHILOSOPHIES, CONF_REGIONS, regionsOverlap,
 		gameStrength, TOP_KNEE, TOP_STRETCH, REGULAR_NOISE,
 		capFillers, FILLER_GAP, conferenceDrift, programLevel, applyOutages, makeFiller,
+		assignFillerSlots, slotTypeOf, SLOT_HGT, SLOT_TARGET,
 		PROGRAM_VOL, DOWN_YEAR_RATE, BREAKOUT_RATE, STAR_RETURNER_RATE,
 		rotationWeights, pairUp, record, recordPostseason, finalizeSchedule,
 		REGULAR_NOISE, momentumArc, arcAt, ARC_KNOTS,

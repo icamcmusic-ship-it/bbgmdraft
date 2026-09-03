@@ -1731,10 +1731,15 @@
 		   a realistic draft-slot-curve class gets ~0.11 (full correction).
 		   Computed once here, passed through ctx to every team simulation. */
 		const prospectComps = [];
+		const compSums = {};
 		for (const name of Object.keys(teams)) {
 			for (const m of teams[name].members) {
-				if (!m.filler && m.player && m.player.newRatings)
-					prospectComps.push(BB.composites(m.player.newRatings).usage);
+				if (m.filler || !m.player || !m.player.newRatings) continue;
+				const c = BB.composites(m.player.newRatings);
+				prospectComps.push(c.usage);
+				for (const k of Object.keys(S.TUNING.PROSPECT_COMP_BASES)) {
+					compSums[k] = (compSums[k] || 0) + c[k];
+				}
 			}
 		}
 		const meanUsageComposite = prospectComps.length > 0
@@ -1744,6 +1749,48 @@
 			: 0;
 		const classRefVolume = S.TUNING.PROSPECT_COMP_SCALE * Math.max(0, rawRef);
 		const classRefEfficiency = S.TUNING.PROSPECT_COMP_SCALE_EFF * rawRef;
+		/* THE PER-COMPOSITE REFERENCE, AND WHY IT IS A MULTIPLIER.
+
+		   classRefVolume above is one number — the gap between this class's
+		   USAGE composite and the level the stat model's intercepts were fitted
+		   at — and it used to be added to the rebounding, passing and stealing
+		   composites as well. Two things are wrong with that and they compound.
+
+		   The first is that it is the wrong number for those composites: a
+		   class sits low on each of them by its own amount (measured against
+		   the N(45,13) calibration fixture: usage -0.059, rebounding -0.054,
+		   passing -0.062, stealing -0.050), and there is no reason the usage
+		   gap should speak for the rest.
+
+		   The second is the one that shows up in the box score. Those three
+		   composites are used to compute SHARES of a team pool, as
+		   pow(composite, exponent) * minutes. Adding a constant to a share
+		   weight compresses it: a prospect point guard at 0.60 and a prospect
+		   centre at 0.30 stand in a ratio of 2.00, and the same two with +0.06
+		   on each stand at 1.83 — then REB_EXP/AST_EXP raise the compressed
+		   ratio and the position gradient the model was supposed to have comes
+		   out a quarter flatter than it was drawn. That is the whole of the
+		   reported "guards rebound too much and pass too little", together with
+		   the flat filler rosters that assignFillerSlots fixes.
+
+		   So the share weights take a MULTIPLIER instead. It corrects the level
+		   exactly as the addition did — mean passing 0.3919 x 1.157 = 0.4535 is
+		   the same 0.4545 the addition produced — while leaving every ratio
+		   between two prospects untouched, which is what a gradient is. It is
+		   capped, because a pathological class (one centre and 69 point guards)
+		   should not be handed an unbounded correction.
+
+		   The RATE terms in statLine (turnover rate, free-throw rate, three
+		   share) keep the additive shift, because there it is not a share: the
+		   composite appears as a difference from a stated reference point and
+		   moving the reference point IS an addition. */
+		const classRefMult = {};
+		for (const k of Object.keys(S.TUNING.PROSPECT_COMP_BASES)) {
+			const mean = prospectComps.length > 0
+				? compSums[k] / prospectComps.length : 0;
+			classRefMult[k] = mean > 0.02
+				? clamp(S.TUNING.PROSPECT_COMP_BASES[k] / mean, 1, 1.35) : 1;
+		}
 
 		/* What each program's opponents actually looked like defensively. This
 		   is the channel that lets a conference of rim protectors hold everyone
@@ -1803,6 +1850,7 @@
 				league: S.NCAA_ENV,
 				pro: false,
 				classRefVolume,
+				classRefMult,
 				classRefEfficiency,
 			}, cfg, statRng.child(school));
 		}
@@ -1827,7 +1875,7 @@
 			}
 		}
 		buildPriorSeasons(state.players, state.season, state.rng.child("prior"),
-			teams, cfg, classRefVolume, classRefEfficiency);
+			teams, cfg, classRefVolume, classRefEfficiency, classRefMult);
 		return state;
 	}
 
@@ -1890,7 +1938,7 @@
 	}
 
 	/* One prior season, simulated. Returns a stat line or null. */
-	function simulatePriorSeason(p, i, teams, season, cfg, rng, classRefVolume, classRefEfficiency) {
+	function simulatePriorSeason(p, i, teams, season, cfg, rng, classRefVolume, classRefEfficiency, classRefMult) {
 		if (!p.buildCleanBase || !RB.resolveTo) return null;
 		/* The rotation is built at his CURRENT program's level even when the
 		   row names the school he transferred from, because that school is a
@@ -1968,6 +2016,7 @@
 			pro: false,
 			classRefVolume: classRefVolume,
 			classRefEfficiency: classRefEfficiency,
+			classRefMult: classRefMult,
 		}, cfg, rng.child("sim"));
 		return younger.stats
 			? {
@@ -1977,7 +2026,7 @@
 			: null;
 	}
 
-	function buildPriorSeasons(players, season, rng, teams, cfg, classRefVolume, classRefEfficiency) {
+	function buildPriorSeasons(players, season, rng, teams, cfg, classRefVolume, classRefEfficiency, classRefMult) {
 		const simulate = !cfg || cfg.priorSeasons !== "reconstruct";
 		for (const p of players) {
 			p.priorSeasons = null;
@@ -1987,7 +2036,8 @@
 			const rows = [];
 			for (let i = n; i >= 1; i--) {
 				const sim = simulate && !p.nonNcaa
-					? simulatePriorSeason(p, i, teams, season, cfg, r.child("y" + i), classRefVolume, classRefEfficiency)
+					? simulatePriorSeason(p, i, teams, season, cfg, r.child("y" + i),
+						classRefVolume, classRefEfficiency, classRefMult)
 					: null;
 				if (sim) {
 					const L = sim.line;
