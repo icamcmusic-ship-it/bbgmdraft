@@ -2827,6 +2827,27 @@
 				"with him — these are the races the class lost."));
 		}
 
+		/* The sideline's trophies. */
+		const ch = res.coachHonors || [];
+		if (ch.length) {
+			const box = el("div", "card");
+			box.appendChild(el("h4", null, "Coach of the Year"));
+			const noteBox = el("div", "note");
+			const national = ch.filter((h) => !/ Coach of the Year$/.test(h.award) ||
+				/^(Naismith|AP) /.test(h.award));
+			const confs = ch.filter((h) => national.indexOf(h) === -1);
+			national.concat(confs).forEach((h, i) => {
+				if (i) noteBox.appendChild(document.createTextNode("\n"));
+				noteBox.appendChild(document.createTextNode(h.award + " — " + h.coach + " ("));
+				if (h.school && res.teams[h.school]) noteBox.appendChild(teamLink(h.school));
+				else noteBox.appendChild(document.createTextNode(h.school || "unknown"));
+				noteBox.appendChild(document.createTextNode(", " + h.record +
+					(h.situation ? ", " + h.situation : "") + ")"));
+			});
+			box.appendChild(noteBox);
+			view.appendChild(box);
+		}
+
 		view.appendChild(el("h3", null, "Honors"));
 		const honored = res.players.filter((p) => p.awards && p.awards.length)
 			.sort((a, b) => (b.scoreTotal || 0) - (a.scoreTotal || 0));

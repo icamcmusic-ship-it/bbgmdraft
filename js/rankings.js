@@ -278,10 +278,17 @@
 				const w = played.reduce((a, g) => a + (g.won ? 1 : 0), 0);
 				const sos = played.length
 					? played.reduce((a, g) => a + (g.quality || 50), 0) / played.length : 50;
-				const qual = played.reduce((a, g) =>
-					a + (g.won && (g.quality || 0) > 62 ? 1 : 0), 0);
+				/* Quality wins, graded and capped. A flat count over a 62
+				   bar let a power-conference team collect seven of them off
+				   its schedule alone and finish 17-14 in the final top 25;
+				   a win over a 63 is not a win over an 80, and past five of
+				   them a voter has stopped counting. Bad losses grade the
+				   same way, and a loss to the middle of the country now
+				   costs something rather than nothing. */
+				const qual = Math.min(5.5, played.reduce((a, g) =>
+					a + (g.won ? clamp(((g.quality || 0) - 60) / 18, 0, 1) : 0), 0));
 				const bad = played.reduce((a, g) =>
-					a + (!g.won && (g.quality || 50) < 42 ? 1 : 0), 0);
+					a + (!g.won ? clamp((52 - (g.quality || 50)) / 14, 0, 1) : 0), 0);
 				return {
 					games: played.length,
 					pct: played.length ? w / played.length : 0,

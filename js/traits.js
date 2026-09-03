@@ -106,7 +106,7 @@
 		{ name: "straight-line only", group: "athleticism", w: 1.3,
 			note: "straight-line speed that does not survive a change of direction",
 			adj: "north-south" },
-		{ name: "heavy-footed", group: "athleticism", w: 1.2, needs: { minHgt: 55 },
+		{ name: "heavy-footed", group: "athleticism", w: 1.2, needs: { minHgt: 55, off: { spd: [null, 6] } },
 			note: "feet that are a step slow on the perimeter and will be tested there",
 			adj: "ground-bound" },
 		{ name: "plays above the rim", group: "athleticism", w: 1.4, needs: { anyTag: ["athletic"] },
@@ -114,16 +114,16 @@
 			adj: "vertical" },
 
 		// ----------------------------------------------------------- motor
-		{ name: "relentless motor", group: "motor", w: 2.2,
+		{ name: "relentless motor", group: "motor", w: 2.2, needs: { off: { endu: [-8, null] } },
 			note: "a motor that does not stop, which shows up in the possessions nobody counts",
 			adj: "relentless", mood: "W" },
 		{ name: "motor questions", group: "motor", w: 1.4,
 			note: "stretches where the effort comes and goes",
-			adj: "streaky-effort", eff: { vol: 1.12 } },
-		{ name: "plays every possession", group: "motor", w: 1.5,
+			adj: "streaky-effort", eff: { vol: 1.22 } },
+		{ name: "plays every possession", group: "motor", w: 1.5, needs: { off: { endu: [-8, null] } },
 			note: "a habit of finishing every possession, on both ends",
 			adj: "conscientious", mood: "W" },
-		{ name: "conditioning questions", group: "motor", w: 1.0,
+		{ name: "conditioning questions", group: "motor", w: 1.0, needs: { off: { endu: [null, 8] } },
 			note: "conditioning that becomes a factor in the second half",
 			adj: "winded" },
 
@@ -137,15 +137,15 @@
 		{ name: "supremely coachable", group: "character", w: 1.8,
 			note: "a player who takes coaching and applies it inside a week",
 			adj: "coachable", mood: "L" },
-		{ name: "stubborn", group: "character", w: 1.0,
+		{ name: "stubborn", group: "character", w: 1.0, mood: "$",
 			note: "a stubborn streak about his own shot selection",
 			adj: "headstrong" },
 		{ name: "plays up to competition", group: "character", w: 1.4,
 			note: "his best games against the best opponents, which is the split that matters",
-			adj: "big-game", eff: { vol: 1.08 } },
+			adj: "big-game", eff: { vol: 1.15 } },
 		{ name: "shrinks in the big ones", group: "character", w: 0.9,
 			note: "numbers that fall away against ranked opponents",
-			adj: "inconsistent", eff: { vol: 1.10 } },
+			adj: "inconsistent", eff: { vol: 1.2 } },
 		{ name: "highly recruited since fifteen", group: "character", w: 1.2,
 			note: "a player who has been told he was a professional since he was fifteen",
 			adj: "hyped", mood: "F" },
@@ -157,7 +157,7 @@
 			adj: "unflappable", mood: "L" },
 		{ name: "focus lapses", group: "character", w: 1.0,
 			note: "concentration that goes for four or five possessions at a time",
-			adj: "distractible", eff: { vol: 1.10 } },
+			adj: "distractible", eff: { vol: 1.18 } },
 
 		// ------------------------------------------------------- finishing
 		{ name: "off-hand finisher", group: "finishing", w: 1.6, needs: { maxHgt: 68 },
@@ -180,7 +180,7 @@
 			adj: "one-dimensional" },
 
 		// -------------------------------------------------------- shooting
-		{ name: "quick release", group: "shooting", w: 1.8, needs: { anyTag: ["shooting", "scoring"] },
+		{ name: "quick release", group: "shooting", w: 1.8, needs: { anyTag: ["shooting", "scoring"], off: { tp: [-6, null] } },
 			note: "a release quick enough that a closeout does not reach it",
 			adj: "quick-triggered" },
 		{ name: "slow, high release", group: "shooting", w: 1.2,
@@ -189,16 +189,16 @@
 		{ name: "two-motion jumper", group: "shooting", w: 1.3,
 			note: "a two-motion jumper that works standing still and not off the move",
 			adj: "mechanical" },
-		{ name: "step-back in his bag", group: "shooting", w: 1.2, needs: { maxHgt: 60, anyTag: ["scoring", "shooting"] },
+		{ name: "step-back in his bag", group: "shooting", w: 1.2, needs: { maxHgt: 60, anyTag: ["scoring", "shooting"], off: { tp: [-6, null] } },
 			note: "a step-back he can get to whenever the possession stalls",
 			adj: "shot-creating" },
-		{ name: "catch-and-shoot only", group: "shooting", w: 1.5,
+		{ name: "catch-and-shoot only", group: "shooting", w: 1.5, needs: { off: { tp: [-4, null] } },
 			note: "a jumper that lives entirely on the catch",
 			adj: "spot-up" },
-		{ name: "NBA range already", group: "shooting", w: 1.1, needs: { anyTag: ["shooting"] },
+		{ name: "NBA range already", group: "shooting", w: 1.1, needs: { anyTag: ["shooting"], off: { tp: [2, null] } },
 			note: "range that already extends well past the college line",
 			adj: "deep-range" },
-		{ name: "broken free-throw stroke", group: "shooting", w: 0.9, needs: { minHgt: 60 },
+		{ name: "broken free-throw stroke", group: "shooting", w: 0.9, needs: { minHgt: 60, off: { ft: [null, 2] } },
 			note: "a free-throw stroke that has not been fixed in three years of trying",
 			adj: "non-shooting" },
 
@@ -223,7 +223,7 @@
 		{ name: "navigates screens", group: "defense", w: 1.5, needs: { maxHgt: 62 },
 			note: "the ability to get over a screen rather than under it",
 			adj: "connected" },
-		{ name: "drop-coverage only", group: "defense", w: 1.4, needs: { minHgt: 58 },
+		{ name: "drop-coverage only", group: "defense", w: 1.4, needs: { minHgt: 58, off: { spd: [null, 6] } },
 			note: "a big who can play drop and cannot play anything else",
 			adj: "conservative" },
 		{ name: "switchable one through four", group: "defense", w: 1.2, needs: { minHgt: 40, maxHgt: 76 },
@@ -260,7 +260,7 @@
 			adj: "movable", eff: { orbBias: -0.04 } },
 
 		// --------------------------------------------------------- medical
-		{ name: "clean medical", group: "medical", w: 2.6,
+		{ name: "clean medical", group: "medical", w: 2.6, needs: { maxInj: 1.4 },
 			note: "a clean file, which is worth saying out loud",
 			adj: "durable", eff: { inj: 0.85 } },
 		{ name: "prior surgery", group: "medical", w: 1.2,
@@ -272,7 +272,7 @@
 		{ name: "ankle history", group: "medical", w: 1.1,
 			note: "ankles that have cost him games in each of the last two seasons",
 			adj: "brittle", eff: { inj: 1.3 } },
-		{ name: "has not missed a game", group: "medical", w: 1.6, needs: { years: ["Junior", "Senior", "Graduate"] },
+		{ name: "has not missed a game", group: "medical", w: 1.6, needs: { years: ["Junior", "Senior", "Graduate"], maxInj: 1.4 },
 			note: "a career without a missed game in it",
 			adj: "available", eff: { inj: 0.7 } },
 
@@ -308,7 +308,7 @@
 			adj: "instant-offence", mood: "L" },
 		{ name: "wants it late", group: "role", w: 1.4, needs: { anyTag: ["scoring", "shooting"] },
 			note: "the man his team goes to with the game on it",
-			adj: "clutch", mood: "W", eff: { vol: 1.06 } },
+			adj: "clutch", mood: "W", eff: { vol: 1.1 } },
 		{ name: "positional versatility", group: "role", w: 1.4,
 			note: "three positions he can play and none he is obviously best at",
 			adj: "positionless" },
@@ -327,7 +327,7 @@
 	   the handful of builds that ARE a volatility statement; everything else
 	   is drawn around 1 with a spread, so two players of the same build are
 	   still not identical. Traits multiply on top. */
-	const VOL_SPREAD = 0.10;
+	const VOL_SPREAD = 0.06;
 
 	function matches(t, p) {
 		const n = t.needs;
@@ -342,6 +342,26 @@
 			if (n.years.indexOf(cy) === -1) return false;
 		}
 		if (n.transfer && !p.transfer) return false;
+		/* Against the build's own offsets: a step-back on a Rim Runner, a
+		   broken free-throw stroke on a Stretch Five, a relentless motor on
+		   a Low-Motor Talent — about one player in fifty carried a trait his
+		   build contradicted. [lo, hi], either side null. */
+		if (n.off) {
+			const RB = global.RatingsBuilder;
+			const o = (RB && RB.RAW_OFFSETS && RB.RAW_OFFSETS[p.archetype]) || {};
+			for (const k of Object.keys(n.off)) {
+				const v = o[k] || 0;
+				const [lo, hi] = n.off[k];
+				if (lo !== null && lo !== undefined && v < lo) return false;
+				if (hi !== null && hi !== undefined && v > hi) return false;
+			}
+		}
+		if (Number.isFinite(n.maxInj) || Number.isFinite(n.minInj)) {
+			const a = archOf(p);
+			const inj = a && Number.isFinite(a.inj) ? a.inj : 1;
+			if (Number.isFinite(n.maxInj) && inj > n.maxInj) return false;
+			if (Number.isFinite(n.minInj) && inj < n.minInj) return false;
+		}
 		const tags = tagsOf(p);
 		if (n.tags && !n.tags.every((x) => tags.indexOf(x) !== -1)) return false;
 		if (n.anyTag && !n.anyTag.some((x) => tags.indexOf(x) !== -1)) return false;

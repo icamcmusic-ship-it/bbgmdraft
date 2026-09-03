@@ -381,6 +381,29 @@
 				bad.slice(0, 4).join("; ") + (bad.length > 4 ? "; …" : ""));
 		}
 		const warnings = [];
+		/* Ages nobody checked: born.year only had to be a number, so a 2031
+		   birth year ran a class of minus-four-year-olds and a 1985 cohort
+		   ran as seniors without a word. A birth year after the season is a
+		   broken file; an age outside 16-30 is probably one. */
+		{
+			let odd = 0;
+			for (const p of leagueFile.players) {
+				const age = Number(season) - Number(p && p.born && p.born.year);
+				if (!Number.isFinite(age)) continue;
+				if (age < 0) {
+					throw new Error("A player is born after the class's season (" +
+						season + "): check born.year on " +
+						((p.firstName || "") + " " + (p.lastName || "")).trim() + ".");
+				}
+				if (age < 16 || age > 30) odd++;
+			}
+			if (odd) {
+				warnings.push(odd + " player" + (odd === 1 ? " is" : "s are") +
+					" younger than 16 or older than 30 at " + season +
+					". Class years are rolled from those ages, so check born.year " +
+					"and startingSeason if that is not what you meant.");
+			}
+		}
 		/* How many of these players actually belong to the draft class.
 
 		   Dropping a full BBGM league export (5,000+ players) instead of a
@@ -562,17 +585,17 @@
 		{
 			name: "the year of the whistle", w: 1.0,
 			blurb: "officials called everything and nobody scored in the flow",
-			bend: { pace: -3, efficiencyEnv: -0.8 },
+			bend: { paceShift: -3, efficiencyEnv: -0.8 },
 		},
 		{
 			name: "a scoring explosion", w: 1.3,
 			blurb: "the numbers went up everywhere and nobody could guard",
-			bend: { pace: 4, efficiencyEnv: 1.0, scoringEnv: 1 },
+			bend: { paceShift: 4, efficiencyEnv: 1.0, scoringEnv: 1 },
 		},
 		{
 			name: "a defensive slog", w: 1.2,
 			blurb: "nothing was easy anywhere",
-			bend: { pace: -4, efficiencyEnv: -1.0, scoringEnv: -1 },
+			bend: { paceShift: -4, efficiencyEnv: -1.0, scoringEnv: -1 },
 		},
 		{
 			name: "the map moved", w: 1.1,
@@ -619,15 +642,23 @@
 			(cfg.flavorReach === undefined ? 0 : cfg.flavorReach) / 100, 0, 1);
 		const out = Object.assign({}, cfg);
 		for (const story of drawn) {
-			for (const k of Object.keys(story.bend)) {
+			for (const key of Object.keys(story.bend)) {
+				/* `paceShift` is a DELTA on the pace slider. It was written
+				   as `pace: -4` and applied as an absolute, so three of the
+				   twelve storylines set the season to minus four possessions,
+				   the floor caught it at 58, and half of all default seasons
+				   played the slowest basketball since 1952 — "a scoring
+				   explosion" being the slowest of all. */
+				const k = key === "paceShift" ? "pace" : key;
+				const want = key === "paceShift" ? D.pace + story.bend[key] : story.bend[key];
 				const touched = cfg[k] !== D[k];
 				if (touched) {
 					if (reach <= 0 || rng.random() >= reach) continue;
-					out[k] = cfg[k] + (story.bend[k] - cfg[k]) * 0.5 * reach;
+					out[k] = cfg[k] + (want - cfg[k]) * 0.5 * reach;
 					if (global.Config.isCount(k)) out[k] = Math.round(out[k]);
 					continue;
 				}
-				out[k] = story.bend[k];
+				out[k] = want;
 			}
 		}
 		return {
@@ -894,7 +925,8 @@
 			const built = RB.rebuild(
 				prng, baseRatings, targetOvr, targetOvr + gap, cfg,
 				ov.archetype || null, state.flavor, ov.ratings || null,
-				state.archetypePool, i);
+				state.archetypePool, i,
+				{ classYear: p.classYear, nonNcaa: p.nonNcaa, transfer: p.transfer });
 			p.newRatings = built.ratings;
 			// Validate: every rating key must be a finite number. A NaN or
 			// Infinity from a degenerate input or a solver edge case must not
@@ -947,9 +979,16 @@
 			p.newPot = clamp(Math.round(targetOvr + gap), p.newOvr, 100);
 		});
 
-		/* TRAITS. Drawn after the build, because every prerequisite in the
-		   table is about the finished player: his height, his class year, his
-		   build's tags, his overall. See js/traits.js. */
+		state.players = players;
+		state.season = season;
+		assignRecruiting(players, rng.child("recruiting" + vsalt));
+		state.surprises = assignSurprises(players, rng.child("surprises" + vsalt), cfg);
+		/* TRAITS. Drawn after the build AND after the anomalies, because
+		   every prerequisite in the table is about the finished player: his
+		   height, his class year, his build's tags, his overall — and an
+		   anomaly can change any of them (a 7'5" outlier, a 24-year-old
+		   JUCO). Drawn before them, "room to fill out" landed on the JUCO
+		   graduate. See js/traits.js. */
 		{
 			const trng = rng.child("traits" + vsalt);
 			for (const p of players) {
@@ -964,10 +1003,6 @@
 				p.moodTraits = t.mood;
 			}
 		}
-		state.players = players;
-		state.season = season;
-		assignRecruiting(players, rng.child("recruiting" + vsalt));
-		state.surprises = assignSurprises(players, rng.child("surprises" + vsalt), cfg);
 		return state;
 	}
 
@@ -1583,7 +1618,9 @@
 			const kind = rng.weighted(kinds, weightOf);
 			kinds.splice(kinds.indexOf(kind), 1);
 			const options = players.filter((p) => !used.has(p.key) && kind.pick(p));
-			if (!options.length) continue;
+			// A kind nobody in this class fits does not spend one of the
+			// class's slots; the next kind in line does.
+			if (!options.length) { i--; continue; }
 			const who = options[Math.floor(rng.random() * options.length)];
 			used.add(who.key);
 			kind.apply(who, rng.child("sp:" + kind.name));
@@ -2350,6 +2387,14 @@
 			p.priorSeasons = null;
 			const n = priorYears(p.classYear);
 			if (!n || !p.stats) continue;
+			/* A prospect abroad has no college seasons to reconstruct unless
+			   his biography put him at one: the backward-scaled copy of a
+			   G League line was a 50-game "Northeastern 2024" with nothing
+			   behind it. A man who left a program for a pro contract keeps
+			   the years he played there. */
+			if (p.nonNcaa && !(p.transfer && p.transfer.from && C.COLLEGES[p.transfer.from])) {
+				continue;
+			}
 			const r = rng.child("prior:" + p.key);
 			const rows = [];
 			for (let i = n; i >= 1; i--) {
@@ -2409,7 +2454,7 @@
 					team: (p.transfer && p.transfer.from && i >= 1)
 						? p.transfer.from : p.newCollege,
 					classYear: CLASS_YEARS[Math.max(0, priorYears(p.classYear) - i)],
-					gp: Math.max(4, Math.round(p.stats.gp * (0.88 + r.uniform(0, 0.2)))),
+					gp: Math.max(4, Math.round((p.nonNcaa ? 31 : p.stats.gp) * (0.88 + r.uniform(0, 0.2)))),
 					mpg: m,
 					ppg: Math.max(0, p.stats.ppg * k),
 					rpg: Math.max(0, p.stats.rpg * (c.mins + (k - c.prod) * 0.5)),
@@ -2525,8 +2570,14 @@
 			}
 			const spread = Math.max(0, cfg.potSpread);
 			const bias = cfg.potBias * 2.2;
+			/* The age the ROLLED class year implies, when the file's ages
+			   carry no information (BBGM writes 19 for everyone). The gap
+			   used to be flat across class years — a rolled senior exported
+			   at 22 with a freshman's upside. */
+			const potAge = state.ageIsInformative || !Number.isFinite(p.age)
+				? p.age : ageForClassYear(p.classYear, p.transfer);
 			const factors = RB.potFactors(
-				p.archetype, p.age, p.newRatings,
+				p.archetype, potAge, p.newRatings,
 				{ hgtInches: p.newHgtInches, weight: p.newWeight }, state.classAge);
 			factors.role = RB.potFromRole(p.stats, p.classYear, usageRefFor(usageRef, p));
 			factors.bias = bias;
@@ -2563,6 +2614,8 @@
 		state.fieldTop = out.fieldTop || [];
 		/* The player-of-the-year ballots, so a split year is legible. */
 		state.poyBallots = out.poyBallots || [];
+		state.coachHonors = out.coachHonors || [];
+		delete state.teams.__coachHonors;
 		/* Every `__`-prefixed key assign leaves on the team map, off. `teams`
 		   is iterated with Object.keys in the stats phase, so a leftover key
 		   is a "team" with no members — and a warm re-run that redoes stats
@@ -3078,6 +3131,7 @@
 				fallers: state.fallers,
 				draftEvents: state.draftEvents || [],
 			fieldHonors: state.fieldHonors || [],
+				coachHonors: state.coachHonors || [],
 				poyBallots: state.poyBallots || [],
 			fieldTop: state.fieldTop || [],
 				seasonEvents: state.seasonEvents || [],
@@ -3269,8 +3323,13 @@
 				}
 				return {
 					name, conf: lgName, members, prospects: [],
-					// The league's game length, read by the game log.
+					// The league's game length, read by the game log, and its
+					// pace, read by the scoreboard: a G League club used to
+					// box 120 a night and "win 72-68" on the college slider.
 					gameMinutes: env.gameMinutes || 40,
+					// Its own name: the stats phase writes `pace` on every
+					// team it simulates, and a warm re-run of March read it.
+					scorePace: env.pace || null,
 					level: clubLevel, prestige: 50 + off * 3,
 					w: 0, l: 0, cw: 0, cl: 0, sos: 0, games: 0, quadWins: 0,
 					log: [], form: crng.normal(1.0, 3.5),
@@ -3395,7 +3454,10 @@
 					const A = cupAlive[i];
 					const B = cupAlive[i + 1];
 					const sc = T.playGameScore(lrng, A, B, 0, cfg, 1, true);
-					T.recordPostseason(A, B, sc, "cup", 1.02, "Cup");
+					/* After the playoffs in the log's order (1.05 + rounds), so
+					   the cup final does not sort before the semifinal it was
+					   played after. */
+					T.recordPostseason(A, B, sc, "cup", 1.15, "Cup");
 					const winner = sc.won ? A : B;
 					gamesLog.push({
 						a: A, b: B, winner,
@@ -3409,6 +3471,11 @@
 			}
 			const cupChamp = cupAlive[0];
 			if (cupChamp) cupChamp.cupChamp = true;
+			/* The college dictionary goes through finalizeSchedule; the clubs
+			   never did, so every prospect abroad had a log in the order the
+			   scheduler paired it and an injury block that landed on the
+			   wrong nights. */
+			for (const c of clubs) c.log.sort((a, b) => a.when - b.when);
 
 			// Promotion and relegation, where the league has it.
 			const relegated = [];
@@ -4014,8 +4081,16 @@
 		// the season's own, applied every night.
 		const orbShare = line && line.rpg > 0
 			? clamp(line.orpg / line.rpg, 0, 1) : 0.30;
-		return games.map((g) => {
-			const orb = Math.round(g.reb * orbShare);
+		/* Apportioned to the season's own offensive-rebound total rather
+		   than rounded night by night: per-game rounding drifted a third of
+		   all exported ORB totals by more than two off the line. */
+		const orbTotal = line && Number.isFinite(line.orpg)
+			? Math.round(line.orpg * games.length)
+			: Math.round(orbShare * games.reduce((a, g) => a + (g.reb || 0), 0));
+		const orbs = apportion(games.map((g) => (g.reb || 0) * orbShare + 1e-6), orbTotal,
+			games.map((g) => g.reb || 0));
+		return games.map((g, gi) => {
+			const orb = orbs[gi];
 			return {
 				min: g.min, fg: g.fgm, fga: g.fga, tp: g.tpm, tpa: g.tpa,
 				ft: g.ftm, fta: g.fta, pts: g.pts,
@@ -4299,6 +4374,7 @@
 			Object.assign(t, opponentTotals(b, avg, r.margin, gp));
 			t.ortg = b.poss > 0 ? (100 * b.pts) / b.poss : 100;
 			t.drtg = b.poss > 0 ? (100 * (t.oppPts / gp)) / b.poss : 100;
+			t.gameMinutes = r.box.gameMinutes || 40;
 			r.stats = t;
 			/* Plus/minus for a season with no game log behind it. The log
 			   estimates it as the team's margin scaled by how much of the game
@@ -4400,7 +4476,7 @@
 		const row = BS.blankRow(season, BS.TID_DOES_NOT_EXIST,
 			String(statsHash(String(p.key || p.name || "")) % 55));
 		row.gp = totals.gp;
-		row.gs = prior ? 0 : (p.isReserve ? 0 : totals.gp);
+		row.gs = prior ? (prior.mpg >= 24 ? totals.gp : 0) : (p.isReserve ? 0 : totals.gp);
 		row.min = totals.min;
 		row.minAvailable = totals.minAvailable;
 		row.fg = totals.fg; row.fga = totals.fga;
@@ -4600,6 +4676,11 @@
 			}
 			const last = out.ratings.length - 1;
 			const r = out.ratings[last];
+			/* A rating row without a season (the sample class, several
+			   third-party class files) is legal in a draft-class import,
+			   which stamps one, and not in a league file, which does not. */
+			if (!Number.isFinite(Number(r.season))) r.season = result.season;
+			if (!Number.isFinite(Number(r.fuzz))) r.fuzz = 0;
 			for (const k of BB.RATING_KEYS) {
 				r[k] = Number.isFinite(p.newRatings[k]) ? p.newRatings[k] : 0;
 			}
@@ -4777,12 +4858,36 @@
 					last = { team: where, season: r.season };
 					delete r.__team;
 				}
-				out.stats = (Array.isArray(out.stats) ? out.stats : []).concat(rows);
+				/* The same argument as the awards block above: a prospect
+				   has played no season in the league before his draft, so
+				   a college row (tid DOES_NOT_EXIST) in the draft year or
+				   the five before it is this tool's, from an earlier export
+				   of the same class. Without this a round trip doubled the
+				   rows: 2, 4, 6 per player on three exports. */
+				const draftSeason = Number(result.season);
+				const kept = (Array.isArray(out.stats) ? out.stats : []).filter((r) =>
+					!r || !(Number(r.tid) === BS.TID_DOES_NOT_EXIST &&
+						Number(r.season) <= draftSeason && Number(r.season) >= draftSeason - 5));
+				/* The row's number is the one BBGM prints on the season line,
+				   and it used to disagree with the player's own. */
+				const jersey = out.jerseyNumber !== undefined && out.jerseyNumber !== null
+					? String(out.jerseyNumber) : null;
+				if (jersey !== null) for (const r of rows) r.jerseyNumber = jersey;
+				out.stats = kept.concat(rows);
 			}
 			return out;
 		});
 
-		const file = Object.assign({}, src, { players });
+		/* A class pulled out of a full league export used to go back out
+		   wrapped in the whole league — teams, schedule, draft picks — with
+		   most of its players deleted, which Create New League reads as a
+		   league missing five thousand men. A class export is the class. */
+		const LEAGUE_ENVELOPE = ["teams", "gameAttributes", "schedule", "draftPicks",
+			"games", "teamSeasons", "teamStats", "events", "playoffSeries"];
+		const file = LEAGUE_ENVELOPE.some((k) => src[k] !== undefined)
+			? { version: src.version, startingSeason: src.startingSeason, players }
+			: Object.assign({}, src, { players });
+		if (file.version === undefined) delete file.version;
 		// Readable by the caller, never written into the file.
 		exportFile.passthroughs = passthroughs;
 		return file;
@@ -5047,9 +5152,16 @@
 		   without this the second class of a two-class merge would delete the
 		   first one. */
 		const protect = (opts && opts.protectPids) || null;
-		const isProspect = (p) => Number(p.tid) === -2 &&
+		/* -4 and -5 are the UNDRAFTED_2 / UNDRAFTED_3 tids older saves used
+		   for the next two classes; a file that still carries them would
+		   otherwise keep its generated class beside the merged one. */
+		const isProspect = (p) => [-2, -4, -5].includes(Number(p.tid)) &&
 			p.draft && Number(p.draft.year) === season &&
 			!(protect && protect.has(Number(p.pid)));
+		const sameName = (a, b) => {
+			const n = (p) => ((p.firstName || "") + " " + (p.lastName || "")).trim().toLowerCase();
+			return !n(a) || !n(b) || n(a) === n(b);
+		};
 
 		const byPid = new Map();
 		for (const p of league.players) {
@@ -5072,6 +5184,19 @@
 		   written name a team the player has no history with. */
 		const overlay = (target, p) => {
 			const out = Object.assign({}, target, JSON.parse(JSON.stringify(p)));
+			/* The league's prospect may carry honors and injuries of his own
+			   (a hand-added HS All-American, say); the export's arrays are
+			   the CLASS file's plus ours, so writing them over his lost them.
+			   Keep his rows at seasons this tool does not write. */
+			const inWindow = (s) => Number(s) <= season && Number(s) >= season - 5;
+			for (const key of ["awards", "injuries"]) {
+				const theirs = (Array.isArray(target[key]) ? target[key] : [])
+					.filter((r) => r && !inWindow(r.season));
+				const mine = Array.isArray(out[key]) ? out[key] : [];
+				const seen = new Set(mine.map((r) => r && JSON.stringify(r)));
+				const extra = theirs.filter((r) => !seen.has(JSON.stringify(r)));
+				if (extra.length) out[key] = extra.concat(mine);
+			}
 			if (Array.isArray(out.stats) && out.stats.length) {
 				const tids = new Set(Array.isArray(target.statsTids) ? target.statsTids : []);
 				for (const row of out.stats) tids.add(row.tid);
@@ -5085,16 +5210,26 @@
 		for (const p of ours) {
 			const pid = Number(p.pid);
 			const target = byPid.get(pid);
-			if (target) {
+			/* A pid match is identity only if the name agrees: a class
+			   exported from ANOTHER league carries that league's pids, and
+			   pid 3,412 there is a different man from pid 3,412 here. */
+			if (target && sameName(target, p)) {
 				replacements.set(target, overlay(target, p));
 			} else {
 				const copy = JSON.parse(JSON.stringify(p));
 				copy.pid = ++maxPid;
 				/* An appended player still has to be a prospect of this draft
-				   class; the file he came from may not have said so. */
+				   class; the file he came from may not have said so. An
+				   undrafted prospect is round 0, pick 0, tid -1 in BBGM;
+				   whatever slot his source file gave him is not his here. */
 				copy.tid = -2;
 				if (!copy.draft || typeof copy.draft !== "object") copy.draft = {};
 				if (!Number.isFinite(Number(copy.draft.year))) copy.draft.year = season;
+				copy.draft.round = 0;
+				copy.draft.pick = 0;
+				copy.draft.tid = -1;
+				copy.draft.originalTid = -1;
+				if (!copy.injury) copy.injury = { type: "Healthy", gamesRemaining: 0 };
 				if (Array.isArray(copy.stats) && copy.stats.length) {
 					copy.statsTids = Array.from(new Set(copy.stats.map((row) => row.tid)));
 				}
@@ -5132,6 +5267,17 @@
 		const mergedPids = [];
 		for (const p of replacements.values()) mergedPids.push(Number(p.pid));
 		for (const p of added) mergedPids.push(Number(p.pid));
+		/* A class for a draft the league has already held is a class BBGM
+		   will never draft: the merge never read the league's own season.
+		   Said, not refused — a user rewinding a save knows what he is doing. */
+		const warnings = [];
+		const leagueSeason = findSeason(league);
+		if (leagueSeason !== null && Number(season) < Number(leagueSeason)) {
+			warnings.push("This league is in " + leagueSeason + " and the class is for the " +
+				season + " draft, which has already happened there. BBGM will not " +
+				"draft these players unless the league's season is " + season +
+				" or earlier.");
+		}
 		return {
 			file,
 			replaced: replacements.size,
@@ -5139,6 +5285,7 @@
 			removed,
 			season,
 			mergedPids,
+			warnings,
 		};
 	}
 
@@ -5162,9 +5309,11 @@
 		let replaced = 0;
 		let added = 0;
 		let removed = 0;
+		const warnings = [];
 		for (const res of list) {
 			const out = mergeIntoLeague(res, file,
 				Object.assign({}, opts, { protectPids: protect }));
+			for (const w of out.warnings || []) if (warnings.indexOf(w) === -1) warnings.push(w);
 			if (seasons.indexOf(out.season) !== -1) {
 				throw new Error("Two of the selected classes are both for the " +
 					out.season + " draft. Merge one of them, or change a class year.");
@@ -5176,7 +5325,7 @@
 			added += out.added;
 			removed += out.removed;
 		}
-		return { file, replaced, added, removed, seasons, season: seasons[0] };
+		return { file, replaced, added, removed, seasons, season: seasons[0], warnings };
 	}
 
 	global.Engine = {

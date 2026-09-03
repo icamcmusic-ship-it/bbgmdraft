@@ -116,8 +116,14 @@
 				hgt: 66 + Math.round((hgt / 100) * 24),
 				weight: Math.round(165 + hgt * 0.9),
 				college: pr.random() < 0.18 ? "" : pickCollege(pr.random()),
-				draft: { year: yr, round: 1 + Math.floor(i / 30), pick: 1 + (i % 30) },
-				ratings: [r],
+				/* Shaped like BBGM's own draft-class export: an undrafted
+				   prospect is tid -2 with an empty draft slot, and his rating
+				   row carries the season. The old rows had round 1-4 and pick
+				   1-30, which a league merge wrote into the file verbatim. */
+				tid: -2,
+				draft: { year: yr, round: 0, pick: 0, tid: -1, originalTid: -1 },
+				injury: { type: "Healthy", gamesRemaining: 0 },
+				ratings: [Object.assign({ season: yr, fuzz: 0 }, r)],
 			});
 		}
 		return { startingSeason: yr, players };

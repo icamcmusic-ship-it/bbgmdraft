@@ -66,8 +66,20 @@
 		for (const t of autos.concat(atLarge)) {
 			gotByConf[t.conf] = (gotByConf[t.conf] || 0) + 1;
 		}
+		/* Expected off THIS season's membership and strength, not a static
+		   number beside a map that has since changed: the WCC's "3" outlived
+		   Gonzaga and "A lean year for the WCC" ran in nine seasons of
+		   twelve. A sixteen-team league at 92 expects about seven, an
+		   eleven-team league at 87 about four, a one-bid league one. */
+		const expectedFor = (conf) => {
+			const n = (pools[conf] || []).length;
+			const strength = C.CONFERENCES[conf] ? C.CONFERENCES[conf].strength : null;
+			if (!n || strength === null) return null;
+			const share = 0.55 * Math.pow(Math.max(0, (strength - 68) / 25), 1.4);
+			return Math.max(1, Math.round(n * share));
+		};
 		for (const conf of Object.keys(gotByConf)) {
-			const expected = C.CONFERENCES[conf] ? C.CONFERENCES[conf].bids : null;
+			const expected = expectedFor(conf);
 			if (expected !== null && Math.abs(gotByConf[conf] - expected) >= 2) {
 				bidCheck.push({ conf, expected, got: gotByConf[conf] });
 			}
@@ -161,6 +173,38 @@
 			const order = band % 2 === 0 ? REGIONS : REGIONS.slice().reverse();
 			regions[order[i % 4]].push({ seed, team });
 		});
+		/* The committee does not pair conference rivals in the first round.
+		   A pure S-curve did, about one game in twenty-four: an 8-9 between
+		   two Big Ten teams. Where the s seed and the (17-s) seed of a region
+		   share a league, the lower seed swaps regions with the same seed
+		   line elsewhere, provided that does not create the same problem. */
+		if (full) {
+			const at = (r, seed) => regions[r].find((x) => x.seed === seed);
+			const conflict = (r, seed) => {
+				const a = at(r, seed);
+				const b = at(r, 17 - seed);
+				return !!(a && b && a.team.conf && a.team.conf === b.team.conf);
+			};
+			for (let seed = 9; seed <= 16; seed++) {
+				for (const r of REGIONS) {
+					if (!conflict(r, seed)) continue;
+					for (const r2 of REGIONS) {
+						if (r2 === r) continue;
+						const mine = at(r, seed);
+						const theirs = at(r2, seed);
+						if (!mine || !theirs) continue;
+						mine.__r = r2;
+						theirs.__r = r;
+						regions[r][regions[r].indexOf(mine)] = theirs;
+						regions[r2][regions[r2].indexOf(theirs)] = mine;
+						if (!conflict(r, seed) && !conflict(r2, seed)) break;
+						regions[r][regions[r].indexOf(theirs)] = mine;
+						regions[r2][regions[r2].indexOf(mine)] = theirs;
+					}
+				}
+			}
+			for (const r of REGIONS) for (const x of regions[r]) delete x.__r;
+		}
 		// A field too small to fill four regions leaves some empty; the round
 		// loop below already skips an unpaired team, but an empty region has no
 		// champion at all, so the Final Four has to be drawn from what is left.

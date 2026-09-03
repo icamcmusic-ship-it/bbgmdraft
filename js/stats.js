@@ -209,7 +209,7 @@
 		REB_CAP: 0.46,
 		// Walker Kessler took 4.6 of Auburn's 6.6 blocks — 70%. The old 0.50
 		// cap forbade by construction the exact season the comment cited.
-		BLK_CAP: 0.68,
+		BLK_CAP: 0.60,
 		STL_CAP: 0.42,
 		/* 0.28 let one player take 28% of a team's 16.6 fouls — 4.65 a
 		   game, past the number that ends a night. The real D-I leader in
@@ -1327,16 +1327,27 @@
 		// reconcileTeamTotals refits the team to its pool afterwards, so an
 		// Enforcer's extra fouls come out of his teammates' rather than
 		// inflating the team.
-		const pfW = Math.pow(comps.fouling, TUNING.PF_EXP) * Math.pow(minShare, 0.82) *
-			identity.pf;
+		/* BBGM's fouling composite is (50 + hgt - diq - spd) / 400: it RISES
+		   as a player gets worse, so a class's prospects sat at 0.61 against
+		   the 0.47 the field is synthesized at and fouled thirty percent
+		   more per minute, with an eighth of every class pinned on the
+		   ceiling. Centered on the field's own reference, like every other
+		   rate in here: the field is synthesized around 0.38 on it, a class of
+		   prospects sits near 0.60, and a starter fouls a little less per
+		   minute than the bench he is protected from. */
+		const foulComp = me.filler
+			? comps.fouling
+			: clamp(0.40 + 0.5 * (comps.fouling - 0.60), 0.15, 1);
+		const pfW = Math.pow(foulComp, TUNING.PF_EXP) *
+			Math.pow(minShare, 0.82) * identity.pf;
 		// Five fouls ends a night, so a season average saturates well below
 		// it. The hard ceiling is derived from minutes: a player at 5 PF/40
 		// is fouling out of most of his games, which caps what any season
 		// average can physically reach — and the national leader in fouls
 		// per game sits around 3.6-3.8, not five.
 		const pfRaw = (teamCtx.pfPool * pfW) / teamCtx.pfDen;
-		const pfLim = Math.min(3.9, 5.0 * (minutes / 40) * 0.95 + 0.6);
-		const pf = clamp(jv(saturate(pfRaw, 3.4, 0.60), 0.12), 0, pfLim);
+		const pfLim = Math.min(4.2, 5.0 * (minutes / 40) * 0.95 + 0.6);
+		const pf = clamp(jv(saturate(pfRaw, 3.3, 0.60), 0.12), 0, pfLim);
 
 		/* --- the defensive box score --------------------------------------
 		   Steals and blocks were the whole of a player's defensive record,
@@ -1551,7 +1562,10 @@
 		/* At least two returning players even on a prospect-stacked roster: a
 		   school with 12+ prospects used to get a rotation of nothing but
 		   draft picks, which no real program has ever iced. */
-		const size = Math.max(9, prospects.length + (fillers.length ? 2 : 0));
+		/* Eight to eleven men, not nine everywhere in the country: the
+		   rotation's size was the one number every program shared. */
+		const drawn = 8 + Math.min(3, Math.floor(rng.child("rotsize").random() * 4));
+		const size = Math.max(drawn, prospects.length + (fillers.length ? 2 : 0));
 		const members = prospects
 			.concat(fillers.slice(0, Math.max(0, size - prospects.length)))
 			.sort((a, b) => b.talent - a.talent);
@@ -1635,7 +1649,12 @@
 			let freed = 0;
 			for (let i = 0; i < members.length; i++) {
 				if (members[i].filler) continue;
-				const cap = env.youthCap;
+				/* The cap is the club's, not the league's: a per-player draw
+				   around it, so the EuroLeague's nineteen-year-olds are not
+				   all printed at 22.0 minutes to the decimal (61% of capped
+				   prospects used to sit on the number exactly). */
+				const cap = Math.max(8, env.youthCap +
+					rng.child("ycap:" + (members[i].player ? members[i].player.key : i)).uniform(-3, 3));
 				if (mins[i] > cap) { freed += mins[i] - cap; mins[i] = cap; }
 			}
 			if (freed > 0) {
@@ -1678,9 +1697,17 @@
 		   coach hands a player, so the archetype says what the composite
 		   cannot — see ROLE_USAGE in js/ratings.js. Fillers have no archetype
 		   and take 1. */
+		/* The coach's philosophy, which was computed for every program and
+		   read by nothing here: a stars-and-scrubs staff concentrates the
+		   offense in its best players and an egalitarian one spreads it. It
+		   moves the talent exponent, so the label is a fact about the box
+		   score and not only about the coach's page. */
+		const usageBias = team.coach && Number.isFinite(team.coach.usageBias)
+			? clamp(team.coach.usageBias, -1.5, 1.5) : 0;
+		const talentExp = TUNING.USG_TALENT_EXP * (1 + 0.22 * usageBias);
 		const rawUsg = members.map((m, i) =>
 			Math.pow(comps[i].usage + (m.filler ? 0 : (ctx.classRefVolume || 0)), TUNING.USG_EXP) *
-				Math.pow(0.35 + 1.3 * (m.talent / 100), TUNING.USG_TALENT_EXP) *
+				Math.pow(0.35 + 1.3 * (m.talent / 100), talentExp) *
 				(1 + TUNING.USG_SIZE_TILT * (0.42 - bignessOf(i))) *
 				CAL.talentUsageMult(m.talent) *
 				roleMult[i],
@@ -1787,6 +1814,13 @@
 		}
 		const uk = (ulo + uhi) / 2;
 		usgShare = usgShare.map((s, i) => softUsg(s * uk, i));
+		/* When the bracket did not bracket, the soft bounds have left the
+		   team's shares summing short (a 0.976 team boxed 2.4% light);
+		   renormalize proportionally rather than shipping the shortfall. */
+		{
+			const tot = usgShare.reduce((a, b) => a + b, 0);
+			if (tot > 0 && Math.abs(tot - 1) > 0.004) usgShare = usgShare.map((s) => s / tot);
+		}
 
 		// Team support = quality of the other four guys on the floor.
 		const teamMinutes = 5 * gameMinutes;
@@ -1836,6 +1870,14 @@
 		let pools = teamPools(comps, mins, jitteredPace, chanceMult, gameMinutes, poolEnv);
 		chanceMult = mult(pools.orbRate);
 		pools = teamPools(comps, mins, jitteredPace, chanceMult, gameMinutes, poolEnv);
+		/* Defensive emphasis: a defensive-minded staff forces a few more
+		   turnovers and contests a few more shots; an uptempo one gives some
+		   of that back. A few percent, which is what a scheme is worth. */
+		if (team.coach && Number.isFinite(team.coach.defEmphasis) && team.coach.defEmphasis) {
+			const d = clamp(team.coach.defEmphasis, -1, 1.5);
+			pools.stlPool *= 1 + 0.05 * d;
+			pools.blkPool *= 1 + 0.04 * d;
+		}
 
 		/* Team-level variance lives on the pool, not on the individual draws.
 		   The per-player jitter used to be the only source of it, which meant
@@ -2080,6 +2122,10 @@
 	function teamBox(lines, games, gameMinutes) {
 		const box = {
 			gp: Math.max(1, Math.round(games || 0)),
+			// The night's length, so the advanced statistics can normalize a
+			// forty-eight-minute club and a thirty-two-minute prep team each
+			// on its own clock.
+			gameMinutes: gameMinutes || 40,
 			min: 0, fg: 0, fga: 0, tp: 0, tpa: 0, ft: 0, fta: 0,
 			orb: 0, drb: 0, trb: 0, ast: 0, tov: 0, stl: 0, blk: 0, pf: 0, pts: 0,
 		};
@@ -2340,8 +2386,8 @@
 		   usage offset with exactly the same distribution around it as an Iron
 		   Man. Streakiness is a fact about a player, not about his average.
 
-		   `p.volatility` is drawn per player from his build (see VOL_BY_BUILD
-		   and the `vol` field on the archetype table) and runs about 0.8 to
+		   `p.volatility` is drawn per player from his build (the `vol` field
+		   on the archetype table, see js/traits.js) and runs about 0.8 to
 		   1.4. It scales the shooting-driven categories only: a streaky
 		   scorer's rebounds are not streaky, and his fouls certainly are not.
 		   The rescale below still forces the log to sum to the season total,
@@ -2426,10 +2472,18 @@
 		   lineup number. On/off is the difference between his per-40
 		   plus/minus and the team's margin — an estimate, and labeled as
 		   one in the view. */
-		const share = Math.min(1, s.mpg / 40);
+		const share = Math.min(1, s.mpg / (gameMinutes || 40));
+		/* An impact term, so on/off is not the noise term alone: the margin
+		   scaled by his floor time cancels exactly against the team's
+		   margin in the on/off formula below, which left on/off correlated
+		   with nothing (-0.02 against overall). A rough per-game production
+		   read against a rotation player's, scaled by his floor time. */
+		const prod = s.ppg + 1.2 * s.rpg + 1.5 * s.apg + 2 * (s.spg || 0) + 2 * (s.bpg || 0) -
+			1.3 * (s.topg || 0);
+		const impact = share * (prod - 11 * share) * 0.22;
 		for (const g of games) {
 			const margin = Number.isFinite(g.pf) && Number.isFinite(g.pa) ? g.pf - g.pa : 0;
-			g.pm = Math.round(margin * share + rng.normal(0, 5.0));
+			g.pm = Math.round(margin * share + impact + rng.normal(0, 5.0));
 		}
 		const teamMargin = meanOf(games.map((g) =>
 			({ m: Number.isFinite(g.pf) && Number.isFinite(g.pa) ? g.pf - g.pa : 0 })), "m");

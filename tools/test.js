@@ -496,8 +496,10 @@ console.log("\nLeague environments");
 			mean(elPlayers.map((p) => p.stats.ppg)).toFixed(1));
 	// Teenagers do not play 30 minutes at Real Madrid.
 	const cap = global.StatsSim.leagueEnv("EuroLeague").youthCap;
+	// Within the club's own read of it: the cap is drawn per player around
+	// the league's number, so nobody sits on 22.0 to the decimal.
 	ok("a teenager abroad is held to the league's youth minutes cap",
-		elPlayers.every((p) => p.stats.mpg <= cap + 1e-6),
+		elPlayers.every((p) => p.stats.mpg <= cap + 3 + 1e-6),
 		"max " + Math.max.apply(null, elPlayers.map((p) => p.stats.mpg)).toFixed(1) +
 			" vs cap " + cap);
 	// The college pace slider must not touch a professional league.
@@ -2560,7 +2562,8 @@ console.log("\nStaying fresh: anomaly memory, narratives, style drift, flavor re
 		const D = global.Config.DEFAULTS;
 		const unknown = [];
 		for (const n of global.Engine.NARRATIVES) {
-			for (const k of Object.keys(n.bend)) if (!(k in D)) unknown.push(n.name + "." + k);
+			// paceShift is a delta on `pace`; see applyNarrative.
+			for (const k of Object.keys(n.bend)) if (!(k in D) && k !== "paceShift") unknown.push(n.name + "." + k);
 		}
 		ok("every storyline bends a setting that exists", unknown.length === 0,
 			unknown.join("; "));
@@ -4255,6 +4258,266 @@ console.log("\nEarlier seasons: nights, highs and honors; statlines abroad; the 
 			global.Awards.POSITION_AWARDS.some((a) => a.name === "Tim Duncan Award") &&
 			!global.Awards.POSITION_AWARDS.some((a) => /Malone/.test(a.name)) &&
 			global.Awards.isMajorAward("Tim Duncan Award"));
+	}
+}
+
+console.log("\nAudit regressions (the second September 2026 pass)");
+{
+	const C = global.Colleges;
+	const T = global.TeamsSim;
+	const RB = global.RatingsBuilder;
+	/* Realignment used to be half-wired: a moved program kept its old
+	   league's schedule, tournament and auto bid while every label said the
+	   new one. */
+	{
+		const res = global.Engine.run(V.realisticClass(2, 70),
+			global.Config.make({ seed: "s2", realignmentRate: 1 }));
+		const moved = res.realignment || [];
+		ok("a realignment moved somebody in this seed", moved.length > 0);
+		let confGamesInNewLeague = 0;
+		let total = 0;
+		for (const m of moved) {
+			const t = res.teams[m.school];
+			for (const g of t.log) {
+				if (!g.conference) continue;
+				total++;
+				if (res.teams[g.opp].conf === t.conf) confGamesInNewLeague++;
+			}
+		}
+		ok("a moved program plays its conference games in its NEW league",
+			total > 0 && confGamesInNewLeague === total);
+		const champsByConf = {};
+		for (const t of Object.values(res.teams)) {
+			if (t && t.confTourneyChamp) champsByConf[t.conf] = (champsByConf[t.conf] || 0) + 1;
+		}
+		ok("no conference has two tournament champions",
+			Object.values(champsByConf).every((n) => n === 1));
+		const pools = T.conferencePools(res.teams);
+		ok("conferencePools groups by the team's own conference",
+			Object.keys(pools).every((c) => pools[c].every((t) => t.conf === c)));
+		/* Conference slates scale with the league: a six-team league no
+		   longer meets every rival four times. */
+		const ivy = pools.Ivy || [];
+		ok("an eight-team league plays fourteen conference games",
+			ivy.length && ivy.every((t) => t.log.filter((g) => g.conference && g.stage === "reg").length === 14));
+		ok("and every team still plays 31",
+			Object.values(res.teams).every((t) => !t || !t.log || t.regGames === 31));
+		ok("no first-round bracket game pairs two teams from one conference",
+			Object.keys(res.tourney.regions).every((r) =>
+				res.tourney.regions[r].rounds[0].every((g) => g.a.team.conf !== g.b.team.conf)));
+		/* Every conference tournament has an MVP, and he is on the champion. */
+		let champs = 0;
+		let mvps = 0;
+		for (const t of Object.values(res.teams)) {
+			if (!t || !t.confTourneyChamp) continue;
+			champs++;
+			const lb = T.label(t.conf);
+			const onClass = res.players.find((p) => (p.awards || []).indexOf(lb + " Tournament MVP") !== -1);
+			const onField = res.fieldHonors.find((h) => h.award === lb + " Tournament MVP");
+			if ((onClass && onClass.newCollege === t.name) || (onField && onField.school === t.name)) mvps++;
+		}
+		ok("every conference tournament MVP is on the team that won it", champs > 0 && mvps === champs);
+		ok("nobody wins both the Cousy and the West",
+			res.players.every((p) => !((p.awards || []).indexOf("Bob Cousy Award") !== -1 &&
+				(p.awards || []).indexOf("Jerry West Award") !== -1)));
+		ok("the sideline has a Coach of the Year, nationally and in every league",
+			res.coachHonors.some((h) => h.award === "AP Coach of the Year") &&
+			Object.keys(pools).every((c) => res.coachHonors.some((h) => h.award === T.label(c) + " Coach of the Year")));
+		const names = Object.values(res.teams).filter((t) => t && t.coach).map((t) => t.coach.name);
+		ok("no two programs share a head coach", new Set(names).size === names.length);
+		const ages = Object.values(res.teams).filter((t) => t && t.coach).map((t) => t.coach.age).sort((a, b) => a - b);
+		ok("the median head coach is in his late forties or fifties",
+			ages[ages.length >> 1] >= 46 && ages[ages.length >> 1] <= 56, String(ages[ages.length >> 1]));
+		ok("the G League plays at its own pace, not the college slider's",
+			(function () {
+				const p = res.players.find((x) => x.newCollege === "NBA G League" && x.proTeam && x.proTeam.log.length);
+				if (!p) return true;
+				const l = p.proTeam.log;
+				const avg = l.reduce((a, g) => a + g.pf, 0) / l.length;
+				return avg > 95 && l.every((g, i) => !i || l[i - 1].when <= g.when);
+			})());
+		ok("a prospect abroad carries no fabricated college seasons",
+			res.players.filter((p) => p.nonNcaa && !(p.transfer && p.transfer.from && C.COLLEGES[p.transfer.from]))
+				.every((p) => !p.priorSeasons));
+	}
+	/* Three of the twelve storylines wrote `pace: -4` and it was applied
+	   as an absolute, so half of all default seasons played at the floor. */
+	{
+		const D = global.Config.DEFAULTS;
+		let floor = 0;
+		let n = 0;
+		for (let s = 0; s < 12; s++) {
+			const res = global.Engine.run(V.realisticClass(s, 40), global.Config.make({ seed: "n" + s }));
+			n++;
+			if (res.effectiveCfg.pace <= D.pace - 8 || res.effectiveCfg.pace <= 58) floor++;
+		}
+		ok("a storyline bends pace by a few possessions, never to the floor", floor === 0, floor + "/" + n);
+	}
+	/* Ratings: the solver lands, the streams hold, the biography gates. */
+	{
+		const lf = V.realisticClass(4, 70);
+		const res = global.Engine.run(lf, global.Config.make({ seed: "b4", buildNoise: 0, ovrMode: "curve" }));
+		let misses = 0;
+		let tried = 0;
+		{
+			const cfg0 = Object.assign({}, res.cfg, { buildNoise: 0 });
+			const r0 = new Rng("solver");
+			for (let i = 0; i < res.players.length; i++) {
+				const p = res.players[i];
+				const target = 25 + r0.int(0, 40);
+				const built = RB.rebuild(r0.child("p" + i), p.origRatings, target, target + 8, cfg0,
+					"Balanced", res.flavor, null, res.archetypePool, i);
+				if (target < built.ovrRange.min || target > built.ovrRange.max) continue;
+				tried++;
+				if (built.ovr !== target) misses++;
+			}
+		}
+		ok("the solver hits the target overall at buildNoise 0 on an integer base",
+			tried > 30 && misses === 0, misses + "/" + tried);
+		ok("a fifth-year senior build is drawn only for seniors",
+			res.players.filter((p) => p.archetype === "Fifth-Year Senior")
+				.every((p) => /Senior|Graduate/.test(p.classYear)));
+		ok("no rating sits on 0 or 100 after a rebuild",
+			res.players.every((p) => global.BBGM.RATING_KEYS.every((k) =>
+				k === "hgt" || (p.newRatings[k] >= 1 && p.newRatings[k] <= 99))));
+		/* Forcing the build a player already has, or pinning one rating,
+		   leaves the other ratings exactly where they were. */
+		const p0 = res.players[3];
+		const rng = () => new Rng("stream");
+		const a = RB.rebuild(rng(), p0.origRatings, 45, 55, res.cfg, null, res.flavor, null, res.archetypePool, 3);
+		const b = RB.rebuild(rng(), p0.origRatings, 45, 55, res.cfg, a.archetype, res.flavor, null, res.archetypePool, 3);
+		ok("forcing the build a player drew changes nothing else",
+			global.BBGM.RATING_KEYS.every((k) => a.base[k] === b.base[k]));
+		const cfgN = Object.assign({}, res.cfg, { buildNoise: 5 });
+		const c = RB.rebuild(rng(), p0.origRatings, 45, 55, cfgN, a.archetype, res.flavor, null, res.archetypePool, 3);
+		const d = RB.rebuild(rng(), p0.origRatings, 45, 55, cfgN, a.archetype, res.flavor, { tp: 70 }, res.archetypePool, 3);
+		ok("pinning one rating does not re-jitter the others",
+			global.BBGM.RATING_KEYS.every((k) => k === "tp" || c.base[k] === d.base[k]));
+		ok("the potential gap falls with class year for a file whose ages carry no information",
+			(function () {
+				const gap = (cy) => {
+					const rows = res.players.filter((p) => !p.nonNcaa && p.classYear === cy);
+					return rows.length ? rows.reduce((s, p) => s + (p.newPot - p.newOvr), 0) / rows.length : null;
+				};
+				const f = gap("Freshman");
+				const s = gap("Senior");
+				return f === null || s === null || f > s + 2;
+			})());
+		ok("no trait contradicts its build's own offsets",
+			res.players.every((p) => (p.traits || []).every((t) => global.Traits.matches
+				? global.Traits.matches(t, p) : true)));
+		ok("the money mood letter can be earned",
+			global.Traits.TRAITS.some((t) => t.mood === "$"));
+	}
+	/* The 2026-27 map. */
+	{
+		ok("the Mountain West has its 2026 members", C.byConference["Mountain West"].length === 8 &&
+			C.conferenceOf("Grand Canyon") === "Mountain West" && C.conferenceOf("UTEP") === "Mountain West");
+		ok("Seattle is in the WCC, Delaware in Conference USA, UMass in the MAC",
+			C.conferenceOf("Seattle") === "WCC" && C.conferenceOf("Delaware") === "Conference USA" &&
+			C.conferenceOf("Massachusetts") === "MAC");
+		ok("every conference is schedulable", Object.keys(C.byConference)
+			.filter((c) => c !== "Independent").every((c) => C.byConference[c].length >= 7));
+		ok("Houston Baptist resolves to its current name", C.canonical("Houston Baptist") === "Houston Christian");
+		ok("no club is in two continental competitions", (function () {
+			const seen = {};
+			for (const lg of ["EuroLeague", "EuroCup", "Basketball Champions League"]) {
+				for (const [name] of C.PRO_CLUBS[lg] || []) {
+					if (seen[name]) return false;
+					seen[name] = lg;
+				}
+			}
+			return true;
+		})());
+	}
+}
+
+console.log("\nExport: stats rows, the class's own year, the envelope and the merge");
+{
+	const S = global.Sample;
+	const opts = { stats: true, prior: true, awards: true, injuries: true, highs: true };
+	/* Stats rows used to concatenate on every round trip: 2, 4, 6 per
+	   player on three exports, while the awards block beside them was
+	   guarded. Same invariant as the awards: the file holds what the last
+	   run produced. */
+	{
+		let lf = S.makeClass(3, 30, 2027);
+		const counts = [];
+		let jerseys = true;
+		for (let i = 0; i < 3; i++) {
+			lf.startingSeason = global.Engine.validateLeagueFile(lf).season;
+			const res = global.Engine.run(lf, global.Config.make({ seed: "rt" }));
+			const out = global.Engine.exportFile(res, opts);
+			counts.push(Math.max.apply(null, out.players.map((p) => (p.stats || []).length)));
+			for (const p of out.players) {
+				for (const r of p.stats || []) {
+					if (String(r.jerseyNumber) !== String(p.jerseyNumber)) jerseys = false;
+				}
+			}
+			lf = JSON.parse(JSON.stringify(out));
+		}
+		ok("three round trips do not accumulate stats rows",
+			counts[0] === counts[1] && counts[1] === counts[2], counts.join(" -> "));
+		ok("a stats row carries the player's own jersey number", jerseys);
+		ok("the sample class is shaped like a BBGM export",
+			lf.players.every((p) => p.tid === -2 && p.draft.round === 0 &&
+				Number.isFinite(p.ratings[0].season)));
+	}
+	/* A class BBGM exported while the league sat a year earlier. */
+	{
+		const lf = S.makeClass(5, 30, 2027);
+		lf.startingSeason = 2026;
+		const chk = global.Engine.validateLeagueFile(lf);
+		ok("a file whose players disagree with its startingSeason is warned about",
+			chk.season === 2026 && chk.warnings.some((w) => /draft year/.test(w)), String(chk.season));
+	}
+	/* A class pulled out of a league export goes back out as a class. */
+	{
+		const lf = S.makeClass(6, 20, 2027);
+		lf.teams = [{ tid: 0 }];
+		lf.gameAttributes = { season: 2027 };
+		lf.startingSeason = global.Engine.validateLeagueFile(lf).season;
+		const res = global.Engine.run(lf, global.Config.make({ seed: "z" }));
+		const out = global.Engine.exportFile(res, opts);
+		ok("the class export drops a league envelope",
+			out.teams === undefined && out.gameAttributes === undefined &&
+			out.players.length === 20);
+		/* The merge: a pid match with a different name is a different man,
+		   the league's own honors outside the tool's window survive, and an
+		   appended prospect is an undrafted one. */
+		const league = {
+			startingSeason: 2027, gameAttributes: { season: 2027 },
+			players: [
+				{ pid: 0, tid: -2, firstName: "Somebody", lastName: "Else",
+					draft: { year: 2027 }, ratings: [{}] },
+				Object.assign(JSON.parse(JSON.stringify(lf.players[1])), {
+					awards: [{ season: 2019, type: "HS All-American" }] }),
+			],
+		};
+		const m = global.Engine.mergeIntoLeague(res, league, opts);
+		const kept = m.file.players.find((p) => p.lastName === lf.players[1].lastName &&
+			p.firstName === lf.players[1].firstName);
+		ok("a pid shared with a different name is not an identity", m.replaced === 1 && m.added === 19);
+		ok("the league's own earlier honors survive the overlay",
+			kept && kept.awards.some((a) => a.type === "HS All-American"));
+		ok("an appended prospect is an undrafted one",
+			m.file.players.filter((p) => p.tid === -2)
+				.every((p) => p.draft.round === 0 && p.draft.tid === -1));
+		ok("no warning when the league is on the class's year", !m.warnings.length);
+		const late = Object.assign({}, league, { gameAttributes: { season: 2030 }, startingSeason: 2030 });
+		ok("a league past the class's draft is warned about",
+			global.Engine.mergeIntoLeague(res, late, opts).warnings.length === 1);
+	}
+	{
+		const bad = S.makeClass(1, 5, 2027);
+		bad.players[0].born.year = 2031;
+		let threw = false;
+		try { global.Engine.validateLeagueFile(bad); } catch (e) { threw = true; }
+		ok("a birth year after the season is refused", threw);
+		const old = S.makeClass(1, 5, 2027);
+		for (const p of old.players) p.born.year = 1990;
+		ok("an implausible age is warned about",
+			global.Engine.validateLeagueFile(old).warnings.some((w) => /older than 30/.test(w)));
 	}
 }
 

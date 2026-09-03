@@ -823,10 +823,14 @@
 
 		// Position awards. Each is a one-winner trophy over its own position
 		// group, so award volume tracks what the class is actually made of.
+		/* One position trophy per man: the Cousy (PG, G) and West (SG, G)
+		   pools overlap on "G", and the same guard used to take both. */
+		const positioned = new Set();
 		for (const pa of POSITION_AWARDS) {
-			const pool = nation.filter((x) => pa.pos.indexOf(x.pos) !== -1);
+			const pool = nation.filter((x) => pa.pos.indexOf(x.pos) !== -1 && !positioned.has(x));
 			if (!pool.length) continue;
 			const winner = pool[0];
+			positioned.add(winner);
 			giveNat(winner, pa.name);
 		}
 		// Best big man in the country, regardless of the PF/C split.
@@ -1002,10 +1006,13 @@
 				return t && t.conf === conf && t.inConfTourney && (t.ctW || 0) >= 1;
 			}).map((p) => ({
 				p,
-				// The MVP of a conference tournament comes off the winning team
-				// far more often than not.
+				/* The MVP of a conference tournament is on the team that won
+				   it: every real league gives it that way. The all-tournament
+				   team can span the bracket, and a lift keeps the champion's
+				   men at the front of it. */
 				score: p.scoreProd + (p.newCollege === champ.name ? 6 : 0) +
 					crng.normal(0, 1.5),
+				champ: p.newCollege === champ.name,
 			}));
 			for (const t of Object.values(teams)) {
 				if (t.conf !== conf || !t.inConfTourney || (t.ctW || 0) < 1) continue;
@@ -1013,6 +1020,7 @@
 					cands.push({
 						p: null,
 						score: x.scoreProd + crng.normal(0, 1.5) + (t === champ ? 6 : 0),
+						champ: t === champ,
 					});
 				}
 			}
@@ -1022,12 +1030,30 @@
 			// Filter for eligibility FIRST, so a gated-out top candidate does
 			// not silently vacate the MVP slot while the rest of the team is
 			// still handed out.
-			cands.filter((x) => x.p && x.p.stats && x.p.stats.mpg >= 18)
-				.slice(0, 5).forEach((x, i) => {
-					x.p.awards.push(i === 0
-						? lb + " Tournament MVP"
-						: "All-" + lb + " Tournament Team");
-				});
+			const eligible = cands.filter((x) => x.p && x.p.stats && x.p.stats.mpg >= 18);
+			/* Whether the champion's best man is a filler or a prospect, the
+			   trophy goes to the champion: a filler MVP is recorded as the
+			   field's, the way the national honors already are, so the
+			   Awards tab can name him rather than leaving the slot empty. */
+			const champBest = cands.find((x) => x.champ);
+			const mvp = champBest && champBest.p && eligible.indexOf(champBest) !== -1
+				? champBest : null;
+			if (mvp) {
+				mvp.p.awards.push(lb + " Tournament MVP");
+			} else if (champBest && !champBest.p) {
+				const x = (fieldByTeam[champ.name] || []).slice(0, 4)
+					.slice().sort((a, b) => b.scoreProd - a.scoreProd)[0];
+				if (x && x.name) {
+					fieldHonors.push({
+						award: lb + " Tournament MVP", name: x.name, key: x.key || null,
+						school: champ.name, classYear: x.classYear || null,
+						starReturner: x.starReturner || null,
+					});
+				}
+			}
+			eligible.filter((x) => x !== mvp).slice(0, mvp ? 4 : 5).forEach((x) => {
+				x.p.awards.push("All-" + lb + " Tournament Team");
+			});
 		}
 
 		// NIT all-tournament team.
@@ -1050,7 +1076,7 @@
 		/* --- pro / DII league honors --------------------------------------- */
 		const PRO_AWARDS = {
 			"EuroLeague": ["EuroLeague Rising Star", "EuroLeague Best Young Player", "All-EuroLeague Second Team"],
-			"NBA G League": ["G League Rookie of the Year", "All-G League First Team", "G League Next Up Award"],
+			"NBA G League": ["G League Rookie of the Year", "G League All-Rookie Team", "G League Next Up Award"],
 			"Liga ACB": ["ACB Best Young Player", "ACB Rising Star", "All-ACB Second Team"],
 			"NBL": ["NBL Next Generation Award", "NBL Rookie of the Year", "All-NBL Second Team"],
 			"Chinese CBA": ["CBA Rookie of the Year", "CBA Most Improved Player", "All-CBA Second Team"],
@@ -1173,6 +1199,64 @@
 			if (p.awards && p.awards.length) p.awards = sortAwards(p.awards);
 		}
 
+		/* --- COACH OF THE YEAR ---------------------------------------------
+		   Every program carried a `rep` "for Coach of the Year" and nothing
+		   ever voted. It is voted against expectations: the season a program
+		   had over the season its name and its coach's reputation said it
+		   would have. Three national panels weigh that differently — the
+		   Naismith leans to the record, the AP to the surprise, the Henry
+		   Iba to the tournament run — and each conference names its own. */
+		const coachHonors = [];
+		const crng = rng.child("coy");
+		const coachRows = Object.keys(teams)
+			.filter((n) => n.indexOf("__") !== 0 && teams[n] && teams[n].coach && teams[n].regGames)
+			.map((n) => {
+				const t = teams[n];
+				const c = t.coach;
+				const expected = 0.45 * (c.rep || 50) + 0.30 * (t.prestige || 50) + 0.25 * 50;
+				const achieved = 100 * (t.regPct || 0) * 0.6 + (t.regSosAvg - 45) * 0.5 +
+					(t.quadWins || 0) * 1.4 +
+					(t.apRank ? Math.max(0, 26 - t.apRank) * 0.35 : 0) +
+					(t.ncaaWins || 0) * 2.2 + (t.confTourneyChamp ? 2 : 0);
+				return {
+					team: t, coach: c,
+					surprise: achieved - expected,
+					record: 100 * (t.regPct || 0) * 0.8 + (t.quadWins || 0) * 1.6,
+					march: (t.ncaaWins || 0) * 4 + (t.bid ? 3 : 0),
+				};
+			});
+		if (coachRows.length) {
+			const give = (award, pick, filter) => {
+				const pool = filter ? coachRows.filter(filter) : coachRows;
+				if (!pool.length) return;
+				const winner = pool.slice().sort((a, b) => pick(b) - pick(a))[0];
+				coachHonors.push({
+					award, coach: winner.coach.name, school: winner.team.name,
+					conf: winner.team.conf, record: winner.team.regW + "-" + winner.team.regL,
+					situation: winner.coach.situationLabel || null,
+				});
+			};
+			const noise = new Map(coachRows.map((r) => [r, crng.normal(0, 3.5)]));
+			give("Naismith Coach of the Year",
+				(r) => r.surprise * 0.7 + r.record * 0.5 + r.march * 0.4 + noise.get(r));
+			give("AP Coach of the Year",
+				(r) => r.surprise * 1.0 + r.record * 0.3 + noise.get(r) + crng.normal(0, 2));
+			give("Henry Iba Award",
+				(r) => r.surprise * 0.5 + r.record * 0.3 + r.march * 0.8 + noise.get(r) + crng.normal(0, 2));
+			/* The Hugh Durham (mid-major) and Ben Jobe (minority coaches at
+			   any level — modeled here as the best coach outside the power
+			   leagues on a one-bid league's budget) awards. */
+			give("Hugh Durham Award",
+				(r) => r.surprise * 0.8 + r.record * 0.4 + r.march * 0.5 + noise.get(r),
+				(r) => (global.Colleges.CONFERENCES[r.team.conf] || {}).tier !== "high");
+			for (const conf of Object.keys(byConf)) {
+				const lb = label(conf);
+				give(lb + " Coach of the Year",
+					(r) => r.surprise * 0.8 + r.record * 0.5 + noise.get(r),
+					(r) => r.team.conf === conf);
+			}
+		}
+
 		/* RETURNED, NOT STASHED ON THE TEAM MAP.
 
 		   These three used to be written onto `teams` as `__`-prefixed keys
@@ -1190,6 +1274,7 @@
 		   and the caller deletes what it reads. */
 		teams.__fieldHonors = fieldHonors;
 		teams.__poyBallots = ballotRows;
+		teams.__coachHonors = coachHonors;
 		/* The best of the field, independent of whether he won anything —
 		   for the News item that says the country's best player this year
 		   was not in the draft class at all. Trimmed to what a spotlight
@@ -1208,7 +1293,7 @@
 		   external caller reads them; the engine deletes every `__` key it
 		   finds after this returns. */
 		teams.__fieldTop = fieldTop;
-		return { ranked, fieldHonors, fieldTop, poyBallots: ballotRows };
+		return { ranked, fieldHonors, fieldTop, poyBallots: ballotRows, coachHonors };
 	}
 
 	/* ------------------------------------------------------- award scope

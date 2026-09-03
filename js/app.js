@@ -3957,7 +3957,7 @@
 				setStatus("Warning: " + global.Engine.exportFile.passthroughs +
 					" player(s) could not be matched and were exported unmodified.");
 			}
-			const base = state.files[i].name.replace(/\.json$/i, "");
+			const base = state.files[i].name.replace(/\.json(\.gz)?$|\.gz$/i, "");
 			// BBGM writes its exports with a BOM; match it.
 			download(base + "_customized.json", "\ufeff" + JSON.stringify(out, null, 2),
 				"application/json");
@@ -5044,7 +5044,8 @@
 				out.removed + " generated prospects dropped) for the " +
 				out.seasons.slice().sort((a, b) => a - b).join(", ") + " draft" +
 				(out.seasons.length === 1 ? "" : "s") + ". Load the new file with " +
-				"Create New League → upload.");
+				"Create New League → upload." +
+				(out.warnings && out.warnings.length ? " " + out.warnings.join(" ") : ""));
 		}).catch((err) => {
 			setStatus(f.name + " could not be read: " +
 				(err && err.message ? err.message : err));

@@ -123,7 +123,7 @@
 		"Davidson": [6, "Atlantic 10"],
 		"Dayton": [22, "Atlantic 10"],
 		"DePaul": [37, "Big East"],
-		"Delaware": [0.1, "CAA"],
+		"Delaware": [0.1, "Conference USA"],
 		"Delaware State": [1, "MEAC"],
 		"Denver": [6, "Summit"],
 		"Detroit Mercy": [22, "Horizon"],
@@ -160,7 +160,7 @@
 		"Georgia Tech": [39, "ACC"],
 		"Gonzaga": [20, "Pac-12"],
 		"Grambling State": [12, "SWAC"],
-		"Grand Canyon": [2, "WAC"],
+		"Grand Canyon": [2, "Mountain West"],
 		"Green Bay": [4, "Horizon"],
 		"Hampton": [2, "CAA"],
 		"Harvard": [4, "Ivy"],
@@ -169,7 +169,7 @@
 		"Hofstra": [5, "CAA"],
 		"Holy Cross": [11, "Patriot"],
 		"Houston": [34, "Big 12"],
-		"Houston Baptist": [1, "Southland"],
+		"Houston Christian": [1, "Southland"],
 		"Howard": [2, "MEAC"],
 		"IU Indianapolis": [1, "Horizon"],
 		"Idaho": [4, "Big Sky"],
@@ -217,12 +217,12 @@
 		"Marshall": [13, "Sun Belt"],
 		"Maryland": [43, "Big Ten"],
 		"Maryland-Eastern Shore": [4, "MEAC"],
-		"Massachusetts": [8, "Atlantic 10"],
+		"Massachusetts": [8, "MAC"],
 		"Massachusetts-Lowell": [0.1, "America East"],
 		"McNeese State": [6, "Southland"],
 		"Memphis": [37, "American"],
 		"Mercer": [1, "Southern"],
-		"Merrimack": [0.1, "NEC"],
+		"Merrimack": [0.1, "MAAC"],
 		"Miami (FL)": [16, "ACC"],
 		"Miami (OH)": [0.1, "MAC"],
 		"Michigan": [57, "Big Ten"],
@@ -316,7 +316,7 @@
 		"San Francisco": [25, "WCC"],
 		"San Jose State": [9, "Mountain West"],
 		"Santa Clara": [14, "WCC"],
-		"Seattle": [11, "WAC"],
+		"Seattle": [11, "WCC"],
 		"Seton Hall": [28, "Big East"],
 		"Siena": [1, "MAAC"],
 		"South Alabama": [5, "Sun Belt"],
@@ -372,7 +372,7 @@
 		"UNLV": [41, "Mountain West"],
 		"USC": [44, "Big Ten"],
 		"USC Upstate": [2, "Big South"],
-		"UTEP": [17, "Conference USA"],
+		"UTEP": [17, "Mountain West"],
 		"UTSA": [2, "American"],
 		"Utah": [31, "Big 12"],
 		"Utah State": [9, "Pac-12"],
@@ -514,7 +514,7 @@
 			["Maccabi Tel Aviv", 5], ["Zalgiris Kaunas", 3], ["Virtus Bologna", 3],
 			["Olimpia Milano", 2], ["AS Monaco", 4], ["Baskonia", 1],
 			["Partizan Belgrade", 2], ["Crvena Zvezda", 1], ["LDLC ASVEL", -2],
-			["Alba Berlin", -3], ["Paris Basketball", -2], ["Bayern Munich", 0],
+			["Hapoel Tel Aviv", -3], ["Paris Basketball", -2], ["Bayern Munich", 0],
 			["Valencia Basket", 0], ["Dubai BC", -4],
 		],
 		"NBA G League": [
@@ -531,7 +531,7 @@
 		"Basketball Champions League": [
 			["Unicaja Malaga", 6], ["Tenerife", 5], ["Hapoel Jerusalem", 4],
 			["Telekom Baskets Bonn", 2], ["Galatasaray", 2], ["Pinar Karsiyaka", 1],
-			["Bahcesehir Koleji", 0], ["Rytas Vilnius", 0], ["Nymburk", -2],
+			["Tofas Bursa", 0], ["Rytas Vilnius", 0], ["Nymburk", -2],
 			["Peristeri", -2], ["Cholet", -3], ["Falco Szombathely", -4],
 		],
 		"Turkish BSL": [
@@ -591,7 +591,7 @@
 			["Joventut Badalona", 2], ["La Laguna Tenerife", 3],
 			["UCAM Murcia", 0], ["Casademont Zaragoza", 0], ["Bilbao Basket", -1],
 			["BAXI Manresa", -1], ["Basquet Girona", -2], ["MoraBanc Andorra", -3],
-			["Rio Breogan", -3], ["Monbus Obradoiro", -4],
+			["Rio Breogan", -3], ["Leyma Coruna", -4],
 		],
 		"NBL": [
 			["Melbourne United", 4], ["Sydney Kings", 4], ["Perth Wildcats", 3],
@@ -620,10 +620,10 @@
 		"EuroCup": [
 			["Dreamland Gran Canaria", 4], ["Turk Telekom", 3], ["Buducnost", 2],
 			["Joventut Badalona", 3], ["Bahcesehir Koleji", 2],
-			["Cedevita Olimpija", 1], ["London Lions", 0], ["Aris Midea", 0],
+			["Cedevita Olimpija", 1], ["Wolves Vilnius", 0], ["Aris Midea", 0],
 			["Trento", 0], ["Veolia Towers Hamburg", -1], ["Wolves Twinsbet", -1],
 			["Slask Wroclaw", -2], ["U-BT Cluj-Napoca", -1], ["Trefl Sopot", -3],
-			["Besiktas", -2], ["Hapoel Jerusalem", 1],
+			["Besiktas", -2], ["Hamburg Towers", 1],
 		],
 		"Basketball Bundesliga": [
 			["Bayern Munich", 6], ["Alba Berlin", 4], ["Ratiopharm Ulm", 3],
@@ -633,7 +633,7 @@
 			["Veolia Towers Hamburg", -1], ["BG Gottingen", -2],
 			["Bamberg Baskets", -1], ["Skyliners Frankfurt", -2],
 			["MLP Academics Heidelberg", -3], ["Rostock Seawolves", -3],
-			["Hakro Merlins Crailsheim", -4],
+			["Rasta Vechta", -4],
 		],
 		"Adriatic League": [
 			["Crvena Zvezda", 7], ["Partizan Belgrade", 7], ["Buducnost", 3],
@@ -667,7 +667,7 @@
 			["Indiana (PA)", 2], ["Cal State San Bernardino", 1],
 			["Augusta University", 0], ["Lincoln Memorial", 0],
 			["Colorado School of Mines", -1], ["Bentley", -2], ["Barry", -2],
-			["West Texas A&M", -3], ["Fort Hays State", -3], ["Queens (NC)", -4],
+			["West Texas A&M", -3], ["Fort Hays State", -3], ["Flagler", -4],
 			["Angelo State", -5],
 		],
 	};
@@ -998,8 +998,12 @@
 		"Texas Rio Grande Valley": "UT Rio Grande Valley",
 		"Texas-Rio Grande Valley": "UT Rio Grande Valley",
 		"UTRGV": "UT Rio Grande Valley",
-		"Houston Christian": "Houston Baptist",
-		"St. Francis (NY)": "St. Francis (PA)",
+		/* The 2022 rename. BBGM's own college list still writes the old
+		   name for older players. St. Francis (NY) is gone from here: the
+		   Brooklyn school dropped athletics in 2023 and was never the
+		   Pennsylvania one, so a player from it is an out-of-table program
+		   rather than a Red Flash alumnus. */
+		"Houston Baptist": "Houston Christian",
 		"Texas A&M-Commerce": "East Texas A&M",
 		"Louisiana-Lafayette": "Louisiana",
 		"Louisiana Lafayette": "Louisiana",
