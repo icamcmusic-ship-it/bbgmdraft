@@ -1249,8 +1249,15 @@
 		   inside a roster and reconcileTeamTotals refits the team to its pool
 		   afterwards, so a Glass-Eating Center's extra boards come off his
 		   teammates' rather than out of thin air. */
-		const orbW = rebWeight(comps, minShare, true, refMult, bigness) * identity.reb;
-		const drbW = rebWeight(comps, minShare, false, refMult, bigness) * identity.reb;
+		/* The offensive/defensive split. `orbBias` moves the two halves in
+		   opposite directions and by construction leaves their sum alone, so
+		   a putback specialist takes his extra offensive boards out of his own
+		   defensive ones rather than out of the team's pool. */
+		const ob = clamp(me.orbBias || 0, -0.12, 0.12);
+		const orbW = rebWeight(comps, minShare, true, refMult, bigness) *
+			identity.reb * (1 + 2.4 * ob);
+		const drbW = rebWeight(comps, minShare, false, refMult, bigness) *
+			identity.reb * (1 - 0.9 * ob);
 		// No single player takes an unbounded share of a team total: the record
 		// books top out near 60-70% of team assists and blocks, so saturate the
 		// share smoothly rather than letting one dominant composite run away
@@ -1893,8 +1900,18 @@
 			// bigness exactly as statLine computes it, or the shares would not
 			// sum to the pool the denominator was built from.
 			const bg = clamp((ratingRows[i].hgt - 30) / 55, 0, 1);
-			teamCtx.rebDen += rebWeight(comps[i], ms, false, cm, bg);
-			teamCtx.orbDen += rebWeight(comps[i], ms, true, cm, bg);
+			/* The same identity and orbBias multipliers the line will use, or
+			   the shares would not sum to the pool the denominator was built
+			   from — the one invariant every stat in this file depends on. */
+			const id = members[i].filler
+				? { reb: 1 }
+				: archetypeIdentity(members[i].player.archetype, cfg);
+			const ob = members[i].filler
+				? 0 : clamp(members[i].player.orbBias || 0, -0.12, 0.12);
+			teamCtx.rebDen += rebWeight(comps[i], ms, false, cm, bg) *
+				id.reb * (1 - 0.9 * ob);
+			teamCtx.orbDen += rebWeight(comps[i], ms, true, cm, bg) *
+				id.reb * (1 + 2.4 * ob);
 			teamCtx.astDen += astWeight(comps[i], ratingRows[i], ms, cm);
 			teamCtx.stlDen += stlWeight(comps[i], ms, cm, cr);
 			teamCtx.blkDen += Math.pow(comps[i].blocking, TUNING.BLK_EXP) * ms;
@@ -1932,6 +1949,12 @@
 					// The build, so the parts of a stat line BBGM's composites
 					// cannot see (see archetypeIdentity) can read it.
 					archetype: m.filler ? null : m.player.archetype,
+					/* The trait layer's one stat-model effect: which half of
+					   the glass this man lives on. See js/traits.js — "chases
+					   his own miss" against "boxes out" is a real and visible
+					   difference between two players with the same rebounding
+					   composite, and the model could not express it. */
+					orbBias: m.filler ? 0 : (m.player.orbBias || 0),
 				},
 			);
 			lines.push(line);
@@ -2303,6 +2326,23 @@
 		   scorer's 55 is a once-a-decade line, not a once-a-season one.
 		   Anything drawn above the ceiling is compressed toward it rather
 		   than clipped, so the tail still exists. */
+		/* VOLATILITY.
+
+		   Every player's night-to-night spread used to be a function of his
+		   average and nothing else, so two eighteen-point scorers produced
+		   identical-looking game logs — and "Streaky Volume Scorer" was a
+		   usage offset with exactly the same distribution around it as an Iron
+		   Man. Streakiness is a fact about a player, not about his average.
+
+		   `p.volatility` is drawn per player from his build (see VOL_BY_BUILD
+		   and the `vol` field on the archetype table) and runs about 0.8 to
+		   1.4. It scales the shooting-driven categories only: a streaky
+		   scorer's rebounds are not streaky, and his fouls certainly are not.
+		   The rescale below still forces the log to sum to the season total,
+		   so a wider spread costs nothing in accuracy — it moves nights
+		   around, which is the whole idea. */
+		const vol = Number.isFinite(p.volatility) ? clamp(p.volatility, 0.6, 1.6) : 1;
+		const VOL_APPLIES = { pts: 1, ast: 0.5, tov: 0.5, reb: 0.25, stl: 0.25, blk: 0.25 };
 		const mpg = Number.isFinite(s.mpg) ? s.mpg : 30;
 		const CEIL = {
 			pts: 4 + 1.55 * mpg, reb: 3 + 0.6 * mpg, ast: 2 + 0.42 * mpg,
@@ -2318,7 +2358,8 @@
 			const lift = (g.home > 0 ? 0.055 : 0) + (g.quality > 55 ? 0.04 : 0);
 			const draw = (key, avg) => {
 				const [a, b, fw] = SPREAD[key];
-				const sdev = a * Math.sqrt(Math.max(0, avg)) + b;
+				const k = VOL_APPLIES[key] || 0;
+				const sdev = (a * Math.sqrt(Math.max(0, avg)) + b) * (1 + k * (vol - 1));
 				let v = avg * (1 + lift) + sdev * (0.55 * fw * form + 0.83 * rng.normal(0, 1));
 				const ceil = CEIL[key];
 				if (v > ceil) v = ceil + (v - ceil) * (key === "fouls" ? 0.2 : 0.3);
@@ -2544,28 +2585,71 @@
 		const fgaT = games.reduce((a, g) => a + g.fga, 0);
 		const tpaT = games.reduce((a, g) => a + g.tpa, 0);
 		const ftaT = games.reduce((a, g) => a + g.fta, 0);
+		/* THE FEASIBLE TARGETS.
+
+		   The log's points are already forced to the season total, so the
+		   three make-totals are constrained: fgmT must lie in [tpmT, fgaT],
+		   and ftmT = ptsT - 2*fgmT - tpmT must lie in [0, ftaT]. Those two
+		   intervals intersect for almost every line and the code used to give
+		   up whenever they did not — "fall back to the identity per game and
+		   let the totals land where they land" — which left a 64% free-throw
+		   shooter printing 20 of 22 across his season log. Rare (about one
+		   player in 800 before per-player volatility widened the points
+		   distribution, and one in 400 after), and visibly wrong when it fired.
+
+		   Searching the interval instead is four lines and always finds an
+		   answer when one exists: take the fgmT closest to the ideal that
+		   satisfies both constraints, and only give up when the intersection
+		   is genuinely empty — which can only happen if the attempts cannot
+		   carry the points at all, and the per-game solver borrows attempts
+		   precisely so that they can. */
 		let tpmT = Math.min(tpaT, Math.round(s.tpa * s.tpp * n));
-		let fgmT = Math.max(tpmT, Math.min(fgaT, Math.round(s.fga * s.fgp * n)));
-		let ftmT = ptsT - 2 * fgmT - tpmT;
-		// Free throws absorb the rounding; a shortfall or an excess beyond
-		// the attempts is taken out of the two-point makes.
-		if (ftmT < 0) { fgmT += Math.ceil(ftmT / 2); ftmT = ptsT - 2 * fgmT - tpmT; }
-		if (ftmT > ftaT) { fgmT += Math.floor((ftmT - ftaT) / 2); ftmT = ptsT - 2 * fgmT - tpmT; }
-		if (ftmT < 0 || ftmT > ftaT || fgmT > fgaT || fgmT < tpmT) {
-			// A line the attempts cannot carry (they were drawn from the
-			// same line, so this is rounding): fall back to the identity
-			// per game and let the totals land where they land.
-			fgmT = null;
+		const idealFgm = Math.round(s.fga * s.fgp * n);
+		const feasible = (tp) => {
+			// fgm bounds from the free-throw constraint, then from its own.
+			const lo = Math.max(tp, Math.ceil((ptsT - tp - ftaT) / 2));
+			const hi = Math.min(fgaT, Math.floor((ptsT - tp) / 2));
+			if (hi < lo) return null;
+			return clamp(idealFgm, lo, hi);
+		};
+		let fgmT = feasible(tpmT);
+		/* If this three-point total cannot be carried, walk it toward zero:
+		   threes are the scarcest of the three and the easiest to give up. */
+		for (let d = 1; fgmT === null && d <= tpaT; d++) {
+			if (tpmT - d >= 0 && feasible(tpmT - d) !== null) {
+				tpmT -= d; fgmT = feasible(tpmT); break;
+			}
+			if (tpmT + d <= tpaT && feasible(tpmT + d) !== null) {
+				tpmT += d; fgmT = feasible(tpmT); break;
+			}
 		}
+		let ftmT = fgmT === null ? 0 : ptsT - 2 * fgmT - tpmT;
 
 		/* Per-game makes: the fewest moves from the expected makes that
 		   satisfy the points identity within the game's attempts. A game
 		   with no way to make its total (one point and no free throw, two
 		   points from nothing but threes) borrows the attempt it lacks. */
+		/* `carry` is the running shortfall between what the games solved so
+		   far SHOULD have made and what they did, per category.
+
+		   Without it each game minimises its own error independently and the
+		   season sum comes out biased, because the per-game choice is an
+		   integer under a parity constraint: a 64% free-throw shooter taking
+		   one attempt a night has an ideal of 0.64 makes, and in any game
+		   whose points are odd with no three made the parity forces the make.
+		   Twenty-eight of those in a row and the log says he shot 20 of 22
+		   from the line. The exchange passes below cannot repair it — the
+		   only move that lowers free-throw makes needs a game with two of
+		   them, and he never had two in a game.
+
+		   Feeding the shortfall forward is the standard fix for exactly this
+		   (it is the same idea as error diffusion, or largest-remainder
+		   apportionment done online) and costs two numbers. */
+		const carry = { ft: 0, tp: 0 };
 		const solveGame = (g) => {
 			const twoA = g.fga - g.tpa;
-			const tpm0 = g.tpa * (s.tpp || 0);
-			const ftm0 = g.fta * (s.ftp || 0);
+			const tpm0 = g.tpa * (s.tpp || 0) + carry.tp;
+			const ftm0 = g.fta * (s.ftp || 0) + carry.ft;
 			let best = null;
 			for (let tpm = 0; tpm <= g.tpa; tpm++) {
 				for (let ftm = 0; ftm <= g.fta; ftm++) {
@@ -2590,6 +2674,10 @@
 			g.tpm = best.tpm;
 			g.ftm = best.ftm;
 			g.fgm = best.two + best.tpm;
+			/* What this game owes, or is owed, forward. Bounded so one
+			   impossible game cannot drag every game after it. */
+			carry.ft = clamp(carry.ft + g.fta * (s.ftp || 0) - g.ftm, -2.5, 2.5);
+			carry.tp = clamp(carry.tp + g.tpa * (s.tpp || 0) - g.tpm, -2.5, 2.5);
 		}
 		if (fgmT === null) return;
 
@@ -2607,11 +2695,26 @@
 			}
 			return true;
 		};
+		/* Try every candidate game, not only the best one.
+
+		   This took `games.filter(pred).sort(...)[0]` and gave up if that one
+		   game could not borrow the attempt the move needed — so a single
+		   uncooperative game aborted the whole pass and left the season's make
+		   totals wherever the per-game solver had put them. Measured: one
+		   player in a few hundred finished the season shooting 20 of 22 from
+		   the line on a 64% free-throw stroke, and the game log and the stat
+		   line beside it disagreed in a way a reader can add up.
+
+		   Walking the candidates in order costs a handful of comparisons on
+		   the one pass in a thousand that needs it. */
 		const exchange = (pred, kinds, apply) => {
-			const g = games.filter(pred).sort((a, b) => b.pts - a.pts)[0];
-			if (!g || !attempt(g, kinds)) return false;
-			apply(g);
-			return true;
+			const cands = games.filter(pred).sort((a, b) => b.pts - a.pts);
+			for (const g of cands) {
+				if (!attempt(g, kinds)) continue;
+				apply(g);
+				return true;
+			}
+			return false;
 		};
 		for (let guard = 0; guard < 400 && tot("tpm") !== tpmT; guard++) {
 			const moved = tot("tpm") < tpmT

@@ -819,3 +819,15 @@ th.dropafter { box-shadow: inset -2px 0 0 0 var(--accent); }
 .facebox { width: 120px; aspect-ratio: 2 / 3; flex: none; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel-2); }
 .facebox > svg { display: block; width: 100%; height: 100%; }
 .facebox.small { width: 40px; border-radius: 5px; }
+
+/* Scouting traits on the player page. Each one is a tag with its full note in
+   the title, so the page can carry five of them without becoming a paragraph. */
+.traitlist { display: flex; flex-wrap: wrap; gap: 4px; }
+.tag.trait {
+	background: var(--chip, rgba(127, 127, 127, .12));
+	border: 1px solid var(--line, rgba(127, 127, 127, .28));
+	border-radius: 3px;
+	padding: 1px 5px;
+	font-size: 11px;
+	cursor: help;
+}

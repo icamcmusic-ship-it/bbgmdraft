@@ -26,7 +26,7 @@ its own pace, game length and youth minutes cap, its own clubs and league table,
 and its own honors.
 
 **2. Rebuilds ratings into varied, specialized builds — without inflating anyone.**
-Each player is assigned one of 121 archetypes (Floor General, Heliocentric
+Each player is assigned one of 131 archetypes (Floor General, Heliocentric
 Guard, Movement Shooter, 3&D Wing, Point Center, Rim Protector, Stretch Big,
 Lob Threat, Athletic Freak, Drop-Coverage Anchor, Boom-or-Bust Tools, …), gated by
 their height so a 7-footer never becomes a point guard. The archetype pushes some ratings up and others down, then the whole
@@ -42,14 +42,14 @@ compressed in log space (down from a measured 281×), and pool slots are drawn o
 the *authored* weights rather than the exposure-divided ones, which had quietly
 inverted the table (the three center builds gated at the top of the height range
 each made a quarter of all pools while Iron Man almost never did). A class then
-draws a **pool** of about seventeen of the 121 builds and takes its players from the pool — which is what makes a
+draws a **pool** of about seventeen of the 131 builds and takes its players from the pool — which is what makes a
 class "the year of the stretch bigs" rather than one of everything, every time.
 It also draws a **flavor** (guard-heavy, defense-first, a weak year,
 one-and-done heavy, a transfer-portal year, …) that tilts which builds enter the
 pool and, for some flavors, bends the class itself: how old it is, how good the
 top of it is, how it got here. A flavor only moves settings you have left alone.
 
-The 121 names are 121 shapes. Measured by cosine similarity over the offset
+The 131 names are 131 shapes. Measured by cosine similarity over the offset
 vectors, the table used to hold 96 pairs above 0.85 and sixteen above 0.95 —
 Rim Protector and Shot-Blocking Anchor were the same vector behind two height
 gates — so a seventeen-build pool that looked varied by name still drew several
@@ -58,7 +58,18 @@ inside. Every pair above 0.95 was pushed apart on at least one axis that means
 something (an Anchor is verticality and timing with poor conditioning; a Rim
 Protector is mobile and rebounds; a Glass-Eating Center is slow and
 ground-bound where an Undersized Rebounder is quick and springy), and
-`tools/test.js` holds the whole table under 0.93 so it cannot re-converge. The
+`tools/test.js` holds the whole table under 0.93 so it cannot re-converge.
+
+That check compares a build to a build, and a build is a shape **and a size**:
+a post-up guard gated at hgt 24-46 and a post-up wing gated at 40-68 have
+near-parallel offset vectors and are never alternatives for one prospect, while
+a pair sharing a whole height band and a vector genuinely is one build with two
+names. So similarity is scaled by how much the two height gates overlap, which
+is what lets the table hold ten shapes it did not have — the putback specialist
+who cannot defend the glass, the floater guard, the lob target who cannot
+rebound, the help defender who produces no steals or blocks, the big who cannot
+shoot a free throw — without any of them being a rename of something already
+there. The
 nine genuine-center builds gated at hgt 72 and up used to be crowded out of
 the pool by the thirty bigs gated at 52 — Shot-Blocking Anchor appeared once in
 2,800 players — so a pool now always carries at least three of them, and a
@@ -115,6 +126,42 @@ a personal-foul term (strength used without feel), centered on the table so the
 class anchor does not move. Measured at specialization 1.5, the foul-drawing
 builds run about five points of FTr above the rest and the Enforcer a third of
 a foul a game above the class.
+
+**And a trait layer, which is a second axis rather than a longer list.** An
+archetype is a *shape*: what a player's rating vector looks like, and therefore
+what his box score looks like. Everything else a scout writes down — how long
+his arms are, whether he plays hard, whether he can finish with his off hand,
+whether the knee is a question, whether he wants the ball late — is not a
+shape, and the tool had no vocabulary for it. A note could say a prospect was a
+Rim Protector at 6'11" and could not say he had a plus-seven wingspan, which is
+the first thing any human being would have written about him.
+
+`js/traits.js` is about seventy-seven traits in twelve groups (frame,
+athleticism, motor, character, finishing, shooting, passing, defense,
+rebounding, medical, background, role). Each states its prerequisites — a
+height band, a class year, build tags it needs or must not have — so a
+seven-footer is never "explosive first step", a freshman is never a natural
+leader, and a guard never has a broken free-throw stroke. Each player draws
+about three, at most one from each group, off his own key so they survive a
+re-run.
+
+A trait that reaches nothing is a label, so every one of them reaches four
+things: a clause in the scouting note, an adjective the news can use, a BBGM
+`moodTraits` letter on export (F, L, $, W — the tool wrote none of them before,
+so an imported class arrived with whatever BBGM happened to roll), and for the
+handful the simulation can express, a number: **volatility** (a per-player
+multiplier on the game log's night-to-night spread, so two eighteen-point
+scorers no longer produce identical-looking logs and "Streaky Volume Scorer" is
+finally a statement about a distribution), the **offensive/defensive rebound
+split** (a putback specialist and a box-out merchant have the same rebounding
+composite and are not the same player), and the **injury roll** (a prior
+surgery, a chronic knee and a clean bill of health were the same draw).
+
+Traits are orthogonal to builds, which is the whole argument for them: 131
+builds and 77 traits multiply rather than add. A Rim Protector with a plus
+wingspan and a great motor and a Rim Protector with short arms and questions
+about the effort are two different prospects out of one row of the archetype
+table. *Scouting traits per prospect* turns the whole layer off at 0.
 
 Every class is also given about four **forced anomalies**, drawn from
 thirty-two kinds — a five-star bust, an unranked recruit who turns into a
@@ -366,7 +413,7 @@ pixels the table becomes one card per prospect.
 | **Flavor strength** | How strongly the flavor leans (guard-heavy, defense-first, a weak year, one-and-done heavy, a transfer-portal year, European in style, a post-up renaissance, feast or famine, a coaching carousel year, …). Some flavors also bend the class itself — how old it is, how good the top of it is — but only settings you have left at their default. |
 | **Variation** | The neighborhood of a seed. 0 is the class that seed has always produced. 1, 2, 3… keep its flavor, its build pool and its curve and re-roll every individual player, so the year is still "the year of the stretch bigs, weak at the top" and the sixty-eight men in it are different. Every shareable link ever made is variation 0, so none of them moved. |
 | **Avoid repeating recent builds** | How hard a build that was in one of the last three classes is pushed out of this one. Measured, the four heaviest builds returned in 14% of pools with this off and 6% with it at full strength — the ordering the weights describe survives, the repetition does not. |
-| **Builds per class** | How many of the 121 archetypes one class is drawn from. Lower is more distinctive ("the year of the stretch bigs"); 0 makes every build eligible in every class, which is one of everything, every time. |
+| **Builds per class** | How many of the 131 archetypes one class is drawn from. Lower is more distinctive ("the year of the stretch bigs"); 0 makes every build eligible in every class, which is one of everything, every time. |
 | **Anomalies per class** | How many forced surprises a class gets, drawn from thirty-two kinds: a five-star bust, an unranked riser, a 24-year-old JUCO, a 7'4" project, the coach's son, a man who never played a high school game, a season that ended in February — and six that change the numbers rather than the note: a suspension, an eligibility hold that costs the first ten games, a mid-season transfer, a double-double machine, a defensive breakout, and a year-long shooting slump that costs about seven points of 3P% off what his jumper says. |
 | **Realignment** | How often the map of college basketball changes. A realignment moves two to five good programs one rung up into a league whose footprint overlaps theirs — the database carries no state per school, so geography is a fact about the conference, and Tennessee State no longer lands in a New England league — and every conference stays schedulable. |
 | **Earlier seasons** | `Simulate` runs each of a prospect's previous college years through the same stat model the draft year goes through. `Reconstruct` is the older behavior: a backward-scaled copy of the draft-year line. |
@@ -409,7 +456,7 @@ Three things it deliberately never touches:
 
 - **The seed.** Reroll owns the seed; randomizing both at once means you can't
   tell which produced what you're looking at.
-- **The per-build rarity weights.** That is a curated 121-row table whose
+- **The per-build rarity weights.** That is a curated 131-row table whose
   ordering is the authored intent, and a uniform draw over it destroys that
   invisibly. Flavor, pool size and diversity are randomized instead — those
   are the supported ways to move the mix.
@@ -452,7 +499,7 @@ liked. Ctrl+Z undoes a reroll like any other change.
 
 - *Class quality & depth* shapes the overall curve — switch **Overall ratings**
   to "Rebuild the class curve" to unlock it; "Preserve" never inflates anyone.
-- *Builds* decides how specialized players are, how many of the 121 archetypes
+- *Builds* decides how specialized players are, how many of the 131 archetypes
   one class draws from, the class flavor (pick one in the dropdown to keep the
   seed and change what kind of class it is), anomalies, and the pool memory
   that stops consecutive classes repeating themselves.

@@ -3351,6 +3351,44 @@
 			else dd.appendChild(v);
 			dl.appendChild(dd);
 		};
+		/* THE SCOUTING TRAITS, before the numbers.
+
+		   A scout's report opens with what the player IS and the numbers come
+		   after, so the traits sit above the stat rows. Grouped, because a
+		   flat list of five traits reads as a shuffle and the group is what
+		   says which question each one answers. See js/traits.js. */
+		if (p.traits && p.traits.length) {
+			const wrap = el("div", "traitlist");
+			for (const t of p.traits) {
+				const tag = el("span", "tag trait", t.name);
+				tag.title = t.group + " — " + t.note +
+					(t.mood ? " (BBGM mood: " + t.mood + ")" : "");
+				tag.setAttribute("aria-label", t.group + ": " + t.name);
+				wrap.appendChild(tag);
+			}
+			row("Scouting", wrap);
+			const eff = [];
+			if (Number.isFinite(p.volatility) && Math.abs(p.volatility - 1) > 0.06) {
+				eff.push(p.volatility > 1
+					? "night to night, more volatile than his average implies (x" +
+						p.volatility.toFixed(2) + ")"
+					: "unusually consistent night to night (x" + p.volatility.toFixed(2) + ")");
+			}
+			if (Number.isFinite(p.orbBias) && Math.abs(p.orbBias) > 0.02) {
+				eff.push(p.orbBias > 0
+					? "lives on the offensive glass"
+					: "a defensive-glass rebounder");
+			}
+			if (Number.isFinite(p.traitInjuryMult) && Math.abs(p.traitInjuryMult - 1) > 0.1) {
+				eff.push(p.traitInjuryMult > 1
+					? "a medical file that raises the injury risk"
+					: "a clean medical file");
+			}
+			if (p.moodTraits && p.moodTraits.length) {
+				eff.push("exports with BBGM mood traits " + p.moodTraits.join(", "));
+			}
+			if (eff.length) row("What that changes", eff.join(" · "));
+		}
 		const s = p.stats;
 		if (s) {
 			row("This season", s.gp + " GP · " + n1(s.mpg) + " MPG · " +

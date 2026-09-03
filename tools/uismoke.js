@@ -909,6 +909,26 @@ function ok(name, condition, detail) {
 			(await page.locator("#view").innerHTML()).length > 2000);
 	}
 
+	console.log("\nScouting traits on the player page");
+	{
+		await page.evaluate(() => {
+			const st = window.App.state;
+			const res = st.results[st.active];
+			window.App.showPlayer(res.players.filter((p) => !p.nonNcaa)[0].key);
+		});
+		await page.waitForTimeout(400);
+		const tags = await page.locator("#view .traitlist .tag.trait").allInnerTexts();
+		ok("the player page lists his scouting traits",
+			tags.length >= 2 && tags.every((t) => t.length > 3), tags.join(" / "));
+		const title = await page.locator("#view .traitlist .tag.trait").first()
+			.getAttribute("title");
+		ok("each trait carries its group and its note in a tooltip",
+			/ — .{15,}/.test(String(title)), String(title).slice(0, 90));
+		const dt = await page.locator("#view dl.shortcuts dt").allInnerTexts();
+		ok("and the page says what the traits change",
+			dt.indexOf("Scouting") !== -1, dt.join(", "));
+	}
+
 	console.log("\nThe news feed filters");
 	{
 		await page.locator("#tabs button", { hasText: "News" }).first().click();

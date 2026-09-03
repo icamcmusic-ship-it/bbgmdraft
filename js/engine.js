@@ -20,6 +20,7 @@
 	const RK = global.Rankings;
 	const AW = global.Awards;
 	const CAL = global.Calibration;
+	const TR = global.Traits;
 
 	/* Season length per non-NCAA destination. */
 	const PRO_GAMES = {
@@ -789,6 +790,23 @@
 			p.newPot = clamp(Math.round(targetOvr + gap), p.newOvr, 100);
 		});
 
+		/* TRAITS. Drawn after the build, because every prerequisite in the
+		   table is about the finished player: his height, his class year, his
+		   build's tags, his overall. See js/traits.js. */
+		{
+			const trng = rng.child("traits" + vsalt);
+			for (const p of players) {
+				const t = TR.assign(p, trng.child("tr:" + p.key + rerollSalt(p, "traits")), cfg);
+				p.traits = t.traits;
+				p.traitNames = t.names;
+				/* Read by the game log (night-to-night spread), the rebound
+				   share and the injury roll respectively. */
+				p.volatility = t.volatility;
+				p.orbBias = t.orbBias;
+				p.traitInjuryMult = t.injuryMult;
+				p.moodTraits = t.mood;
+			}
+		}
 		state.players = players;
 		state.season = season;
 		assignRecruiting(players, rng.child("recruiting" + vsalt));
@@ -1508,7 +1526,12 @@
 			   Injury-Prone Talent is hurt about twice as often as the class,
 			   an Iron Man half as often. It moves the injury roll, not the
 			   ordinary absences — a coach's decision is not a knee. */
-			const build = RB.injuryMultiplier(p.archetype);
+			/* And the medical file. A prior surgery, a chronic knee and a
+			   clean bill of health are the three things a scout writes about
+			   an injury history, and until the trait layer existed the draw
+			   was the same for all three. See js/traits.js. */
+			const build = RB.injuryMultiplier(p.archetype) *
+				(Number.isFinite(p.traitInjuryMult) ? p.traitInjuryMult : 1);
 			// The draft-year games-played mean is 33.5 against a ~35-game
 			// schedule, so a bit over half a class misses something.
 			if (r.random() >= 0.54 * rate * (0.6 + 0.4 * build)) continue;
@@ -2514,7 +2537,7 @@
 				"archetypeWeights", "classFlavor", "freshmanShare", "transferShare",
 				"redshirtShare", "reclassShare", "leagueWeights", "wEuroLeague",
 				"wGLeague", "wNBL", "pDII", "overrides",
-				"archetypePool", "surpriseBudget",
+				"archetypePool", "surpriseBudget", "traitCount",
 				// See variationSalt / pickClassPool: both reshape the class
 				// from the build phase down.
 				"variation", "flavorHint", "poolMemory", "recentPools",
@@ -3092,6 +3115,10 @@
 		["injury", "Games missed and why"],
 		["coach", "Who coaches him, and what kind of year the staff is having"],
 		["archetype", "Archetype label"],
+		/* Everything a scout writes down that is not a shape: wingspan, motor,
+		   the off hand, the medical file, whether he wants it late. See
+		   js/traits.js — this line is the trait layer's main surface. */
+		["traits", "Scouting traits (frame, motor, hands, medical)"],
 		["awards", "Honors"],
 		["stock", "Draft stock and mock position"],
 		/* Where his season places him against the rest of Division I. Every
@@ -3100,7 +3127,7 @@
 		   awards. See rankAgainstField in js/awards.js. */
 		["ranks", "Where he finished nationally and in his conference"],
 	];
-	const DEFAULT_NOTE_LINES = ["summary", "team", "stats", "shooting", "signature", "awards"];
+	const DEFAULT_NOTE_LINES = ["summary", "team", "traits", "stats", "shooting", "signature", "awards"];
 
 	/* The note's opening sentence. It used to start "School (Conf) · Year"
 	   and go straight to stat lines, which reads like a stat export; a
@@ -3224,6 +3251,16 @@
 				}
 			}
 			lines.push(rec);
+		}
+		/* The traits, as a sentence rather than a list. Two of them at most in
+		   the prose clause because a scouting note is written and not tabulated;
+		   the rest follow as a compact tail, which is how a real report does it
+		   too. See js/traits.js. */
+		if (on("traits") && p.traits && p.traits.length) {
+			const clause = TR.noteClause(p.traits);
+			const rest = p.traits.slice(2).map((t) => t.name);
+			lines.push("Scouts note " + clause + "." +
+				(rest.length ? " Also: " + rest.join("; ") + "." : ""));
 		}
 		if (s && on("stats")) {
 			lines.push(
@@ -4040,6 +4077,18 @@
 			out.draft = Object.assign({}, out.draft, {
 				ovr: p.newOvr, pot: p.newPot, skills: p.newSkills.slice(),
 			});
+			/* BBGM's mood traits, which the tool never wrote — so an imported
+			   class arrived with whatever BBGM happened to roll, and a leader
+			   and a mercenary were the same free agent. The four letters are F
+			   (fame), L (loyalty), $ (money) and W (winning); the trait layer
+			   decides which of them a player has earned. See js/traits.js.
+
+			   Written only when the trait layer produced some: a file that
+			   never had the field does not acquire an empty one, and a
+			   traitCount of 0 leaves BBGM's own roll alone. */
+			if (opts.moodTraits !== false && p.moodTraits && p.moodTraits.length) {
+				out.moodTraits = p.moodTraits.slice();
+			}
 			/* opts.noteAppend: keep a note the file already carried and put
 			   the generated one underneath. Off by default, because the
 			   generated note is a complete replacement and a user who never

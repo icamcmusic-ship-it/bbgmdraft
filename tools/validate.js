@@ -31,6 +31,7 @@ function loadEngine() {
 		   a Node harness. */
 		for (const f of [
 			"text", "rng", "bbgm", "bbgmstats", "colleges", "config", "calibration", "ratings",
+			"traits",
 			"teams", "stats", "rankings", "tournament", "awards", "engine", "batch",
 			"sample", "news", "universe",
 		]) require(path.join(__dirname, "..", "js", f + ".js"));

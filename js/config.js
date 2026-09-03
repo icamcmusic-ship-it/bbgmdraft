@@ -189,7 +189,15 @@
 		archetypeWeights: null,
 
 		// --- notes -----------------------------------------------------------
-		noteLines: ["summary", "team", "stats", "shooting", "signature", "awards"],
+		/* "traits" is on by default: the trait layer's whole point is that a
+		   scouting note can say what a scout would say, and a line nobody
+		   turns on says nothing. See js/traits.js. */
+		noteLines: ["summary", "team", "traits", "stats", "shooting", "signature", "awards"],
+		/* How many scouting traits a prospect carries, roughly. 0 turns the
+		   layer off, which is what a user who wants a plain statline note
+		   wants; the effects (night-to-night volatility, the offensive glass,
+		   the medical file) go with it. */
+		traitCount: 3,
 
 		// --- college season ----------------------------------------------
 		// Which era's empirical anchors the stat model targets. See the header

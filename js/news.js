@@ -449,6 +449,34 @@
 							Math.abs(f.player.stockMove) + " from the preseason"
 						: "") + ".")],
 		},
+		/* The trait layer, in the paper. A scouting note says a prospect is
+		   long-armed with a relentless motor; the paper is where that becomes
+		   a sentence somebody wrote. See js/traits.js. */
+		{
+			id: "scouting traits", voices: ["beat", "columnist", "local", "wire"],
+			need: (f) => f.player && f.player.traits && f.player.traits.length >= 2,
+			build: (f, rng) => {
+				const t = f.player.traits;
+				const two = rng.random() < 0.5 ? [t[0], t[1]] : [t[1], t[0]];
+				return [T("What the scouts write about "),
+					PL(f.player.name, f.player.key),
+					T(": " + two[0].note + ", and " + two[1].note + ".")];
+			},
+		},
+		{
+			id: "trait adjective", voices: ["columnist", "social", "local"],
+			need: (f) => f.player && f.player.traits && f.player.traits.length,
+			build: (f, rng) => {
+				const adj = global.Traits.adjective(f.player.traits);
+				return [T(rng.pick([
+					"He is the most " + adj + " player in his conference and it is " +
+						"not an argument anybody is having.",
+					"Every report on him opens with the same word: " + adj + ".",
+					"Scouts have written " + adj + " on the same page of the same " +
+						"notebook eleven times this season.",
+				]))];
+			},
+		},
 		{
 			id: "biography", voices: ["beat", "local"],
 			need: (f) => f.player && (f.player.transfer || f.player.redshirt ||

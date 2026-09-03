@@ -2401,6 +2401,162 @@ console.log("\nGenerated text");
 		faults.length === 0, faults.slice(0, 6).join("\n         "));
 }
 
+console.log("\nThe trait layer");
+{
+	const TR = global.Traits;
+	const res = global.Engine.run(V.realisticClass(5, 70),
+		global.Config.make({ seed: "traits" }));
+	const ncaa = res.players.filter((p) => !p.nonNcaa);
+
+	ok("every prospect carries traits",
+		res.players.every((p) => Array.isArray(p.traits) && p.traits.length >= 1),
+		String(res.players.filter((p) => !p.traits || !p.traits.length).length) + " without");
+
+	/* One trait per group. A player with three different opinions about his
+	   wingspan is not a scouting report. */
+	{
+		let dup = 0;
+		for (const p of res.players) {
+			const groups = (p.traits || []).map((t) => t.group);
+			if (new Set(groups).size !== groups.length) dup++;
+		}
+		ok("no player draws two traits from one group", dup === 0, String(dup));
+	}
+
+	/* PREREQUISITES. The gates are what make the draw read as a report rather
+	   than as a shuffle, so every one of them is checked against every player
+	   who drew the trait, rather than trusting the drawer. */
+	{
+		const bad = [];
+		for (const p of res.players) {
+			for (const t of p.traits || []) {
+				if (!TR.matches(t, p)) bad.push(p.name + " / " + t.name);
+			}
+		}
+		ok("every trait's prerequisites hold for the player who drew it",
+			bad.length === 0, bad.slice(0, 4).join("; "));
+		/* And the gates actually bite: the specific ones the table exists for. */
+		const tall = res.players.filter((p) => p.newRatings.hgt >= 70);
+		ok("a seven-footer is never 'explosive first step'",
+			tall.every((p) => (p.traitNames || []).indexOf("explosive first step") === -1));
+		const fresh = res.players.filter((p) => /Freshman/.test(String(p.classYear)));
+		ok("a freshman is never a natural leader or has never missed a game",
+			fresh.every((p) => (p.traitNames || []).indexOf("natural leader") === -1 &&
+				(p.traitNames || []).indexOf("has not missed a game") === -1));
+		const small = res.players.filter((p) => p.newRatings.hgt < 60);
+		ok("a guard never has a broken free-throw stroke",
+			small.every((p) => (p.traitNames || []).indexOf("broken free-throw stroke") === -1));
+	}
+
+	/* THE FOUR SURFACES. A trait that reaches nothing is a label. */
+	ok("every trait carries a note clause",
+		TR.TRAITS.every((t) => typeof t.note === "string" && t.note.length > 12),
+		TR.TRAITS.filter((t) => !t.note).map((t) => t.name).join("; "));
+	ok("every trait carries a news adjective",
+		TR.TRAITS.every((t) => typeof t.adj === "string" && t.adj.length > 2),
+		TR.TRAITS.filter((t) => !t.adj).map((t) => t.name).join("; "));
+	ok("the table is big enough to be a vocabulary",
+		TR.TRAITS.length >= 55 && TR.GROUPS.length >= 10,
+		TR.TRAITS.length + " traits in " + TR.GROUPS.length + " groups");
+	ok("every trait's group is a declared group",
+		TR.TRAITS.every((t) => TR.GROUPS.indexOf(t.group) !== -1));
+	{
+		const notes = res.players.filter(
+			(p) => String(p.note || "").indexOf("Scouts note ") !== -1);
+		ok("the default note carries the trait line",
+			notes.length > res.players.length * 0.8,
+			notes.length + " of " + res.players.length);
+	}
+	{
+		const f = global.Engine.exportFile(res, {});
+		const mood = f.players.filter((p) => p.moodTraits && p.moodTraits.length);
+		ok("mood traits reach the exported file", mood.length > 10,
+			mood.length + " of " + f.players.length);
+		const letters = new Set();
+		for (const p of mood) for (const m of p.moodTraits) letters.add(m);
+		ok("and are BBGM's own four letters",
+			[...letters].every((m) => "FL$W".indexOf(m) !== -1), [...letters].join(""));
+		const off = global.Engine.run(V.realisticClass(5, 70),
+			global.Config.make({ seed: "traits", traitCount: 0 }));
+		const fOff = global.Engine.exportFile(off, {});
+		ok("traitCount 0 writes no mood traits and no trait line",
+			fOff.players.every((p) => !p.moodTraits) &&
+			off.players.every((p) => String(p.note || "").indexOf("Scouts note") === -1));
+	}
+
+	/* THE NUMERIC EFFECTS. */
+	{
+		ok("volatility is drawn per player and lands in a sane band",
+			res.players.every((p) => p.volatility >= 0.7 && p.volatility <= 1.6),
+			String(Math.min.apply(null, res.players.map((p) => p.volatility))));
+		const vols = res.players.map((p) => p.volatility);
+		ok("and it actually varies between players",
+			Math.max.apply(null, vols) - Math.min.apply(null, vols) > 0.2,
+			(Math.max.apply(null, vols) - Math.min.apply(null, vols)).toFixed(2));
+		/* The point of it: two players with the same average produce
+		   different-looking logs. Measured as the game-log SD of the top and
+		   bottom volatility quartiles among comparable scorers. */
+		const scorers = ncaa.filter((p) => p.stats && p.stats.ppg >= 12 &&
+			p.gameLog && p.gameLog.games.length > 20);
+		if (scorers.length >= 12) {
+			const sd = (p) => {
+				const g = p.gameLog.games.map((x) => x.pts);
+				const m = g.reduce((a, b) => a + b, 0) / g.length;
+				return Math.sqrt(g.reduce((a, x) => a + (x - m) * (x - m), 0) / g.length) /
+					p.stats.ppg;
+			};
+			const byVol = scorers.slice().sort((a, b) => a.volatility - b.volatility);
+			const k = Math.max(3, Math.floor(byVol.length / 4));
+			const lowV = byVol.slice(0, k).map(sd);
+			const hiV = byVol.slice(-k).map(sd);
+			const mn = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+			ok("a volatile scorer's game log is genuinely wider",
+				mn(hiV) > mn(lowV), mn(lowV).toFixed(3) + " -> " + mn(hiV).toFixed(3));
+		}
+		ok("the offensive-glass bias stays inside its band",
+			res.players.every((p) => Math.abs(p.orbBias) <= 0.12));
+		ok("the medical file moves the injury roll",
+			res.players.every((p) => p.traitInjuryMult >= 0.5 &&
+				p.traitInjuryMult <= 2.0));
+	}
+
+	/* DETERMINISM. A trait has to survive a re-run, like every other
+	   per-player fact. */
+	{
+		const again = global.Engine.run(V.realisticClass(5, 70),
+			global.Config.make({ seed: "traits" }));
+		let same = 0;
+		for (let i = 0; i < res.players.length; i++) {
+			if ((res.players[i].traitNames || []).join("|") ===
+				(again.players[i].traitNames || []).join("|")) same++;
+		}
+		ok("the same seed draws the same traits", same === res.players.length,
+			same + " of " + res.players.length);
+	}
+
+	/* THE TRAIT LAYER MULTIPLIES. The whole argument for it is that traits are
+	   orthogonal to builds, so the same build produces different prospects. */
+	{
+		const byBuild = {};
+		for (let s = 0; s < 4; s++) {
+			const r = global.Engine.run(V.realisticClass(s, 70),
+				global.Config.make({ seed: "orth" + s }));
+			for (const p of r.players) {
+				(byBuild[p.archetype] = byBuild[p.archetype] || [])
+					.push((p.traitNames || []).slice().sort().join("|"));
+			}
+		}
+		const repeated = Object.keys(byBuild).filter((k) => byBuild[k].length >= 4);
+		let identical = 0;
+		for (const k of repeated) {
+			if (new Set(byBuild[k]).size === 1) identical++;
+		}
+		ok("two players of the same build are not the same prospect",
+			identical === 0, identical + " builds with one trait set across " +
+				repeated.length + " repeated builds");
+	}
+}
+
 console.log("\nThe paper: kinds, variants, voices and quotes");
 {
 	const N = global.News;
@@ -2661,6 +2817,20 @@ console.log("\nAudit regressions");
 	   and Shot-Blocking Anchor identical in shape (1.00) and differing only
 	   in height gate — 121 names for about 65 distinct shapes, which is why
 	   a 17-build pool still read as repetition. */
+	/* A BUILD IS A SHAPE AND A SIZE.
+
+	   This compared offset vectors alone, and the audit that produced it said
+	   so in the same breath: "a Boom-or-Bust Tools guard and a Boom-or-Bust
+	   Tools center are the same offset vector, which the cosine-similarity
+	   test cannot see because it compares builds, not build x height." The
+	   consequence is a test that reports redundancy where there is none — a
+	   post-up guard gated 24-46 and a post-up wing gated 40-68 are not the
+	   same player and never appear as alternatives for one prospect — while
+	   still missing the case it was written for.
+
+	   So similarity is scaled by height OVERLAP. Two builds a prospect can
+	   never choose between are not redundant however parallel their vectors;
+	   two builds that share their whole gate are compared exactly as before. */
 	const keys = BB.RATING_KEYS;
 	const specs = RB.ARCHETYPES.filter((a) => a.name !== "Balanced");
 	const vec = (a) => keys.map((k) => RB.RAW_OFFSETS[a.name][k] || 0);
@@ -2671,19 +2841,44 @@ console.log("\nAudit regressions");
 		for (let i = 0; i < u.length; i++) { d += u[i] * v[i]; nu += u[i] * u[i]; nv += v[i] * v[i]; }
 		return nu && nv ? d / Math.sqrt(nu * nv) : 0;
 	};
+	/* Jaccard over the two height gates: 1 when they are the same band, 0
+	   when they do not touch. */
+	const overlap = (a, b) => {
+		const lo = Math.max(a.min, b.min);
+		const hi = Math.min(a.max, b.max);
+		if (hi <= lo) return 0;
+		const union = Math.max(a.max, b.max) - Math.min(a.min, b.min);
+		return union > 0 ? (hi - lo) / union : 0;
+	};
 	let maxCos = 0;
 	let maxPair = "";
 	let above85 = 0;
+	let maxRaw = 0;
+	let maxRawPair = "";
 	for (let i = 0; i < specs.length; i++) {
 		for (let j = i + 1; j < specs.length; j++) {
-			const c = cosine(vec(specs[i]), vec(specs[j]));
+			const raw = cosine(vec(specs[i]), vec(specs[j]));
+			const c = raw * overlap(specs[i], specs[j]);
 			if (c > 0.85) above85++;
 			if (c > maxCos) { maxCos = c; maxPair = specs[i].name + " / " + specs[j].name; }
+			if (raw > maxRaw) {
+				maxRaw = raw;
+				maxRawPair = specs[i].name + " / " + specs[j].name;
+			}
 		}
 	}
-	ok("no two archetypes share a shape (max cosine < 0.93)", maxCos < 0.93,
-		maxPair + " at " + maxCos.toFixed(3));
-	ok("near-duplicate pairs (cosine > 0.85) stay under 50", above85 <= 50, String(above85));
+	ok("no two archetypes share a shape AND a height band (max cosine < 0.93)",
+		maxCos < 0.93, maxPair + " at " + maxCos.toFixed(3));
+	ok("near-duplicate pairs (cosine x height overlap > 0.85) stay under 30",
+		above85 <= 30, String(above85));
+	/* The raw figure is still reported, because a pair at 0.99 in offset space
+	   is worth a comment in the table even when the gates keep them apart —
+	   and every such pair in the table carries one. */
+	ok("the closest pair in offset space is separated by its height gate",
+		maxRaw < 0.995 || overlap(
+			specs.filter((a) => a.name === maxRawPair.split(" / ")[0])[0],
+			specs.filter((a) => a.name === maxRawPair.split(" / ")[1])[0]) < 0.5,
+		maxRawPair + " at " + maxRaw.toFixed(3));
 	const durability = RB.ARCHETYPES.filter((a) => (a.t || []).indexOf("durability") !== -1).length;
 	ok("the durability tag has a pool to draw from", durability >= 6, durability + " members");
 

@@ -400,7 +400,7 @@
 		"specialization", "archetypeDiversity", "classFlavor", "buildNoise",
 		"freshmanShare", "transferShare", "redshirtShare", "reclassShare", "pDII",
 		"pace", "scoringEnv", "efficiencyEnv", "statNoise", "upsetFactor",
-		"archetypePool", "surpriseBudget", "injuryRate",
+		"archetypePool", "surpriseBudget", "injuryRate", "traitCount",
 		"realignmentRate", "bluebloodDownYears", "midMajorLift",
 		"coachTurnover", "realignmentMemory", "starReturners", "portalRate",
 		"awardStrictness", "confAwardStrictness", "proAwardStrictness",
@@ -535,6 +535,11 @@
 			: v < 0.9 ? "more conference honors" : "realistic conference award volume",
 		proAwardStrictness: (v) => v > 1.2 ? "a higher bar for honors abroad"
 			: v < 0.9 ? "a lower bar for honors abroad" : "a realistic bar abroad",
+		traitCount: (v) => (v <= 0
+			? "no traits: a plain note, and no medical file, volatility or " +
+				"offensive-glass bias"
+			: "about " + v + " traits a prospect — frame, motor, hands, " +
+				"medical, background, role"),
 		coachTurnover: (v) => (v <= 0 ? "no sideline changes at all"
 			: "about " + Math.round(v * 0.43) + " of 368 head coaches change job" +
 				(v === 100 ? " — what Division I actually does" : "")),

@@ -14,7 +14,7 @@
 
 self.importScripts(
 	"text.js", "rng.js", "bbgm.js", "bbgmstats.js", "colleges.js", "config.js", "calibration.js",
-	"ratings.js", "teams.js", "stats.js", "rankings.js", "tournament.js", "awards.js",
+	"ratings.js", "traits.js", "teams.js", "stats.js", "rankings.js", "tournament.js", "awards.js",
 	"engine.js", "batch.js", "news.js", "universe.js",
 );
 
