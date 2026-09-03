@@ -3813,6 +3813,55 @@ console.log("\nAudit regressions (September 2026)");
 				m2.file.players.filter((x) => x.lastName === "Else").length ===
 					foreign.players.length &&
 				new Set(m2.file.players.map((x) => x.pid)).size === m2.file.players.length);
+			/* THE ONE THAT ATE LEAGUES.
+
+			   A class whose players are drafted in a year other than the
+			   file's startingSeason (BBGM writes exactly that for a class
+			   exported a year ahead) used to match the league's prospects on
+			   startingSeason: every player in THAT class was dropped as "the
+			   class being replaced", and the class actually being merged was
+			   left in place with a duplicate appended beside it. */
+			{
+				const ahead = JSON.parse(JSON.stringify(res.leagueFile));
+				ahead.startingSeason = res.season;
+				for (const p of ahead.players) p.draft = { year: res.season + 1 };
+				const r2 = global.Engine.run(ahead, global.Config.make({ seed: "ahead" }));
+				const other = [];
+				for (let i = 0; i < 5; i++) {
+					other.push({
+						pid: 90000 + i, tid: -2, firstName: "This", lastName: "Year" + i,
+						draft: { year: res.season }, ratings: [{ season: res.season }],
+					});
+				}
+				const lg = {
+					version: res.leagueFile.version, startingSeason: res.season,
+					gameAttributes: { season: res.season }, teams: [],
+					players: other.concat([roster]),
+				};
+				const m3 = global.Engine.mergeIntoLeague(r2, lg, {});
+				ok("a class drafted after the file's season leaves this year's class alone",
+					m3.season === res.season + 1 && m3.removed === 0 &&
+					m3.file.players.filter((x) => x.lastName &&
+						/^Year\d$/.test(x.lastName)).length === 5 &&
+					m3.file.players.includes(roster));
+
+				/* Two classes, one league file, one pass — and the first
+				   class's players are not swept away by the second. */
+				const many = global.Engine.mergeManyIntoLeague([res, r2], lg, {});
+				const in1 = many.file.players.filter((x) =>
+					Number(x.tid) === -2 && Number(x.draft.year) === res.season).length;
+				const in2 = many.file.players.filter((x) =>
+					Number(x.tid) === -2 && Number(x.draft.year) === res.season + 1).length;
+				ok("two classes merge into one file without eating each other",
+					in1 === res.leagueFile.players.length &&
+					in2 === res.leagueFile.players.length &&
+					many.file.players.includes(roster) &&
+					many.seasons.length === 2);
+				ok("two classes for the same draft year are refused", (() => {
+					try { global.Engine.mergeManyIntoLeague([res, res], lg, {}); return false; }
+					catch (e) { return /same .*draft|both for the/.test(e.message); }
+				})());
+			}
 			ok("a file with no players array is refused with a sentence", (() => {
 				try { global.Engine.mergeIntoLeague(res, { teams: [] }, {}); return false; }
 				catch (e) { return /league file/.test(e.message); }

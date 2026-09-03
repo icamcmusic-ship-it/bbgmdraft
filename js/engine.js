@@ -4736,14 +4736,49 @@
 	   overwriting a franchise player because his pid collided with a
 	   prospect's is not a thing to risk: anyone unmatched is appended with a
 	   fresh pid instead. */
+	/* The draft year a set of exported players actually belongs to.
+
+	   `result.season` is the file's startingSeason — the season the league was
+	   IN when the class was exported — and for BBGM's own draft-class exports
+	   that is not always the year the class is drafted in: a 2027 class
+	   exported from a league sitting in 2026 carries draft.year 2027 on every
+	   player and startingSeason 2026 on the file. Matching the league's
+	   prospects on 2026 then found the wrong class entirely: every player in
+	   it was dropped as "the class being replaced", and the real 2027 class
+	   was left in place with the merged one appended beside it. So the year
+	   comes from the players being merged, and startingSeason is only the
+	   fallback for a file whose players carry no draft year at all. */
+	function classDraftYear(players, fallback) {
+		const counts = new Map();
+		for (const p of players) {
+			const y = Number(p && p.draft && p.draft.year);
+			if (Number.isFinite(y)) counts.set(y, (counts.get(y) || 0) + 1);
+		}
+		let best = null;
+		let bestN = 0;
+		for (const [year, n] of counts) {
+			if (n > bestN || (n === bestN && best !== null && year < best)) {
+				best = year;
+				bestN = n;
+			}
+		}
+		return best === null ? fallback : best;
+	}
+
 	function mergeIntoLeague(result, league, opts) {
 		if (!league || typeof league !== "object" || !Array.isArray(league.players)) {
 			throw new Error("That file has no players array — it is not a BBGM league file.");
 		}
-		const season = result.season;
 		const ours = exportFile(result, opts).players;
+		const season = classDraftYear(ours, result.season);
+		/* Players an earlier class in the same merge already wrote. They look
+		   exactly like the generated prospects this pass is replacing, so
+		   without this the second class of a two-class merge would delete the
+		   first one. */
+		const protect = (opts && opts.protectPids) || null;
 		const isProspect = (p) => Number(p.tid) === -2 &&
-			p.draft && Number(p.draft.year) === season;
+			p.draft && Number(p.draft.year) === season &&
+			!(protect && protect.has(Number(p.pid)));
 
 		const byPid = new Map();
 		for (const p of league.players) {
@@ -4813,19 +4848,69 @@
 		}
 		for (const p of added) players.push(p);
 
+		/* The one thing this function must never do. Everyone in the league
+		   file who is not a prospect of the class being merged has to come out
+		   the other side, and the count is cheap: anything else means a bug
+		   here just deleted a user's league. */
+		if (players.length - added.length !== league.players.length - removed) {
+			throw new Error("Merge aborted: the result would have lost players " +
+				"from your league file. Nothing was written.");
+		}
+
 		const file = Object.assign({}, league, { players });
+		const mergedPids = [];
+		for (const p of replacements.values()) mergedPids.push(Number(p.pid));
+		for (const p of added) mergedPids.push(Number(p.pid));
 		return {
 			file,
 			replaced: replacements.size,
 			added: added.length,
 			removed,
 			season,
+			mergedPids,
 		};
+	}
+
+	/* Several classes into one league file, in one pass.
+
+	   Sequential merges over the accumulating file, with every player an
+	   earlier pass wrote protected from the next one's "replace the class"
+	   sweep — which matters even when the classes are different years (a
+	   re-exported class can carry an unexpected year) and is the whole story
+	   when two selected classes happen to share one.
+
+	   Two classes for the SAME draft year is refused rather than resolved:
+	   either answer (both classes in one draft, or the second silently winning)
+	   is a guess about what the user meant. */
+	function mergeManyIntoLeague(results, league, opts) {
+		const list = Array.isArray(results) ? results : [results];
+		if (!list.length) throw new Error("No draft class was selected to merge.");
+		const protect = new Set();
+		const seasons = [];
+		let file = league;
+		let replaced = 0;
+		let added = 0;
+		let removed = 0;
+		for (const res of list) {
+			const out = mergeIntoLeague(res, file,
+				Object.assign({}, opts, { protectPids: protect }));
+			if (seasons.indexOf(out.season) !== -1) {
+				throw new Error("Two of the selected classes are both for the " +
+					out.season + " draft. Merge one of them, or change a class year.");
+			}
+			for (const pid of out.mergedPids) protect.add(pid);
+			seasons.push(out.season);
+			file = out.file;
+			replaced += out.replaced;
+			added += out.added;
+			removed += out.removed;
+		}
+		return { file, replaced, added, removed, seasons, season: seasons[0] };
 	}
 
 	global.Engine = {
 		run, createRunner, exportFile, exportPlayersFile, exportSeason,
-		exportLeagueFragment, mergeIntoLeague,
+		exportLeagueFragment, mergeIntoLeague, mergeManyIntoLeague, classDraftYear,
 		buildNote, classYear,
 		assignClassYears, inchesFromHgtRating, validateLeagueFile, findSeason, playerKey,
 		SIZE_OVERRIDE_KEYS, SURPRISES, DRAFT_EVENTS,

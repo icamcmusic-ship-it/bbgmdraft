@@ -16,6 +16,7 @@
 	const STORE_KEY = "bbgm-draft-workshop/v1";
 
 	const state = {
+		mergeIndices: null,
 		cfg: CFG.make(),
 		files: [],       // [{name, data, fingerprint}]
 		runners: [],     // parallel to files
@@ -2002,6 +2003,36 @@
 			", " + Math.round((100 * blank) / Math.max(1, players.length)) + "% blank colleges";
 	}
 
+	/* Reading a dropped file, gzip and all.
+
+	   BBGM writes big league exports as .json.gz, and the browser will not
+	   unzip one for us: a FileReader on a gzipped file returns the compressed
+	   bytes, JSON.parse throws on the first one, and the user is told their
+	   own league export is not valid JSON. So the bytes are read, the gzip
+	   magic number (1f 8b) is checked — the extension is a hint, not the
+	   truth — and DecompressionStream does the rest. Everything else is the
+	   old path: decode UTF-8, drop a BOM, parse. */
+	function readTextFile(f) {
+		const buf = f.arrayBuffer
+			? f.arrayBuffer()
+			: new Promise((resolve, reject) => {
+				const r = new FileReader();
+				r.onerror = () => reject(new Error("could not be read from disk"));
+				r.onload = () => resolve(r.result);
+				r.readAsArrayBuffer(f);
+			});
+		return buf.then((raw) => {
+			const head = new Uint8Array(raw, 0, Math.min(2, raw.byteLength));
+			if (head.length < 2 || head[0] !== 0x1f || head[1] !== 0x8b) return raw;
+			if (typeof DecompressionStream === "undefined") {
+				throw new Error("this browser cannot open a .gz file — unzip it first");
+			}
+			const stream = new Blob([raw]).stream()
+				.pipeThrough(new DecompressionStream("gzip"));
+			return new Response(stream).arrayBuffer();
+		}).then((out) => new TextDecoder("utf-8").decode(out).replace(/^\ufeff/, ""));
+	}
+
 	function readFiles(fileList) {
 		const problems = [];
 		// A five-file drop used to just sit there with nothing on screen.
@@ -2009,40 +2040,31 @@
 		setStatus("Reading " + fileList.length + " file" +
 			(fileList.length === 1 ? "" : "s") + "…", true);
 		const jobs = Array.from(fileList).map(
-			(f) => new Promise((resolve) => {
-				const r = new FileReader();
-				r.onerror = () => {
-					problems.push(f.name + ": could not be read from disk");
-					resolve(null);
-				};
-				r.onload = () => {
-					try {
-						const text = String(r.result).replace(/^\ufeff/, "");
-						const data = JSON.parse(text);
-						// Full schema check up front, so a bad file is rejected
-						// with a sentence instead of throwing a raw TypeError
-						// out of the middle of the sim.
-						const check = global.Engine.validateLeagueFile(data);
-						/* validateLeagueFile is a check now, not a migration, so
-						   the season it recovered is applied here. */
-						data.startingSeason = check.season;
-						/* A full league export is 5,000+ players. Rebuilding all
-						   of them and simulating 368 programs with hundreds of
-						   prospects apiece locks the tab with no progress bar and
-						   no way out, so take the draft class inside the file
-						   when there is one and say so. */
-						if (check.oversized && check.classPids) {
-							const keep = new Set(check.classPids);
-							data.players = data.players.filter((p, i) =>
-								keep.has(Number.isFinite(Number(p.pid)) ? Number(p.pid) : -1 - i));
-						}
-						resolve({ name: f.name, data, warnings: check.warnings });
-					} catch (e) {
-						problems.push(f.name + ": " + e.message);
-						resolve(null);
+			(f) => readTextFile(f).then(
+				(text) => {
+					const data = JSON.parse(text);
+					// Full schema check up front, so a bad file is rejected
+					// with a sentence instead of throwing a raw TypeError
+					// out of the middle of the sim.
+					const check = global.Engine.validateLeagueFile(data);
+					/* validateLeagueFile is a check now, not a migration, so
+					   the season it recovered is applied here. */
+					data.startingSeason = check.season;
+					/* A full league export is 5,000+ players. Rebuilding all
+					   of them and simulating 368 programs with hundreds of
+					   prospects apiece locks the tab with no progress bar and
+					   no way out, so take the draft class inside the file
+					   when there is one and say so. */
+					if (check.oversized && check.classPids) {
+						const keep = new Set(check.classPids);
+						data.players = data.players.filter((p, i) =>
+							keep.has(Number.isFinite(Number(p.pid)) ? Number(p.pid) : -1 - i));
 					}
-				};
-				r.readAsText(f);
+					return { name: f.name, data, warnings: check.warnings };
+				},
+			).catch((e) => {
+				problems.push(f.name + ": " + (e && e.message ? e.message : e));
+				return null;
 			}),
 		);
 		Promise.all(jobs).then((loaded) => installFiles(loaded, problems));
@@ -4309,7 +4331,7 @@
 		});
 		item("Merge into a league file… (keeps the statline AND the awards)", () => {
 			state.mergeOpts = exportOpts();
-			$("leagueMergeFile").click();
+			chooseMergeClasses();
 		});
 		item("Prospect table as CSV (the current filter)", () => exportCsv(res));
 		item("Prospect table as CSV (whole class)", () => exportCsv(res, true));
@@ -4323,6 +4345,53 @@
 		item("Compare two presets…", comparePresets);
 		box.appendChild(list);
 		modal("Export and import", box, null, "Close");
+	}
+
+	/* Which classes go into the league file.
+
+	   One loaded class is the common case and asking about it would be noise,
+	   so it goes straight to the file picker. With several loaded, a user
+	   almost always means all of them — a 2027, 2028 and 2029 class merged
+	   into one save is the whole reason for loading three files — so they are
+	   all ticked and the dialog is a chance to untick one, not a form to
+	   fill in. */
+	function chooseMergeClasses() {
+		if (state.files.length < 2) {
+			state.mergeIndices = [state.active];
+			$("leagueMergeFile").click();
+			return;
+		}
+		const box = el("div");
+		box.appendChild(el("p", null,
+			"Merge these draft classes into the league file. Each one replaces " +
+			"the generated class for its own draft year; the rest of the league " +
+			"is left alone."));
+		const list = el("div", "checklist");
+		const boxes = [];
+		state.files.forEach((f, i) => {
+			const lab = el("label");
+			const cb = document.createElement("input");
+			cb.type = "checkbox";
+			cb.checked = true;
+			cb.dataset.idx = String(i);
+			boxes.push(cb);
+			lab.appendChild(cb);
+			lab.appendChild(document.createTextNode(" " + f.name + " — " +
+				(f.data.players || []).length + " players, " +
+				(f.data.startingSeason || "?")));
+			list.appendChild(lab);
+		});
+		box.appendChild(list);
+		modal("Merge into a league file", box, () => {
+			const picked = boxes.filter((c) => c.checked)
+				.map((c) => Number(c.dataset.idx));
+			if (!picked.length) {
+				setStatus("No class was selected, so nothing was merged.");
+				return;
+			}
+			state.mergeIndices = picked;
+			$("leagueMergeFile").click();
+		}, "Choose league file…");
 	}
 
 	/* ------------------------------------------------------------ comparison */
@@ -4801,29 +4870,43 @@
 		const f = e.target.files[0];
 		e.target.value = "";
 		if (!f) return;
-		const res = state.results[state.active];
-		if (!res) return;
+		const picked = (state.mergeIndices && state.mergeIndices.length
+			? state.mergeIndices
+			: [state.active]).filter((i) => state.files[i]);
+		state.mergeIndices = null;
+		const results = [];
+		for (const i of picked) {
+			const r = ensureResult(i);
+			if (r) results.push(r);
+		}
+		if (!results.length) return;
 		setStatus("Reading " + f.name + "…", true);
-		const r = new FileReader();
-		r.onerror = () => setStatus(f.name + " could not be read from disk.");
-		r.onload = () => {
+		readTextFile(f).then((text) => {
 			let out;
 			try {
-				const league = JSON.parse(String(r.result).replace(/^\ufeff/, ""));
-				out = global.Engine.mergeIntoLeague(res, league, state.mergeOpts || {});
+				const league = JSON.parse(text);
+				out = global.Engine.mergeManyIntoLeague(results, league,
+					state.mergeOpts || {});
 			} catch (err) {
 				setStatus("Could not merge: " + (err && err.message ? err.message : err));
 				return;
 			}
-			const base = f.name.replace(/\.json$/i, "");
-			download(base + "_with_" + out.season + "_class.json",
-				"\ufeff" + JSON.stringify(out.file), "application/json");
+			/* No BOM here, unlike the CSV exports: this file is read back by
+			   BBGM's own league loader, not by a spreadsheet. */
+			const base = f.name.replace(/\.json(\.gz)?$/i, "").replace(/\.gz$/i, "");
+			const years = out.seasons.slice().sort((a, b) => a - b).join("_");
+			download(base + "_with_" + years + "_class.json",
+				JSON.stringify(out.file), "application/json");
 			setStatus("Merged " + (out.replaced + out.added) + " players into " +
 				f.name + " (" + out.replaced + " replaced, " + out.added + " added, " +
-				out.removed + " generated prospects dropped). Load the new file with " +
+				out.removed + " generated prospects dropped) for the " +
+				out.seasons.slice().sort((a, b) => a - b).join(", ") + " draft" +
+				(out.seasons.length === 1 ? "" : "s") + ". Load the new file with " +
 				"Create New League → upload.");
-		};
-		r.readAsText(f);
+		}).catch((err) => {
+			setStatus(f.name + " could not be read: " +
+				(err && err.message ? err.message : err));
+		});
 	});
 	$("csvFile").addEventListener("change", (e) => {
 		const f = e.target.files[0];
