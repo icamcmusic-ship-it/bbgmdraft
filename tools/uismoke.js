@@ -921,6 +921,121 @@ function ok(name, condition, detail) {
 			(await page.locator("#view").innerHTML()).length > 2000);
 	}
 
+	console.log("\nThe settings filter");
+	{
+		const visibleCtls = async () => page.evaluate(() =>
+			Array.from(document.querySelectorAll("#settings details.grp .ctl"))
+				.filter((c) => !c.classList.contains("settings-hidden")).length);
+		/* One search box for SETTINGS. The archetype panel has its own, which
+		   filters builds rather than settings and is a different control. */
+		ok("there is exactly one settings search box",
+			(await page.locator("#settings input[type=search]:not(#archSearch)")
+				.count()) === 1);
+		const all = await visibleCtls();
+		ok("the panel has enough controls to need a filter", all > 40, String(all));
+		await page.locator("#settingSearch").fill("pace");
+		await page.waitForTimeout(200);
+		const few = await visibleCtls();
+		ok("searching narrows the panel", few > 0 && few < all, few + " of " + all);
+		ok("and says how many matched",
+			/\d+ of \d+ settings/.test(await page.locator("#settingSearchNote").innerText()),
+			await page.locator("#settingSearchNote").innerText());
+		await page.locator("#settingSearch").fill("zzzznothing");
+		await page.waitForTimeout(200);
+		ok("a search with no matches says so",
+			/nothing matches/.test(await page.locator("#settingSearchNote").innerText()));
+		await page.locator("#settingSearch").fill("");
+		await page.waitForTimeout(200);
+		ok("clearing it restores every control", (await visibleCtls()) === all);
+		/* Only-changed. Nothing has been changed by hand at this point except
+		   the era, which was set back, so one deliberate change is made. */
+		await page.evaluate(() => {
+			const i = document.getElementById("upsetFactor");
+			i.value = "1.7";
+			i.dispatchEvent(new Event("input", { bubbles: true }));
+		});
+		await page.waitForTimeout(900);
+		await page.locator("#onlyChanged").check();
+		await page.waitForTimeout(250);
+		const changed = await visibleCtls();
+		ok("only-changed shows a handful, not the panel",
+			changed > 0 && changed < all / 2, changed + " of " + all);
+		const labels = await page.evaluate(() =>
+			Array.from(document.querySelectorAll("#settings details.grp .ctl"))
+				.filter((c) => !c.classList.contains("settings-hidden"))
+				.map((c) => (c.querySelector("label") || {}).textContent || "").join(" "));
+		ok("and one of them is the setting that was changed",
+			/March upsets/.test(labels), labels.slice(0, 120));
+		await page.locator("#onlyChanged").uncheck();
+		await page.waitForTimeout(200);
+	}
+
+	console.log("\nDestination weights by region");
+	{
+		await page.evaluate(() => {
+			document.getElementById("grp-leagues").open = true;
+		});
+		await page.waitForTimeout(150);
+		const groups = await page.locator("#leagueWeights details.leaguegroup").count();
+		ok("the destinations are grouped rather than a flat list of 23",
+			groups >= 3 && groups <= 8, String(groups));
+		const inputs = await page.locator("#leagueWeights input").count();
+		ok("and every league is still there", inputs === 23, String(inputs));
+		/* Europe is the group that has to exist, and the EuroLeague has to be
+		   in it: the grouping is derived from each league's own birthplace
+		   multipliers, so this is the check that the derivation works. */
+		const euro = await page.evaluate(() => {
+			const g = Array.from(
+				document.querySelectorAll("#leagueWeights details.leaguegroup"))
+				.filter((d) => /Europe/.test(d.querySelector("summary").textContent))[0];
+			if (!g) return null;
+			return Array.from(g.querySelectorAll("input")).map((i) => i.dataset.league);
+		});
+		ok("the EuroLeague is grouped under Europe",
+			!!euro && euro.indexOf("EuroLeague") !== -1, (euro || []).join(", "));
+		/* The group multiplier. */
+		await page.evaluate(() => {
+			const g = Array.from(
+				document.querySelectorAll("#leagueWeights details.leaguegroup"))
+				.filter((d) => /Europe/.test(d.querySelector("summary").textContent))[0];
+			g.open = true;
+			window.__before = Array.from(g.querySelectorAll("input"))
+				.map((i) => Number(i.value));
+			g.querySelector("summary button").click();
+		});
+		await page.waitForTimeout(700);
+		const doubled = await page.evaluate(() => {
+			const g = Array.from(
+				document.querySelectorAll("#leagueWeights details.leaguegroup"))
+				.filter((d) => /Europe/.test(d.querySelector("summary").textContent))[0];
+			const now = Array.from(g.querySelectorAll("input")).map((i) => Number(i.value));
+			return now.every((v, i) => v === Math.min(100, window.__before[i] * 2));
+		});
+		ok("doubling a region doubles every weight in it", doubled);
+		ok("and the change reaches the settings",
+			await page.evaluate(() => {
+				const w = window.App.state.cfg.leagueWeights;
+				return w && w.EuroLeague === Math.min(100, window.__before[0] * 2);
+			}));
+	}
+
+	console.log("\nThe randomizer scopes");
+	{
+		const chips = await page.locator("#randomScope .chip").allInnerTexts();
+		ok("the randomizer offers its scopes as chips",
+			chips.length === 8, chips.join(", "));
+		ok("exactly one is selected",
+			(await page.locator("#randomScope .chip.on").count()) === 1);
+		await page.locator("#randomScope .chip", { hasText: "builds" }).click();
+		await page.waitForTimeout(150);
+		ok("clicking one selects it",
+			(await page.evaluate(() => window.App.state.randomScope)) === "builds");
+		ok("and marks it for a screen reader",
+			(await page.locator("#randomScope .chip.on").getAttribute("aria-checked")) === "true");
+		await page.locator("#randomScope .chip", { hasText: "gently" }).click();
+		await page.waitForTimeout(150);
+	}
+
 	console.log("\nThe compare radar");
 	{
 		await page.locator("#tabs button", { hasText: "Compare" }).first().click();

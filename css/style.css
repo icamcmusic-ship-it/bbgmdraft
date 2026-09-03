@@ -912,3 +912,9 @@ svg.radar { display: block; width: 260px; max-width: 100%; height: auto; color: 
 ol.ballot { margin: 4px 0 0; padding-left: 20px; font-size: 12px; }
 ol.ballot li { margin-bottom: 2px; }
 ol.ballot .unit { display: inline; margin: 0; }
+
+/* Destination weights, grouped by region: twenty-three number boxes in a flat
+   list is a list nobody edits, and what people want from it is a region. */
+.leaguegroup > summary { cursor: pointer; font-size: 11px; padding: 3px 0; }
+.leaguegroup > summary button { margin-left: 6px; }
+.leaguegroup .archrow { padding-left: 8px; }

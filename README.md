@@ -452,7 +452,14 @@ pixels the table becomes one card per prospect.
 | **Build noise** | Per-rating jitter. |
 | **Vary size** | Lets listed height and weight drift with the build. |
 | **Freshmen / transfers / redshirts / reclassified** | Who is in what year, and how they got there. |
-| **Destination weights** | Where blank-college prospects go, per league. |
+| **Destination weights** | Where blank-college prospects go, per league — grouped by region, each group collapsible with its own ×2 / ×½, because what anybody actually wants from twenty-three number boxes is "more Europe". The grouping is derived from each league's own birthplace multipliers, so adding a league to `js/colleges.js` files it correctly with no second edit. |
+| **Scouting traits per prospect** | How many traits from the ~77-row table each prospect carries (see above). 0 turns the layer off, along with the per-player volatility, the offensive-glass bias and the medical file. |
+| **Avoid repeating recent anomalies** | The same memory the build pool has, one layer down. Thirty-two kinds and four draws a class is not enough separation on its own. |
+| **Flavor reaches settings you changed** | 0 (the default) means a flavor only moves settings still at their default and never overrules a decision you made. Above 0 it may move a random subset of yours, and only part of the way. |
+| **Universe mode** | Runs every loaded class file as one continuous world — see *Universe mode* below. It is a setting rather than a button because the button left every other tab showing a different world. |
+| **Coaching turnover / realignment memory / star returners / transfer portal** | How much the sideline and the roster around the class change from one season to the next. Turnover at 100 moves 40–60 of the 368 head-coaching jobs a year, which is what Division I does. |
+| **Season storylines** | Two or three macro storylines per class — a dominant favourite, a wide-open year, a mid-major surge, an attrition season, a chaotic sideline — each bending settings the season already reads. A class flavor says what kind of *players* the year has; this says what kind of *season* they played. |
+| **Coaching style drift** | How far a coach's style wanders from its row and from last season. At 0 every "four-out" team in the country plays identical numbers, which is what it used to do. |
 | **Era** | Which empirical anchor set the stat model targets — 2023–2026 or 2009–2021. Moves the whole scoring environment, not a slider on top of it. |
 | **Pace, scoring environment** | How many possessions a Division I game has. |
 | **Shooting efficiency** | What a possession is worth. Pace and scoring environment are both possession dials; without this there was no way to ask for a class that scores its points more (or less) efficiently. |
@@ -467,8 +474,15 @@ pixels the table becomes one card per prospect.
 | **Archetype frequencies** | Per-build rarity weights for every archetype, grouped by guards / wings / bigs / any size with a ×2 and ×½ per group, and showing what share of the last generated class each build actually came out as. Searchable by name or by tag ("shooting" finds the twenty builds that shoot, not the one called it), filterable by the height a build is eligible at ("make this a rim-protector-heavy class" starts with the builds a seven-footer can draw) and by whether it is in the current class's pool, and each group folds. Hover a name to see its offset vector. The count and weight span in the hint are read off the table, not typed. |
 | **Note template** | Which lines are written into each player's exported note. |
 
-Every control says which phases it re-runs, so a slider that costs 0.6 ms and one
-that rebuilds the class are visibly different before you drag either.
+Every control says which phases it re-runs, colour-coded — green for
+milliseconds, amber for a re-simulated season, red for a rebuilt class — so a
+slider that costs 0.6 ms and one that rebuilds the class are visibly different
+before you drag either.
+
+Eighty-odd controls is more than anybody scrolls, so the panel has a **search
+box** (matching labels, ids and hint text, opening the groups that match) and a
+**show only what I have changed** toggle, which is the other question people
+have of it — especially after a randomize.
 
 Presets set several at once, and you can save your own; the dropdown says
 "(modified)" once you change anything by hand, and lists exactly which settings
@@ -481,7 +495,8 @@ scope. *Everything, gently* draws a triangular distribution centered on each
 setting's own default, reaching about a third of the way toward each end;
 *everything, wide open* draws uniformly across each slider's declared range; the
 remaining scopes randomize one fieldset (quality, builds, years, destinations,
-season, awards). Every draw snaps to the control's step so the panel prints
+season, awards). The scope is a row of chips rather than a dropdown, because the
+button is one you press repeatedly and two clicks a press is one too many. Every draw snaps to the control's step so the panel prints
 clean numbers.
 
 Three things it deliberately never touches:
@@ -641,13 +656,57 @@ Player of the Year, the All-America team), the trophy the class lost to a
 named returning player, a spotlight on the best player who wasn't draft
 eligible, realignment, the anomaly stories, and draft day.
 
+**A hundred and one kinds now, in three registers.** The material was always
+there and the *writing* was the tell: one body template for most kinds, no
+quotes anywhere, and every article in the same flat declarative.
+
+- **Voices.** Wire, beat writer, columnist, analytics blog, local paper,
+  timeline. A voice is a register, not a set of facts — it decides how likely
+  an article is to carry a quote, whether it closes with a number or an
+  opinion, and what the byline says. A class draws a *staff* of three to five
+  rather than assigning voices independently, because a paper has a staff and
+  the same bylines recur through a season.
+- **Paragraphs.** A body is a lede plus, often, a paragraph drawn from a pool:
+  the stat line, the efficiency behind it, the usage share, the season high,
+  the team's record and résumé, the coach, the style, the draft stock, the
+  scouting traits, a columnist's take. Five ledes and six second paragraphs is
+  thirty articles, not eleven. The pool reads its facts back out of the article
+  itself, so every existing kind got paragraphs without an edit at its own
+  site, and a kind added later gets them without asking.
+- **Quotes.** Forty-odd lines across seven situations, attributed to a coach,
+  the player, an opposing coach or a scout in the building. Keyed on situation
+  rather than on kind, because "we got beat by a better team tonight" is the
+  same sentence whether the article is a bracket upset or a Tuesday in January.
+
+And forty-five new kinds, as a **table** rather than as code: a kind whose
+facts are one filter and a sort has no business being a block of plumbing.
+Each row states what it needs, what it fills in, and at least three headlines
+and three bodies — portal commitments, schedule releases, buzzer beaters, a
+freshman's first twenty, twenty-rebound nights, road winless streaks, senior
+night, bracketology, 15-over-2s, All-America snubs, combine measurements,
+withdrawals, and a handful that only fire inside a universe. A row returning
+"no story this year" is the normal case: a season does not have a 16-over-1 in
+it, and a paper that runs one anyway is the machine showing.
+
+The feed filters by kind (grouped), by team or player, and by "only my
+prospects", which reads the prospect table's own filter so a filtered board and
+a filtered feed agree.
+
 ## Player pages, links and faces
 
 Every player name across the season views — including every row on the
 **draft board** — is a link to a real player page: stats, shooting, career
 (the simulated prior seasons), honors, recruiting path, trajectory,
 scouting note, and an edit button. Team pages gained NET, quadrant records
-and the AP rank history. Back/forward work: player and team pages ride on
+and the AP rank history — the quadrant record drawn as a shape (segment width is
+games played, the filled part the share won) and the rank history as an inline
+sparkline, because "Q1 2-5 · Q2 4-3" and `[· · 18 15 11 9]` are the two formats
+a reader cannot compare at a glance. **Every game in a schedule opens a box
+score** for both teams: each prospect's own line, reconciled to his season
+totals, so it cannot disagree with anything else in the tool. It deliberately
+does not invent per-game lines for the returning players — their season
+averages exist and their nights do not — and says so rather than filling the
+space. Back/forward work: player, team and game pages ride on
 `pushState`. Portraits render with **facesjs** — the same
 library BBGM uses, vendored as `js/vendor/facesjs.js` so the no-build-step,
 open-off-the-disk property survives. A file's own `face` blob renders as-is
@@ -1012,6 +1071,24 @@ tools/golden.json   recorded output hashes
   transfer gets no partial line at the school he left (the season is played
   once, on one roster, so he carries one line), and the professional leagues
   abroad are still biography rather than a simulated season — see below.
+* **Universe mode does not yet share rosters across class files.** Turning it
+  on chains the loaded classes, hands each season's conference map, program
+  strength, coaches and star returners to the next, and — the fix that
+  mattered — makes every tab and the export show that world rather than
+  re-simulating the file on its own. What it does *not* do is put next year's
+  sophomores on this year's rosters: a player who is a junior in the 2027 file
+  ought to appear as a freshman in 2025 and a sophomore in 2026, on the school
+  his transfer biography says he was at, in every view except the draft board
+  of a year that is not his. That needs class-year assignment to become a
+  property of the *universe* rather than of one run, which is the genuinely
+  hard part and is not done. The export format carries the biography table
+  already, so the data is in place for it.
+* **Returning rotation players have season averages, not nights.** They are
+  named, they take trophies, they have pages, and the box-score view will not
+  print a line for them, because dividing a season average by games and calling
+  it a game is a fabrication in the one view whose whole claim is that it is a
+  record. Per-game logs for all ten rotation players is roughly three times the
+  stats phase and is the obvious next thing.
 * About one rating in a hundred sits exactly on the floor of 1 after a
   rebuild, concentrated in the ovr 20–39 band. Half of that arrives in the
   input (a draft-slot-shaped class has walk-on candidates whose ratings are

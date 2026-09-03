@@ -987,35 +987,20 @@
 			"\nrarity weight " + (a.w === undefined ? 1 : a.w);
 	}
 
-	/* ---- settings search (Part 5B) ----------------------------------------- */
+	/* ---- settings search --------------------------------------------------
 
+	   There were two of these: one injected an <input> at the top of the panel
+	   and toggled a `settings-hidden` class, and the other (bindSettingFilter,
+	   below) filters the same controls from a markup-declared box that also
+	   carries "show only what I have changed". Two search boxes over one panel
+	   is worse than either, and the second one is the one with the second
+	   filter on it, so this became the shim that removes the first.
+
+	   The `settings-hidden` CSS rule stays: it is what a stylesheet override or
+	   a bookmarklet would target, and it costs one line. */
 	function bindSettingsSearch() {
-		const aside = $("settings");
-		if (!aside) return;
-		const search = el("input");
-		search.type = "search";
-		search.id = "settingsSearch";
-		search.placeholder = "Search settings…";
-		search.setAttribute("aria-label", "Filter settings by name");
-		aside.insertBefore(search, aside.firstChild);
-		search.addEventListener("input", () => {
-			const q = search.value.trim().toLowerCase();
-			// Show/hide individual .ctl elements
-			for (const ctl of aside.querySelectorAll(".ctl")) {
-				const label = ctl.querySelector("label");
-				const text = label ? label.textContent.toLowerCase() : "";
-				ctl.classList.toggle("settings-hidden", q !== "" && text.indexOf(q) === -1);
-			}
-			// Show/hide details groups: hidden if ALL their .ctl children are hidden
-			for (const grp of aside.querySelectorAll("details.grp")) {
-				const ctls = grp.querySelectorAll(".ctl");
-				const allHidden = ctls.length > 0 &&
-					Array.from(ctls).every((c) => c.classList.contains("settings-hidden"));
-				grp.classList.toggle("settings-hidden", q !== "" && allHidden);
-				// Auto-open groups that have matches when searching
-				if (q && !allHidden) grp.open = true;
-			}
-		});
+		const stale = document.getElementById("settingsSearch");
+		if (stale && stale.parentNode) stale.parentNode.removeChild(stale);
 	}
 
 	/* ---- numeric input for each slider (Part 5A) + modified markers (Part 5C) */
@@ -1258,6 +1243,14 @@
 	function paintRandomScope() {
 		const box = $("randomScope");
 		if (!box) return;
+		/* The button says what it will do, since the scope is now a chip row
+		   rather than a labelled <select> and the button is what gets pressed. */
+		const btn = $("btnRandomize");
+		if (btn) {
+			const row = SCOPE_CHIPS.filter((r) => r[0] === state.randomScope)[0];
+			btn.title = "Randomize: " + (row ? row[2] : state.randomScope) +
+				" (g). Ctrl+Z restores them in one step.";
+		}
 		/* The chips have to be the scopes the randomizer knows, or a chip is a
 		   button that silently falls back to "gently". RANDOM_SCOPES is the
 		   authority; this asserts the two agree rather than trusting them to.
@@ -1279,7 +1272,6 @@
 				state.randomScope = value;
 				persist();
 				paintRandomScope();
-				paintRandomizeHint();
 			});
 			box.appendChild(b);
 		}
@@ -1319,9 +1311,10 @@
 		const D = CFG.DEFAULTS;
 		let shown = 0;
 		let total = 0;
-		for (const grp of document.querySelectorAll("#panel details.grp")) {
+		for (const grp of document.querySelectorAll("#settings details.grp")) {
 			let any = 0;
-			for (const ctl of grp.querySelectorAll(".ctl")) {
+			const ctls = grp.querySelectorAll(".ctl");
+			for (const ctl of ctls) {
 				const input = ctl.querySelector("input, select");
 				const key = input && input.id;
 				total++;
@@ -1335,14 +1328,23 @@
 						: cur === def;
 					if (same) show = false;
 				}
-				ctl.hidden = !show;
+				/* The stylesheet's own class, not the `hidden` attribute: a
+				   .ctl inside a <details> that is closed is already not
+				   rendered, and mixing the two mechanisms made "show only what
+				   I changed" leave empty gaps where a control used to be. */
+				ctl.classList.toggle("settings-hidden", !show);
 				if (show) { any++; shown++; }
 			}
 			/* A group with nothing in it is hidden rather than left as an
 			   empty heading, and a group with a match is opened — otherwise
 			   searching finds a setting inside a collapsed section and shows
 			   you the section's title. */
-			grp.hidden = any === 0;
+			/* A group with no .ctl children at all is not a group of settings
+			   — the archetype panel is a weight table with its own search box
+			   — and hiding it because "none of its controls matched" hid a
+			   panel that has no controls to match. Only a group that HAS
+			   controls and matched none of them is hidden. */
+			grp.classList.toggle("settings-hidden", ctls.length > 0 && any === 0);
 			if ((q || changedOnly) && any > 0) grp.open = true;
 		}
 		if (note) {
@@ -1744,39 +1746,101 @@
 			run();
 		});
 
-		// Destination weights, one row per non-NCAA league.
+		/* Destination weights, GROUPED BY REGION.
+
+		   Twenty-three number boxes in one flat list, and the thing a user
+		   actually wants from them is almost never one league — it is "more
+		   Europe", "fewer prep and postgrad", "this is an international
+		   class". So the leagues are grouped, each group collapses, and each
+		   group carries the same x2 / x1/2 buttons the archetype weights have.
+
+		   The grouping is DERIVED rather than authored: every league already
+		   carries a `regions` map of birthplace multipliers, and the region it
+		   most rewards is the region it belongs to. That means adding a league
+		   to js/colleges.js puts it in the right group with no second edit —
+		   which is the whole reason not to author a second table. */
 		const lw = $("leagueWeights");
+		const REGION_LABEL = {
+			europe: "Europe", usa: "United States", canada: "Canada",
+			oceania: "Australia and New Zealand", asia: "Asia",
+			latam: "Latin America", africa: "Africa", other: "Everywhere else",
+		};
+		const regionOf = (lg) => {
+			const r = lg.regions || {};
+			let best = "other";
+			let bestV = -Infinity;
+			for (const k of Object.keys(r)) {
+				// "other" is the fallback multiplier, not a place.
+				if (k === "other") continue;
+				if (r[k] > bestV) { bestV = r[k]; best = k; }
+			}
+			return bestV > 1.05 ? best : "other";
+		};
+		const commit = (label) => {
+			pushUndo(label);
+			const w = {};
+			for (const i of lw.querySelectorAll("input")) w[i.dataset.league] = Number(i.value);
+			state.cfg.leagueWeights = w;
+			// The three legacy sliders are folded in by Config.make, so they
+			// have to stop overriding once the user edits the table.
+			state.cfg.wEuroLeague = null;
+			state.cfg.wGLeague = null;
+			state.cfg.wNBL = null;
+			markDirty();
+			scheduleRun();
+		};
+		const byRegion = {};
 		for (const name of Object.keys(C.NON_NCAA)) {
 			if (name === "DII NCAA") continue;
-			const lg = C.NON_NCAA[name];
-			const row = el("div", "archrow");
-			const label = el("span", "archname", name);
-			label.title = name + "\nstrength " + lg.strength +
-				"\n" + (lg.pro ? "professional" : "amateur") +
-				"\ndefault weight " + lg.w;
-			row.appendChild(label);
-			const inp = el("input");
-			inp.type = "number";
-			inp.step = "1";
-			inp.min = "0";
-			inp.max = "100";
-			inp.dataset.league = name;
-			inp.setAttribute("aria-label", "Weight for " + name);
-			inp.addEventListener("change", () => {
-				pushUndo("changed destination weights");
-				const w = {};
-				for (const i of lw.querySelectorAll("input")) w[i.dataset.league] = Number(i.value);
-				state.cfg.leagueWeights = w;
-				// The three legacy sliders are folded in by Config.make, so they
-				// have to stop overriding once the user edits the table.
-				state.cfg.wEuroLeague = null;
-				state.cfg.wGLeague = null;
-				state.cfg.wNBL = null;
-				markDirty();
-				scheduleRun();
-			});
-			row.appendChild(inp);
-			lw.appendChild(row);
+			const key = regionOf(C.NON_NCAA[name]);
+			(byRegion[key] = byRegion[key] || []).push(name);
+		}
+		const order = Object.keys(byRegion)
+			.sort((a, b) => byRegion[b].length - byRegion[a].length);
+		for (const region of order) {
+			const group = el("details", "leaguegroup");
+			const sum = el("summary");
+			sum.appendChild(document.createTextNode(
+				(REGION_LABEL[region] || region) + " (" + byRegion[region].length + ")"));
+			const scale = (k, verb) => {
+				const b = el("button", "tiny", k > 1 ? "x2" : "x\u00bd");
+				b.type = "button";
+				b.title = verb + " every weight in this group";
+				b.addEventListener("click", (e) => {
+					e.preventDefault();
+					e.stopPropagation();
+					for (const i of lw.querySelectorAll("input")) {
+						if (byRegion[region].indexOf(i.dataset.league) === -1) continue;
+						i.value = String(Math.round(
+							Math.max(0, Math.min(100, Number(i.value) * k))));
+					}
+					commit(verb + " the " + (REGION_LABEL[region] || region) + " weights");
+				});
+				sum.appendChild(b);
+			};
+			scale(2, "Doubled");
+			scale(0.5, "Halved");
+			group.appendChild(sum);
+			for (const name of byRegion[region]) {
+				const lg = C.NON_NCAA[name];
+				const row = el("div", "archrow");
+				const label = el("span", "archname", name);
+				label.title = name + "\nstrength " + lg.strength +
+					"\n" + (lg.pro ? "professional" : "amateur") +
+					"\ndefault weight " + lg.w;
+				row.appendChild(label);
+				const inp = el("input");
+				inp.type = "number";
+				inp.step = "1";
+				inp.min = "0";
+				inp.max = "100";
+				inp.dataset.league = name;
+				inp.setAttribute("aria-label", "Weight for " + name);
+				inp.addEventListener("change", () => commit("changed destination weights"));
+				row.appendChild(inp);
+				group.appendChild(row);
+			}
+			lw.appendChild(group);
 		}
 		$("btnLeagueReset").addEventListener("click", () => {
 			pushUndo("reset the destination weights");
