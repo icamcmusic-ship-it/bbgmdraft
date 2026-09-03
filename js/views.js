@@ -2313,7 +2313,7 @@
 		const table = el("table");
 		const hr = el("tr");
 		for (const h of ["Season", "Flavor", "AP No. 1", "Champion", "Player of the Year",
-			"No. 1 pick", "Realignment", "Sideline changes"]) {
+			"No. 1 pick", "Realignment", "Sideline changes", "Later-class players"]) {
 			hr.appendChild(el("th", null, h));
 		}
 		const thead = el("thead");
@@ -2350,11 +2350,19 @@
 					r.coachHiredAway ? r.coachHiredAway + " hired away" : null,
 				].filter(Boolean).join(", ") + ")"
 				: "0"));
+			tr.appendChild(el("td", "num", r.futureOnRosters
+				? r.futureOnRosters + (r.futureHonors ? " (" + r.futureHonors + " honors)" : "")
+				: "0"));
 			tb.appendChild(tr);
 		}
 		table.appendChild(tb);
 		wrap.appendChild(table);
 		view.appendChild(wrap);
+		view.appendChild(el("p", "legendline",
+			"Later-class players: prospects from a later loaded class who were " +
+			"on this season's rosters as underclassmen — a 2027 junior playing " +
+			"his 2025 freshman year here. They take minutes, shots and honors " +
+			"from this season, and their own pages show the season they played."));
 
 		if (u.threads && u.threads.length) {
 			view.appendChild(el("h4", null, "Threads"));
@@ -2795,17 +2803,22 @@
 		const fh = res.fieldHonors || [];
 		if (fh.length) {
 			const box = el("div", "card");
-			box.appendChild(el("h4", null, "Honors won by returning players"));
+			box.appendChild(el("h4", null, fh.some((h) => h.futureClass)
+				? "Honors won by returning players and later classes' underclassmen"
+				: "Honors won by returning players"));
 			const noteBox = el("div", "note");
 			fh.forEach((h, i) => {
 				if (i) noteBox.appendChild(document.createTextNode("\n"));
+				noteBox.appendChild(document.createTextNode(h.award + " — "));
+				if (h.key) noteBox.appendChild(playerLink(h.name, h.key));
+				else noteBox.appendChild(document.createTextNode(h.name));
 				noteBox.appendChild(document.createTextNode(
-					h.award + " — " + h.name +
 					(h.classYear ? ", " + h.classYear.toLowerCase() : "") + " ("));
 				if (h.school && res.teams[h.school]) noteBox.appendChild(teamLink(h.school));
 				else noteBox.appendChild(document.createTextNode(h.school || "unknown"));
 				noteBox.appendChild(document.createTextNode(")" +
-					(h.starReturner ? " — " + h.starReturner : "")));
+					(h.starReturner ? " — " + h.starReturner : "") +
+					(h.futureClass ? " — in the " + h.futureClass + " draft class" : "")));
 			});
 			box.appendChild(noteBox);
 			view.appendChild(box);
@@ -2839,7 +2852,11 @@
 				p.newPos + " · " + p.newOvr + "/" + p.newPot + " · " + p.archetype + "\n" +
 				n1(s.ppg) + " PPG / " + n1(s.rpg) + " RPG / " + n1(s.apg) + " APG · " +
 				pc(s.fgp) + "% FG, " + pc(s.tpp) + "% 3P\n" +
-				p.awards.join("\n")));
+				p.awards.join("\n") +
+				(p.priorAwards && p.priorAwards.length
+					? "\nEarlier: " + p.priorAwards.slice().sort((a, b) => b.season - a.season)
+						.map((a) => a.season + " " + a.award).join("; ")
+					: "")));
 			cards.appendChild(c);
 		}
 		view.appendChild(cards);
@@ -3196,11 +3213,44 @@
 
 		const p = current;
 		if (!p || !p.gameLog) return;
-		const gl = p.gameLog;
+		/* Which season. An upperclassman's earlier seasons carry a log of
+		   their own now (see priorSchedule in js/engine.js), so the tab can
+		   show his sophomore year night by night rather than only the draft
+		   year. The draft year is the default and the only choice for a
+		   freshman. */
+		const earlier = (p.priorSeasons || []).filter((r) => r.gameLog && r.gameLog.games);
+		let showRow = null;
+		if (earlier.length) {
+			const seasons = el("div", "rowflex");
+			const want = st.logSeason && earlier.some((r) => r.season === st.logSeason)
+				? st.logSeason : null;
+			showRow = want ? earlier.filter((r) => r.season === want)[0] : null;
+			for (const r of earlier) {
+				const b = el("button", "tiny" + (showRow === r ? " primary" : ""),
+					r.season + " (" + r.classYear + (r.universe ? ", played in this universe" : "") + ")");
+				b.addEventListener("click", () => { st.logSeason = r.season; A().render(); });
+				seasons.appendChild(b);
+			}
+			const now = el("button", "tiny" + (!showRow ? " primary" : ""),
+				res.season + " (" + p.classYear + ", draft year)");
+			now.addEventListener("click", () => { st.logSeason = null; A().render(); });
+			seasons.appendChild(now);
+			view.appendChild(seasons);
+		}
+		const gl = showRow ? showRow.gameLog : p.gameLog;
+		const line = showRow ? showRow.line || showRow : p.stats;
+		if (showRow) {
+			view.appendChild(el("p", "legendline", showRow.universe
+				? "The season this universe's " + showRow.season + " actually played, on " +
+					showRow.team + "'s roster against that year's field."
+				: "A season simulated for him alone, at the ratings he had in " +
+					showRow.season + ", on a drawn schedule — nights that are plausible, " +
+					"not a replay of a season somebody watched."));
+		}
 		const head = el("div", "rowflex");
 		for (const t of [
-			p.name + " · " + p.newPos + " · " + (p.proClub || p.newCollege),
-			"season " + n1(p.stats.ppg) + "/" + n1(p.stats.rpg) + "/" + n1(p.stats.apg),
+			p.name + " · " + p.newPos + " · " + (showRow ? showRow.team : (p.proClub || p.newCollege)),
+			"season " + n1(line.ppg) + "/" + n1(line.rpg) + "/" + n1(line.apg),
 			"highs " + gl.highs.pts + "p " + gl.highs.reb + "r " + gl.highs.ast + "a",
 			gl.twentyPointGames + " 20-point games",
 			gl.doubleDoubles + " double-doubles",
@@ -3412,6 +3462,7 @@
 		back.addEventListener("click", () => { A().showPlayer(null); });
 		box.appendChild(back);
 		if (!p && /^field:/.test(String(key))) return fieldPlayerPage(box, res, key);
+		if (!p && /^future:/.test(String(key))) return futurePlayerPage(box, res, key);
 		if (!p) {
 			box.appendChild(el("p", "hint", "No such prospect in this class."));
 			return box;
@@ -3520,6 +3571,11 @@
 				n1(p.betterEarlier.ppg) + " PPG in " + p.betterEarlier.season + ")");
 		}
 		if (p.awards && p.awards.length) row("Honors", p.awards.join("; "));
+		if (p.priorAwards && p.priorAwards.length) {
+			row("Earlier honors", p.priorAwards.slice()
+				.sort((a, b) => b.season - a.season)
+				.map((a) => a.season + " " + a.award).join("; "));
+		}
 		box.appendChild(dl);
 
 		// Earlier seasons, when they were simulated.
@@ -3528,49 +3584,81 @@
 			const wrap = el("div", "scroll");
 			const table = el("table");
 			const hr = el("tr");
-			for (const h of ["Season", "Team", "Year", "GP", "MPG", "PPG", "RPG", "APG", "TS%"]) {
-				hr.appendChild(el("th", ["Season", "Team", "Year"].indexOf(h) === -1 ? "num" : "", h));
+			const HEAD = ["Season", "Team", "Year", "Record", "GP", "MPG", "PPG", "RPG", "APG", "TS%",
+				"Highs", "Honors"];
+			for (const h of HEAD) {
+				hr.appendChild(el("th", ["Season", "Team", "Year", "Record", "Highs", "Honors"].indexOf(h) === -1 ? "num" : "", h));
 			}
 			const thead = el("thead");
 			thead.appendChild(hr);
 			table.appendChild(thead);
 			const tb = el("tbody");
 			const rows = p.priorSeasons.slice();
+			const highsText = (h) => (h ? h.pts + "p / " + h.reb + "r / " + h.ast + "a" : "—");
 			for (const r of rows) {
-				const tr = el("tr");
-				tr.appendChild(el("td", null, String(r.season || "")));
+				const tr = el("tr", r.universe ? "now" : "");
+				const seasonTd = el("td", null, String(r.season || ""));
+				if (r.universe) {
+					seasonTd.textContent = "";
+					const go = el("button", "linky", String(r.season) + " ★");
+					go.title = "Played in this universe's " + r.season + " season — open it";
+					go.addEventListener("click", () => {
+						A().showPlayerInFile(r.universeFileIndex, r.universeKey);
+					});
+					seasonTd.appendChild(go);
+				}
+				tr.appendChild(seasonTd);
 				tr.appendChild(el("td", null, r.team || ""));
 				tr.appendChild(el("td", null, r.redshirt ? "Redshirt" : (r.classYear || "")));
 				if (r.redshirt) {
 					const td = el("td", null, r.reason || "did not play");
-					td.colSpan = 6;
+					td.colSpan = HEAD.length - 3;
 					tr.appendChild(td);
 				} else {
+					tr.appendChild(el("td", null, r.record ? r.record.w + "-" + r.record.l : "—"));
 					tr.appendChild(el("td", "num", String(r.gp || "")));
 					tr.appendChild(el("td", "num", n1(r.mpg)));
 					tr.appendChild(el("td", "num", n1(r.ppg)));
 					tr.appendChild(el("td", "num", n1(r.rpg)));
 					tr.appendChild(el("td", "num", n1(r.apg)));
 					tr.appendChild(el("td", "num", r.ts ? pc(r.ts) : ""));
+					const hi = el("td", null, highsText(r.highs));
+					if (r.best && r.best.opp) {
+						hi.title = "Best game: " + r.best.pts + " points against " + r.best.opp +
+							(r.twentyPointGames ? " · " + r.twentyPointGames + " 20-point games" : "");
+					}
+					tr.appendChild(hi);
+					tr.appendChild(el("td", null, (r.awards || []).join("; ")));
 				}
 				tb.appendChild(tr);
 			}
 			if (s) {
+				const team = res.teams[p.newCollege];
 				const tr = el("tr");
 				tr.appendChild(el("td", null, String(res.leagueFile.startingSeason || "")));
-				tr.appendChild(el("td", null, p.newCollege));
+				tr.appendChild(el("td", null, p.proClub || p.newCollege));
 				tr.appendChild(el("td", null, p.classYear));
+				tr.appendChild(el("td", null, team && Number.isFinite(team.w) ? team.w + "-" + team.l : "—"));
 				tr.appendChild(el("td", "num", String(s.gp)));
 				tr.appendChild(el("td", "num", n1(s.mpg)));
 				tr.appendChild(el("td", "num", n1(s.ppg)));
 				tr.appendChild(el("td", "num", n1(s.rpg)));
 				tr.appendChild(el("td", "num", n1(s.apg)));
 				tr.appendChild(el("td", "num", pc(s.ts)));
+				tr.appendChild(el("td", null, highsText(p.gameLog && p.gameLog.highs)));
+				tr.appendChild(el("td", null, (p.awards || []).slice(0, 3).join("; ") +
+					((p.awards || []).length > 3 ? " (+" + (p.awards.length - 3) + ")" : "")));
 				tb.appendChild(tr);
 			}
 			table.appendChild(tb);
 			wrap.appendChild(table);
 			box.appendChild(wrap);
+			if (rows.some((r) => r.universe)) {
+				box.appendChild(el("p", "legendline",
+					"★ a season this universe actually played, on that year's " +
+					"roster, against that year's field — not a season simulated " +
+					"for him alone. Click it to open it."));
+			}
 		}
 
 		if (p.note) {
@@ -3594,6 +3682,69 @@
 		}
 		box.appendChild(actions);
 		if (global.Faces) global.Faces.render(face, p);
+		return box;
+	}
+
+	/* A LATER CLASS'S UNDERCLASSMAN, in the season he played here.
+
+	   In a universe the 2027 file's junior was a freshman on a 2025 roster,
+	   and this is his 2025: the line, the nights, the honors, and a link to
+	   the man he became — his own page, in his own file. */
+	function futurePlayerPage(box, res, key) {
+		const fp = (res.futurePlayers || []).filter((f) => f.key === key)[0];
+		if (!fp) {
+			box.appendChild(el("p", "hint", "No such player in this season."));
+			return box;
+		}
+		const team = res.teams[fp.newCollege];
+		const head = el("div", "rowflex playerhead");
+		const idbox = el("div");
+		idbox.appendChild(el("h3", null, fp.name));
+		const line = el("p", "legendline");
+		line.appendChild(teamLink(fp.newCollege));
+		line.appendChild(document.createTextNode(
+			" · " + fp.classYear + " · " + fp.newPos + " · " + fp.archetype +
+			" · ovr " + fp.newOvr + " that year"));
+		idbox.appendChild(line);
+		const pills = el("div", "rowflex");
+		pills.appendChild(el("span", "pill", "In the " + fp.classSeason + " draft class, not this one"));
+		const own = el("button", "linky", "His own page, in the " + fp.classSeason + " class →");
+		own.addEventListener("click", () => { A().showPlayerInFile(fp.fileIndex, fp.homeKey); });
+		pills.appendChild(own);
+		idbox.appendChild(pills);
+		head.appendChild(idbox);
+		box.appendChild(head);
+		const dl = el("dl", "shortcuts");
+		const row = (k, v) => {
+			if (!v) return;
+			dl.appendChild(el("dt", null, k));
+			dl.appendChild(el("dd", null, v));
+		};
+		const s = fp.stats;
+		if (s) {
+			row("This season", s.gp + " GP · " + n1(s.mpg) + " MPG · " +
+				n1(s.ppg) + " / " + n1(s.rpg) + " / " + n1(s.apg) +
+				" · " + n1(s.spg) + " stl, " + n1(s.bpg) + " blk");
+			row("Shooting", "FG " + pc(s.fgp) + "% · 3P " + pc(s.tpp) + "% · FT " +
+				pc(s.ftp) + "% · TS " + pc(s.ts) + "%");
+			row("Usage", pc(s.usg) + "% of possessions · " + n1(s.topg) + " TO · " +
+				n1(s.pfpg) + " PF");
+		}
+		if (team) row("Team", team.w + "-" + team.l + (team.ncaaSeed
+			? " · No. " + team.ncaaSeed + " seed, " + team.ncaaResult : ""));
+		if (fp.awards && fp.awards.length) row("Honors", fp.awards.join("; "));
+		box.appendChild(dl);
+		const gl = fp.gameLog;
+		if (gl && gl.games && gl.games.length) {
+			box.appendChild(el("h4", null, "Game log"));
+			const pillsRow = el("div", "rowflex");
+			pillsRow.appendChild(el("span", "pill", "highs " + gl.highs.pts + "p " +
+				gl.highs.reb + "r " + gl.highs.ast + "a"));
+			pillsRow.appendChild(el("span", "pill", gl.twentyPointGames + " 20-point games"));
+			pillsRow.appendChild(el("span", "pill", gl.doubleDoubles + " double-doubles"));
+			box.appendChild(pillsRow);
+			box.appendChild(gameLogTable(gl));
+		}
 		return box;
 	}
 
@@ -3934,6 +4085,53 @@
 			plist.appendChild(c);
 		}
 		box.appendChild(plist);
+
+		/* The later classes' underclassmen who were on this roster this
+		   year (universe mode). Each links to the season he played here and,
+		   from there, to his own class. */
+		const future = (t.futureMembers || []).slice()
+			.sort((a, b) => ((b.stats && b.stats.mpg) || 0) - ((a.stats && a.stats.mpg) || 0));
+		if (future.length) {
+			box.appendChild(el("h4", null, "From later draft classes"));
+			box.appendChild(el("p", "legendline",
+				"Prospects in a later loaded class who were on this roster this " +
+				"season, at the class year and rating they had then."));
+			const wrap = el("div", "scroll");
+			const table = el("table");
+			const hr = el("tr");
+			for (const h of ["Player", "Class", "Year", "Ovr", "MPG", "PPG", "RPG", "APG", "TS%", "Honors"]) {
+				hr.appendChild(el("th", ["Player", "Class", "Year", "Honors"].indexOf(h) === -1 ? "num" : "", h));
+			}
+			const thead = el("thead");
+			thead.appendChild(hr);
+			table.appendChild(thead);
+			const tb = el("tbody");
+			for (const fp of future) {
+				const l = fp.stats || {};
+				const tr = el("tr");
+				const td = el("td", "sticky");
+				td.appendChild(playerLink(fp.name, fp.key));
+				tr.appendChild(td);
+				const cls = el("td");
+				const go = el("button", "linky", String(fp.classSeason) + " class");
+				go.title = "His page in the " + fp.classSeason + " draft class";
+				go.addEventListener("click", () => { A().showPlayerInFile(fp.fileIndex, fp.homeKey); });
+				cls.appendChild(go);
+				tr.appendChild(cls);
+				tr.appendChild(el("td", null, fp.classYear || ""));
+				tr.appendChild(el("td", "num", String(fp.newOvr)));
+				tr.appendChild(el("td", "num", n1(l.mpg || 0)));
+				tr.appendChild(el("td", "num", n1(l.ppg || 0)));
+				tr.appendChild(el("td", "num", n1(l.rpg || 0)));
+				tr.appendChild(el("td", "num", n1(l.apg || 0)));
+				tr.appendChild(el("td", "num", Number.isFinite(l.ts) ? pc(l.ts) : ""));
+				tr.appendChild(el("td", null, (fp.awards || []).slice(0, 3).join("; ")));
+				tb.appendChild(tr);
+			}
+			table.appendChild(tb);
+			wrap.appendChild(table);
+			box.appendChild(wrap);
+		}
 
 		/* The rest of the rotation. Returning players carry names, stat
 		   lines and, when one of them beat the class to a trophy, honors —

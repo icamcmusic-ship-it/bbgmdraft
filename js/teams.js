@@ -731,8 +731,14 @@
 			if (carry && carry.levels && Number.isFinite(carry.levels[name])) {
 				level = clamp(0.62 * level + 0.38 * carry.levels[name], 12, 95);
 			}
-			const prospects = prospectsBySchool[name] || [];
-			const members = prospects.map((p) => ({
+			const onRoster = prospectsBySchool[name] || [];
+			/* This class's prospects, and — in a universe — the men from
+			   later classes who were on the roster this year. Both play;
+			   only the first are `prospects` (the board, the export, the
+			   prospect cards). See phaseRegular in js/engine.js. */
+			const prospects = onRoster.filter((p) => !p.future);
+			const futureMembers = onRoster.filter((p) => p.future);
+			const members = onRoster.map((p) => ({
 				filler: false,
 				player: p,
 				talent: prospectTalent(p.newOvr, p.newPot),
@@ -837,6 +843,7 @@
 				members,
 				rating: teamRating(members),
 				prospects,
+				futureMembers,
 				w: 0, l: 0, cw: 0, cl: 0,
 				sos: 0, games: 0, quadWins: 0,
 				log: [],
@@ -1030,7 +1037,10 @@
 		const edge = gameStrength(ratingOn(A, when)) - gameStrength(ratingOn(B, when)) + home;
 		// ~0.72 points of margin per rating point, plus real game-to-game noise.
 		const margin = edge * 0.72 + rng.normal(0, 9.4 * noise);
-		const pace = clamp((cfg.pace || 68) + (cfg.scoringEnv || 0) * 1.6, 58, 82);
+		/* Capped at 78 possessions: the fastest D-I team in the modern era
+		   sits near 76, and the class-level pace jitter plus a run-and-gun
+		   style could stack to 82, which is a game nobody has played. */
+		const pace = clamp((cfg.pace || 68) + (cfg.scoringEnv || 0) * 1.6, 58, 78);
 		const total = clamp(pace * 2.06 + rng.normal(0, 9), 92, 190);
 		let a = Math.round((total + margin) / 2);
 		let b = Math.round((total - margin) / 2);

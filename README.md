@@ -202,7 +202,7 @@ walk-on who ended up a draft pick, the coach's son, a man who never played a hig
 school game, a convert from another sport, a season that ended in February. The
 prospect table lists them as the story of the class.
 
-**3. Simulates the season those prospects played.** All 368 colleges are built
+**3. Simulates the season those prospects played.** All 364 Division I programs are built
 into a real landscape: program strength starts from each school's draft frequency
 (Kentucky 116, Wagner 0.1) on a log scale, plus this season's conference strength (which drifts
 from year to year rather than being a constant), plus a year of variance — flat
@@ -220,7 +220,7 @@ below the best prospect on the roster, because a program that landed a draft pic
 did not already have two of them. Injuries are drawn **before** a game is played,
 so a man who misses fourteen games with a knee costs his team the games it would
 have won with him.
-Then **every one of the 368 programs** plays the same 31-game schedule, conference
+Then **every one of the 364 programs** plays the same 31-game schedule, conference
 tournaments, a 68-team national tournament and a 32-team NIT — with real scores,
 overtimes, and teams a few points better in March than in November.
 
@@ -360,12 +360,25 @@ page.
 national player-of-the-year trophies (Naismith, Wooden, Oscar Robertson, AP, NABC,
 Sporting News) each have their own electorate, so a clear best player sweeps and a
 close year splits. Three national defensive awards, the five position awards (Cousy,
-West, Erving, Malone, Abdul-Jabbar), the Pete Newell, Lute Olson and Wayman Tisdale
+West, Erving, Duncan, Abdul-Jabbar), the Pete Newell, Lute Olson and Wayman Tisdale
 awards, consensus All-America teams, NABC All-Defensive teams, NCAA All-Region
 teams, the Final Four Most Outstanding Player, Academic All-America, NIT honors,
 and per conference: Player, Defensive Player, Freshman, Sixth Man and Most Improved
 of the Year, all-conference first and second teams, and all-defensive, all-freshman,
 all-newcomer and all-tournament teams.
+
+**A player who stayed can win it twice.** An upperclassman's earlier seasons
+are ranked too: each simulated year is measured against the bars this
+season's field set — the score of the last man named to every honor — and a
+sophomore season that would have made the first team this year is an
+all-conference season on his record, at its own year. About a quarter of a
+class's non-freshmen carry one, mostly all-conference and all-freshman rows
+and the occasional All-America, so a two-time all-conference pick is a thing
+the tool can produce and a one-and-done and a fourth-year senior no longer
+finish with the same number of lines. They live beside the draft year's list,
+never in it: the player page and the Awards tab show them under *Earlier
+honors*, the note has a line for them, the export writes them as award rows
+at their own seasons, and the paper has a kind for the repeat winner.
 
 There is a **finalist tier** as well as a winners' tier — Naismith finalists, the
 Wooden Late Season Top 20, AP honorable mention, position-award finalists, a
@@ -457,7 +470,7 @@ pixels the table becomes one card per prospect.
 | **Avoid repeating recent anomalies** | The same memory the build pool has, one layer down. Thirty-two kinds and four draws a class is not enough separation on its own. |
 | **Flavor reaches settings you changed** | 0 (the default) means a flavor only moves settings still at their default and never overrules a decision you made. Above 0 it may move a random subset of yours, and only part of the way. |
 | **Universe mode** | Runs every loaded class file as one continuous world — see *Universe mode* below. It is a setting rather than a button because the button left every other tab showing a different world. |
-| **Coaching turnover / realignment memory / star returners / transfer portal** | How much the sideline and the roster around the class change from one season to the next. Turnover at 100 moves 40–60 of the 368 head-coaching jobs a year, which is what Division I does. |
+| **Coaching turnover / realignment memory / star returners / transfer portal** | How much the sideline and the roster around the class change from one season to the next. Turnover at 100 moves 40–60 of the 364 head-coaching jobs a year, which is what Division I does. |
 | **Season storylines** | Two or three macro storylines per class — a dominant favourite, a wide-open year, a mid-major surge, an attrition season, a chaotic sideline — each bending settings the season already reads. A class flavor says what kind of *players* the year has; this says what kind of *season* they played. |
 | **Coaching style drift** | How far a coach's style wanders from its row and from last season. At 0 every "four-out" team in the country plays identical numbers, which is what it used to do. |
 | **Era** | Which empirical anchor set the stat model targets — 2023–2026 or 2009–2021. Moves the whole scoring environment, not a slider on top of it. |
@@ -604,9 +617,9 @@ true strength. `js/rankings.js` derives everything from **observable results**:
 - **Adjusted efficiency** — per-game margin, capped at ±10 like the real NET
   so blowouts don't pay, adjusted for opponent quality and venue by the same
   iteration.
-- **NET rank** — a blend of the two, over all 368 programs.
+- **NET rank** — a blend of the two, over all 364 programs.
 - **Quadrant records** — the standard Q1–Q4 map (home 1–30 / neutral 1–50 /
-  away 1–75 is a Q1 game, and so on). With 368 programs the real ~360-team
+  away 1–75 is a Q1 game, and so on). With 364 programs the real ~360-team
   thresholds transfer directly.
 - **The committee** — selection and seeding score NET rank, Q1/Q2 wins, bad
   losses, road record, the last twelve games and head-to-head among the
@@ -656,7 +669,7 @@ Player of the Year, the All-America team), the trophy the class lost to a
 named returning player, a spotlight on the best player who wasn't draft
 eligible, realignment, the anomaly stories, and draft day.
 
-**A hundred and one kinds now, in three registers.** The material was always
+**A hundred and twenty-one kinds now, in three registers.** The material was always
 there and the *writing* was the tell: one body template for most kinds, no
 quotes anywhere, and every article in the same flat declarative.
 
@@ -744,6 +757,28 @@ flavor, realignment, coaching changes per season), continuity threads
 (repeat champions, programs with multiple No. 1 picks), and the alumni
 index. The export stores seeds and file fingerprints, not simulated output —
 with the same files loaded, importing it replays the identical world.
+
+**The classes share rosters now.** A junior in the 2027 file was a freshman in
+2025 and a sophomore in 2026, and until this he was not: each season was played
+with its own prospects and synthesized returners, so the roster that would
+carry next year's lottery pick as a freshman carried a made-up sophomore
+instead, and the freshman-of-the-year race never had him in it. The chain runs
+in three passes. First every file's **build phase** alone (class years,
+colleges, transfers and builds are drawn there, from the seed and the pool
+memory and nothing a season produces — so the preview is exactly the class the
+full run builds later, and `tools/test.js` holds it to that). Then the seasons,
+oldest first, each handed the later classes' underclassmen who were on campus
+that year: on the school his transfer biography says, at the class year and
+the overall he had then (the same arithmetic his own career page uses), as
+real players — minutes, a stat line, a game log, and every honor the field can
+win, so the 2025 Tisdale can go to a man whose draft is 2027. They never reach
+the draft board or the export of a year that is not theirs; the team page
+lists them under *From later draft classes*, the awards page names the class
+they belong to, and the paper has a kind for it. Last, the seasons a player
+actually played replace the ones his own file simulated for him alone: his
+career table marks them ★ and links to that year, his earlier honors are the
+ones he really took, and his note says so. The timeline counts the roster
+spots each season filled from a later class.
 
 ---
 
@@ -934,8 +969,9 @@ code page, which turns Dončić into mojibake). Load it back with **Tools → Im
 ### The college statline
 
 The **More ▾** dialog's *college statline*, *prior seasons* and *season highs* options
-write the simulated college season into each player's `stats` as **complete Basketball GM
-season rows** — every one of the 74 keys the game's own `addStatsRow` writes, in its
+write the simulated season — Division I or not: a prospect at Real Madrid or in
+Stockton gets his club's season as a row too, at his league's game length — into
+each player's `stats` as **complete Basketball GM season rows** — every one of the 74 keys the game's own `addStatsRow` writes, in its
 order: the counting stats, the three-zone shot chart (`fgAtRim` / `fgLowPost` /
 `fgMidRange` and their attempts), `minAvailable`, blocked shots against, the
 double-double / triple-double / five-by-five counts, all 18 derived statistics (PER, EWA,
@@ -1031,7 +1067,7 @@ css/style.css
 js/text.js          a/an, sentence endings, and the text-fault sweep every template shares
 js/rng.js           seeded RNG (mulberry32) + distributions
 js/bbgm.js          BBGM's own rating formulas, reimplemented
-js/colleges.js      368 colleges + 24 non-NCAA destinations and their clubs
+js/colleges.js      364 D-I programs + 24 non-NCAA destinations and their clubs
 js/config.js        defaults + presets
 js/calibration.js   the era table: empirical anchors and the shifts to reach them
 js/ratings.js       archetypes, class flavor, potential and the ovr-preserving solver
@@ -1059,9 +1095,14 @@ tools/golden.json   recorded output hashes
   D-I prospects: the player re-solved to the overall he had then, carrying that
   year's class year, in a rotation rebuilt at his program's level with the men
   he was behind actually on it. Pooled over three classes that runs 24.1 minutes
-  and 9.4 points as a freshman against 31.3 and 15.7 in the draft year. Nothing
-  ranks on them beyond the "was better as a sophomore" note line, and
-  `priorSeasons: "reconstruct"` restores the old backward-scaled line.
+  and 9.4 points as a freshman against 31.3 and 15.7 in the draft year. Each
+  one carries nights now — a drawn schedule (the program's own conference,
+  results off its level that year) and a game log reconciled to the line, so
+  an earlier season has season highs, a best game, a twenty-point count and a
+  record, on the Career table, in the note's highs line and on the exported
+  row — and honors, measured against this season's bars (see *Hands out
+  honors*). `priorSeasons: "reconstruct"` restores the old backward-scaled
+  line, with none of that.
 * Depth that used to be missing and now exists: the AP poll is voted weekly by
   a persistent 60-member electorate; selection runs a committee model over
   observables (NET, quadrants, road record, stretch form) instead of peeking at
@@ -1089,18 +1130,14 @@ tools/golden.json   recorded output hashes
   transfer gets no partial line at the school he left (the season is played
   once, on one roster, so he carries one line), and the professional leagues
   abroad are still biography rather than a simulated season — see below.
-* **Universe mode does not yet share rosters across class files.** Turning it
-  on chains the loaded classes, hands each season's conference map, program
-  strength, coaches and star returners to the next, and — the fix that
-  mattered — makes every tab and the export show that world rather than
-  re-simulating the file on its own. What it does *not* do is put next year's
-  sophomores on this year's rosters: a player who is a junior in the 2027 file
-  ought to appear as a freshman in 2025 and a sophomore in 2026, on the school
-  his transfer biography says he was at, in every view except the draft board
-  of a year that is not his. That needs class-year assignment to become a
-  property of the *universe* rather than of one run, which is the genuinely
-  hard part and is not done. The export format carries the biography table
-  already, so the data is in place for it.
+* **Universe mode shares rosters across class files, one direction.** A
+  later class's underclassmen play the earlier seasons (see *Universe mode*).
+  What it still does not do is the reverse: a 2025 class's freshman who went
+  undrafted does not reappear as a 2026 sophomore, because a class file only
+  knows about the men who were drafted out of it. A universe's earlier
+  seasons also run once with the later classes' rosters and once without
+  when a single file is re-run outside the chain, which is why the chain is
+  the world and a standalone run of one of its files is not.
 * **Returning rotation players have season averages, not nights.** They are
   named, they take trophies, they have pages, and the box-score view will not
   print a line for them, because dividing a season average by games and calling
@@ -1140,7 +1177,7 @@ tools/golden.json   recorded output hashes
   his program's level and nothing else, so the best player in the country was
   by construction always somebody in the draft class and the national player of
   the year came out of the class in 100% of seasons. About a dozen **star
-  returners** now exist across the 368 programs — the excellent college player
+  returners** now exist across the 364 programs — the excellent college player
   who is not an NBA prospect, which several of the 2024 consensus first-team
   All-Americans were — and the class takes the trophy in 80% of seasons and 2.4
   of the five consensus first-team spots instead. Each has a name, a class year

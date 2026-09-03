@@ -305,7 +305,7 @@
 		{ name: "Bob Cousy Award", label: "best point guard", pos: ["PG", "G"] },
 		{ name: "Jerry West Award", label: "best shooting guard", pos: ["SG", "G"] },
 		{ name: "Julius Erving Award", label: "best small forward", pos: ["SF", "GF"] },
-		{ name: "Karl Malone Award", label: "best power forward", pos: ["PF", "F"] },
+		{ name: "Tim Duncan Award", label: "best power forward", pos: ["PF", "F"] },
 		{ name: "Kareem Abdul-Jabbar Award", label: "best center", pos: ["C", "FC"] },
 	];
 
@@ -318,7 +318,7 @@
 		[/^Consensus National Player of the Year/, 0],
 		[/^(Naismith Trophy|John R\. Wooden Award|Oscar Robertson Trophy|AP Player of the Year|NABC Player of the Year|Sporting News Player of the Year)$/, 1],
 		[/^(Naismith Defensive|NABC Defensive|Lefty Driesell)/, 2],
-		[/^(Bob Cousy|Jerry West|Julius Erving|Karl Malone|Kareem Abdul-Jabbar|Pete Newell|Lute Olson|Wayman Tisdale) Award$/, 3],
+		[/^(Bob Cousy|Jerry West|Julius Erving|Tim Duncan|Kareem Abdul-Jabbar|Pete Newell|Lute Olson|Wayman Tisdale) Award$/, 3],
 		[/^Consensus First Team All-American$/, 4],
 		[/^Consensus Second Team All-American$/, 5],
 		[/^Third Team All-American$/, 6],
@@ -474,6 +474,87 @@
 		return n + (["th", "st", "nd", "rd"][n % 10] || "th");
 	}
 
+	/* HONORS FOR THE SEASONS BEFORE THIS ONE.
+
+	   A prospect who stayed three years finished with exactly the honors of
+	   his draft year, because only the draft year was ranked against a
+	   field. His sophomore season was simulated — a stat line, a rotation, a
+	   program level — and then nothing asked whether it was an all-conference
+	   season, so a two-time all-conference pick was not a thing the tool
+	   could produce and a one-and-done and a fourth-year senior finished
+	   with the same number of lines under "Honors".
+
+	   There is no field for an earlier year (the season was not played
+	   across 364 programs), so an earlier season is measured against THIS
+	   season's bars: the score of the last man named to each honor is what a
+	   prior line has to reach. A conference all-first-team season last year
+	   is one that would have made the first team this year, which is the
+	   only yardstick that exists and a fair one — the field does not change
+	   shape much from one year to the next. The résumé half of the score is
+	   the program's record that year (the drawn schedule carries one) and its
+	   conference's strength; the March half is unknown and left out, so an
+	   earlier season is if anything held to a slightly higher bar.
+
+	   Honors go onto `p.priorAwards` as {season, classYear, award} — never
+	   into `p.awards`, which is the draft year and is what every count, band
+	   and export scope was written against — and `p.awards` stays the draft
+	   year's list. The export writes them as rows at their own seasons. */
+	function priorHonors(ncaa, teams, confBars, natBars, rng, noiseScale) {
+		const has = (v) => Number.isFinite(v);
+		for (const p of ncaa) {
+			p.priorAwards = [];
+			if (!Array.isArray(p.priorSeasons)) continue;
+			for (const row of p.priorSeasons) {
+				if (row.redshirt || !row.simulated || !row.line) continue;
+				const L = row.line;
+				// The same gates the draft year applies: a bit-part season is
+				// not an all-conference one however the maths ranked it.
+				if (!(L.mpg >= 20)) continue;
+				const prod = productionScore({ stats: L, teamPace: p.teamPace });
+				if (prod < 12) continue;
+				const team = teams[row.team] || teams[p.newCollege];
+				const conf = team ? team.conf : null;
+				const cmeta = conf ? (C.CONFERENCES[conf] || C.CONFERENCES.Independent) : null;
+				const confStrength = team && Number.isFinite(team.confStrength)
+					? team.confStrength : (cmeta ? cmeta.strength : 60);
+				const wins = row.record && Number.isFinite(row.record.w) ? row.record.w : 16;
+				const resume = 0.18 * wins + 0.18 * (confStrength - 58);
+				const r = rng.child(p.key + "|" + row.season);
+				const score = prod + resume + r.normal(0, 1.4 * noiseScale);
+				const def = fieldDefenseScore(L) + resume * 0.35 + r.normal(0, 1.2 * noiseScale);
+				const fresh = row.classYear === "Freshman";
+				const out = [];
+				const bars = conf && confBars[conf] && teams[row.team] ? confBars[conf] : null;
+				if (bars) {
+					const lb = bars.label;
+					if (has(bars.poy) && score >= bars.poy) out.push(lb + " Player of the Year");
+					if (has(bars.first) && score >= bars.first) out.push("All-" + lb + " First Team");
+					else if (has(bars.second) && score >= bars.second) out.push("All-" + lb + " Second Team");
+					if (fresh) {
+						if (has(bars.froy) && score >= bars.froy) out.push(lb + " Freshman of the Year");
+						if (has(bars.allFresh) && score >= bars.allFresh) out.push("All-" + lb + " Freshman Team");
+					}
+					if (has(bars.dpoy) && def >= bars.dpoy && def >= 9) out.push(lb + " Defensive Player of the Year");
+					else if (has(bars.allDef) && def >= bars.allDef && def >= 9) out.push("All-" + lb + " Defensive Team");
+				}
+				if (has(natBars.aa1) && score >= natBars.aa1) out.push("Consensus First Team All-American");
+				else if (has(natBars.aa2) && score >= natBars.aa2) out.push("Consensus Second Team All-American");
+				else if (has(natBars.aa3) && score >= natBars.aa3) out.push("Third Team All-American");
+				if (fresh) {
+					if (has(natBars.tisdale) && score >= natBars.tisdale) out.push("Wayman Tisdale Award");
+					if (has(natBars.allFresh) && score >= natBars.allFresh) out.push("All-Freshman Team");
+				}
+				if (has(natBars.allDef1) && def >= natBars.allDef1 && def >= 9) {
+					out.push("NABC All-Defensive First Team");
+				}
+				row.awards = sortAwards(out);
+				for (const award of row.awards) {
+					p.priorAwards.push({ season: row.season, classYear: row.classYear, award });
+				}
+			}
+		}
+	}
+
 	function assign(prospects, teams, tourney, cfg, rng) {
 		const strict = clamp(cfg.awardStrictness, 0.2, 3);
 		// Conference hardware is its own dial. 32 conferences hand out far more
@@ -546,6 +627,7 @@
 		const label = T.label;
 
 		/* --- conference honors ------------------------------------------- */
+		const confBars = {};
 		const byConf = {};
 		for (const x of everyone) {
 			if (!x.conf) continue;
@@ -620,6 +702,20 @@
 			// named none of them.
 			def.slice(0, confSlots(5))
 				.forEach((x) => giveDef(x, "All-" + lb + " Defensive Team"));
+			/* The bar each honor cleared this season, for the earlier
+			   seasons (see priorHonors below): the score of the last man
+			   named is what an earlier year has to match. */
+			const at = (arr, n) => (arr[Math.min(arr.length, n) - 1] || {});
+			confBars[conf] = {
+				label: lb,
+				poy: at(list, 1).scoreTotal,
+				first: at(list, firstN).scoreTotal,
+				second: at(list, firstN + confSlots(5)).scoreTotal,
+				froy: at(fresh, 1).scoreTotal,
+				allFresh: at(fresh, confSlots(5)).scoreTotal,
+				dpoy: at(def, 1).scoreDefTotal,
+				allDef: at(def, confSlots(5)).scoreDefTotal,
+			};
 		}
 
 		/* --- national honors ---------------------------------------------- */
@@ -779,6 +875,16 @@
 		const freshmen = nation.filter((x) => x.isFreshman);
 		freshmen.slice(0, slots(1)).forEach((x) => giveNat(x, "Wayman Tisdale Award"));
 		freshmen.slice(0, slots(5)).forEach((x) => giveNat(x, "All-Freshman Team"));
+		const natAt = (arr, n) => (arr[Math.min(arr.length, n) - 1] || {});
+		const natBars = {
+			aa1: natAt(nation, slots(5)).scoreTotal,
+			aa2: natAt(nation, slots(10)).scoreTotal,
+			aa3: natAt(nation, slots(15)).scoreTotal,
+			tisdale: natAt(freshmen, slots(1)).scoreTotal,
+			allFresh: natAt(freshmen, slots(5)).scoreTotal,
+			allDef1: natAt(natDef, slots(5)).scoreDefTotal,
+		};
+		priorHonors(ncaa, teams, confBars, natBars, rng.child("prior-honors"), noiseScale);
 
 		/* Finalists.
 
@@ -1150,7 +1256,7 @@
 		/^Third Team All-American$/,
 		/^(Naismith|NABC) Defensive Player of the Year$/,
 		/^Lefty Driesell Award$/,
-		/^(Bob Cousy|Jerry West|Julius Erving|Karl Malone|Kareem Abdul-Jabbar) Award$/,
+		/^(Bob Cousy|Jerry West|Julius Erving|Tim Duncan|Kareem Abdul-Jabbar) Award$/,
 		/^Final Four Most Outstanding Player$/,
 		/^NCAA All-Tournament Team$/,
 		/^NIT Most Valuable Player$/,
@@ -1208,6 +1314,7 @@
 	}
 
 	global.Awards = {
+		priorHonors,
 		assign, productionScore, defenseScore, fieldDefenseScore, resumeScore,
 		rankAgainstField, rankHighlights, RANKED_STATS,
 		REF_PACE,

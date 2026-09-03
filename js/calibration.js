@@ -208,7 +208,7 @@
 			   one, so it is not even consistent — and fixing it needs a term
 			   that reaches prospects and not the field, which is a larger
 			   change than rebalancing a shared shift. */
-			shift: { ftr: 1, tov: 1.09, inside: 0, mid: 0, three: 0.011, fieldEff: -0.005, ppgBoost: 0 },
+			shift: { ftr: 1, tov: 1.09, inside: 0, mid: 0, three: 0.011, fieldEff: -0.005, ppgBoost: 0.02 },
 		},
 		modern: {
 			label: "2023-2026 (the modern game)",
@@ -228,7 +228,7 @@
 			/* Measured, not guessed. Each shift was fitted by sweeping it alone
 			   against the modern team targets above; see tools/validate.js,
 			   which checks every one of them. */
-			shift: { ftr: 0.845, tov: 0.96, inside: 0.021, mid: 0.017, three: 0.004, fieldEff: 0.010, ppgBoost: 0 },
+			shift: { ftr: 0.845, tov: 0.96, inside: 0.021, mid: 0.017, three: 0.004, fieldEff: 0.010, ppgBoost: 0.02 },
 		},
 	};
 	/* PPG, DERIVED.
@@ -248,6 +248,16 @@
 	   N(45,13) class the model was originally fitted to, and the ref corrects
 	   for that gap. The boost is about 10-12% depending on the era and is
 	   stored as ppgBoost in the shift block.
+
+	   ppgBoost also carries the one thing the identity above cannot: it is
+	   evaluated on the D-I AVERAGE team, and a draft prospect does not play
+	   for the average team. Measured over twenty realistic classes, the
+	   programs the prospects actually play for generate about 3-4% more
+	   scoring chances per game than the field (fewer turnovers, more
+	   offensive rebounds — they are better teams), so a prospect at the
+	   anchor's own minutes and usage scores a little more than the average
+	   team's arithmetic says. Half of that is carried here; the other half
+	   is inside the model's tolerance.
 
 	   p95 keeps the 1.50 ratio to the mean that the old stated pair carried
 	   (24.0 / 16.0): the LEVEL was wrong, the SHAPE of the distribution around

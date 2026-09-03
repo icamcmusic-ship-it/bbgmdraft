@@ -1249,6 +1249,56 @@ function ok(name, condition, detail) {
 			return i >= 0 && file.players[i].note === res.players[i].note;
 		});
 		ok("the export writes the universe's world", exportAgrees);
+		/* THE SAME MEN ACROSS THE TWO FILES. The 2027 class's upperclassmen
+		   were on 2026's rosters; the 2026 team page lists them, the awards
+		   page can name one, and the 2027 player's career table carries the
+		   season 2026 actually played, marked and linked. */
+		const cross = await page.evaluate(() => {
+			const st = window.App.state;
+			const i26 = st.files.findIndex((f) => /2026/.test(f.name));
+			const i27 = st.files.findIndex((f) => /2027/.test(f.name));
+			const r26 = st.results[i26];
+			const r27 = st.results[i27];
+			const future = (r26 && r26.futurePlayers) || [];
+			const withTeam = future.filter((p) => r26.teams[p.newCollege] &&
+				(r26.teams[p.newCollege].futureMembers || []).indexOf(p) !== -1);
+			const linked = r27 ? r27.players.filter((p) =>
+				(p.priorSeasons || []).some((r) => r.universe && r.season === r26.season)) : [];
+			return {
+				future: future.length, withTeam: withTeam.length, linked: linked.length,
+				stats: future.every((p) => p.stats && p.gameLog),
+				team: withTeam.length ? withTeam[0].newCollege : null,
+				key27: linked.length ? linked[0].key : null,
+				i26, i27,
+			};
+		});
+		ok("the later class's upperclassmen played the earlier season",
+			cross.future >= 10 && cross.withTeam === cross.future && cross.stats,
+			JSON.stringify(cross));
+		ok("and their own file's career table carries that season",
+			cross.linked >= 10 && cross.linked <= cross.future, cross.linked + " of " + cross.future);
+		if (cross.team) {
+			await page.evaluate((i) => {
+				window.App.state.active = i;
+				window.App.showTeam(null);
+			}, cross.i26);
+			await page.evaluate((name) => window.App.showTeam(name), cross.team);
+			const heading = await page.evaluate(() =>
+				Array.from(document.querySelectorAll("#view h4")).map((h) => h.textContent));
+			ok("the team page has a section for later-class players",
+				heading.indexOf("From later draft classes") !== -1, heading.join(" | "));
+			await page.evaluate(() => window.App.showTeam(null));
+		}
+		if (cross.key27) {
+			await page.evaluate((args) => window.App.showPlayerInFile(args.i, args.key),
+				{ i: cross.i27, key: cross.key27 });
+			const marked = await page.evaluate(() =>
+				Array.from(document.querySelectorAll("#view button.linky"))
+					.some((b) => /★/.test(b.textContent)));
+			ok("the player's career table marks the season the universe played",
+				marked);
+			await page.evaluate(() => window.App.showPlayer(null));
+		}
 		/* Turning the setting off drops the chain's configs, so the tabs go
 		   back to standalone runs rather than silently keeping a world the
 		   user has switched out of. */

@@ -224,6 +224,11 @@
 				.filter((c) => c.reason === "retired").length,
 			coachHiredAway: (res.coachingCarousel || [])
 				.filter((c) => c.reason === "hired away").length,
+			/* Later classes' underclassmen who played this season, and the
+			   honors they took — the seam between two class files. */
+			futureOnRosters: (res.futurePlayers || []).length,
+			futureHonors: (res.futurePlayers || [])
+				.reduce((a, p) => a + ((p.awards || []).length), 0),
 		};
 	}
 
@@ -247,6 +252,11 @@
 			if (no1Count[name] >= 2) {
 				out.push(name + " produced " + no1Count[name] + " No. 1 picks");
 			}
+		}
+		const crossed = rows.reduce((a, r) => a + (r.futureOnRosters || 0), 0);
+		if (crossed) {
+			out.push(crossed + " roster spots across the timeline were filled by " +
+				"players from a later draft class");
 		}
 		for (let i = 1; i < rows.length; i++) {
 			if (rows[i].champion && rows[i].champion === rows[i - 1].champion) {

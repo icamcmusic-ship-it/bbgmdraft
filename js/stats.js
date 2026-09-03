@@ -1067,7 +1067,13 @@
 		// Volume tax: a low-usage role player picks his shots, a 33%-usage hub
 		// takes what the defense gives him. Keeps pass-first guards from being
 		// the least efficient scorers on the floor.
-		const loadAdj = -0.30 * (usgRate - 0.245);
+		/* Steeper above thirty percent. The linear tax let a 36%-usage man
+		   on a fast team shoot 65% true shooting on twenty-three attempts and
+		   print 36 a game — a line Division I has not produced this century.
+		   The extra term only reaches the top tenth of a class: at 30% usage
+		   it is zero, at 36% it costs about five points of true shooting. */
+		const loadAdj = -0.30 * (usgRate - 0.245) -
+			0.85 * Math.max(0, usgRate - 0.30);
 
 		const bigness = clamp((ratings.hgt - 30) / 55, 0, 1);
 		/* THE COMPOSITE REFERENCE.
@@ -1792,7 +1798,7 @@
 		const stylePace = (team.style && team.style.pace) || 0;
 		const pace = env.pace !== null && env.pace !== undefined
 			? clamp(env.pace + (cfg.scoringEnv || 0) * 1.2 + stylePace, 50, 115)
-			: clamp(cfg.pace + cfg.scoringEnv * 1.6 + stylePace, 58, 82);
+			: clamp(cfg.pace + cfg.scoringEnv * 1.6 + stylePace, 58, 78);
 		// Chances exceed possessions by the team's offensive rebounds; solve
 		// chances = poss + orbRate * missShare * chances for the multiplier.
 		// One pass on a nominal ORB rate, then refine with the roster's own.
@@ -1825,7 +1831,7 @@
 		const paceAdj = rng.normal(0, 2.0);
 		const jitteredPace = env.pace !== null && env.pace !== undefined
 			? clamp(pace + paceAdj, 50, 118)
-			: clamp(pace + paceAdj, 58, 82);
+			: clamp(pace + paceAdj, 58, 78);
 		let chanceMult = mult(TUNING.ORB_RATE);
 		let pools = teamPools(comps, mins, jitteredPace, chanceMult, gameMinutes, poolEnv);
 		chanceMult = mult(pools.orbRate);
@@ -2344,9 +2350,17 @@
 		const vol = Number.isFinite(p.volatility) ? clamp(p.volatility, 0.6, 1.6) : 1;
 		const VOL_APPLIES = { pts: 1, ast: 0.5, tov: 0.5, reb: 0.25, stl: 0.25, blk: 0.25 };
 		const mpg = Number.isFinite(s.mpg) ? s.mpg : 30;
+		/* How long a game is where he plays. A college game is forty
+		   minutes and a G League game forty-eight; the minutes cap and the
+		   night's ceilings used to assume forty for everybody, so a G League
+		   prospect at 36 minutes a night was cut to 40 in overtime and his
+		   ceilings sat where a college player's do. A club carries its
+		   league's game length (see simulateProLeagues). */
+		const gameMinutes = team.gameMinutes || 40;
+		const scale = gameMinutes / 40;
 		const CEIL = {
-			pts: 4 + 1.55 * mpg, reb: 3 + 0.6 * mpg, ast: 2 + 0.42 * mpg,
-			stl: 2 + 0.2 * mpg, blk: 2 + 0.2 * mpg, tov: 2 + 0.25 * mpg,
+			pts: 4 + 1.55 * mpg / scale, reb: 3 + 0.6 * mpg / scale, ast: 2 + 0.42 * mpg / scale,
+			stl: 2 + 0.2 * mpg / scale, blk: 2 + 0.2 * mpg / scale, tov: 2 + 0.25 * mpg / scale,
 			// Below five: a man on four sits, so the draw bends before the cap.
 			fouls: 4.5,
 		};
@@ -2402,7 +2416,9 @@
 		/* Minutes and the shooting line behind the points. The log carried
 		   counting stats only, so "best game" could say he scored 30 and
 		   not whether it was 11-of-15 or a 28-shot night. */
-		attachMinutesAndShooting(games, s, rng);
+		attachMinutesAndShooting(games, s, rng, gameMinutes);
+		// The minutes the game had, so an export can count them.
+		for (const g of games) g.avail = gameMinutes + 5 * (g.ot || 0);
 
 		/* Plus/minus, which a modern box score carries and this one did
 		   not. His team's margin that night, scaled by how much of it he
@@ -2517,10 +2533,11 @@
 	   for two free throws — both points-neutral) moves the season's FGM
 	   and 3PM totals onto the line's own, so the percentages a reader
 	   recomputes off the log are the percentages beside it. */
-	function attachMinutesAndShooting(games, s, rng) {
+	function attachMinutesAndShooting(games, s, rng, gameMinutes) {
 		const n = games.length;
 		const mpg = Number.isFinite(s.mpg) ? s.mpg : 0;
-		const gameMin = (g) => 40 + 5 * (g.ot || 0);
+		const gm = gameMinutes || 40;
+		const gameMin = (g) => gm + 5 * (g.ot || 0);
 		const rawMin = games.map((g) => {
 			let m = mpg + rng.normal(0, 0.11 * mpg + 1.4);
 			if (g.ot) m += 2.5 * g.ot * Math.min(1, mpg / 30);
@@ -2724,13 +2741,96 @@
 					(g) => { g.tpm--; g.ftm++; });
 			if (!moved) break;
 		}
+		/* The compound move, for the season the single move cannot reach.
+
+		   Raising field-goal makes by one costs two free-throw makes in the
+		   SAME game, and a man who shoots 0.7 free throws a night rarely has
+		   two in one. Measured: a 66% free-throw shooter on 23 attempts
+		   finished his log 19-of-23 because no game held two made free
+		   throws to trade. Two games can do it between them, each move
+		   points-neutral inside its own game: in X a made three becomes two
+		   twos less a free throw (3 = 2 + 2 - 1), in Y a two and a free
+		   throw become a three. Net: one more field goal, two fewer free
+		   throws, the three-point total unchanged. Mirror for the other
+		   direction. */
+		const compound = (up) => {
+			if (up) {
+				const xs = games.filter((g) => g.tpm >= 1 && g.ftm >= 1)
+					.sort((a, b) => b.pts - a.pts);
+				for (const x of xs) {
+					const y = games.filter((g) => g !== x && madeTwo(g) >= 1 && g.ftm >= 1)[0];
+					if (!y) continue;
+					let okay = true;
+					while (okay && spareTwo(x) < 2) okay = borrow(x, "2a");
+					while (okay && spareThree(y) < 1) okay = borrow(y, "3a");
+					if (!okay) continue;
+					x.tpm--; x.fgm++; x.ftm--;
+					y.tpm++; y.ftm--;
+					return true;
+				}
+				return false;
+			}
+			const xs = games.filter((g) => madeTwo(g) >= 2).sort((a, b) => b.pts - a.pts);
+			for (const x of xs) {
+				const y = games.filter((g) => g !== x && g.tpm >= 1)[0];
+				if (!y) continue;
+				let okay = true;
+				while (okay && spareThree(x) < 1) okay = borrow(x, "3a");
+				while (okay && spareFt(x) < 1) okay = borrow(x, "fta");
+				while (okay && spareTwo(y) < 1) okay = borrow(y, "2a");
+				while (okay && spareFt(y) < 1) okay = borrow(y, "fta");
+				if (!okay) continue;
+				x.tpm++; x.fgm--; x.ftm++;
+				y.tpm--; y.ftm++;
+				return true;
+			}
+			return false;
+		};
+		/* The last resort: one point moved between two games. A man with no
+		   threes whose free-throw makes are all singles has no points-neutral
+		   move left inside any one game — every odd night needs its one free
+		   throw — so a point goes from one such night to another: the first
+		   loses its free throw, the second turns its free throw and the point
+		   into a two. Every season total is unchanged, which is the invariant
+		   the log exists to keep; a night's score moving by a point is well
+		   inside what the draw that produced it would have produced anyway. */
+		const shiftPoint = (up) => {
+			if (up) {
+				const as = games.filter((g) => g.ftm >= 1 && g.pts >= 1).sort((a, b) => a.pts - b.pts);
+				for (const a of as) {
+					const b = games.filter((g) => g !== a && g.ftm >= 1)[0];
+					if (!b) continue;
+					let okay = true;
+					while (okay && spareTwo(b) < 1) okay = borrow(b, "2a");
+					if (!okay) continue;
+					a.pts--; a.ftm--;
+					b.pts++; b.ftm--; b.fgm++;
+					return true;
+				}
+				return false;
+			}
+			const as = games.filter((g) => madeTwo(g) >= 1).sort((a, b) => b.pts - a.pts);
+			for (const a of as) {
+				const b = games.filter((g) => g !== a)[0];
+				if (!b) continue;
+				let okay = true;
+				while (okay && spareFt(a) < 1) okay = borrow(a, "fta");
+				while (okay && spareFt(b) < 1) okay = borrow(b, "fta");
+				if (!okay) continue;
+				a.pts--; a.fgm--; a.ftm++;
+				b.pts++; b.ftm++;
+				return true;
+			}
+			return false;
+		};
 		for (let guard = 0; guard < 400 && tot("fgm") !== fgmT; guard++) {
-			const moved = tot("fgm") < fgmT
+			const up = tot("fgm") < fgmT;
+			const moved = up
 				? exchange((g) => g.ftm >= 2, ["2a"],
 					(g) => { g.fgm++; g.ftm -= 2; })
 				: exchange((g) => madeTwo(g) >= 1, ["fta", "fta"],
 					(g) => { g.fgm--; g.ftm += 2; });
-			if (!moved) break;
+			if (!moved && !compound(up) && !shiftPoint(up)) break;
 		}
 	}
 

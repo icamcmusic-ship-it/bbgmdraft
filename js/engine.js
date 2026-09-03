@@ -1756,6 +1756,40 @@
 			if (p.nonNcaa) continue;
 			(bySchool[p.newCollege] = bySchool[p.newCollege] || []).push(p);
 		}
+		/* THE UNDERCLASSMEN FROM LATER DRAFT CLASSES.
+
+		   In a universe the 2027 file's juniors were on 2025's rosters, and
+		   for a long time they were not: each season was played with its own
+		   prospects and synthesized returners, so a roster that would carry
+		   next year's lottery pick as a freshman carried a made-up sophomore
+		   instead, and the freshman-of-the-year race never had him in it.
+		   `cfg.universeRoster` (see futureRosterFor and runUniverse in
+		   js/app.js) is the list of those men for this season. They go onto
+		   their rosters as real players — ratings, a build, a class year —
+		   and play the season: minutes, a stat line, a game log, and every
+		   honor the field can win. They are not in `state.players`, so they
+		   never reach the draft board or the export of THIS class; their own
+		   file shows the season on their career page (see app.js). */
+		const future = [];
+		for (const f of Array.isArray(cfg.universeRoster) ? cfg.universeRoster : []) {
+			if (!f || !f.team || !f.ratings || !C.COLLEGES[f.team]) continue;
+			const fp = {
+				key: "future:" + f.classSeason + ":" + f.key,
+				homeKey: f.key, fileIndex: f.fileIndex, classSeason: f.classSeason,
+				future: true,
+				name: f.name, classYear: f.classYear, draftClassYear: f.draftClassYear,
+				newCollege: f.team, nonNcaa: false,
+				newRatings: f.ratings, newOvr: f.ovr, talentPot: f.talentPot,
+				newPot: Math.max(f.ovr, f.talentPot || f.ovr),
+				newPos: f.pos, archetype: f.archetype,
+				hand: f.hand, volatility: f.volatility, orbBias: f.orbBias,
+				traitInjuryMult: f.traitInjuryMult,
+				availability: null, statSalt: "|future", override: {},
+			};
+			future.push(fp);
+			(bySchool[f.team] = bySchool[f.team] || []).push(fp);
+		}
+		state.futurePlayers = future;
 		state.bySchool = bySchool;
 		assignAvailability(state.players, rng.child("availability" + variationSalt(state.cfg)), cfg);
 		/* The class's season travels with the config, so a coach's style drifts
@@ -2087,6 +2121,15 @@
 				p.stats.clutchPpg = p.gameLog.clutch ? p.gameLog.clutch.ppg : undefined;
 			}
 		}
+		for (const p of state.futurePlayers || []) {
+			const home = teams[p.newCollege];
+			p.gameLog = home ? S.gameLog(p, home, logRng.child("gl:" + p.key)) : null;
+			p.signature = p.gameLog ? p.gameLog.best : null;
+			if (p.stats && p.gameLog) {
+				p.stats.pm = p.gameLog.plusMinus;
+				p.stats.onOff = p.gameLog.onOff;
+			}
+		}
 		buildPriorSeasons(state.players, state.season, state.rng.child("prior"),
 			teams, cfg, classRefVolume, classRefEfficiency, classRefMult);
 		return state;
@@ -2148,6 +2191,56 @@
 		const room = Math.max(2, (p.talentPot || p.newOvr) - p.newOvr);
 		const step = 2.6 + 0.32 * room;
 		return clamp(Math.round(p.newOvr - step * Math.pow(i, 0.85)), 8, 90);
+	}
+
+	/* A schedule for a season that was never played.
+
+	   A prior season is simulated as a rotation and a stat line, and a stat
+	   line is an average: it has no nights in it, so it had no season high,
+	   no best game, no twenty-point count — the things the draft year's game
+	   log gives every prospect and the Career table then could not show for
+	   any earlier year. The game log generator needs a schedule to hang the
+	   nights on, so this draws one: the program's own conference for the
+	   conference slate, the rest of the country for the non-conference one,
+	   results off the program's level that year against each opponent's
+	   prior. It is a schedule of plausible nights rather than a replay of a
+	   season somebody watched, and it is labeled that way where it is shown;
+	   what it buys is that a junior's sophomore high is a night with an
+	   opponent and a score on it, drawn from the same generator as this
+	   year's, and reconciles to the line beside it the same way. */
+	function priorSchedule(home, level, rng, cfg) {
+		const confMates = (C.byConference[home.conf] || []).filter((n) => n !== home.name);
+		const pool = C.names.filter((n) => n !== home.name);
+		const n = SEASON_GAMES;
+		const pace = clamp(Number.isFinite(cfg.pace) ? cfg.pace : 68, 58, 82);
+		const log = [];
+		for (let i = 0; i < n; i++) {
+			const conference = i >= T.NON_CONF_GAMES && confMates.length > 0;
+			const opp = rng.pick(conference ? confMates : pool);
+			const oconf = C.CONFERENCES[C.conferenceOf(opp)] || C.CONFERENCES.Independent;
+			const oppLevel = clamp(
+				0.45 * C.prestige(opp) + 0.4 * oconf.strength + rng.normal(0, 7), 5, 99);
+			const homeSide = conference
+				? (i % 2 ? 1 : -1)
+				: (rng.random() < 0.55 ? 1 : rng.random() < 0.5 ? -1 : 0);
+			const edge = (level - oppLevel) * 0.6 + homeSide * 3.2;
+			const margin = edge * 0.72 + rng.normal(0, 11.3);
+			const total = clamp(pace * 2.06 + rng.normal(0, 9), 92, 190);
+			let a = Math.round((total + margin) / 2);
+			let b = Math.round((total - margin) / 2);
+			let ot = 0;
+			while (a === b) {
+				ot++;
+				const swing = rng.normal(edge * 0.10, 4.2 + ot * 0.8);
+				a += Math.round(6 + swing / 2);
+				b += Math.round(6 - swing / 2);
+			}
+			log.push({
+				opp, won: a > b, conference, pf: a, pa: b, ot, home: homeSide,
+				when: (i + 0.5) / n, quality: oppLevel, stage: "reg", round: null,
+			});
+		}
+		return log;
 	}
 
 	/* One prior season, simulated. Returns a stat line or null. */
@@ -2231,12 +2324,24 @@
 			classRefEfficiency: classRefEfficiency,
 			classRefMult: classRefMult,
 		}, cfg, rng.child("sim"));
-		return younger.stats
-			? {
-				line: younger.stats, ovr: younger.newOvr, box: team.box,
-				lines: team.lines, pos: BB.pos(re.ratings),
-			}
-			: null;
+		if (!younger.stats) return null;
+		/* The nights behind the line: a drawn schedule and a game log off it,
+		   so an earlier season carries season highs, a best game and a
+		   twenty-point count the way the draft year does. See priorSchedule. */
+		team.log = priorSchedule(home, level, rng.child("schedule"), cfg);
+		team.w = team.log.filter((g) => g.won).length;
+		team.l = team.log.length - team.w;
+		let gameLog = null;
+		try {
+			gameLog = S.gameLog(younger, team, rng.child("log"));
+		} catch (e) {
+			gameLog = null;
+		}
+		return {
+			line: younger.stats, ovr: younger.newOvr, box: team.box,
+			lines: team.lines, pos: BB.pos(re.ratings),
+			gameLog, record: { w: team.w, l: team.l },
+		};
 	}
 
 	function buildPriorSeasons(players, season, rng, teams, cfg, classRefVolume, classRefEfficiency, classRefMult) {
@@ -2278,6 +2383,15 @@
 						box: sim.box || null,
 						lines: sim.lines || null,
 						pos: sim.pos || null,
+						/* The nights. `highs` and `best` are what the Career
+						   table, the note and the export read; the whole log
+						   stays for the game-log view. */
+						gameLog: sim.gameLog || null,
+						highs: sim.gameLog ? sim.gameLog.highs : null,
+						best: sim.gameLog ? sim.gameLog.best : null,
+						twentyPointGames: sim.gameLog ? sim.gameLog.twentyPointGames : 0,
+						doubleDoubles: sim.gameLog ? sim.gameLog.doubleDoubles : 0,
+						record: sim.record || null,
 						simulated: true,
 						redshirt: false,
 					});
@@ -2429,10 +2543,23 @@
 	/* ------------------------------------------------------------- phase 6 */
 
 	function phaseAwards(state) {
-		const out = AW.assign(state.players, state.teams, state.tourney,
+		const future = state.futurePlayers || [];
+		const out = AW.assign(state.players.concat(future), state.teams, state.tourney,
 			state.effectiveCfg || state.cfg, state.rng.child("awards"));
-		state.ranked = out.ranked;
-		state.fieldHonors = out.fieldHonors || [];
+		/* The board is this class's; a later class's freshman ranked above
+		   it is a fact for the awards page, not a pick. */
+		state.ranked = (out.ranked || []).filter((p) => !p.future);
+		state.fieldHonors = (out.fieldHonors || []).slice();
+		for (const p of future) {
+			for (const award of p.awards || []) {
+				state.fieldHonors.push({
+					award, name: p.name, key: p.key, school: p.newCollege,
+					classYear: p.classYear, starReturner: null,
+					futureClass: p.classSeason, fileIndex: p.fileIndex, homeKey: p.homeKey,
+				});
+			}
+		}
+		state.fieldHonors.sort((a, b) => AW.awardRank(a.award) - AW.awardRank(b.award));
 		state.fieldTop = out.fieldTop || [];
 		/* The player-of-the-year ballots, so a split year is legible. */
 		state.poyBallots = out.poyBallots || [];
@@ -2795,6 +2922,68 @@
 		return parts.join("&");
 	}
 
+	/* THE CLASS BEFORE THE SEASON: the build phase alone.
+
+	   A universe needs to know, before it plays 2025, who in the 2027 file
+	   was a freshman that year and where — and the build phase is where
+	   class years, colleges, transfers and builds are drawn. It reads the
+	   seed, the settings and the pool memory and nothing the season
+	   produces, so running it on its own gives exactly the class the full
+	   chain will build later, at a fraction of the cost. */
+	function previewClass(leagueFile, cfg) {
+		const validation = validateLeagueFile(leagueFile);
+		const lf = Object.assign({}, leagueFile, { startingSeason: validation.season });
+		const seed = cfg.seed && String(cfg.seed).trim() !== ""
+			? String(cfg.seed).trim() : String(Math.floor(Math.random() * 1e9));
+		const state = { leagueFile: lf, rng: new Rng(seed), seed, cfg: Object.assign({}, cfg, { seed }) };
+		phaseBuild(state);
+		return {
+			season: state.season, seed, players: state.players,
+			archetypePool: state.archetypePool ? state.archetypePool.map((a) => a.name) : null,
+		};
+	}
+
+	/* Who from a later class was on a Division I roster in `season`, and as
+	   what. A junior in the 2027 file was a freshman in 2025 and a sophomore
+	   in 2026, at the school his transfer biography says he was at, at the
+	   overall he had then — the same arithmetic simulatePriorSeason uses for
+	   his own career page, so the two agree. Returns the entries phaseRegular
+	   puts on rosters (see cfg.universeRoster). */
+	function futureRosterFor(preview, season, fileIndex) {
+		const out = [];
+		if (!preview || !preview.players || !Number.isFinite(preview.season)) return out;
+		const back = preview.season - season;
+		if (back < 1) return out;
+		for (const p of preview.players) {
+			if (p.nonNcaa || !p.buildCleanBase || !RB.resolveTo) continue;
+			const n = priorYears(p.classYear);
+			if (back > n) continue;
+			const team = p.transfer && p.transfer.from
+				? (C.COLLEGES[p.transfer.from] ? p.transfer.from : null)
+				: p.newCollege;
+			if (!team || !C.COLLEGES[team]) continue;
+			const ovr = ovrYearsAgo(p, back);
+			let re;
+			try {
+				re = RB.resolveTo(p.buildCleanBase, ovr, p.archetype,
+					p.origRatings ? p.origRatings.fuzz : 0, p.buildPinned, p.buildCleanBase);
+			} catch (e) {
+				continue;
+			}
+			out.push({
+				key: p.key, name: p.name, team, fileIndex,
+				classSeason: preview.season,
+				classYear: CLASS_YEARS[clamp(n - back, 0, 3)],
+				draftClassYear: p.classYear,
+				ovr: re.ovr, ratings: re.ratings, pos: BB.pos(re.ratings),
+				archetype: p.archetype, talentPot: p.talentPot || re.ovr,
+				hand: p.hand, volatility: p.volatility, orbBias: p.orbBias,
+				traitInjuryMult: p.traitInjuryMult, boardHint: p.origOvr,
+			});
+		}
+		return out;
+	}
+
 	/* A runner keeps the intermediate state of one file, so successive runs
 	   with slightly different settings only redo the phases that changed. */
 	function createRunner(leagueFile) {
@@ -2893,6 +3082,9 @@
 			fieldTop: state.fieldTop || [],
 				seasonEvents: state.seasonEvents || [],
 				coachingCarousel: state.coachingCarousel || [],
+				/* The later classes' underclassmen who played this season
+				   (universe mode). See phaseRegular. */
+				futurePlayers: state.futurePlayers || [],
 				flavor: state.flavor,
 				/* The season's storylines, so the UI can say what kind of year
 				   this was rather than only what kind of class it was. */
@@ -3077,18 +3269,30 @@
 				}
 				return {
 					name, conf: lgName, members, prospects: [],
+					// The league's game length, read by the game log.
+					gameMinutes: env.gameMinutes || 40,
 					level: clubLevel, prestige: 50 + off * 3,
 					w: 0, l: 0, cw: 0, cl: 0, sos: 0, games: 0, quadWins: 0,
 					log: [], form: crng.normal(1.0, 3.5),
 				};
 			});
 
-			// Prospects sign where they fit: better prospects at better clubs.
+			/* Prospects sign where they fit: better prospects lean to better
+			   clubs. LEAN, not land — the old rule handed the best prospect to
+			   the best club, the next to the second, and with one or two
+			   prospects in a league every one of them spent his draft year at
+			   the champion and nobody ever played for a mid-table side that
+			   needed him. A draw weighted by the club's level, steeper for a
+			   better prospect, puts most of them at good clubs and some of
+			   them at the ones that give a nineteen-year-old thirty minutes. */
 			const signings = byLeague[lgName].slice()
 				.sort((a, b) => b.newOvr - a.newOvr);
 			const ranked = clubs.slice().sort((a, b) => b.level - a.level);
+			const meanLevel = clubs.reduce((a, c) => a + c.level, 0) / Math.max(1, clubs.length);
 			signings.forEach((p, i) => {
-				const club = ranked[i % ranked.length];
+				const srng = lrng.child("sign:" + p.key);
+				const steep = 0.05 + 0.10 * clamp((p.newOvr - 30) / 25, 0, 1);
+				const club = srng.weighted(clubs, (c) => Math.exp(steep * (c.level - meanLevel)));
 				club.prospects.push(p);
 				/* Make room by dropping the club's WEAKEST FILLER. members.pop()
 				   took the last entry, which after the first signing is the
@@ -3552,6 +3756,13 @@
 				bits.push("best stretch: " + gl.hotStreak.games + " straight at " +
 					n1(gl.hotStreak.ppg) + " a night");
 			}
+			/* The earlier seasons' highs, when they were simulated: a
+			   junior's sophomore high is a scouting fact too. */
+			const earlier = (p.priorSeasons || []).filter((r) => r.highs && r.season);
+			for (const r of earlier) {
+				bits.push(r.season + " highs " + r.highs.pts + "p / " + r.highs.reb +
+					"r / " + r.highs.ast + "a");
+			}
 			lines.push(bits.join(" · "));
 		}
 		if (on("march") && p.gameLog && p.gameLog.postseason) {
@@ -3594,6 +3805,16 @@
 			const shown = p.awards.slice(0, MAX);
 			const extra = p.awards.length - shown.length;
 			lines.push("Honors: " + shown.join("; ") +
+				(extra > 0 ? " (+" + extra + " more)" : ""));
+		}
+		if (on("awards") && p.priorAwards && p.priorAwards.length) {
+			/* The seasons before this one, newest first, top three: a
+			   two-time all-conference pick reads as one. */
+			const prior = p.priorAwards.slice()
+				.sort((a, b) => b.season - a.season);
+			const shown = prior.slice(0, 3).map((a) => a.season + " " + a.award);
+			const extra = prior.length - shown.length;
+			lines.push("Earlier honors: " + shown.join("; ") +
 				(extra > 0 ? " (+" + extra + " more)" : ""));
 		}
 		if (on("stock") && p.boardRank) {
@@ -3803,8 +4024,9 @@
 				pm: Number.isFinite(g.pm) ? g.pm : 0,
 				ba: 0,
 				// Overtime lengthens the night, which is what "minutes
-				// available" counts.
-				available: 40 + 5 * (g.ot || 0),
+				// available" counts; a G League night is forty-eight to
+				// begin with (see gameLog, which stamps `avail`).
+				available: Number.isFinite(g.avail) ? g.avail : 40 + 5 * (g.ot || 0),
 			};
 		});
 	}
@@ -3957,6 +4179,33 @@
 			addTeam(team.box, items, margin, wanted);
 		}
 
+		/* The clubs abroad and in the G League, the same way. A prospect at
+		   Real Madrid or in Stockton had a simulated season — a club, a
+		   rotation, a table — and no stats row, because this pass only
+		   walked the college programs. His club is a team-season like any
+		   other; the only thing different about it is the length of a night,
+		   which the game log carries. */
+		for (const lgName of Object.keys(result.proLeagues || {})) {
+			const lg = result.proLeagues[lgName];
+			for (const club of (lg && lg.clubs) || []) {
+				if (!club || !club.box || !club.lines || !club.prospects.length) continue;
+				const byLine = new Map();
+				for (const p of club.prospects) if (p && p.stats) byLine.set(p.stats, p);
+				const items = club.lines.map((line) => {
+					const p = byLine.get(line);
+					return p
+						? { line, log: p.gameLog, pos: p.newPos, key: p.key }
+						: { line, log: null, pos: null, key: null };
+				});
+				const wanted = club.prospects.filter((p) => p && p.stats)
+					.map((p) => ({ key: p.key, player: p, season, team: club.name, draftYear: true }));
+				const margin = club.log && club.log.length
+					? club.log.reduce((a, g) => a + ((g.pf || 0) - (g.pa || 0)), 0) / club.log.length
+					: null;
+				addTeam(club.box, items, margin, wanted);
+			}
+		}
+
 		// The seasons before it, each one its own simulated team.
 		for (const p of result.players || []) {
 			if (p.nonNcaa || !Array.isArray(p.priorSeasons)) continue;
@@ -3966,7 +4215,9 @@
 				const key = p.key + "|" + row.season;
 				const items = row.lines.map((line) => ({
 					line,
-					log: null,
+					// The drawn nights behind an earlier season, so its highs
+					// come out of the same log its totals do.
+					log: line === row.line ? (row.gameLog || null) : null,
 					pos: line === row.line ? row.pos : null,
 					key: line === row.line ? key : null,
 				}));
@@ -4451,9 +4702,29 @@
 				   a real league history, a hand-added honor — is left alone. */
 				const scoped = awardsInScope(
 					p.awards, opts.awardsScope, opts.majorConferences);
+				/* The earlier seasons' honors (see priorHonors in
+				   js/awards.js), at their own seasons and under the same
+				   scope. Rows at those seasons are ours by the same argument
+				   as the draft year's: a prospect has played no season in the
+				   league before his draft. */
+				const priorRows = [];
+				for (const a of p.priorAwards || []) {
+					if (awardsInScope([a.award], opts.awardsScope, opts.majorConferences).length) {
+						priorRows.push({ season: a.season, type: a.award });
+					}
+				}
+				/* Ours: the draft year and the five seasons before it. A draft
+				   prospect has played no season in the league before his draft,
+				   so a row in that window is this tool's from an earlier export
+				   — and it is dropped whether or not THIS run minted one at the
+				   same season, or a re-run that gave him fewer earlier honors
+				   would leave the last run's behind. Anything older is a real
+				   history and is left alone. */
+				const draftSeason = Number(result.season);
 				const kept = (Array.isArray(out.awards) ? out.awards : [])
-					.filter((a) => !a || Number(a.season) !== Number(result.season));
-				out.awards = kept.concat(
+					.filter((a) => !a || !(Number(a.season) <= draftSeason &&
+						Number(a.season) >= draftSeason - 5));
+				out.awards = kept.concat(priorRows,
 					scoped.map((type) => ({ season: result.season, type })));
 				/* `awards` does not survive Tools -> Import players: that
 				   function builds the imported player from a fixed list of
@@ -4482,7 +4753,7 @@
 			   empty note made BBGM flag a note the player doesn't have. */
 			if (out.note && String(out.note).trim()) out.noteBool = 1;
 			else delete out.noteBool;
-			if (opts.stats && p.stats && !p.nonNcaa) {
+			if (opts.stats && p.stats) {
 				const built = collegeSeasonStats(result);
 				const rows = [];
 				if (opts.prior && Array.isArray(p.priorSeasons)) {
@@ -4918,5 +5189,6 @@
 		rerollSalt,
 		signatureGame, simulateProLeagues, assignRecruiting,
 		NOTE_LINES, DEFAULT_NOTE_LINES, PHASES, PRO_GAMES,
+		previewClass, futureRosterFor, priorYears, ovrYearsAgo, CLASS_YEARS,
 	};
 })(typeof window !== "undefined" ? window : self);

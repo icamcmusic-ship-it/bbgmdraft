@@ -64,6 +64,8 @@
 		compactBracket: false,
 		theme: "system", // see THEMES below
 		logPlayer: null,
+		// Which season the Game log tab shows for him: null = the draft year.
+		logSeason: null,
 		pinned: null,
 		undo: [],
 		lastSeed: null,
@@ -616,7 +618,7 @@
 			: "about " + v + " traits a prospect — frame, motor, hands, " +
 				"medical, background, role"),
 		coachTurnover: (v) => (v <= 0 ? "no sideline changes at all"
-			: "about " + Math.round(v * 0.43) + " of 368 head coaches change job" +
+			: "about " + Math.round(v * 0.43) + " of " + C.names.length + " head coaches change job" +
 				(v === 100 ? " — what Division I actually does" : "")),
 		realignmentMemory: (v) => (v >= 100
 			? "a program that moved conference stays moved, season after season"
@@ -653,7 +655,9 @@
 			? "On, with one file loaded: it runs as a single season with nothing " +
 				"to carry over. Load more classes and they chain."
 			: "On: " + n + " files run as one continuous world, oldest season " +
-				"first. Every tab, the export and the Timeline show that world.";
+				"first, and the later classes' upperclassmen play the earlier " +
+				"seasons on their real rosters. Every tab, the export and the " +
+				"Timeline show that world.";
 	}
 
 	function awardInteractionHint() {
@@ -2333,7 +2337,97 @@
 		cfg.seed = saved.seed;
 		cfg.carryOver = saved.carryOver || null;
 		cfg.recentPools = (saved.recentPools || []).map((a) => a.slice());
+		cfg.universeRoster = saved.universeRoster || null;
 		return cfg;
+	}
+
+	/* THE SAME MAN, ACROSS FILES.
+
+	   After the chain has run, a player in the 2027 file who was on a 2025
+	   roster (see cfg.universeRoster in js/engine.js) has two records of that
+	   freshman year: the one 2025 actually played, with a team record, a
+	   game log and whatever honors he took off the field, and the one his
+	   own file simulated for him alone in a rotation of synthesized
+	   teammates. The first is the world; the second was the best guess
+	   before the world existed. So the played season replaces the guessed
+	   one on his career page, in his honors, in the export and in the note,
+	   and the earlier season's page links forward to the man he became. */
+	function linkCareers(runnable) {
+		const E = global.Engine;
+		for (let j = 0; j < runnable.length; j++) {
+			const dj = runnable[j];
+			const resJ = state.results[dj.index];
+			if (!resJ || !resJ.players) continue;
+			const touched = new Set();
+			for (let k = 0; k < j; k++) {
+				const dk = runnable[k];
+				const resK = state.results[dk.index];
+				if (!resK || !resK.futurePlayers) continue;
+				for (const fp of resK.futurePlayers) {
+					if (fp.fileIndex !== dj.index || !fp.stats) continue;
+					const p = resJ.players.filter((x) => x.key === fp.homeKey)[0];
+					if (!p) continue;
+					const team = resK.teams[fp.newCollege];
+					if (!Array.isArray(p.priorSeasons)) p.priorSeasons = [];
+					let row = p.priorSeasons.filter((r) => r.season === resK.season && !r.redshirt)[0];
+					if (!row) {
+						row = { season: resK.season, redshirt: false };
+						p.priorSeasons.push(row);
+						p.priorSeasons.sort((a, b) => a.season - b.season);
+					}
+					const gl = fp.gameLog || null;
+					Object.assign(row, {
+						team: fp.newCollege, classYear: fp.classYear, ovr: fp.newOvr,
+						gp: Math.round(fp.stats.gp), mpg: fp.stats.mpg, ppg: fp.stats.ppg,
+						rpg: fp.stats.rpg, apg: fp.stats.apg, usg: fp.stats.usg, ts: fp.stats.ts,
+						line: fp.stats, box: team ? team.box : null, lines: team ? team.lines : null,
+						pos: fp.newPos, gameLog: gl, highs: gl ? gl.highs : null, best: gl ? gl.best : null,
+						twentyPointGames: gl ? gl.twentyPointGames : 0,
+						doubleDoubles: gl ? gl.doubleDoubles : 0,
+						record: team ? { w: team.w, l: team.l } : null,
+						awards: (fp.awards || []).slice(),
+						simulated: true, universe: true,
+						universeFileIndex: dk.index, universeKey: fp.key,
+						postseason: team ? (team.ncaaResult || team.nitResult || null) : null,
+					});
+					fp.laterKey = p.key;
+					fp.laterFileIndex = dj.index;
+					touched.add(p);
+				}
+			}
+			for (const p of touched) {
+				p.priorAwards = [];
+				for (const r of p.priorSeasons) {
+					for (const award of r.awards || []) {
+						p.priorAwards.push({ season: r.season, classYear: r.classYear, award });
+					}
+				}
+				p.betterEarlier = null;
+				for (const r of p.priorSeasons) {
+					if (r.redshirt || !(r.mpg >= 15) || !p.stats) continue;
+					if (r.ppg > p.stats.ppg + 2 && (!p.betterEarlier || r.ppg > p.betterEarlier.ppg)) {
+						p.betterEarlier = { season: r.season, classYear: r.classYear, ppg: r.ppg };
+					}
+				}
+				try {
+					p.note = E.buildNote(p, resJ.teams, resJ.season, resJ.cfg);
+				} catch (e) { /* the note is a convenience; the page still renders */ }
+			}
+		}
+	}
+
+	/* A player page in ANOTHER loaded file: the later-class freshman on a
+	   2025 team page is a prospect in the 2027 file, and his page is there. */
+	function showPlayerInFile(fileIndex, key) {
+		if (!Number.isFinite(fileIndex) || !state.files[fileIndex]) return;
+		if (fileIndex !== state.active) {
+			state.active = fileIndex;
+			const sel = $("fileSelect");
+			if (sel) sel.value = String(fileIndex);
+			checkLockFingerprint();
+			ensureResult(state.active);
+		}
+		showPlayer(key);
 	}
 
 	function ensureResult(i) {
@@ -2655,12 +2749,56 @@
 		   somebody moved a slider would make the tool unusable. */
 		if (!state.cfg.universe) state.tab = "universe";
 		render();
+		/* PASS ONE: who is in every class, before any season is played.
+
+		   The 2027 file's juniors were freshmen in 2025, and 2025 cannot put
+		   them on its rosters without knowing who they are — class years,
+		   colleges and builds are drawn in the build phase, from the seed and
+		   the pool memory and nothing the season produces. So every file's
+		   build phase runs first, in order (the pool memory chains through
+		   it exactly as the full run will), and each earlier season is then
+		   handed the underclassmen the later classes say were there. See
+		   Engine.previewClass and Engine.futureRosterFor. */
+		const previews = [];
+		let previewPools = [];
+		for (let k = 0; k < runnable.length; k++) {
+			const d = runnable[k];
+			let prev = null;
+			try {
+				const pcfg = CFG.make(state.cfg);
+				pcfg.seed = baseSeed + "#" + (d.season || k);
+				pcfg.overrides = {};
+				pcfg.recentPools = previewPools.map((a) => a.slice());
+				prev = global.Engine.previewClass(state.files[d.index].data, pcfg);
+			} catch (e) {
+				prev = null;
+			}
+			previews.push(prev);
+			if (prev && prev.archetypePool) {
+				previewPools.unshift(prev.archetypePool.slice());
+				previewPools = previewPools.slice(0, 3);
+			}
+		}
+		const rosterFor = (k) => {
+			const season = runnable[k].season;
+			if (!Number.isFinite(season)) return [];
+			let out = [];
+			for (let j = k + 1; j < runnable.length; j++) {
+				if (!previews[j] || !(runnable[j].season > season)) continue;
+				out = out.concat(global.Engine.futureRosterFor(
+					previews[j], season, runnable[j].index));
+			}
+			return out;
+		};
 		let carry = null;
 		let recentPools = [];
 		const step = (k) => {
 			if (k >= runnable.length) {
 				state.universe.running = false;
 				state.universe.threads = U.threads(state.universe.rows);
+				/* PASS THREE: the seasons a player actually played, on his
+				   own page. See linkCareers. */
+				try { linkCareers(runnable); } catch (e) { showError(e); }
 				persist();
 				setStatus("Universe complete: " + state.universe.rows.length +
 					" seasons, " + state.universe.threads.length + " threads.");
@@ -2679,6 +2817,7 @@
 				cfg.overrides = {};
 				cfg.recentPools = recentPools.map((a) => a.slice());
 				cfg.carryOver = carry;
+				cfg.universeRoster = rosterFor(k);
 				const res = state.runners[d.index].run(cfg);
 				/* KEEP the result and the config that produced it. The chain
 				   used to discard both, which is the whole of bug B1: every
@@ -2690,6 +2829,7 @@
 					seed: cfg.seed,
 					carryOver: cfg.carryOver,
 					recentPools: (cfg.recentPools || []).map((a) => a.slice()),
+					universeRoster: cfg.universeRoster,
 				};
 				state.universe.rows.push(Object.assign(
 					U.summarize(res, cfg.seed, d.name),
@@ -3473,7 +3613,7 @@
 		const head = el("tr");
 		// Overall is on the earlier rows now, because a simulated prior season
 		// is a season of a DIFFERENT player: the number is the point.
-		for (const h of ["Season", "Team", "Ovr", "GP", "MPG", "PPG", "RPG", "APG", "TS%"]) {
+		for (const h of ["Season", "Team", "Ovr", "GP", "MPG", "PPG", "RPG", "APG", "TS%", "Highs"]) {
 			head.appendChild(el("th", null, h));
 		}
 		table.appendChild(head);
@@ -3483,7 +3623,7 @@
 			tr.appendChild(el("td", null, team));
 			if (r.redshirt) {
 				const td = el("td", null, r.reason || "redshirt");
-				td.colSpan = 7;
+				td.colSpan = 8;
 				tr.appendChild(td);
 				return tr;
 			}
@@ -3494,6 +3634,8 @@
 				tr.appendChild(el("td", "num", r[k].toFixed(1)));
 			}
 			tr.appendChild(el("td", "num", (r.ts * 100).toFixed(1)));
+			const hi = now ? (p.gameLog && p.gameLog.highs) : r.highs;
+			tr.appendChild(el("td", null, hi ? hi.pts + "/" + hi.reb + "/" + hi.ast : "—"));
 			return tr;
 		};
 		for (const r of rows) table.appendChild(line(r.season, r.team, r, false));
@@ -4770,7 +4912,7 @@
 		state, render, run, persist, openEditor, revealPlayer, visibleRows,
 		editorPanel, modal, closeModal,
 		clearLock, showPlayer, showTeam, showGame,
-		runUniverse, exportUniverse, importUniverse,
+		runUniverse, exportUniverse, importUniverse, showPlayerInFile,
 		// Exposed for tools/uismoke.js, which loads files without a file input.
 		installFiles, paintConfig,
 		copyText, announce, bulkApply, bulkShiftOvr, bulkLockAsIs, bulkClear, refreshBulkBar,

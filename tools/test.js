@@ -3880,6 +3880,11 @@ console.log("\nExport: the round trip, ages, award scope and notes");
 	const cfg = () => global.Config.make({ seed: "export-rt" });
 	const countAwards = (f) => f.players.reduce(
 		(a, p) => a + ((p.awards || []).length), 0);
+	/* What a run produced: the draft year's honors plus the earlier
+	   seasons' (see priorHonors in js/awards.js), both of which the export
+	   writes at their own seasons. */
+	const ownAwards = (res) => res.players.reduce(
+		(a, p) => a + ((p.awards || []).length) + ((p.priorAwards || []).length), 0);
 
 	/* THE ROUND TRIP.
 
@@ -3897,7 +3902,7 @@ console.log("\nExport: the round trip, ages, award scope and notes");
 		const rows = [];
 		for (let i = 0; i < 4; i++) {
 			const res = global.Engine.run(file, cfg());
-			const own = res.players.reduce((a, p) => a + ((p.awards || []).length), 0);
+			const own = ownAwards(res);
 			file = global.Engine.exportFile(res, { awards: true });
 			rows.push([own, countAwards(file)]);
 		}
@@ -3915,6 +3920,7 @@ console.log("\nExport: the round trip, ages, award scope and notes");
 		let stale = 0;
 		for (let i = 0; i < out.players.length; i++) {
 			if ((res.players[i].awards || []).length === 0 &&
+				(res.players[i].priorAwards || []).length === 0 &&
 				(out.players[i].awards || []).length > 0) stale++;
 		}
 		ok("a player who won nothing this run keeps nothing", stale === 0, stale + " stale");
@@ -4093,6 +4099,163 @@ console.log("\nExport: the round trip, ages, award scope and notes");
 	ok("an unknown conference can be opted into",
 		A.isMajorAward("Big Sky Player of the Year", ["Big Sky"]) &&
 		!A.isMajorAward("Big Sky Player of the Year"));
+}
+
+console.log("\nUniverse: the same men across two classes");
+{
+	/* Two files, one world: the later file's underclassmen play the earlier
+	   season on real rosters, can win its honors, and never reach its board
+	   or its export. The build-phase preview the chain relies on has to
+	   agree with the full run, or the man on the 2025 roster is not the man
+	   in the 2027 file. */
+	const E = global.Engine;
+	const lfA = V.realisticClass(1, 70);
+	lfA.startingSeason = 2026;
+	const lfB = V.realisticClass(2, 70);
+	lfB.startingSeason = 2027;
+	const prev = E.previewClass(lfB, global.Config.make({ seed: "u#2027" }));
+	const full = E.run(lfB, global.Config.make({ seed: "u#2027" }));
+	ok("the build-phase preview agrees with the full run on every player",
+		prev.season === 2027 && prev.players.length === full.players.length &&
+		prev.players.every((p, i) => p.newCollege === full.players[i].newCollege &&
+			p.classYear === full.players[i].classYear &&
+			p.archetype === full.players[i].archetype && p.key === full.players[i].key));
+	const roster = E.futureRosterFor(prev, 2026, 1);
+	ok("a later class's upperclassmen were on campus the season before",
+		roster.length >= 15 && roster.every((f) => f.team && global.Colleges.COLLEGES[f.team] &&
+			f.classYear && f.ratings && Number.isFinite(f.ovr)) &&
+		roster.every((f) => {
+			const p = prev.players.filter((x) => x.key === f.key)[0];
+			return p && p.classYear !== "Freshman" && f.ovr <= p.newOvr;
+		}));
+	ok("a freshman in the later class was not on campus yet",
+		!roster.some((f) => prev.players.filter((x) => x.key === f.key)[0].classYear === "Freshman"));
+	ok("and nobody is on a roster two seasons before a sophomore year",
+		E.futureRosterFor(prev, 2025, 1).every((f) =>
+			prev.players.filter((x) => x.key === f.key)[0].classYear !== "Sophomore"));
+	const resA = E.run(lfA, global.Config.make({ seed: "u#2026", universeRoster: roster }));
+	const fp = resA.futurePlayers || [];
+	ok("every one of them played the earlier season: a line and a game log",
+		fp.length === roster.length && fp.every((p) => p.stats && p.gameLog && p.future));
+	ok("they sit on the roster of the school the later file says",
+		fp.every((p) => resA.teams[p.newCollege] &&
+			(resA.teams[p.newCollege].futureMembers || []).indexOf(p) !== -1 &&
+			resA.teams[p.newCollege].members.some((m) => m.player === p) &&
+			resA.teams[p.newCollege].prospects.indexOf(p) === -1));
+	ok("they never reach the draft board, the class or the export",
+		!resA.board.some((p) => p.future) && !resA.players.some((p) => p.future) &&
+		E.exportFile(resA).players.length === lfA.players.length);
+	ok("one of them can take an honor off the field, and it is recorded as a later class's",
+		fp.some((p) => p.awards && p.awards.length) &&
+		resA.fieldHonors.some((h) => h.futureClass === 2027 && h.key && h.homeKey));
+	ok("the same seed without the roster is a different season for those programs",
+		JSON.stringify(E.run(lfA, global.Config.make({ seed: "u#2026" })).futurePlayers) === "[]");
+	ok("a class run alone is unchanged: universeRoster defaults to nothing",
+		E.run(lfA, global.Config.make({ seed: "u#2026", universeRoster: [] })).futurePlayers.length === 0);
+	/* News can say it. */
+	const arts = global.News.build(resA);
+	ok("the paper can report an award won by a later class's underclassman",
+		global.News.TEMPLATES.some((t) => t.kind === "underclassman award") &&
+		(arts.some((a) => a.kind === "underclassman award") ||
+			!resA.fieldHonors.some((h) => h.futureClass)));
+}
+
+console.log("\nEarlier seasons: nights, highs and honors; statlines abroad; the college table");
+{
+	/* A prior season used to be an average with no nights in it. Now it
+	   carries a drawn schedule, a game log reconciled to the line, season
+	   highs and a best game — and honors, measured against the bars this
+	   season's field set. */
+	const res = global.Engine.run(V.realisticClass(3, 70), global.Config.make({ seed: "prior-nights" }));
+	const rows = [];
+	for (const p of res.players) {
+		if (p.nonNcaa) continue;
+		for (const r of p.priorSeasons || []) if (r.simulated) rows.push({ p, r });
+	}
+	ok("every simulated earlier season carries a game log and season highs",
+		rows.length >= 30 && rows.every(({ r }) => r.gameLog && r.gameLog.games.length >= 25 &&
+			r.highs && Number.isFinite(r.highs.pts) && r.best && r.best.opp && r.record));
+	ok("an earlier season's high is a night out of that season, not this one",
+		rows.every(({ r }) => r.highs.pts >= Math.floor(r.ppg) &&
+			r.highs.pts <= 4 + 1.55 * r.mpg + 30 &&
+			Math.abs(r.gameLog.games.reduce((a, g) => a + g.pts, 0) / r.gameLog.games.length - r.ppg) < 0.6));
+	ok("the drawn schedule names real opponents and a record that adds up",
+		rows.every(({ r }) => r.record.w + r.record.l === r.gameLog.games.length ||
+			r.record.w + r.record.l >= r.gameLog.games.length) &&
+		rows.every(({ r }) => r.gameLog.games.every((g) => global.Colleges.COLLEGES[g.opp])));
+	const honored = res.players.filter((p) => p.priorAwards && p.priorAwards.length);
+	const older = res.players.filter((p) => !p.nonNcaa && p.classYear !== "Freshman");
+	ok("some upperclassmen hold honors from earlier seasons, and no freshman does",
+		honored.length >= 3 && honored.length <= older.length &&
+		honored.every((p) => p.classYear !== "Freshman") &&
+		honored.every((p) => p.priorAwards.every((a) => a.season < res.season && a.award)));
+	ok("an earlier honor is also on the season row it belongs to",
+		honored.every((p) => p.priorAwards.every((a) =>
+			(p.priorSeasons || []).some((r) => r.season === a.season &&
+				(r.awards || []).indexOf(a.award) !== -1))));
+	ok("the draft year's own list is untouched by them",
+		res.players.every((p) => !(p.awards || []).some((a) => /^\d{4} /.test(a))));
+	/* The export: earlier honors at their own seasons, never accumulating,
+	   and the earlier rows carry highs off their own nights. */
+	{
+		const ex = global.Engine.exportFile(res, { stats: true, prior: true, highs: true, awards: true });
+		const withPrior = honored[0];
+		const idx = res.players.indexOf(withPrior);
+		const row = ex.players[idx];
+		ok("earlier honors are exported as {season, type} at their own season",
+			withPrior.priorAwards.every((a) =>
+				row.awards.some((x) => x.season === a.season && x.type === a.award)));
+		const again = global.Engine.exportFile({ leagueFile: { players: ex.players }, players: res.players,
+			teams: res.teams, proLeagues: res.proLeagues, season: res.season, seed: res.seed,
+			cfg: res.cfg, ageIsInformative: res.ageIsInformative },
+			{ stats: true, prior: true, highs: true, awards: true });
+		ok("and a second export does not double them",
+			again.players[idx].awards.length === row.awards.length);
+		const priorRows = row.stats.filter((r) => r.season < res.season);
+		ok("an earlier season's exported row carries highs from its own nights",
+			priorRows.length > 0 && priorRows.every((r) => Array.isArray(r.ptsMax) &&
+				r.ptsMax[0] <= r.pts && r.ptsMax[0] > 0));
+		ok("the note says what the earlier seasons' highs were",
+			/\d{4} highs \d+p/.test(global.Engine.buildNote(withPrior, res.teams, res.season,
+				{ noteLines: ["highs"] })));
+	}
+	/* Statlines for the prospects abroad. */
+	{
+		const pro = res.players.filter((p) => p.nonNcaa && p.stats && p.gameLog)[0];
+		const ex = global.Engine.exportFile(res, { stats: true, highs: true });
+		const row = ex.players[res.players.indexOf(pro)];
+		const BS = global.BBGMStats;
+		ok("a prospect abroad gets a complete stats row too",
+			pro && Array.isArray(row.stats) && row.stats.length >= 1 &&
+			row.stats[row.stats.length - 1].gp === pro.stats.gp &&
+			JSON.stringify(Object.keys(row.stats[row.stats.length - 1])) === JSON.stringify(BS.KEYS) &&
+			row.stats[row.stats.length - 1].pts > 0 &&
+			Array.isArray(row.stats[row.stats.length - 1].ptsMax));
+		const gl = res.players.filter((p) => p.newCollege === "NBA G League" && p.gameLog)[0];
+		ok("a G League night is forty-eight minutes long, not forty",
+			!gl || gl.gameLog.games.every((g) => g.avail >= 48 && g.min <= g.avail));
+	}
+	/* The college table. */
+	{
+		const C = global.Colleges;
+		ok("UC San Diego is a Division I program",
+			C.COLLEGES["UC San Diego"] && C.conferenceOf("UC San Diego") === "Big West");
+		ok("Hartford and St. Francis Brooklyn are no longer in the table",
+			!C.COLLEGES["Hartford"] && !C.COLLEGES["St. Francis (BKN)"]);
+		ok("no program is in the table twice under two names",
+			!C.COLLEGES["Nebraska-Omaha"] && !C.COLLEGES["Arkansas-Little Rock"] &&
+			!C.COLLEGES["Texas Rio Grande Valley"] &&
+			C.canonical("Nebraska-Omaha") === "Omaha" &&
+			C.canonical("Arkansas-Little Rock") === "Little Rock" &&
+			C.canonical("Texas Rio Grande Valley") === "UT Rio Grande Valley");
+		ok("every alias resolves to a program in the table",
+			Object.keys(C.ALIASES).every((k) => C.COLLEGES[C.ALIASES[k]]));
+		ok("the table is the 364 programs of Division I", C.names.length === 364);
+		ok("the Tim Duncan Award replaced the Karl Malone Award",
+			global.Awards.POSITION_AWARDS.some((a) => a.name === "Tim Duncan Award") &&
+			!global.Awards.POSITION_AWARDS.some((a) => /Malone/.test(a.name)) &&
+			global.Awards.isMajorAward("Tim Duncan Award"));
+	}
 }
 
 console.log("\n" + (failures ? failures + " of " + checks + " checks failed"
