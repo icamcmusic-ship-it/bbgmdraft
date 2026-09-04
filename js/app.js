@@ -430,6 +430,7 @@
 		const next = state.redo.pop();
 		if (!next) return;
 		state.undo.push(undoSnapshot(next.label));
+		if (state.undo.length > 40) state.undo.shift();
 		applySnapshot(next, "Redid");
 	}
 
@@ -3952,11 +3953,13 @@
 		try {
 			const out = global.Engine.exportFile(res, opts);
 			/* A player whose identity check failed passed through untouched;
-			   that used to be silent. */
-			if (global.Engine.exportFile.passthroughs) {
-				setStatus("Warning: " + global.Engine.exportFile.passthroughs +
-					" player(s) could not be matched and were exported unmodified.");
-			}
+			   that used to be silent, and then it was said and immediately
+			   overwritten by the caller's "Exported" line. Left on the
+			   function for the caller to fold into its own status. */
+			exportOne.warning = global.Engine.exportFile.passthroughs
+				? "Warning: " + global.Engine.exportFile.passthroughs +
+					" player(s) could not be matched and were exported unmodified."
+				: "";
 			const base = state.files[i].name.replace(/\.json(\.gz)?$|\.gz$/i, "");
 			// BBGM writes its exports with a BOM; match it.
 			download(base + "_customized.json", "\ufeff" + JSON.stringify(out, null, 2),
@@ -4055,7 +4058,7 @@
 	}
 
 	function exportLeagueFragment(res) {
-		download(state.files[state.active].name.replace(/\.json$/i, "") + "_league_fragment.json",
+		download(state.files[state.active].name.replace(/\.json(\.gz)?$|\.gz$/i, "") + "_league_fragment.json",
 			JSON.stringify(global.Engine.exportLeagueFragment(res), null, 2), "application/json");
 		setStatus("League fragment exported.");
 	}
@@ -4252,26 +4255,52 @@
 		return rows;
 	}
 
+	/* The export options every route outside the menu uses: the toolbar
+	   button, the `e` shortcut and Export all. They used to pass nothing,
+	   which disagreed with the menu's own defaults (injuries on there, off
+	   in the engine) and threw away whatever the user had just ticked in
+	   the menu. The menu writes state.exportOpts on every change. */
+	function currentExportOpts() {
+		return state.exportOpts || { ages: true, injuries: true, jerseys: true };
+	}
+
+	/* One sequence at a time, driven from the button's single listener. A
+	   second `onclick` handler beside the listener fired both on every
+	   "Export next" click, so file 0 downloaded again each time. */
 	function exportAll() {
+		if (state.exportAllStep) { state.exportAllStep(); return; }
 		let i = 0;
+		const done = () => {
+			state.exportAllStep = null;
+			$("btnExportAll").textContent = "Export all";
+		};
 		const step = () => {
 			if (i >= state.files.length) {
 				setStatus("All " + state.files.length + " files exported.");
-				$("btnExportAll").textContent = "Export all";
+				done();
 				return;
 			}
-			const ok = exportOne(i);
+			const ok = exportOne(i, currentExportOpts());
 			i++;
-			if (!ok) return;
+			if (!ok) { done(); return; }
 			if (i < state.files.length) {
 				$("btnExportAll").textContent = "Export next (" + i + "/" + state.files.length + ")";
 				setStatus("Exported " + i + " of " + state.files.length +
 					". Your browser blocks bulk downloads without a click — " +
-					"press the button again for the next file.", true);
-				$("btnExportAll").onclick = step;
+					"press the button again for the next file." +
+					(exportOne.warning ? " " + exportOne.warning : ""), true);
+				state.exportAllStep = step;
 			} else step();
 		};
 		step();
+	}
+
+	/* Export the active class and say so, keeping any passthrough warning
+	   in the status line instead of overwriting it a moment later. */
+	function exportActive(opts) {
+		if (!exportOne(state.active, opts)) return;
+		setStatus("Exported " + state.files[state.active].name + "." +
+			(exportOne.warning ? " " + exportOne.warning : ""));
 	}
 
 	function exportMenu() {
@@ -4290,11 +4319,16 @@
 		   then thrown away at export time. Opt-in, so the default file is
 		   unchanged. */
 		const optBox = el("div", "checks");
+		const remembered = state.exportOpts || null;
 		const opt = (key, label, dflt) => {
 			const lab = el("label", "check");
 			const cb = el("input");
 			cb.type = "checkbox";
-			cb.checked = !!dflt;
+			/* The menu reopens the way it was left, and the toolbar export
+			   uses the same choices (see currentExportOpts). */
+			cb.checked = remembered && typeof remembered[key] === "boolean"
+				? remembered[key] : !!dflt;
+			cb.addEventListener("change", () => { state.exportOpts = exportOpts(); });
 			lab.appendChild(cb);
 			lab.appendChild(document.createTextNode(" " + label));
 			optBox.appendChild(lab);
@@ -4352,11 +4386,13 @@
 		};
 		scopeSel.addEventListener("change", () => {
 			state.exportAwardsScope = scopeSel.value;
+			state.exportOpts = exportOpts();
 			paintScope();
 		});
 		confInput.addEventListener("input", () => {
 			state.exportMajorConfs = confInput.value.split(",")
 				.map((x) => x.trim()).filter(Boolean);
+			state.exportOpts = exportOpts();
 			paintScope();
 		});
 		scopeWrap.appendChild(scopeLab);
@@ -4453,16 +4489,14 @@
 			"“DNE” itself, whatever team the file named — that is BBGM, not " +
 			"this export."));
 		item("BBGM class file, with the options above", () => {
-			if (exportOne(state.active, exportOpts())) {
-				setStatus("Exported " + state.files[state.active].name + ".");
-			}
+			exportActive(exportOpts());
 		});
 		item("Players file, for Tools → Import players (keeps the statline)", () => {
 			const res2 = ensureResult(state.active);
 			if (!res2) return;
 			try {
 				const out = global.Engine.exportPlayersFile(res2, exportOpts());
-				const base = state.files[state.active].name.replace(/\.json$/i, "");
+				const base = state.files[state.active].name.replace(/\.json(\.gz)?$|\.gz$/i, "");
 				download(base + "_players.json", "\ufeff" + JSON.stringify(out, null, 2),
 					"application/json");
 				setStatus("Wrote " + out.players.length + " players. Load it with " +
@@ -5001,7 +5035,7 @@
 	$("btnRerun").addEventListener("click", () => run());
 	$("btnUndo").addEventListener("click", undo);
 	$("btnExport").addEventListener("click", () => {
-		if (exportOne(state.active)) setStatus("Exported " + state.files[state.active].name + ".");
+		exportActive(currentExportOpts());
 	});
 	$("btnExportMenu").addEventListener("click", exportMenu);
 	$("btnExportAll").addEventListener("click", exportAll);
@@ -5218,9 +5252,7 @@
 		}
 		if (k === "e" && !$("btnExport").disabled) {
 			e.preventDefault();
-			if (exportOne(state.active)) {
-				setStatus("Exported " + state.files[state.active].name + ".");
-			}
+			exportActive(currentExportOpts());
 			return;
 		}
 		if (k === "p" && !$("btnPin").disabled) { e.preventDefault(); $("btnPin").click(); return; }

@@ -413,8 +413,13 @@
 		   players whose draft year is this season; if that leaves a plausible
 		   class, the caller is told it can take that subset instead of the
 		   whole file. */
-		const inClass = leagueFile.players.filter((p) =>
-			p && p.draft && Number(p.draft.year) === Number(season));
+		/* The index kept here is the row's position in the WHOLE file: a
+		   pid-less row is identified by that position, and the caller
+		   filters the whole file by it, so an index into the filtered
+		   subset kept the wrong sixty players. */
+		const inClass = leagueFile.players
+			.map((p, i) => ({ p, i }))
+			.filter(({ p }) => p && p.draft && Number(p.draft.year) === Number(season));
 		const oversized = leagueFile.players.length > MAX_CLASS;
 		if (oversized) {
 			warnings.push(leagueFile.players.length + " players in this file — a draft " +
@@ -460,7 +465,7 @@
 			// The subset the caller can offer to load instead, when the file is
 			// a whole league rather than a class.
 			classPids: oversized && inClass.length && inClass.length <= MAX_CLASS
-				? inClass.map((p, i) => (Number.isFinite(Number(p.pid)) ? Number(p.pid) : -1 - i))
+				? inClass.map(({ p, i }) => (Number.isFinite(Number(p.pid)) ? Number(p.pid) : -1 - i))
 				: null,
 			classCount: inClass.length,
 		};
@@ -5237,7 +5242,11 @@
 			/* A pid match is identity only if the name agrees: a class
 			   exported from ANOTHER league carries that league's pids, and
 			   pid 3,412 there is a different man from pid 3,412 here. */
-			if (target && sameName(target, p)) {
+			/* And a league prospect is replaced at most once: a class file
+			   with two rows on one pid (tolerated by validateLeagueFile)
+			   used to write the second over the first and lose a player,
+			   past the guard below, which only counts the league's side. */
+			if (target && sameName(target, p) && !replacements.has(target)) {
 				replacements.set(target, overlay(target, p));
 			} else {
 				const copy = JSON.parse(JSON.stringify(p));

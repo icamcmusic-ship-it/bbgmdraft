@@ -985,6 +985,18 @@ console.log("\nLeague file season");
 		const small = global.Engine.validateLeagueFile(V.syntheticClass(5, 70));
 		ok("a normal class does not warn", small.oversized === false &&
 			small.classPids === null);
+		/* A pid-less row is named by its position in the WHOLE file, which
+		   is how the caller filters; an index into the class subset kept
+		   the first sixty rows of the league instead of the class. */
+		const noPid = JSON.parse(JSON.stringify(big));
+		for (const p of noPid.players) delete p.pid;
+		noPid.players.reverse(); // the class is now rows 330-399
+		const v2 = global.Engine.validateLeagueFile(noPid);
+		const keep = new Set(v2.classPids || []);
+		const kept = noPid.players.filter((p, i) => keep.has(-1 - i));
+		ok("a pid-less league file offers the class rows themselves",
+			kept.length === 70 && kept.every((p) => p.draft.year === 2026),
+			kept.length + " kept, " + kept.filter((p) => p.draft.year === 2026).length + " in class");
 	}
 }
 
@@ -4521,6 +4533,21 @@ console.log("\nExport: stats rows, the class's own year, the envelope and the me
 			m.file.players.filter((p) => p.tid === -2)
 				.every((p) => p.draft.round === 0 && p.draft.tid === -1));
 		ok("no warning when the league is on the class's year", !m.warnings.length);
+		/* Two class rows on one pid (which validateLeagueFile tolerates)
+		   both matched the same league prospect, and the second replacement
+		   overwrote the first: one player gone, past a guard that only
+		   counted the league's side. */
+		const dup = JSON.parse(JSON.stringify(lf));
+		dup.players[2].pid = dup.players[1].pid;
+		const resDup = global.Engine.run(dup, global.Config.make({ seed: "z" }));
+		const leagueDup = {
+			startingSeason: 2027, gameAttributes: { season: 2027 },
+			players: dup.players.map((p) => Object.assign(JSON.parse(JSON.stringify(p)), { tid: -2 })),
+		};
+		const md = global.Engine.mergeIntoLeague(resDup, leagueDup, opts);
+		ok("a class with two rows on one pid loses neither in the merge",
+			md.file.players.length === 20 && md.replaced === 19 && md.added === 1,
+			md.file.players.length + " players, " + md.replaced + " replaced, " + md.added + " added");
 		const late = Object.assign({}, league, { gameAttributes: { season: 2030 }, startingSeason: 2030 });
 		ok("a league past the class's draft is warned about",
 			global.Engine.mergeIntoLeague(res, late, opts).warnings.length === 1);
