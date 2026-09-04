@@ -753,7 +753,12 @@
 			const members = onRoster.map((p) => ({
 				filler: false,
 				player: p,
-				talent: prospectTalent(p.newOvr, p.newPot),
+				/* talentPot, not newPot: this runs on a staged re-run too, and
+				   by then newPot holds the pot phase's displayed number, which
+				   a cold run has not computed yet. Reading it made a re-run
+				   from the regular phase disagree with a cold run on every
+				   team. */
+				talent: prospectTalent(p.newOvr, p.talentPot || p.newPot),
 			}));
 			const nFill = Math.max(6, 10 - members.length);
 			const slots = assignFillerSlots(members, nFill, trng.child("slots"));

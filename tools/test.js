@@ -985,6 +985,18 @@ console.log("\nLeague file season");
 		const small = global.Engine.validateLeagueFile(V.syntheticClass(5, 70));
 		ok("a normal class does not warn", small.oversized === false &&
 			small.classPids === null);
+		/* A pid-less row is named by its position in the WHOLE file, which
+		   is how the caller filters; an index into the class subset kept
+		   the first sixty rows of the league instead of the class. */
+		const noPid = JSON.parse(JSON.stringify(big));
+		for (const p of noPid.players) delete p.pid;
+		noPid.players.reverse(); // the class is now rows 330-399
+		const v2 = global.Engine.validateLeagueFile(noPid);
+		const keep = new Set(v2.classPids || []);
+		const kept = noPid.players.filter((p, i) => keep.has(-1 - i));
+		ok("a pid-less league file offers the class rows themselves",
+			kept.length === 70 && kept.every((p) => p.draft.year === 2026),
+			kept.length + " kept, " + kept.filter((p) => p.draft.year === 2026).length + " in class");
 	}
 }
 
@@ -2266,6 +2278,23 @@ console.log("\nWarm re-runs");
 		.run(global.Config.make({ seed: "warm" }));
 	ok("and turning them back on reproduces the cold run",
 		names(back) === names(coldAgain));
+
+	/* A re-run from the REGULAR phase (a pace change skips the build) read
+	   the pot phase's displayed potential as each prospect's college talent,
+	   which a cold run has not computed yet, so every team's season differed
+	   between the two. */
+	{
+		const sig = (res) => JSON.stringify(res.players.map((p) =>
+			[p.key, p.stats && p.stats.ppg, p.awards, p.note]));
+		const r2 = global.Engine.createRunner(V.realisticClass(2, 70));
+		r2.run(global.Config.make({ seed: "regwarm" }));
+		const w2 = r2.run(global.Config.make({ seed: "regwarm", pace: 72 }));
+		const c2 = global.Engine.run(V.realisticClass(2, 70),
+			global.Config.make({ seed: "regwarm", pace: 72 }));
+		ok("a warm re-run from the regular phase matches a cold run",
+			w2.phasesRun.indexOf("build") === -1 && sig(w2) === sig(c2),
+			"ran " + w2.phasesRun.join(","));
+	}
 
 	/* Each event's sentence describes where the player actually ended up. A
 	   later event's move() shifts everyone it passes by one, so a text written
@@ -3757,6 +3786,23 @@ console.log("\nAudit regressions (September 2026)");
 			ok("a note template with no honors line still gets one when awards export",
 				bareHonored.length > 0 &&
 				bareHonored.every((x) => /^Honors: /m.test(String(x.note || ""))));
+			/* The class file and the league merge both keep `awards`, so on
+			   those routes an unticked honors line means what it says: the
+			   honors used to land in every note anyway. */
+			const bareClass = global.Engine.exportFile(bare, { awards: true });
+			ok("the class file respects a template with the honors line off",
+				bareClass.players.some((x) => x.awards && x.awards.length) &&
+				bareClass.players.every((x) => !/^Honors: /m.test(String(x.note || ""))));
+			const bareMerge = global.Engine.mergeIntoLeague(bare, {
+				players: [], startingSeason: bare.season,
+			}, { awards: true });
+			ok("and so does the league merge",
+				bareMerge.file.players.some((x) => x.awards && x.awards.length) &&
+				bareMerge.file.players.every((x) => !/^Honors: /m.test(String(x.note || ""))));
+			ok("while a template WITH the honors line still writes it into the class file",
+				honored.length > 0 && global.Engine.exportFile(res, { awards: true }).players
+					.filter((x) => x.awards && x.awards.length)
+					.every((x) => /^Honors: /m.test(String(x.note || ""))));
 		}
 
 		/* Merging the class into a whole league file, which is the only route
@@ -4003,6 +4049,16 @@ console.log("\nExport: the round trip, ages, award scope and notes");
 			ok("the note's Honors: line follows the same scope",
 				line.split("; ").every((t) => global.Awards.isMajorAward(t.trim())), line);
 		}
+		/* The earlier seasons' line follows the scope too: it used to keep
+		   the template's unscoped list beside a scoped awards array. */
+		ok("the note's Earlier honors: line follows the same scope",
+			major.players.every((p) => {
+				const line = String(p.note || "").split("\n")
+					.filter((l) => l.indexOf("Earlier honors:") === 0)[0];
+				if (!line) return true;
+				return line.slice(16).replace(/ \(\+\d+ more\)$/, "").split("; ")
+					.every((t) => global.Awards.isMajorAward(t.trim().replace(/^\d{4} /, "")));
+			}));
 		ok("only one Honors: line, however many times a file is exported",
 			major.players.every((p) => String(p.note || "").split("\n")
 				.filter((l) => l.indexOf("Honors:") === 0).length <= 1));
@@ -4504,6 +4560,21 @@ console.log("\nExport: stats rows, the class's own year, the envelope and the me
 			m.file.players.filter((p) => p.tid === -2)
 				.every((p) => p.draft.round === 0 && p.draft.tid === -1));
 		ok("no warning when the league is on the class's year", !m.warnings.length);
+		/* Two class rows on one pid (which validateLeagueFile tolerates)
+		   both matched the same league prospect, and the second replacement
+		   overwrote the first: one player gone, past a guard that only
+		   counted the league's side. */
+		const dup = JSON.parse(JSON.stringify(lf));
+		dup.players[2].pid = dup.players[1].pid;
+		const resDup = global.Engine.run(dup, global.Config.make({ seed: "z" }));
+		const leagueDup = {
+			startingSeason: 2027, gameAttributes: { season: 2027 },
+			players: dup.players.map((p) => Object.assign(JSON.parse(JSON.stringify(p)), { tid: -2 })),
+		};
+		const md = global.Engine.mergeIntoLeague(resDup, leagueDup, opts);
+		ok("a class with two rows on one pid loses neither in the merge",
+			md.file.players.length === 20 && md.replaced === 19 && md.added === 1,
+			md.file.players.length + " players, " + md.replaced + " replaced, " + md.added + " added");
 		const late = Object.assign({}, league, { gameAttributes: { season: 2030 }, startingSeason: 2030 });
 		ok("a league past the class's draft is warned about",
 			global.Engine.mergeIntoLeague(res, late, opts).warnings.length === 1);

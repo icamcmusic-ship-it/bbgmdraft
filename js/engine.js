@@ -413,8 +413,13 @@
 		   players whose draft year is this season; if that leaves a plausible
 		   class, the caller is told it can take that subset instead of the
 		   whole file. */
-		const inClass = leagueFile.players.filter((p) =>
-			p && p.draft && Number(p.draft.year) === Number(season));
+		/* The index kept here is the row's position in the WHOLE file: a
+		   pid-less row is identified by that position, and the caller
+		   filters the whole file by it, so an index into the filtered
+		   subset kept the wrong sixty players. */
+		const inClass = leagueFile.players
+			.map((p, i) => ({ p, i }))
+			.filter(({ p }) => p && p.draft && Number(p.draft.year) === Number(season));
 		const oversized = leagueFile.players.length > MAX_CLASS;
 		if (oversized) {
 			warnings.push(leagueFile.players.length + " players in this file — a draft " +
@@ -460,7 +465,7 @@
 			// The subset the caller can offer to load instead, when the file is
 			// a whole league rather than a class.
 			classPids: oversized && inClass.length && inClass.length <= MAX_CLASS
-				? inClass.map((p, i) => (Number.isFinite(Number(p.pid)) ? Number(p.pid) : -1 - i))
+				? inClass.map(({ p, i }) => (Number.isFinite(Number(p.pid)) ? Number(p.pid) : -1 - i))
 				: null,
 			classCount: inClass.length,
 		};
@@ -4585,6 +4590,13 @@
 		return AW.scopeAwards(list, scope, confs);
 	}
 
+	/* Whether the run's note template carries a given line. */
+	function noteTemplateHas(result, key) {
+		const cfg = result && result.cfg;
+		const want = cfg && Array.isArray(cfg.noteLines) ? cfg.noteLines : DEFAULT_NOTE_LINES;
+		return want.indexOf(key) !== -1;
+	}
+
 	/* Produce the modified BBGM draft class file.
 
 	   `opts` is the §8.13 opt-in surface — every flag off writes exactly the
@@ -4593,6 +4605,9 @@
 	     prior:  simulated earlier seasons as additional stats rows
 	     awards: every honor as {season, type}, concatenated (a re-imported
 	             file may already carry awards)
+	     honorsInNote: write the Honors: line into the note even when the
+	             note template left it out (the Import players route, where
+	             the note is the only place honors survive)
 	     highs:  game-log season highs and double-double counts on the row
 
 	   IMPORTANT: BBGM's own Import -> Draft class tool (handleUploadedDraftClass
@@ -4741,7 +4756,8 @@
 			   either way; that one is ours. */
 			if (opts.noteAppend && String(orig.note || "").trim()) {
 				const keep = String(orig.note).split("\n")
-					.filter((l) => l.indexOf("Honors:") !== 0).join("\n").trim();
+					.filter((l) => l.indexOf("Honors:") !== 0 &&
+						l.indexOf("Earlier honors:") !== 0).join("\n").trim();
 				out.note = keep && keep !== String(p.note || "").trim()
 					? keep + "\n\n" + p.note : p.note;
 			} else {
@@ -4815,19 +4831,42 @@
 				   guarded by noteBool. So when a player's honors are being
 				   exported, they are also guaranteed a line in the note —
 				   which is the only way an import that keeps his statline can
-				   also tell you he was an All-American. The note template can
-				   drop the honors line (see NOTE_LINES); this does not. */
+				   also tell you he was an All-American. On THAT route the note
+				   template's honors line is overridden (opts.honorsInNote,
+				   set by exportPlayersFile). */
 				/* Same reasoning one level down: a note carried in from a
 				   previous export holds the PREVIOUS run's honors line, so it
 				   is replaced rather than skipped. p.note is built fresh each
 				   run, so the only way a stale line survives is a template
 				   that omits the honors line while awards are being written —
 				   which is exactly the case the old guard silently kept. */
+				/* ...but only on the route that needs it. The class file
+				   (Draft -> Import) and the league merge both keep `awards`,
+				   so on those routes a note template with the honors line
+				   unticked means exactly that, and writing the line anyway
+				   put the honors in every note the user had asked to keep
+				   them out of. exportPlayersFile sets honorsInNote because
+				   there the note is the only place they survive. The
+				   template's own line is still rewritten to the scope, so a
+				   "major honors only" export does not say otherwise in the
+				   note. */
+				const templateHasHonors = noteTemplateHas(result, "awards");
+				const isOurs = (l) => l.indexOf("Honors:") === 0 || l.indexOf("Earlier honors:") === 0;
 				out.note = String(out.note || "")
-					.split("\n").filter((l) => l.indexOf("Honors:") !== 0).join("\n");
-				if (scoped.length) {
+					.split("\n").filter((l) => !isOurs(l)).join("\n");
+				if (scoped.length && (opts.honorsInNote || templateHasHonors)) {
 					out.note = (out.note ? out.note + "\n" : "") +
 						"Honors: " + scoped.join("; ");
+				}
+				/* The earlier seasons' line follows the same scope as the
+				   rows: a "major honors only" export used to keep the
+				   template's unscoped line beside a scoped array. */
+				if (priorRows.length && (opts.honorsInNote || templateHasHonors)) {
+					const prior = priorRows.slice().sort((a, b) => b.season - a.season);
+					const shown = prior.slice(0, 3).map((a) => a.season + " " + a.type);
+					const extra = prior.length - shown.length;
+					out.note += "\nEarlier honors: " + shown.join("; ") +
+						(extra > 0 ? " (+" + extra + " more)" : "");
 				}
 			}
 			/* The flag matches the note: writing noteBool = 1 beside an
@@ -5063,7 +5102,9 @@
 	];
 
 	function exportPlayersFile(result, opts) {
-		const full = exportFile(result, opts);
+		/* `awards` does not survive Tools -> Import players, so the honors go
+		   into the note here whatever the note template says. */
+		const full = exportFile(result, Object.assign({}, opts, { honorsInNote: true }));
 		const players = full.players.map((p) => {
 			const out = JSON.parse(JSON.stringify(p));
 			for (const key of PLAYERS_FILE_STRIP) delete out[key];
@@ -5213,7 +5254,11 @@
 			/* A pid match is identity only if the name agrees: a class
 			   exported from ANOTHER league carries that league's pids, and
 			   pid 3,412 there is a different man from pid 3,412 here. */
-			if (target && sameName(target, p)) {
+			/* And a league prospect is replaced at most once: a class file
+			   with two rows on one pid (tolerated by validateLeagueFile)
+			   used to write the second over the first and lose a player,
+			   past the guard below, which only counts the league's side. */
+			if (target && sameName(target, p) && !replacements.has(target)) {
 				replacements.set(target, overlay(target, p));
 			} else {
 				const copy = JSON.parse(JSON.stringify(p));

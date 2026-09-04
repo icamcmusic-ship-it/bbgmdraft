@@ -604,16 +604,28 @@ function ok(name, condition, detail) {
 		await page.setViewportSize({ width: 420, height: 900 });
 		await page.waitForTimeout(300);
 		ok("the settings panel is out of the way on a phone",
-			!(await page.locator("aside").isVisible()));
+			!(await page.locator("#settings").isVisible()));
+		/* The player editor is an aside too, and the rule that hid the
+		   panel hid it with it: on a phone a tapped row selected the player
+		   and showed nothing. */
+		await page.evaluate(() => {
+			const st = window.App.state;
+			st.editing = st.results[st.active].players[0].key;
+			window.App.render();
+		});
+		await page.waitForTimeout(300);
+		ok("the player editor still shows on a phone",
+			await page.locator(".drawer").isVisible());
+		await page.evaluate(() => { window.App.state.editing = null; window.App.render(); });
 		await page.locator("#btnSettings").click();
 		await page.waitForTimeout(300);
 		ok("and the header button brings it back",
-			await page.locator("aside").isVisible());
+			await page.locator("#settings").isVisible());
 		await page.locator("#btnSettings").click();
 		await page.setViewportSize({ width: 1500, height: 980 });
 		await page.waitForTimeout(300);
 		ok("the panel is always there on a desktop",
-			await page.locator("aside").isVisible());
+			await page.locator("#settings").isVisible());
 	}
 
 	console.log("\nCards, columns and the menu");
@@ -707,6 +719,16 @@ function ok(name, condition, detail) {
 		});
 		ok("a right-button echo does not close the menu",
 			(await page.locator(".rowmenu").count()) === 1);
+		/* A second right-click, on another row, opens that row's menu. A
+		   document listener that closed on any contextmenu ran right after
+		   the row's own handler, so every right-click after the first
+		   opened and closed in the same instant. */
+		await page.locator("table tbody tr").nth(1).click({ button: "right" });
+		await page.waitForTimeout(300);
+		ok("a second right-click opens the next row's menu",
+			(await page.locator(".rowmenu").count()) === 1);
+		await page.locator("table tbody tr").first().click({ button: "right" });
+		await page.waitForTimeout(300);
 		/* Named before it is clicked: a locator that matches nothing spends
 		   thirty seconds timing out and then says only that it found nothing,
 		   which is all CI got out of it. This says what the menu did offer. */
@@ -788,6 +810,12 @@ function ok(name, condition, detail) {
 				const st = window.App.state;
 				return st.tab === "players" && st.editing === st.logPlayer;
 			}));
+		// The shortcut sheet says Escape closes the editor; it did not.
+		await page.locator("body").click({ position: { x: 5, y: 5 } });
+		await page.keyboard.press("Escape");
+		await page.waitForTimeout(300);
+		ok("Escape closes the editor",
+			await page.evaluate(() => window.App.state.editing === null));
 	}
 
 	console.log("\nThe busy indicator");

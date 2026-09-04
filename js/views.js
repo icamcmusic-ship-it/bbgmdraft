@@ -1483,6 +1483,7 @@
 	function closeRowMenu() {
 		if (openMenuOutsideClick) {
 			document.removeEventListener("click", openMenuOutsideClick);
+			document.removeEventListener("contextmenu", openMenuOutsideClick);
 			openMenuOutsideClick = null;
 		}
 		if (!openMenu) return;
@@ -1579,14 +1580,24 @@
 		   to catch it. closeRowMenu() (called from a menu item, Escape, or
 		   this handler itself) is what removes it, so a menu dismissed any
 		   other way never leaves a stale listener on document. */
+		/* A right-click elsewhere dismisses too — but not one on another
+		   row, whose own handler has just opened the next menu: a
+		   document-level contextmenu listener that closed unconditionally
+		   ran right after it and left every right-click past the first
+		   opening and closing in the same instant. */
 		const outsideClick = (e) => {
+			if (e.type === "contextmenu") {
+				if (e.target && e.target.closest && e.target.closest("tr[data-pkey]")) return;
+				closeRowMenu();
+				return;
+			}
 			if (e.button !== undefined && e.button !== 0) return;
 			closeRowMenu();
 		};
 		openMenuOutsideClick = outsideClick;
 		setTimeout(() => {
 			document.addEventListener("click", outsideClick);
-			document.addEventListener("contextmenu", closeRowMenu, { once: true });
+			document.addEventListener("contextmenu", outsideClick);
 		}, 0);
 	}
 

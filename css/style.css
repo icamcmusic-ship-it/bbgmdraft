@@ -734,12 +734,15 @@ body.busy button, body.busy input[type=range] { cursor: progress; }
 /* The toggle shows at every width now: on a desktop, closing the panel
    hands its 320px column back to the forty-column table. */
 .narrowonly { display: inline-block; }
-body.settings-closed aside { display: none; }
+/* #settings, not `aside`: the player editor drawer is an aside too, and
+   these rules hid it along with the panel — on every phone, and on a
+   desktop with the panel closed. */
+body.settings-closed #settings { display: none; }
 @media (max-width: 860px) {
-	aside { display: none; }
-	body.settings-open aside { display: block; }
+	#settings { display: none; }
+	body.settings-open #settings { display: block; }
 	/* Somewhere to stop scrolling when it is open. */
-	body.settings-open aside {
+	body.settings-open #settings {
 		max-height: 70vh;
 		overflow-y: auto;
 	}
