@@ -501,6 +501,39 @@
 			regions: { usa: 1.0, canada: 0.8, europe: 0.2, oceania: 0.2, asia: 0.2, latam: 0.3, africa: 0.4, other: 0.3 } },
 		"Did not play":   { strength: 30, pro: false, w: 2, tier: 3, idle: true,
 			regions: { usa: 1.0, canada: 1.0, europe: 1.0, oceania: 1.0, asia: 1.0, latam: 1.0, africa: 1.0, other: 1.0 } },
+		/* Thirteen more, because the map still had holes a real class fills
+		   every year: Italy and Lithuania are two of the four or five
+		   European leagues that actually produce first-round picks, Korea,
+		   the Philippines and Argentina each have a domestic league a
+		   prospect born there plays in before anyone abroad sees him, and
+		   the American amateur ladder below Division I is JUCO and DIII, not
+		   only the NAIA. */
+		"Italian LBA":    { strength: 75, pro: true, w: 6, tier: 2, domestic: "Italy", relegation: 2,
+			regions: { usa: 0.3, canada: 0.2, europe: 1.4, oceania: 0.2, asia: 0.2, latam: 0.6, africa: 0.5, other: 0.6 } },
+		"Lithuanian LKL": { strength: 68, pro: true, w: 4, tier: 2, domestic: "Lithuania", relegation: 1,
+			regions: { usa: 0.25, canada: 0.15, europe: 1.3, oceania: 0.1, asia: 0.1, latam: 0.2, africa: 0.3, other: 0.5 } },
+		"VTB United League": { strength: 72, pro: true, w: 4, tier: 2,
+			regions: { usa: 0.2, canada: 0.1, europe: 1.2, oceania: 0.1, asia: 0.5, latam: 0.2, africa: 0.3, other: 0.6 } },
+		"Polish PLK":     { strength: 62, pro: true, w: 3, tier: 3, domestic: "Poland", relegation: 1,
+			regions: { usa: 0.3, canada: 0.15, europe: 1.1, oceania: 0.1, asia: 0.1, latam: 0.2, africa: 0.3, other: 0.4 } },
+		"BNXT League":    { strength: 60, pro: true, w: 3, tier: 3, domestic: "Belgium and the Netherlands", relegation: 1,
+			regions: { usa: 0.3, canada: 0.2, europe: 1.1, oceania: 0.1, asia: 0.1, latam: 0.2, africa: 0.5, other: 0.4 } },
+		"Korean KBL":     { strength: 62, pro: true, w: 3, tier: 3, domestic: "South Korea",
+			regions: { usa: 0.15, canada: 0.1, europe: 0.1, oceania: 0.2, asia: 2.4, latam: 0.1, africa: 0.2, other: 0.3 } },
+		"Philippine PBA": { strength: 56, pro: true, w: 2, tier: 3, domestic: "the Philippines",
+			regions: { usa: 0.2, canada: 0.1, europe: 0.05, oceania: 0.3, asia: 1.8, latam: 0.1, africa: 0.1, other: 0.3 } },
+		"Argentine Liga Nacional": { strength: 60, pro: true, w: 3, tier: 3, domestic: "Argentina", relegation: 1,
+			regions: { usa: 0.1, canada: 0.05, europe: 0.15, oceania: 0.05, asia: 0.05, latam: 2.6, africa: 0.1, other: 0.3 } },
+		"Mexican LNBP":   { strength: 54, pro: true, w: 2, tier: 3, domestic: "Mexico",
+			regions: { usa: 0.4, canada: 0.1, europe: 0.1, oceania: 0.05, asia: 0.05, latam: 1.8, africa: 0.1, other: 0.3 } },
+		"Puerto Rico BSN": { strength: 56, pro: true, w: 2, tier: 3, domestic: "Puerto Rico",
+			regions: { usa: 0.5, canada: 0.1, europe: 0.1, oceania: 0.05, asia: 0.05, latam: 1.6, africa: 0.1, other: 0.3 } },
+		"New Zealand NBL": { strength: 54, pro: true, w: 2, tier: 3, domestic: "New Zealand",
+			regions: { usa: 0.25, canada: 0.1, europe: 0.1, oceania: 2.0, asia: 0.2, latam: 0.05, africa: 0.1, other: 0.3 } },
+		"JUCO":           { strength: 33, pro: false, w: 3, tier: 3,
+			regions: { usa: 1.4, canada: 0.6, europe: 0.2, oceania: 0.2, asia: 0.2, latam: 0.4, africa: 0.4, other: 0.3 } },
+		"DIII NCAA":      { strength: 28, pro: false, w: 1, tier: 3,
+			regions: { usa: 1.0, canada: 0.4, europe: 0.1, oceania: 0.1, asia: 0.1, latam: 0.2, africa: 0.2, other: 0.2 } },
 	};
 
 	/* Real clubs for the non-NCAA destinations, so a prospect abroad gets a
@@ -578,6 +611,87 @@
 			["Link Academy", 3], ["Oak Hill Academy", 2], ["Prolific Prep", 2],
 			["La Lumiere", 0], ["Wasatch Academy", 0], ["Long Island Lutheran", -1],
 			["Brewster Academy", -1],
+		],
+		"Italian LBA": [
+			["Virtus Bologna", 8], ["Olimpia Milano", 8], ["Germani Brescia", 4],
+			["Reyer Venezia", 3], ["Dolomiti Energia Trento", 2], ["Derthona Tortona", 2],
+			["Dinamo Sassari", 1], ["Pallacanestro Trieste", 0], ["Reggio Emilia", 0],
+			["Napoli Basket", -1], ["Vanoli Cremona", -2], ["Pistoia", -2],
+			["Scafati", -3], ["Trapani Shark", -1], ["Varese", -2], ["Treviso", -3],
+		],
+		"Lithuanian LKL": [
+			["Zalgiris Kaunas", 9], ["Rytas Vilnius", 6], ["Lietkabelis Panevezys", 2],
+			["Neptunas Klaipeda", 1], ["Juventus Utena", 0], ["Wolves Vilnius", 1],
+			["Siauliai", -1], ["Nevezis Kedainiai", -3], ["Jonava", -3], ["Pieno Zvaigzdes", -4],
+		],
+		"VTB United League": [
+			["CSKA Moscow", 8], ["Zenit St. Petersburg", 6], ["UNICS Kazan", 5],
+			["Lokomotiv Kuban", 4], ["Avtodor Saratov", 0], ["Parma Perm", 0],
+			["Nizhny Novgorod", -1], ["Enisey Krasnoyarsk", -2], ["Uralmash Yekaterinburg", -1],
+			["Astana", -3], ["Samara", -2], ["MBA Moscow", -3],
+		],
+		"Polish PLK": [
+			["Anwil Wloclawek", 5], ["Legia Warszawa", 4], ["Slask Wroclaw", 4],
+			["Trefl Sopot", 2], ["Start Lublin", 1], ["Stal Ostrow", 2],
+			["Arka Gdynia", 0], ["Spojnia Stargard", -1], ["GTK Gliwice", -2],
+			["Krol Krosno", -3], ["Czarni Slupsk", -1], ["Zastal Zielona Gora", 0],
+		],
+		"BNXT League": [
+			["Filou Oostende", 6], ["Antwerp Giants", 3], ["Limburg United", 2],
+			["Spirou Charleroi", 1], ["Leuven Bears", 0], ["Mons-Hainaut", -1],
+			["ZZ Leiden", 4], ["Heroes Den Bosch", 3], ["Donar Groningen", 1],
+			["Landstede Hammers", 0], ["Yoast United", -3], ["Feyenoord Basketball", -4],
+		],
+		"Korean KBL": [
+			["Seoul SK Knights", 5], ["Busan KCC Egis", 4], ["Wonju DB Promy", 3],
+			["Changwon LG Sakers", 3], ["Suwon KT Sonicboom", 1], ["Anyang Jung Kwan Jang", 2],
+			["Ulsan Hyundai Mobis", 1], ["Goyang Sono Skygunners", -2],
+			["Daegu KOGAS Pegasus", -2], ["Seoul Samsung Thunders", -4],
+		],
+		"Philippine PBA": [
+			["San Miguel Beermen", 6], ["Barangay Ginebra", 5], ["TNT Tropang Giga", 5],
+			["Magnolia Hotshots", 2], ["Meralco Bolts", 2], ["Rain or Shine", 0],
+			["NLEX Road Warriors", -1], ["Phoenix Fuel Masters", -2],
+			["Converge FiberXers", -2], ["Terrafirma Dyip", -5], ["Blackwater Bossing", -4],
+		],
+		"Argentine Liga Nacional": [
+			["Quimsa", 5], ["Boca Juniors", 4], ["Instituto de Cordoba", 4],
+			["San Lorenzo", 2], ["Obras Sanitarias", 2], ["Gimnasia Comodoro", 1],
+			["Regatas Corrientes", 0], ["Olimpico La Banda", 0], ["Penarol Mar del Plata", -1],
+			["Ferro Carril Oeste", -2], ["Atenas Cordoba", -2], ["Union Santa Fe", -3],
+			["Platense", -3], ["Zarate Basket", -4],
+		],
+		"Mexican LNBP": [
+			["Fuerza Regia de Monterrey", 6], ["Halcones de Xalapa", 5], ["Astros de Jalisco", 4],
+			["Abejas de Leon", 2], ["Soles de Mexicali", 1], ["Diablos Rojos", 3],
+			["Libertadores de Queretaro", 0], ["Plateros de Fresnillo", -2],
+			["Dorados de Chihuahua", -1], ["Mineros de Zacatecas", -2], ["Panteras de Aguascalientes", -4],
+		],
+		"Puerto Rico BSN": [
+			["Cangrejeros de Santurce", 5], ["Vaqueros de Bayamon", 5], ["Capitanes de Arecibo", 4],
+			["Leones de Ponce", 3], ["Atleticos de San German", 1], ["Piratas de Quebradillas", 0],
+			["Criollos de Caguas", 0], ["Gigantes de Carolina", -1], ["Mets de Guaynabo", -2],
+			["Osos de Manati", -3], ["Indios de Mayaguez", -3], ["Santeros de Aguada", -4],
+		],
+		"New Zealand NBL": [
+			["Canterbury Rams", 4], ["Wellington Saints", 4], ["Auckland Tuatara", 3],
+			["Otago Nuggets", 2], ["Hawke's Bay Hawks", 1], ["Nelson Giants", 0],
+			["Taranaki Airs", -1], ["Southland Sharks", -1], ["Franklin Bulls", -2],
+			["Manawatu Jets", -3],
+		],
+		"JUCO": [
+			["Chipola College", 5], ["John A. Logan", 4], ["Indian Hills CC", 4],
+			["South Plains College", 3], ["Salt Lake CC", 3], ["Northwest Florida State", 2],
+			["Trinity Valley CC", 2], ["Odessa College", 1], ["Hutchinson CC", 1],
+			["Vincennes", 0], ["Casper College", -1], ["Cowley College", -1],
+			["Eastern Florida State", -2], ["Moberly Area CC", -2], ["Tallahassee CC", -3],
+			["Northeastern JC", -4],
+		],
+		"DIII NCAA": [
+			["Christopher Newport", 5], ["Trinity (CT)", 4], ["Wisconsin-Platteville", 4],
+			["Mount Union", 3], ["Williams", 3], ["Randolph-Macon", 2],
+			["Swarthmore", 2], ["Johns Hopkins", 1], ["Nichols", 0], ["Illinois Wesleyan", 0],
+			["Oswego State", -1], ["Whitman", -2], ["Elmhurst", -3], ["Rowan", -3],
 		],
 		"NAIA": [
 			["Indiana Wesleyan", 4], ["Talladega", 3], ["Georgetown (KY)", 2],

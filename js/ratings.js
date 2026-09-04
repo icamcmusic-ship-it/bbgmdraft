@@ -350,6 +350,42 @@
 		   is the specialist version with the defensive cost priced in. */
 		{ name: "Standstill Stretch Five", min: 62, max: 100, w: 0.8, t: ["big", "shooting"], o: { tp: 22, ft: 14, oiq: 6, spd: -14, jmp: -12, diq: -12, reb: -8, drb: -8, dnk: -6 } },
 
+		/* --- fourteen more: the axes the table still could not say ----------
+
+		   Measured over the 131 builds above, four tags carried far fewer
+		   members than the flavors that multiply them assume — `durability`
+		   eight, `raw` sixteen, `rebounding` twenty-one, `shooting`
+		   twenty-three against `big`'s forty-five — so a "weak year" or an
+		   "athletic and raw" class was tilting a handful of builds by 2.2x
+		   while a big-heavy one had forty-five to choose from. Nine of the
+		   fourteen below carry one of those four tags.
+
+		   They are also shapes the table had no vocabulary for, which is the
+		   test that matters: a defender whose case is CONDITIONING rather
+		   than quickness, a shot-blocker who does not rebound, a big whose
+		   value is the screen, a perimeter player the strength column
+		   disqualifies, a five-man who cannot be played in the last four
+		   minutes. Each one is a sentence a scout writes and the tool could
+		   not. */
+		// --- guards -------------------------------------------------------
+		{ name: "Ninety-Four-Feet Defender", min: 0, max: 50, w: 1.1, inj: 0.9, t: ["guard", "defense", "durability"], o: { endu: 22, diq: 14, spd: 10, stre: 6, ins: -14, tp: -10, pss: -8, fg: -6, reb: -6 } },
+		{ name: "Toughness Question", min: 0, max: 56, w: 0.8, inj: 1.35, t: ["guard", "raw", "durability"], o: { spd: 14, drb: 12, tp: 10, oiq: 6, stre: -22, reb: -12, diq: -8, ins: -6, endu: -4 } },
+		{ name: "Backup-Point Organizer", min: 0, max: 46, w: 0.9, t: ["guard", "playmaking", "durability"], o: { endu: 16, pss: 12, oiq: 10, ft: 8, diq: 4, dnk: -14, jmp: -12, ins: -10, tp: -6 } },
+		// --- wings --------------------------------------------------------
+		{ name: "Chase-Down Blocker", min: 40, max: 74, w: 1.1, t: ["wing", "defense", "athletic"], o: { jmp: 20, spd: 12, diq: 12, endu: 8, reb: -12, ins: -10, ft: -10, tp: -8, stre: -8 } },
+		{ name: "Second-Side Shooter", min: 34, max: 66, w: 1.3, t: ["wing", "shooting", "durability"], o: { tp: 16, endu: 14, ft: 10, oiq: 8, drb: -12, ins: -12, dnk: -10, pss: -8, spd: -6 } },
+		{ name: "Ball-Stopping Wing", min: 34, max: 68, w: 0.9, t: ["wing", "scoring", "raw"], o: { fg: 16, drb: 14, ins: 8, jmp: 6, pss: -18, oiq: -12, diq: -8, endu: -4 } },
+		{ name: "Undersized Power Forward", min: 44, max: 64, w: 1.2, t: ["wing", "rebounding", "durability"], o: { reb: 16, stre: 14, endu: 12, ins: 8, tp: -14, drb: -12, pss: -10, spd: -8, ft: -4 } },
+		// --- bigs ---------------------------------------------------------
+		{ name: "Screening Specialist", min: 54, max: 100, w: 1.2, t: ["big", "durability"], o: { stre: 20, endu: 14, oiq: 8, reb: 6, spd: -12, drb: -12, tp: -10, ft: -8, dnk: -4 } },
+		{ name: "Conditioning Question", min: 52, max: 100, w: 0.8, inj: 1.25, t: ["big", "rebounding", "durability"], o: { stre: 16, reb: 14, ins: 12, dnk: 6, endu: -24, spd: -8, oiq: -6, diq: -4 } },
+		{ name: "Unplayable-in-Space Five", min: 66, max: 100, w: 0.9, t: ["big", "rebounding", "defense"], o: { reb: 18, stre: 12, ins: 10, diq: 8, spd: -20, endu: -8, drb: -8, tp: -8, ft: -4 } },
+		{ name: "Offense-Only Big", min: 56, max: 100, w: 1.0, t: ["big", "scoring", "shooting"], o: { ins: 16, ft: 12, fg: 10, tp: 8, diq: -20, reb: -8, endu: -8, spd: -6 } },
+		// --- everyone -----------------------------------------------------
+		{ name: "Frame to Fill Out", min: 30, max: 100, w: 1.2, pot: 5, t: ["raw", "rebounding"], o: { reb: 12, jmp: 10, spd: 10, endu: 8, stre: -22, ins: -8, ft: -6, oiq: -4 } },
+		{ name: "Craft Over Bounce", min: 0, max: 100, w: 1.3, pot: -4, t: ["scoring", "playmaking", "durability"], o: { oiq: 14, ft: 12, ins: 10, drb: 8, fg: 6, jmp: -20, spd: -14, dnk: -12, endu: -4 } },
+		{ name: "Motor-Only Prospect", min: 0, max: 100, w: 1.1, t: ["raw", "rebounding", "athletic"], o: { endu: 18, reb: 12, spd: 8, jmp: 8, diq: 6, fg: -16, tp: -14, pss: -10, ins: -8, oiq: -4 } },
+
 		{ name: "Balanced", min: 0, max: 100, w: 1.0, t: [], o: {} },
 	];
 

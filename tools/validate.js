@@ -478,7 +478,7 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   "Division II All-American", "NAIA All-American" and "Prep
 		   All-American" all match the national regex because they are all
 		   All-American teams — of a different division. */
-		const OWN_AWARD = /^(Division II|NAIA|Prep|National Prep)/;
+		const OWN_AWARD = /^(Division II|Division III|NAIA|NJCAA|Prep|National Prep)/;
 		const d1Only = (a) => NATIONAL_RE.test(a) && !OWN_AWARD.test(a);
 		nonNcaaAwards.push(res.players.filter((p) =>
 			p.nonNcaa && (p.awards || []).some(d1Only)).length);
@@ -1141,9 +1141,29 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   the top is drawn two errors above THAT rather than above the real
 		   figure, or the row fails on the draw alone at this sample size. */
 		["8 seed beats 9 seed (rate)", lineRate(seedLine["8v9"])].concat(rateBand(0.36, 0.70)),
-		["1 seed wins the title (rate)", mean(champSeedOne)].concat(rateBand(0.28, 0.72)),
-		["Seed 5 or worse wins the title (rate)", mean(champSeedDeep)].concat(rateBand(0.0, 0.36)),
-		["1 seeds' share of the Final Four", mean(ffOneShare)].concat(rateBand(0.24, 0.56)),
+		/* THESE THREE ROWS ARE SAMPLES OF SIZE nSeeds, NOT OF SIZE nPlayers.
+
+		   Every other rate in this file pools hundreds of player-seasons; a
+		   champion's seed is one observation per tournament, so a 20-seed run
+		   is a sample of twenty. Measured over 60 tournaments per fixture,
+		   the model gives a 1-seed title rate of 0.58 on the synthetic
+		   fixture and 0.47 on the realistic one, and a 1-seed Final Four
+		   share of 0.45 and 0.31 — both fixtures inside the real game's
+		   figures (a 1 seed takes 55-65% of titles and about two fifths of
+		   Final Four places). The standard error of a rate near 0.55 over
+		   twenty tournaments is 0.11, and of the Final Four share 0.055.
+
+		   The bands were drawn at about 1.3 standard errors from those true
+		   values, so each row failed on the draw roughly one run in twelve
+		   with nothing wrong at all — which is how a developer learns to
+		   re-run the harness instead of reading it. They are drawn at two
+		   and a half standard errors now: still tight enough to catch the
+		   failure they exist for (a curve so steep the same school wins
+		   every year, or so flat that March is a coin flip), and no longer
+		   an alarm that fires on a coin. */
+		["1 seed wins the title (rate)", mean(champSeedOne)].concat(rateBand(0.26, 0.82)),
+		["Seed 5 or worse wins the title (rate)", mean(champSeedDeep)].concat(rateBand(0.0, 0.40)),
+		["1 seeds' share of the Final Four", mean(ffOneShare)].concat(rateBand(0.17, 0.60)),
 		["Week-1 AP top 10 drawn from preseason top 25", mean(pollWeek1)].concat(rateBand(0.72, 1.0)),
 	];
 

@@ -10,17 +10,18 @@
 <body>
 
 <header>
-	<h1>BBGM <span>Draft Class Workshop</span></h1>
-	<!-- Narrow viewports only (see css/style.css): the settings panel stacks
-	     above the table below 860px, so eight fieldsets sat between the user
-	     and the thing they came to look at. -->
-	<button id="btnSettings" class="narrowonly" aria-expanded="true"
-		aria-controls="settings" title="Show or hide the settings panel">Settings</button>
+	<div class="brand">
+		<h1>BBGM <span>Draft Class Workshop</span></h1>
+	</div>
+	<!-- The panel toggle is on every width now: on a desktop, closing the
+	     panel hands its column back to the board. -->
+	<button id="btnSettings" class="iconbtn" aria-expanded="true"
+		aria-controls="settings" title="Show or hide the settings panel"><span aria-hidden="true">☰</span> Settings</button>
 	<input type="file" id="file" accept=".json,.gz,.json.gz" multiple hidden>
 	<input type="file" id="csvFile" accept=".csv" hidden>
 	<input type="file" id="leagueMergeFile" accept=".json,.gz,.json.gz" hidden>
 	<div class="btngroup">
-		<button id="btnLoad">Load draft class…</button>
+		<button id="btnLoad">Load file…</button>
 		<select id="fileSelect" hidden aria-label="Loaded file"></select>
 	</div>
 	<span class="spacer"></span>
@@ -28,17 +29,23 @@
 		<button class="pill seedpill" id="seedPill" hidden title="Click to copy this seed"></button>
 		<select id="seedHistory" hidden aria-label="Recent seeds"></select>
 	</div>
+	<!-- The two verbs that make a new class, then the four small tools that
+	     support them. Icon-only, because a row of eight equally weighted
+	     labelled buttons reads as one undifferentiated bar and the two that
+	     matter disappear into it. -->
 	<div class="btngroup" role="group" aria-label="Generate">
 		<button id="btnReroll" class="warn" disabled title="New seed, same settings">Reroll</button>
 		<button id="btnRerun" disabled title="Re-apply the current settings with the same seed">Re-apply</button>
-		<button id="btnUndo" disabled title="Undo the last settings or lock change (Ctrl+Z)">Undo</button>
-		<button id="btnRedo" disabled title="Redo (Ctrl+Shift+Z)">Redo</button>
-		<button id="btnKeys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
-		<button id="btnHowTo" title="How to play — what everything does and a sensible order to do it in">Guide</button>
 	</div>
-	<div class="btngroup" role="group" aria-label="Share and export">
-		<button id="btnPin" disabled title="Keep this class as a comparison baseline">Pin</button>
-		<button id="btnCopyLink" title="Copy a link that reproduces this exact class, settings and locks">Link</button>
+	<div class="btngroup tools" role="group" aria-label="Tools">
+		<button id="btnUndo" class="iconbtn" disabled title="Undo the last settings or lock change (Ctrl+Z)" aria-label="Undo">↶</button>
+		<button id="btnRedo" class="iconbtn" disabled title="Redo (Ctrl+Shift+Z)" aria-label="Redo">↷</button>
+		<button id="btnPin" class="iconbtn" disabled title="Pin this class as a comparison baseline" aria-label="Pin as baseline">◎</button>
+		<button id="btnCopyLink" class="iconbtn" title="Copy a link that reproduces this exact class, settings and locks" aria-label="Copy link">🔗</button>
+		<button id="btnHowTo" class="iconbtn" title="How to play — what everything does and a sensible order to do it in" aria-label="Guide">?</button>
+		<button id="btnKeys" class="iconbtn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">⌘</button>
+	</div>
+	<div class="btngroup" role="group" aria-label="Export">
 		<button id="btnExport" class="primary" disabled>Export JSON</button>
 		<!-- The label was a bare ▾. Screen readers got "Other exports" from the
 		     title; a sighted user got a chevron with nothing to say it was a
@@ -264,9 +271,11 @@
 
 <main>
 	<div id="empty" class="drop">
-		<h2 style="margin:0 0 8px;font-size:18px">Drop a BBGM draft class file here</h2>
-		<p style="margin:0">Export one from Basketball GM via <b>Tools → Export → Draft class</b>, then drop the
-		<code>.json</code> here (or use “Load draft class…”). Multiple files are fine.</p>
+		<h2 style="margin:0 0 8px;font-size:18px">Drop a BBGM draft class or league file here</h2>
+		<p style="margin:0">Export a class from Basketball GM via <b>Tools → Export → Draft class</b>, or export the
+		whole league (<b>Tools → Export league</b>) and drop the <code>.json</code> or
+		<code>.json.gz</code> here. A league file is split into one editable class per
+		future draft year, and can be written straight back into it. Multiple files are fine.</p>
 		<p class="hint">Everything runs locally in your browser. Nothing is uploaded.</p>
 		<p style="margin:14px 0 0">No export to hand? <button type="button" id="btnSample"
 			title="Load a synthetic 70-man class so you can try every tab before exporting one from the game">Try a sample class</button></p>

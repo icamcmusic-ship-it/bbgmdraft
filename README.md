@@ -11,22 +11,27 @@ Open `index.html` in any browser. Nothing is uploaded and there is no build step
 ## What it does
 
 **1. Fills in the blank colleges.** Every prospect whose college is `""` (shown as
-*None* in game) is sent somewhere real. There are twenty-four destinations —
+*None* in game) is sent somewhere real. There are thirty-seven destinations —
 **EuroLeague**, the **NBA G League**, **Liga ACB**, the **NBL**, the **Chinese CBA**,
 **LNB Pro A**, the **EuroCup**, the **Basketball Bundesliga**, the **Adriatic
 League**, the **Basketball Champions League**, the **Turkish BSL**, the **Greek
-Basket League**, the **Israeli Premier League**, **Japan's B.League**, **Brazil's
-NBB**, the **Basketball Africa League**, the Canadian **CEBL**, **NBL1**, **Overtime
-Elite**, the **NBA Academies**, **prep and postgrad**, the **NAIA**, **DII NCAA**,
+Basket League**, the **Israeli Premier League**, the **Italian LBA**, the
+**Lithuanian LKL**, the **VTB United League**, the **Polish PLK**, the **BNXT
+League**, **Japan's B.League**, the **Korean KBL**, the **Philippine PBA**,
+**Brazil's NBB**, the **Argentine Liga Nacional**, the **Mexican LNBP**, **Puerto
+Rico's BSN**, the **Basketball Africa League**, the Canadian **CEBL**, **NBL1**,
+the **New Zealand NBL**, **Overtime Elite**, the **NBA Academies**, **prep and
+postgrad**, the **NAIA**, **JUCO**, **DII NCAA**, **DIII NCAA**,
 and **did not play** — each with its own weight, and each weight scaled by where the
 player was born, across seven regions. A Serbian leans EuroLeague and the Adriatic
 League, an Australian leans the NBL, a Nigerian leans LNB Pro A and the Basketball
-Africa League, a Canadian leans the G League and the CEBL. Every one of them has
+Africa League, a Canadian leans the G League and the CEBL, an Argentine the Liga
+Nacional, a Korean the KBL. Every one of them has
 its own pace, game length and youth minutes cap, its own clubs and league table,
 and its own honors.
 
 **2. Rebuilds ratings into varied, specialized builds — without inflating anyone.**
-Each player is assigned one of 131 archetypes (Floor General, Heliocentric
+Each player is assigned one of 145 archetypes (Floor General, Heliocentric
 Guard, Movement Shooter, 3&D Wing, Point Center, Rim Protector, Stretch Big,
 Lob Threat, Athletic Freak, Drop-Coverage Anchor, Boom-or-Bust Tools, …), gated by
 their height so a 7-footer never becomes a point guard. The archetype pushes some ratings up and others down, then the whole
@@ -46,17 +51,17 @@ compressed in log space (down from a measured 281×), and pool slots are drawn o
 the *authored* weights rather than the exposure-divided ones, which had quietly
 inverted the table (the three center builds gated at the top of the height range
 each made a quarter of all pools while Iron Man almost never did). A class then
-draws a **pool** of about seventeen of the 131 builds and takes its players from the pool — which is what makes a
+draws a **pool** of about nineteen of the 145 builds and takes its players from the pool — which is what makes a
 class "the year of the stretch bigs" rather than one of everything, every time.
 It also draws a **flavor** (guard-heavy, defense-first, a weak year,
 one-and-done heavy, a transfer-portal year, …) that tilts which builds enter the
 pool and, for some flavors, bends the class itself: how old it is, how good the
 top of it is, how it got here. A flavor only moves settings you have left alone.
 
-The 131 names are 131 shapes. Measured by cosine similarity over the offset
+The 145 names are 145 shapes. Measured by cosine similarity over the offset
 vectors, the table used to hold 96 pairs above 0.85 and sixteen above 0.95 —
 Rim Protector and Shot-Blocking Anchor were the same vector behind two height
-gates — so a seventeen-build pool that looked varied by name still drew several
+gates — so a nineteen-build pool that looked varied by name still drew several
 members of one cluster, which is what "every class feels the same" is from the
 inside. Every pair above 0.95 was pushed apart on at least one axis that means
 something (an Anchor is verticality and timing with poor conditioning; a Rim
@@ -173,7 +178,7 @@ split** (a putback specialist and a box-out merchant have the same rebounding
 composite and are not the same player), and the **injury roll** (a prior
 surgery, a chronic knee and a clean bill of health were the same draw).
 
-Traits are orthogonal to builds, which is the whole argument for them: 131
+Traits are orthogonal to builds, which is the whole argument for them: 145
 builds and 77 traits multiply rather than add. A Rim Protector with a plus
 wingspan and a great motor and a Rim Protector with short arms and questions
 about the effort are two different prospects out of one row of the archetype
@@ -266,10 +271,56 @@ the gap between No. 16 and No. 150), the game noise comes down to the eleven
 points a real game carries, and `tools/validate.js` bands the seed-line win
 rates, the champion's seed and the Final Four's composition — with a top as
 well as a floor, because a curve steep enough for the same school to win every
-year is the opposite failure. Forty classes still produce about 26 different
+year is the opposite failure. Measured over sixty tournaments per fixture, a
+1 seed now takes 47-58% of titles and 31-45% of Final Four places against a
+real 55-65% and two fifths. Those three rows are samples of size *nSeeds*
+rather than of size *nPlayers* — a champion's seed is one observation per
+tournament — so their bands are drawn at two and a half standard errors of a
+twenty-tournament run rather than at a figure that looks tight and fires on a
+coin. Forty classes still produce about 26 different
 champions. The Distributions tab shows the same readings for one class and
 batch mode shows them as a histogram, so the chalkiness of a March is on
 screen rather than only in an audit script.
+
+**Four things a final score now knows about the teams playing it.** The
+scoreboard used to read one number — the class's pace slider — for every game
+in the country, and three real properties of a basketball game were missing
+from it.
+
+- **Tempo belongs to the fixture.** `PROGRAM_STYLES` moves possessions from
+  -4.5 (pack-line, grind it out) to +5.5 (press and trap), the *stat* model
+  read it, and the scoreboard did not — so a run-and-gun team's players got
+  more possessions in the box score while its games finished on the same
+  totals as everyone else's, and the style a note named was a label on
+  nothing a reader could see in a result. A game is played at the average of
+  the two teams' tempos now, which measures out at a twelve-point spread in
+  mean total between the fastest style and the slowest.
+- **Home courts are not identical.** A flat 3.2 points for every building in
+  the country is every arena holding the same crowd; the edge scales with the
+  program, from about two points to four and a half.
+- **The last minute is not a random walk.** A symmetric margin ties at the
+  buzzer about 2.6% of the time and Division I goes to overtime in about six
+  percent of its games. The difference is the endgame — a team down one to
+  four fouls to extend it, a team up three defends the arc — and a game still
+  within a possession now has a real chance of being level, which puts the
+  overtime rate where the sport's is.
+- **An overtime period is worth what five minutes are worth.** It was a flat
+  six points a side, which is a fifth low for a forty-minute college game and
+  a third low for a forty-eight-minute professional one; it comes off the
+  same pace the regulation score did. Its *margin* is derived the same way —
+  the expected edge shrinks in proportion to the time and the noise in
+  proportion to its square root — where it used to be a hand-picked mean and
+  a spread a third too wide, which made an extra period close to a coin flip
+  whoever was in it. That matters more than it sounds: with a realistic
+  overtime rate, a beaten favourite was getting a free re-draw six times in a
+  hundred, and the seed-line rates `tools/validate.js` bands moved with it.
+
+**And the first weekend of March is played in pods.** The top seeds open forty
+minutes from campus in front of their own crowd while the 16 seed has flown
+across the country, which is worth about a point and is a real part of why the
+top lines almost never lose early. It is a *share* of a home edge rather than a
+home game, it stops when the regionals move to neutral sites, and the game log
+still records a neutral court.
 
 **A game log is a box score, not a column of counts.** Every game carries
 minutes and the shooting behind the points — FGM-FGA, 3PM-3PA, FTM-FTA — so
@@ -416,6 +467,18 @@ and per conference: Player, Defensive Player, Freshman, Sixth Man and Most Impro
 of the Year, all-conference first and second teams, and all-defensive, all-freshman,
 all-newcomer and all-tournament teams.
 
+**And the team trophies, which nobody was carrying.** The bracket crowned a
+champion, the conference tournaments crowned eight-and-thirty more, clubs
+abroad won leagues and cups and continental competitions — and no player's
+page said he was on any of them. A ring is not minutes-gated and it is on a
+résumé for life, so every prospect who played a game for a national champion
+carries *NCAA National Champion*, and the same for the runner-up, an NIT
+champion, a conference tournament or regular-season champion, and a
+professional league, cup or continental title abroad. They sort with the
+honors they belong beside, they follow the export's award scope, and the
+paper has a story for the champion's best prospect and for a prospect whose
+club won a league.
+
 **A player who stayed can win it twice.** An upperclassman's earlier seasons
 are ranked too: each simulated year is measured against the bars this
 season's field set — the score of the last man named to every honor — and a
@@ -522,14 +585,14 @@ pixels the table becomes one card per prospect.
 | **Flavor strength** | How strongly the flavor leans (guard-heavy, defense-first, a weak year, one-and-done heavy, a transfer-portal year, European in style, a post-up renaissance, feast or famine, a coaching carousel year, …). Some flavors also bend the class itself — how old it is, how good the top of it is — but only settings you have left at their default. |
 | **Variation** | The neighborhood of a seed. 0 is the class that seed has always produced. 1, 2, 3… keep its flavor, its build pool and its curve and re-roll every individual player, so the year is still "the year of the stretch bigs, weak at the top" and the sixty-eight men in it are different. Every shareable link ever made is variation 0, so none of them moved. |
 | **Avoid repeating recent builds** | How hard a build that was in one of the last three classes is pushed out of this one. Measured, the four heaviest builds returned in 14% of pools with this off and 6% with it at full strength — the ordering the weights describe survives, the repetition does not. |
-| **Builds per class** | How many of the 131 archetypes one class is drawn from. Lower is more distinctive ("the year of the stretch bigs"); 0 makes every build eligible in every class, which is one of everything, every time. |
+| **Builds per class** | How many of the 145 archetypes one class is drawn from. Lower is more distinctive ("the year of the stretch bigs"); 0 makes every build eligible in every class, which is one of everything, every time. |
 | **Anomalies per class** | How many forced surprises a class gets, drawn from thirty-two kinds: a five-star bust, an unranked riser, a 24-year-old JUCO, a 7'4" project, the coach's son, a man who never played a high school game, a season that ended in February — and six that change the numbers rather than the note: a suspension, an eligibility hold that costs the first ten games, a mid-season transfer, a double-double machine, a defensive breakout, and a year-long shooting slump that costs about seven points of 3P% off what his jumper says. |
 | **Realignment** | How often the map of college basketball changes. A realignment moves two to five good programs one rung up into a league whose footprint overlaps theirs — the database carries no state per school, so geography is a fact about the conference, and Tennessee State no longer lands in a New England league — and every conference stays schedulable. |
 | **Earlier seasons** | `Simulate` runs each of a prospect's previous college years through the same stat model the draft year goes through. `Reconstruct` is the older behavior: a backward-scaled copy of the draft-year line. |
 | **Build noise** | Per-rating jitter. |
 | **Vary size** | Lets listed height and weight drift with the build. |
 | **Freshmen / transfers / redshirts / reclassified** | Who is in what year, and how they got there. |
-| **Destination weights** | Where blank-college prospects go, per league — grouped by region, each group collapsible with its own ×2 / ×½, because what anybody actually wants from twenty-three number boxes is "more Europe". The grouping is derived from each league's own birthplace multipliers, so adding a league to `js/colleges.js` files it correctly with no second edit. |
+| **Destination weights** | Where blank-college prospects go, per league — grouped by region, each group collapsible with its own ×2 / ×½, because what anybody actually wants from thirty-odd number boxes is "more Europe". The grouping is derived from each league's own birthplace multipliers, so adding a league to `js/colleges.js` files it correctly with no second edit. |
 | **Scouting traits per prospect** | How many traits from the ~77-row table each prospect carries (see above). 0 turns the layer off, along with the per-player volatility, the offensive-glass bias and the medical file. |
 | **Avoid repeating recent anomalies** | The same memory the build pool has, one layer down. Thirty-two kinds and four draws a class is not enough separation on its own. |
 | **Flavor reaches settings you changed** | 0 (the default) means a flavor only moves settings still at their default and never overrules a decision you made. Above 0 it may move a random subset of yours, and only part of the way. |
@@ -580,7 +643,7 @@ Three things it deliberately never touches:
 
 - **The seed.** Reroll owns the seed; randomizing both at once means you can't
   tell which produced what you're looking at.
-- **The per-build rarity weights.** That is a curated 131-row table whose
+- **The per-build rarity weights.** That is a curated 145-row table whose
   ordering is the authored intent, and a uniform draw over it destroys that
   invisibly. Flavor, pool size and diversity are randomized instead — those
   are the supported ways to move the mix.
@@ -588,7 +651,7 @@ Three things it deliberately never touches:
   randomizing it does Reroll's job while making shared links confusing.
 
 Destination weights are randomized *multiplicatively* off the built-ins, so a
-randomized class is a different mix of the same twenty-four leagues rather than
+randomized class is a different mix of the same thirty-seven leagues rather than
 a uniform one. A padlock next to each slider excludes that one setting from the
 draw — "randomize everything except pace and era" is a click, not a wish. The
 whole draw goes through one undo entry, so Ctrl+Z restores it in a single step;
@@ -602,8 +665,22 @@ were iterating on).
 
 The in-app **Guide** button covers the same ground; this is the long version.
 
-**1. Load a class.** Export a draft class from Basketball GM (*Tools → Export →
-Draft class*) and drop the `.json` onto the page, or use *Load draft class…*.
+**1. Load a class — or a whole league.** Export a draft class from Basketball
+GM (*Tools → Export → Draft class*) and drop the `.json` onto the page, or use
+*Load file…*.
+
+A **league export** works too, and is usually what you want: drop the
+`.json.gz` straight in. A BBGM league carries its next two or three draft
+classes inside it as ordinary player rows with an undrafted tid and a future
+`draft.year`, and the tool used to take exactly one of them — the year
+matching the league's own season, which is the class already being drafted —
+and throw the rest of the file away. It now loads **one editable class per
+draft year**, which drops straight into the multi-file machinery: the header
+picker lists them, universe mode runs them as one continuous world oldest
+first, and *Export → Merge into a league file* offers to write all of them
+straight back into the league they came from, without asking you to find the
+same file on disk twice.
+
 Everything runs locally in your browser; nothing is uploaded. You can load
 several files at once and switch between them in the header. No export to
 hand? *Try a sample class* loads a synthetic 70-man class — the same kind of
@@ -623,13 +700,13 @@ liked. Ctrl+Z undoes a reroll like any other change.
 
 - *Class quality & depth* shapes the overall curve — switch **Overall ratings**
   to "Rebuild the class curve" to unlock it; "Preserve" never inflates anyone.
-- *Builds* decides how specialized players are, how many of the 131 archetypes
+- *Builds* decides how specialized players are, how many of the 145 archetypes
   one class draws from, the class flavor (pick one in the dropdown to keep the
   seed and change what kind of class it is), anomalies, and the pool memory
   that stops consecutive classes repeating themselves.
 - *Class years & paths* sets how the class got here: freshmen, transfers,
   redshirts, reclassifications.
-- *Players with no college* routes them across twenty-four real leagues and
+- *Players with no college* routes them across thirty-seven real leagues and
   academies, weighted by where each player was born.
 - *College season* is the era, pace, efficiency, injuries, upsets,
   realignment, streaks and mid-season events the class plays through.
@@ -668,6 +745,46 @@ so what you see here is what the game computes. *More ▾* has CSV, season data,
 locked prospects and the settings on their own.
 
 ---
+
+## Recruiting
+
+Every NCAA prospect was recruited by somebody, and the tool used to be able to
+say two things about it: a national rank and a star count. That is the box
+score of a recruitment. The file now carries the recruitment.
+
+- **A composite**, on the 247-style scale, derived from the national rank
+  rather than typed — a star rating has four values and a rank has four
+  hundred, and the number every recruiting argument is actually conducted in
+  is the one between them.
+- **A position rank.** "No. 2 point guard in the country" is a different
+  sentence from "No. 23 nationally", and the model already knew where he
+  plays.
+- **Offers and a final list.** How many programs were in on him scales with
+  his ranking, and the programs that call are the ones at his own level —
+  centred on the higher of the school he signed with and the level his own
+  ranking implies, so a top-five recruit who picks a mid-major was still
+  being called by blue bloods rather than choosing between two other
+  mid-majors. The cut is three to five schools with the one he picked on it,
+  which is what makes "he chose us over Kansas" a sentence the tool can write.
+- **When he signed** — the early period, the late one, or the spring, which
+  is a real signal about how wanted he was.
+- **The April all-star games** — McDonald's, the Jordan Brand Classic, the
+  Iverson Classic — selected by national rank on a probability that falls
+  away with it, because a recruiting rank is assigned *within* a high-school
+  class and a flat cutoff over a four-cohort draft class handed the jersey to
+  two thirds of it. Deliberately not written into the award list: these are
+  high-school honors and the award model reads "All-American" as a Division I
+  trophy.
+
+All of it is drawn from the player's own key, so it survives a reroll of
+somebody else and a warm phase skip. It reaches the player page, the note's
+*path* line, and two stories in the paper — the recruitment that came down to
+four schools, and the showcase circuit.
+
+The aggregate every fan argues about is there too: **recruiting class
+rankings** for all 364 programs, real signees plus synthetic ones, scored on
+a 247-style per-recruit point value that decays with rank and has diminishing
+returns after the top handful.
 
 ## Rankings, selection and the AP poll
 
@@ -733,7 +850,22 @@ Player of the Year, the All-America team), the trophy the class lost to a
 named returning player, a spotlight on the best player who wasn't draft
 eligible, realignment, the anomaly stories, and draft day.
 
-**A hundred and twenty-one kinds now, in three registers.** The material was always
+Eighteen more read things the season produced and nobody wrote up. A
+national champion crowned a team and no prospect's page said he was on it,
+so the champion's best prospect gets a story and so does a prospect whose
+club won a league abroad — both off the championship honors described under
+*Awards*. The rebounding, assist and shot-blocking leads existed in the
+model and only the scoring title was ever printed. The game log already
+carried a five-block night, a perfect night from the field and a game with
+no turnovers in twenty-four minutes, and read none of them back. The rest
+are season shapes: an unbeaten league run, a one-bid league's single team,
+the country's most efficient high-volume scorer, the man who lives at the
+free-throw line, a prospect who is a quarter of his team's points, a
+transfer who moved up into a losing season, and — for the prospects abroad
+— the national-team caps and the loan spell the development model was
+already drawing.
+
+**A hundred and thirty-nine kinds now, in three registers.** The material was always
 there and the *writing* was the tell: one body template for most kinds, no
 quotes anywhere, and every article in the same flat declarative.
 
@@ -1139,6 +1271,25 @@ in from a CSV so a round trip through a spreadsheet works.
 
 If you load several seasons at once, `Export all` writes each of them.
 
+## The interface
+
+The tool opens on the **Draft board**. The question a draft class answers is
+"who is good, and in what order", and that is the board — the forty-column
+editable spreadsheet is the power tool, not the front page, and opening on it
+put the thing everybody came to look at behind a scroll. The prospect table is
+still one click away and always in the same place: a **Player Edit** toggle on
+the board itself, which is where you go to filter, sort, add columns, lock
+ratings and open the editor. It is not a separate destination any more,
+because it was never a separate thing — it is the same class, in edit mode.
+
+The tab bar is a segmented control rather than a row of underlined links, so
+the page you are on is a shape and not a two-pixel line, and the header's
+small tools — undo, redo, pin, link, guide, shortcuts — are icon buttons
+beside the two verbs that matter (*Reroll* and *Export*) rather than eight
+equally weighted labelled buttons that read as one undifferentiated bar. The
+settings panel closes at every width, on a desktop as well as a phone, and
+hands its column back to the table when it does.
+
 ## Layout
 
 ```
@@ -1147,7 +1298,7 @@ css/style.css
 js/text.js          a/an, sentence endings, and the text-fault sweep every template shares
 js/rng.js           seeded RNG (mulberry32) + distributions
 js/bbgm.js          BBGM's own rating formulas, reimplemented
-js/colleges.js      364 D-I programs + 24 non-NCAA destinations and their clubs
+js/colleges.js      364 D-I programs + 37 non-NCAA destinations and their clubs
 js/config.js        defaults + presets
 js/calibration.js   the era table: empirical anchors and the shifts to reach them
 js/ratings.js       archetypes, class flavor, potential and the ovr-preserving solver

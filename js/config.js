@@ -28,10 +28,17 @@
 
 		   Raised from 14 when the table grew past 117 builds: per-class
 		   coverage had quietly fallen from 23% of the table to 12%, and
-		   measured over 20 classes five builds never appeared at all. 17 is a
-		   deliberate target, not a maximization — consecutive classes should
-		   share a build or two, the way real drafts repeat archetypes. */
-		archetypePool: 17,
+		   measured over 20 classes five builds never appeared at all. 17 was
+		   a deliberate target, not a maximization — consecutive classes
+		   should share a build or two, the way real drafts repeat archetypes.
+
+		   19 keeps that same target as the table grew again, to 145: the
+		   figure that matters is the SHARE of the table one class draws
+		   (17/131 and 19/145 are both about 13%), and holding the pool fixed
+		   while the table grows is how per-class coverage quietly fell the
+		   first time. Measured over 20 classes, 17 left fourteen builds
+		   unseen and 19 leaves eleven. */
+		archetypePool: 19,
 		/* How many forced anomalies a class gets: a five-star bust, an
 		   unranked recruit who turns into a lottery pick, a 24-year-old JUCO,
 		   a 7'4" project, the coach's son, the man whose season ended in

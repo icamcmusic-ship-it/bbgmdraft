@@ -225,7 +225,23 @@
 					const A = alive[i];
 					const B = alive[i + 1];
 					if (!B) { next.push(A); continue; }
-					const sc = T.playGameScore(rng, A.team, B.team, 0, cfg, 1, true);
+					/* The pod advantage. The first weekend is played in
+					   four-team pods sited near the top seeds, so a 1 seed
+					   opens forty minutes from campus in front of its own
+					   crowd and its 16 seed has flown across the country —
+					   which is worth about a point, and is a real part of
+					   why the top lines almost never lose early. It is a
+					   share of a home edge rather than a home game (see
+					   playGameScore), and it stops after the first weekend,
+					   when the regionals move to neutral sites.
+
+					   The LOG still records a neutral court: the game-log
+					   generator's home lift is a binary 5.5% and applying it
+					   to a pod would overstate a one-point edge sixfold. */
+					const pod = regionRounds.length <= 1
+						? (A.seed < B.seed ? 0.3 : A.seed > B.seed ? -0.3 : 0)
+						: 0;
+					const sc = T.playGameScore(rng, A.team, B.team, pod, cfg, 1, true);
 					T.recordPostseason(A.team, B.team, sc, "ncaa",
 						1.07 + regionRounds.length * 0.01, roundName);
 					const won = sc.won;

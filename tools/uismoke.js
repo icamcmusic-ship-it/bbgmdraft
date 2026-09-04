@@ -95,6 +95,19 @@ function ok(name, condition, detail) {
 	}
 }
 
+/* The prospect table is a MODE of the Draft board now ("Player Edit"), not a
+   tab of its own — the tool opens on the board. Every check that wants the
+   forty-column editable table goes through here. */
+async function gotoProspects(page) {
+	await page.locator("#tabs button", { hasText: "Draft board" }).first().click();
+	await page.waitForTimeout(120);
+	const seg = page.locator('.segmented button[data-board-mode="edit"]');
+	if (await seg.count()) {
+		await seg.first().click();
+		await page.waitForTimeout(200);
+	}
+}
+
 (async () => {
 	const V = require("./validate.js");
 	V.loadEngine();
@@ -124,6 +137,11 @@ function ok(name, condition, detail) {
 	await page.waitForSelector("table tbody tr", { timeout: 30000 });
 
 	console.log("Rendering");
+	/* The tool opens on the Draft board, which is a row per prospect in board
+	   order. That IS the front page now, so it is what the first check reads. */
+	ok("the tool opens on the Draft board",
+		(await page.locator("#tabs button.active").first().textContent()).indexOf("Draft board") !== -1);
+	await gotoProspects(page);
 	ok("the prospect table has a row per player",
 		(await page.locator("table tbody tr").count()) === 70);
 	for (const label of await page.locator("#tabs button").allTextContents()) {
@@ -134,7 +152,7 @@ function ok(name, condition, detail) {
 	}
 
 	console.log("\nEditing");
-	await page.locator("#tabs button", { hasText: "Prospects" }).click();
+	await gotoProspects(page);
 	await page.waitForTimeout(150);
 	await page.locator("table tbody tr").first().click();
 	await page.waitForSelector(".editor", { timeout: 8000 });
@@ -365,7 +383,7 @@ function ok(name, condition, detail) {
 	await page.waitForTimeout(300);
 	ok("two prospects compare side by side",
 		(await page.locator("#view table.compare").innerText()).indexOf("True shooting") !== -1);
-	await page.locator("#tabs button", { hasText: "Prospects" }).first().click();
+	await gotoProspects(page);
 	await page.waitForTimeout(250);
 
 	/* The export menu, which is also where the new verbs live. */
@@ -485,7 +503,7 @@ function ok(name, condition, detail) {
 	}
 
 	console.log("\nKeyboard and table verbs");
-	await page.locator("#tabs button", { hasText: "Prospects" }).click();
+	await gotoProspects(page);
 	await page.waitForSelector("table tbody tr", { timeout: 8000 });
 	{
 		// "/" focuses the search, which is where every table shortcut starts.
@@ -497,14 +515,18 @@ function ok(name, condition, detail) {
 		await page.keyboard.press("Escape");
 		await page.locator("body").click({ position: { x: 5, y: 5 } });
 
-		// A number key is a tab.
-		await page.keyboard.press("2");
+		// A number key is a tab. 1 is the Draft board, which is where the
+		// tool opens; 4 is the poll, which is somewhere else.
+		await page.keyboard.press("4");
 		await page.waitForTimeout(250);
 		ok("a number key jumps to a tab",
 			(await page.locator("#tabs button.active").first().textContent())
-				.indexOf("Draft board") !== -1);
+				.indexOf("AP Poll") !== -1);
 		await page.keyboard.press("1");
 		await page.waitForTimeout(250);
+		ok("and 1 comes back to the Draft board",
+			(await page.locator("#tabs button.active").first().textContent())
+				.indexOf("Draft board") !== -1);
 
 		// "l" locks the focused row without opening the editor.
 		await page.locator("table tbody tr").nth(2).focus();
@@ -585,7 +607,7 @@ function ok(name, condition, detail) {
 		ok("three prospects compare side by side",
 			(await page.locator("#view table.compare th").count()) === 4);
 
-		await page.locator("#tabs button", { hasText: "Prospects" }).click();
+		await gotoProspects(page);
 		await page.waitForTimeout(200);
 		const seedBefore = await page.evaluate(() => window.App.state.lastSeed);
 		await page.locator("#btnReroll").click();
@@ -764,7 +786,7 @@ function ok(name, condition, detail) {
 			}));
 
 		// The seed history's own housekeeping.
-		await page.locator(".tabs button", { hasText: "Prospects" }).click();
+		await gotoProspects(page);
 		await page.waitForTimeout(300);
 		const seeds = await page.evaluate(() => {
 			window.App.state.history = ["aaa", "bbb", "ccc"];
@@ -808,7 +830,8 @@ function ok(name, condition, detail) {
 		ok("and it lands on the prospect it was showing",
 			await page.evaluate(() => {
 				const st = window.App.state;
-				return st.tab === "players" && st.editing === st.logPlayer;
+				return st.tab === "board" && st.boardMode === "edit" &&
+					st.editing === st.logPlayer;
 			}));
 		// The shortcut sheet says Escape closes the editor; it did not.
 		await page.locator("body").click({ position: { x: 5, y: 5 } });
@@ -939,8 +962,10 @@ function ok(name, condition, detail) {
 			(await page.locator("#btnSample").count()) === 1);
 		await page.locator("#btnSample").click();
 		await page.waitForSelector("table tbody tr", { timeout: 30000 });
-		ok("the sample class renders a prospect table",
-			(await page.locator("table tbody tr").count()) === 70);
+		/* The board carries a divider row per round (see bandOf in
+		   js/views.js), so the player rows are the ones that are not one. */
+		ok("the sample class renders a board with a row per prospect",
+			(await page.locator("table tbody tr:not(.bandrow)").count()) === 70);
 		ok("the sample class is named as one",
 			/sample/i.test(await page.locator("#fileSummary").textContent()));
 		await page.locator("#tabs button", { hasText: "News" }).first().click();
@@ -1008,7 +1033,14 @@ function ok(name, condition, detail) {
 		ok("the destinations are grouped rather than a flat list of 23",
 			groups >= 3 && groups <= 8, String(groups));
 		const inputs = await page.locator("#leagueWeights input").count();
-		ok("and every league is still there", inputs === 23, String(inputs));
+		/* Derived, not typed: the count was hardcoded at 23 and went stale the
+		   first time a league was added. Every destination gets a box except
+		   "DII NCAA", which has a slider of its own (pDII) in the same
+		   fieldset. */
+		const want = await page.evaluate(() =>
+			Object.keys(window.Colleges.NON_NCAA).filter((k) => k !== "DII NCAA").length);
+		ok("and every league is still there", inputs === want,
+			inputs + " boxes for " + want + " destinations");
 		/* Europe is the group that has to exist, and the EuroLeague has to be
 		   in it: the grouping is derived from each league's own birthplace
 		   multipliers, so this is the check that the derivation works. */
@@ -1106,10 +1138,17 @@ function ok(name, condition, detail) {
 		ok("every schedule row opens a box score",
 			(await gameLinks.count()) >= 25, String(await gameLinks.count()));
 		await gameLinks.first().click();
-		await page.waitForTimeout(350);
+		await page.waitForFunction(
+			() => window.App && window.App.state && window.App.state.game,
+			null, { timeout: 10000 });
+		await page.waitForTimeout(200);
 		const text = await page.locator("#view").innerText();
 		ok("the box score names both teams and the score",
 			/ at .+\d/.test(text.split("\n")[1] || ""), text.split("\n").slice(0, 3).join(" | "));
+		/* Wait for the box score's own table rather than a fixed 350ms: on a
+		   loaded machine the render lands after the timeout and the whole
+		   block fails on a stopwatch rather than on a defect. */
+		await page.waitForSelector("#view table thead th", { timeout: 10000 });
 		const heads = await page.locator("#view table thead th").allInnerTexts();
 		ok("and carries a real box-score header",
 			heads.indexOf("MIN") !== -1 && heads.indexOf("+/-") !== -1 &&
@@ -1137,7 +1176,7 @@ function ok(name, condition, detail) {
 
 	console.log("\nThe season's storylines");
 	{
-		await page.locator("#tabs button", { hasText: "Prospects" }).first().click();
+		await gotoProspects(page);
 		await page.waitForTimeout(300);
 		const text = await page.locator("#view").innerText();
 		const narrative = await page.evaluate(() => {
@@ -1447,6 +1486,92 @@ function ok(name, condition, detail) {
 					snap.perGame.join() !== snap.per40.join());
 			}
 		}
+	}
+
+	/* ---------------------------------------------------------------------
+	   A WHOLE LEAGUE EXPORT.
+
+	   The headline path of this change and the one with no coverage at all: a
+	   BBGM league carries its next two or three draft classes inside it as
+	   ordinary player rows with an undrafted tid and a future draft year, and
+	   the tool used to take one of them and discard the file. It has to load
+	   one editable class per draft year, say so, and keep the league in
+	   memory for the merge.
+
+	   Last, because loading a file replaces everything on the page. */
+	console.log("\nA whole league export");
+	{
+		const league = { version: 50, startingSeason: 2027, gameAttributes: { season: 2027 },
+			teams: [], players: [] };
+		let pid = 0;
+		for (const year of [2027, 2028, 2029]) {
+			const cls = V.syntheticClass(year, 60);
+			for (const p of cls.players) {
+				const copy = JSON.parse(JSON.stringify(p));
+				copy.pid = pid++;
+				copy.tid = -2;
+				copy.draft = { year, round: 0, pick: 0, tid: -1 };
+				copy.born = { year: year - 19, loc: (p.born && p.born.loc) || "USA" };
+				league.players.push(copy);
+			}
+		}
+		// The rest of the league: rostered players, who are not a draft class
+		// however their draft rows read.
+		for (const p of V.syntheticClass(9, 120).players) {
+			const copy = JSON.parse(JSON.stringify(p));
+			copy.pid = pid++;
+			copy.tid = 5;
+			copy.draft = { year: 2020, round: 1, pick: 3, tid: 5 };
+			copy.born = { year: 2000, loc: "USA" };
+			copy.college = "Duke";
+			league.players.push(copy);
+		}
+		const leagueFixture = path.join(require("os").tmpdir(), "bbgm-uismoke-league.json");
+		fs.writeFileSync(leagueFixture, JSON.stringify(league));
+
+		await page.goto(base);
+		await page.evaluate(() => localStorage.clear());
+		await page.goto(base);
+		await page.setInputFiles("#file", leagueFixture);
+		await page.waitForSelector("table tbody tr", { timeout: 60000 });
+		const files = await page.evaluate(() =>
+			window.App.state.files.map((f) => f.name + "|" +
+				(f.data.startingSeason || "?") + "|" + (f.data.players || []).length));
+		ok("a league export loads one class per draft year",
+			files.length === 3, files.join(" , "));
+		ok("each class carries its own draft year and only its own players",
+			files.every((f, i) => f.indexOf("|" + (2027 + i) + "|60") !== -1),
+			files.join(" , "));
+		ok("and the file picker offers all three",
+			(await page.locator("#fileSelect option").count()) === 3);
+		ok("the league itself is kept for the merge",
+			await page.evaluate(() => {
+				const src = window.App.state.leagueSource;
+				return !!(src && src.data && src.data.players.length ===
+					window.App.state.files.reduce((a, f) =>
+						a + f.data.players.length, 0) + 120);
+			}), "the whole league, not just the classes");
+		const warn = await page.locator("#warnBanner .bannertext").innerText();
+		ok("and the page says what it did with the file",
+			/full league export/.test(warn) && /2027, 2028, 2029/.test(warn),
+			warn.slice(0, 140));
+		/* The merge offers the league already in memory rather than sending
+		   the user back to the disk for the same file. */
+		await page.locator("#btnExportMenu").click();
+		await page.waitForTimeout(250);
+		await page.locator('#modal button:has-text("Merge into a league file")').click();
+		await page.waitForTimeout(350);
+		// With several classes loaded the first dialog is the class picker;
+		// the league question is the one after it.
+		ok("the merge offers every loaded class", (await page.locator(
+			"#modal .checklist input[type=checkbox]").count()) === 3);
+		await page.locator("#modalOk").click();
+		await page.waitForTimeout(350);
+		const mergeText = await page.locator("#modal").innerText();
+		ok("the merge dialog names the league the classes came from",
+			/still loaded/.test(mergeText), mergeText.slice(0, 200));
+		await page.locator("#modalCancel").click();
+		await page.waitForTimeout(200);
 	}
 
 	console.log("\nNo errors");
