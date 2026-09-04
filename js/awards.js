@@ -326,6 +326,8 @@
 		[/^NABC All-Defensive Second Team$/, 8],
 		[/^All-Freshman Team$/, 9],
 		[/^Final Four Most Outstanding Player$/, 10],
+		[/^NCAA National Champion$/, 10.5],
+		[/^NCAA National Runner-Up$/, 11.5],
 		[/All-Region Team$/, 11],
 		[/^NCAA All-Tournament Team$/, 12],
 		[/Player of the Year$/, 13],
@@ -339,6 +341,8 @@
 		/* The professional leagues' own honors, which had no tier and so
 		   sorted alphabetically: "ACB Best Young Player" ahead of "ACB MVP". */
 		[/ Finals MVP$/, 20],
+		[/ (Champion|Cup Winner)$/, 20.5],
+		[/Regular-Season Champion$/, 20.6],
 		[/ MVP$/, 13],
 		[/(Rising Star|Best Young Player|Rookie of the Year|Next Up Award|Next Generation Award|Youth Player of the Year)$/, 15],
 		[/Defensive Team$/, 21],
@@ -1078,6 +1082,30 @@
 				});
 		}
 
+		/* --- championships -------------------------------------------------
+		   The bracket crowned a champion and no player ever carried it: a
+		   prospect who started on the national champion finished with
+		   "NCAA All-Tournament Team" at best, and a reserve on that roster
+		   finished with nothing at all. A title is a line on every roster
+		   member's page for the rest of his life, so every prospect who
+		   played for the champion gets it — the same way a ring is not
+		   minutes-gated — and the same for a conference title, the NIT, and
+		   (below) a professional league, cup or continental title. */
+		const played = (p) => p.stats && p.stats.gp > 0;
+		for (const p of ncaa) {
+			if (!played(p)) continue;
+			const t = teams[p.newCollege];
+			if (!t) continue;
+			if (t.name === champName) p.awards.push("NCAA National Champion");
+			else if (tourney.runnerUp && t.name === tourney.runnerUp.team.name) {
+				p.awards.push("NCAA National Runner-Up");
+			}
+			if (t.nitChamp) p.awards.push("NIT Champion");
+			const lb = label(t.conf);
+			if (t.confTourneyChamp) p.awards.push(lb + " Tournament Champion");
+			if (t.confRegularChamp) p.awards.push(lb + " Regular-Season Champion");
+		}
+
 		/* --- pro / DII league honors --------------------------------------- */
 		const PRO_AWARDS = {
 			"EuroLeague": ["EuroLeague Rising Star", "EuroLeague Best Young Player", "All-EuroLeague Second Team"],
@@ -1108,6 +1136,19 @@
 			"CEBL": ["CEBL Canadian of the Year", "CEBL Rookie of the Year", "All-CEBL Second Team"],
 			"Prep / Postgrad": ["National Prep Player of the Year", "Prep All-American", "Prep Showcase MVP"],
 			"NAIA": ["NAIA Player of the Year", "NAIA All-American", "NAIA Freshman of the Year"],
+			"Italian LBA": ["LBA Best Under-22", "LBA Rising Star", "All-LBA Second Team"],
+			"Lithuanian LKL": ["LKL Best Young Player", "LKL Rising Star", "All-LKL Second Team"],
+			"VTB United League": ["VTB Best Young Player", "VTB Rising Star", "All-VTB Second Team"],
+			"Polish PLK": ["PLK Best Young Player", "PLK Rising Star", "All-PLK Second Team"],
+			"BNXT League": ["BNXT Rising Star", "BNXT Best Young Player", "All-BNXT Second Team"],
+			"Korean KBL": ["KBL Rookie of the Year", "KBL Best Young Player", "All-KBL Second Team"],
+			"Philippine PBA": ["PBA Rookie of the Year", "PBA Most Improved Player", "All-PBA Second Team"],
+			"Argentine Liga Nacional": ["LNB Revelation of the Year", "LNB Best Young Player", "All-Liga Nacional Second Team"],
+			"Mexican LNBP": ["LNBP Rookie of the Year", "LNBP Best Young Player", "All-LNBP Second Team"],
+			"Puerto Rico BSN": ["BSN Rookie of the Year", "BSN Best Young Player", "All-BSN Second Team"],
+			"New Zealand NBL": ["NZNBL Rookie of the Year", "NZNBL Best Young Player", "All-NZNBL Second Team"],
+			"JUCO": ["NJCAA Player of the Year", "NJCAA All-American", "NJCAA Freshman of the Year"],
+			"DIII NCAA": ["Division III Player of the Year", "Division III All-American", "Division III Rookie of the Year"],
 		};
 		const byLeague = {};
 		for (const p of pros) {
@@ -1188,6 +1229,18 @@
 					p.awards.push(names[i]);
 				}
 			});
+			/* Titles. A prospect on the champion is a champion whatever he
+			   averaged; the trophy names the league the way its honors do. */
+			const shortName = short || lg;
+			for (const p of list) {
+				const club = p.proTeam;
+				if (!club || !p.stats || !(p.stats.gp > 0)) continue;
+				if (club.leagueChamp) p.awards.push(shortName + " Champion");
+				if (club.cupChamp) p.awards.push(shortName + " Cup Winner");
+				if (club.continental && club.continental.result === "champions") {
+					p.awards.push(club.continental.competition + " Champion");
+				}
+			}
 		}
 
 		// One consistent order everywhere: the note, the table, the editor.
@@ -1339,6 +1392,7 @@
 		/^Lefty Driesell Award$/,
 		/^(Bob Cousy|Jerry West|Julius Erving|Tim Duncan|Kareem Abdul-Jabbar) Award$/,
 		/^Final Four Most Outstanding Player$/,
+		/^NCAA National Champion$/,
 		/^NCAA All-Tournament Team$/,
 		/^NIT Most Valuable Player$/,
 	];
@@ -1357,6 +1411,11 @@
 		"Japan B.League": "B.League", "Brazil NBB": "NBB",
 		"Basketball Africa League": "BAL", "CEBL": "CEBL", "NAIA": "NAIA",
 		"DII NCAA": "Division II",
+		"Italian LBA": "LBA", "Lithuanian LKL": "LKL", "VTB United League": "VTB",
+		"Polish PLK": "PLK", "BNXT League": "BNXT", "Korean KBL": "KBL",
+		"Philippine PBA": "PBA", "Argentine Liga Nacional": "Liga Nacional",
+		"Mexican LNBP": "LNBP", "Puerto Rico BSN": "BSN", "New Zealand NBL": "NZNBL",
+		"JUCO": "NJCAA", "DIII NCAA": "Division III",
 	};
 	const PRO_FIRST_TEAM = new RegExp("^All-(" + Object.values(PRO_SHORT)
 		.concat(["East Asia Super League"])
@@ -1364,7 +1423,7 @@
 
 	/* Abroad and in the G League: the same shape of rule, one league up. */
 	const MAJOR_PRO = [
-		/\bMVP$/, /\bFinals MVP$/, /^All-[\w .]+ First Team$/,
+		/\bMVP$/, /\bFinals MVP$/, /^All-[\w .]+ First Team$/, /\bChampion$/,
 		/Rising Star$/, /Best Young Player$/, /Rookie of the Year$/,
 	];
 	/* Which of those are conference rows rather than pro rows: "All-ACC First
@@ -1376,6 +1435,7 @@
 				award === c + " Defensive Player of the Year" ||
 				award === c + " Freshman of the Year" ||
 				award === "All-" + c + " First Team" ||
+				award === c + " Tournament Champion" ||
 				award === c + " Tournament MVP") return true;
 		}
 		return false;
@@ -1383,7 +1443,7 @@
 	/* Any conference at all — used to reject a NON-major conference row before
 	   the pro patterns can claim it. */
 	const CONF_SHAPED =
-		/(Player of the Year|Freshman of the Year|Tournament MVP|Defensive Player of the Year)$|^All-.+ (First|Second|Freshman|Newcomer|Defensive|Tournament) Team$/;
+		/(Player of the Year|Freshman of the Year|Tournament MVP|Defensive Player of the Year|Tournament Champion|Regular-Season Champion)$|^All-.+ (First|Second|Freshman|Newcomer|Defensive|Tournament) Team$/;
 
 	function isMajorAward(award, confs) {
 		const a = String(award || "").trim();

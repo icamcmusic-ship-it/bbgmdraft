@@ -747,6 +747,11 @@
 		if (/All-American|All-America|Team\b|All-Defensive|All-Freshman|All-Newcomer/.test(award)) {
 			return "is named " + global.Text.withArticle(award);
 		}
+		// A title is worn, not won as a trophy: "is crowned NCAA National
+		// Champion", "is a EuroLeague Cup Winner".
+		if (/Champion$/.test(award)) return "is crowned " + award;
+		if (/Cup Winner$/.test(award)) return "is " + global.Text.withArticle(award);
+		if (/Runner-Up$/.test(award)) return "finishes as " + award;
 		return "wins the " + award;
 	}
 
@@ -2939,6 +2944,560 @@
 			"{player}, a {year} at {team}, was named {award}. He is not in this year's draft — his class is {cls} — which is the kind of thing the scouts already knew and the rest of the country is finding out.",
 			"The {award} went to {player} of {team}, a {year} who will not be eligible until {cls}. Front offices have started their file early.",
 			"{team}'s {player} took the {award} as a {year}. Circle {cls}: that is the draft he belongs to, and it just got a headline.",
+		],
+	});
+
+	/* ================================================== eighteen more rows
+
+	   The paper could describe a season and could not describe several of the
+	   things a season actually produces. A national champion crowned nobody:
+	   the bracket ran, the trophy was handed to a team, and no prospect's
+	   page said he was on it. A league title abroad was the same. A national
+	   statistical lead — rebounds, assists, blocks — existed in the model
+	   (see the rank layer in js/awards.js) and only scoring was ever written
+	   up. And the single-game feats the game log already carries — five
+	   blocks, a perfect night from the field, a game with no turnovers —
+	   were computed every season and never read.
+
+	   Each row below reads something the season already produced. None of
+	   them invent a fact. */
+
+	TPL({
+		kind: "champion's prospect", group: "postseason", p: 1, when: 1.14,
+		find: (ctx) => {
+			const champs = ctx.ncaa.filter((p) =>
+				(p.awards || []).indexOf("NCAA National Champion") !== -1);
+			if (!champs.length) return null;
+			return champs.sort((a, b) => (b.stats.ppg || 0) - (a.stats.ppg || 0))[0];
+		},
+		slots: (p) => ({
+			player: PL(p.name, p.key), team: TM(p.newCollege),
+			line: T(statBlurb(p.stats)),
+			year: T(String(p.classYear).toLowerCase()),
+		}),
+		headlines: [
+			"{player} leaves {team} a national champion",
+			"A title, and a draft board: {player}",
+			"{player} has a ring and a decision",
+		],
+		bodies: [
+			"{player} finishes the season as a national champion. He averaged {line} for {team}, and the scouts who spent the year arguing about him now have to do it about a player with a title.",
+			"The last shot of the season belonged to {team}, and {player} was on the floor for it. A {year} averaging {line}, he goes into the draft with the one line on a résumé nobody can take back.",
+			"{team} are national champions and {player} is the prospect who came out of it. {line} across the season; a ring at the end of it.",
+		],
+	});
+
+	TPL({
+		kind: "champion abroad", group: "postseason", p: 1, when: 1.02,
+		find: (ctx) => {
+			const won = (ctx.res.players || []).filter((p) => p.nonNcaa && p.stats &&
+				(p.awards || []).some((a) => / Champion$/.test(a)));
+			if (!won.length) return null;
+			return ctx.rng.pick(won);
+		},
+		slots: (p) => ({
+			player: PL(p.name, p.key), club: T(p.proClub || p.newCollege),
+			league: T(p.newCollege), line: T(statBlurb(p.stats)),
+			title: T((p.awards || []).filter((a) => / Champion$/.test(a))[0] || "a league title"),
+		}),
+		headlines: [
+			"{player} wins the {league} with {club}",
+			"{club} are champions, and {player} was in the rotation",
+			"A title abroad for {player}",
+		],
+		bodies: [
+			"{club} finished the season as {league} champions. {player}, on the roster all year at {line}, is the prospect who comes out of it with {title} beside his name.",
+			"The {league} title went to {club}. {player} played his draft year there and averaged {line} doing it.",
+			"{player} is a champion before he is a draft pick: {club} took the {league}, and he was part of the rotation that did it.",
+		],
+	});
+
+	TPL({
+		kind: "rebounding title", group: "regular season", p: 0.55, when: 0.99,
+		find: (ctx) => {
+			const cand = ctx.ncaa.filter((p) => p.stats.gp >= 18 && p.stats.rpg >= 9);
+			return cand.length ? bestBy(cand, (p) => p.stats.rpg) : null;
+		},
+		slots: (p) => ({
+			player: PL(p.name, p.key), team: TM(p.newCollege),
+			rpg: T(p.stats.rpg.toFixed(1)), orpg: T((p.stats.orpg || 0).toFixed(1)),
+		}),
+		headlines: [
+			"{player} owns the glass: {rpg} a game",
+			"Nobody rebounds like {player}",
+			"{rpg} rebounds a night for {player}",
+		],
+		bodies: [
+			"{player} finished the season at {rpg} rebounds a game for {team}, {orpg} of them on the offensive end. Rebounding is the one skill scouts believe translates without an argument.",
+			"{rpg} a game. {player} spent the season taking the glass away from {team}'s opponents, and the offensive-rebounding number — {orpg} — is the one that will be quoted in the draft room.",
+			"The country's leading rebounder plays for {team}. {player} averaged {rpg}, which is the kind of season that survives a bad shooting year.",
+		],
+	});
+
+	TPL({
+		kind: "assist title", group: "regular season", p: 0.55, when: 0.99,
+		find: (ctx) => {
+			const cand = ctx.ncaa.filter((p) => p.stats.gp >= 18 && p.stats.apg >= 5.5);
+			return cand.length ? bestBy(cand, (p) => p.stats.apg) : null;
+		},
+		slots: (p) => ({
+			player: PL(p.name, p.key), team: TM(p.newCollege),
+			apg: T(p.stats.apg.toFixed(1)),
+			ratio: T((p.stats.apg / Math.max(0.4, p.stats.topg)).toFixed(1)),
+		}),
+		headlines: [
+			"{player} leads the country in assists",
+			"{apg} a game: {player} runs everything",
+			"The passer of the year plays at {team}",
+		],
+		bodies: [
+			"{player} averaged {apg} assists for {team}, against an assist-to-turnover ratio of {ratio}. A passer who does not give it away is a rarer thing than a passer.",
+			"{apg} assists a game. Everything {team} ran went through {player}, and the turnover column — a ratio of {ratio} — says he could carry it.",
+			"Nobody in the country set up more shots than {player}. {apg} a game for {team}, at {ratio} assists per turnover.",
+		],
+	});
+
+	TPL({
+		kind: "shot-blocking title", group: "regular season", p: 0.55, when: 0.98,
+		find: (ctx) => {
+			const cand = ctx.ncaa.filter((p) => p.stats.gp >= 18 && p.stats.bpg >= 2.2);
+			return cand.length ? bestBy(cand, (p) => p.stats.bpg) : null;
+		},
+		slots: (p) => ({
+			player: PL(p.name, p.key), team: TM(p.newCollege),
+			bpg: T(p.stats.bpg.toFixed(1)), drtg: T(Number.isFinite(p.stats.drtg)
+				? p.stats.drtg.toFixed(1) : "an elite number"),
+		}),
+		headlines: [
+			"{player} blocks {bpg} a game",
+			"The rim belongs to {player}",
+			"{team} give up nothing at the rim",
+		],
+		bodies: [
+			"{player} averaged {bpg} blocks a game for {team}. The defensive rating that came with it — {drtg} — says the shots he did not block were the ones that mattered.",
+			"{bpg} blocks a night. {player} spent the season deciding what {team}'s opponents were allowed to attempt, which is worth more than the column says.",
+			"Nobody protected a rim like {player} this season: {bpg} a game, and a defensive rating of {drtg} behind it.",
+		],
+	});
+
+	TPL({
+		kind: "block party", group: "regular season", p: 0.6,
+		when: (g) => g.when,
+		find: (ctx) => {
+			let best = null;
+			for (const p of ctx.ncaa) {
+				for (const g of logGames(p)) {
+					if (g.blk >= 5 && (!best || g.blk > best.blk)) {
+						best = Object.assign({}, g, { p });
+					}
+				}
+			}
+			return best;
+		},
+		slots: (g) => ({
+			player: PL(g.p.name, g.p.key), team: TM(g.p.newCollege),
+			opp: T(g.opp), n: T(String(g.blk)), score: T(scoreText(g)),
+			result: T(g.won ? "won" : "lost"),
+		}),
+		headlines: [
+			"{player} blocks {n} against {opp}",
+			"{n} blocks in one night for {player}",
+			"{player} turns the paint into a wall",
+		],
+		bodies: [
+			"{player} blocked {n} shots against {opp}, a game {team} {result} {score}. Nights like that are why a rim protector is scouted on tape rather than on averages.",
+			"{n} blocks. {team} {result} {score} against {opp}, and {player} spent the second half daring them to come inside anyway.",
+			"Against {opp}, {player} put up {n} blocks in a {score} game {team} {result}. The number is real; the deterrence is the part nobody counts.",
+		],
+	});
+
+	TPL({
+		kind: "steal spree", group: "regular season", p: 0.6,
+		when: (g) => g.when,
+		find: (ctx) => {
+			let best = null;
+			for (const p of ctx.ncaa) {
+				for (const g of logGames(p)) {
+					if (g.stl >= 5 && (!best || g.stl > best.stl)) {
+						best = Object.assign({}, g, { p });
+					}
+				}
+			}
+			return best;
+		},
+		slots: (g) => ({
+			player: PL(g.p.name, g.p.key), team: TM(g.p.newCollege),
+			opp: T(g.opp), n: T(String(g.stl)), score: T(scoreText(g)),
+			result: T(g.won ? "won" : "lost"),
+		}),
+		headlines: [
+			"{player} takes {n} away from {opp}",
+			"{n} steals for {player}",
+			"{player} spends the night in the passing lanes",
+		],
+		bodies: [
+			"{player} had {n} steals against {opp} in a game {team} {result} {score}. Hands like that decide possessions before a defense has to make a decision.",
+			"{n} steals in one game. {team} {result} {score} against {opp}, and {player} was the reason the ball kept changing ends.",
+			"{opp} could not get the ball where they wanted it: {player} finished with {n} steals in a {score} game {team} {result}.",
+		],
+	});
+
+	TPL({
+		kind: "perfect from the field", group: "regular season", p: 0.55,
+		when: (g) => g.when,
+		find: (ctx) => {
+			let best = null;
+			for (const p of ctx.ncaa) {
+				for (const g of logGames(p)) {
+					if (g.fga >= 6 && g.fgm === g.fga &&
+						(!best || g.fga > best.fga)) {
+						best = Object.assign({}, g, { p });
+					}
+				}
+			}
+			return best;
+		},
+		slots: (g) => ({
+			player: PL(g.p.name, g.p.key), team: TM(g.p.newCollege),
+			opp: T(g.opp), n: T(g.fgm + "-for-" + g.fga), pts: T(String(g.pts)),
+			score: T(scoreText(g)), result: T(g.won ? "won" : "lost"),
+		}),
+		headlines: [
+			"{player} does not miss: {n} against {opp}",
+			"A perfect night for {player}",
+			"{n} from the floor for {player}",
+		],
+		bodies: [
+			"{player} went {n} from the field against {opp}, finishing with {pts} points in a game {team} {result} {score}. A perfect shooting night is usually a shot-selection story before it is a shooting one.",
+			"{n}. {player} did not miss a shot against {opp}, scored {pts}, and {team} {result} {score}.",
+			"Against {opp}, {player} took what the defense gave him and made all of it: {n} for {pts} points in a {score} game {team} {result}.",
+		],
+	});
+
+	TPL({
+		kind: "turnover-free night", group: "regular season", p: 0.5,
+		when: (g) => g.when,
+		find: (ctx) => {
+			let best = null;
+			for (const p of ctx.ncaa) {
+				for (const g of logGames(p)) {
+					if (g.tov === 0 && g.ast >= 5 && g.min >= 24 &&
+						(!best || g.ast > best.ast)) {
+						best = Object.assign({}, g, { p });
+					}
+				}
+			}
+			return best;
+		},
+		slots: (g) => ({
+			player: PL(g.p.name, g.p.key), team: TM(g.p.newCollege),
+			opp: T(g.opp), ast: T(String(g.ast)), min: T(String(g.min)),
+			score: T(scoreText(g)), result: T(g.won ? "won" : "lost"),
+		}),
+		headlines: [
+			"{ast} assists, no turnovers for {player}",
+			"{player} plays a clean {min} minutes",
+			"Nothing given away: {player} against {opp}",
+		],
+		bodies: [
+			"{player} played {min} minutes against {opp} with {ast} assists and not a single turnover. {team} {result} {score}. Front offices keep that box score.",
+			"{ast} and none. {player}'s line against {opp} carried no turnovers in {min} minutes, in a game {team} {result} {score}.",
+			"A guard's cleanest possible night: {ast} assists, zero turnovers, {min} minutes. {team} {result} {score} against {opp}.",
+		],
+	});
+
+	TPL({
+		kind: "double-figure streak", group: "regular season", p: 0.5, when: 0.93,
+		find: (ctx) => {
+			const cand = ctx.ncaa.filter((p) => {
+				const g = logGames(p);
+				return g.length >= 18 && g.every((x) => x.pts >= 10);
+			});
+			return cand.length ? bestBy(cand, (p) => p.stats.ppg) : null;
+		},
+		slots: (p) => ({
+			player: PL(p.name, p.key), team: TM(p.newCollege),
+			n: T(String(logGames(p).length)), ppg: T(p.stats.ppg.toFixed(1)),
+			low: T(String(Math.min.apply(null, logGames(p).map((g) => g.pts)))),
+		}),
+		headlines: [
+			"{player} has not been held under ten all season",
+			"{n} games, {n} double figures for {player}",
+			"The most reliable scorer in the country: {player}",
+		],
+		bodies: [
+			"{player} scored in double figures in every one of his {n} games for {team}. His worst night was {low} points; his average is {ppg}. Consistency is the part of a scoring average nobody prints.",
+			"{n} for {n}. {player} has not had a single-figure night this season, on {ppg} a game, with a floor of {low}.",
+			"{team} know exactly what they are getting: {player} averaged {ppg} and never once finished below ten, across all {n} games.",
+		],
+	});
+
+	TPL({
+		kind: "one-man team", group: "regular season", p: 0.55, when: 0.9,
+		find: (ctx) => {
+			const cand = ctx.ncaa.filter((p) => p.shareOf &&
+				p.shareOf.pts >= 0.28 && p.stats.gp >= 18);
+			return cand.length ? bestBy(cand, (p) => p.shareOf.pts) : null;
+		},
+		slots: (p) => ({
+			player: PL(p.name, p.key), team: TM(p.newCollege),
+			share: T((p.shareOf.pts * 100).toFixed(0)),
+			ppg: T(p.stats.ppg.toFixed(1)), usg: T((p.stats.usg * 100).toFixed(1)),
+		}),
+		headlines: [
+			"{share}% of {team}'s offense is {player}",
+			"{player} is the whole plan at {team}",
+			"One man, one offense: {player}",
+		],
+		bodies: [
+			"{player} scored {share}% of {team}'s points this season, on a usage rate of {usg}%. {ppg} a game is the headline; the share is the scouting question — nobody knows what he looks like next to other good players.",
+			"{share}% of everything. {player} averaged {ppg} for {team} at {usg}% usage, which is a workload almost nobody carries into the league intact.",
+			"The tape on {player} is the tape on {team}: {share}% of the points, {usg}% of the possessions, {ppg} a game.",
+		],
+	});
+
+	TPL({
+		kind: "league romp", group: "regular season", p: 0.6, when: 0.99,
+		find: (ctx) => {
+			const cand = ctx.teamList.filter((t) => t.cw + t.cl >= 14 && t.cl <= 1);
+			return cand.length ? bestBy(cand, (t) => t.cw - t.cl) : null;
+		},
+		slots: (t) => ({
+			team: TM(t.name), conf: T(t.conf),
+			record: T(t.cw + "-" + t.cl), overall: T(t.regW + "-" + t.regL),
+		}),
+		headlines: [
+			"{team} go {record} in the {conf}",
+			"The {conf} was not a race",
+			"{team} run through their league",
+		],
+		bodies: [
+			"{team} finished {record} in the {conf}, {overall} overall. A league title decided in February is a résumé the committee reads in one line.",
+			"{record}. Nobody in the {conf} came close to {team}, who are {overall} on the season and have been the answer since the schedule turned over.",
+			"The {conf} title went to {team} at {record}. At {overall} overall, the only remaining question about them is a bracket one.",
+		],
+	});
+
+	TPL({
+		kind: "one-bid league", group: "postseason", p: 0.5, when: 1.03,
+		find: (ctx) => {
+			const sel = ctx.res.tourney && ctx.res.tourney.selection;
+			if (!sel || !sel.byConf) return null;
+			const single = Object.keys(sel.byConf).filter((c) => sel.byConf[c] === 1);
+			if (!single.length) return null;
+			const conf = ctx.rng.pick(single);
+			const team = sel.field.filter((t) => t.conf === conf)[0];
+			return team ? { conf, team } : null;
+		},
+		slots: (x) => ({
+			team: TM(x.team.name), conf: T(x.conf),
+			seed: T(String(x.team.ncaaSeed || 16)),
+			record: T(x.team.regW + "-" + x.team.regL),
+		}),
+		headlines: [
+			"The {conf} sends one, and it is {team}",
+			"{team} carry the {conf} alone",
+			"A one-bid league gets its bid: {team}",
+		],
+		bodies: [
+			"{team} are the {conf}'s only team in the field, a No. {seed} seed at {record}. For a one-bid league the conference tournament is the season, and this is what winning it is for.",
+			"One bid, one team: {team} at {record}, seeded {seed}. The rest of the {conf} is watching.",
+			"The {conf} got exactly one team into the bracket. {team}, {record}, a No. {seed} seed, and a scouting audience they have not had all year.",
+		],
+	});
+
+	TPL({
+		kind: "efficiency king", group: "regular season", p: 0.5, when: 0.96,
+		find: (ctx) => {
+			const cand = ctx.ncaa.filter((p) => p.stats.gp >= 18 &&
+				p.stats.ppg >= 13 && Number.isFinite(p.stats.ts) && p.stats.ts >= 0.60);
+			return cand.length ? bestBy(cand, (p) => p.stats.ts) : null;
+		},
+		slots: (p) => {
+			/* Effective field-goal percentage is DERIVED (see DERIVED in
+			   js/views.js), not a field on the stat line — reading
+			   `stats.efg` printed "NaN% effective field-goal percentage" in
+			   a finished article. */
+			const st = p.stats;
+			const efg = st.fga > 0
+				? (st.fgp * st.fga + 0.5 * st.tpp * st.tpa) / st.fga : st.fgp;
+			return {
+				player: PL(p.name, p.key), team: TM(p.newCollege),
+				ts: T((st.ts * 100).toFixed(1)), ppg: T(st.ppg.toFixed(1)),
+				efg: T((efg * 100).toFixed(1)),
+			};
+		},
+		headlines: [
+			"{player} scores {ppg} on {ts}% true shooting",
+			"The most efficient scorer in the country: {player}",
+			"{player} does not waste a possession",
+		],
+		bodies: [
+			"{player} averaged {ppg} points a game for {team} at {ts}% true shooting and {efg}% effective field-goal percentage. Volume with that efficiency behind it is the combination that survives a level jump.",
+			"{ts}% true shooting on {ppg} a game. Whatever {team} asked {player} to do, he did it without giving anything back.",
+			"Efficiency at volume is the rarest thing on a draft board, and {player} has it: {ppg} a game on {ts}% true shooting for {team}.",
+		],
+	});
+
+	TPL({
+		kind: "living at the line", group: "regular season", p: 0.5, when: 0.94,
+		find: (ctx) => {
+			const cand = ctx.ncaa.filter((p) => p.stats.gp >= 18 && p.stats.fta >= 5 &&
+				p.stats.fga >= 6 && p.stats.fta / p.stats.fga >= 0.44);
+			return cand.length ? bestBy(cand, (p) => p.stats.fta / p.stats.fga) : null;
+		},
+		slots: (p) => ({
+			player: PL(p.name, p.key), team: TM(p.newCollege),
+			fta: T(p.stats.fta.toFixed(1)), ftr: T((100 * p.stats.fta / p.stats.fga).toFixed(0)),
+			ftp: T((p.stats.ftp * 100).toFixed(1)),
+		}),
+		headlines: [
+			"{player} lives at the free-throw line",
+			"{fta} free throws a game for {player}",
+			"Nobody gets fouled like {player}",
+		],
+		bodies: [
+			"{player} attempted {fta} free throws a game for {team} — {ftr} of them for every hundred field-goal attempts — and made {ftp}% of them. Drawing fouls is a skill that does not appear in a highlight package and never stops working.",
+			"{fta} a game from the line, at {ftp}%. {player} spends the second half of games at {team} turning contact into points.",
+			"The most-fouled player in the country plays for {team}: {player}, at a free-throw rate of {ftr} and {ftp}% once he gets there.",
+		],
+	});
+
+	TPL({
+		kind: "national team call-up", group: "offseason", p: 0.6, when: -0.15,
+		find: (ctx) => {
+			const cand = (ctx.res.players || []).filter((p) => p.nonNcaa &&
+				p.proPath && p.proPath.caps);
+			return cand.length ? ctx.rng.pick(cand) : null;
+		},
+		slots: (p) => ({
+			player: PL(p.name, p.key), club: T(p.proClub || p.newCollege),
+			country: T(p.proPath.caps.country), n: T(String(p.proPath.caps.n)),
+			level: T(p.proPath.caps.level === "senior"
+				? "the senior side" : "the " + p.proPath.caps.level + " side"),
+		}),
+		headlines: [
+			"{player} called up by {country}",
+			"{country} name {player} to {level}",
+			"An international summer for {player}",
+		],
+		bodies: [
+			"{player} has {n} caps for {country} at {level}. A prospect who has played competitive international basketball has done something the college calendar cannot show a scout.",
+			"{country} called {player} in again: {n} caps now, with {level}, alongside his season at {club}.",
+			"The summer file on {player} is longer than the winter one. {n} appearances for {country} with {level}, and a club season at {club} either side of it.",
+		],
+	});
+
+	TPL({
+		kind: "loan spell", group: "offseason", p: 0.55, when: -0.25,
+		find: (ctx) => {
+			const cand = (ctx.res.players || []).filter((p) => p.nonNcaa &&
+				p.proPath && p.proPath.loan);
+			return cand.length ? ctx.rng.pick(cand) : null;
+		},
+		slots: (p) => ({
+			player: PL(p.name, p.key), club: T(p.proClub || p.newCollege),
+			where: T(p.proPath.loan.where), league: T(p.newCollege),
+			span: T(p.proPath.loan.season === 1 ? "a season" : "two seasons"),
+		}),
+		headlines: [
+			"{player} spent {span} on loan",
+			"The minutes {player} could not get at {club}",
+			"{player}'s development took a detour",
+		],
+		bodies: [
+			"{player} was loaned to {where} for {span} before returning to {club}. A loan is how a European club admits a nineteen-year-old needs to play, and it is usually the most informative year on the file.",
+			"Before this season at {club}, {player} spent {span} at {where}. Scouts who followed the {league} only will have missed the year that made him.",
+			"A detour of {span} at {where}, then back to {club}. {player}'s route through the {league} is the ordinary one, and the loan tape is the tape worth watching.",
+		],
+	});
+
+	TPL({
+		kind: "portal regret", group: "regular season", p: 0.5, when: 0.88,
+		find: (ctx) => {
+			const cand = ctx.ncaa.filter((p) => p.transfer && p.transfer.from &&
+				p.transfer.direction === "up" && p.stats.gp >= 12);
+			const bad = cand.filter((p) => {
+				const t = ctx.teams[p.newCollege];
+				return t && t.regL > t.regW;
+			});
+			return bad.length ? bestBy(bad, (p) => p.stats.ppg) : null;
+		},
+		slots: (p, ctx) => {
+			const t = ctx.teams[p.newCollege];
+			return {
+				player: PL(p.name, p.key), to: TM(p.newCollege), from: T(p.transfer.from),
+				record: T(t.regW + "-" + t.regL), ppg: T(p.stats.ppg.toFixed(1)),
+			};
+		},
+		headlines: [
+			"{player} moved up and the season went down",
+			"A hard first year at {to} for {player}",
+			"{player} left {from} for this",
+		],
+		bodies: [
+			"{player} transferred up to {to} and averaged {ppg} for a team that finished {record}. The portal is a bet on a situation, and this one did not come in.",
+			"{ppg} a game, on a {record} team. {player}'s move from {from} to {to} was the right kind of move and the wrong year to make it.",
+			"{to} finished {record}. {player} came from {from} for a bigger stage and got {ppg} a game on a losing one, which is a harder year to scout than a good one.",
+		],
+	});
+
+	TPL({
+		kind: "recruiting battle", group: "offseason", p: 0.7, when: -0.75,
+		find: (ctx) => {
+			const cand = ctx.ncaa.filter((p) => p.recruiting &&
+				p.classYear === "Freshman" && !(p.transfer && p.transfer.from) &&
+				p.recruiting.finalists && p.recruiting.finalists.length >= 3);
+			if (!cand.length) return null;
+			return cand.sort((a, b) => a.recruiting.rank - b.recruiting.rank)[0];
+		},
+		slots: (p) => {
+			const rec = p.recruiting;
+			const lost = rec.finalists.slice(1);
+			return {
+				player: PL(p.name, p.key), to: TM(rec.committed),
+				rank: T(String(rec.rank)), stars: T(String(rec.stars)),
+				lost: T(lost.join(", ")), first: T(lost[0] || "the field"),
+				offers: T(String(rec.offerCount || rec.finalists.length)),
+			};
+		},
+		headlines: [
+			"{to} win the race for {player}",
+			"{player} picks {to} over {first}",
+			"The No. {rank} recruit is off the board",
+		],
+		bodies: [
+			"{player}, the No. {rank} player in his class, chose {to} over {lost}. He held {offers} offers and cut it to four before Christmas; the staff that got him has been on him since his sophomore year.",
+			"{offers} offers, a final list of {to}, {lost}, and a {stars}-star committing to {to}. {player} is the kind of signing a program points at for a decade.",
+			"It came down to {to} and {lost}. {player} picked {to}, which is the answer the recruiting industry expected and the one the other staffs will spend the summer explaining.",
+		],
+	});
+
+	TPL({
+		kind: "all-star game", group: "offseason", p: 0.65, when: -0.62,
+		find: (ctx) => {
+			const cand = ctx.ncaa.filter((p) => p.recruiting &&
+				p.recruiting.allStar && p.recruiting.allStar.length);
+			if (!cand.length) return null;
+			return cand.sort((a, b) =>
+				(b.recruiting.allStar.length - a.recruiting.allStar.length) ||
+				(a.recruiting.rank - b.recruiting.rank))[0];
+		},
+		slots: (p) => ({
+			player: PL(p.name, p.key), to: TM(p.newCollege),
+			games: T(p.recruiting.allStar.join(" and the ")),
+			first: T(p.recruiting.allStar[0]),
+			rank: T(String(p.recruiting.rank)),
+		}),
+		headlines: [
+			"{player} named to the {first}",
+			"April's all-star circuit runs through {player}",
+			"{player} plays his way through the showcase season",
+		],
+		bodies: [
+			"{player} was selected for the {games}. The showcase games are the last time a class is seen together before it scatters, and he arrives at {to} having been measured against all of it.",
+			"The No. {rank} player in his class, {player} played in the {games} before enrolling at {to}. Scouts who saw him there saw him against the only defenders his own age who could stay with him.",
+			"{first} selection for {player}, on his way to {to}. The all-star games decide nothing and everybody watches them anyway.",
 		],
 	});
 

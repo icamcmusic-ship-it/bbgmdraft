@@ -344,6 +344,19 @@
 		// there is nothing to cap.
 		"Prep / Postgrad":       { pace: 80, gameMinutes: 32, youthCap: null, mpgCap: 29 },
 		"NAIA":                  { pace: 74, gameMinutes: 40, youthCap: null, mpgCap: 36 },
+		"Italian LBA":           { pace: 72, gameMinutes: 40, youthCap: 22, mpgCap: 32 },
+		"Lithuanian LKL":        { pace: 74, gameMinutes: 40, youthCap: 24, mpgCap: 33 },
+		"VTB United League":     { pace: 72, gameMinutes: 40, youthCap: 22, mpgCap: 32 },
+		"Polish PLK":            { pace: 76, gameMinutes: 40, youthCap: 26, mpgCap: 34 },
+		"BNXT League":           { pace: 76, gameMinutes: 40, youthCap: 26, mpgCap: 34 },
+		"Korean KBL":            { pace: 80, gameMinutes: 40, youthCap: 26, mpgCap: 34 },
+		"Philippine PBA":        { pace: 88, gameMinutes: 48, youthCap: 28, mpgCap: 38 },
+		"Argentine Liga Nacional": { pace: 78, gameMinutes: 40, youthCap: 26, mpgCap: 34 },
+		"Mexican LNBP":          { pace: 80, gameMinutes: 40, youthCap: 28, mpgCap: 35 },
+		"Puerto Rico BSN":       { pace: 82, gameMinutes: 40, youthCap: 28, mpgCap: 35 },
+		"New Zealand NBL":       { pace: 84, gameMinutes: 40, youthCap: 30, mpgCap: 36 },
+		"JUCO":                  { pace: 80, gameMinutes: 40, youthCap: null, mpgCap: 36 },
+		"DIII NCAA":             { pace: 74, gameMinutes: 40, youthCap: null, mpgCap: 36 },
 	};
 	// Everything else (D-I, and any league without an entry) takes cfg.pace and
 	// a 40-minute game.

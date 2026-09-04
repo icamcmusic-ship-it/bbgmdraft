@@ -471,6 +471,77 @@
 		};
 	}
 
+	/* --------------------------------------------- draft classes in a league
+
+	   A BBGM league export carries the next two or three draft classes inside
+	   it: they are ordinary rows in `players`, marked by an UNDRAFTED tid and
+	   a `draft.year` in the future. The tool could not see them. Dropping a
+	   league export took the ONE class whose draft year matched the league's
+	   current season and threw the rest of the file away, so the 2028 and
+	   2029 classes a user actually wanted to rework were invisible — and the
+	   only way to reach them was to advance the save two years in the game
+	   and export again.
+
+	   These two functions are the whole of that feature: one says which draft
+	   years the file holds a class for, the other lifts one of them out as a
+	   standalone class file that every other part of this tool already knows
+	   how to read. */
+
+	/* The tids BBGM writes on an undrafted prospect. -2 is UNDRAFTED; -4 and
+	   -5 are the UNDRAFTED_2 / UNDRAFTED_3 tids older saves used for the next
+	   two classes, which is exactly the population this feature is about. */
+	const PROSPECT_TIDS = [-2, -4, -5];
+	/* Below this a "class" is a handful of stragglers — a few prospects a
+	   user hand-added, or the undrafted remainder of a class already played
+	   — rather than a draft class worth loading as one. */
+	const MIN_CLASS = 15;
+
+	function draftClassesIn(leagueFile) {
+		if (!leagueFile || !Array.isArray(leagueFile.players)) return [];
+		let season;
+		try { season = findSeason(leagueFile); } catch (e) { season = null; }
+		const byYear = {};
+		leagueFile.players.forEach((p) => {
+			if (!p || !p.draft) return;
+			const year = Number(p.draft.year);
+			if (!Number.isFinite(year)) return;
+			if (season !== null && year < season) return;
+			/* A player already on a team is not in a draft class however his
+			   draft row reads: every player in the league carries a
+			   draft.year, and without this check a league's whole roster
+			   would be read as one enormous class. */
+			const tid = Number(p.tid);
+			if (!PROSPECT_TIDS.includes(tid)) return;
+			(byYear[year] = byYear[year] || []).push(p);
+		});
+		return Object.keys(byYear).map(Number).sort((a, b) => a - b)
+			.filter((year) => byYear[year].length >= MIN_CLASS)
+			.map((year) => ({ year, count: byYear[year].length }));
+	}
+
+	/* One of those years, as a file this tool can load.
+
+	   The players are shallow-copied so that nothing the generator or the
+	   exporter does to a class can reach back into the league object the
+	   caller is still holding for the merge. The envelope is deliberately
+	   bare — no teams, no schedule, no draft picks — because exportFile
+	   treats a file carrying a league envelope as a league and re-wraps its
+	   output in it, which for a class lifted OUT of a league is precisely
+	   the bug this feature would otherwise reintroduce. */
+	function extractDraftClass(leagueFile, year) {
+		const want = Number(year);
+		const players = (leagueFile.players || [])
+			.filter((p) => p && p.draft && Number(p.draft.year) === want &&
+				PROSPECT_TIDS.includes(Number(p.tid)))
+			.map((p) => Object.assign({}, p));
+		if (!players.length) {
+			throw new Error("No " + want + " draft class in that league file.");
+		}
+		const out = { startingSeason: want, players };
+		if (leagueFile.version !== undefined) out.version = leagueFile.version;
+		return out;
+	}
+
 	/* A per-player salt for the RNG streams. `reroll` re-draws ONE prospect:
 	   every stream in the generator is keyed off the player's key, so salting
 	   his key changes his draw and leaves every other player's stream
@@ -1678,8 +1749,115 @@
 					// A transfer was recruited somewhere else; a freshman was
 					// recruited here.
 					committed: (p.transfer && p.transfer.from) || p.newCollege,
+					/* The 247-style composite. A star rating has four values
+					   and a national rank has four hundred; the number every
+					   recruiting argument is actually conducted in is the
+					   composite between them, and it is a fixed function of
+					   the rank, so the tool was throwing away resolution it
+					   already had. Anchored so that the No. 1 in a class
+					   sits near 1.00 and a low three-star near 0.85. */
+					composite: Number((1.005 - 0.075 *
+						Math.log10(1 + rank / 1.4) / Math.log10(1 + 400 / 1.4) * 4).toFixed(4)),
 				};
 			}
+		}
+		/* THE REST OF THE RECRUITMENT.
+
+		   A prospect had a rank, a star count and the school he ended up at,
+		   which is the box score of a recruitment and not the recruitment. A
+		   scout's file says who else was in on him, who he cut it to, when he
+		   signed, where he ranked among players who do his job, and whether he
+		   played in the all-star games in April — and none of that was
+		   expressible even though the model already knows how good he is, how
+		   good his school is, and where he plays.
+
+		   All of it is drawn from his own key, so it survives a re-run and a
+		   warm phase skip the same way everything else about him does. */
+		const namePool = C.names.filter((n) => C.COLLEGES[n]);
+		const posGroups = {};
+		for (const p of ncaa) {
+			const g = ({ PG: "point guard", SG: "shooting guard", G: "guard",
+				GF: "wing", SF: "small forward", F: "forward", PF: "power forward",
+				FC: "big", C: "center" })[p.newPos] || "player";
+			(posGroups[g] = posGroups[g] || []).push(p);
+		}
+		for (const g of Object.keys(posGroups)) {
+			posGroups[g].sort((a, b) => a.recruiting.rank - b.recruiting.rank)
+				.forEach((p, i) => { p.recruiting.posRank = i + 1; p.recruiting.posLabel = g; });
+		}
+		for (const p of ncaa) {
+			const r = rng.child("recdepth:" + p.key);
+			const rec = p.recruiting;
+			const home = rec.committed;
+			const homePrestige = C.prestige(home);
+			/* Who else was in on him. A five-star hears from thirty programs
+			   and a two-star from four, and the programs that call are the
+			   ones at his own level: a top-ten recruit does not hold a Big
+			   Sky offer and a two-star does not hold a Duke one. */
+			const want = rec.stars >= 5 ? r.int(18, 34)
+				: rec.stars === 4 ? r.int(10, 22)
+				: rec.stars === 3 ? r.int(5, 12) : r.int(2, 6);
+			/* The level of program that recruits him is decided by HIM, not
+			   only by where he signed: a top-five recruit who picks a
+			   mid-major was still being called by blue bloods, and drawing
+			   his offer list around his school's prestige alone produced a
+			   No. 3 national recruit choosing between Fordham and Southern
+			   Illinois. So the centre of the draw is the higher of the two —
+			   the program he picked, and the program his ranking says was
+			   after him. */
+			const rankLevel = 90 - 45 * Math.min(1, Math.log10(1 + rec.rank / 2) /
+				Math.log10(1 + 400 / 2));
+			const centre = Math.max(homePrestige, rankLevel);
+			const near = namePool
+				.filter((n) => n !== home && Math.abs(C.prestige(n) - centre) <= 12);
+			const pool = near.length >= 6 ? near : namePool.filter((n) => n !== home);
+			const offers = [home];
+			const seen = { [home]: 1 };
+			let guard = 0;
+			while (offers.length < Math.min(want, pool.length + 1) && guard++ < 300) {
+				const pick = pool[r.int(0, pool.length - 1)];
+				if (!pick || seen[pick]) continue;
+				seen[pick] = 1;
+				offers.push(pick);
+			}
+			rec.offerCount = want;
+			/* The list is the ones worth naming, not all thirty-four: a note
+			   that prints thirty school names is a note nobody reads. */
+			rec.offers = offers.slice(0, 8);
+			/* The cut. Every recruitment ends with a short list, the
+			   committed school is always on it, and the losers are the story
+			   — "he picked us over Kansas" is the sentence a fanbase says
+			   for a decade. */
+			const cut = Math.min(offers.length, rec.stars >= 4 ? r.int(3, 5) : r.int(2, 4));
+			rec.finalists = [home].concat(
+				offers.slice(1, Math.max(1, cut))).slice(0, cut);
+			/* When he signed. The early period is November of his senior
+			   year and the late one is April; a player who waited until
+			   April was either not wanted early or could not decide, and
+			   both are worth a line. */
+			rec.signed = r.random() < (rec.stars >= 4 ? 0.72 : 0.6) ? "early"
+				: r.random() < 0.75 ? "late" : "spring";
+			/* April's all-star games. Selection is by national rank, which is
+			   how it actually works, with a roll at the boundary so the
+			   twenty-fifth-ranked player is not deterministically excluded.
+			   Deliberately NOT written into p.awards: these are high-school
+			   honors, and the award model's national-honor checks read
+			   "All-American" as a Division I trophy. */
+			/* A recruiting rank is assigned WITHIN a cohort (see above: the
+			   high-school class a player came out of), so a 70-man draft
+			   class spanning four class years legitimately holds four No. 1s
+			   — and a flat "rank <= 26 is a McDonald's All-American" gate
+			   therefore handed the jersey to two thirds of the class. The
+			   gate is a probability that falls away with the rank instead,
+			   which lands a class near the ten or so former all-stars a real
+			   draft class carries. */
+			const allStar = [];
+			const bar = (n, top) => rec.rank <= n &&
+				r.random() < top * Math.max(0, 1 - rec.rank / n);
+			if (bar(20, 0.8)) allStar.push("McDonald's All-American");
+			if (bar(34, 0.6)) allStar.push("Jordan Brand Classic");
+			if (bar(50, 0.5)) allStar.push("Iverson Classic");
+			if (allStar.length) rec.allStar = allStar;
 		}
 		// Who the headline signing was at each program, and who shared a class.
 		const bySchool = {};
@@ -3222,6 +3400,20 @@
 		"Chinese CBA": ["China"],
 		"Japan B.League": ["Japan"],
 		"Brazil NBB": ["Brazil"],
+		"Italian LBA": ["Italy"],
+		"Lithuanian LKL": ["Lithuania"],
+		"VTB United League": ["Russia", "Kazakhstan", "Belarus"],
+		"Polish PLK": ["Poland"],
+		"BNXT League": ["Belgium", "Netherlands"],
+		"Korean KBL": ["South Korea"],
+		"Philippine PBA": ["Philippines"],
+		"Argentine Liga Nacional": ["Argentina", "Uruguay"],
+		"Mexican LNBP": ["Mexico"],
+		"Puerto Rico BSN": ["Puerto Rico", "Dominican Republic"],
+		"New Zealand NBL": ["New Zealand"],
+		"Turkish BSL": ["Turkey"],
+		"Greek Basket League": ["Greece"],
+		"Israeli Premier League": ["Israel"],
 	};
 
 	function proPath(p, lgName, club, rng) {
@@ -3276,7 +3468,11 @@
 				(path.loan.season === 1 ? "a season" : "two seasons"));
 		}
 		if (path.caps) {
-			bits.push(path.caps.n + " caps for " +
+			// "1 caps for the senior Lithuania side" — a count of one with a
+			// plural noun after it, which the text sweep in js/text.js exists
+			// to catch and which this line had been producing since it was
+			// written, on every league whose senior draw came up 1.
+			bits.push(Text.plural(path.caps.n, "cap") + " for " +
 				(path.caps.level === "senior"
 					? "the senior " + path.caps.country + " side"
 					: path.caps.country + " at " + path.caps.level));
@@ -3558,6 +3754,15 @@
 		"Japan B.League": [["East Asia Super League", 2, 66]],
 		"Chinese CBA": [["East Asia Super League", 2, 66]],
 		"NBL": [["East Asia Super League", 2, 66]],
+		"Italian LBA": [["EuroLeague", 2, 88], ["EuroCup", 2, 74], ["Basketball Champions League", 2, 68]],
+		"Lithuanian LKL": [["EuroLeague", 1, 88], ["EuroCup", 1, 74], ["Basketball Champions League", 1, 68]],
+		"Polish PLK": [["Basketball Champions League", 1, 68]],
+		"BNXT League": [["Basketball Champions League", 1, 68]],
+		"Korean KBL": [["East Asia Super League", 2, 66]],
+		"Philippine PBA": [["East Asia Super League", 2, 66]],
+		"Argentine Liga Nacional": [["BCL Americas", 2, 60]],
+		"Mexican LNBP": [["BCL Americas", 1, 60]],
+		"Puerto Rico BSN": [["BCL Americas", 1, 60]],
 	};
 	const CONTINENTAL_STAGES = ["group stage", "round of 16", "quarterfinals",
 		"Final Four", "final", "champions"];
@@ -3705,9 +3910,23 @@
 		if (on("path")) {
 			const bits = [];
 			if (p.recruiting) {
-				bits.push(p.recruiting.stars + "-star recruit (No. " +
-					p.recruiting.rank + " nationally)");
-				if (p.recruiting.headliner) bits.push("headline signing of his class");
+				const rec = p.recruiting;
+				bits.push(rec.stars + "-star recruit (No. " + rec.rank +
+					" nationally" +
+					(rec.posRank ? ", No. " + rec.posRank + " " + rec.posLabel : "") +
+					(Number.isFinite(rec.composite)
+						? ", " + rec.composite.toFixed(4) + " composite" : "") + ")");
+				if (rec.offerCount) {
+					bits.push(rec.offerCount + " offers" +
+						(rec.finalists && rec.finalists.length > 1
+							? ", cut to " + rec.finalists.join(", ") : ""));
+				}
+				if (rec.signed && rec.signed !== "early") {
+					bits.push("signed in the " + (rec.signed === "late"
+						? "late period" : "spring"));
+				}
+				if (rec.allStar && rec.allStar.length) bits.push(rec.allStar.join(", "));
+				if (rec.headliner) bits.push("headline signing of his class");
 			}
 			// The international equivalent of a recruiting rank: how he got to
 			// the club he is at. See proPath.
@@ -5379,6 +5598,7 @@
 		buildNote, classYear,
 		assignClassYears, inchesFromHgtRating, validateLeagueFile, findSeason, playerKey,
 		SIZE_OVERRIDE_KEYS, SURPRISES, DRAFT_EVENTS,
+		draftClassesIn, extractDraftClass, MIN_CLASS, PROSPECT_TIDS,
 		MAX_CLASS, ANOMALY_MEMORY_DEPTH, NARRATIVES,
 		rerollSalt,
 		signatureGame, simulateProLeagues, assignRecruiting,

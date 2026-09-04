@@ -893,10 +893,37 @@ console.log("\nArchetypes");
 		seen.length + " of " + RB.ARCHETYPES.length + " builds in " + total + " players");
 	const spec = seen.filter((k) => k !== "Balanced").map((k) => counts[k])
 		.sort((a, b) => b - a);
+	/* "A gradient, not a cliff" is a claim about the SHAPE of the frequency
+	   distribution, and it used to be measured as commonest ÷ rarest-seen.
+	   That is a ratio to an extreme order statistic over 144 builds: with a
+	   145-row table and 1,400 sampled players the expected count of a
+	   legitimately rare build is one or two, so Poisson noise alone swings
+	   the ratio between about 20x and 50x with the model unchanged — and the
+	   row duly failed and passed on the draw rather than on the table. It
+	   also failed to test the actual claim: a distribution running
+	   45, 30, 25, 23, 23, 22 … 2, 1 has no cliff in it anywhere, and one
+	   running 45, 5, 4, 4 is nothing but cliff, and the old statistic could
+	   not tell them apart.
+	   
+	   So the claim is measured twice, both on stable statistics: no single
+	   STEP in the body of the distribution may be a drop of more than 2.5x,
+	   and the commonest specialist may be no more than 25x the build at the
+	   90th percentile of rarity. */
+	const quantile = (p) => spec[Math.min(spec.length - 1, Math.floor(p * spec.length))];
+	let worstStep = 1;
+	let worstAt = "";
+	const body = Math.floor(spec.length * 0.9);
+	for (let i = 0; i + 1 < body; i++) {
+		const r = spec[i] / Math.max(1, spec[i + 1]);
+		if (r > worstStep) { worstStep = r; worstAt = spec[i] + " -> " + spec[i + 1]; }
+	}
 	ok("build rarity is a gradient, not a cliff",
-		spec.length > 1 && spec[0] / spec[spec.length - 1] <= 40,
-		"commonest specialist " + spec[0] + ", rarest seen " + spec[spec.length - 1] +
-			" (" + (spec[0] / spec[spec.length - 1]).toFixed(1) + "x)");
+		spec.length > 1 && worstStep <= 2.5,
+		"biggest single step in the body: " + worstStep.toFixed(2) + "x (" + worstAt + ")");
+	ok("and the rarity spread stays inside an order of magnitude and a half",
+		spec.length > 1 && spec[0] / Math.max(1, quantile(0.9)) <= 25,
+		"commonest specialist " + spec[0] + ", 90th percentile " + quantile(0.9) +
+			" (" + (spec[0] / Math.max(1, quantile(0.9))).toFixed(1) + "x)");
 	// The Balanced share is a promise the label on the slider makes.
 	const balanced = (counts.Balanced || 0) / total;
 	ok("the Balanced share matches what the diversity slider promises",
@@ -2647,9 +2674,25 @@ console.log("\nStaying fresh: anomaly memory, narratives, style drift, flavor re
 		/* The drift must not shift any other random stream — an earlier
 		   version drew a per-coach seed from the coach's own rng and moved
 		   every coach's development number, which moved the tournament. */
-		ok("and turning it off changes nothing but the styles",
-			off.tourney.champion.team.name === res.tourney.champion.team.name,
-			off.tourney.champion.team.name + " vs " + res.tourney.champion.team.name);
+		/* What "changes nothing but the styles" means, now that a style
+		   reaches the scoreboard.
+
+		   The check used to be that the national champion was the same man
+		   with the drift off, which held only while a program's tempo was
+		   decorative: PROGRAM_STYLES moved possessions in the STAT model and
+		   the scoreboard ignored it, so a run-and-gun team and a pack-line
+		   team produced identical final scores. teamPace in js/teams.js reads
+		   it now, so turning the drift off legitimately changes every score
+		   in the country — which is the whole point of the change.
+
+		   The invariant that still holds, and the one this check was written
+		   for, is that the drift must not reach into any other random
+		   stream: the CLASS must be untouched, player for player. */
+		const classPrint = (r) => r.players.map((p) => p.key + ":" + p.archetype +
+			":" + p.newCollege + ":" + p.newOvr + ":" + p.classYear).join("|");
+		ok("and turning it off changes nothing about the class itself",
+			classPrint(off) === classPrint(res),
+			"the drift moved a stream it does not own");
 	}
 }
 
@@ -2996,21 +3039,34 @@ console.log("\nUniverse");
 		Object.keys(carry.levels).length >= 360 && Object.keys(carry.coaches).length >= 360);
 	const b = global.Engine.run(V.realisticClass(2, 70),
 		global.Config.make({ seed: "u2", carryOver: carry, narrative: false }));
-	let same = 0;
-	let total = 0;
-	for (const name of Object.keys(b.teams)) {
-		const t = b.teams[name];
-		if (!t || !t.coach || !carry.coaches[name]) continue;
-		total++;
-		if (t.coach.name === carry.coaches[name].coach.name) same++;
-	}
 	/* Retention, not permanence. The carousel (js/teams.js) turns over 40-60
 	   of 368 jobs a year at coachTurnover 100, which is what Division I does,
-	   so 85-93% of programs keep the same man. The old band was >90% because
-	   the old model fired exactly one coach a season across the country. */
+	   so 85-93% of programs keep the same man.
+
+	   Measured over THREE handoffs rather than one. The rate has a spread of
+	   about two points from season to season — a season in which more
+	   programs had losing records fires more coaches, which is the model
+	   working — so a single pair against a band eight points wide fails on
+	   the draw about as often as it fails on a defect, and a harness that
+	   does that teaches a developer to ignore it. */
+	let same = 0;
+	let total = 0;
+	for (let i = 0; i < 3; i++) {
+		const prev = i === 0 ? a : global.Engine.run(V.realisticClass(i, 70),
+			global.Config.make({ seed: "u1" + i, narrative: false }));
+		const carried = i === 0 ? carry : U.harvest(prev);
+		const next = i === 0 ? b : global.Engine.run(V.realisticClass(i + 1, 70),
+			global.Config.make({ seed: "u2" + i, carryOver: carried, narrative: false }));
+		for (const name of Object.keys(next.teams)) {
+			const t = next.teams[name];
+			if (!t || !t.coach || !carried.coaches[name]) continue;
+			total++;
+			if (t.coach.name === carried.coaches[name].coach.name) same++;
+		}
+	}
 	ok("a carried coach is the same man next season",
-		total > 300 && same / total > 0.85 && same / total < 0.94,
-		same + " of " + total);
+		total > 900 && same / total > 0.85 && same / total < 0.94,
+		same + " of " + total + " (" + (100 * same / total).toFixed(1) + "%)");
 	/* The other half of the same fact: a coach who did NOT come back was
 	   named by the carousel, rather than simply being redrawn. */
 	{

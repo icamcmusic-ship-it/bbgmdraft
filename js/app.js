@@ -17,12 +17,22 @@
 
 	const state = {
 		mergeIndices: null,
+		/* The league export the loaded classes came out of, if any. Kept in
+		   memory (never persisted — it is megabytes) so a merge back into it
+		   does not ask the user to find the same file on disk again. */
+		leagueSource: null,
 		cfg: CFG.make(),
 		files: [],       // [{name, data, fingerprint}]
 		runners: [],     // parallel to files
 		results: [],     // parallel to files; entries may be null until needed
 		active: 0,
-		tab: "players",
+		/* The Draft board is the front page: the question a class answers is
+		   "who is good and in what order", and the forty-column editable
+		   table is the power tool behind a toggle on it, not the thing the
+		   tool opens on. */
+		tab: "board",
+		// "board" | "edit" — which face of the Draft board tab is showing.
+		boardMode: "board",
 		sort: [{ key: "newOvr", dir: -1 }],
 		filter: {
 			q: "", pos: "", conf: "", archetype: "", changedOnly: false, lockedOnly: false,
@@ -184,6 +194,7 @@
 				settingLocks: state.settingLocks,
 				sort: state.sort,
 				tab: state.tab,
+				boardMode: state.boardMode,
 				// Small (a name and six numbers per prospect) and the whole
 				// point of pinning is that it outlives the class you pinned.
 				// byKey is a lookup index rebuilt on restore, not state worth storing.
@@ -342,8 +353,17 @@
 		if (saved.pinned && typeof saved.pinned === "object") {
 			state.pinned = indexSnapshot(saved.pinned);
 		}
-		// Never land on a tab that has nothing to show.
-		if (saved.tab && (saved.tab !== "compare" || state.pinned)) state.tab = saved.tab;
+		// Never land on a tab that has nothing to show. A session saved before
+		// the prospect table became a mode of the Draft board carries
+		// tab: "players", which is no longer a tab — it is the board in edit
+		// mode, which is what that session was actually looking at.
+		let tab = saved.tab;
+		if (tab === "players") { tab = "board"; state.boardMode = "edit"; }
+		if (tab && (tab !== "compare" || state.pinned) &&
+			TABS.some(([k]) => k === tab)) state.tab = tab;
+		if (saved.boardMode === "edit" || saved.boardMode === "board") {
+			state.boardMode = saved.boardMode;
+		}
 		return saved;
 	}
 
@@ -2042,6 +2062,69 @@
 		}).then((out) => new TextDecoder("utf-8").decode(out).replace(/^\ufeff/, ""));
 	}
 
+	/* Every draft class a dropped file contains, as loadable classes.
+
+	   A BBGM league export carries the next two or three draft classes inside
+	   it as ordinary player rows with an UNDRAFTED tid and a future
+	   `draft.year`, and this tool used to take exactly one of them — the year
+	   matching the league's own season — and discard the rest of the file. So
+	   the future classes, which are the ones a user has any business
+	   reworking (the current one is already being drafted), could not be
+	   reached at all without advancing the save in the game and exporting
+	   again.
+
+	   A league export now loads as one class PER draft year, which drops
+	   straight into the multi-file machinery that already exists: the file
+	   picker lists them, universe mode runs them as one continuous world
+	   oldest first, and "Merge into a league file" writes all of them back
+	   into the league they came from. */
+	function classesFromFile(name, data, check) {
+		const base = name.replace(/\.json(\.gz)?$|\.gz$/i, "");
+		const found = global.Engine.draftClassesIn(data);
+		/* Not a league export: an ordinary draft-class file, loaded as
+		   itself. The size check is what tells the two apart — a class is
+		   sixty to eighty players and a league is thousands — because a
+		   class file's own players carry UNDRAFTED tids too. */
+		if (!check.oversized || found.length === 0) {
+			/* The old fallback, for a big file whose prospects carry no tid
+			   this tool recognizes: take the players drafted in the file's
+			   own season rather than simulating five thousand men. */
+			if (check.oversized && check.classPids) {
+				const keep = new Set(check.classPids);
+				const players = data.players.filter((p, i) =>
+					keep.has(Number.isFinite(Number(p.pid)) ? Number(p.pid) : -1 - i));
+				return [{
+					name, data: Object.assign({}, data, { players }),
+					warnings: check.warnings, league: { name, data },
+				}];
+			}
+			return [{ name, data, warnings: check.warnings }];
+		}
+		const years = found.map((c) => c.year);
+		const note = "This is a full league export. " +
+			(found.length === 1
+				? "The " + years[0] + " draft class inside it (" + found[0].count +
+					" players) was loaded; the rest of the league was left alone."
+				: found.length + " draft classes were found inside it (" +
+					years.join(", ") + ") and each is loaded as its own class. " +
+					"Turn on universe mode under The world to run them as one " +
+					"continuous world.") +
+			" Export \u2192 Merge into a league file writes them back into it.";
+		return found.map((c, i) => {
+			const cls = global.Engine.extractDraftClass(data, c.year);
+			const sub = global.Engine.validateLeagueFile(cls);
+			cls.startingSeason = sub.season;
+			return {
+				name: base + " \u2014 " + c.year + " class",
+				data: cls,
+				// The note is about the FILE, so it is said once rather than
+				// once per class it produced.
+				warnings: (i === 0 ? [note] : []).concat(sub.warnings),
+				league: { name, data },
+			};
+		});
+	}
+
 	function readFiles(fileList) {
 		const problems = [];
 		// A five-file drop used to just sit there with nothing on screen.
@@ -2059,24 +2142,15 @@
 					/* validateLeagueFile is a check now, not a migration, so
 					   the season it recovered is applied here. */
 					data.startingSeason = check.season;
-					/* A full league export is 5,000+ players. Rebuilding all
-					   of them and simulating 368 programs with hundreds of
-					   prospects apiece locks the tab with no progress bar and
-					   no way out, so take the draft class inside the file
-					   when there is one and say so. */
-					if (check.oversized && check.classPids) {
-						const keep = new Set(check.classPids);
-						data.players = data.players.filter((p, i) =>
-							keep.has(Number.isFinite(Number(p.pid)) ? Number(p.pid) : -1 - i));
-					}
-					return { name: f.name, data, warnings: check.warnings };
+					return classesFromFile(f.name, data, check);
 				},
 			).catch((e) => {
 				problems.push(f.name + ": " + (e && e.message ? e.message : e));
 				return null;
 			}),
 		);
-		Promise.all(jobs).then((loaded) => installFiles(loaded, problems));
+		Promise.all(jobs).then((loaded) => installFiles(
+			loaded.filter(Boolean).reduce((a, b) => a.concat(b), []), problems));
 	}
 
 	/* A synthetic class for a visitor with nothing to drop. It goes through
@@ -2100,6 +2174,10 @@
 			if (!ok.length) { setStatus(""); return; }
 			state.files = ok.sort((a, b) =>
 				(a.data.startingSeason || 0) - (b.data.startingSeason || 0));
+			/* The league export these classes were lifted out of, kept so the
+			   merge does not have to ask the user to find the same file on
+			   disk a second time. */
+			state.leagueSource = (ok.filter((f) => f.league)[0] || {}).league || null;
 			for (const f of state.files) f.fingerprint = fingerprint(f);
 			state.runners = state.files.map((f) => global.Engine.createRunner(f.data));
 			state.results = [];
@@ -2704,7 +2782,6 @@
 	/* Grouped: nine flat peer tabs was the navigability complaint. The third
 	   element is the group label the tab bar renders between clusters. */
 	const TABS = [
-		["players", "Prospects", "Class"],
 		["board", "Draft board", "Class"],
 		["compare", "Compare", "Class"],
 		["distribution", "Distributions", "Class"],
@@ -2975,7 +3052,7 @@
 
 	function showPlayer(key) {
 		state.player = key || null;
-		if (key) state.tab = "players";
+		if (key) state.tab = "board";
 		pushNav();
 		persist();
 		render();
@@ -3150,6 +3227,9 @@
 
 	function openEditor(p) {
 		state.editing = state.editing === p.key ? null : p.key;
+		// The editor is a drawer beside the prospect table, so opening it
+		// means being in the mode that has a table.
+		if (state.editing) { state.tab = "board"; state.boardMode = "edit"; }
 		render();
 	}
 
@@ -3177,6 +3257,9 @@
 
 	function revealPlayer(p) {
 		if (!p) return;
+		state.tab = "board";
+		state.boardMode = "edit";
+		state.player = null;
 		const f = state.filter;
 		const hidden = !V.matchesFilter(p, state.results[state.active] || {});
 		if (hidden) {
@@ -4558,10 +4641,70 @@
 	   into one save is the whole reason for loading three files — so they are
 	   all ticked and the dialog is a chance to untick one, not a form to
 	   fill in. */
+	/* The merge itself, once both halves are in hand: the classes to write and
+	   the league to write them into. Shared by the file-picker route and the
+	   in-memory route (the league the classes were lifted out of). */
+	function mergeInto(league, leagueName, picked) {
+		const results = [];
+		for (const i of picked) {
+			const r = ensureResult(i);
+			if (r) results.push(r);
+		}
+		if (!results.length) return;
+		let out;
+		try {
+			out = global.Engine.mergeManyIntoLeague(results, league,
+				state.mergeOpts || {});
+		} catch (err) {
+			setStatus("Could not merge: " + (err && err.message ? err.message : err));
+			return;
+		}
+		/* No BOM here, unlike the CSV exports: this file is read back by
+		   BBGM's own league loader, not by a spreadsheet. */
+		const base = leagueName.replace(/\.json(\.gz)?$/i, "").replace(/\.gz$/i, "");
+		const years = out.seasons.slice().sort((a, b) => a - b).join("_");
+		download(base + "_with_" + years + "_class.json",
+			JSON.stringify(out.file), "application/json");
+		setStatus("Merged " + (out.replaced + out.added) + " players into " +
+			leagueName + " (" + out.replaced + " replaced, " + out.added + " added, " +
+			out.removed + " generated prospects dropped) for the " +
+			out.seasons.slice().sort((a, b) => a - b).join(", ") + " draft" +
+			(out.seasons.length === 1 ? "" : "s") + ". Load the new file with " +
+			"Create New League \u2192 upload." +
+			(out.warnings && out.warnings.length ? " " + out.warnings.join(" ") : ""));
+	}
+
+	/* Where the league file comes from. When the classes were lifted out of a
+	   league export this session, it is already in memory and asking the user
+	   to find the same file on disk again is a step that exists for no
+	   reason — and a step at which they can pick the wrong file. */
+	function startMerge(picked) {
+		state.mergeIndices = picked;
+		const src = state.leagueSource;
+		if (!src) { $("leagueMergeFile").click(); return; }
+		const box = el("div");
+		box.appendChild(el("p", null,
+			"These classes came out of " + src.name + ", which is still loaded. " +
+			"Merge them straight back into it, or pick a different league file."));
+		const other = el("button", "tiny", "Use a different league file\u2026");
+		other.addEventListener("click", () => {
+			closeModal();
+			state.mergeIndices = picked;
+			$("leagueMergeFile").click();
+		});
+		box.appendChild(other);
+		modal("Merge into a league file", box, () => {
+			state.mergeIndices = null;
+			setStatus("Merging into " + src.name + "\u2026", true);
+			// A frame, so the status paints before a multi-megabyte merge
+			// blocks the main thread.
+			requestAnimationFrame(() => mergeInto(src.data, src.name, picked));
+		}, "Merge into " + src.name);
+	}
+
 	function chooseMergeClasses() {
 		if (state.files.length < 2) {
-			state.mergeIndices = [state.active];
-			$("leagueMergeFile").click();
+			startMerge([state.active]);
 			return;
 		}
 		const box = el("div");
@@ -4592,9 +4735,8 @@
 				setStatus("No class was selected, so nothing was merged.");
 				return;
 			}
-			state.mergeIndices = picked;
-			$("leagueMergeFile").click();
-		}, "Choose league file…");
+			startMerge(picked);
+		}, state.leagueSource ? "Next\u2026" : "Choose league file…");
 	}
 
 	/* ------------------------------------------------------------ comparison */
@@ -5077,36 +5219,17 @@
 			? state.mergeIndices
 			: [state.active]).filter((i) => state.files[i]);
 		state.mergeIndices = null;
-		const results = [];
-		for (const i of picked) {
-			const r = ensureResult(i);
-			if (r) results.push(r);
-		}
-		if (!results.length) return;
+		if (!picked.length) return;
 		setStatus("Reading " + f.name + "…", true);
 		readTextFile(f).then((text) => {
-			let out;
+			let league;
 			try {
-				const league = JSON.parse(text);
-				out = global.Engine.mergeManyIntoLeague(results, league,
-					state.mergeOpts || {});
+				league = JSON.parse(text);
 			} catch (err) {
 				setStatus("Could not merge: " + (err && err.message ? err.message : err));
 				return;
 			}
-			/* No BOM here, unlike the CSV exports: this file is read back by
-			   BBGM's own league loader, not by a spreadsheet. */
-			const base = f.name.replace(/\.json(\.gz)?$/i, "").replace(/\.gz$/i, "");
-			const years = out.seasons.slice().sort((a, b) => a - b).join("_");
-			download(base + "_with_" + years + "_class.json",
-				JSON.stringify(out.file), "application/json");
-			setStatus("Merged " + (out.replaced + out.added) + " players into " +
-				f.name + " (" + out.replaced + " replaced, " + out.added + " added, " +
-				out.removed + " generated prospects dropped) for the " +
-				out.seasons.slice().sort((a, b) => a - b).join(", ") + " draft" +
-				(out.seasons.length === 1 ? "" : "s") + ". Load the new file with " +
-				"Create New League → upload." +
-				(out.warnings && out.warnings.length ? " " + out.warnings.join(" ") : ""));
+			mergeInto(league, f.name, picked);
 		}).catch((err) => {
 			setStatus(f.name + " could not be read: " +
 				(err && err.message ? err.message : err));
@@ -5274,8 +5397,32 @@
 			return;
 		}
 		if (k === "/") {
+			e.preventDefault();
+			/* The search box lives on the prospect table, which is now a mode
+			   of the Draft board rather than a tab of its own — so "/" takes
+			   you there rather than doing nothing on every other page. */
 			const box = $("prospectSearch");
-			if (box) { e.preventDefault(); box.focus(); box.select(); }
+			if (box) { box.focus(); box.select(); return; }
+			state.tab = "board";
+			state.boardMode = "edit";
+			persist();
+			render();
+			requestAnimationFrame(() => {
+				const late = $("prospectSearch");
+				if (late) { late.focus(); late.select(); }
+			});
+			return;
+		}
+		/* The Draft board's two faces. The toggle is one click on the page and
+		   one keystroke here, because switching between "who is good" and
+		   "let me change this man" is the loop the whole tool is for. */
+		if (k === "b") {
+			e.preventDefault();
+			state.tab = "board";
+			state.boardMode = state.boardMode === "edit" ? "board" : "edit";
+			if (state.boardMode !== "edit") state.editing = null;
+			persist();
+			render();
 			return;
 		}
 		if (k === "r" && !$("btnReroll").disabled) { e.preventDefault(); reroll(); return; }
@@ -5338,9 +5485,10 @@
 		["?", "Show this list"],
 		["Ctrl / Cmd + Enter", "Reroll the class (works anywhere)"],
 		["1 – 9", "Jump to a tab"],
+		["b", "Draft board \u2194 Player Edit"],
 		["r", "Reroll the class"],
 		["g", "Randomize the settings in the chosen scope"],
-		["/", "Focus the prospect search"],
+		["/", "Focus the prospect search (opens Player Edit)"],
 		["l", "Lock or unlock the focused row"],
 		["[ / ]", "Previous / next archetype filter"],
 		["p", "Pin this class as the comparison baseline"],
@@ -5372,16 +5520,24 @@
 	   at more length; this is the version you can read without leaving the
 	   class you are working on. */
 	const HOW_TO_PLAY = [
-		["1. Load a class", "Export a draft class from Basketball GM " +
-			"(Tools → Export → Draft class) and drop the .json here. Nothing " +
+		["1. Load a class — or a whole league", "Export a draft class from " +
+			"Basketball GM (Tools → Export → Draft class) and drop the .json " +
+			"here. A whole league export (.json.gz) works too, and is usually " +
+			"what you want: it carries the next two or three draft classes " +
+			"inside it, and each one loads as its own editable class. Nothing " +
 			"is uploaded; everything runs in your browser. You can load " +
 			"several files and switch between them."],
-		["2. Reroll until something catches your eye", "Reroll (r) draws a " +
+		["2. Read the board, edit in Player Edit", "The tool opens on the " +
+			"Draft board: the class in board order, which is the question a " +
+			"draft class answers. The Player Edit toggle on it (or b) opens " +
+			"the full prospect table — filters, columns, locks and the " +
+			"editor — on the same class."],
+		["3. Reroll until something catches your eye", "Reroll (r) draws a " +
 			"new seed: a new class flavor, a new build pool, a new season. " +
 			"The seed pill in the header reproduces the exact class — click " +
 			"it to copy, shift-click to paste one in. Re-apply keeps the seed " +
 			"and re-runs the current settings over it."],
-		["3. Shape the class with the settings panel", "Each fieldset is one " +
+		["4. Shape the class with the settings panel", "Each fieldset is one " +
 			"idea. Quality & depth shapes the overall curve (switch to " +
 			"“Rebuild the class curve” to unlock it). Builds decides how " +
 			"specialized players are, how many archetypes one class draws " +
@@ -5390,30 +5546,30 @@
 			"destinations, the college season, and awards each own their " +
 			"corner. Every slider shows what it means in units underneath, " +
 			"and what part of the pipeline it re-runs."],
-		["4. Or let the dice do it", "The 🎲 Randomize control (g) draws new " +
+		["5. Or let the dice do it", "The 🎲 Randomize control (g) draws new " +
 			"settings in the chosen scope. “Everything, gently” stays near " +
 			"the defaults; “everything, wide open” uses each slider's whole " +
 			"range; the other scopes randomize one fieldset. It never touches " +
 			"the seed (Reroll owns that), the per-build rarity table, or any " +
 			"setting you lock with the padlock next to its name. Ctrl+Z puts " +
 			"everything back in one step."],
-		["5. Lock what must survive", "Open a prospect and lock his overall, " +
+		["6. Lock what must survive", "Open a prospect and lock his overall, " +
 			"build, school or individual ratings — locks survive rerolls, so " +
 			"you can keep the player you like while the class around him " +
 			"changes. l locks the focused row as-is. The padlocks in the " +
 			"settings panel are different: they guard a SETTING against the " +
 			"randomizer."],
-		["6. Read the season, not just the board", "The class plays a full " +
+		["7. Read the season, not just the board", "The class plays a full " +
 			"college season: standings, a bracket, awards, game logs, box " +
 			"scores, events. A prospect's stat line, his awards and his draft " +
 			"stock all come from games that were actually simulated, so the " +
 			"Notes tab can defend every claim it makes."],
-		["7. Compare, pin, and keep what you like", "Pin (p) keeps the " +
+		["8. Compare, pin, and keep what you like", "Pin (p) keeps the " +
 			"current class as a baseline and the Compare tab holds prospects " +
 			"side by side. Save preset… names your slider setup; the Link " +
 			"button copies a URL that reproduces the exact class, settings " +
 			"and locks."],
-		["8. Export back to BBGM", "Export JSON writes a draft class file " +
+		["9. Export back to BBGM", "Export JSON writes a draft class file " +
 			"BBGM imports directly — every player re-solved against BBGM's " +
 			"own formulas, so what you see here is what the game computes. " +
 			"More ▾ has CSV, season data and the settings on their own."],

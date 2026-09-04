@@ -1015,6 +1015,10 @@
 	   the bracket it names. Regular-season variance is a fixed, realistic
 	   amount; the slider moves the postseason, which is what the label says. */
 	const REGULAR_NOISE = 1.2;
+	/* Points of game-to-game margin noise over a full regulation game, before
+	   the postseason multiplier. Named because the overtime model below is
+	   derived from it rather than from a second constant of its own. */
+	const MARGIN_SD = 9.4;
 
 	/* The top of the country was too flat.
 
@@ -1046,26 +1050,82 @@
 		return r + TOP_STRETCH * Math.max(0, r - TOP_KNEE);
 	}
 
+	/* How fast a team plays, on the scoreboard.
+
+	   PROGRAM_STYLES moves possessions by -4.5 (pack-line) to +5.5 (run and
+	   gun) and the STAT model reads it — a run-and-gun team's players get
+	   more possessions in the box score — while the scoreboard did not, so
+	   the two disagreed about the same game: a grind-it-out team and a
+	   run-and-gun team produced identical final scores, and the style a note
+	   named was a label on nothing anyone could see in a result. */
+	function teamPace(t, cfg) {
+		// A professional club carries its own league's pace (see leagueEnv).
+		if (t && Number.isFinite(t.scorePace)) return t.scorePace;
+		const style = t && t.style && Number.isFinite(t.style.pace) ? t.style.pace : 0;
+		/* Capped at 78 possessions: the fastest D-I team in the modern era
+		   sits near 76, and the class-level pace jitter plus a run-and-gun
+		   style could stack to 82, which is a game nobody has played. */
+		return clamp((cfg.pace || 68) + (cfg.scoringEnv || 0) * 1.6 + style, 55, 78);
+	}
+
+	/* The home edge, in points. A flat 3.2 for every building in the country
+	   was the modelling equivalent of every arena holding the same crowd; the
+	   real spread runs from about two points at a half-empty mid-major to
+	   four and a half at the loudest buildings, and prestige is the only
+	   proxy the model has for how full a gym gets. */
+	function homeEdge(t) {
+		const prestige = t && Number.isFinite(t.prestige) ? t.prestige : 60;
+		return clamp(3.2 + (prestige - 60) / 34, 2.1, 4.5);
+	}
+
 	function playGameScore(rng, A, B, homeForA, cfg, when, postseason) {
 		const noise = postseason
 			? 1 + 0.2 * clamp(cfg.upsetFactor, 0, 3)
 			: REGULAR_NOISE;
-		const home = homeForA === 0 ? 0 : homeForA > 0 ? 3.2 : -3.2;
+		/* `homeForA` is a SHARE of a home edge, not a flag: +1 and -1 are a
+		   true home game either way (every existing caller), and the bracket
+		   passes a fraction for the pod advantage a top seed gets in the
+		   first weekend, which is a real and much smaller thing. */
+		const share = clamp(homeForA || 0, -1, 1);
+		const home = share === 0 ? 0
+			: share > 0 ? homeEdge(A) * share : -homeEdge(B) * Math.abs(share);
 		const edge = gameStrength(ratingOn(A, when)) - gameStrength(ratingOn(B, when)) + home;
 		// ~0.72 points of margin per rating point, plus real game-to-game noise.
-		const margin = edge * 0.72 + rng.normal(0, 9.4 * noise);
-		/* Capped at 78 possessions: the fastest D-I team in the modern era
-		   sits near 76, and the class-level pace jitter plus a run-and-gun
-		   style could stack to 82, which is a game nobody has played. */
-		const ownPace = Number.isFinite(A.scorePace) ? A.scorePace
-			: Number.isFinite(B.scorePace) ? B.scorePace : null;
-		const pace = ownPace !== null
-			? ownPace
-			: clamp((cfg.pace || 68) + (cfg.scoringEnv || 0) * 1.6, 58, 78);
-		const total = clamp(pace * 2.06 + rng.normal(0, 9), 92, ownPace !== null ? 260 : 190);
+		const margin = edge * 0.72 + rng.normal(0, MARGIN_SD * noise);
+		// Tempo belongs to the fixture, not to one side of it: a game between
+		// a pressing team and a pack-line team is played somewhere between the
+		// two, which is what makes a style visible in a final score.
+		const pace = (teamPace(A, cfg) + teamPace(B, cfg)) / 2;
+		/* The bounds are derived from the pace rather than typed. They used to
+		   be 92 and 190 for college and 92 and 260 for anything with its own
+		   pace, which is two magic pairs describing one relationship: a game
+		   is between about 1.35 and 2.95 points per possession-pair. */
+		const total = clamp(pace * 2.06 + rng.normal(0, 9), pace * 1.35, pace * 2.95);
 		let a = Math.round((total + margin) / 2);
 		let b = Math.round((total - margin) / 2);
+		/* THE LAST MINUTE IS NOT A RANDOM WALK.
+
+		   A normal margin produces a tie at the buzzer about 2.6% of the
+		   time; Division I actually goes to overtime in about six percent of
+		   its games. The gap is not noise, it is the endgame: a team down
+		   one to four fouls to extend the game and a team up three defends
+		   the arc, and the whole apparatus of the last ninety seconds exists
+		   to move a close margin to zero. Nothing in a symmetric draw around
+		   the true difference can produce that pile-up.
+
+		   So a game still within a possession at the buzzer gets a real
+		   chance of being level — which is what raises the overtime rate to
+		   where the sport's is, and is why an overtime game means something
+		   when the news writes one up. */
+		if (a !== b && Math.abs(a - b) <= 3 && rng.random() < 0.22) b = a;
 		let ot = 0;
+		/* What an extra period is worth, from the same pace the regulation
+		   score came from: five minutes of a forty-minute game at a point a
+		   possession. It was a flat six points, which is a fifth low for
+		   college and a third low for a 48-minute professional game. */
+		const gameMinutes = Number.isFinite(A.gameMinutes) ? A.gameMinutes
+			: Number.isFinite(B.gameMinutes) ? B.gameMinutes : 40;
+		const otPoints = pace * 1.03 * (5 / Math.max(20, gameMinutes));
 		while (a === b) {
 			// Overtime: five more minutes, and somebody has to win them. The
 			// old loop bailed after 4OT by adding a single point outside the
@@ -1074,9 +1134,21 @@
 			// the game inside the model within a couple more periods and still
 			// produces a plausible 5OT box score.
 			ot++;
-			const swing = rng.normal(edge * 0.10, 4.2 + ot * 0.8);
-			a += Math.round(6 + swing / 2);
-			b += Math.round(6 - swing / 2);
+			/* An extra period is a short game between the same two teams, so
+			   its margin comes off the regulation model scaled to five
+			   minutes: the expected edge shrinks in proportion to the time
+			   and the noise in proportion to its square root. The old pair
+			   (a mean of edge x 0.10 and an sd of 4.2) had the mean about
+			   right and the spread a third too wide, which made an overtime
+			   period close to a coin flip whoever was in it — so a beaten
+			   favourite got a free re-draw every time a game finished level.
+			   Later periods widen a little: by the third one both benches
+			   are in foul trouble. */
+			const share5 = 5 / Math.max(20, gameMinutes);
+			const swing = rng.normal(edge * 0.72 * share5,
+				MARGIN_SD * noise * Math.sqrt(share5) + (ot - 1) * 0.5);
+			a += Math.round(otPoints + swing / 2);
+			b += Math.round(otPoints - swing / 2);
 		}
 		return { a, b, ot, won: a > b };
 	}
@@ -1895,7 +1967,7 @@
 		buildPrograms, simulateRegularSeason, simulateConferenceTournaments,
 		prospectTalent, teamRating, winProb, playGame, playGameScore, ratingOn,
 		realign, makeCoach, COACH_SITUATIONS, COACH_PHILOSOPHIES, CONF_REGIONS, regionsOverlap,
-		gameStrength, TOP_KNEE, TOP_STRETCH, REGULAR_NOISE,
+		gameStrength, TOP_KNEE, TOP_STRETCH, REGULAR_NOISE, teamPace, homeEdge,
 		capFillers, FILLER_GAP, conferenceDrift, programLevel, applyOutages, makeFiller,
 		driftStyle, seasonOf,
 		assignFillerSlots, slotTypeOf, SLOT_HGT, SLOT_TARGET,

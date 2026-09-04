@@ -2896,6 +2896,63 @@
 
 	/* ----------------------------------------------------------- draft board */
 
+	/* THE DRAFT BOARD, and the prospect table behind a toggle on it.
+
+	   The tool opened on a forty-column editable spreadsheet, which is the
+	   power tool and not the thing anyone comes to look at: the question a
+	   draft class answers is "who is good and in what order", and that is the
+	   board. Prospects is not a separate destination any more — it is the
+	   same class in edit mode, one button away, and the button says so. */
+	function viewDraft(view, res) {
+		const st = A().state;
+		// A prospect's own page rides inside this tab, whichever mode it is in.
+		if (st.player) {
+			view.appendChild(playerPage(view, res, st.player));
+			return;
+		}
+		const bar = el("div", "modebar");
+		const seg = el("div", "segmented");
+		seg.setAttribute("role", "tablist");
+		seg.setAttribute("aria-label", "Draft board mode");
+		[["board", "Draft board", "The class in board order, for reading"],
+			["edit", "Player Edit", "The full prospect table: filters, columns, locks and the editor"],
+		].forEach(([mode, label, title]) => {
+			const on = (st.boardMode || "board") === mode;
+			const b = el("button", on ? "on" : "", label);
+			b.type = "button";
+			b.title = title;
+			b.setAttribute("role", "tab");
+			b.setAttribute("aria-selected", on ? "true" : "false");
+			b.dataset.boardMode = mode;
+			b.addEventListener("click", () => {
+				st.boardMode = mode;
+				// Leaving edit mode closes the editor with it: a drawer open
+				// on a view that is not showing the table is a drawer with
+				// nothing to point at.
+				if (mode !== "edit") st.editing = null;
+				A().persist();
+				A().render();
+			});
+			seg.appendChild(b);
+		});
+		bar.appendChild(seg);
+		/* The class's own two facts, on the board only: the prospect table
+		   below carries its own summary row and repeating them there is the
+		   clutter this reorganization exists to remove. */
+		if ((st.boardMode || "board") !== "edit") {
+			bar.appendChild(el("span", "pill", res.players.length + " prospects"));
+			if (res.flavor && res.flavor.label) {
+				bar.appendChild(el("span", "pill", res.flavor.label));
+			}
+		}
+		view.appendChild(bar);
+		if ((st.boardMode || "board") === "edit") {
+			viewPlayers(view, res);
+			return;
+		}
+		viewBoard(view, res);
+	}
+
 	function viewBoard(view, res) {
 		view.appendChild(el("p", "legendline",
 			"The file already carries draft.round and draft.pick and the tool " +
@@ -2931,8 +2988,9 @@
 		const table = el("table");
 		const thead = el("thead");
 		const hr = el("tr");
-		for (const h of ["Board", "Rd", "Pick", "Player", "Pos", "Year", "Ovr", "Pot",
-			"School / club", "Preseason", "±", "PPG", "Honors"]) {
+		const BOARD_HEADS = ["Board", "Rd", "Pick", "Player", "Pos", "Year", "Ovr", "Pot",
+			"School / club", "Preseason", "±", "PPG", "Honors"];
+		for (const h of BOARD_HEADS) {
 			const th = el("th", ["Board", "Rd", "Pick", "Ovr", "Pot", "Preseason", "±", "PPG"].indexOf(h) >= 0 ? "num" : "", h);
 			th.scope = "col";
 			hr.appendChild(th);
@@ -2940,7 +2998,27 @@
 		thead.appendChild(hr);
 		table.appendChild(thead);
 		const tb = el("tbody");
+		/* Round dividers. A draft board is read in rounds — the lottery, the
+		   rest of the first, the second, and the men who do not get picked —
+		   and a flat sixty-row list makes the reader count to fourteen to
+		   find out where the lottery ended. The board already carries a mock
+		   round and pick for every prospect; this is that information as a
+		   shape rather than as two numeric columns. */
+		let lastBand = null;
+		const bandOf = (p) => (!p.mockRound ? "Undrafted"
+			: p.mockRound === 1 && p.mockPick <= 14 ? "Lottery"
+			: p.mockRound === 1 ? "First round"
+			: p.mockRound === 2 ? "Second round" : "Round " + p.mockRound);
 		for (const p of res.board || []) {
+			const band = bandOf(p);
+			if (band !== lastBand) {
+				lastBand = band;
+				const sep = el("tr", "bandrow");
+				const cell = el("td", null, band);
+				cell.colSpan = BOARD_HEADS.length;
+				sep.appendChild(cell);
+				tb.appendChild(sep);
+			}
 			const tr = el("tr");
 			tr.tabIndex = 0;
 			// The board is for LOOKING, not editing — clicking a row (or the
@@ -3229,13 +3307,11 @@
 			back.title = "Show " + current.name + " in the prospect table, " +
 				"scrolled to and with his editor open";
 			back.addEventListener("click", () => {
-				A().state.tab = "players";
 				A().revealPlayer(current);
 			});
 			bar.appendChild(back);
 			const edit = el("button", "tiny", "Edit " + current.name);
 			edit.addEventListener("click", () => {
-				A().state.tab = "players";
 				A().state.editing = null;
 				A().revealPlayer(current);
 			});
@@ -3591,8 +3667,27 @@
 			if (p.hand === "left") row("Hand", "Left-handed");
 		}
 		if (p.recruiting) {
-			row("Recruiting", p.recruiting.stars + "-star, No. " + p.recruiting.rank +
-				" nationally" + (p.recruiting.headliner ? " — headline signing" : ""));
+			/* The whole recruitment, not the box score of one. Rank and stars
+			   were all the page could say; who else was in on him, what he cut
+			   it to, when he signed and whether he played in April are the
+			   things a scout's file actually opens with. */
+			const rec = p.recruiting;
+			row("Recruiting", rec.stars + "-star, No. " + rec.rank + " nationally" +
+				(rec.posRank ? " · No. " + rec.posRank + " " + rec.posLabel : "") +
+				(Number.isFinite(rec.composite) ? " · " + rec.composite.toFixed(4) : "") +
+				(rec.headliner ? " — headline signing" : ""));
+			if (rec.offerCount) {
+				row("Recruitment", rec.offerCount + " offers" +
+					(rec.finalists && rec.finalists.length > 1
+						? ", cut to " + rec.finalists.join(", ") : "") +
+					(rec.signed ? " · signed " + (rec.signed === "early"
+						? "in the early period" : rec.signed === "late"
+							? "in the late period" : "in the spring") : "") +
+					(rec.decommits ? " · " + rec.decommits + " decommitments" : ""));
+			}
+			if (rec.allStar && rec.allStar.length) {
+				row("All-star games", rec.allStar.join(" · "));
+			}
 		}
 		if (p.transfer) row("Path", p.transfer.kind +
 			(p.transfer.from ? " — from " + p.transfer.from : ""));
@@ -4688,7 +4783,7 @@
 
 	global.Views = {
 		players: viewPlayers, teams: viewTeams, bracket: viewBracket, bulkBar,
-		awards: viewAwards, board: viewBoard, distribution: viewDistribution, tournamentCard,
+		awards: viewAwards, board: viewDraft, distribution: viewDistribution, tournamentCard,
 		notes: viewNotes, gamelog: viewGameLog, compare: viewCompare,
 		news: viewNews, universe: viewUniverse, playerLink, teamLink, playerPage,
 		gamePage, gameKeyFor, quadBar, pollSpark, ballotCards,
