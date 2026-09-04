@@ -1899,13 +1899,17 @@
 
 	/* ------------------------------------------------------- config sharing */
 
-	function encodeConfig() {
+	function encodeConfig(withDrawnSeed) {
 		const out = {};
 		for (const k of Object.keys(CFG.DEFAULTS)) {
 			const v = state.cfg[k];
 			const d = CFG.DEFAULTS[k];
 			if (JSON.stringify(v) !== JSON.stringify(d)) out[k] = v;
 		}
+		/* A rerolled class has no typed seed; the one it drew is the only
+		   thing that reproduces it, and a link without it opened a
+		   different class on another machine. */
+		if (withDrawnSeed && !out.seed && state.lastSeed) out.seed = String(state.lastSeed);
 		if (Object.keys(state.overrides).length) {
 			out.overrides = state.overrides;
 			/* Locks are keyed by pid. Opening a shared link with a DIFFERENT
@@ -1925,9 +1929,9 @@
 	const HASH_LIMIT = 8000;
 	let hashWarned = false;
 
-	function writeHash() {
+	function writeHash(withDrawnSeed) {
 		try {
-			const payload = encodeConfig();
+			const payload = encodeConfig(withDrawnSeed);
 			let body = Object.keys(payload).length
 				? encodeURIComponent(JSON.stringify(payload))
 				: "";
@@ -3026,6 +3030,7 @@
 				if (!d) return;
 				e.preventDefault();
 				state.tab = TABS[(i + d + TABS.length) % TABS.length][0];
+				persist();
 				render();
 				const next = tabs.querySelector("button.active");
 				if (next) next.focus();
@@ -3409,7 +3414,9 @@
 			return b;
 		};
 		rerollAxis(null, "Reroll just him",
-			"Draw this prospect again. Nobody else in the class moves.");
+			"Draw this prospect again. Nobody else changes build, school or " +
+			"ratings; the season is re-simulated around him, so other players' " +
+			"stat lines can shift.");
 		/* One axis at a time. Rerolling the whole player is a blunt instrument:
 		   the thing you usually want is this build at a different school, or
 		   this school with a different build, or the same player with the stat
@@ -4139,7 +4146,10 @@
 		if (!plan.applied.length) {
 			showError(new Error("Nothing in that CSV matched a player in this class." +
 				(plan.unmatched.length
-					? " " + plan.unmatched.length + " row(s) named somebody else." : "")));
+					? " " + plan.unmatched.length + " row(s) named somebody else." : "") +
+				(plan.rejected.length
+					? " " + plan.rejected.length + " value(s) were not names the tool knows: " +
+						plan.rejected.slice(0, 3).join("; ") + "." : "")));
 			return;
 		}
 		const box = el("div");
@@ -4167,6 +4177,11 @@
 			box.appendChild(el("p", "hint",
 				"Not matched: " + plan.unmatched.slice(0, 12).join(", ") +
 				(plan.unmatched.length > 12 ? ", …" : "")));
+		}
+		if (plan.rejected.length) {
+			box.appendChild(el("p", "hint",
+				"Not applied: " + plan.rejected.slice(0, 12).join("; ") +
+				(plan.rejected.length > 12 ? "; …" : "")));
 		}
 		modal("Import locks — preview", box, () => applyLockImport(plan), "Apply");
 	}
@@ -4207,6 +4222,10 @@
 		}
 		const applied = [];
 		const unmatched = [];
+		const rejected = [];
+		const archetypeNames = new Set(global.RatingsBuilder.ARCHETYPES.map((a) => a.name));
+		const schoolNames = new Set(global.Colleges.names
+			.concat(Object.keys(global.Colleges.NON_NCAA)));
 		let total = 0;
 		for (let i = 1; i < rows.length; i++) {
 			const r = rows[i];
@@ -4223,16 +4242,24 @@
 			};
 			if (cols.ovr >= 0 && num(cols.ovr) !== null) patch.ovr = num(cols.ovr);
 			if (cols.pot >= 0 && num(cols.pot) !== null) patch.pot = num(cols.pot);
+			/* A name the tool does not know is refused here, not applied:
+			   an unknown archetype fell back to the rolled build while the
+			   lock badge said otherwise, and an unknown school was written
+			   verbatim into the export with no team behind it. */
 			if (cols.archetype >= 0 && String(r[cols.archetype]).trim()) {
-				patch.archetype = String(r[cols.archetype]).trim();
+				const a = String(r[cols.archetype]).trim();
+				if (archetypeNames.has(a)) patch.archetype = a;
+				else rejected.push(p.name + ": unknown archetype “" + a + "”");
 			}
 			if (cols.college >= 0 && String(r[cols.college]).trim()) {
-				patch.college = String(r[cols.college]).trim();
+				const c = String(r[cols.college]).trim();
+				if (schoolNames.has(c)) patch.college = c;
+				else rejected.push(p.name + ": unknown school “" + c + "”");
 			}
 			if (!Object.keys(patch).length) continue;
 			applied.push({ player: p, patch });
 		}
-		return { applied, unmatched, total };
+		return { applied, unmatched, rejected, total };
 	}
 
 	function parseCsv(text) {
@@ -5134,7 +5161,9 @@
 		$("seed").value = v;
 		run();
 	});
-	$("seedPill").addEventListener("click", () => {
+	$("seedPill").addEventListener("click", (e) => {
+		// Shift-click pastes (below); copying as well overwrote the clipboard.
+		if (e.shiftKey) return;
 		copyText($("seedPill").dataset.seed || "", null, "");
 		const p = $("seedPill");
 		const was = p.textContent;
@@ -5177,7 +5206,7 @@
 		setTimeout(() => input.focus(), 0);
 	}
 	$("btnCopyLink").addEventListener("click", () => {
-		writeHash();
+		writeHash(true);
 		copyText(location.href, $("btnCopyLink"), "Link");
 	});
 	$("btnBatch").addEventListener("click", () => {
@@ -5198,6 +5227,11 @@
 	document.addEventListener("keydown", (e) => {
 		if (e.key === "Escape") V.closeRowMenu();
 		if (e.key === "Escape" && !$("modal").hidden) closeModal();
+		else if (e.key === "Escape" && state.editing !== null && state.editing !== undefined) {
+			// The shortcut sheet promises this closes the editor too.
+			state.editing = null;
+			render();
+		}
 		const tag = (e.target.tagName || "").toLowerCase();
 		const typing = tag === "input" || tag === "textarea" || tag === "select";
 		/* Ctrl+Enter / Cmd+Enter triggers generation (Part 5D). Works even
