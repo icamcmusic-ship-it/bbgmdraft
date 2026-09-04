@@ -4756,7 +4756,8 @@
 			   either way; that one is ours. */
 			if (opts.noteAppend && String(orig.note || "").trim()) {
 				const keep = String(orig.note).split("\n")
-					.filter((l) => l.indexOf("Honors:") !== 0).join("\n").trim();
+					.filter((l) => l.indexOf("Honors:") !== 0 &&
+						l.indexOf("Earlier honors:") !== 0).join("\n").trim();
 				out.note = keep && keep !== String(p.note || "").trim()
 					? keep + "\n\n" + p.note : p.note;
 			} else {
@@ -4850,11 +4851,22 @@
 				   "major honors only" export does not say otherwise in the
 				   note. */
 				const templateHasHonors = noteTemplateHas(result, "awards");
+				const isOurs = (l) => l.indexOf("Honors:") === 0 || l.indexOf("Earlier honors:") === 0;
 				out.note = String(out.note || "")
-					.split("\n").filter((l) => l.indexOf("Honors:") !== 0).join("\n");
+					.split("\n").filter((l) => !isOurs(l)).join("\n");
 				if (scoped.length && (opts.honorsInNote || templateHasHonors)) {
 					out.note = (out.note ? out.note + "\n" : "") +
 						"Honors: " + scoped.join("; ");
+				}
+				/* The earlier seasons' line follows the same scope as the
+				   rows: a "major honors only" export used to keep the
+				   template's unscoped line beside a scoped array. */
+				if (priorRows.length && (opts.honorsInNote || templateHasHonors)) {
+					const prior = priorRows.slice().sort((a, b) => b.season - a.season);
+					const shown = prior.slice(0, 3).map((a) => a.season + " " + a.type);
+					const extra = prior.length - shown.length;
+					out.note += "\nEarlier honors: " + shown.join("; ") +
+						(extra > 0 ? " (+" + extra + " more)" : "");
 				}
 			}
 			/* The flag matches the note: writing noteBool = 1 beside an

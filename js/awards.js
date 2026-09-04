@@ -336,6 +336,11 @@
 		[/ First Team$/, 18],
 		[/ Second Team$/, 19],
 		[/Tournament MVP$/, 20],
+		/* The professional leagues' own honors, which had no tier and so
+		   sorted alphabetically: "ACB Best Young Player" ahead of "ACB MVP". */
+		[/ Finals MVP$/, 20],
+		[/ MVP$/, 13],
+		[/(Rising Star|Best Young Player|Rookie of the Year|Next Up Award|Next Generation Award|Youth Player of the Year)$/, 15],
 		[/Defensive Team$/, 21],
 		[/Freshman Team$/, 22],
 		[/Newcomer Team$/, 23],
@@ -1131,16 +1136,7 @@
 		   scale the youth awards use, set higher, and the league's own
 		   strength raises it — an MVP in the EuroLeague is a harder thing
 		   than one in NBL1. */
-		const SHORT = {
-			"EuroLeague": "EuroLeague", "NBA G League": "G League", "Liga ACB": "ACB",
-			"NBL": "NBL", "Chinese CBA": "CBA", "LNB Pro A": "LNB", "EuroCup": "EuroCup",
-			"Basketball Bundesliga": "BBL", "Adriatic League": "ABA", "NBL1": "NBL1",
-			"Basketball Champions League": "BCL", "Turkish BSL": "BSL",
-			"Greek Basket League": "GBL", "Israeli Premier League": "Israeli League",
-			"Japan B.League": "B.League", "Brazil NBB": "NBB",
-			"Basketball Africa League": "BAL", "CEBL": "CEBL", "NAIA": "NAIA",
-			"DII NCAA": "Division II",
-		};
+		const SHORT = PRO_SHORT;
 		for (const lg of Object.keys(byLeague)) {
 			const list = byLeague[lg].sort((a, b) => b.scoreTotal - a.scoreTotal);
 			const names = PRO_AWARDS[lg] || [];
@@ -1347,6 +1343,25 @@
 		/^NIT Most Valuable Player$/,
 	];
 
+	/* The short name every professional (and non-DI) league's honors are
+	   minted under: "ACB MVP", "All-BBL First Team". One table, read by the
+	   minting below and by isMajorAward, which used to carry a hand-typed
+	   copy that had drifted (an All-ACB First Team was filler; All-BBL was
+	   major). */
+	const PRO_SHORT = {
+		"EuroLeague": "EuroLeague", "NBA G League": "G League", "Liga ACB": "ACB",
+		"NBL": "NBL", "Chinese CBA": "CBA", "LNB Pro A": "LNB", "EuroCup": "EuroCup",
+		"Basketball Bundesliga": "BBL", "Adriatic League": "ABA", "NBL1": "NBL1",
+		"Basketball Champions League": "BCL", "Turkish BSL": "BSL",
+		"Greek Basket League": "GBL", "Israeli Premier League": "Israeli League",
+		"Japan B.League": "B.League", "Brazil NBB": "NBB",
+		"Basketball Africa League": "BAL", "CEBL": "CEBL", "NAIA": "NAIA",
+		"DII NCAA": "Division II",
+	};
+	const PRO_FIRST_TEAM = new RegExp("^All-(" + Object.values(PRO_SHORT)
+		.concat(["East Asia Super League"])
+		.map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ") First Team$");
+
 	/* Abroad and in the G League: the same shape of rule, one league up. */
 	const MAJOR_PRO = [
 		/\bMVP$/, /\bFinals MVP$/, /^All-[\w .]+ First Team$/,
@@ -1376,7 +1391,11 @@
 		if (MINOR_SUFFIX.test(a)) return false;
 		for (const re of MINOR_ALWAYS) if (re.test(a)) return false;
 		for (const re of MAJOR_NATIONAL) if (re.test(a)) return true;
-		const list = confs && confs.length ? confs : MAJOR_CONFERENCES;
+		/* Awards are minted under the conference LABEL ("AAC"), so a key the
+		   user typed ("American") is mapped through it as well. */
+		const raw = confs && confs.length ? confs : MAJOR_CONFERENCES;
+		const T = global.TeamsSim;
+		const list = T && T.label ? raw.concat(raw.map((c) => T.label(c))) : raw;
 		if (conferenceIn(a, list)) return true;
 		/* A conference-shaped row that did not match the list above is filler
 		   by construction — second teams, all-freshman, all-newcomer, and
@@ -1384,7 +1403,7 @@
 		if (CONF_SHAPED.test(a)) {
 			// ...unless it is a professional league's own award, which is
 			// conference-shaped only by coincidence of wording.
-			if (/^All-(EuroLeague|EuroCup|ABA|BBL|LNB|BSL|B\.League|G League|BAL|East Asia Super League) First Team$/.test(a)) return true;
+			if (PRO_FIRST_TEAM.test(a)) return true;
 			return false;
 		}
 		for (const re of MAJOR_PRO) if (re.test(a)) return true;

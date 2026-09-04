@@ -2279,6 +2279,23 @@ console.log("\nWarm re-runs");
 	ok("and turning them back on reproduces the cold run",
 		names(back) === names(coldAgain));
 
+	/* A re-run from the REGULAR phase (a pace change skips the build) read
+	   the pot phase's displayed potential as each prospect's college talent,
+	   which a cold run has not computed yet, so every team's season differed
+	   between the two. */
+	{
+		const sig = (res) => JSON.stringify(res.players.map((p) =>
+			[p.key, p.stats && p.stats.ppg, p.awards, p.note]));
+		const r2 = global.Engine.createRunner(V.realisticClass(2, 70));
+		r2.run(global.Config.make({ seed: "regwarm" }));
+		const w2 = r2.run(global.Config.make({ seed: "regwarm", pace: 72 }));
+		const c2 = global.Engine.run(V.realisticClass(2, 70),
+			global.Config.make({ seed: "regwarm", pace: 72 }));
+		ok("a warm re-run from the regular phase matches a cold run",
+			w2.phasesRun.indexOf("build") === -1 && sig(w2) === sig(c2),
+			"ran " + w2.phasesRun.join(","));
+	}
+
 	/* Each event's sentence describes where the player actually ended up. A
 	   later event's move() shifts everyone it passes by one, so a text written
 	   when the event fired disagreed with the rank printed beside it. */
@@ -4032,6 +4049,16 @@ console.log("\nExport: the round trip, ages, award scope and notes");
 			ok("the note's Honors: line follows the same scope",
 				line.split("; ").every((t) => global.Awards.isMajorAward(t.trim())), line);
 		}
+		/* The earlier seasons' line follows the scope too: it used to keep
+		   the template's unscoped list beside a scoped awards array. */
+		ok("the note's Earlier honors: line follows the same scope",
+			major.players.every((p) => {
+				const line = String(p.note || "").split("\n")
+					.filter((l) => l.indexOf("Earlier honors:") === 0)[0];
+				if (!line) return true;
+				return line.slice(16).replace(/ \(\+\d+ more\)$/, "").split("; ")
+					.every((t) => global.Awards.isMajorAward(t.trim().replace(/^\d{4} /, "")));
+			}));
 		ok("only one Honors: line, however many times a file is exported",
 			major.players.every((p) => String(p.note || "").split("\n")
 				.filter((l) => l.indexOf("Honors:") === 0).length <= 1));
