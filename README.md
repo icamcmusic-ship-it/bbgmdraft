@@ -31,7 +31,11 @@ Guard, Movement Shooter, 3&D Wing, Point Center, Rim Protector, Stretch Big,
 Lob Threat, Athletic Freak, Drop-Coverage Anchor, Boom-or-Bust Tools, …), gated by
 their height so a 7-footer never becomes a point guard. The archetype pushes some ratings up and others down, then the whole
 build is re-solved against **BBGM's own `ovr` formula** so the finished player comes
-out at exactly the target overall. Specializing a player makes him lopsided, not
+out at exactly the target overall — an integer touch-up after the bisection
+closes the last point when every rating crosses .5 at once, which on an
+integer base it did for a third of Balanced players. Forcing the build a
+player already drew, or pinning one rating, leaves every other rating exactly
+where it was; both used to skip an RNG draw and re-jitter the rest. Specializing a player makes him lopsided, not
 better.
 
 Rarity weights span 0.45 to 3.6, so a Combo Guard is about eight times more likely
@@ -73,7 +77,13 @@ there. The
 nine genuine-center builds gated at hgt 72 and up used to be crowded out of
 the pool by the thirty bigs gated at 52 — Shot-Blocking Anchor appeared once in
 2,800 players — so a pool now always carries at least three of them, and a
-seven-footer draws a build made for him about 40% of the time.
+seven-footer draws a build made for him about 40% of the time. Every other
+class also reserves one slot for a build the weights never reach — Point
+Center and Jumbo Playmaker had been drawn zero times in 2,800 players — and a
+build with a biography has to fit the man's: "Fifth-Year Senior" is drawn only
+for seniors and graduates, "Overseas Pro Veteran" only for a prospect abroad or
+one who came back from a professional contract, and an Iron Man is never a
+freshman.
 
 How much of a team's offense a build is given is **derived, not tabulated**. It
 used to be seventy-two hand-fitted constants, two builds missing entirely
@@ -84,7 +94,10 @@ shot-*making*, so a build that loads on `fg` and `tp` takes volume it was never
 given and one that loads on `diq` and `reb` loses volume it never should have.
 That is computable straight off the build's own offset vector, plus a
 self-creation term and a small per-tag intent — and `tools/rolefit.js` fits it,
-so adding a build no longer costs a constant. An unknown archetype now throws
+so adding a build no longer costs a constant. The table is computed off the
+*normalized* offsets the fit measures; it used to be computed off the raw ones,
+so 97 of 131 builds ran on multipliers the fit had never seen, and the
+constants have been re-fitted since. An unknown archetype now throws
 under the test harnesses instead of scoring 1.0.
 
 **So is the potential gap.** How far a build's `pot` sits above its `ovr`
@@ -139,9 +152,12 @@ the first thing any human being would have written about him.
 `js/traits.js` is about seventy-seven traits in twelve groups (frame,
 athleticism, motor, character, finishing, shooting, passing, defense,
 rebounding, medical, background, role). Each states its prerequisites — a
-height band, a class year, build tags it needs or must not have — so a
-seven-footer is never "explosive first step", a freshman is never a natural
-leader, and a guard never has a broken free-throw stroke. Each player draws
+height band, a class year, build tags it needs or must not have, and bounds on
+the build's own offset vector — so a seven-footer is never "explosive first
+step", a freshman is never a natural leader, a guard never has a broken
+free-throw stroke, and a Rim Runner never has a step-back. Traits are drawn
+after the anomalies rather than before them, so a 7'4" outlier's traits are
+about the man he became. Each player draws
 about three, at most one from each group, off his own key so they survive a
 re-run.
 
@@ -175,7 +191,12 @@ averaged: "a wide-open year" and "chalk all the way" is a contradiction and
 averaging two contradictions gives an ordinary season, which is the outcome
 this exists to avoid. Measured over sixteen classes, the season-to-season
 spread in team scoring is about twice what it is with storylines off. A
-setting the user has changed is still left alone.
+setting the user has changed is still left alone. A storyline's pace bend is a
+*shift* on the slider — it was written as one and applied as an absolute, so
+"a scoring explosion" set the season to minus four possessions, the floor
+caught it at 58, and half of all default seasons played the slowest basketball
+since 1952. `tools/test.js` now holds a storyline to a few possessions either
+side of the default.
 
 That last rule has an escape hatch now. A flavor moved only settings sitting at
 their default — the right principle, and it does mean a user who has customized
@@ -214,8 +235,14 @@ much better the team is in March than in November — and whose **situation** (f
 year, an interim who took over in December, on the hot seat, a fixture) moves
 that development, the team's form and its strength. Conference membership is a
 per-run fact too: some years a realignment takes two to five good programs one
-rung up, and the schedule, the conference tournaments and the all-conference
-teams follow it. Prospects are layered on alongside synthetic returning teammates — capped just
+rung up, and the schedule, the conference tournaments, the auto bid and the
+all-conference teams follow it — all of them, which for a while they did not:
+the schedule and the tournaments read the static table, so a program that
+moved to the ACC played eighteen games in the American, won the American's
+tournament and took its bid while every label said ACC. A league's slate is
+its size now, too — two round robins, fourteen to twenty games — so a six-team
+league no longer meets every rival four times, and the first round of the
+bracket never pairs two teams from one conference. Prospects are layered on alongside synthetic returning teammates — capped just
 below the best prospect on the roster, because a program that landed a draft pick
 did not already have two of them. Injuries are drawn **before** a game is played,
 so a man who misses fourteen games with a knee costs his team the games it would
@@ -325,13 +352,35 @@ the raw distribution above them is wide enough that they rarely bind. The
 harness checks the histogram's shape directly, because no band on a mean or a
 percentile can see a wall.
 
+**Four more walls came down in this pass.** Personal fouls: BBGM's `fouling`
+composite *rises* as a player gets worse, so a class's prospects sat at 0.60
+on it against the 0.38 the field is synthesized at, fouled thirty percent more
+per minute than their teammates and an eighth of every class was pinned on
+the ceiling; the prospect term is compressed toward the field's reference now
+and a starter fouls a little less per minute than the bench. The youth minutes
+cap abroad is drawn per player around the league's number rather than being
+a clamp 61% of capped prospects sat on to the decimal. Every program played
+exactly nine men; it plays eight to eleven. And on/off was the noise term
+alone — the margin scaled by floor time cancelled exactly against the team's
+margin — so it carries a production-based impact term and correlates with
+something. Two smaller ones: exported offensive rebounds are apportioned to
+the season line rather than rounded night by night (a third of totals drifted
+by more than two), and the advanced statistics normalize a forty-eight-minute
+club and a thirty-two-minute prep team on their own clocks. The potential gap
+also reads the class year the tool *rolled*: a BBGM file writes 19 for
+everyone, so a rolled senior exported at 22 with a freshman's upside.
+
 **Defense is modeled, not implied.** Every team has a defensive profile built from
 BBGM's `defenseInterior` and `defensePerimeter` composites, and it is applied to the
 opponents that team actually played: a conference full of rim protectors holds
 everyone below their usual rim percentage, and a pressing team forces turnovers.
 
 **Non-NCAA prospects get a real season too**, in their own environment. The G League
-plays 48-minute games at 103 possessions; the EuroLeague plays 40 at 70; a
+plays 48-minute games at 103 possessions — on the scoreboard as well as in the
+box score, which used to run on the college pace slider and print a 120-point
+club "winning 72-68" — its game logs are in date order, and a prospect abroad
+carries no fabricated college seasons unless his biography put him at a
+program; the EuroLeague plays 40 at 70; a
 19-year-old at Real Madrid is capped at the minutes a 19-year-old at Real Madrid
 actually gets. Each league has a club list, a table, a playoff with named rounds
 (the EuroLeague's ends in a Final Four), a domestic cup, promotion and relegation
@@ -379,6 +428,21 @@ finish with the same number of lines. They live beside the draft year's list,
 never in it: the player page and the Awards tab show them under *Earlier
 honors*, the note has a line for them, the export writes them as award rows
 at their own seasons, and the paper has a kind for the repeat winner.
+
+**The sideline has trophies of its own.** Every program's coach carried a
+reputation "for Coach of the Year" and nothing ever voted. The Naismith, the
+AP and the Henry Iba are voted against expectations — the season a program
+had over the season its name and its coach's reputation said it would have,
+each panel weighting the record, the surprise and the March run differently —
+plus the Hugh Durham for the best season outside the power leagues, and a
+Coach of the Year in every conference. The Awards tab lists them and the paper
+writes the AP one up. A coach's **philosophy** reaches the box score now as
+well: a stars-and-scrubs staff concentrates the offense in its best players
+and an egalitarian one spreads it, a defensive-minded one forces a few more
+turnovers. The philosophy was computed for every program and read by nothing
+in the stat model. Coaches are also the age head coaches are — a median near
+fifty rather than forty, so retirement is a thing that happens — and no two
+programs share a head coach in one season.
 
 There is a **finalist tier** as well as a winners' tier — Naismith finalists, the
 Wooden Late Season Top 20, AP honorable mention, position-award finalists, a
@@ -966,6 +1030,18 @@ source file lacked them), and the file is written with a BOM the same way BBGM w
 its own exports (so is the CSV — Excel reads a BOM-less UTF-8 file as the system
 code page, which turns Dončić into mojibake). Load it back with **Tools → Import → Draft class**.
 
+The round trip is clean for stats rows as well as honors: a college row (tid
+`DOES_NOT_EXIST`) in the draft year or the five before it is this tool's from
+an earlier export and is replaced rather than appended — three exports used to
+give a player two, four and six rows. A class pulled out of a full league
+export goes back out as a class (`version`, `startingSeason`, `players`) rather
+than as the whole league envelope with most of its players deleted, a stats
+row carries the player's own jersey number, and a rating row without a
+`season` or `fuzz` gets one. The sample class is shaped like BBGM's own export
+(tid −2, an empty draft slot, a season on the rating row). A file whose
+players' `draft.year` disagrees with its `startingSeason` is warned about, and
+a birth year after the season is refused.
+
 ### The college statline
 
 The **More ▾** dialog's *college statline*, *prior seasons* and *season highs* options
@@ -1046,7 +1122,11 @@ the same draft year — a class exported from a different league has pids that m
 people, and those players are appended with fresh pids instead of overwriting anybody. It
 is an overlay, not a swap: the league's own player object is the base (his `value`,
 `contract`, `statsTids`, `moodTraits` and the rest survive) and only what the tool
-produced goes on top. `tools/test.js` covers all of it.
+produced goes on top — including his own `awards` and `injuries` at seasons this tool
+does not write. A pid match is an identity only when the name agrees, an appended
+prospect is written as an undrafted one (round 0, pick 0), the older `UNDRAFTED_2`
+/ `UNDRAFTED_3` tids are recognized, and a league already past the class's draft
+year is warned about. `tools/test.js` covers all of it.
 
 The **More ▾** button next to it also writes the players file and merges the class into a
 league file (both above), exports the prospect table as CSV, the whole simulated
@@ -1155,7 +1235,15 @@ tools/golden.json   recorded output hashes
 * The professional side is thinner than the NCAA side. Clubs, tables, playoffs,
   cups, relegation, each league's own MVP and first team, and a continental
   competition for the top clubs exist; national-team summers do not, and the
-  continental run is a drawn result rather than a simulated bracket.
+  continental run is a drawn result rather than a simulated bracket. The
+  conference map is the 2026-27 one (Gonzaga, Oregon State, Washington State
+  and Texas State in the rebuilt Pac-12 with the five Mountain West schools;
+  Grand Canyon and UTEP in the Mountain West; Seattle in the WCC; Delaware in
+  Conference USA; UMass in the MAC; Merrimack in the MAAC) and the club lists
+  are the 2025-26 ones; both will date.
+* The field's block tail is still fat: about thirty rotation players a season
+  average over 3.5 blocks against a real five to eight. The prospect bands
+  hold; the field's do not exist yet.
 * Below 700 pixels the prospect table becomes one card per prospect, because a
   forty-column table on a 390-pixel screen is a horizontal scroll however it is
   arranged — and a card is the twelve fields a scout reads first, not the same

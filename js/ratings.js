@@ -48,7 +48,7 @@
 		{ name: "Pesky On-Ball Stopper", min: 0, max: 48, w: 1.1, t: ["guard", "defense"], o: { diq: 18, stre: 14, endu: 12, oiq: 6, spd: -4, tp: -8, ins: -10, dnk: -10, jmp: -8, pss: -6 } },
 		{ name: "Score-First Point", min: 0, max: 44, w: 1.0, t: ["guard", "scoring"], o: { fg: 14, ins: 10, tp: 10, drb: 10, spd: 6, pss: -10, diq: -10, reb: -8 } },
 		{ name: "Sixth-Man Gunner", min: 0, max: 54, w: 0.8, t: ["guard", "shooting", "scoring"], o: { tp: 16, fg: 14, endu: 8, oiq: -6, pss: -8, diq: -10, reb: -8 } },
-		{ name: "Streaky Volume Scorer", min: 0, max: 56, w: 0.75, t: ["guard", "scoring"], o: { fg: 18, tp: 14, dnk: 8, ft: 6, oiq: -10, diq: -12, pss: -8, reb: -6 } },
+		{ name: "Streaky Volume Scorer", min: 0, max: 56, w: 0.75, vol: 1.3, t: ["guard", "scoring"], o: { fg: 18, tp: 14, dnk: 8, ft: 6, oiq: -10, diq: -12, pss: -8, reb: -6 } },
 		{ name: "Change-of-Pace Guard", min: 0, max: 46, w: 0.7, t: ["guard", "athletic"], o: { spd: 18, drb: 14, pss: 10, endu: 8, tp: -8, ins: -10, reb: -10, stre: -8 } },
 		{ name: "Post-Up Guard", min: 24, max: 46, w: 0.5, t: ["guard", "scoring"], o: { stre: 16, ins: 14, ft: 8, pss: 8, oiq: 6, spd: -12, tp: -10, drb: -6, jmp: -8, reb: -4 } },
 		{ name: "Free-Throw Merchant", min: 0, max: 54, w: 0.6, t: ["guard", "scoring"], o: { ft: 18, drb: 12, oiq: 10, spd: 6, ins: 6, tp: -10, diq: -12, reb: -8 } },
@@ -70,7 +70,7 @@
 		{ name: "Bully Slasher", min: 38, max: 66, w: 0.9, t: ["wing", "scoring"], o: { stre: 16, dnk: 14, ins: 10, ft: 6, tp: -14, fg: -8, pss: -8, drb: -4 } },
 		{ name: "Glide Athlete", min: 36, max: 66, w: 1.0, inj: 1.15, t: ["wing", "athletic", "raw"], o: { jmp: 20, spd: 14, fg: 8, endu: 6, dnk: 6, tp: -10, ft: -10, oiq: -8, pss: -8, stre: -10 } },
 		// --- everyone -----------------------------------------------------
-		{ name: "Microwave Scorer", min: 0, max: 80, w: 0.9, pot: -3, t: ["scoring"], o: { fg: 16, tp: 12, ins: 10, dnk: 8, diq: -16, pss: -12, oiq: -4 } },
+		{ name: "Microwave Scorer", min: 0, max: 80, w: 0.9, pot: -3, vol: 1.2, t: ["scoring"], o: { fg: 16, tp: 12, ins: 10, dnk: 8, diq: -16, pss: -12, oiq: -4 } },
 		{ name: "Athletic Freak", min: 0, max: 100, w: 1.8, inj: 1.25, t: ["athletic", "raw"], o: { spd: 18, jmp: 20, stre: 12, dnk: 14, oiq: -16, ft: -12, tp: -12, pss: -8 } },
 		{ name: "Glue Guy", min: 0, max: 100, w: 1.6, pot: -3, inj: 0.8, t: ["defense", "durability"], o: { diq: 12, oiq: 10, pss: 8, endu: 12, ins: -8, dnk: -8, fg: -4, tp: -2 } },
 		{ name: "High-IQ Connector", min: 0, max: 100, w: 1.0, t: ["playmaking"], o: { oiq: 16, pss: 12, diq: 8, tp: 4, dnk: -10, jmp: -8, ins: -8, fg: -4 } },
@@ -79,7 +79,7 @@
 		   appeared zero times in 30 consecutive classes. `durability` is the
 		   shared availability axis with Injury-Prone Talent and Injury-Return
 		   Unknown; `athletic` is what an every-game body is. */
-		{ name: "Iron Man", min: 0, max: 100, w: 0.7, inj: 0.45, t: ["athletic", "durability"], o: { endu: 20, stre: 8, diq: 6, oiq: 6, dnk: -8, tp: -6, ins: -8, jmp: -6 } },
+		{ name: "Iron Man", min: 0, max: 100, w: 0.7, inj: 0.45, bio: { notYears: ["Freshman"] }, t: ["athletic", "durability"], o: { endu: 20, stre: 8, diq: 6, oiq: 6, dnk: -8, tp: -6, ins: -8, jmp: -6 } },
 		// --- bigs ---------------------------------------------------------
 		{ name: "Stretch Big", min: 54, max: 100, w: 2.4, t: ["big", "shooting"], o: { tp: 22, ft: 14, fg: 6, oiq: 4, reb: 4, spd: -8, drb: -10, dnk: -8, ins: -8, diq: -6 } },
 		{ name: "Post Scorer", min: 56, max: 100, w: 1.8, t: ["big", "scoring"], o: { ins: 24, stre: 12, reb: 8, dnk: 8, oiq: 6, tp: -16, spd: -12, drb: -10, ft: -8, diq: -6 } },
@@ -120,7 +120,7 @@
 		{ name: "Stretch Four Stopper", min: 48, max: 74, w: 1.1, t: ["big", "shooting", "defense"], o: { tp: 14, diq: 14, stre: 10, reb: 8, oiq: 4, ins: -12, pss: -10, drb: -12, spd: -6 } },
 		{ name: "Rim-Running Wing", min: 40, max: 68, w: 1.2, t: ["wing", "athletic"], o: { spd: 16, dnk: 14, endu: 12, reb: 6, oiq: -6, tp: -14, ft: -10, pss: -8, fg: -6 } },
 		{ name: "Late Bloomer", min: 0, max: 100, w: 1.1, t: ["raw"], o: { endu: 10, oiq: 8, spd: 6, stre: 6, fg: -8, tp: -6, ins: -6, drb: -4 } },
-		{ name: "Fifth-Year Senior", min: 0, max: 100, w: 1.2, pot: -6, inj: 1.1, t: ["defense", "playmaking", "durability"], o: { oiq: 14, diq: 10, ft: 8, fg: 6, jmp: -14, spd: -10, endu: -4, dnk: -8 } },
+		{ name: "Fifth-Year Senior", min: 0, max: 100, w: 1.2, pot: -6, inj: 1.1, bio: { years: ["Senior", "Graduate"] }, t: ["defense", "playmaking", "durability"], o: { oiq: 14, diq: 10, ft: 8, fg: 6, jmp: -14, spd: -10, endu: -4, dnk: -8 } },
 		{ name: "Positionless Forward", min: 38, max: 72, w: 1.4, t: ["wing", "playmaking", "defense"], o: { pss: 12, diq: 10, drb: 10, reb: 8, oiq: 6, ins: -10, dnk: -8, ft: -6 } },
 		/* --- twenty-six more, and the shape of the table ---------------------
 
@@ -194,9 +194,9 @@
 		{ name: "Late-Blooming Shooter", min: 0, max: 100, w: 1.3, t: ["shooting", "raw"], o: { tp: 18, ft: 12, endu: 8, drb: 6, oiq: -6, ins: -12, dnk: -10, diq: -8, stre: -8, pss: -6 } },
 		{ name: "System Player", min: 0, max: 100, w: 1.2, t: ["playmaking", "defense"], o: { oiq: 14, diq: 10, tp: 8, endu: 8, pss: 4, dnk: -12, jmp: -10, drb: -8, ins: -6, stre: -4 } },
 		{ name: "High-Floor Low-Ceiling", min: 0, max: 100, w: 1.2, inj: 0.85, t: ["defense"], o: { oiq: 12, ft: 12, fg: 8, endu: 8, diq: 4, jmp: -14, dnk: -12, spd: -8, reb: -6 } },
-		{ name: "Boom-or-Bust Tools", min: 0, max: 100, w: 1.4, inj: 1.3, t: ["raw", "athletic"], o: { jmp: 18, dnk: 14, spd: 10, stre: 8, oiq: -16, diq: -12, ft: -10, drb: -8 } },
-		{ name: "Overseas Pro Veteran", min: 0, max: 100, w: 1.0, pot: -6, t: ["shooting", "playmaking"], o: { oiq: 14, tp: 12, pss: 10, ft: 8, jmp: -14, spd: -10, dnk: -8, endu: -6 } },
-		{ name: "Injury-Return Unknown", min: 0, max: 100, w: 0.9, pot: 5, inj: 1.7, t: ["raw", "scoring", "durability"], o: { fg: 12, ins: 10, oiq: 8, ft: 6, endu: -18, spd: -10, jmp: -8 } },
+		{ name: "Boom-or-Bust Tools", min: 0, max: 100, w: 1.4, inj: 1.3, vol: 1.18, t: ["raw", "athletic"], o: { jmp: 18, dnk: 14, spd: 10, stre: 8, oiq: -16, diq: -12, ft: -10, drb: -8 } },
+		{ name: "Overseas Pro Veteran", min: 0, max: 100, w: 1.0, pot: -6, bio: { proOrReturned: true }, t: ["shooting", "playmaking"], o: { oiq: 14, tp: 12, pss: 10, ft: 8, jmp: -14, spd: -10, dnk: -8, endu: -6 } },
+		{ name: "Injury-Return Unknown", min: 0, max: 100, w: 0.9, pot: 5, inj: 1.7, bio: { notYears: ["Freshman"] }, t: ["raw", "scoring", "durability"], o: { fg: 12, ins: 10, oiq: 8, ft: 6, endu: -18, spd: -10, jmp: -8 } },
 
 		/* --- shooting-tagged additions (task 4.1) ---
 		   Measured: the `shooting` tag had 14 members against `guard`'s 30+, and
@@ -516,16 +516,21 @@
 		   the tags describe. compExp rises to 1.00: the composite
 		   compensation now has to undo the whole of what the composite
 		   over-reads, since the tags are no longer absorbing half of it. */
-		createW: 0.08,
-		compExp: 1.00,
-		base: 0.93,
+		/* Re-fitted again once ROLE_USAGE was computed on the normalized
+		   offsets the fit had always measured (it used to be computed on
+		   the raw ones, so 97 builds ran on multipliers the fit never saw).
+		   compExp comes down to 0.71: the normalizer already undoes part of
+		   what the composite over-reads. */
+		createW: 0.07,
+		compExp: 0.71,
+		base: 0.89,
 		/* What a coach hands each kind of player, over and above what his
 		   shot-making says. Offensive roles (scoring) use more possessions;
 		   defensive and rebounding roles defer on offense. */
 		tags: {
-			guard: 0.95, wing: 1.08, big: 1.18,
-			scoring: 1.24, shooting: 0.97, playmaking: 0.94,
-			defense: 0.86, athletic: 1.09, rebounding: 0.86, raw: 0.94,
+			guard: 1.04, wing: 1.10, big: 1.22,
+			scoring: 1.30, shooting: 0.86, playmaking: 0.90,
+			defense: 0.94, athletic: 1.09, rebounding: 0.79, raw: 1.04,
 		},
 		/* Softly bounded rather than clamped, so a build can never land
 		   exactly on a limit the way twelve of the old table's entries did.
@@ -666,8 +671,10 @@
 	   be built first: creationDelta is measured against the table it is part
 	   of. */
 	const ROLE_USAGE = {};
-	recomputeCreationBaseline();
-	for (const a of ARCHETYPES) ROLE_USAGE[a.name] = computeRoleUsage(a);
+	/* Filled AFTER normalizeArchetypes below: the fit in tools/rolefit.js
+	   runs on the loaded (normalized) table, and this table used to be
+	   computed on the raw one, so 97 of 131 builds ran on a usage multiplier
+	   the fit had never seen. */
 
 	/* An unknown build is now an ERROR, not a silent 1.0.
 
@@ -724,10 +731,19 @@
 		if (!arch || arch.name === "Balanced") return 0;
 		if (Number.isFinite(arch.pot)) return arch.pot;
 		let v = POT_BASE;
-		for (const k of Object.keys(POT_SKILL_W)) v += POT_SKILL_W[k] * ((arch.o && arch.o[k]) || 0);
+		/* The AUTHORED offsets, whether this runs at load (before the
+		   normalizer edits a.o) or from the editor afterwards; the two used
+		   to disagree for 99 builds. */
+		const o = RAW_OFFSETS[arch.name] || arch.o || {};
+		for (const k of Object.keys(POT_SKILL_W)) v += POT_SKILL_W[k] * (o[k] || 0);
 		for (const t of arch.t || []) v += POT_INTENT[t] || 0;
 		return Math.round(v);
 	}
+	/* The authored offsets, kept before the normalizer edits a.o (below),
+	   so the editor's tooltip can show a build's intent rather than the
+	   solver's arithmetic and the potential fit reads what was written. */
+	const RAW_OFFSETS = {};
+	for (const a of ARCHETYPES) RAW_OFFSETS[a.name] = Object.assign({}, a.o);
 	const POT_BY_ARCHETYPE = {};
 	for (const a of ARCHETYPES) POT_BY_ARCHETYPE[a.name] = computePotGap(a);
 
@@ -995,8 +1011,6 @@
 	   can compare what the normalizer does now against what the old uniform
 	   one did, and so the editor's tooltip can show a build's intent rather
 	   than the solver's arithmetic. */
-	const RAW_OFFSETS = {};
-	for (const a of ARCHETYPES) RAW_OFFSETS[a.name] = Object.assign({}, a.o);
 	(function normalizeArchetypes() {
 		let shiftW = 0;
 		for (const k of BB.RATING_KEYS) shiftW += OVR_W[k] * SHIFT_SCALE[k];
@@ -1031,6 +1045,8 @@
 			a.o = o;
 		}
 	})();
+	recomputeCreationBaseline();
+	for (const a of ARCHETYPES) ROLE_USAGE[a.name] = computeRoleUsage(a);
 
 	/* How large a slice of the league each archetype is even eligible for.
 	   Normalizing by the eligible set alone made an archetype's real frequency
@@ -1436,6 +1452,21 @@
 			pool.push(pick);
 			remaining.splice(remaining.indexOf(pick), 1);
 		}
+		/* One slot for a build the weights never reach. Point Center and
+		   Jumbo Playmaker were drawn zero times in 2,800 players; a rare
+		   build is rare, not absent. Drawn uniformly from the sub-1.0
+		   weights that did not make the pool, and only when the pool has
+		   room for it to mean something. About every other class: the rare
+		   builds are mostly non-scoring bigs, and one in every pool moved
+		   the big-versus-guard scoring band a full point. */
+		if (size >= 8 && remaining.length && rng.random() < 0.5) {
+			const rare = remaining.filter((a) => a.w < 1.0 && a.name !== "Balanced");
+			if (rare.length) {
+				const pick = rare[Math.floor(rng.random() * rare.length)];
+				pool.push(pick);
+				remaining.splice(remaining.indexOf(pick), 1);
+			}
+		}
 		// The seven-footers' own builds. See CENTER_MIN.
 		{
 			const isCenter = (a) => a.min >= CENTER_MIN;
@@ -1465,10 +1496,24 @@
 		return pool;
 	}
 
-	function pickArchetype(rng, hgtRating, cfg, flavor, pool, rank) {
+	/* A build with a biography has to fit the man's. "Fifth-Year Senior"
+	   was drawn for freshmen two times in three, and the note then called a
+	   nineteen-year-old a fifth-year man. */
+	function bioFits(a, bio) {
+		if (!a.bio || !bio) return true;
+		const b = a.bio;
+		const cy = String(bio.classYear || "").replace(/^Redshirt /, "");
+		if (b.years && b.years.indexOf(cy) === -1) return false;
+		if (b.notYears && b.notYears.indexOf(cy) !== -1) return false;
+		if (b.proOrReturned && !(bio.nonNcaa ||
+			(bio.transfer && /professional/.test(String(bio.transfer.kind || ""))))) return false;
+		return true;
+	}
+
+	function pickArchetype(rng, hgtRating, cfg, flavor, pool, rank, bio) {
 		const source = pool && pool.length ? pool.concat(BALANCED) : ARCHETYPES;
 		const eligible = source.filter(
-			(a) => hgtRating >= a.min && hgtRating <= a.max,
+			(a) => hgtRating >= a.min && hgtRating <= a.max && bioFits(a, bio),
 		);
 		if (!eligible.length) {
 			return ARCHETYPES.filter((a) => a.name === "Balanced")[0];
@@ -1536,9 +1581,49 @@
 		const sc = scales || SHIFT_SCALE;
 		const out = {};
 		for (const key of BB.RATING_KEYS) {
-			out[key] = clamp(Math.round(base[key] + k * sc[key]), 0, 100);
+			// The same floor and ceiling the base is built on. A 0/100 clamp
+			// here put 2.6% of a class's tp ratings on exactly 0.
+			out[key] = key === "hgt"
+				? clamp(Math.round(base[key] + k * sc[key]), 0, 100)
+				: clamp(Math.round(base[key] + k * sc[key]), 1, 99);
 		}
 		return out;
+	}
+
+	/* The last point. A uniform shift over an integer base moves every
+	   rating across .5 at the same k when the scales are equal (Balanced),
+	   so ovr steps by two or three at once and bisection cannot land on the
+	   integer between: 30% of Balanced players missed by exactly one at
+	   buildNoise 0. Close the gap one rating at a time, spending it on the
+	   rating that moves ovr least past the target. */
+	function touchUp(ratings, targetOvr, scales, pinned) {
+		let cur = BB.ovr(ratings);
+		for (let iter = 0; iter < 8 && cur !== targetOvr; iter++) {
+			const dir = targetOvr > cur ? 1 : -1;
+			let best = null;
+			let bestGap = Math.abs(cur - targetOvr);
+			let bestStep = Infinity;
+			/* One point of one rating can leave the rounded ovr where it
+			   was, so the step is allowed to grow to three; the smallest
+			   step that closes the gap wins. */
+			for (let step = 1; step <= 3 && !best; step++) {
+				for (const key of BB.RATING_KEYS) {
+					if (key === "hgt" || (pinned && Number.isFinite(pinned[key]))) continue;
+					if (scales && !(scales[key] > 0)) continue;
+					const v = ratings[key] + dir * step;
+					if (v < 1 || v > 99) continue;
+					const trial = Object.assign({}, ratings, { [key]: v });
+					const gap = Math.abs(BB.ovr(trial) - targetOvr);
+					if (gap < bestGap || (gap === bestGap && best && step < bestStep)) {
+						bestGap = gap; best = trial; bestStep = step;
+					}
+				}
+			}
+			if (!best) break;
+			ratings = best;
+			cur = BB.ovr(ratings);
+		}
+		return ratings;
 	}
 
 	// Solve for the uniform shift that makes BBGM's ovr equal targetOvr. The
@@ -1602,7 +1687,9 @@
 		}
 		const a = shift(lo);
 		const b = shift(hi);
-		return Math.abs(BB.ovr(a) - targetOvr) <= Math.abs(BB.ovr(b) - targetOvr) ? a : b;
+		const near = Math.abs(BB.ovr(a) - targetOvr) <= Math.abs(BB.ovr(b) - targetOvr) ? a : b;
+		if (BB.ovr(near) === targetOvr) return near;
+		return touchUp(near, targetOvr, targetOvr > BB.ovr(near) ? upScales : downScales, pinned);
 	}
 
 	// Target ovr/pot curve for the whole class ("curve" mode).
@@ -1634,11 +1721,16 @@
 	/* Rebuild one player's ratings.
 	   orig: the ratings row from the league file
 	   targetOvr / targetPot: what the rebuilt player must come out to */
-	function rebuild(rng, orig, targetOvr, targetPot, cfg, forcedArchetype, flavor, pinned, pool, rank) {
+	function rebuild(rng, orig, targetOvr, targetPot, cfg, forcedArchetype, flavor, pinned, pool, rank, bio) {
 		const forced = forcedArchetype
 			? ARCHETYPES.filter((a) => a.name === forcedArchetype)[0]
 			: null;
-		const arch = forced || pickArchetype(rng, orig.hgt, cfg, flavor, pool, rank);
+		/* The draw is made whether or not it is used: forcing a build used
+		   to skip it, which shifted every jitter draw after it, so locking a
+		   player to the build he already had re-rolled all fourteen of his
+		   ratings. */
+		const rolled = pickArchetype(rng, orig.hgt, cfg, flavor, pool, rank, bio);
+		const arch = forced || rolled;
 		const spec = clamp(cfg.specialization, 0, 3);
 		const noise = Math.max(0, cfg.buildNoise);
 
@@ -1651,6 +1743,9 @@
 			// A hand-edited rating is taken literally and never shifted. There
 			// was no way at all to say "leave everything else, just bump his tp
 			// to 70"; the editor could only set ovr, pot, archetype and school.
+			// Its jitter is drawn and discarded, so pinning tp does not
+			// re-roll oiq, diq and everything after it in key order.
+			const jitter = rng.normal(0, noise);
 			if (pinned && Number.isFinite(pinned[key])) {
 				base[key] = clamp(Math.round(pinned[key]), 0, 100);
 				cleanBase[key] = base[key];
@@ -1670,7 +1765,7 @@
 				const room = Math.max(0, orig[key] - lo);
 				off *= room / (room + 0.5 * Math.abs(spec * off));
 			}
-			base[key] = clamp(orig[key] + spec * off + rng.normal(0, noise), lo, hi);
+			base[key] = clamp(orig[key] + spec * off + jitter, lo, hi);
 			cleanBase[key] = clamp(orig[key] + spec * off, lo, hi);
 		}
 

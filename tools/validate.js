@@ -260,7 +260,11 @@ function collect(nSeeds, cfgOverrides, fixture) {
 	};
 	const rateBand = (lo, hi) => {
 		const b = perClass(lo, hi);
-		return [Math.max(0, b[0]), Math.min(1, b[1])];
+		/* A floor that has scaled below 5% is a floor a four-seed run can
+		   miss on the draw alone (no 1 seed won in four Marches happens
+		   about one run in twenty at a true 45%), which is how a developer
+		   learns to ignore the harness. Below that the floor is zero. */
+		return [b[0] < 0.05 ? 0 : b[0], Math.min(1, b[1])];
 	};
 	/* Tags for a player's build. Read off the archetype table rather than off
 	   the player, because a player carries the build's NAME and the tags are

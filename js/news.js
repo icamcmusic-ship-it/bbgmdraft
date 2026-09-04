@@ -1943,6 +1943,38 @@
 	});
 
 	TPL({
+		kind: "coach of the year", group: "awards", p: 0.85, when: 1.22,
+		find: (ctx) => {
+			const ch = (ctx.res.coachHonors || []).filter((h) => h.award === "AP Coach of the Year");
+			if (!ch.length) return null;
+			const h = ch[0];
+			const t = ctx.teams[h.school];
+			if (!t || !t.coach) return null;
+			const others = (ctx.res.coachHonors || [])
+				.filter((x) => x.coach === h.coach && x.award !== h.award &&
+					!/ Coach of the Year$/.test(x.award.replace(/^(Naismith|AP) /, "")))
+				.map((x) => x.award);
+			return { h, t, others };
+		},
+		slots: (f) => ({
+			team: TM(f.t.name), coach: T(f.h.coach), record: T(f.h.record),
+			conf: T(f.t.conf), years: T(String(f.t.coach.tenure)),
+			sweep: T(f.others.length ? " He also took the " + f.others.join(" and the ") + "." : ""),
+			situation: T(f.t.coach.situationLabel || "a fixture"),
+		}),
+		headlines: [
+			"{coach} is the AP Coach of the Year",
+			"Coach of the Year: {coach}, {team}",
+			"{team} went {record}, and the voters noticed the man on the sideline",
+		],
+		bodies: [
+			"{coach} took {team} to {record} in a season nobody outside the building expected, and the AP named him Coach of the Year.{sweep}",
+			"The AP Coach of the Year is {coach} of {team}, {record} in the {conf} in his year {years}.{sweep}",
+			"{team} was picked for the middle of the {conf} and finished {record}. {coach} is the AP Coach of the Year for it.{sweep}",
+		],
+	});
+
+	TPL({
 		kind: "champion's coach", group: "NCAA tournament", p: 0.6, when: 1.20,
 		find: (ctx) => {
 			const t = ctx.res.tourney;
@@ -3163,9 +3195,20 @@
 		if (hist.length > 2) {
 			// A change at No. 1 mid-season is always a story.
 			let prevTop = hist[0].ranks[0] && hist[0].ranks[0].team;
+			/* Two a season at most: the first change and the last. A 0.7
+			   roll per change ran to seven articles in a year the top spot
+			   kept moving, which is a story told once. */
+			const changes = [];
 			for (let w = 1; w < hist.length; w++) {
 				const top = hist[w].ranks[0] && hist[w].ranks[0].team;
-				if (top && prevTop && top !== prevTop && runs(0.7)) {
+				if (top && prevTop && top !== prevTop) changes.push(w);
+				prevTop = top || prevTop;
+			}
+			const tell = new Set(changes.length > 2 ? [changes[0], changes[changes.length - 1]] : changes);
+			prevTop = hist[0].ranks[0] && hist[0].ranks[0].team;
+			for (let w = 1; w < hist.length; w++) {
+				const top = hist[w].ranks[0] && hist[w].ranks[0].team;
+				if (top && prevTop && top !== prevTop && tell.has(w) && runs(0.85)) {
 					articles.push({
 						when: (w / (hist.length - 1)) * 0.98,
 						kind: "new number one",
@@ -3381,8 +3424,11 @@
 					when: 1.13, kind: "cinderella",
 					headline: fill(rng.pick(CINDERELLA_HEADS), { team: TM(c.team.name) }),
 					body: [T("No. " + c.seed + " "), TM(c.team.name),
-						T(" has won " + c.team.ncaaWins + " games in this tournament — " +
-							c.team.ncaaResult + ".")],
+						T(" has won " + c.team.ncaaWins + " games in this tournament" +
+							(c.team.ncaaResult
+								? ", and the run ended in the " +
+									String(c.team.ncaaResult).replace(/^lost in the /i, "").replace(/^won the /i, "") + "."
+								: "."))],
 				});
 			}
 

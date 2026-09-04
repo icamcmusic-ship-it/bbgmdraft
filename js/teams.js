@@ -510,7 +510,7 @@
 		});
 	}
 
-	function makeCoach(rng, level, prestige) {
+	function makeCoach(rng, level, prestige, used) {
 		// A better program usually has a longer-tenured coach, because a coach
 		// who wins keeps his job and a coach who wins is hired by better
 		// programs. The tail is what makes a first-year man at a blue blood
@@ -541,10 +541,21 @@
 		   than he is a 55-year-old, and a sixteen-year fixture is not 40, so
 		   age is drawn AROUND the tenure rather than independently of it —
 		   which also means it agrees with the situation the tenure produced. */
+		/* 34 plus tenure put the median head coach at forty and 26 of
+		   5,800 coach-seasons past the retirement age, so nobody ever
+		   retired. The real median is about fifty with a real cohort in
+		   its sixties. */
 		const age = clamp(Math.round(
-			34 + tenure + rng.normal(0, 5.5)), 30, 74);
+			44 + 0.8 * tenure + rng.normal(0, 7)), 31, 72);
+		let name = rng.pick(COACH_FIRST) + " " + rng.pick(COACH_LAST);
+		/* Two programs with the same head coach in one season: 364 draws
+		   from 12,672 names collide about five times a year. */
+		for (let guard = 0; used && used.has(name) && guard < 12; guard++) {
+			name = rng.pick(COACH_FIRST) + " " + rng.pick(COACH_LAST);
+		}
+		if (used) used.add(name);
 		return {
-			name: rng.pick(COACH_FIRST) + " " + rng.pick(COACH_LAST),
+			name,
 			tenure,
 			age,
 			situation,
@@ -720,6 +731,7 @@
 		const confAt = (n) => map.confOf[n] || C.conferenceOf(n) || "Independent";
 		teams.__realignment = map.moves;
 		const carry = (cfg && cfg.carryOver) || null;
+		const coachNames = new Set();
 		for (const name of C.names.concat(extra)) {
 			const trng = rng.child("prog:" + name);
 			let level = programLevel(name, trng, confStrength[confAt(name)]);
@@ -805,7 +817,7 @@
 				coach.formAdj = sit.form;
 				coach.carried = true;
 			} else {
-				coach = makeCoach(trng.child("coach"), level, C.prestige(name));
+				coach = makeCoach(trng.child("coach"), level, C.prestige(name), coachNames);
 				if (kept && kept.fired) {
 					// The replacement hire: always a first-year man, and the
 					// team page can say whom he replaced.
@@ -1040,8 +1052,12 @@
 		/* Capped at 78 possessions: the fastest D-I team in the modern era
 		   sits near 76, and the class-level pace jitter plus a run-and-gun
 		   style could stack to 82, which is a game nobody has played. */
-		const pace = clamp((cfg.pace || 68) + (cfg.scoringEnv || 0) * 1.6, 58, 78);
-		const total = clamp(pace * 2.06 + rng.normal(0, 9), 92, 190);
+		const ownPace = Number.isFinite(A.scorePace) ? A.scorePace
+			: Number.isFinite(B.scorePace) ? B.scorePace : null;
+		const pace = ownPace !== null
+			? ownPace
+			: clamp((cfg.pace || 68) + (cfg.scoringEnv || 0) * 1.6, 58, 78);
+		const total = clamp(pace * 2.06 + rng.normal(0, 9), 92, ownPace !== null ? 260 : 190);
 		let a = Math.round((total + margin) / 2);
 		let b = Math.round((total - margin) / 2);
 		let ot = 0;
@@ -1144,7 +1160,10 @@
 	function pairUp(rng, pool, target, filterFn, onGame, maxMeet) {
 		if (pool.length < 2) return;
 		const need = new Map();
-		for (const t of pool) need.set(t, target);
+		// `target` is a number, or a function of the team when the pool's
+		// members arrive with different amounts of schedule already played.
+		const targetOf = typeof target === "function" ? target : () => target;
+		for (const t of pool) need.set(t, targetOf(t));
 		/* How often the same pair may meet. pairUp guaranteed every team the
 		   right NUMBER of games and nothing about their spread, so the same
 		   two teams could meet four times while another pair never met — and
@@ -1157,12 +1176,15 @@
 		const meetings = (a, b) => met.get(pairKey(a, b)) || 0;
 		// An odd (teams x target) product cannot be split into pairs; drop one
 		// game from a random team so the rest come out exact.
-		if ((pool.length * target) % 2 === 1) {
-			const victim = pool[Math.floor(rng.random() * pool.length)];
-			need.set(victim, target - 1);
+		let totalNeed = 0;
+		for (const t of pool) totalNeed += need.get(t);
+		if (totalNeed % 2 === 1) {
+			const victims = pool.filter((t) => need.get(t) > 0);
+			const victim = victims[Math.floor(rng.random() * victims.length)];
+			if (victim) need.set(victim, need.get(victim) - 1);
 		}
 		let guard = 0;
-		const maxGuard = pool.length * target * 8 + 2000;
+		const maxGuard = totalNeed * 8 + 2000;
 		while (guard++ < maxGuard) {
 			// Always serve the neediest team first. That keeps the remaining
 			// need spread evenly instead of stranding one team at the end.
@@ -1319,16 +1341,25 @@
 			   said something else. */
 			const month = rng.pick(["January", "February"]);
 			const who = t.coach && t.coach.name ? t.coach.name : "its head coach";
+			const when = month === "January" ? rng.uniform(0.46, 0.65) : rng.uniform(0.68, 0.87);
+			/* The record ON THAT DATE. It used to print the end-of-season
+			   record for a January firing: "fired in January at 8-23". */
+			let w = 0;
+			let l = 0;
+			for (const g of t.log || []) {
+				if (g.stage && g.stage !== "reg") continue;
+				if ((g.when || 0) > when) continue;
+				if (g.won) w++; else l++;
+			}
+			const rec = w + "-" + l;
 			add("coaching change", rng.pick([
-				t.name + " fired " + who + " in " + month + " at " + t.w + "-" + t.l,
-				t.name + " and " + who + " parted ways in " + month + ", with the team " +
-					t.w + "-" + t.l,
+				t.name + " fired " + who + " in " + month + " at " + rec,
+				t.name + " and " + who + " parted ways in " + month + ", with the team " + rec,
 				who + " coached his last game at " + t.name + " in " + month + "; the " +
-					"record was " + t.w + "-" + t.l,
+					"record was " + rec,
 				t.name + " made the change in " + month + " rather than waiting for " +
-					"April, which at " + t.w + "-" + t.l + " surprised nobody",
-			]), month === "January" ? rng.uniform(0.46, 0.65) : rng.uniform(0.68, 0.87),
-				[t.name]);
+					"April, which at " + rec + " surprised nobody",
+			]), when, [t.name]);
 		}
 
 		// A blowout worth naming, because a 40-point game is a fact about a
@@ -1376,9 +1407,21 @@
 			for (let i = 0; i < 8 && b === a; i++) b = r.pick(all);
 			return [a, b];
 		};
+		/* A game that was actually played, so "the last call in A's win over
+		   B" names a game the log holds. The old draw took two random
+		   programs, and 21 of 22 such stories were about a meeting that
+		   never happened. Returns {winner, loser, host, visitor, g}. */
+		const realGame = (r) => {
+			const gm = r.pick(games);
+			const host = gm.g.home > 0 ? gm.winner : gm.g.home < 0 ? gm.loser : null;
+			const visitor = host === gm.winner ? gm.loser : host === gm.loser ? gm.winner : null;
+			return { winner: gm.winner, loser: gm.loser, host, visitor, g: gm.g };
+		};
 		const flavor = [
 			(r) => {
-				const [t, host] = twoTeams(r);
+				const gm = realGame(r);
+				const host = gm.host || gm.winner;
+				const t = gm.host ? gm.visitor : gm.loser;
 				if (t === host) return null;
 				const cause = r.pick(["a snowstorm", "a frozen floor",
 					"an arena roof leak", "a travel failure", "an ice storm",
@@ -1406,7 +1449,9 @@
 				]), [t.name]];
 			},
 			(r) => {
-				const [a, b] = twoTeams(r);
+				const gm = realGame(r);
+				const a = gm.winner;
+				const b = gm.loser;
 				if (a === b) return null;
 				return ["altercation", r.pick([
 					a.name + " and " + b.name + " cleared the benches with four minutes left",
@@ -1417,8 +1462,24 @@
 				]), [a.name, b.name]];
 			},
 			(r) => {
-				const t = r.pick(ranked.slice(0, 40));
-				const n = r.int(1, 3);
+				/* A real eight-day stretch against ranked opponents, read off
+				   the log, with the record it actually produced. */
+				const rankedSet = new Set(ranked.slice(0, 25).map((x) => x.name));
+				const cands = [];
+				for (const t of ranked.slice(0, 80)) {
+					const log = (t.log || []).filter((g) => g.stage === "reg")
+						.slice().sort((x, y) => x.when - y.when);
+					for (let i = 0; i + 2 < log.length; i++) {
+						const win = log.slice(i, i + 3);
+						if (win[2].when - win[0].when > 0.03) continue;
+						if (!win.every((g) => rankedSet.has(g.opp))) continue;
+						cands.push({ t, n: win.filter((g) => g.won).length });
+					}
+				}
+				if (!cands.length) return null;
+				const pick = r.pick(cands);
+				const t = pick.t;
+				const n = pick.n;
 				return ["storm", r.pick([
 					t.name + " played three ranked opponents in eight days and won " +
 						n + " of them",
@@ -1441,7 +1502,9 @@
 				]), [t.name]];
 			},
 			(r) => {
-				const [a, b] = twoTeams(r);
+				const gm = realGame(r);
+				const a = gm.winner;
+				const b = gm.loser;
 				if (a === b) return null;
 				return ["officiating", r.pick([
 					"The last call in " + a.name + "'s win over " + b.name +
@@ -1500,9 +1563,13 @@
 
 		for (const conf of Object.keys(confPools)) {
 			const pool = confPools[conf];
-			// Cap the same conference pair at two meetings, like a real
-			// double-round-robin slate at this league size.
-			pairUp(rng, pool, CONF_GAMES, null, (A, B) => {
+			/* A league's slate is its size: eighteen games in a six-team
+			   league is every rival four times. Two round robins, floored
+			   at fourteen (the Ivy, the MEAC) and capped at twenty; the
+			   difference from the standard slate is made up out of
+			   conference below. */
+			const n = clamp(2 * (pool.length - 1), 14, 20);
+			pairUp(rng, pool, n, null, (A, B) => {
 				play(A, B, rng.random() < 0.5 ? 1 : -1, true);
 			}, 2);
 		}
@@ -1514,7 +1581,10 @@
 		// makes up the difference in the top-up loop below, which reads the
 		// live t.games directly. (An earlier draft built a shortfall map here
 		// that nothing ever read.)
-		pairUp(rng, all, NON_CONF_GAMES,
+		/* Each team's non-conference slate is whatever its league left of
+		   the standard 31: fifteen games for an Ivy team, eleven for a
+		   twenty-game league. */
+		pairUp(rng, all, (t) => Math.max(0, CONF_GAMES + NON_CONF_GAMES - t.games),
 			(a, b, roll) => a.conf !== b.conf &&
 				roll < Math.exp(-Math.abs(a.rating - b.rating) / 24) + 0.06,
 			(A, B) => {
@@ -1596,10 +1666,22 @@
 	   derives its pools from here, so all three agree on where a team plays. */
 	function conferencePools(teams) {
 		const pools = {};
-		for (const conf of Object.keys(C.byConference)) {
-			pools[conf] = C.byConference[conf].map((n) => teams[n]).filter(Boolean);
+		for (const conf of Object.keys(C.byConference)) pools[conf] = [];
+		/* By the team's OWN conference, which realignment may have moved.
+		   This used to read the static table, so a program that moved to the
+		   ACC played eighteen games in the American, won the American's
+		   tournament and took its auto bid while every label said ACC — and
+		   the ACC then had two tournament champions. */
+		for (const name of Object.keys(teams)) {
+			if (name.indexOf("__") === 0) continue;
+			const t = teams[name];
+			if (!t || !C.COLLEGES[t.name]) continue;
+			const conf = t.conf && pools[t.conf] ? t.conf : C.conferenceOf(t.name);
+			if (!pools[conf]) pools[conf] = [];
+			pools[conf].push(t);
 		}
-		const extra = Object.values(teams).filter((t) => !C.COLLEGES[t.name]);
+		for (const conf of Object.keys(pools)) if (!pools[conf].length) delete pools[conf];
+		const extra = Object.values(teams).filter((t) => t && t.name && !C.COLLEGES[t.name]);
 		if (extra.length >= 2) {
 			for (const t of extra) t.conf = "Independent";
 			pools.Independent = extra;

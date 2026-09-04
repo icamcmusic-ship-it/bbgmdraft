@@ -219,9 +219,13 @@
 		if (!players.length || !league.gp) return out;
 
 		/* --- on/off --------------------------------------------------- */
+		// Per team: a field that mixes forty- and forty-eight-minute
+		// leagues normalizes each on its own game length.
+		const gmOf = (t) => (t.stats && t.stats.gameMinutes) || gameMinutes;
 		for (let i = 0; i < players.length; i++) {
 			const ps = players[i].p.stats;
 			const t = players[i].t.stats;
+			const gameMinutes = gmOf(players[i].t);
 			const tminAvg = t.min / numPlayersOnCourt;
 			const onPerMin = ps.pm / (ps.min + 1e-6);
 			const offMin = tminAvg - ps.min;
@@ -263,7 +267,9 @@
 				aPER[i] = fix(paceAdj * uPER);
 				leagueAPER += aPER[i] * ps.min;
 			}
-			leagueAPER /= league.gp * numPlayersOnCourt * gameMinutes;
+			let leagueMin = 0;
+			for (const t of teams) leagueMin += (t.stats.gp || 0) * gmOf(t);
+			leagueAPER /= (leagueMin || league.gp * gameMinutes) * numPlayersOnCourt;
 			for (let i = 0; i < players.length; i++) {
 				const per = leagueAPER > 0 ? aPER[i] * (15 / leagueAPER) : 0;
 				out[i].per = fix(per);
@@ -391,7 +397,7 @@
 				const tsa = ps.fga + ps.fta * 0.44;
 				const ptsTsa = ps.pts / (tsa + 1e-6);
 				adjPts[i] = (ptsTsa - ta.ptsTSA + 1) * tsa;
-				playerPoss[i] = 1e-6 + (ps.min * t.pace) / gameMinutes;
+				playerPoss[i] = 1e-6 + (ps.min * t.pace) / gmOf(players[i].t);
 				threshPts[i] = tsa * (ptsTsa - (ta.ptsTSA - 0.33));
 				ta.teamThresh += threshPts[i];
 			}
