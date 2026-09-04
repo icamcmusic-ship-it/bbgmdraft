@@ -4585,6 +4585,13 @@
 		return AW.scopeAwards(list, scope, confs);
 	}
 
+	/* Whether the run's note template carries a given line. */
+	function noteTemplateHas(result, key) {
+		const cfg = result && result.cfg;
+		const want = cfg && Array.isArray(cfg.noteLines) ? cfg.noteLines : DEFAULT_NOTE_LINES;
+		return want.indexOf(key) !== -1;
+	}
+
 	/* Produce the modified BBGM draft class file.
 
 	   `opts` is the §8.13 opt-in surface — every flag off writes exactly the
@@ -4593,6 +4600,9 @@
 	     prior:  simulated earlier seasons as additional stats rows
 	     awards: every honor as {season, type}, concatenated (a re-imported
 	             file may already carry awards)
+	     honorsInNote: write the Honors: line into the note even when the
+	             note template left it out (the Import players route, where
+	             the note is the only place honors survive)
 	     highs:  game-log season highs and double-double counts on the row
 
 	   IMPORTANT: BBGM's own Import -> Draft class tool (handleUploadedDraftClass
@@ -4815,17 +4825,29 @@
 				   guarded by noteBool. So when a player's honors are being
 				   exported, they are also guaranteed a line in the note —
 				   which is the only way an import that keeps his statline can
-				   also tell you he was an All-American. The note template can
-				   drop the honors line (see NOTE_LINES); this does not. */
+				   also tell you he was an All-American. On THAT route the note
+				   template's honors line is overridden (opts.honorsInNote,
+				   set by exportPlayersFile). */
 				/* Same reasoning one level down: a note carried in from a
 				   previous export holds the PREVIOUS run's honors line, so it
 				   is replaced rather than skipped. p.note is built fresh each
 				   run, so the only way a stale line survives is a template
 				   that omits the honors line while awards are being written —
 				   which is exactly the case the old guard silently kept. */
+				/* ...but only on the route that needs it. The class file
+				   (Draft -> Import) and the league merge both keep `awards`,
+				   so on those routes a note template with the honors line
+				   unticked means exactly that, and writing the line anyway
+				   put the honors in every note the user had asked to keep
+				   them out of. exportPlayersFile sets honorsInNote because
+				   there the note is the only place they survive. The
+				   template's own line is still rewritten to the scope, so a
+				   "major honors only" export does not say otherwise in the
+				   note. */
+				const templateHasHonors = noteTemplateHas(result, "awards");
 				out.note = String(out.note || "")
 					.split("\n").filter((l) => l.indexOf("Honors:") !== 0).join("\n");
-				if (scoped.length) {
+				if (scoped.length && (opts.honorsInNote || templateHasHonors)) {
 					out.note = (out.note ? out.note + "\n" : "") +
 						"Honors: " + scoped.join("; ");
 				}
@@ -5063,7 +5085,9 @@
 	];
 
 	function exportPlayersFile(result, opts) {
-		const full = exportFile(result, opts);
+		/* `awards` does not survive Tools -> Import players, so the honors go
+		   into the note here whatever the note template says. */
+		const full = exportFile(result, Object.assign({}, opts, { honorsInNote: true }));
 		const players = full.players.map((p) => {
 			const out = JSON.parse(JSON.stringify(p));
 			for (const key of PLAYERS_FILE_STRIP) delete out[key];

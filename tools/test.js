@@ -3757,6 +3757,23 @@ console.log("\nAudit regressions (September 2026)");
 			ok("a note template with no honors line still gets one when awards export",
 				bareHonored.length > 0 &&
 				bareHonored.every((x) => /^Honors: /m.test(String(x.note || ""))));
+			/* The class file and the league merge both keep `awards`, so on
+			   those routes an unticked honors line means what it says: the
+			   honors used to land in every note anyway. */
+			const bareClass = global.Engine.exportFile(bare, { awards: true });
+			ok("the class file respects a template with the honors line off",
+				bareClass.players.some((x) => x.awards && x.awards.length) &&
+				bareClass.players.every((x) => !/^Honors: /m.test(String(x.note || ""))));
+			const bareMerge = global.Engine.mergeIntoLeague(bare, {
+				players: [], startingSeason: bare.season,
+			}, { awards: true });
+			ok("and so does the league merge",
+				bareMerge.file.players.some((x) => x.awards && x.awards.length) &&
+				bareMerge.file.players.every((x) => !/^Honors: /m.test(String(x.note || ""))));
+			ok("while a template WITH the honors line still writes it into the class file",
+				honored.length > 0 && global.Engine.exportFile(res, { awards: true }).players
+					.filter((x) => x.awards && x.awards.length)
+					.every((x) => /^Honors: /m.test(String(x.note || ""))));
 		}
 
 		/* Merging the class into a whole league file, which is the only route
