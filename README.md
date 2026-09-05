@@ -1022,7 +1022,7 @@ tool writes evaluate identically inside the game.
 ```
 node tools/validate.js [nSeeds] [--json]   # calibration bands
 node tools/validate.js 20 --fixture=realistic   # the default fixture only, twice as fast
-node tools/test.js [--update-golden]       # regression tests
+node tools/test.js [--update-golden]       # regression tests, tools/tests/*.js included
 node tools/rolefit.js [nSeeds]             # re-fit the derived role-usage model
 node tools/bench.js [reps] [--md|--json]   # staged-pipeline timings
 node tools/uismoke.js                      # headless-browser smoke test
@@ -1114,6 +1114,14 @@ and class years, number agreement ("1 triple-doubles" is a fault the text
 sweep now sees), a derived potential gap for a build that has no table entry,
 the injury axis, geography-aware realignment, the college aliases and the
 sample class.
+
+The second round of that audit is in **`tools/tests/`**, one file per area —
+`ratings`, `sim`, `awards`, `export`, `ui` — each exporting
+`function (ok, V)` and picked up by `test.js` by being on the disk. `test.js`
+had grown past four thousand lines with every pass appending to the same end
+of it, which is also how two people auditing at once collide on a file
+neither is really editing. A new area's checks are a new file; nothing has to
+be threaded through the harness to run them.
 
 `test.js` covers what the prose used to only claim: a golden-file hash of the
 exported JSON for three configurations, seed→output determinism, the 420/420
@@ -1315,10 +1323,546 @@ js/app.js           state, settings, editing, persistence, export
 tools/validate.js   calibration bands against the empirical anchors
 tools/rolefit.js    fits the derived role-usage model and reports per-build residuals
 tools/test.js       golden-file, round-trip, determinism and property tests
+tools/tests/*.js    one suite per area, loaded by test.js off the disk
 tools/uismoke.js    headless-browser smoke test
 tools/bench.js      staged-pipeline timings, for the performance table
 tools/golden.json   recorded output hashes
 ```
+
+## The audit pass of September 2026, second round
+
+Six areas were audited against the running tool rather than against the prose
+here — the build and trait layer, the season simulation and the advanced
+block, the awards and the paper, the file the game reads, the databases
+underneath all of it, and the page itself in a browser. What each one found,
+and what changed, in its own words.
+
+### Builds, traits and the pool
+
+A size anomaly used to change a prospect's height, re-solve his ratings and keep
+the build he already had, and every build in the table is gated on a height
+band. Measured over thirty classes, five of the six physical outliers ended
+outside their own build's gate: a Shot-Blocking Anchor (min hgt 76) at 5'8", a
+Movement Shooter (max 56) at 7'4". The label in the table and the rating vector
+beside it were describing different players, and everything downstream that
+reads the build — the potential model, the role-usage term, the trait gates —
+was looking at a build that prospect could not have had. The anomaly now redraws
+the archetype when the new height puts the old one out of band, from the same
+pool and with the same weights the build phase used; a build the user locked is
+left alone. Zero of the outliers in twenty-four classes are off-band now.
+
+Two silent NaN paths are closed. A source file whose last ratings row carried no
+`ovr` or `pot` made the ovr-to-potential gap NaN, and that NaN reached
+`ratings.pot`, `draft.pot` and the displayed potential of every player in the
+class — `validateLeagueFile` checked the fifteen rating keys and had never
+checked those two. Overall is now recomputed from the ratings when it is
+missing, potential defaults to ten points of room, and the load warns that the
+gap those players were meant to carry is gone. Separately, a non-numeric
+`archetypeDiversity` (a string out of a URL or localStorage) turned every
+archetype weight into NaN, and the weighted draw then handed back the first
+eligible build — every player in the class came out Balanced, with no error
+anywhere. It is coerced now.
+
+The normalizer that makes a build ovr-neutral used to reverse the sign of small
+authored boosts: Matchup-Zone Defender's `stre +4` became -2.25, Wing Stopper's
+`+6` became 0, Point-of-Attack Menace's `+6` became -0.25. The editor's tooltip
+reads the authored vector, so the one place a user can see what a build is FOR
+disagreed with what the solver did to it. The subtraction now runs in passes: a
+rating authored positive is floored at zero rather than pushed through it, the
+ovr the floor leaves unspent comes out of the ratings the build did not author
+positive, and it repeats until the vector is neutral again. Sign flips across
+the whole table went from four to zero, the worst residual push is 0.10 against
+a 0.35 tolerance, and the usage-composite protection the normalizer already had
+is untouched.
+
+Three things about the class pool were not what the label said. The pool size
+was a lie by two to four every class — the rare slot, the three guaranteed
+centre builds and the height-band probes were all added on TOP of the number,
+so "19 builds per class" realized 20-23 and the one flavor whose whole identity
+is a small pool (three-and-D only, which asks for 8) got 10-12. The guarantees
+now come out of the budget, and the pool is exactly the size asked for; the
+default moved from 19 to 21 so the realized size is what it always was. The rare
+slot filtered on the authored weight and so read straight past a build the user
+had zeroed — one made the pool in 23 of 40 classes, spending the slot meant for
+a rare build on one that had been switched off; it filters on the effective
+weight now, and 0 of 40. And the guaranteed slots ignored the pool memory
+entirely, because a guarantee is not a weighted draw: Shot-Blocking Anchor sat
+in 28-31 of 60 consecutive pools at every memory setting. The guarantees now
+rotate away from the last class's builds, and consecutive-class pool overlap
+fell from 0.10/0.08/0.06 to 0.09/0.05/0.03 at memory 0/0.6/1.
+
+Variety, measured over 2,100 players in thirty classes. A build with no height
+gate is eligible for everybody, so once it made the pool it owned the class:
+Athletic Freak turned up 50 times and Raw Project 43, while a gated build that
+made a pool drew 0 of its 47 eligible players. A class now counts its own draws
+and halves a build's weight past six of them — the largest single build count
+fell to 40 — and inside the top ten a build already used up there is quartered
+per use, which took classes with a duplicated build in the top five from 12 in
+30 to 5. Five builds were never drawn at all across those thirty classes; three
+are now. On the trait side, four heavy rows were taking the one-per-group rule
+as a clear run at every player: "clean medical" landed on 10.1% of all
+prospects, two and a half times the median trait. Capping the drawn weight at
+1.6 takes that to 7.3% and the max/median ratio from 2.52 to 1.76. Drawing the
+group first and the trait inside it was the other candidate and measured worse —
+rebounding has four traits and three are height-gated, so a flat group draw
+handed "chases his own miss" one draw in twelve and 307 appearances. Flavors can
+now tilt the trait groups as well as the build mix (`traits: {group: mult}` on
+nine of the twenty-nine): the year everybody got hurt goes from 21% of the class
+carrying a medical trait to 40%.
+
+Traits had prerequisites about height and class year and none at all about the
+build's own shape, so "genuinely strong" was drawable on nineteen builds
+authoring stre -8 or worse (Toughness Question at -22), "explosive first step"
+on thirty-eight with spd -8 or worse, "chronic knee" on Iron Man, and
+"maxed-out frame" on a senior built as a Frame to Fill Out. They are gated on
+the authored offsets and on the build's injury multiplier now, and the
+undocumented `minInj`/`maxInj` fields are written down in the header where the
+rest of the prerequisites are.
+
+Finally, four smaller things. `solveToOvr` and `ovrRange` read only the KEYS of
+the pinned vector and never its values, so asking for tp 100 came back with tp
+45 for every caller that had not already written the pin into the base. Pinning
+all fifteen ratings replaced the class's target overall with whatever those
+ratings came to, and said nothing; it reports now. The room-scaling that keeps a
+build's negative offsets off the 1 floor only ever bit at specialization 1,
+where it was measured — at 3 the cut is three times the size and the room is the
+same, and 6.2% of a class's ratings sat on exactly 1, a vector with no shape
+left in it. The scaling now carries the whole cut and the solver's downward
+shift eases onto the floor over its last ten points instead of driving through
+it; the floor share at specialization 3 is 1.9% and at 1 it is 0.09%, and 35% of
+a 70-man class's ratings move by an average of 1.2 points. Two guard builds were
+tagged in a way their own gates contradicted (Sharpshooter runs to 6'8" and
+Slasher to 6'9", and neither could be reached by a wing-leaning flavor); both
+carry `wing` now.
+
+One thing was left for the UI: `archetypePool` was clamped at 60 against a
+145-build table, so the documented "a size at or above the table turns the pool
+off" could not be said. The clamp is the table size now, but the slider in
+index.html still stops at 40.
+
+### The season, the scoreboard and the advanced block
+
+#### A team's points existed three times and none of them agreed
+
+The stat pool summed its rotation to one number, `teamBox` summed the same
+lines to a second, and js/teams.js had already played thirty-one games whose
+final scores said a third. Over 3,640 team-seasons the box said 73.4 points and
+the season the team actually played said 70.6; 1,231 programs differed by more
+than five points and the worst was off by twenty-one, which is a box score and a
+results page describing two different teams. Worse, everything that is a
+DIFFERENCE between the two inherited the gap: net rating, plus/minus, on/off and
+both team ratings all read the model's offense against the scoreboard's defense,
+so the country netted +3.6 points per hundred possessions on a true margin of
+-0.19.
+
+Two things were wrong. The scoreboard multiplied pace by a hardcoded 2.06
+whatever era was selected — one number for a modern game anchored at 73.6 points
+on 67.4 possessions (2.184 a possession pair) and for 2009-2021 at 70.0 on 68.5
+(2.044) — so switching era moved the stat model and left the scoreboard where it
+was, and both eras scored about 70. It reads the era's own anchor now. And the
+stat pool answered to nothing outside itself; after reconciliation it is scaled
+by one factor per team so the rotation's points are the points the team actually
+scored. One factor, not a per-player fit: the SHARES are the stat model's answer
+and were never in question, only the total. Measured after: the box and the
+scoreboard agree to 0.05 points on average, three teams of 2,184 differ by more
+than five, the two eras score 75.4 and 70.6 against their own anchors, and the
+country's mean net rating is -0.36 against a true margin of -0.19.
+
+#### Box plus/minus, and an on/off that reached +295
+
+The exported advanced block was never banded, and it showed. On/off ran from
+-217 to +295 points per hundred possessions with a 99th percentile of +117,
+against a real college range of +10 to +20 and an extreme near +25.
+
+Three separate faults stacked. The impact term added to a player's plus/minus
+was not zero-sum over the rotation — five men are on the floor for every point
+of a team's margin, so a term that is positive for good players and negative for
+nobody hands the team more margin than it won, and BBGM's on/off reads the
+surplus off the off-court minutes, of which a starter has about nine a night.
+The term was also on a per-GAME scale in a formula that amplifies by
+1/(share × (1-share)) — six times for a thirty-minute starter and seventeen for
+a thirty-seven-minute one — so five points a game of impact is fifty points of
+on/off. And an earlier season's opponent column was built from the FIELD's
+average points rather than from the margin that season was played to, so a prior
+year's on/off was measured against a team nobody played. The impact term is now
+defined per hundred possessions, bounded there, and centred on the rotation's own
+production; the per-night plus/minus noise is recentred so the SEASON number is
+exactly the margin he was on the floor for plus his impact; and a prior season
+carries its own margin. On/off now runs -18 to +45 with a 99th percentile of
++26, and per-game plus/minus tops out at +24 rather than +30. EWA was also
+normalizing every club on the run's nominal forty minutes instead of its own, so
+a G League season's value over replacement was out by as much as 1.6 wins; the
+other identities were already exact (VORP to 1e-16) and win shares sum to 1.04
+times the wins there were.
+
+#### Walls, blocks, and where a game is played
+
+A hard ceiling does not remove the players who would have gone past it, it
+stacks them on it: 245 lines of 33,617 finished with exactly 3.90 personal
+fouls, 639 sat to the decimal on the per-40 rebounding cap and 319 on the
+blocked-shot share cap. Every one of those ceilings bends now — above a knee the
+curve saturates toward the limit instead of arriving at it — and the largest
+group sharing one value in the top decile of any of them is under 0.3%. Blocks
+had a second problem: the national leader averaged 5.6 a game against a real
+3.6, with 110 lines over 4.5. The exponent that produces the big-versus-guard
+separation stays where it was (flattening it to 2.5 dropped the ratio to 3.7 and
+failed the band that exists to protect it); instead the share cap was softened to
+0.52 and an absolute per-40 ceiling was added, as rebounds and assists already
+had. The leader now averages 4.1-4.4 and nothing clears 4.5.
+
+Home games ran from 3 to 27 in a 31-game season, against a real 13 to 19,
+because the higher-prestige side always hosted a non-conference game and a
+conference game flipped a coin with no return leg. Three rules replace them: a
+second meeting is the return leg and is played at the other building, a single
+meeting goes to whoever has fewer home dates, and a non-conference game is a
+negotiation whose odds come from the prestige gap with about one in seven played
+somewhere neutral. Home games now run 8 to 21 and 99% of teams are within a game
+of half their conference slate. Conference tournaments no longer cap the field at
+twelve — six ACC and Big Ten teams used to finish a season without one — and the
+seeding tie-break reads head-to-head and the conference record instead of the
+sim's hidden true rating, which decided 1,062 ties over ten seasons.
+
+#### The AP electorate was reading the answer key
+
+This file's own header says the poll votes on observables, and three of its six
+features read `g.quality`, which js/teams.js stamps on every log row straight off
+the opponent's hidden rating. Strength of schedule, quality wins and bad losses
+all come off the NET ranking `computeRankings` has already derived from the game
+log. A poll recomputed with every `quality` field blanked now keeps 24 of its
+top 25; it kept 16 before. Two smaller ones alongside it: a neutral-court game
+was counted as a road win, and every filler line in the country carried
+`astdRate: NaN` (66,243 of them over twenty classes, exported as null) because
+the composite it reads was never defined for a filler.
+
+Conference-tournament games are still excluded from the resume, and that is now
+a deliberate choice rather than an oversight: adding them was measured and put
+five seeds past twelve seeds 81% of the time against a real 64% and the harness's
+78% ceiling. Championship week is played on neutral floors against the rest of
+your own league, and folding it into a NET built for a 31-game schedule sharpens
+the seed line rather than describing it.
+
+#### Twenty seasons that were too alike at the bottom and too chaotic at the top
+
+One volatility of 7 for all 364 programs, plus a 9% chance of a down year drawn
+on top, was too much for the top of the sport and not enough for the bottom:
+Kentucky missed the tournament in three seasons of twenty while the same program
+won a one-bid league in eight to ten of them. That is backwards on both ends, and
+for a real reason — a blue blood's floor is structural, and a one-bid league is
+two rosters wide. Volatility now runs from 4 at the top of the sport to 10 at the
+bottom and a down year is rarer for a program with everything to lose: Kentucky
+misses two of twenty, and the most frequent one-bid champion won seven rather
+than ten. The preseason ballot was a table — it read reputation and this season's
+level, both stable by design, and voted the same program No. 1 in seven seasons
+of twenty — so it now carries October's story as well, a draw that moves the
+ballot and nothing else, weighted by how far up the ballot the program already
+is — a preseason story is about a contender, and a flat draw moved teams into
+and out of the top 25 rather than around inside it. Eight different programs are
+preseason No. 1 over twenty seasons rather than six.
+
+The draw is deliberately much smaller than variety alone would want, and that is
+the one place this whole pass had to give something back. A ballot is judged on
+whether it is any good: with no hype at all, 71.7% of preseason top-25 teams
+reach the tournament, and a wide enough draw to make thirteen seasons of twenty
+have a different No. 1 takes that to 63.7% — a noisier poll rather than a more
+interesting one, and past the 65% the harness requires. At the sigma actually
+shipped it is 68%. The point is WHICH blue blood is No. 1, not whether the
+ballot means anything.
+
+The one target not reached is the final top 25's season-to-season overlap, which
+sits at 0.18 against a real 0.45. It is not the programs: setting the level draw
+to zero entirely only lifts it to 0.22, because the ceiling is set by a 31-game
+schedule with eleven points of per-game margin noise and by the conference drift,
+and because twenty seeds of this tool are twenty unrelated universes rather than
+twenty consecutive seasons of one.
+
+Finally, a season's mid-season events were a fixed budget of seven, topped up
+from a flavor pool, so every season had exactly seven things happen in it and
+each KIND of thing happened in twelve to seventeen seasons of twenty. The budget
+is a Poisson draw now (the slider is its mean, with a floor of four — a Division
+I season is never empty) and the gates on the result-driven kinds were loosened
+to match: 5.7 events a season, the most common kind fires in fifteen seasons of
+twenty rather than seventeen, and the rest are spread from seven to fourteen
+instead of bunched at twelve to sixteen.
+
+### Awards, the paper and the draft board
+
+The awards pass, the paper and the draft board carried a set of faults that a
+reader could catch and the harness could not. The largest was structural: **a
+draft class could not win a national defensive award.** The unseen field —
+every returning rotation player in Division I — has no rating vector, so its
+defensive score was re-derived from event rates, and the two halves were not on
+the same scale. The composite term of a prospect's defensive score runs mean
+-1.7 with a maximum of +2.2 (three bounded composites cannot go far); the
+rate-derived stand-in ran mean +0.4 with a maximum of +8.9, and the stat model
+hands a filler event rates it never hands a prospect (6.0 blocks a game against
+a prospect maximum of 2.9). That was a systematic two-point gift to four
+thousand players plus a tail four times as long, and over fifteen classes the
+Naismith DPOY, the NABC DPOY and the Lefty Driesell went to the field **45 times
+out of 45**. The field is now held to the envelope the model produces for the
+players it rates in full: each defensive rate and the defensive rating are
+capped at the class's own maximum, and the rate-derived term is mapped onto the
+mean and spread of the real one. Ordering inside the field is untouched — a
+better defender is still a better defender — only the scale it is compared on.
+Over forty seeds the class now wins a national defensive trophy in **15 of 40
+classes** and takes some national defensive honor in **33 of 40**, and the field
+still wins most of them, which is right: it is thirty times the population.
+
+Three stories were printing things the model did not believe. The "sweeps the
+hardware" article filtered on `/Player of the Year/`, which is a rule about the
+words and not about the trophies — "WCC Player of the Year" matches it — so it
+fired in fifteen classes of fifteen and in nine of them the man it crowned held
+no national trophy at all ("took 1 national honors"), in a paper that was
+simultaneously running the field-honors story naming whoever actually won. It
+now reads the named national trophies from `js/awards.js`, demands two of them
+before it says "sweeps", pluralizes, and stands down when a returning player
+took one. The conference-player-of-the-year story required an NCAA player, since
+a prospect in prep ball holds an award of the same shape and the template was
+rendering "Prep / Postgrad" as a clickable team. And the mock-draft and
+stock-movement stories were reading a board the draft-day events had already
+reordered: `boardRank` and `stockMove` were assigned after the events ran, so a
+late reach who moved up 22 places on the night printed as "has climbed 22 spots
+from his preseason ranking", and eight of fifty-nine events had a rise story
+sitting on a faller's number with the scouting note's Board line saying "down 3"
+underneath it. The ranking is now assigned on the pre-event board — which is
+what a mock draft is — and where a man was actually taken is a separate
+`draftSlot` that the draft-night stories and the note read. Each event's
+sentence is also measured from the board slot rather than from the half-shuffled
+intermediate position, which was off by one to three spots against the rank
+printed beside it.
+
+Smaller corrections around the honors: a pro MVP is now on his league's first
+team (it was an `if/else`, so the one certain first-teamer in each league was
+the only man left off it — 40 of them); a league whose own honors list opens
+with a player of the year no longer also mints an MVP for the same season (nine
+classes in fifteen had a man holding both); the domestic cup runs only for
+leagues that are actually professional, ending the "Division II Cup Winner" and
+"Prep / Postgrad Cup Winner"; a "newcomer" has to have arrived from somewhere,
+so the walk-on who won a scholarship is no longer All-Conference Newcomer at the
+school he never left; and the conference player-of-the-year races lost to the
+field are recorded rather than silently dropped, so the paper can say which
+returning senior beat the class to the A-10.
+
+The prose fixes are mostly one helper each. `Text` gained `ordinal()` — "1th
+season" and "3th game" were shipping — and its fault sweep now reads lowercase
+words after an article (that is how "a old-school disciplinarian coach" got out)
+and flags a bad ordinal, so neither can come back. The coaching-philosophy
+labels are model keys, and "neutral" is the do-nothing archetype: it was
+printing as "He is a neutral coach". They are mapped to readable adjectives now
+and the article in front of them goes through `Text`. An overtime body said the
+overtimes twice because the score text already carries "(3OT)". Four templates
+asserted history the tool does not simulate — eleven straight losses to ranked
+teams, a first bid in a programme's history, a decade without a second weekend —
+and now say what the model actually selected on. And the pre-draft calendar
+exists: everything past the bracket used to be clamped to "March", so 171
+articles a run — the lottery, the combine, the pro days, the draft itself —
+were filed from the wrong month.
+
+Against staleness, the thin template tails were the problem: three draft-day
+headlines covered four events a class ("The pick that made the room gasp" ran 23
+times) and the "new No. 1" body had exactly one template for 26 articles. The
+draft headlines are now keyed to what happened to the man — a slide, a workout
+riser, a trade-up, a reach — with six each, and the poll story reads the poll's
+own history ("had been No. 2 a week ago", "after three weeks"). The most-repeated
+headline template fell from 23 to 17 occurrences (1.4% to 1.0% of articles).
+`statBlurb`, which every scouting note opens on, had four branches and a
+fallback, so 53% of players got the identical true-shooting sentence; it now has
+seventeen shapes — the offensive glass, a real three-point season, assists
+against turnovers, free-throw volume, minutes, low usage and high efficiency —
+and the most common covers 12%. The quote pool reads the trait layer for the
+first time (a scout who has actually read the file talks about the motor, the
+medical or the release), and the paragraph the beat writers file has six
+openings rather than one.
+
+Eight new kinds run off facts the model already had and nothing printed: the
+Final Four Most Outstanding Player and the all-tournament team (the award was
+assigned and never mentioned), a career-milestone story off the earlier seasons,
+a conference player of the week off the game log, a coaching-record story, a
+transfer facing the school he left, the conference player-of-the-year race the
+class lost, a return from a long injury, and a prospect at a small programme
+beating a ranked team on his own. Over fifteen classes they fired 5, 11, 13, 7,
+11, 10, 12 and 3 times respectively. Finally the draft board reads two things it
+did not: a prospect's draft age — taken from his class year, because most source
+files carry 19 for everybody — so a senior and a freshman with the same ratings
+no longer tie; and only the honors a scout cares about, since 46% of an award
+list is team trophies and finalist tiers and a reserve on the national champion
+was collecting three or four points of draft stock for other people's rings.
+
+### Import, export and the merge
+
+The file a class is written into is the only part of this tool the game ever
+sees, and an audit of that path found nine ways a file could come out of here
+saying something the tool did not mean. The worst of them killed the run: every
+random stream and every editor lock is keyed off `Engine.playerKey`, which
+returned the pid whenever the pid was a number, so two rows carrying the same
+pid shared one key — the same build, the same college, the same lock — and the
+draft-day stream handed the second man events the first had already consumed,
+where `applyDraftEvents` died with "ev.say is not a function". `validateLeagueFile`
+had only warned about it. The key is now unique for the second and later
+occurrence of a pid (`4`, `4#2`), and unchanged for a well-formed file, so a
+class that was fine before keys exactly as it always did.
+
+Two things were wrong about what the file said. It dropped `version` from any
+source that lacked one, and BBGM reads a versionless file as a pre-versioning
+save: `augmentPartialPlayer` then recomputes every ratings row's `hgt` from the
+player's listed height and rewrites the ratings season and draft year, so a
+class solved to the exact rating arrived in the game as a different class.
+Everything written here now carries `LEAGUE_DATABASE_VERSION` (73), stated once
+in `js/bbgm.js` and stamped by both export routes and by the sample class. And
+the tool's own height map was a 66-to-90 span where BBGM's `heightToRating.ts`
+is 66-to-93. Every height derived from a rating was therefore short, and short
+by more the taller the player: across 560 prospects in files with no listed
+height the mean listed height moved from 6'5.5" to 6'6.9", the largest single
+correction was three inches, and the number of seven-footers went from 42 to
+102 — which is the population the archetype gates actually care about. The three
+places in the build phase that converted inches back into rating points used the
+same wrong span and now read one shared constant.
+
+A class exported for a draft the league has not reached yet was dated to the
+wrong year throughout. `result.season` is the file's `startingSeason` — the
+season the league was in — and for BBGM's own year-ahead exports (startingSeason
+2026, `draft.year` 2027 on every player) the export stamped 2026 on the ratings
+row, on every honor, on every college stats row and on `born.year`, so a
+prospect's final college season was labelled the year before the draft he was in.
+The merge already read the year off the players; the export does now too, and
+shifts every season it writes by the difference.
+
+Three fixes are about not saying more than the tool knows. The class file did
+not force `tid: -2`, and BBGM's draft import filters the uploaded file to
+UNDRAFTED before it reads anything else — a class pulled out of a league export
+by hand carried its rows' team tids and imported as zero players, with no error
+on either side. Numeric strings passed validation (`Number.isFinite(Number(v))`
+checked the value and then kept the raw object) and exported as `ovr: null`;
+every rating key, season, fuzz, `born.year`, `draft.year`, `hgt` and `weight` is
+now coerced with `Number()` where it is read and where it is written. And
+`hgt: -5`, `hgt: 120` and `weight: 0` all exported verbatim, because the only
+test on any of them was whether they were numbers: heights outside 58-96 inches,
+weights outside 120-400 and ratings outside 0-100 are warned about and clamped
+where they are read. The validator still never edits the file it is handed.
+
+The league merge overlaid the whole exported player onto the league's
+(`Object.assign({}, target, p)`), and a draft-class file is not a complete
+player: a file from an older run wrote its stale `value`, `contract`, `born`,
+`hgt`, `weight`, `injury`, `face` and `relatives` over the league's current
+ones, so a prospect the user had already edited in-game silently reverted. Only
+what this tool actually produces goes on top of him now — college, the class
+season's ratings row, `draft.ovr/pot/skills`, the note, awards, injuries, stats,
+mood traits and jersey number, with height and weight only when the tool
+rewrote them.
+
+Four smaller gaps: a file carrying a single `name` instead of `firstName` /
+`lastName` exported with neither and showed a nameless player, and is split on
+the way through; nobody wrote `injury`, so a prospect arrived with whatever
+BBGM rolled; `born.loc` and the seeded face the tool draws on its own pages were
+never written, so the man you scouted and the man in the game were different
+people; and `college` for a prospect abroad held the LEAGUE — "LNB Pro A" — under
+a heading BBGM prints as College. The club is already drawn, and the club is
+what goes in the field; a club-to-league table takes him back to the right
+competition when the same file is loaded again. That last step is exact for
+every club that plays in one league and only nearly exact for the 44 that play
+in two — a club name alone cannot say whether a Barcelona prospect was reached
+through the EuroLeague or the ACB, so about one prospect abroad in ten comes
+back in the neighbouring competition.
+
+On the data side, the conference table had been drifting between two seasons at
+once; it is now stated as, and consistent with, 2027-28 — UC Davis in the
+Mountain West, Louisiana Tech in the Sun Belt, New Haven in the NEC and St.
+Francis (PA), Division II since 2026, out. Eleven reverse aliases were added, so
+a modded file that says "Dixie State", "UMKC", "IPFW", "College of Charleston",
+"Central Florida", "Southern Mississippi", "Miami", "UConn", "Mississippi" or
+"Penn" lands on the right program instead of falling out of the database
+entirely. Seven programs got their real abbreviations, where the initials
+generator had confidently produced IC, MO, II, WG, GC, TAC and SPS for UIC,
+M-OH, IUI, UWG, GCU, TAMUCC and SPU. The EuroCup listed two clubs twice under
+two names apiece, four clubs were named differently in their domestic league and
+in the continental table (and the pro-league sim matches a club by name), six
+relegated or defunct sides were still playing, and four notable ones were
+missing. `EURO_HINTS` did not match "United Kingdom" — which is the string BBGM
+itself writes — so a British prospect got a flat 1.0 on every destination
+abroad, and sixteen of its entries were duplicates.
+
+Finally the synthetic returners, who fill out every roster the class plays
+against: 28 first names by 28 last ones is 784 combinations for about 3,200
+players a season, so every name in the pool was used four times over and the
+honors page read like a family reunion. They were also entirely American, in a
+sport whose rosters are not. The pools are now 180 by 209 — 37,620 combinations
+— with the range of origins a Division I roster actually holds, and the coach
+first names, which were one generation of Anglo names, carry another hundred.
+The "International class" preset had the same shape of problem: it named twelve
+destinations, and the twenty-four leagues added to the table since kept their
+ordinary weights while those twelve were boosted around them, so the preset
+whose whole purpose is to send a class abroad was quietly holding back most of
+the world. It names all thirty-six now.
+
+### The page itself
+
+This pass drove the running page rather than reading it: the sample class loaded
+through the “Try a sample class” button, every tab screenshotted at 1400×900 and
+390×844 in both the light and the dark palette, and then the verbs exercised one
+by one — reroll, undo, redo, re-apply, pin and compare, the editor's locks and
+its three ↻ buttons, “Reroll just him”, search, the range filters, the sort
+stack, the column picker, the keyboard shortcuts, the settings search and its
+only-what-I-changed toggle, the randomizer scopes and padlocks, presets, the
+Link round trip, the seed pill and its history, the CSV lock import, all nine
+export routes, batch mode with its progress and its cancel, universe mode over
+two sample files, back and forward navigation on the player, team and box-score
+pages, and the phone card layout. Almost all of it worked, and the run raised
+no console error or warning anywhere. What it did find was in the chrome — the
+header, the dialog and the palettes — which is the part nothing was reading.
+
+The copy-link button ate its own icon. `copyText` flashes “Copied ✓” on the
+button and then restores a label the CALL SITE passes; the header's button is
+the 🔗 glyph and the call site passed the word “Link”, so one click replaced the
+icon with a word for the rest of the session, and the wider button reflowed the
+toolbar. It now puts back the label the button actually had. Beside it, the
+header's flex spacer had a height of its own: the header wraps at 1400px as soon
+as the seed history appears and “Undo …” grows a label, and a wrapped
+`flex: 1` item becomes an empty band — a measured 96px of nothing between the
+two toolbar rows. The spacer collapses now, and the undo label, which is written
+from the action it will undo, is capped at 17ch so it cannot re-wrap the bar
+mid-session.
+
+Two of the three dark palettes failed WCAG on the most-pressed button in the
+tool. White on `#4da3ff` is 2.63:1; Export JSON and the selected randomizer chip
+both wore it. A `--on-accent` token per palette makes that dark text on the
+light-blue accents (6.7:1) and leaves the light themes as they were. The same
+sweep turned up three tokens that no palette has ever defined — `--ok`,
+`--warn` and `--win`, read by the phase-cost hints and the poll movement column,
+which meant those rules painted one light-theme hex in every theme (3.19:1 and
+3.30:1 on white; a dark green on a dark panel) — plus `--upset-bg2` and
+`--upset-bg3`, so a dark bracket drew its heaviest upsets in the light theme's
+browns. All of them now read tokens the palettes set. `tools/tests/ui.js` is a
+new static check that fails on any `var(--x)` the stylesheet never defines,
+because a `var()` with a fallback is valid CSS that renders in silence and that
+is exactly how those five survived.
+
+The bracket scrolled the whole page sideways on a phone. `.regionbox` sized
+itself to the full 814px bracket inside a 366px column, so the March Madness tab
+made the document 826px wide at a 390px viewport: every other tab then sat in a
+half-width column with the rest of the screen blank. The regions are capped to
+their column now and the bracket scrolls inside its own box, which is what
+`.bracket { overflow-x: auto }` was always for. In the export dialog, the
+five-column table of BBGM import routes was 200px wider than the 560px dialog,
+so the two columns that answer “does this keep my awards” sat off the right edge
+behind a scrollbar nobody looks for inside a dialog; it wraps to a fixed layout
+now.
+
+Two small verbs earned their place. Every note card carries its own Copy button
+— “Copy all notes” wrote seventy of them into the clipboard, which is the wrong
+verb for pasting one prospect into a forum post — and every export now names the
+file it wrote: `download()` records the name and the statuses that used to read
+“Season exported.” read “Wrote season_249663942.csv — …”, which is the only
+confirmation a browser that saves silently to a download folder ever gives.
+
+Measured, on the 70-man sample class: a reroll is 647ms end to end (median of
+five, busy indicator up throughout), a re-apply 98ms, and a batch of six 3.5s
+on the worker. Tab renders are 13–45ms except the AP poll (143ms), the game log
+(110ms) and the bracket (251ms); the bracket is the one worth a second look if
+the tab switching ever feels heavy. `tools/uismoke.js` grew twelve checks over
+the chrome — the copy button's label, the wrapped header, the phone bracket, the
+accent contrast in all three dark themes, the dialog's route table, the per-note
+copy and the named export.
+
+---
 
 ## Known limits
 
@@ -1387,14 +1931,18 @@ tools/golden.json   recorded output hashes
   cups, relegation, each league's own MVP and first team, and a continental
   competition for the top clubs exist; national-team summers do not, and the
   continental run is a drawn result rather than a simulated bracket. The
-  conference map is the 2026-27 one (Gonzaga, Oregon State, Washington State
-  and Texas State in the rebuilt Pac-12 with the five Mountain West schools;
-  Grand Canyon and UTEP in the Mountain West; Seattle in the WCC; Delaware in
-  Conference USA; UMass in the MAC; Merrimack in the MAAC) and the club lists
-  are the 2025-26 ones; both will date.
-* The field's block tail is still fat: about thirty rotation players a season
-  average over 3.5 blocks against a real five to eight. The prospect bands
-  hold; the field's do not exist yet.
+  conference map is the 2027-28 one (Gonzaga, Oregon State, Washington State
+  and Texas State in the rebuilt Pac-12; Grand Canyon, UTEP and UC Davis in the
+  Mountain West; Louisiana Tech in the Sun Belt; Seattle in the WCC; Delaware in
+  Conference USA; UMass in the MAC; Merrimack in the MAAC; New Haven in the NEC
+  and St. Francis (PA) gone from Division I) and the club lists are the 2025-26
+  ones; both will date. It used to be authored to two seasons at once, which is
+  how UC Davis sat in the Big West while UTEP had already moved.
+* The field's block tail is thinner than it was and is not gone: the national
+  leader averages 4.1-4.4 against a real 3.6, where he used to average 5.6 with
+  110 lines a season over 4.5. What is left is the exponent that separates a
+  centre from a guard, which the harness bands in the other direction, so the
+  next move there is a per-position block model rather than another cap.
 * Below 700 pixels the prospect table becomes one card per prospect, because a
   forty-column table on a 390-pixel screen is a horizontal scroll however it is
   arranged — and a card is the twelve fields a scout reads first, not the same

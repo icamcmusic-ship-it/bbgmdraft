@@ -4660,6 +4660,27 @@ console.log("\nExport: stats rows, the class's own year, the envelope and the me
 	}
 }
 
+/* ------------------------------------------------------- the area suites */
+/* One file per area, each exporting `(ok, V)`. This file had grown past four
+   thousand lines and every audit pass added to the same end of it, which is
+   also how two passes writing at once conflict on a file neither of them is
+   really editing. A new area's checks go in tools/tests/<area>.js and are
+   picked up here by being on disk. */
+{
+	const dir = path.join(__dirname, "tests");
+	const files = fs.existsSync(dir)
+		? fs.readdirSync(dir).filter((f) => f.endsWith(".js")).sort()
+		: [];
+	for (const f of files) {
+		console.log("\n" + f.replace(/\.js$/, "") + " (tools/tests/" + f + ")");
+		try {
+			require(path.join(dir, f))(ok, V);
+		} catch (e) {
+			ok("tools/tests/" + f + " runs", false, e && e.stack ? e.stack : String(e));
+		}
+	}
+}
+
 console.log("\n" + (failures ? failures + " of " + checks + " checks failed"
 	: "all " + checks + " checks passed"));
 process.exit(failures ? 1 : 0);
