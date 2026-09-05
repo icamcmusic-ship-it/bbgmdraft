@@ -1743,10 +1743,17 @@
 	});
 
 	TPL({
-		kind: "road struggles", group: "regular season", p: 0.5, when: 0.66,
+		kind: "road struggles", group: "regular season", p: 0.85, when: 0.66,
 		find: (ctx) => {
-			const cand = ctx.teamList.filter((t) => t.roadW === 0 && t.roadL >= 6 &&
-				t.w >= 10);
+			/* A winning team that cannot win away from home. The bar was ten
+			   wins and six road losses, which was ordinary while the schedule
+			   handed the better program the home game every time and a team
+			   could play twenty-seven of them; once home dates were balanced
+			   that combination turned up in two seasons of twelve, and a kind
+			   that rare is one nobody ever reads. Nine and five is the same
+			   story on a schedule that is now half away. */
+			const cand = ctx.teamList.filter((t) => t.roadW === 0 && t.roadL >= 5 &&
+				t.w >= 9);
 			return cand.length ? ctx.rng.pick(cand) : null;
 		},
 		slots: (t) => ({
