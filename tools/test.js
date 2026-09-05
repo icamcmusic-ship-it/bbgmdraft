@@ -2921,11 +2921,17 @@ console.log("\nThe paper: kinds, variants, voices and quotes");
 		   always enough for all of them. A row that needs more than ten is a
 		   row nobody would see either. */
 		const fired = new Set();
+		const faults = [];
 		for (let s = 0; s < 10; s++) {
 			const res = global.Engine.run(V.realisticClass(s, 70),
 				global.Config.make({ seed: "tpl" + s }));
 			for (const a of N.build(res)) {
 				fired.add(a.kind);
+				for (const seg of [a.headline, a.body].concat(a.paras || [])) {
+					const one = T.segsToText(seg);
+					const f = T.textFaults(one);
+					if (f.length) faults.push(a.kind + " [" + f + "]: " + one.slice(0, 90));
+				}
 				const text = T.segsToText(a.headline) + " " + T.segsToText(a.body) + " " +
 					(a.paras || []).map((x) => T.segsToText(x)).join(" ");
 				if (/\{\w+\}/.test(text)) bad.push(a.kind + ": " + text.slice(0, 90));
@@ -2933,6 +2939,18 @@ console.log("\nThe paper: kinds, variants, voices and quotes");
 		}
 		ok("no rendered article leaves a slot unfilled", bad.length === 0,
 			bad.slice(0, 3).join(" | "));
+		/* And none of them carries a text fault, on THESE ten classes as well
+		   as on the six tools/tests/awards.js sweeps.
+
+		   Sixteen classes rather than six is not belt-and-braces. Every fault
+		   this rule has ever caught was conditional on a draw — "a East
+		   Carolina side" needs the row to pick a vowel-led program,
+		   "N.J.I.T.." needs the one school on the schedule whose name ends in
+		   a period, "his 3th commitment" needs a third decommitment — so the
+		   number of classes swept IS the sensitivity of the check, and all
+		   three shipped under a six-class sweep. */
+		ok("no rendered article carries a text fault", faults.length === 0,
+			faults.slice(0, 3).join(" | "));
 		/* The two universe rows read carryOver and cannot fire on a standalone
 		   class, which is correct; everything else has to be reachable. */
 		const never = N.TEMPLATES.filter((t) => !fired.has(t.kind) && t.group !== "universe");

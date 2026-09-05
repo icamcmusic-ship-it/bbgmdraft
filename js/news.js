@@ -58,19 +58,43 @@
 	}
 
 	/* Substitute {name} slots in a template string with segments. */
+	/* Substitute the slots, and swallow the full stop a slot has already
+	   written.
+
+	   A template ends a sentence with "{c}." and it reads correctly for every
+	   school but the ones whose NAME ends in a period — N.J.I.T. is on the
+	   schedule of every team that plays it — where it renders "N.J.I.T..".
+	   That is a fault the sweep names (doubled punctuation) and one that only
+	   appears on the seeds that happen to draw the program, which is the worst
+	   kind: it ships. Fixing it here rather than in the two templates that hit
+	   it first means every row in the table, including the ones added after
+	   this, is covered by construction. Only a LITERAL chunk that begins with
+	   a stop is touched, so nothing that separates two slots with a comma or a
+	   dash changes. */
+	const ENDS_SENTENCE = /[.!?…]$/;
 	function fill(tpl, slots) {
 		const out = [];
 		const re = /\{(\w+)\}/g;
 		let last = 0;
 		let m;
+		let prev = "";
+		const push = (seg, text) => {
+			out.push(seg);
+			prev = text;
+		};
+		const literal = (str) => {
+			const text = ENDS_SENTENCE.test(prev) && str.charAt(0) === "."
+				? str.slice(1) : str;
+			if (text) push(T(text), text);
+		};
 		while ((m = re.exec(tpl)) !== null) {
-			if (m.index > last) out.push(T(tpl.slice(last, m.index)));
+			if (m.index > last) literal(tpl.slice(last, m.index));
 			const seg = slots[m[1]];
-			if (seg) out.push(seg);
-			else out.push(T(m[0]));
+			if (seg) push(seg, String(seg.v === undefined ? "" : seg.v));
+			else push(T(m[0]), m[0]);
 			last = m.index + m[0].length;
 		}
-		if (last < tpl.length) out.push(T(tpl.slice(last)));
+		if (last < tpl.length) literal(tpl.slice(last));
 		return out;
 	}
 
@@ -332,17 +356,29 @@
 			if (!who && !q.attribution) continue;
 			const line = rng.pick(q.lines);
 			const segs = [T("“" + line + "” ")];
+			/* The attribution's closing period, unless the thing it closes is
+			   already a sentence's worth of punctuation. A name can end in
+			   one — N.J.I.T. and Texas A&M are on the same schedule — and the
+			   flat `T(".")` printed "— Damon Ackerman, N.J.I.T..", which the
+			   fault sweep catches as doubled punctuation on the seeds that
+			   happen to draw that program and misses on the ones that do not.
+			   Text.endSentence already knows this rule; this is the segment
+			   form of it. */
+			const stop = (last) => {
+				if (/[.!?…]$/.test(String(last === undefined ? "" : last))) return;
+				segs.push(T("."));
+			};
 			if (who && q.who === "coach") {
 				segs.push(T("— "));
 				segs.push(T(who));
 				if (f.team) { segs.push(T(", ")); segs.push(TM(f.team.name)); }
-				segs.push(T("."));
+				stop(f.team ? f.team.name : who);
 			} else if (who && q.who === "player") {
 				segs.push(T("— "));
 				segs.push(PL(f.player.name, f.player.key));
-				segs.push(T("."));
+				stop(f.player.name);
 			} else {
-				segs.push(T("— " + q.attribution + "."));
+				segs.push(T("— " + global.Text.endSentence(q.attribution)));
 			}
 			return segs;
 		}
@@ -4018,6 +4054,349 @@
 		],
 	});
 
+
+	/* ---------------------------------------------------------------------
+	   THE ANALYTICS DESK: ELEVEN KINDS THE ADVANCED LINE HAD THE FACTS FOR.
+
+	   The paper's ninety-odd kinds read the counting box score — points,
+	   rebounds, assists, blocks, a score, a seed. Everything js/stats.js
+	   computes ON TOP of that box score was invisible: the defensive record
+	   the model built specifically so defensive honors would have something
+	   to rank on (contested shots, deflections, charges drawn, a defensive
+	   rating), the playmaking pair (how much of his scoring came off a
+	   teammate's pass, how much of it came in transition), the lineup
+	   numbers the game log produces (plus/minus, on/off), and the shot-mix
+	   ratios a modern box score leads with (three-point rate, free-throw
+	   rate, assist-to-turnover).
+
+	   Every row below reads one of those and nothing else does. Two of them
+	   are deliberately the same fact from opposite ends — the efficient
+	   high-usage scorer already had a story ("efficiency king") and the
+	   INEFFICIENT one, which is the more common draft-room argument, had
+	   none.
+
+	   The derived ratios are computed here rather than read off the stat
+	   line, for the reason the efficiency-king row records: effective
+	   field-goal percentage, three-point rate, free-throw rate and
+	   assist-to-turnover are DERIVED (see DERIVED in js/views.js) and reading
+	   `stats.efg` off the line prints "NaN%" in a finished article. */
+
+	// Minutes enough that a rate means something. Every row below uses it.
+	const RATE_MIN_GP = 18;
+	function ratePool(ctx, extra) {
+		return ctx.ncaa.filter((p) => p.stats.gp >= RATE_MIN_GP &&
+			(!extra || extra(p, p.stats)));
+	}
+
+	TPL({
+		kind: "assist to turnover", group: "analytics", p: 0.55, when: 0.7,
+		find: (ctx) => {
+			const cand = ratePool(ctx, (p, s) => s.apg >= 3.5 && s.topg > 0.4 &&
+				s.apg / s.topg >= 2.2);
+			return cand.length
+				? bestBy(cand, (p) => p.stats.apg / p.stats.topg) : null;
+		},
+		slots: (p) => ({
+			player: PL(p.name, p.key), team: TM(p.newCollege),
+			ratio: T((p.stats.apg / p.stats.topg).toFixed(2)),
+			apg: T(p.stats.apg.toFixed(1)), topg: T(p.stats.topg.toFixed(1)),
+			usg: T((p.stats.usg * 100).toFixed(1)),
+		}),
+		headlines: [
+			"{ratio} assists for every turnover: {player}",
+			"{player} does not give it away",
+			"The safest hands in the country belong to {player}",
+		],
+		bodies: [
+			"{player} averaged {apg} assists against {topg} turnovers for {team} — a ratio of {ratio} on {usg}% usage. A guard who can be trusted with the ball in March is worth more than one who cannot, and this is the column that says which he is.",
+			"{ratio}. That is {player}'s assist-to-turnover ratio at {team}, on {apg} assists and {topg} giveaways a night. The number moves very little between levels, which is why draft rooms read it before they read the scoring average.",
+			"{apg} assists, {topg} turnovers, {usg}% of {team}'s possessions used. {player} spent a season handling everything and losing almost none of it.",
+		],
+	});
+
+	TPL({
+		kind: "three-point diet", group: "analytics", p: 0.55, when: 0.86,
+		find: (ctx) => {
+			const cand = ratePool(ctx, (p, s) => s.fga >= 6 && s.tpa >= 5 &&
+				s.tpa / s.fga >= 0.55);
+			return cand.length
+				? bestBy(cand, (p) => p.stats.tpa / p.stats.fga) : null;
+		},
+		slots: (p) => {
+			const s = p.stats;
+			return {
+				player: PL(p.name, p.key), team: TM(p.newCollege),
+				tpar: T((s.tpa / s.fga).toFixed(3)),
+				share: T((100 * s.tpa / s.fga).toFixed(0)),
+				tpa: T(s.tpa.toFixed(1)), tpp: T((s.tpp * 100).toFixed(1)),
+				ppg: T(s.ppg.toFixed(1)),
+			};
+		},
+		headlines: [
+			"{share}% of {player}'s shots come from three",
+			"{player} has stopped taking two-pointers",
+			"A three-point rate of {tpar} for {player}",
+		],
+		bodies: [
+			"{share} of every hundred shots {player} took for {team} were threes — {tpa} a game, at {tpp}%. A shot diet that extreme is a bet the player and the staff made together, and it is the first thing a pro team will ask him to keep doing.",
+			"{tpa} three-point attempts a game and a three-point rate of {tpar}. {player} scored {ppg} for {team} almost entirely from behind the line, which is either a specialist or the modern game, depending on who is doing the scouting.",
+			"Nobody in the country lived further from the rim. {player} put up {tpa} threes a night at {tpp}% and took the other {share}% of his shots — the two-pointers — almost as an afterthought.",
+		],
+	});
+
+	TPL({
+		kind: "self creator", group: "analytics", p: 0.6, when: 0.68,
+		find: (ctx) => {
+			const cand = ratePool(ctx, (p, s) => s.ppg >= 12 &&
+				Number.isFinite(s.astdRate) && s.astdRate <= 0.44);
+			return cand.length ? bestBy(cand, (p) => -p.stats.astdRate) : null;
+		},
+		slots: (p) => {
+			const s = p.stats;
+			return {
+				player: PL(p.name, p.key), team: TM(p.newCollege),
+				astd: T((s.astdRate * 100).toFixed(0)),
+				unast: T((100 - s.astdRate * 100).toFixed(0)),
+				ppg: T(s.ppg.toFixed(1)), usg: T((s.usg * 100).toFixed(1)),
+				ts: T((s.ts * 100).toFixed(1)),
+			};
+		},
+		headlines: [
+			"{unast}% of {player}'s makes are his own work",
+			"{player} creates everything he scores",
+			"Nobody sets up {player}",
+		],
+		bodies: [
+			"Only {astd}% of {player}'s field goals at {team} were assisted, which is to say he made {unast}% of them out of nothing. Self-creation is the skill that decides whether {ppg} points a game survives a level jump, and it is the one thing a stat sheet almost never reports.",
+			"{ppg} a game on {usg}% usage, assisted on {astd}% of his makes. {player} is not a player {team} runs offense for; he is the offense, and the shot-creation burden is already at the level he will be asked to carry.",
+			"{unast} of every hundred baskets {player} made, he made for himself. At {ts}% true shooting, that is the profile scouts pay for — a scorer who does not need a passer to exist.",
+		],
+	});
+
+	TPL({
+		kind: "transition scorer", group: "analytics", p: 0.55, when: 0.72,
+		find: (ctx) => {
+			const cand = ratePool(ctx, (p, s) => s.ppg >= 10 &&
+				Number.isFinite(s.transShare) && s.transShare >= 0.16);
+			return cand.length ? bestBy(cand, (p) => p.stats.transShare) : null;
+		},
+		slots: (p, ctx) => {
+			const s = p.stats;
+			const t = ctx.teams[p.newCollege];
+			return {
+				player: PL(p.name, p.key), team: TM(p.newCollege),
+				share: T((s.transShare * 100).toFixed(0)),
+				ppg: T(s.ppg.toFixed(1)),
+				pts: T((s.transShare * s.ppg).toFixed(1)),
+				style: T(t && t.style && t.style.name !== "balanced"
+					? t.style.name : "the way they play"),
+			};
+		},
+		headlines: [
+			"{share}% of {player}'s points come before the defense is set",
+			"{player} scores it going the other way",
+			"{pts} a game in transition for {player}",
+		],
+		bodies: [
+			"{share}% of {player}'s {ppg} points a game came in transition — {pts} a night before {team}'s opponents had five men back. Running is a skill and a system at once, and separating the two is most of the work of scouting him.",
+			"{pts} of {player}'s {ppg} came on the break. {team} play {style}, so some of that is the system; the part that is not is the reason he will get a look.",
+			"Nobody in the class scored a larger share of his points in the open floor: {share}%, and {team} pushed it every time the ball came off the rim. What {player} does in a half-court set is the question the tape has to answer.",
+		],
+	});
+
+	TPL({
+		kind: "on off leader", group: "analytics", p: 0.55, when: 0.8,
+		find: (ctx) => {
+			const cand = ratePool(ctx, (p, s) => Number.isFinite(s.onOff) &&
+				s.onOff >= 10 && s.mpg >= 20 && ctx.teams[p.newCollege]);
+			return cand.length ? bestBy(cand, (p) => p.stats.onOff) : null;
+		},
+		slots: (p, ctx) => {
+			const s = p.stats;
+			const t = ctx.teams[p.newCollege];
+			return {
+				player: PL(p.name, p.key), team: TM(p.newCollege),
+				onoff: T("+" + s.onOff.toFixed(1)),
+				pm: T((s.pm >= 0 ? "+" : "") + s.pm.toFixed(1)),
+				mpg: T(s.mpg.toFixed(1)),
+				record: T(t.w + "-" + t.l),
+			};
+		},
+		headlines: [
+			"{team} are a different team when {player} sits",
+			"{onoff} per forty: the {player} swing",
+			"The most indispensable player in the country",
+		],
+		bodies: [
+			"{team} outscored their opponents by {pm} a game with {player} on the floor, an on/off swing of {onoff} per forty minutes against the same team without him. He played {mpg} a night for a {record} team, and the bench minutes are the ones that made the case.",
+			"An on/off swing of {onoff}. {player} is not the best player in this class and he may be the one his team can least afford to rest — {team} finished {record} and the reason is legible in the lineup data long before it is legible in the box score.",
+			"{mpg} minutes a game, {pm} plus/minus, {onoff} per forty against the same team without him. Whatever {player} does for {team}, it stops when he stops.",
+		],
+	});
+
+	TPL({
+		kind: "defensive rating leader", group: "analytics", p: 0.55, when: 0.86,
+		find: (ctx) => {
+			const cand = ratePool(ctx, (p, s) => s.mpg >= 24 &&
+				Number.isFinite(s.drtg) && s.drtg <= 95);
+			return cand.length ? bestBy(cand, (p) => -p.stats.drtg) : null;
+		},
+		slots: (p) => {
+			const s = p.stats;
+			return {
+				player: PL(p.name, p.key), team: TM(p.newCollege),
+				drtg: T(s.drtg.toFixed(1)), mpg: T(s.mpg.toFixed(1)),
+				stl: T(s.spg.toFixed(1)), blk: T(s.bpg.toFixed(1)),
+				cs: T(s.cspg.toFixed(1)),
+			};
+		},
+		headlines: [
+			"{drtg} allowed per hundred: {player} is the best defender in the class",
+			"{player} takes a possession away",
+			"The defensive rating leader plays at {team}",
+		],
+		bodies: [
+			"{team} gave up {drtg} points per hundred possessions with {player} on the floor, across {mpg} minutes a night. The steals ({stl}) and the blocks ({blk}) are the part that shows up on a highlight reel; the {cs} contested shots a game are the part that made the number.",
+			"A defensive rating of {drtg}. {player} contested {cs} shots a game for {team} and blocked {blk}, and the difference between a defender who makes plays and one who prevents them is exactly this column.",
+			"{drtg} per hundred, over {mpg} minutes a game. Nothing else on {player}'s stat line at {team} is remarkable, and a draft room will spend an hour on that one number anyway.",
+		],
+	});
+
+	TPL({
+		kind: "deflections leader", group: "regular season", p: 0.5, when: 0.83,
+		find: (ctx) => {
+			const cand = ratePool(ctx, (p, s) => s.deflpg >= 2.6);
+			return cand.length ? bestBy(cand, (p) => p.stats.deflpg) : null;
+		},
+		slots: (p) => ({
+			player: PL(p.name, p.key), team: TM(p.newCollege),
+			defl: T(p.stats.deflpg.toFixed(1)),
+			stl: T(p.stats.spg.toFixed(1)),
+			season: T(String(Math.round(p.stats.deflpg * p.stats.gp))),
+		}),
+		headlines: [
+			"{defl} deflections a game for {player}",
+			"{player} gets a hand on everything",
+			"{season} deflections: the busiest hands in the country",
+		],
+		bodies: [
+			"{player} recorded {defl} deflections a game for {team} — {season} across the season — against {stl} steals. Most of a deflection's value goes to somebody else, which is why the players who produce them are undervalued everywhere except in a coaching staff's own film room.",
+			"{season} deflections. {player} converted {stl} a game of them into steals himself and turned the rest into the possessions {team}'s guards picked up behind him.",
+			"A deflection is a steal that somebody else finished. {player} had {defl} a night for {team}, and the tape is full of possessions that ended badly for the offense with his name nowhere in the box score.",
+		],
+	});
+
+	TPL({
+		kind: "charges drawn", group: "regular season", p: 0.5, when: 0.76,
+		find: (ctx) => {
+			const cand = ratePool(ctx, (p, s) => s.chgpg >= 0.55);
+			return cand.length ? bestBy(cand, (p) => p.stats.chgpg) : null;
+		},
+		slots: (p) => ({
+			player: PL(p.name, p.key), team: TM(p.newCollege),
+			chg: T(p.stats.chgpg.toFixed(2)),
+			season: T(String(Math.round(p.stats.chgpg * p.stats.gp))),
+			pf: T(p.stats.pfpg.toFixed(1)),
+		}),
+		headlines: [
+			"{season} charges taken by {player}",
+			"{player} steps in front of it",
+			"The most-taken charges in the country: {player}",
+		],
+		bodies: [
+			"{player} drew {season} charges for {team}, {chg} a game, while committing {pf} fouls a night himself. Taking a charge is a decision made in about a fifth of a second and it is one of the few defensive plays that is entirely a matter of willingness.",
+			"{chg} charges drawn a game. It is not a skill anybody is recruited for, and over a season {player} turned {season} opponent possessions at {team} into fouls on somebody else.",
+			"{season} times this season, {player} planted his feet and took the hit. {team} got the ball and the other bench got a foul, which is a two-possession swing that no highlight package will ever carry.",
+		],
+	});
+
+	TPL({
+		kind: "contested shots", group: "regular season", p: 0.5, when: 0.84,
+		find: (ctx) => {
+			const cand = ratePool(ctx, (p, s) => s.cspg >= 5.5 && s.mpg >= 22);
+			return cand.length ? bestBy(cand, (p) => p.stats.cspg) : null;
+		},
+		slots: (p) => ({
+			player: PL(p.name, p.key), team: TM(p.newCollege),
+			cs: T(p.stats.cspg.toFixed(1)),
+			per40: T((p.stats.mpg > 0
+				? p.stats.cspg * 40 / p.stats.mpg : p.stats.cspg).toFixed(1)),
+			blk: T(p.stats.bpg.toFixed(1)),
+			mpg: T(p.stats.mpg.toFixed(1)),
+		}),
+		headlines: [
+			"{cs} contested shots a game for {player}",
+			"{player} is at the rim on every possession",
+			"Nobody contests more shots than {player}",
+		],
+		bodies: [
+			"{player} contested {cs} shots a game for {team} — {per40} per forty minutes — and blocked {blk} of them. The blocks are the ones anybody remembers; the contests are the ones that decided whether the shot went in.",
+			"{cs} a game over {mpg} minutes. {player} spends most of his floor time inside somebody's shooting motion, and {team}'s field-goal percentage allowed is the argument for what that is worth.",
+			"A block is a contest that went perfectly. {player} had {blk} of those a night for {team} and {cs} contests in total, which is a defensive workload rather than a highlight.",
+		],
+	});
+
+	TPL({
+		kind: "usage without efficiency", group: "analytics", p: 0.5, when: 0.78,
+		find: (ctx) => {
+			const cand = ratePool(ctx, (p, s) => s.usg >= 0.26 && s.ts <= 0.525 &&
+				s.ppg >= 11);
+			return cand.length ? bestBy(cand, (p) => p.stats.usg - p.stats.ts) : null;
+		},
+		slots: (p) => {
+			const s = p.stats;
+			const efg = s.fga > 0
+				? (s.fgp * s.fga + 0.5 * s.tpp * s.tpa) / s.fga : s.fgp;
+			return {
+				player: PL(p.name, p.key), team: TM(p.newCollege),
+				usg: T((s.usg * 100).toFixed(1)), ts: T((s.ts * 100).toFixed(1)),
+				efg: T((efg * 100).toFixed(1)), ppg: T(s.ppg.toFixed(1)),
+				fga: T(s.fga.toFixed(1)),
+			};
+		},
+		headlines: [
+			"{player} uses {usg}% of {team}'s possessions at {ts}% true shooting",
+			"The hardest {ppg} points in the country",
+			"{player} is asked to do too much",
+		],
+		bodies: [
+			"{player} used {usg}% of {team}'s possessions and returned {ts}% true shooting on them. {ppg} points a game on {fga} attempts is a scoring average and a warning at the same time: the question is whether a roster this thin created the shot selection or merely revealed it.",
+			"{usg}% usage, {efg}% effective field-goal percentage. Nobody in this class was handed more of an offense and gave back less per possession than {player}, and every draft room will argue about whose fault that is.",
+			"There is a version of {player} at a better program who takes {fga} shots a game at a far better number than {ts}%, and there is a version who does not. A season at {team} does not settle it, which is the honest scouting report.",
+		],
+	});
+
+	TPL({
+		kind: "minutes load", group: "regular season", p: 0.5, when: 0.92,
+		find: (ctx) => {
+			const cand = ratePool(ctx, (p, s) => s.mpg >= 33 &&
+				ctx.teams[p.newCollege]);
+			return cand.length ? bestBy(cand, (p) => p.stats.mpg) : null;
+		},
+		slots: (p, ctx) => {
+			const s = p.stats;
+			const t = ctx.teams[p.newCollege];
+			return {
+				player: PL(p.name, p.key), team: TM(p.newCollege),
+				mpg: T(s.mpg.toFixed(1)),
+				total: T(String(Math.round(s.mpg * s.gp))),
+				gp: T(String(s.gp)),
+				share: T((100 * s.mpg / 40).toFixed(0)),
+				record: T(t.w + "-" + t.l),
+			};
+		},
+		headlines: [
+			"{mpg} minutes a night for {player}",
+			"{player} never comes off the floor",
+			"{total} minutes: the heaviest load in the country",
+		],
+		bodies: [
+			"{player} played {mpg} minutes a game across {gp} games for {team} — {total} in total, {share}% of every available minute. A staff that leans on one player that hard is telling you what it thinks of the rest of the roster.",
+			"{share}% of {team}'s minutes went to one man. {player} sat for barely five minutes a night through a {record} season, and the fatigue question is one the shooting splits after Christmas can answer.",
+			"{total} minutes over {gp} games. Nobody in this class was asked for more floor time than {player}, and durability at that volume is itself a piece of scouting information.",
+		],
+	});
+
 	/* The context every row's `find` and `slots` read. Built once per class,
 	   because forty-odd rows each recomputing "the NCAA prospects with a stat
 	   line" is forty passes over the same array. */
@@ -4771,8 +5150,14 @@
 							T(", and the recruiting analysts can go back to sleep.")],
 						[T("A recruitment that would not stay decided is decided: "),
 							PL(flip.name, flip.key), T(" signs with "),
+							/* n + "th" is right for eight numbers in ten and
+							   wrong for the rest: a third decommitment made
+							   this "his 3th commitment". `ordinal` exists for
+							   exactly this and the fault sweep has a rule
+							   named after it. */
 							TM(flip.newCollege), T(", his " +
-							(flip.recruiting.decommits + 1) + "th commitment and the " +
+							ordinal(flip.recruiting.decommits + 1) +
+							" commitment and the " +
 							"only one with a signature under it.")],
 					]),
 				});

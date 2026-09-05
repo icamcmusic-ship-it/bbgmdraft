@@ -2479,10 +2479,27 @@
 			raw.push({ l, s, pg });
 			rawSum += pg;
 		}
-		// Centered on the rotation's minutes, so the five men on the floor
-		// account for the team's margin and no more.
+		/* Centered so the five men on the floor account for the team's
+		   margin and no more — the rotation's impacts have to sum to zero,
+		   because `margin * share` already spends the whole margin.
+
+		   The correction is spread on the SAME weight the impact itself
+		   carries, s * (1 - s), and not on the minutes. That is not a
+		   cosmetic choice: on/off divides an impact by s * (1 - s) (see
+		   gameLog — the amplifier is exact, which is why the impact is
+		   built with the factor in it), so a correction proportional to s
+		   instead came back out of the division as a term in 1 / (1 - s).
+		   For a 37-minute starter that is a fourteen-fold amplification of
+		   a number that is the same for everybody on his team, which put
+		   on/off swings near +30 per forty on the column and made the
+		   statistic a function of minutes played rather than of the player.
+		   With the weights matched, the correction is a per-team constant
+		   in on/off, where it belongs, and the sum is still exactly zero. */
+		let weightSum = 0;
+		for (const r of raw) weightSum += r.s * (1 - r.s);
 		for (const r of raw) {
-			const pg = r.pg - (shareSum > 1e-9 ? (r.s * rawSum) / shareSum : 0);
+			const pg = r.pg - (weightSum > 1e-9
+				? (r.s * (1 - r.s) * rawSum) / weightSum : 0);
 			out.set(r.l, pg);
 		}
 		PM_IMPACT.set(team, out);
