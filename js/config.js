@@ -37,8 +37,12 @@
 		   (17/131 and 19/145 are both about 13%), and holding the pool fixed
 		   while the table grows is how per-class coverage quietly fell the
 		   first time. Measured over 20 classes, 17 left fourteen builds
-		   unseen and 19 leaves eleven. */
-		archetypePool: 19,
+		   unseen and 19 leaves eleven.
+
+		   Raised from 19 when pickClassPool stopped adding its guaranteed
+		   slots on TOP of this number: 19 realized 20-23 before, so 21 is the
+		   size the class always had — the label just now says it. */
+		archetypePool: 21,
 		/* How many forced anomalies a class gets: a five-star bust, an
 		   unranked recruit who turns into a lottery pick, a 24-year-old JUCO,
 		   a 7'4" project, the coach's son, the man whose season ended in

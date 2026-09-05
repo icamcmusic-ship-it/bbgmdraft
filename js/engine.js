@@ -331,6 +331,7 @@
 		const seenPid = new Set();
 		let duplicatePid = 0;
 		let draftYearMismatch = 0;
+		let missingOvrPot = 0;
 		leagueFile.players.forEach((p, i) => {
 			if (p && p.draft && Number.isFinite(Number(p.draft.year)) &&
 				Number(p.draft.year) !== season) draftYearMismatch++;
@@ -357,6 +358,13 @@
 							: missing.slice(0, 5).join(", ") +
 								(missing.length > 5 ? ", …" : "")));
 				}
+				/* ovr and pot are not rating keys and so were never checked.
+				   The generator reads both (the ovr->pot gap is what the whole
+				   potential model is built on), and a row without them used to
+				   export NaN as the player's potential without a word. */
+				if (last && typeof last === "object" &&
+					(!Number.isFinite(Number(last.ovr)) ||
+						!Number.isFinite(Number(last.pot)))) missingOvrPot++;
 			}
 			if (!p.born || !Number.isFinite(Number(p.born.year))) {
 				bad.push(who + " has no born.year");
@@ -381,6 +389,14 @@
 				bad.slice(0, 4).join("; ") + (bad.length > 4 ? "; …" : ""));
 		}
 		const warnings = [];
+		if (missingOvrPot) {
+			warnings.push(missingOvrPot + " player" +
+				(missingOvrPot === 1 ? " has" : "s have") +
+				" no ovr or pot on the last ratings row. Overall is recomputed " +
+				"from the ratings and potential defaults to ten points of room, " +
+				"so the class will build — but the ovr->pot gap those players " +
+				"were meant to carry is gone.");
+		}
 		/* Ages nobody checked: born.year only had to be a number, so a 2031
 		   birth year ran a class of minus-four-year-olds and a 1985 cohort
 		   ran as seniors without a word. A birth year after the season is a
@@ -904,8 +920,18 @@
 				draftPick: p.draft && Number.isFinite(p.draft.pick) ? p.draft.pick : null,
 				origCollege: C.canonical(p.college),
 				origRatings: r,
-				origOvr: r.ovr,
-				origPot: r.pot,
+				/* A file missing ovr/pot is not hypothetical — validateLeagueFile
+				   checks the 15 rating keys and never checked these two, so a
+				   source row without them made `gap` NaN, which made targetPot
+				   NaN, which exported ratings.pot, draft.pot and newPot as NaN
+				   for every player in the file. BBGM computes ovr from the
+				   ratings anyway, so computing it here is the same answer the
+				   file should have carried; potential defaults to ten points of
+				   room, which is about the class median. */
+				origOvr: Number.isFinite(Number(r.ovr)) ? Number(r.ovr) : BB.ovr(r),
+				origPot: Number.isFinite(Number(r.pot))
+					? Number(r.pot)
+					: clamp(BB.ovr(r) + 10, 0, 100),
 				origPos: r.pos,
 				hgtInches: hgtIn,
 				weight: wt,
@@ -952,6 +978,10 @@
 
 		// --- ratings ---------------------------------------------------
 		const order = players.slice().sort((a, b) => b.origOvr - a.origOvr);
+		/* What this class has drawn so far, so one build cannot be half of it
+		   and the top of the board cannot be the same build twice. See
+		   RB.newDrawCounts. */
+		const drawCounts = RB.newDrawCounts();
 		let curve = null;
 		if (cfg.ovrMode === "curve") curve = RB.classCurve(rng, players.length, cfg);
 
@@ -1002,7 +1032,8 @@
 				prng, baseRatings, targetOvr, targetOvr + gap, cfg,
 				ov.archetype || null, state.flavor, ov.ratings || null,
 				state.archetypePool, i,
-				{ classYear: p.classYear, nonNcaa: p.nonNcaa, transfer: p.transfer });
+				{ classYear: p.classYear, nonNcaa: p.nonNcaa, transfer: p.transfer },
+				drawCounts);
 			p.newRatings = built.ratings;
 			// Validate: every rating key must be a finite number. A NaN or
 			// Infinity from a degenerate input or a solver edge case must not
@@ -1027,8 +1058,17 @@
 			p.baseGap = gap;
 			// A locked overall this player's height cannot reach is reported
 			// rather than silently approximated.
-			p.lockUnreachable = Number.isFinite(ov.ovr) && built.ovr !== targetOvr
-				? { asked: targetOvr, got: built.ovr, range: built.ovrRange }
+			/* Also when the ovr was NOT locked. Pinning all fifteen ratings
+			   leaves the solver nothing to move, so the player's overall is
+			   whatever those ratings come to — which silently replaced the
+			   target the curve or the source file asked for, with nothing
+			   anywhere to say so. */
+			const allPinned = !!ov.ratings && BB.RATING_KEYS.every(
+				(k) => k === "hgt" || Number.isFinite(ov.ratings[k]));
+			p.lockUnreachable = (Number.isFinite(ov.ovr) || allPinned) &&
+				built.ovr !== targetOvr
+				? { asked: targetOvr, got: built.ovr, range: built.ovrRange,
+					fromRatings: !Number.isFinite(ov.ovr) }
 				: null;
 			p.newPos = built.pos;
 			p.newSkills = built.skills;
@@ -1058,7 +1098,8 @@
 		state.players = players;
 		state.season = season;
 		assignRecruiting(players, rng.child("recruiting" + vsalt));
-		state.surprises = assignSurprises(players, rng.child("surprises" + vsalt), cfg);
+		state.surprises = assignSurprises(players, rng.child("surprises" + vsalt), cfg,
+			{ cfg, flavor: state.flavor, pool: state.archetypePool, counts: drawCounts });
 		/* TRAITS. Drawn after the build AND after the anomalies, because
 		   every prerequisite in the table is about the finished player: his
 		   height, his class year, his build's tags, his overall — and an
@@ -1068,7 +1109,8 @@
 		{
 			const trng = rng.child("traits" + vsalt);
 			for (const p of players) {
-				const t = TR.assign(p, trng.child("tr:" + p.key + rerollSalt(p, "traits")), cfg);
+				const t = TR.assign(p, trng.child("tr:" + p.key + rerollSalt(p, "traits")),
+					cfg, state.flavor);
 				p.traits = t.traits;
 				p.traitNames = t.names;
 				/* Read by the game log (night-to-night spread), the rebound
@@ -1140,7 +1182,7 @@
 			name: "physical outlier", w: 1.6,
 			label: "a physical outlier",
 			pick: (p) => true,
-			apply: (p, r) => {
+			apply: (p, r, ctx) => {
 				const tall = r.random() < 0.66;
 				const inches = tall ? r.int(87, 89) : r.int(66, 68);
 				/* Height feeds BBGM's overall formula more heavily than any
@@ -1158,6 +1200,29 @@
 				const cleanBase = p.buildCleanBase
 					? Object.assign({}, p.buildCleanBase, { hgt: base.hgt })
 					: null;
+				/* The BUILD has to survive the new height too. Re-solving the
+				   old one was all this did, and every archetype is gated on a
+				   height band: measured over 30 classes, five of six outliers
+				   ended outside their own build's band — a Shot-Blocking
+				   Anchor (min 76) at 5'8", a Movement Shooter (max 56) at
+				   7'4". The rating vector then said one thing and the label
+				   beside it said another, and nothing downstream that reads
+				   the build — the pot model, the role usage, the trait gates —
+				   was looking at a build this player could have.
+
+				   A locked build is left alone: the user asked for it. */
+				const keep = p.override && p.override.archetype;
+				if (!keep) {
+					const A = RB.ARCHETYPES.filter((x) => x.name === p.archetype)[0];
+					if (!A || base.hgt < A.min || base.hgt > A.max) {
+						const c = ctx || {};
+						const redrawn = RB.pickArchetype(r, base.hgt, c.cfg || {},
+							c.flavor || null, c.pool || null, null,
+							{ classYear: p.classYear, nonNcaa: p.nonNcaa,
+								transfer: p.transfer }, c.counts || null);
+						p.archetype = (redrawn && redrawn.name) || "Balanced";
+					}
+				}
 				const re = RB.resolveTo(base, p.newOvr, p.archetype,
 					p.origRatings.fuzz, p.buildPinned, cleanBase);
 				p.newHgtInches = inches;
@@ -1650,7 +1715,7 @@
 	   and the penalty is smaller than the draw's own noise. */
 	const ANOMALY_MEMORY_DEPTH = 3;
 
-	function assignSurprises(players, rng, cfg) {
+	function assignSurprises(players, rng, cfg, ctx) {
 		const budget = clamp(
 			cfg && cfg.surpriseBudget !== undefined ? cfg.surpriseBudget : 4, 0, 10);
 		if (!budget || !players.length) return [];
@@ -1699,7 +1764,7 @@
 			if (!options.length) { i--; continue; }
 			const who = options[Math.floor(rng.random() * options.length)];
 			used.add(who.key);
-			kind.apply(who, rng.child("sp:" + kind.name));
+			kind.apply(who, rng.child("sp:" + kind.name), ctx);
 			who.surprise = { name: kind.name, label: kind.label };
 			out.push({ name: kind.name, label: kind.label, player: who.name, key: who.key });
 		}
