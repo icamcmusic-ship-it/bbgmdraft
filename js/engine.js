@@ -3620,17 +3620,41 @@
 	   seed, the settings and the pool memory and nothing the season
 	   produces, so running it on its own gives exactly the class the full
 	   chain will build later, at a fraction of the cost. */
+	/* MEMOIZED on the build phase's own dependency key.
+
+	   A universe runs one preview per file on EVERY chain run, and a chain
+	   re-runs whenever a setting invalidates it — so nudging awardStrictness,
+	   which createRunner's phase cache turns into one awards phase per
+	   season, still paid a full build phase per file in the preview pass:
+	   twenty on a twenty-file world, fifty on a fifty-file one. The build
+	   phase reads the seed, the settings in its deps list and the pool
+	   memory, and phaseKey already names exactly those; keyed on that plus
+	   the file, the preview is reused until one of them changes. A small
+	   LRU keyed by file object, so a re-dropped file starts clean. */
+	const PREVIEW_CACHE_MAX = 64;
+	const previewCache = new Map();
+
 	function previewClass(leagueFile, cfg) {
 		const validation = validateLeagueFile(leagueFile);
 		const lf = Object.assign({}, leagueFile, { startingSeason: validation.season });
 		const seed = cfg.seed && String(cfg.seed).trim() !== ""
 			? String(cfg.seed).trim() : String(Math.floor(Math.random() * 1e9));
-		const state = { leagueFile: lf, rng: new Rng(seed), seed, cfg: Object.assign({}, cfg, { seed }) };
+		const effective = Object.assign({}, cfg, { seed });
+		const key = phaseKey(PHASES[0], effective);
+		let byKey = previewCache.get(leagueFile);
+		if (byKey && byKey.key === key) return byKey.value;
+		const state = { leagueFile: lf, rng: new Rng(seed), seed, cfg: effective };
 		phaseBuild(state);
-		return {
+		const value = {
 			season: state.season, seed, players: state.players,
 			archetypePool: state.archetypePool ? state.archetypePool.map((a) => a.name) : null,
 		};
+		previewCache.delete(leagueFile);
+		previewCache.set(leagueFile, { key, value });
+		if (previewCache.size > PREVIEW_CACHE_MAX) {
+			previewCache.delete(previewCache.keys().next().value);
+		}
+		return value;
 	}
 
 	/* Who from a later class was on a Division I roster in `season`, and as
@@ -5397,6 +5421,12 @@
 			   the club is what goes in the field; the league is what the
 			   note says around it. */
 			out.college = p.proClub || p.newCollege;
+			/* Years in the league, which for a draft prospect is none. BBGM
+			   counts it from the pro seasons a player has played, and the
+			   college rows this tool writes are not that; saying 0 here
+			   keeps an imported class from arriving with a veteran's number
+			   read off somebody else's stats. */
+			out.experience = 0;
 			const ov = p.override || {};
 			if (ov.name && String(ov.name).trim()) {
 				const parts = String(ov.name).trim().split(/\s+/);
@@ -6257,7 +6287,7 @@
 			const out = Object.assign({}, target);
 			const src2 = JSON.parse(JSON.stringify(p));
 			for (const key of ["college", "note", "noteBool", "awards", "injuries",
-				"stats", "moodTraits", "jerseyNumber"]) {
+				"stats", "moodTraits", "jerseyNumber", "experience"]) {
 				if (src2[key] !== undefined) out[key] = src2[key];
 			}
 			if (src2.noteBool === undefined) delete out.noteBool;

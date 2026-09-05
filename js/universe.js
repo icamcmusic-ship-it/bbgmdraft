@@ -102,8 +102,9 @@
 				index: i, name: f.name, ok: true, errors: [], warnings: [],
 				season: null, players: 0,
 			};
+			let v;
 			try {
-				const v = global.Engine.validateLeagueFile(f.data);
+				v = global.Engine.validateLeagueFile(f.data);
 				row.season = v.season;
 				row.warnings = (v.warnings || []).slice();
 				row.players = (f.data.players || []).length;
@@ -122,8 +123,30 @@
 			   says so. */
 			const cap = global.Engine.MAX_CLASS;
 			if (row.players > cap) {
-				row.ok = false;
-				row.errors.push(row.players + " players — above the " + cap + " cap");
+				/* THE SAME RULE AS THE STANDALONE PATH.
+
+				   Engine.validateLeagueFile warns about an oversized file and
+				   offers `classPids` — the players drafted in the file's own
+				   season — so a whole-league export dropped on the page loads
+				   as the class it contains. This used to be a hard rejection
+				   with no offer, so the same file was accepted by one path and
+				   refused by name by the other. Now the offer travels with the
+				   row and the chain runs the subset (see runUniverse); a file
+				   with no recoverable class is still refused, because fifty
+				   seasons of five thousand men is not a universe anybody
+				   waits for. */
+				if (v.classPids && v.classPids.length) {
+					row.classPids = v.classPids.slice();
+					row.classCount = v.classCount;
+					row.players = v.classCount;
+					row.warnings.push(v.total + " players in the file — only the " +
+						v.classCount + " drafted in " + v.season + " run as this season's class");
+				} else {
+					row.ok = false;
+					row.errors.push(row.players + " players — above the " + cap +
+						" cap, and none of them are drafted in " + v.season +
+						" so no class could be picked out of the file");
+				}
 			}
 			return row;
 		});
@@ -430,8 +453,16 @@
 			champion: t && t.champion ? t.champion.team.name : null,
 			champSeed: t && t.champion ? t.champion.seed : null,
 			runnerUp: t && t.runnerUp ? t.runnerUp.team.name : null,
-			poy: poy ? { name: poy.name, school: poy.proClub || poy.newCollege } : null,
-			no1: no1 ? { name: no1.name, school: no1.proClub || no1.newCollege } : null,
+			/* `school` is the NCAA program, always, for the reason alumniOf
+			   gives: `proClub || newCollege` put a EuroLeague club in the
+			   field, and threads() then counted "Kansas produced 2 No. 1
+			   picks" against a club with no team page, and "back-to-back
+			   players of the year" matched two pro clubs. The club rides
+			   beside it so the timeline can still say where he played. */
+			poy: poy ? { name: poy.name, school: poy.newCollege,
+				club: poy.proClub || null, nonNcaa: !!poy.nonNcaa } : null,
+			no1: no1 ? { name: no1.name, school: no1.newCollege,
+				club: no1.proClub || null, nonNcaa: !!no1.nonNcaa } : null,
 			apOne: res.poll && res.poll[0] ? res.poll[0].name : null,
 			realignment: (res.realignment || [])
 				.map((m) => m.school + " → " + m.to),
@@ -469,11 +500,14 @@
 			if (r.champion) {
 				(titleSeasons[r.champion] = titleSeasons[r.champion] || []).push(r.season);
 			}
-			if (r.no1 && r.no1.school) {
+			/* Programs only: a No. 1 pick out of a EuroLeague club is not a
+			   program producing picks, and there is no team page to link. */
+			if (r.no1 && r.no1.school && !r.no1.nonNcaa) {
 				(no1Seasons[r.no1.school] = no1Seasons[r.no1.school] || []).push(r.season);
 			}
 		}
-		for (const name of Object.keys(titleSeasons).sort()) {
+		const byName = (a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: "base" });
+		for (const name of Object.keys(titleSeasons).sort(byName)) {
 			const seasons = titleSeasons[name];
 			if (seasons.length >= 2) {
 				out.push({ kind: "titles", team: name, seasons: seasons.slice(),
@@ -481,7 +515,7 @@
 					text: name + " won " + seasons.length + " national titles" });
 			}
 		}
-		for (const name of Object.keys(no1Seasons).sort()) {
+		for (const name of Object.keys(no1Seasons).sort(byName)) {
 			const seasons = no1Seasons[name];
 			if (seasons.length >= 2) {
 				out.push({ kind: "no1", team: name, seasons: seasons.slice(),
@@ -502,6 +536,7 @@
 					text: rows[i].champion + " repeated as champions in " + rows[i].season });
 			}
 			if (rows[i].poy && rows[i - 1].poy &&
+				!rows[i].poy.nonNcaa && !rows[i - 1].poy.nonNcaa &&
 				rows[i].poy.school === rows[i - 1].poy.school) {
 				out.push({ kind: "poyRepeat", team: rows[i].poy.school,
 					seasons: [rows[i - 1].season, rows[i].season], count: 2,
@@ -544,12 +579,17 @@
 			if (r.champion) finals[r.champion] = (finals[r.champion] || 0) + 1;
 			if (r.runnerUp) finals[r.runnerUp] = (finals[r.runnerUp] || 0) + 1;
 			if (r.apOne) apOnes[r.apOne] = (apOnes[r.apOne] || 0) + 1;
-			if (r.poy && r.poy.school) poys[r.poy.school] = (poys[r.poy.school] || 0) + 1;
-			if (r.no1 && r.no1.school) no1s[r.no1.school] = (no1s[r.no1.school] || 0) + 1;
+			if (r.poy && r.poy.school && !r.poy.nonNcaa) {
+				poys[r.poy.school] = (poys[r.poy.school] || 0) + 1;
+			}
+			if (r.no1 && r.no1.school && !r.no1.nonNcaa) {
+				no1s[r.no1.school] = (no1s[r.no1.school] || 0) + 1;
+			}
 		}
 		const leaders = (map, label) => Object.keys(map)
 			.map((team) => ({ team, count: map[team], label }))
-			.sort((a, b) => b.count - a.count || (a.team < b.team ? -1 : 1))
+			.sort((a, b) => b.count - a.count ||
+				String(a.team).localeCompare(String(b.team), undefined, { sensitivity: "base" }))
 			.slice(0, 10);
 
 		/* The longest unbroken run at AP No. 1, which is a streak over the

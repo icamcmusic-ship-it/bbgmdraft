@@ -250,6 +250,34 @@ async function gotoProspects(page) {
 	// Multi-key sort, and a way back out of it.
 	await page.locator("table thead th", { hasText: "PPG" }).first().click();
 	await page.waitForTimeout(200);
+	/* Blanks sort LAST in both directions. The rule was multiplied by the
+	   direction, and numeric columns open descending, so the first click on
+	   PPG put every prospect with no stat line at the top. Read off the
+	   rendered column: once a blank cell appears, nothing non-blank may
+	   follow it, whichever way the column is sorted. */
+	const blanksLast = async () => page.evaluate(() => {
+		const heads = Array.from(document.querySelectorAll("table thead th"))
+			.map((th) => th.textContent.replace(/\s*[▾▴]\d*$/, "").trim());
+		const col = heads.indexOf("PPG");
+		if (col < 0) return { ok: false, why: "no PPG column" };
+		const cells = Array.from(document.querySelectorAll("table tbody tr"))
+			.filter((tr) => !tr.classList.contains("bandrow"))
+			.map((tr) => (tr.children[col] ? tr.children[col].textContent.trim() : ""));
+		let seenBlank = false;
+		for (const c of cells) {
+			if (c === "" || c === "—") seenBlank = true;
+			else if (seenBlank) return { ok: false, why: "non-blank after blank: " + cells.join(",") };
+		}
+		return { ok: true, blanks: cells.filter((c) => c === "" || c === "—").length };
+	});
+	const descBlank = await blanksLast();
+	ok("blank PPG cells sort last on a descending column", descBlank.ok, descBlank.why);
+	await page.locator("table thead th", { hasText: "PPG" }).first().click();
+	await page.waitForTimeout(200);
+	const ascBlank = await blanksLast();
+	ok("blank PPG cells sort last on an ascending column", ascBlank.ok, ascBlank.why);
+	await page.locator("table thead th", { hasText: "PPG" }).first().click();
+	await page.waitForTimeout(200);
 	await page.locator("table thead th", { hasText: "Ovr" }).first()
 		.click({ modifiers: ["Shift"] });
 	await page.waitForTimeout(250);

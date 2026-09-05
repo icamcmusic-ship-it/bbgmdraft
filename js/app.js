@@ -116,6 +116,22 @@
 		fileCfgs: {},
 		// Settings the randomizer must not touch. {key: true}.
 		settingLocks: {},
+		/* The randomizer's own seed, so a draw can be reproduced: the one
+		   action in a deterministic tool that used Math.random() was the one
+		   that could not be shared. Set by randomizeSettings, shown in the
+		   status line, replayable by shift-clicking Randomize. */
+		lastRandomSeed: null,
+		/* Which tier of the settings panel is shown: "shape" is the handful
+		   of sliders a new user needs, "season" adds the college season and
+		   awards, "model" is everything. Persisted like every other view
+		   choice. The search box and "only what I changed" cut across it. */
+		settingTier: "model",
+		/* RUN HISTORY. The seed list remembers twelve seeds, and a seed is not
+		   a run: the run is seed + settings + locks + the pool and anomaly
+		   memories it was drawn against. One entry per reroll, labelled by
+		   the class fingerprint and flavor, restorable in one step (through
+		   the undo stack, so restoring is itself undoable). */
+		sessions: [],
 	};
 	global.App = { state };
 
@@ -262,6 +278,8 @@
 			randomScope: state.randomScope,
 			randomizePerFile: state.randomizePerFile,
 			settingLocks: state.settingLocks,
+			settingTier: state.settingTier,
+			sessions: state.sessions.slice(0, SESSIONS_MAX),
 			sort: state.sort,
 			tab: state.tab,
 			boardMode: state.boardMode,
@@ -432,6 +450,14 @@
 		}
 		state.randomizePerFile = !!saved.randomizePerFile;
 		state.settingLocks = validFlagMap(saved.settingLocks) || state.settingLocks;
+		if (validString(saved.settingTier, SETTING_TIERS.map((t) => t[0]))) {
+			state.settingTier = saved.settingTier;
+		}
+		if (Array.isArray(saved.sessions)) {
+			state.sessions = saved.sessions.filter((x) => x && typeof x === "object" &&
+				x.cfg && typeof x.cfg === "object" && typeof x.label === "string")
+				.slice(0, SESSIONS_MAX);
+		}
 		const sort = validSortStack(saved.sort);
 		if (sort) state.sort = sort;
 		if (saved.pinned && typeof saved.pinned === "object") {
@@ -1275,9 +1301,10 @@
 	   way; "wide" is uniform across the declared min/max. Both snap to the
 	   control's step and round off binary-float dust so the panel prints
 	   clean numbers. */
-	function randomSliderValue(key, mode) {
+	function randomSliderValue(key, mode, rng) {
 		const input = $(key);
 		if (!input || input.type !== "range") return null;
+		const random = rng ? () => rng.random() : Math.random;
 		const min = Number(input.min);
 		const max = Number(input.max);
 		const step = Number(input.step) || 1;
@@ -1286,9 +1313,9 @@
 		if (mode === "gentle") {
 			const d = Number(CFG.DEFAULTS[key]);
 			const center = Number.isFinite(d) ? Math.min(max, Math.max(min, d)) : (min + max) / 2;
-			v = center + (Math.random() - Math.random()) * 0.34 * (max - min);
+			v = center + (random() - random()) * 0.34 * (max - min);
 		} else {
-			v = min + Math.random() * (max - min);
+			v = min + random() * (max - min);
 		}
 		v = min + Math.round((Math.min(max, Math.max(min, v)) - min) / step) * step;
 		v = Math.min(max, Math.max(min, v));
@@ -1301,7 +1328,14 @@
 	   (the original, one-class behavior) or stashed per file (see
 	   randomizePerFile below) without duplicating the sampling rules in two
 	   places that would drift apart the first time one of them changed. */
-	function drawRandomPatch(scope) {
+	/* SEEDED. Every other draw in the tool comes off a seed, and the
+	   randomizer used Math.random(), so "🎲 Randomize" was the one thing that
+	   could not be reproduced or shared. The draw now comes off a randomizer
+	   seed — minted per press, or given back to replay one — which the
+	   status line shows and shift-click on the button asks for. The keys are
+	   drawn in a fixed order so the same seed gives the same patch. */
+	function drawRandomPatch(scope, rseed) {
+		const rng = rseed ? new global.BBGMRng.Rng("randomize|" + rseed) : null;
 		const mode = scope === "wide" ? "wide" : scope === "gentle" ? "gentle" : "wide";
 		const groups = (scope === "gentle" || scope === "wide")
 			? Object.keys(RANDOM_GROUPS) : [scope];
@@ -1311,7 +1345,7 @@
 		for (const g of groups) {
 			for (const key of RANDOM_GROUPS[g]) {
 				if (state.settingLocks[key]) { locked++; continue; }
-				const v = randomSliderValue(key, mode);
+				const v = randomSliderValue(key, mode, rng);
 				if (v === null || v === state.cfg[key]) continue;
 				patch[key] = v;
 				moved++;
@@ -1324,9 +1358,10 @@
 			const base = CFG.defaultLeagueWeights();
 			const spread = mode === "wide" ? Math.log(4) : Math.log(1.6);
 			const lw = {};
-			for (const k of Object.keys(base)) {
+			const random = rng ? () => rng.random() : Math.random;
+			for (const k of Object.keys(base).sort()) {
 				lw[k] = Math.max(0, Number(
-					(base[k] * Math.exp((Math.random() * 2 - 1) * spread)).toFixed(1)));
+					(base[k] * Math.exp((random() * 2 - 1) * spread)).toFixed(1)));
 			}
 			patch.leagueWeights = lw;
 			moved++;
@@ -1343,9 +1378,18 @@
 		return { patch, moved, locked };
 	}
 
-	function randomizeSettings(scope) {
+	function mintRandomSeed() {
+		return Math.floor(Math.random() * 0x7fffffff).toString(36);
+	}
+
+	function randomizeSettings(scope, givenSeed) {
 		if (RANDOM_SCOPES.indexOf(scope) === -1) scope = "gentle";
 		pushUndo("randomized settings (" + scope + ")");
+		const rseed = givenSeed && String(givenSeed).trim()
+			? String(givenSeed).trim() : mintRandomSeed();
+		state.lastRandomSeed = rseed;
+		const seedNote = " Randomizer seed " + rseed +
+			" — shift-click Randomize to replay one.";
 
 		/* Several files loaded, and the box below the button checked: instead
 		   of one shared draw applied to every class, each loaded file gets
@@ -1361,7 +1405,7 @@
 			let moved = 0;
 			let locked = 0;
 			for (let i = 0; i < state.files.length; i++) {
-				const draw = drawRandomPatch(scope);
+				const draw = drawRandomPatch(scope, rseed + "/" + i);
 				patches[i] = draw.patch;
 				moved += draw.moved;
 				// Every draw locks the same keys, so the count does not need summing.
@@ -1383,11 +1427,11 @@
 			setStatus("Drew a separate " + scope + " randomization for each of " +
 				state.files.length + " loaded classes" +
 				(locked ? " (" + locked + " locked, untouched)" : "") +
-				". Ctrl+Z restores them in one step.");
+				". Ctrl+Z restores them in one step." + seedNote);
 			return;
 		}
 
-		const { patch, moved, locked } = drawRandomPatch(scope);
+		const { patch, moved, locked } = drawRandomPatch(scope, rseed);
 		if (!moved) {
 			// Undo entry stays — it is a no-op to undo — but say why nothing moved.
 			setStatus(locked
@@ -1402,7 +1446,26 @@
 		scheduleRun();
 		setStatus("Randomized " + moved + " setting" + (moved === 1 ? "" : "s") +
 			(locked ? " (" + locked + " locked, untouched)" : "") +
-			". Ctrl+Z restores them in one step.");
+			". Ctrl+Z restores them in one step." + seedNote);
+	}
+
+	/* Replay a randomizer draw by its seed. */
+	function randomizeWithSeed() {
+		const box = el("div");
+		box.appendChild(el("p", null, "Every Randomize press draws from a randomizer " +
+			"seed, shown in the status line afterwards. Paste one here to draw the " +
+			"same settings again" + (state.lastRandomSeed
+				? " (the last one was " + state.lastRandomSeed + ")" : "") + "."));
+		const inp = el("input");
+		inp.type = "text";
+		inp.value = state.lastRandomSeed || "";
+		inp.placeholder = "randomizer seed";
+		inp.setAttribute("aria-label", "Randomizer seed");
+		box.appendChild(inp);
+		modal("Replay a randomizer seed", box, () => {
+			closeModal();
+			randomizeSettings(state.randomScope, inp.value);
+		}, "Randomize");
 	}
 
 	/* The randomizer's scopes, as chips rather than a <select>.
@@ -1476,7 +1539,10 @@
 		if (!btn) return;
 		paintRandomScope();
 		paintRandomPerFile();
-		btn.addEventListener("click", () => randomizeSettings(state.randomScope));
+		btn.addEventListener("click", (e) => {
+			if (e.shiftKey) randomizeWithSeed();
+			else randomizeSettings(state.randomScope);
+		});
 		const perFile = $("randomizePerFile");
 		if (perFile) {
 			perFile.addEventListener("change", () => {
@@ -1512,6 +1578,79 @@
 			(ctl.querySelector(".unit") ? ctl.querySelector(".unit").textContent : ""))
 			.toLowerCase();
 	}
+	/* THREE TIERS OF THE PANEL.
+
+	   Eight groups and forty-five controls, and no notion of which six a new
+	   user needs. "Shape" is the class itself: how good, how deep, how
+	   specialized, what flavor, how it got here. "Season" adds the college
+	   year that gets played around it and the honors it hands out. "Model" is
+	   everything — the memories, the noise dials, the calibration knobs. A
+	   control not named in the first two sets is a model control. The search
+	   box overrides the tier, so a setting you can name is always findable;
+	   "only what I changed" does too, since a changed model dial is exactly
+	   what you would want to see. */
+	const SETTING_TIERS = [
+		["shape", "Shape", "The class: quality, depth, builds, flavor, paths"],
+		["season", "Season", "Plus the college season and its awards"],
+		["model", "Model", "Everything, memories and noise dials included"],
+	];
+	const TIER_SHAPE = new Set([
+		"preset", "seed", "ovrMode", "classQuality", "classDepth", "eliteCount",
+		"specialization", "classFlavor", "flavorHint", "archetypePool",
+		"freshmanShare", "transferShare", "varySize", "universe", "era",
+		"pDII",
+	]);
+	const TIER_SEASON = new Set([
+		"potBias", "potSpread", "surpriseBudget", "traitCount", "narrative",
+		"pace", "scoringEnv", "efficiencyEnv", "upsetFactor", "injuryRate",
+		"seasonEvents", "draftEvents", "awardStrictness", "priorSeasons",
+		"coachTurnover", "realignmentRate", "redshirtShare", "reclassShare",
+		"archetypeDiversity",
+	]);
+	function tierOf(key) {
+		if (!key) return "model";
+		if (TIER_SHAPE.has(key)) return "shape";
+		if (TIER_SEASON.has(key)) return "season";
+		return "model";
+	}
+	const TIER_RANK = { shape: 0, season: 1, model: 2 };
+
+	function paintSettingTier() {
+		const row = $("settingTier");
+		if (!row) return;
+		row.innerHTML = "";
+		for (const [value, label, title] of SETTING_TIERS) {
+			const b = el("button", "chip" + (state.settingTier === value ? " on" : ""), label);
+			b.type = "button";
+			b.title = title;
+			b.setAttribute("role", "radio");
+			b.setAttribute("aria-checked", state.settingTier === value ? "true" : "false");
+			b.addEventListener("click", () => {
+				state.settingTier = value;
+				persist();
+				paintSettingTier();
+				applySettingFilter();
+			});
+			row.appendChild(b);
+		}
+	}
+
+	function bindSettingTier() {
+		const anchor = $("settingSearchBox");
+		if (!anchor || $("settingTier")) return;
+		const ctl = el("div", "ctl");
+		const lbl = el("span", "lbl", "Show");
+		lbl.id = "settingTierLabel";
+		ctl.appendChild(lbl);
+		const chips = el("div", "chips");
+		chips.id = "settingTier";
+		chips.setAttribute("role", "radiogroup");
+		chips.setAttribute("aria-labelledby", "settingTierLabel");
+		ctl.appendChild(chips);
+		anchor.parentNode.insertBefore(ctl, anchor);
+		paintSettingTier();
+	}
+
 	function applySettingFilter() {
 		const box = $("settingSearch");
 		const onlyChanged = $("onlyChanged");
@@ -1520,8 +1659,11 @@
 		const q = box.value.trim().toLowerCase();
 		const changedOnly = onlyChanged && onlyChanged.checked;
 		const D = CFG.DEFAULTS;
+		const tierRank = TIER_RANK[state.settingTier] !== undefined
+			? TIER_RANK[state.settingTier] : 2;
 		let shown = 0;
 		let total = 0;
+		let tiered = 0;
 		for (const grp of document.querySelectorAll("#settings details.grp")) {
 			let any = 0;
 			const ctls = grp.querySelectorAll(".ctl");
@@ -1531,6 +1673,10 @@
 				total++;
 				let show = true;
 				if (q && settingText(ctl).indexOf(q) === -1) show = false;
+				if (show && !q && !changedOnly && TIER_RANK[tierOf(key)] > tierRank) {
+					show = false;
+					tiered++;
+				}
 				if (show && changedOnly && key && key in D) {
 					const cur = state.cfg[key];
 					const def = D[key];
@@ -1562,7 +1708,11 @@
 			note.textContent = (q || changedOnly)
 				? shown + " of " + total + " settings" +
 					(shown === 0 ? " — nothing matches" : "")
-				: "";
+				: tiered
+					? tiered + " of " + total + " settings are behind the " +
+						(state.settingTier === "shape" ? "Season and Model" : "Model") +
+						" tier"
+					: "";
 		}
 	}
 	function bindSettingFilter() {
@@ -2386,7 +2536,7 @@
 			$("fileSummary").textContent = state.files.map(
 				(f) => f.name + ": " + summarize(f.data)).join("  ·  ");
 			$("fileSummary").hidden = false;
-			for (const id of ["btnReroll", "btnRerun", "btnExport", "btnExportMenu",
+			for (const id of ["btnReroll", "btnRerollUntil", "btnRerun", "btnExport", "btnExportMenu",
 				"btnExportAll", "btnPin"]) $(id).disabled = false;
 			checkLockFingerprint();
 			const warns = state.files.flatMap((f) => (f.warnings || [])
@@ -2614,6 +2764,7 @@
 		cfg.seed = saved.seed;
 		cfg.carryOver = saved.carryOver || null;
 		cfg.recentPools = (saved.recentPools || []).map((a) => a.slice());
+		cfg.recentAnomalies = (saved.recentAnomalies || []).map((a) => a.slice());
 		cfg.universeRoster = saved.universeRoster || null;
 		cfg.universeAlumni = saved.universeAlumni || null;
 		cfg.universeTitles = saved.universeTitles || null;
@@ -2767,11 +2918,22 @@
 		if (state.results[i]) return state.results[i];
 		const runner = state.runners[i];
 		if (!runner) return null;
+		/* UNIVERSE MODE NEVER SHOWS A STANDALONE WORLD.
+
+		   universeCfgFor is null until the chain has recorded what it ran
+		   this file with — during the run, and after a reload (cfgs are not
+		   persisted; the files are re-dropped and the chain re-runs). Falling
+		   through to the plain config here re-simulated the file with no
+		   carry-over and the wrong seed, so a tab opened in that window
+		   showed a world the Timeline disagrees with — bug B1 back for the
+		   length of a chain. The result is simply not there yet; render()
+		   says so instead. */
+		const ucfg = universeCfgFor(i);
+		if (state.cfg.universe && !ucfg) return null;
 		// Every file in a batch shares the seed, so they stay one set —
 		// unless it has its own randomized-settings patch (fileCfgFor), or
 		// is a universe-mode season with its own carry-over (universeCfgFor).
-		state.results[i] = runner.run(
-			universeCfgFor(i) || fileCfgFor(i) || effectiveCfg());
+		state.results[i] = runner.run(ucfg || fileCfgFor(i) || effectiveCfg());
 		/* A universe result rebuilt after eviction is the RAW season; the
 		   career links are a pass the chain runs on top of it. Relink it, or
 		   a rehydrated file shows the freshman year its own file guessed
@@ -2810,7 +2972,7 @@
 
 	   Cheap, correct, and honest about what it is: the page still blocks, it
 	   just no longer lies about blocking. */
-	const BUSY_BUTTONS = ["btnReroll", "btnRerun", "btnExport", "btnExportMenu"];
+	const BUSY_BUTTONS = ["btnReroll", "btnRerollUntil", "btnRerun", "btnExport", "btnExportMenu"];
 	let busyDepth = 0;
 	/* What the status line said before the busy message replaced it, so it can
 	   be put back. Without this the busy text is simply left on screen: nothing
@@ -3015,9 +3177,225 @@
 		return false;
 	}
 
+	/* ------------------------------------------------------------ sessions */
+
+	const SESSIONS_MAX = 24;
+
+	/* Record the class on screen as a restorable run: everything undoSnapshot
+	   carries (settings, locks, the drawn seed, both memories) plus a label
+	   made of what the class IS — fingerprint and flavor — rather than the
+	   seed alone. Called before a reroll replaces it, and never twice for
+	   the same fingerprint under the same settings. */
+	function rememberSession() {
+		const res = state.results[state.active];
+		if (!res) return;
+		const fp = classFingerprint(res);
+		const snap = undoSnapshot(fp);
+		snap.fingerprint = fp;
+		snap.seed = res.seed;
+		snap.flavor = res.flavor ? res.flavor.label : null;
+		snap.at = Date.now();
+		snap.file = activeFile() ? activeFile().name : null;
+		snap.label = fp + (snap.flavor ? " · " + snap.flavor : "") +
+			" · seed " + res.seed;
+		const dup = state.sessions.findIndex((x) => x.fingerprint === fp &&
+			JSON.stringify(x.cfg) === JSON.stringify(snap.cfg) &&
+			JSON.stringify(x.overrides) === JSON.stringify(snap.overrides));
+		if (dup !== -1) state.sessions.splice(dup, 1);
+		state.sessions.unshift(snap);
+		state.sessions = state.sessions.slice(0, SESSIONS_MAX);
+		paintSessions();
+	}
+
+	function restoreSession(i) {
+		const snap = state.sessions[i];
+		if (!snap) return;
+		pushUndo("returned to " + snap.label);
+		applySnapshot(JSON.parse(JSON.stringify(snap)), "Returned to");
+		persist();
+	}
+
+	function paintSessions() {
+		const sel = $("sessionHistory");
+		if (!sel) return;
+		sel.innerHTML = "";
+		sel.appendChild(new Option("recent classes…", ""));
+		state.sessions.forEach((x, i) => {
+			sel.appendChild(new Option(x.label + (x.file ? " (" + x.file + ")" : ""), String(i)));
+		});
+		if (state.sessions.length) {
+			const sep = new Option("──────────", "");
+			sep.disabled = true;
+			sel.appendChild(sep);
+			sel.appendChild(new Option("clear the run history", SESSIONS_CLEAR));
+		}
+		sel.hidden = !state.sessions.length;
+	}
+	const SESSIONS_CLEAR = "\u0000clearSessions";
+
+	function bindSessions() {
+		const hist = $("seedHistory");
+		if (!hist || $("sessionHistory")) return;
+		const sel = el("select");
+		sel.id = "sessionHistory";
+		sel.setAttribute("aria-label", "Recent classes: seed, settings and locks together");
+		sel.title = "Every class you rerolled away from, restorable with its settings, " +
+			"locks and memories — not only its seed";
+		hist.parentNode.insertBefore(sel, hist.nextSibling);
+		sel.addEventListener("change", () => {
+			const v = sel.value;
+			sel.value = "";
+			if (v === SESSIONS_CLEAR) {
+				state.sessions = [];
+				persist();
+				paintSessions();
+				setStatus("Run history cleared.");
+				return;
+			}
+			if (v === "") return;
+			restoreSession(Number(v));
+		});
+		paintSessions();
+	}
+
+	/* ------------------------------------------------------- reroll until */
+
+	/* CONSTRAINT-DRIVEN REROLLING.
+
+	   The batch engine generates and summarizes N classes; this wires a
+	   predicate to the same loop and stops at the first class that satisfies
+	   it. Seeds are derived from a base so the search is reproducible, and
+	   the class it lands on is an ordinary reroll: its seed is in the pill,
+	   the history and the undo stack. Predicates are named rather than
+	   typed, since a class is a structured thing and "the champion is a
+	   mid-major" is not a number. */
+	const REROLL_PREDICATES = [
+		{ key: "tallTop5", label: "a 7'2\" or taller top-five pick",
+			test: (res) => (res.board || []).slice(0, 5)
+				.some((p) => (p.newHgtInches || 0) >= 86) },
+		{ key: "midMajorChamp", label: "the national champion is a mid-major",
+			test: (res) => {
+				const t = res.tourney && res.tourney.champion && res.tourney.champion.team;
+				if (!t || !t.conf) return false;
+				const conf = global.Colleges.CONFERENCES[t.conf];
+				return !conf || conf.tier !== "high";
+			} },
+		{ key: "freshmanNo1", label: "the No. 1 pick is a freshman",
+			test: (res) => !!(res.board && res.board[0] && res.board[0].classYear === "Freshman") },
+		{ key: "abroadNo1", label: "the No. 1 pick played abroad",
+			test: (res) => !!(res.board && res.board[0] && res.board[0].nonNcaa) },
+		{ key: "seniorTop3", label: "a senior in the top three",
+			test: (res) => (res.board || []).slice(0, 3).some((p) => p.classYear === "Senior") },
+		{ key: "deepClass", label: "at least ten prospects at 50+ overall",
+			test: (res) => res.players.filter((p) => p.newOvr >= 50).length >= 10 },
+		{ key: "cinderella", label: "a No. 11 seed or worse in the Final Four",
+			test: (res) => !!(res.tourney && res.tourney.finalFour &&
+				res.tourney.finalFour.some((x) => x.seed >= 11)) },
+		{ key: "poyIsNo1", label: "the player of the year is the No. 1 pick",
+			test: (res) => {
+				const set = global.Universe ? global.Universe.nationalPOYSet() : new Set();
+				const no1 = res.board && res.board[0];
+				return !!no1 && (no1.awards || []).some((a) => set.has(a));
+			} },
+	];
+	const REROLL_UNTIL_MAX = 60;
+
+	function rerollUntilDialog() {
+		if (!state.files.length) return;
+		const box = el("div");
+		box.appendChild(el("p", null, "Reroll the class — new seed, same settings — " +
+			"until the first one that satisfies every condition ticked below, " +
+			"or the try limit is reached. The search is seeded, so the same " +
+			"conditions from the same class find the same seed again."));
+		const list = el("div", "colpicker");
+		const boxes = [];
+		for (const pr of REROLL_PREDICATES) {
+			const lab = el("label", "check");
+			const cb = el("input");
+			cb.type = "checkbox";
+			cb.value = pr.key;
+			lab.appendChild(cb);
+			lab.appendChild(document.createTextNode(" " + pr.label));
+			list.appendChild(lab);
+			boxes.push(cb);
+		}
+		box.appendChild(list);
+		const triesRow = el("div", "ctl");
+		const tl = el("label", null, "Give up after");
+		tl.htmlFor = "rerollUntilTries";
+		triesRow.appendChild(tl);
+		const tries = el("input");
+		tries.type = "number";
+		tries.id = "rerollUntilTries";
+		tries.min = "1";
+		tries.max = String(REROLL_UNTIL_MAX);
+		tries.value = "25";
+		triesRow.appendChild(tries);
+		triesRow.appendChild(el("span", "unit", " tries (about a third of a second each)"));
+		box.appendChild(triesRow);
+		modal("Reroll until…", box, () => {
+			const picked = boxes.filter((b) => b.checked).map((b) => b.value);
+			const n = Math.max(1, Math.min(REROLL_UNTIL_MAX, Number(tries.value) || 25));
+			closeModal();
+			if (!picked.length) { setStatus("Tick at least one condition."); return; }
+			rerollUntil(picked, n);
+		}, "Search");
+	}
+
+	function rerollUntil(keys, maxTries) {
+		const preds = REROLL_PREDICATES.filter((p) => keys.indexOf(p.key) !== -1);
+		if (!preds.length || !state.files.length) return;
+		const runner = state.runners[state.active];
+		if (!runner) return;
+		pushUndo("rerolled until " + preds.map((p) => p.label).join(" and "));
+		rememberSession();
+		rememberPool();
+		const base = (state.lastSeed || state.cfg.seed || mintRandomSeed()) +
+			"|until|" + keys.join("+");
+		const searchRng = new global.BBGMRng.Rng(base);
+		const cfg = fileCfgFor(state.active) || effectiveCfg();
+		let k = 0;
+		let found = null;
+		const step = () => {
+			if (found || k >= maxTries) { finish(); return; }
+			const seed = "u" + Math.floor(searchRng.random() * 1e9).toString(36);
+			k++;
+			try {
+				const res = runner.run(Object.assign({}, cfg, { seed }));
+				if (preds.every((p) => p.test(res))) found = res;
+			} catch (e) { /* a failed candidate is just not the one */ }
+			setStatus("Reroll until: try " + k + " of " + maxTries + "…", true);
+			setTimeout(step, 0);
+		};
+		const finish = () => {
+			if (!found) {
+				setStatus("No class in " + k + " tries satisfied " +
+					preds.map((p) => p.label).join(" and ") + ". The class on screen " +
+					"is unchanged; raise the try limit or loosen the conditions.");
+				/* The runner's cached state belongs to the last candidate;
+				   re-run the class that was on screen so the phase cache and
+				   the page agree again. */
+				run();
+				return;
+			}
+			state.cfg.seed = "";
+			$("seed").value = "";
+			state.lastSeed = found.seed;
+			state.editing = null;
+			state.selected = {};
+			run(() => setStatus("Found it on try " + k + ": seed " + found.seed +
+				" satisfies " + preds.map((p) => p.label).join(" and ") + "."));
+		};
+		setStatus("Reroll until: searching…", true);
+		setTimeout(step, 0);
+	}
+
 	function reroll() {
 		const previous = state.lastSeed;
 		pushUndo("rerolled the class");
+		// The class being replaced goes into the run history, with everything
+		// needed to come back to it. See rememberSession.
+		rememberSession();
 		// Before the draw: the class being replaced is what the next one is
 		// asked not to repeat. See rememberPool.
 		rememberPool();
@@ -3116,6 +3494,28 @@
 		state.universe.diags = diags;
 		const runnable = diags.filter((d) => d.ok)
 			.sort((a, b) => (a.season || 0) - (b.season || 0) || a.index - b.index);
+		/* THE "LOAD JUST THE CLASS" OFFER, HONOURED.
+
+		   Universe.validate hands back `classPids` for a whole-league file the
+		   way Engine.validateLeagueFile does for the standalone path, and the
+		   offer is taken here the same way classesFromFile takes it on drop:
+		   the file becomes the class it contains, once, and the runner is
+		   rebuilt on it. The fingerprint moves with it, since the export
+		   records which file a season was. */
+		for (const d of runnable) {
+			if (!d.classPids || !d.classPids.length) continue;
+			const f = state.files[d.index];
+			if (!f || !f.data || !Array.isArray(f.data.players)) continue;
+			const keep = new Set(d.classPids);
+			const players = f.data.players.filter((p, i) =>
+				keep.has(Number.isFinite(Number(p.pid)) ? Number(p.pid) : -1 - i));
+			if (!players.length || players.length === f.data.players.length) continue;
+			f.data = Object.assign({}, f.data, { players });
+			f.fingerprint = fingerprint(f);
+			state.runners[d.index] = global.Engine.createRunner(f.data);
+			state.results[d.index] = null;
+			d.classPids = null;
+		}
 		if (runnable.length < 1) {
 			setStatus("No runnable files — see the Universe tab for per-file diagnostics.");
 			state.tab = "universe";
@@ -3198,6 +3598,11 @@
 		};
 		let carry = null;
 		let recentPools = [];
+		/* The anomaly memory is universe-scoped, like the pool memory: a
+		   ten-season chain used to re-use the same six anomalies because
+		   each season was handed the standalone session's history rather
+		   than the chain's own. */
+		let recentAnomalies = [];
 		let coachTree = null;
 		let lastSeason = null;
 		const finish = () => {
@@ -3254,6 +3659,7 @@
 				cfg.seed = seedAt(k);
 				cfg.overrides = {};
 				cfg.recentPools = recentPools.map((a) => a.slice());
+				cfg.recentAnomalies = recentAnomalies.map((a) => a.slice());
 				cfg.carryOver = carry;
 				cfg.universeRoster = rosterFor(k);
 				/* What the world remembers, for the news desk. The alumni
@@ -3275,6 +3681,7 @@
 					seed: cfg.seed,
 					carryOver: cfg.carryOver,
 					recentPools: (cfg.recentPools || []).map((a) => a.slice()),
+					recentAnomalies: (cfg.recentAnomalies || []).map((a) => a.slice()),
 					universeRoster: cfg.universeRoster,
 					universeAlumni: cfg.universeAlumni,
 					universeTitles: cfg.universeTitles,
@@ -3299,6 +3706,10 @@
 				if (res.archetypePool) {
 					recentPools.unshift(res.archetypePool.slice());
 					recentPools = recentPools.slice(0, 3);
+				}
+				if (Array.isArray(res.surprises) && res.surprises.length) {
+					recentAnomalies.unshift(res.surprises.map((sp) => sp.name));
+					recentAnomalies = recentAnomalies.slice(0, ANOMALY_HISTORY);
 				}
 			} catch (e) {
 				/* A FAILED SEASON STILL PASSES TIME.
@@ -3436,6 +3847,79 @@
 		return out.length ? out : state.results.filter(Boolean);
 	}
 
+	/* UNIVERSE-LEVEL VIEWS, ON DEMAND.
+
+	   Coaches persist across the chain with a tenure, a reputation and an
+	   age, and conference membership carries from season to season — every
+	   fact a coach's career page or a realignment map needs is already in
+	   the results the chain produced. Neither is persisted (368 programs
+	   times fifty seasons is not a localStorage payload); both are built
+	   here from liveResults(), which rehydrates evicted seasons from the
+	   configs the chain recorded, and cached on the universe object until
+	   the next run replaces it. */
+	function universeCareers() {
+		if (state.universe.careers) return state.universe.careers;
+		const results = liveResults().slice()
+			.sort((a, b) => (a.season || 0) - (b.season || 0));
+		const coaches = {};
+		const confs = {};
+		for (const res of results) {
+			const season = res.season;
+			for (const t of Object.values(res.teams || {})) {
+				if (!t || !t.name) continue;
+				if (t.coach && t.coach.name) {
+					const c = coaches[t.coach.name] || (coaches[t.coach.name] = {
+						name: t.coach.name, seasons: [], wins: 0, losses: 0, titles: 0,
+						tourneys: 0, finalFours: 0, schools: [], mentor: t.coach.mentor || null,
+					});
+					const won = res.tourney && res.tourney.champion &&
+						res.tourney.champion.team.name === t.name;
+					const ff = /Final Four|Champion|Runner/i.test(String(t.ncaaResult || ""));
+					c.seasons.push({
+						season, school: t.name, w: t.w || 0, l: t.l || 0,
+						conf: t.conf, ncaa: t.ncaaResult || null, title: !!won,
+						apRank: t.finalRank || t.apRank || null,
+						tenure: t.coach.tenure, age: t.coach.age, rep: t.coach.rep,
+						replaced: !!t.coach.replaced,
+					});
+					c.wins += t.w || 0;
+					c.losses += t.l || 0;
+					if (won) c.titles++;
+					if (t.ncaaResult) c.tourneys++;
+					if (ff) c.finalFours++;
+					if (c.schools.indexOf(t.name) === -1) c.schools.push(t.name);
+					if (!c.mentor && t.coach.mentor) c.mentor = t.coach.mentor;
+				}
+				if (t.conf) {
+					const cf = confs[t.conf] || (confs[t.conf] = { name: t.conf, bySeason: {} });
+					(cf.bySeason[season] = cf.bySeason[season] || []).push(t.name);
+				}
+			}
+		}
+		const careers = Object.values(coaches)
+			.sort((a, b) => b.wins - a.wins || b.titles - a.titles ||
+				String(a.name).localeCompare(String(b.name)));
+		/* Membership as a story: for each conference, who joined and who
+		   left between consecutive played seasons, plus the roll at the end. */
+		const seasons = results.map((r) => r.season).filter(Number.isFinite);
+		const map = Object.keys(confs).sort((a, b) => a.localeCompare(b)).map((name) => {
+			const cf = confs[name];
+			const moves = [];
+			for (let i = 1; i < seasons.length; i++) {
+				const was = new Set(cf.bySeason[seasons[i - 1]] || []);
+				const now = new Set(cf.bySeason[seasons[i]] || []);
+				const joined = Array.from(now).filter((x) => !was.has(x));
+				const left = Array.from(was).filter((x) => !now.has(x));
+				if (joined.length || left.length) moves.push({ season: seasons[i], joined, left });
+			}
+			const last = seasons.length ? (cf.bySeason[seasons[seasons.length - 1]] || []) : [];
+			const first = seasons.length ? (cf.bySeason[seasons[0]] || []) : [];
+			return { name, first: first.length, last: last.length, members: last.slice().sort(), moves };
+		});
+		state.universe.careers = { coaches: careers, conferences: map, seasons };
+		return state.universe.careers;
+	}
+
 	/* Re-import: a universe file carries seeds and file fingerprints, not
 	   output. With the same class files loaded, replaying it reproduces the
 	   same world exactly — that is what determinism buys. */
@@ -3479,12 +3963,28 @@
 		   version 1 export does not, and replaying it under the current
 		   settings is the best that can be done — which is said out loud
 		   rather than silently producing a different world. */
+		/* UNDOABLE. Importing a universe replaces every setting on the panel,
+		   and it used to be the one settings change Ctrl+Z could not take
+		   back. The snapshot is taken before anything below moves. */
+		pushUndo("imported a universe");
 		let note = "";
 		if (json.settings) {
 			const seed = json.settings.seed;
-			state.cfg = CFG.make(json.settings);
+			const incoming = CFG.make(json.settings);
+			/* A locked setting is one the user has said must not move —
+			   the randomizer honours that, and so does this. The value
+			   under the lock stays; the import is reported as partial so the
+			   divergence check later has an explanation ready. */
+			const held = Object.keys(state.settingLocks || {})
+				.filter((k) => state.settingLocks[k] && k in incoming && k in state.cfg);
+			for (const k of held) incoming[k] = JSON.parse(JSON.stringify(state.cfg[k]));
+			state.cfg = incoming;
 			state.cfg.seed = seed || state.cfg.seed;
-			note = " Settings from the file were applied.";
+			note = " Settings from the file were applied." + (held.length
+				? " " + held.length + " locked setting" + (held.length === 1 ? "" : "s") +
+					" (" + held.join(", ") + ") kept your value" +
+					(held.length === 1 ? "" : "s") + ", so the replay may differ."
+				: "");
 		} else {
 			note = " This export predates settings capture (version " +
 				(json.version || 1) + "), so it replays under your current settings.";
@@ -3657,7 +4157,28 @@
 		const focus = captureFocus(view);
 		view.innerHTML = "";
 		const res = ensureResult(state.active);
-		if (!res) return;
+		if (!res) {
+			/* Universe mode with the chain still to run this file (see
+			   ensureResult): the Universe tab renders its own progress, and
+			   every other tab says what it is waiting for rather than
+			   drawing a world that is not the universe. */
+			if (state.cfg.universe && state.files.length) {
+				if (state.tab === "universe") { V.universe(view, null); return; }
+				const box = el("div", "empty-state");
+				box.appendChild(el("h3", null, state.universe.running
+					? "Universe: season " + (state.universe.done || 0) + " of " +
+						(state.universe.total || state.files.length) + "…"
+					: "Waiting for the universe chain"));
+				box.appendChild(el("p", "hint", state.universe.running
+					? "This tab shows the universe's world, which is still being played. " +
+						"It fills in when the chain reaches this class."
+					: "Universe mode is on and this class has not been run as part of " +
+						"the chain yet. It runs when the chain does; the Universe tab " +
+						"has the button and the per-file diagnostics."));
+				view.appendChild(box);
+			}
+			return;
+		}
 		// The archetype editor reports what the last run actually produced, so
 		// it has to be repainted when there is a new run to report.
 		paintArchWeights();
@@ -5309,6 +5830,16 @@
 			topPpg: withStats.length ? Math.max.apply(null, withStats.map((p) => p.stats.ppg)) : 0,
 			awards: res.players.reduce((a, p) => a + (p.awards || []).length, 0),
 			archetypes: new Set(res.players.map((p) => p.archetype)).size,
+			/* For the two-class diff on the Compare tab: the build pool the
+			   class drew, its curve by board band, and the top of the board. */
+			pool: Array.isArray(res.archetypePool) ? res.archetypePool.slice() : [],
+			curve: curveOf(res),
+			topTen: (res.board || []).slice(0, 10).map((p) => ({
+				key: p.key, name: p.name, ovr: p.newOvr, pot: p.newPot,
+				pos: p.newPos, year: p.classYear, archetype: p.archetype,
+				college: p.proClub || p.newCollege,
+			})),
+			champion: res.tourney && res.tourney.champion ? res.tourney.champion.team.name : null,
 			players: res.players.map((p) => ({
 				key: p.key, name: p.name, ovr: p.newOvr, pot: p.newPot,
 				archetype: p.archetype, college: p.proClub || p.newCollege,
@@ -5322,6 +5853,17 @@
 				ts: p.stats ? p.stats.ts : 0,
 			})),
 		};
+	}
+
+	/* The class curve as a few numbers: the overall at fixed positions down
+	   the sorted class, which is how a scout describes one ("the top is
+	   fine, it falls off a cliff at fifteen"). */
+	const CURVE_POINTS = [1, 3, 5, 10, 15, 20, 30, 45, 60];
+	function curveOf(res) {
+		const sorted = res.players.map((p) => p.newOvr).sort((a, b) => b - a);
+		return CURVE_POINTS.map((n) => ({
+			at: n, ovr: sorted.length >= n ? sorted[n - 1] : null,
+		}));
 	}
 
 	/* Index the pinned class by player key once, so the main table can put a
@@ -5671,11 +6213,12 @@
 		editorPanel, modal, closeModal,
 		clearLock, showPlayer, showTeam, showGame,
 		runUniverse, cancelUniverse, exportUniverse, exportUniversePlayers,
-		importUniverse, showPlayerInFile,
+		importUniverse, showPlayerInFile, universeCareers, liveResults,
 		// Exposed for tools/uismoke.js, which loads files without a file input.
 		installFiles, paintConfig,
 		copyText, announce, bulkApply, bulkShiftOvr, bulkLockAsIs, bulkClear, refreshBulkBar,
-		snapshot,
+		snapshot, rerollUntilDialog, rerollUntil, restoreSession, randomizeSettings,
+		REROLL_PREDICATES,
 		exportCsv, setStatus, showError, indexSnapshot,
 	});
 
@@ -5687,6 +6230,8 @@
 
 	bindSettingsSearch();
 	wrapSlidersWithNumbers();
+	bindSettingTier();
+	bindSessions();
 	bindConfig();
 	bindSliderNumbers();
 	bindRandomize();
@@ -5755,6 +6300,7 @@
 	})();
 
 	$("btnReroll").addEventListener("click", reroll);
+	$("btnRerollUntil").addEventListener("click", rerollUntilDialog);
 	// Not `run` directly: run takes an `after` callback and a listener
 	// would pass it the click event.
 	$("btnRerun").addEventListener("click", () => run());
@@ -5813,7 +6359,9 @@
 	   table. Debounced, and it only re-renders when the answer actually
 	   changed, so dragging a window edge is not seventy table rebuilds. */
 	let resizeTimer = null;
-	let lastCardMode = null;
+	/* Seeded with the mode at load rather than null, or the first resize
+	   always re-rendered even when the answer had not changed. */
+	let lastCardMode = V.cardMode();
 	window.addEventListener("resize", () => {
 		if ((state.cardView || "auto") !== "auto") return;
 		clearTimeout(resizeTimer);

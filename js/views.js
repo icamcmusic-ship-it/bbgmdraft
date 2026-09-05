@@ -371,6 +371,133 @@
 			(typeof v === "number" && !Number.isFinite(v));
 	}
 
+	/* ONE ORDER FOR NAMES. Team and conference lists used Object.keys().sort()
+	   — byte order — in most places and localeCompare in one, so "St. John's
+	   (NY)" and "Texas A&M" sat in different places on different tabs. Every
+	   list of names goes through this. */
+	function byName(a, b) {
+		return String(a).localeCompare(String(b), undefined, { sensitivity: "base" });
+	}
+	function sortedNames(list) {
+		return list.slice().sort(byName);
+	}
+
+	/* "WHY IS THIS PLAYER HERE?"
+
+	   Board rank against preseason rank, the draft-day event and the reason
+	   the engine drew for it, the anomaly tag, the class flavor — all of it
+	   computed (see reachDetail and assignSurprises in js/engine.js) and
+	   most of it shown nowhere per row. One small button on a row opens a
+	   popover with the whole account. */
+	let openWhy = null;
+	function closeWhy() {
+		if (!openWhy) return;
+		openWhy.pop.remove();
+		openWhy.btn.setAttribute("aria-expanded", "false");
+		document.removeEventListener("click", openWhy.away, true);
+		document.removeEventListener("keydown", openWhy.esc, true);
+		openWhy = null;
+	}
+	function whyLines(p, res) {
+		const out = [];
+		if (Number.isFinite(p.boardRank)) {
+			let line = "Board No. " + p.boardRank;
+			if (Number.isFinite(p.preseasonRank)) {
+				const mv = p.preseasonRank - p.boardRank;
+				line += " — preseason No. " + p.preseasonRank +
+					(mv > 0 ? ", up " + mv : mv < 0 ? ", down " + (-mv) : ", unchanged");
+			}
+			if (p.mockRound) line += "; mock pick " + p.mockRound + "." + p.mockPick;
+			out.push(line);
+		}
+		if (p.draftEvent) {
+			const ev = p.draftEvent;
+			const moved = Number.isFinite(ev.from) && Number.isFinite(p.boardRank)
+				? (p.boardRank - 1) - ev.from : 0;
+			let line = "Draft day: " + (typeof ev.say === "function"
+				? ev.say(moved, p.boardRank - 1) : ev.kind || "moved");
+			if (ev.detail) line += " — " + ev.detail;
+			out.push(line);
+		}
+		if (p.surprise) out.push("Anomaly: " + (p.surprise.label || p.surprise.name));
+		if (p.stats) {
+			out.push("Season: " + n1(p.stats.ppg) + " ppg, " + n1(p.stats.rpg) + " rpg, " +
+				n1(p.stats.apg) + " apg in " + n1(p.stats.mpg) + " mpg");
+		}
+		if (Number.isFinite(p.newPot) && Number.isFinite(p.newOvr)) {
+			out.push("Upside: " + p.newOvr + " → " + p.newPot +
+				(p.newPot - p.newOvr >= 10 ? " (a project)" : ""));
+		}
+		if (p.archetype) {
+			out.push("Build: " + p.archetype + (p.classYear ? ", " + p.classYear : "") +
+				(Number.isFinite(p.age) ? ", age " + Math.floor(p.age) : ""));
+		}
+		if (p.transfer && p.transfer.kind) {
+			out.push("Path: " + p.transfer.kind + (p.transfer.from ? " from " + p.transfer.from : ""));
+		}
+		if (res && res.flavor && res.flavor.name !== "balanced") {
+			out.push("Class flavor: " + res.flavor.label);
+		}
+		if ((p.awards || []).length) out.push("Honors: " + p.awards.slice(0, 4).join("; "));
+		return out;
+	}
+	function whyButton(p, res) {
+		const btn = el("button", "whybtn tiny", "?");
+		btn.type = "button";
+		btn.title = "Why is " + p.name + " here?";
+		btn.setAttribute("aria-label", "Why is " + p.name + " here?");
+		btn.setAttribute("aria-haspopup", "dialog");
+		btn.setAttribute("aria-expanded", "false");
+		btn.addEventListener("click", (e) => {
+			e.stopPropagation();
+			if (openWhy && openWhy.btn === btn) { closeWhy(); return; }
+			closeWhy();
+			const pop = el("div", "whypop");
+			pop.setAttribute("role", "dialog");
+			pop.setAttribute("aria-label", "Why " + p.name + " is here");
+			pop.appendChild(el("h5", null, p.name));
+			const ul = el("ul");
+			for (const line of whyLines(p, res)) ul.appendChild(el("li", null, line));
+			pop.appendChild(ul);
+			pop.appendChild(el("p", "hint", "Esc or click away to close"));
+			pop.addEventListener("click", (ev) => ev.stopPropagation());
+			document.body.appendChild(pop);
+			const r = btn.getBoundingClientRect();
+			const top = r.bottom + (global.scrollY || 0) + 4;
+			let left = r.left + (global.scrollX || 0);
+			const w = pop.offsetWidth || 260;
+			if (left + w > (global.innerWidth || 1000) - 8) {
+				left = Math.max(8, (global.innerWidth || 1000) - w - 8);
+			}
+			pop.style.top = top + "px";
+			pop.style.left = left + "px";
+			btn.setAttribute("aria-expanded", "true");
+			const away = () => closeWhy();
+			const esc = (ev) => { if (ev.key === "Escape") { closeWhy(); btn.focus(); } };
+			openWhy = { btn, pop, away, esc };
+			setTimeout(() => {
+				document.addEventListener("click", away, true);
+				document.addEventListener("keydown", esc, true);
+			}, 0);
+		});
+		btn.addEventListener("keydown", (e) => {
+			if (e.key === "Enter" || e.key === " ") e.stopPropagation();
+		});
+		return btn;
+	}
+
+	/* A GitHub-flavoured markdown table, for the board and the notes: the
+	   copy actions wrote plain text and tab-separated rows, and the place
+	   these get pasted is a forum post. */
+	function markdownTable(heads, rows) {
+		const cell = (v) => String(v === undefined || v === null ? "" : v)
+			.replace(/\|/g, "\\|").replace(/\n/g, " ");
+		return ["| " + heads.map(cell).join(" | ") + " |",
+			"| " + heads.map(() => "---").join(" | ") + " |"]
+			.concat(rows.map((r) => "| " + r.map(cell).join(" | ") + " |"))
+			.join("\n");
+	}
+
 	function sortRows(rows) {
 		const keys = A().state.sort;
 		const numeric = {};
@@ -384,11 +511,15 @@
 				const vb = b.sortVals[key];
 				const ba = isBlank(va);
 				const bb = isBlank(vb);
-				// Missing sorts last either way, so reversing a column never
-				// fills the top of the table with players who have no value.
+				/* Missing sorts last either way, so reversing a column never
+				   fills the top of the table with players who have no value.
+				   NOT multiplied by dir: that flipped the rule on every
+				   descending sort, and numeric columns open descending, so the
+				   first click on PPG put the men with no stat line at the top
+				   — exactly the failure the rule exists to prevent. */
 				if (ba || bb) {
 					if (ba && bb) continue;
-					return (ba ? 1 : -1) * dir;
+					return ba ? 1 : -1;
 				}
 				const cmp = numeric[key]
 					? Number(va) - Number(vb)
@@ -867,7 +998,7 @@
 		archSel.appendChild(new Option("all builds", ""));
 		const present = {};
 		for (const p of res.players) if (p.archetype) present[p.archetype] = true;
-		for (const a of Object.keys(present).sort()) archSel.appendChild(new Option(a, a));
+		for (const a of sortedNames(Object.keys(present))) archSel.appendChild(new Option(a, a));
 		archSel.value = st.filter.archetype || "";
 		archSel.addEventListener("change", () => {
 			st.filter.archetype = archSel.value;
@@ -894,7 +1025,7 @@
 		const confSel = el("select");
 		confSel.setAttribute("aria-label", "Filter by conference or league");
 		confSel.appendChild(new Option("all conferences", ""));
-		for (const c of Object.keys(confs).sort()) confSel.appendChild(new Option(c, c));
+		for (const c of sortedNames(Object.keys(confs))) confSel.appendChild(new Option(c, c));
 		confSel.value = st.filter.conf;
 		confSel.addEventListener("change", () => { st.filter.conf = confSel.value; A().render(); });
 		bar.appendChild(confSel);
@@ -969,10 +1100,68 @@
 			}
 		}
 
+		/* The presets, one click from the table rather than two clicks
+		   into the picker. Everyone rebuilt the same three arrangements. */
+		const quick = el("select");
+		quick.setAttribute("aria-label", "Column preset");
+		quick.title = "Column presets — Columns… has the full picker and your saved layouts";
+		quick.appendChild(new Option("columns: preset…", ""));
+		for (const pr of COLUMN_PRESETS) quick.appendChild(new Option(pr.name, pr.name));
+		for (const name of sortedNames(Object.keys(st.columnLayouts || {}))) {
+			quick.appendChild(new Option("saved: " + name, "\u0000" + name));
+		}
+		quick.addEventListener("change", () => {
+			const v = quick.value;
+			quick.value = "";
+			if (!v) return;
+			if (v.charAt(0) === "\u0000") {
+				const saved = (st.columnLayouts || {})[v.slice(1)];
+				if (saved) st.hiddenColumns = Object.assign({}, saved);
+			} else {
+				applyColumnPreset(v);
+			}
+			A().persist();
+			A().render();
+		});
+		bar.appendChild(quick);
 		const cols = el("button", null, "Columns…");
 		cols.addEventListener("click", () => columnPicker());
 		bar.appendChild(cols);
 		return bar;
+	}
+
+	/* The built-in column presets. One table, read by the picker and by the
+	   quick select above, so the two cannot drift. "Export" is the set of
+	   fields that reach the file: what a reader checking an export wants. */
+	const COLUMN_PRESETS = [
+		{ name: "Everything", keys: null },
+		{ name: "Scouting", keys: ["pos", "year", "board", "move", "newOvr", "newPot",
+			"archetype", "college", "conf", "hgtInches", "weight",
+			"mpg", "ppg", "rpg", "apg", "ts", "awards"] },
+		{ name: "Box score", keys: ["pos", "college", "gp", "mpg", "ppg", "rpg", "apg",
+			"spg", "bpg", "topg", "pfpg", "fgp", "tpp", "ftp", "ts"] },
+		// "35% from three" means nothing without "on 7.8 attempts".
+		{ name: "Shooting", keys: ["pos", "college", "mpg", "ppg", "fga", "tpa", "fta",
+			"tpar", "ftr", "fgp", "efg", "tpp", "ftp", "ts", "usg"] },
+		{ name: "Efficiency", keys: ["pos", "college", "mpg", "usg", "ts", "efg", "ortg",
+			"drtg", "astTo", "prod", "ppg", "apg", "topg"] },
+		{ name: "Defense", keys: ["pos", "college", "mpg", "drpg", "spg", "bpg", "cspg",
+			"deflpg", "chgpg", "drtg", "pfpg", "awards"] },
+		{ name: "Team context", keys: ["pos", "college", "conf", "record", "apRank", "seed",
+			"newOvr", "mpg", "ppg", "usg", "ts", "awards"] },
+		{ name: "Export", keys: ["pos", "year", "newOvr", "newPot", "archetype", "college",
+			"hgtInches", "weight", "board", "awards"] },
+	];
+	function applyColumnPreset(name) {
+		const st = A().state;
+		const pr = COLUMN_PRESETS.filter((x) => x.name === name)[0];
+		if (!pr) return;
+		st.hiddenColumns = {};
+		if (!pr.keys) return;
+		for (const col of COLUMNS) {
+			if (col.fixed) continue;
+			if (pr.keys.indexOf(col.key) === -1) st.hiddenColumns[col.key] = true;
+		}
 	}
 
 	function columnPicker() {
@@ -1007,7 +1196,7 @@
 		const saved = st.columnLayouts || (st.columnLayouts = {});
 		const savedRow = el("div", "rowflex");
 		savedRow.appendChild(el("span", "hint", "Your layouts:"));
-		const names = Object.keys(saved).sort();
+		const names = sortedNames(Object.keys(saved));
 		if (!names.length) savedRow.appendChild(el("span", "hint", "none yet"));
 		for (const name of names) {
 			const b = el("button", "tiny", name);
@@ -1041,35 +1230,16 @@
 		box.appendChild(savedRow);
 
 		const presets = el("div", "rowflex");
-		const preset = (name, keys) => {
-			const b = el("button", "tiny", name);
+		for (const pr of COLUMN_PRESETS) {
+			const b = el("button", "tiny", pr.name);
 			b.addEventListener("click", () => {
-				st.hiddenColumns = {};
-				for (const col of COLUMNS) {
-					if (col.fixed) continue;
-					if (keys.indexOf(col.key) === -1) st.hiddenColumns[col.key] = true;
-				}
+				applyColumnPreset(pr.name);
 				A().closeModal();
 				A().persist();
 				A().render();
 			});
 			presets.appendChild(b);
-		};
-		preset("Everything", COLUMNS.map((c) => c.key));
-		preset("Scouting", ["pos", "year", "board", "move", "newOvr", "newPot",
-			"archetype", "college", "conf", "hgtInches", "weight",
-			"mpg", "ppg", "rpg", "apg", "ts", "awards"]);
-		preset("Box score", ["pos", "college", "gp", "mpg", "ppg", "rpg", "apg",
-			"spg", "bpg", "topg", "pfpg", "fgp", "tpp", "ftp", "ts"]);
-		// "35% from three" means nothing without "on 7.8 attempts".
-		preset("Shooting", ["pos", "college", "mpg", "ppg", "fga", "tpa", "fta",
-			"tpar", "ftr", "fgp", "efg", "tpp", "ftp", "ts", "usg"]);
-		preset("Efficiency", ["pos", "college", "mpg", "usg", "ts", "efg", "ortg",
-			"drtg", "astTo", "prod", "ppg", "apg", "topg"]);
-		preset("Defense", ["pos", "college", "mpg", "drpg", "spg", "bpg", "cspg",
-			"deflpg", "chgpg", "drtg", "pfpg", "awards"]);
-		preset("Team context", ["pos", "college", "conf", "record", "apRank", "seed",
-			"newOvr", "mpg", "ppg", "usg", "ts", "awards"]);
+		}
 		box.appendChild(el("h4", null, "Presets"));
 		box.appendChild(presets);
 
@@ -1286,6 +1456,7 @@
 				case "name":
 					td = el("td", "sticky");
 					td.appendChild(document.createTextNode(p.name));
+					td.appendChild(whyButton(p, res));
 					sortVals.name = p.name;
 					break;
 				case "pos":
@@ -1718,7 +1889,7 @@
 		const colSel = el("select");
 		colSel.setAttribute("aria-label", "Set school for the selection");
 		colSel.appendChild(new Option("set school / league…", ""));
-		for (const name of C.names.concat(Object.keys(C.NON_NCAA)).sort()) {
+		for (const name of sortedNames(C.names.concat(Object.keys(C.NON_NCAA)))) {
 			colSel.appendChild(new Option(name, name));
 		}
 		colSel.addEventListener("change", () => {
@@ -2282,6 +2453,112 @@
 		return box;
 	}
 
+	/* COACHES AND CONFERENCES OVER TIME.
+
+	   Read-only views over data the chain already carries — see
+	   App.universeCareers. Built on a click rather than on render because
+	   a long chain has evicted older seasons and rebuilding one is a
+	   re-simulation. */
+	function careersSection(view, u) {
+		view.appendChild(el("h4", null, "Coaches and conferences"));
+		const built = u.careers;
+		if (!built) {
+			const p = el("p", "hint",
+				"Career lines for every head coach in the universe, and each " +
+				"conference's membership season by season. Built from the seasons " +
+				"the chain played; older ones may need to be re-run.");
+			const b = el("button", null, "Build coach careers and the conference map");
+			b.addEventListener("click", () => {
+				A().setStatus("Building coach careers…", true);
+				setTimeout(() => {
+					try { A().universeCareers(); } catch (e) { A().showError(e); }
+					A().setStatus("");
+					A().render();
+				}, 0);
+			});
+			p.appendChild(document.createTextNode(" "));
+			p.appendChild(b);
+			view.appendChild(p);
+			return;
+		}
+		const st = A().state;
+		const wrap = el("div", "scroll");
+		const table = el("table");
+		const hr = el("tr");
+		for (const h of ["Coach", "Seasons", "Record", "Titles", "NCAA trips", "Final Fours",
+			"Programs", "Tree"]) {
+			hr.appendChild(el("th", ["Seasons", "Record", "Titles", "NCAA trips", "Final Fours"]
+				.indexOf(h) >= 0 ? "num" : "", h));
+		}
+		const thead = el("thead");
+		thead.appendChild(hr);
+		table.appendChild(thead);
+		const tb = el("tbody");
+		const limit = st.careerAll ? built.coaches.length : 40;
+		for (const c of built.coaches.slice(0, limit)) {
+			const tr = el("tr");
+			const name = el("td", "sticky");
+			const b = el("button", "linky", c.name);
+			b.addEventListener("click", () => {
+				st.careerCoach = st.careerCoach === c.name ? null : c.name;
+				A().render();
+			});
+			name.appendChild(b);
+			tr.appendChild(name);
+			tr.appendChild(el("td", "num", String(c.seasons.length)));
+			tr.appendChild(el("td", "num", c.wins + "-" + c.losses));
+			tr.appendChild(el("td", "num", String(c.titles)));
+			tr.appendChild(el("td", "num", String(c.tourneys)));
+			tr.appendChild(el("td", "num", String(c.finalFours)));
+			const sch = el("td");
+			c.schools.forEach((x, i) => {
+				if (i) sch.appendChild(document.createTextNode(", "));
+				sch.appendChild(teamLink(x));
+			});
+			tr.appendChild(sch);
+			tr.appendChild(el("td", null, c.mentor ? "under " + c.mentor : "—"));
+			tb.appendChild(tr);
+			if (st.careerCoach === c.name) {
+				const dr = el("tr");
+				const td = el("td");
+				td.colSpan = 8;
+				const lines = c.seasons.map((y) => y.season + "  " + y.school + "  " +
+					y.w + "-" + y.l + (y.apRank ? "  AP " + y.apRank : "") +
+					(y.ncaa ? "  " + y.ncaa : "") + (y.title ? "  🏆" : "") +
+					(y.replaced ? "  (first year)" : "") +
+					(Number.isFinite(y.age) ? "  age " + y.age : ""));
+				td.appendChild(el("div", "note", lines.join("\n")));
+				dr.appendChild(td);
+				tb.appendChild(dr);
+			}
+		}
+		table.appendChild(tb);
+		wrap.appendChild(table);
+		view.appendChild(wrap);
+		if (built.coaches.length > 40) {
+			const more = el("button", "tiny", st.careerAll
+				? "Show the top 40" : "Show all " + built.coaches.length + " coaches");
+			more.addEventListener("click", () => { st.careerAll = !st.careerAll; A().render(); });
+			view.appendChild(more);
+		}
+		view.appendChild(el("h4", null, "Conference membership over time"));
+		const cm = el("div", "note");
+		for (const cf of built.conferences) {
+			const line = el("div");
+			line.appendChild(document.createTextNode(cf.name + " — " + cf.first + " → " +
+				cf.last + " members"));
+			for (const m of cf.moves) {
+				line.appendChild(document.createTextNode("\n    " + m.season + ": " +
+					[m.joined.length ? "+ " + m.joined.join(", ") : null,
+						m.left.length ? "− " + m.left.join(", ") : null]
+						.filter(Boolean).join("; ")));
+			}
+			if (!cf.moves.length) line.appendChild(document.createTextNode("  (no changes)"));
+			cm.appendChild(line);
+		}
+		view.appendChild(cm);
+	}
+
 	function recordsSection(view, rec) {
 		view.appendChild(el("h4", null, "Records book"));
 		view.appendChild(el("p", "legendline",
@@ -2499,7 +2776,26 @@
 		thead.appendChild(hr);
 		table.appendChild(thead);
 		const tb = el("tbody");
+		/* Where a man played, for the two name columns. `school` is the
+		   NCAA program (see Universe.summarize); a prospect abroad shows
+		   his club instead, since that is where the season happened. */
+		const where = (m) => m.nonNcaa && m.club ? m.club : (m.school || m.club || "?");
 		for (const r of u.rows) {
+			/* A GAP IS A ROW. The status line named the seasons that were
+			   not played and the table did not, so 2030 followed 2027 as if
+			   nothing had happened. One greyed row per missing season says
+			   what the world did in the dark. */
+			if (r.gap > 0 && Number.isFinite(r.season)) {
+				for (let g = r.gap; g >= 1; g--) {
+					const gtr = el("tr", "gaprow");
+					gtr.appendChild(el("td", null, String(r.season - g)));
+					const td = el("td", "hint", "no class file loaded — the world " +
+						"was aged across this season");
+					td.colSpan = 8;
+					gtr.appendChild(td);
+					tb.appendChild(gtr);
+				}
+			}
 			const tr = el("tr");
 			tr.appendChild(el("td", null, String(r.season || "?")));
 			if (r.error) {
@@ -2514,9 +2810,9 @@
 			tr.appendChild(el("td", null, (r.champion || "—") +
 				(r.champSeed ? " (No. " + r.champSeed + ")" : "")));
 			tr.appendChild(el("td", null, r.poy
-				? r.poy.name + " (" + r.poy.school + ")" : "—"));
+				? r.poy.name + " (" + where(r.poy) + ")" : "—"));
 			tr.appendChild(el("td", null, r.no1
-				? r.no1.name + " (" + r.no1.school + ")" : "—"));
+				? r.no1.name + " (" + where(r.no1) + ")" : "—"));
 			tr.appendChild(el("td", null, r.realignment && r.realignment.length
 				? r.realignment.join("; ") : "—"));
 			/* Fired / retired / hired away, rather than one number that used
@@ -2566,6 +2862,7 @@
 			view.appendChild(tl);
 		}
 		if (u.records) recordsSection(view, u.records);
+		if (!u.running && u.cfgs && Object.keys(u.cfgs).length) careersSection(view, u);
 		if (u.coachTree && u.coachTree.hires && u.coachTree.hires.length) {
 			coachTreeSection(view, u.coachTree);
 		}
@@ -2698,7 +2995,7 @@
 		for (const r of liveRegions) {
 			for (const x of t.regions[r].seeds) inField.push(x);
 		}
-		inField.sort((a, b) => a.team.name.localeCompare(b.team.name));
+		inField.sort((a, b) => byName(a.team.name, b.team.name));
 		for (const x of inField) sel.appendChild(new Option(x.team.name, x.team.name));
 		const out = el("div", "note");
 		out.setAttribute("role", "status");
@@ -3174,12 +3471,38 @@
 		cards.appendChild(mk("Fallers", res.fallers || [], true));
 		view.appendChild(cards);
 
+		const BOARD_HEADS = ["Board", "Rd", "Pick", "Player", "Pos", "Year", "Ovr", "Pot",
+			"School / club", "Preseason", "±", "PPG", "Honors"];
+		/* Copy as markdown, beside the other copy actions in the tool: a
+		   draft board's natural destination is a forum post. */
+		const bar = el("div", "filters");
+		const md = el("button", null, "Copy as markdown");
+		md.title = "Copy the board as a markdown table";
+		md.addEventListener("click", () => {
+			const rows = (res.board || []).map((p) => [
+				p.boardRank, p.mockRound || "", p.mockPick || "", p.name, p.newPos,
+				p.classYear, p.newOvr, p.newPot, p.proClub || p.newCollege,
+				p.preseasonRank, p.stockMove === 0 ? "" : (p.stockMove > 0 ? "+" : "") + p.stockMove,
+				p.stats ? n1(p.stats.ppg) : "", (p.awards || []).slice(0, 3).join("; "),
+			]);
+			A().copyText("**Draft board — seed " + res.seed +
+				(res.flavor && res.flavor.label ? ", " + res.flavor.label : "") + "**\n\n" +
+				markdownTable(BOARD_HEADS, rows), md, "Copy as markdown");
+		});
+		bar.appendChild(md);
+		view.appendChild(bar);
+		if (!(res.board || []).length) {
+			const box = el("div", "card empty-state");
+			box.appendChild(el("h4", null, "No board to show"));
+			box.appendChild(el("p", "hint", "The class has no prospects to rank."));
+			view.appendChild(box);
+			return;
+		}
+
 		const wrap = el("div", "scroll");
 		const table = el("table");
 		const thead = el("thead");
 		const hr = el("tr");
-		const BOARD_HEADS = ["Board", "Rd", "Pick", "Player", "Pos", "Year", "Ovr", "Pot",
-			"School / club", "Preseason", "±", "PPG", "Honors"];
 		for (const h of BOARD_HEADS) {
 			const th = el("th", ["Board", "Rd", "Pick", "Ovr", "Pot", "Preseason", "±", "PPG"].indexOf(h) >= 0 ? "num" : "", h);
 			th.scope = "col";
@@ -3231,6 +3554,7 @@
 			tr.appendChild(el("td", "num", p.mockPick ? String(p.mockPick) : "—"));
 			const nameTd = el("td", "sticky");
 			nameTd.appendChild(playerLink(p));
+			nameTd.appendChild(whyButton(p, res));
 			tr.appendChild(nameTd);
 			tr.appendChild(el("td", null, p.newPos));
 			tr.appendChild(el("td", null, p.classYear));
@@ -3442,12 +3766,26 @@
 				"Copy as spreadsheet rows");
 		});
 		bar.appendChild(tsv);
+		const md = el("button", null, "Copy as markdown");
+		md.title = "Copy every note as a markdown document: a heading per prospect";
+		md.addEventListener("click", () => {
+			const text = res.players.slice().sort((a, b) => b.newOvr - a.newOvr)
+				.map((p) => "### " + p.name + " — " + p.newPos + ", " +
+					(p.proClub || p.newCollege) + "\n\n" +
+					String(p.note || "").split("\n").map((l) => l.trim()).filter(Boolean)
+						.map((l) => "- " + l).join("\n"))
+				.join("\n\n");
+			A().copyText(text, md, "Copy as markdown");
+		});
+		bar.appendChild(md);
 		view.appendChild(bar);
 
 		const q = (st.noteQuery || "").toLowerCase();
 		const cards = el("div", "cards");
+		let shown = 0;
 		for (const p of res.players.slice().sort((a, b) => b.newOvr - a.newOvr)) {
 			if (q && (p.name + "\n" + p.note).toLowerCase().indexOf(q) === -1) continue;
+			shown++;
 			const c = el("div", "card");
 			const head = el("div", "rowflex notehead");
 			head.appendChild(el("h4", null, p.name));
@@ -3464,6 +3802,20 @@
 			c.appendChild(head);
 			c.appendChild(el("div", "note", p.note));
 			cards.appendChild(c);
+		}
+		if (!shown) {
+			const box = el("div", "card empty-state");
+			box.appendChild(el("h4", null, q ? "No note mentions “" + q + "”" : "No notes"));
+			box.appendChild(el("p", "hint", q
+				? "The search covers names and note text. Clear it to see every note."
+				: "Every line of the note template is off, or the class is empty."));
+			if (q) {
+				const clear = el("button", "tiny", "Clear the search");
+				clear.addEventListener("click", () => { st.noteQuery = ""; A().render(); });
+				box.appendChild(clear);
+			}
+			view.appendChild(box);
+			return;
 		}
 		view.appendChild(cards);
 	}
@@ -3485,7 +3837,13 @@
 				(p.proClub || p.newCollege), p.key));
 		}
 		if (!sel.options.length) {
-			view.appendChild(el("p", "legendline", "No game logs in this class."));
+			const box = el("div", "card empty-state");
+			box.appendChild(el("h4", null, "No game logs in this class"));
+			box.appendChild(el("p", "hint", res.players.length
+				? "Nobody in it played a college season the tool simulated — a class " +
+					"entirely abroad, or one that did not play at all, has no game-by-game lines."
+				: "The class is empty."));
+			view.appendChild(box);
 			return;
 		}
 		if (!st.logPlayer || !sorted.some((p) => p.key === st.logPlayer)) {
@@ -3677,6 +4035,78 @@
 		num("Honors handed out", pinned.awards, now.awards, 0);
 		num("Distinct archetypes", pinned.archetypes, now.archetypes, 0);
 		view.appendChild(cards);
+
+		/* THE TWO-COLUMN DIFF. Averages say two classes differ; the curve,
+		   the pool, the flavor and the top of the board say HOW. A snapshot
+		   pinned before these fields existed shows what it has. */
+		const side = el("div", "cards");
+		const two = (title, left, right) => {
+			const box = el("div", "card");
+			box.appendChild(el("h4", null, title));
+			const grid = el("div", "scroll");
+			const t = el("table");
+			const h = el("tr");
+			for (const x of ["", "Pinned", "Current"]) h.appendChild(el("th", null, x));
+			const th = el("thead");
+			th.appendChild(h);
+			t.appendChild(th);
+			const tb = el("tbody");
+			const n = Math.max(left.length, right.length);
+			for (let i = 0; i < n; i++) {
+				const tr = el("tr");
+				tr.appendChild(el("td", "num", left[i] && left[i].label !== undefined
+					? String(left[i].label) : right[i] && right[i].label !== undefined
+						? String(right[i].label) : String(i + 1)));
+				const a = left[i] ? left[i].text : "";
+				const b = right[i] ? right[i].text : "";
+				const ta = el("td", null, a);
+				const tbb = el("td", null, b);
+				if (a !== b) { ta.className = "down"; tbb.className = "up"; }
+				tr.appendChild(ta);
+				tr.appendChild(tbb);
+				tb.appendChild(tr);
+			}
+			t.appendChild(tb);
+			grid.appendChild(t);
+			box.appendChild(grid);
+			return box;
+		};
+		const facts = (snap) => [
+			{ label: "flavor", text: snap.flavor || "balanced" },
+			{ label: "seed", text: String(snap.seed) },
+			{ label: "champion", text: snap.champion || "—" },
+			{ label: "pool", text: (snap.pool || []).length ? (snap.pool || []).length + " builds" : "—" },
+		];
+		side.appendChild(two("Flavor, seed, champion", facts(pinned), facts(now)));
+		const curveRows = (snap) => (snap.curve || []).map((c) => ({
+			label: "No. " + c.at, text: c.ovr === null || c.ovr === undefined ? "—" : String(c.ovr),
+		}));
+		if ((pinned.curve || []).length || (now.curve || []).length) {
+			side.appendChild(two("Curve (overall at each slot)", curveRows(pinned), curveRows(now)));
+		}
+		if ((pinned.pool || []).length || (now.pool || []).length) {
+			const was = new Set(pinned.pool || []);
+			const is = new Set(now.pool || []);
+			const both = (pinned.pool || []).filter((x) => is.has(x));
+			const gone = (pinned.pool || []).filter((x) => !is.has(x));
+			const added = (now.pool || []).filter((x) => !was.has(x));
+			const box = el("div", "card");
+			box.appendChild(el("h4", null, "Build pool"));
+			box.appendChild(el("div", "note",
+				"In both: " + (both.length ? both.join(", ") : "none") + "\n" +
+				"Only pinned: " + (gone.length ? gone.join(", ") : "none") + "\n" +
+				"Only current: " + (added.length ? added.join(", ") : "none")));
+			side.appendChild(box);
+		}
+		if ((pinned.topTen || []).length || (now.topTen || []).length) {
+			const top = (snap) => (snap.topTen || []).map((p, i) => ({
+				label: i + 1,
+				text: p.name + " (" + p.pos + ", " + p.year + ", " + p.ovr + "/" + p.pot + ", " +
+					p.college + ")",
+			}));
+			side.appendChild(two("Top ten", top(pinned), top(now)));
+		}
+		view.appendChild(side);
 
 		view.appendChild(el("h3", null, "Player by player"));
 		const byKey = {};
