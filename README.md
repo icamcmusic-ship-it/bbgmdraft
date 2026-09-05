@@ -31,7 +31,7 @@ its own pace, game length and youth minutes cap, its own clubs and league table,
 and its own honors.
 
 **2. Rebuilds ratings into varied, specialized builds — without inflating anyone.**
-Each player is assigned one of 145 archetypes (Floor General, Heliocentric
+Each player is assigned one of 205 archetypes (Floor General, Heliocentric
 Guard, Movement Shooter, 3&D Wing, Point Center, Rim Protector, Stretch Big,
 Lob Threat, Athletic Freak, Drop-Coverage Anchor, Boom-or-Bust Tools, …), gated by
 their height so a 7-footer never becomes a point guard. The archetype pushes some ratings up and others down, then the whole
@@ -51,14 +51,14 @@ compressed in log space (down from a measured 281×), and pool slots are drawn o
 the *authored* weights rather than the exposure-divided ones, which had quietly
 inverted the table (the three center builds gated at the top of the height range
 each made a quarter of all pools while Iron Man almost never did). A class then
-draws a **pool** of about nineteen of the 145 builds and takes its players from the pool — which is what makes a
+draws a **pool** of about nineteen of the 205 builds and takes its players from the pool — which is what makes a
 class "the year of the stretch bigs" rather than one of everything, every time.
 It also draws a **flavor** (guard-heavy, defense-first, a weak year,
 one-and-done heavy, a transfer-portal year, …) that tilts which builds enter the
 pool and, for some flavors, bends the class itself: how old it is, how good the
 top of it is, how it got here. A flavor only moves settings you have left alone.
 
-The 145 names are 145 shapes. Measured by cosine similarity over the offset
+The 205 names are 205 shapes. Measured by cosine similarity over the offset
 vectors, the table used to hold 96 pairs above 0.85 and sixteen above 0.95 —
 Rim Protector and Shot-Blocking Anchor were the same vector behind two height
 gates — so a nineteen-build pool that looked varied by name still drew several
@@ -178,7 +178,7 @@ split** (a putback specialist and a box-out merchant have the same rebounding
 composite and are not the same player), and the **injury roll** (a prior
 surgery, a chronic knee and a clean bill of health were the same draw).
 
-Traits are orthogonal to builds, which is the whole argument for them: 145
+Traits are orthogonal to builds, which is the whole argument for them: 205
 builds and 77 traits multiply rather than add. A Rim Protector with a plus
 wingspan and a great motor and a Rim Protector with short arms and questions
 about the effort are two different prospects out of one row of the archetype
@@ -581,11 +581,11 @@ pixels the table becomes one card per prospect.
 | **Potential bias / spread** | How far pot sits above ovr, and how much it varies. These do not re-play the season — potential is computed after it — but they are not cosmetic: the mock draft board scores `(pot − ovr) × 0.65`, so moving them moves the board. |
 | **Specialization** | 0 = BBGM's fairly uniform builds, 2.5 = extreme specialists. |
 | **Archetype diversity** | Exactly `100 − v`% of the class stays Balanced. |
-| **Class flavor** (the dropdown) | Which of the 29 flavors this class gets, instead of drawing one. Asking for "big-heavy" used to mean setting the strength to 2 and rerolling until it came up — which replaces the class you were keeping the seed for. |
+| **Class flavor** (the dropdown) | Which of the 41 flavors this class gets, instead of drawing one. Asking for "big-heavy" used to mean setting the strength to 2 and rerolling until it came up — which replaces the class you were keeping the seed for. |
 | **Flavor strength** | How strongly the flavor leans (guard-heavy, defense-first, a weak year, one-and-done heavy, a transfer-portal year, European in style, a post-up renaissance, feast or famine, a coaching carousel year, …). Some flavors also bend the class itself — how old it is, how good the top of it is — but only settings you have left at their default. |
 | **Variation** | The neighborhood of a seed. 0 is the class that seed has always produced. 1, 2, 3… keep its flavor, its build pool and its curve and re-roll every individual player, so the year is still "the year of the stretch bigs, weak at the top" and the sixty-eight men in it are different. Every shareable link ever made is variation 0, so none of them moved. |
 | **Avoid repeating recent builds** | How hard a build that was in one of the last three classes is pushed out of this one. Measured, the four heaviest builds returned in 14% of pools with this off and 6% with it at full strength — the ordering the weights describe survives, the repetition does not. |
-| **Builds per class** | How many of the 145 archetypes one class is drawn from. Lower is more distinctive ("the year of the stretch bigs"); 0 makes every build eligible in every class, which is one of everything, every time. |
+| **Builds per class** | How many of the 205 archetypes one class is drawn from. Lower is more distinctive ("the year of the stretch bigs"); 0 makes every build eligible in every class, which is one of everything, every time. |
 | **Anomalies per class** | How many forced surprises a class gets, drawn from thirty-two kinds: a five-star bust, an unranked riser, a 24-year-old JUCO, a 7'4" project, the coach's son, a man who never played a high school game, a season that ended in February — and six that change the numbers rather than the note: a suspension, an eligibility hold that costs the first ten games, a mid-season transfer, a double-double machine, a defensive breakout, and a year-long shooting slump that costs about seven points of 3P% off what his jumper says. |
 | **Realignment** | How often the map of college basketball changes. A realignment moves two to five good programs one rung up into a league whose footprint overlaps theirs — the database carries no state per school, so geography is a fact about the conference, and Tennessee State no longer lands in a New England league — and every conference stays schedulable. |
 | **Earlier seasons** | `Simulate` runs each of a prospect's previous college years through the same stat model the draft year goes through. `Reconstruct` is the older behavior: a backward-scaled copy of the draft-year line. |
@@ -643,7 +643,7 @@ Three things it deliberately never touches:
 
 - **The seed.** Reroll owns the seed; randomizing both at once means you can't
   tell which produced what you're looking at.
-- **The per-build rarity weights.** That is a curated 145-row table whose
+- **The per-build rarity weights.** That is a curated 205-row table whose
   ordering is the authored intent, and a uniform draw over it destroys that
   invisibly. Flavor, pool size and diversity are randomized instead — those
   are the supported ways to move the mix.
@@ -700,7 +700,7 @@ liked. Ctrl+Z undoes a reroll like any other change.
 
 - *Class quality & depth* shapes the overall curve — switch **Overall ratings**
   to "Rebuild the class curve" to unlock it; "Preserve" never inflates anyone.
-- *Builds* decides how specialized players are, how many of the 145 archetypes
+- *Builds* decides how specialized players are, how many of the 205 archetypes
   one class draws from, the class flavor (pick one in the dropdown to keep the
   seed and change what kind of class it is), anomalies, and the pool memory
   that stops consecutive classes repeating themselves.
@@ -976,6 +976,74 @@ career table marks them ★ and links to that year, his earlier honors are the
 ones he really took, and his note says so. The timeline counts the roster
 spots each season filled from a later class.
 
+**The chain is hard to break.** A universe used to be a chain of assumptions
+about what would not change while it ran, and each of them is now a fact the
+run records:
+
+- **The config is frozen before season one.** Every season used to rebuild its
+  config from the live settings, so a slider nudged during a forty-file run
+  gave seasons 1–12 one world and 13–40 another, with nothing to say so. One
+  config object is built at the start and handed down.
+- **The seed is keyed on the file, not on the season number.** It was
+  `baseSeed#season`, so two files both claiming `startingSeason: 2031` — which
+  the file list already warned about — drew the identical seed and therefore
+  the identical world. It is now the file's index, season and fingerprint.
+- **Every season stores a fingerprint of what it PRODUCED**, alongside the seed
+  and the file fingerprint, and the export names the `engineRev` that built it.
+  Importing a universe replays it and compares the two: a season that comes out
+  different is named ("season 2034 diverged") instead of being handed back as
+  the same world.
+- **Biographies are read.** The class year, redshirt, transfer path and college
+  the export has always stored per player key are applied on import, so a
+  shared universe replays the same *men* and not merely the same seeds. The
+  field was write-only until now.
+- **A gap in the files is time passing**, and so is a failed season. Five
+  missing years used to age the world by one: coaches aged a year, program
+  levels drifted one step, a senior star returner stayed a junior. The carry is
+  now aged across the hole — coaches age and the oldest leave, levels regress
+  toward the middle, class years advance and graduate out — and a season that
+  throws does the same rather than freezing the world behind it.
+- **There is a Stop button**, and the seasons already finished are kept.
+- **Memory is bounded.** Past fifteen files the older results are dropped and
+  rebuilt on demand from the config the chain recorded for each one.
+- **Storage is budgeted.** A fifty-season timeline plus overrides was a
+  plausible quota failure that took the settings down with it; the universe
+  payload is capped, and if it still does not fit it is dropped rather than
+  losing presets and pinned classes.
+
+**Getting a universe into the game.** BBGM's draft-class import deletes
+`stats` on every uploaded player, so a universe exported as a folder of
+per-class files loses the thing the mode exists for. **Export universe players**
+writes one BBGM players file for the whole world: every class at its own
+`draft.year`, pids renumbered monotonically across the universe, awards deduped
+on `{season, type}` at their own seasons, the multi-season statline each man
+actually played, and `relatives` — father/son links between generations
+twenty-odd years apart, which BBGM renders natively. Load it with
+**Tools → Import players** and tick *include stats*. The seeds-and-fingerprints
+export is still there (and the embedded variant is gzipped now, so a shared
+universe is a file somebody will actually send).
+
+**And the world means something.** Recruiting has momentum: a blank-college
+prospect is recruited in proportion to the program's level, its banners and the
+title it just won, so dynasties start recruiting like dynasties (the
+*Recruiting momentum* dial, universe mode only). The paper reads the alumni
+index, so a 2033 article can mention the 2027 player of the year and a
+program's banner count. Every first-year hire is attributed to a head coach
+working the season before, so after a decade a name has a **coaching tree**.
+And the Universe tab carries a **records book**: all-time titles, title games,
+seasons at AP No. 1, players of the year and No. 1 picks; the longest unbroken
+run at No. 1; the best single season anybody had; a player of the decade; and a
+hall of fame drawn from the alumni index. Continuity threads are structured
+data now (`{kind, team, seasons, count, text}`), so a program in one is a link
+to its team page rather than a word in a sentence.
+
+`node tools/universe.js` is the harness that guards all of it: a three-file
+chain run twice must produce identical rows, the same universe exported twice
+must be byte-identical, the merged players file must survive both of BBGM's
+import paths (reimplemented from its source) with nothing dropped, and the
+timeline's player-of-the-year column and the alumni index must name the same
+man. It runs in CI.
+
 ---
 
 ## Performance
@@ -1035,6 +1103,7 @@ node tools/validate.js [nSeeds] [--json]   # calibration bands
 node tools/validate.js 20 --fixture=realistic   # the default fixture only, twice as fast
 node tools/test.js [--update-golden]       # regression tests, tools/tests/*.js included
 node tools/rolefit.js [nSeeds]             # re-fit the derived role-usage model
+node tools/universe.js                     # universe determinism / idempotency / round trip
 node tools/bench.js [reps] [--md|--json]   # staged-pipeline timings
 node tools/uismoke.js                      # headless-browser smoke test
 ```
@@ -1105,6 +1174,11 @@ structural ones run on both. Four groups:
 Every band knows how many seeds it is being judged on. A mean's tolerance widens
 as 1/√n; a per-class count or rate does the same; an extreme value's lower bound
 falls with the sample, because the expected maximum of a small sample is smaller.
+A rate with ONE observation per class — a champion's seed — also knows that it
+can only take the values k/n, so its band carries one observation of slack at
+each end: a bound of 0.65 on four tournaments means "at most two of four", and
+rejecting three of four (0.75) at a true rate near 0.15 is arithmetic, not
+evidence.
 Bands only ever widen — they are modeling tolerances against an anchor, not
 confidence intervals, so more seeds must not make them stricter. `node
 tools/validate.js 3` and `node tools/validate.js 40` both pass, which is the
@@ -1149,8 +1223,11 @@ inheriting the last one, that turnovers are per possession and offensive
 rebounds are a share of missed shots, that fouls and free throws are consistent
 with one another, that the defensive glass responds to how well the schedule
 shot, that no rotation player finishes with an impossible assist line, that a
-non-shooter does not launch threes, that the defensive archetypes keep more of
-their offense than a uniform ovr-neutralizing shift would leave them, that the
+non-shooter does not launch threes — the system he plays in and the shot-mix
+noise are both scaled by how willing a shooter he is now, because a four-out
+program does not turn a seven-footer with a three-point rating of 25 into a
+shooter, it gives his shots to somebody else — that the defensive archetypes
+keep more of their offense than a uniform ovr-neutralizing shift would leave them, that the
 rarest builds actually turn up, that rerolling one prospect moves exactly one
 prospect, that a season on fourteen programs still produces a champion, that a
 pressing schedule forces more turnovers without swamping the height gradient,
@@ -1335,6 +1412,7 @@ tools/validate.js   calibration bands against the empirical anchors
 tools/rolefit.js    fits the derived role-usage model and reports per-build residuals
 tools/test.js       golden-file, round-trip, determinism and property tests
 tools/tests/*.js    one suite per area, loaded by test.js off the disk
+tools/universe.js   universe determinism, idempotency and BBGM round trip
 tools/uismoke.js    headless-browser smoke test
 tools/bench.js      staged-pipeline timings, for the performance table
 tools/golden.json   recorded output hashes
@@ -1447,7 +1525,7 @@ Slasher to 6'9", and neither could be reached by a wing-leaning flavor); both
 carry `wing` now.
 
 One thing was left for the UI: `archetypePool` was clamped at 60 against a
-145-build table, so the documented "a size at or above the table turns the pool
+205-build table, so the documented "a size at or above the table turns the pool
 off" could not be said. The clamp is the table size now, but the slider in
 index.html still stops at 40.
 

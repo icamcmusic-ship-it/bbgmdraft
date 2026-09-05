@@ -492,8 +492,14 @@ async function gotoProspects(page) {
 		   which pickClassPool reads to push a repeated build toward the back
 		   of the queue; the dial the user turns is poolMemory, which does have
 		   a control. */
+		/* `biography` is on it for exactly the same reason: it is the class
+		   years and transfer paths a SHARED UNIVERSE already drew, supplied by
+		   importUniverse and read by the build phase so that replaying
+		   somebody's world reproduces the same men. There is nothing for a
+		   user to set. */
 		const EXEMPT = ["seed", "overrides", "leagueWeights", "archetypeWeights",
-			"noteLines", "wEuroLeague", "wGLeague", "wNBL", "recentPools"];
+			"noteLines", "wEuroLeague", "wGLeague", "wNBL", "recentPools",
+			"biography"];
 		const missing = await page.evaluate((exempt) =>
 			Object.keys(window.Config.DEFAULTS)
 				.filter((k) => exempt.indexOf(k) === -1)
@@ -1497,6 +1503,44 @@ async function gotoProspects(page) {
 				marked);
 			await page.evaluate(() => window.App.showPlayer(null));
 		}
+		/* THE UNIVERSE TAB'S OWN FURNITURE. The chain now produces structured
+		   threads, a records book and a coaching tree, and writes one BBGM
+		   players file for the whole world — all of which is reachable from
+		   this tab and none of which the engine harness can see. */
+		await page.evaluate(() => { window.App.state.tab = "universe"; window.App.render(); });
+		await page.waitForTimeout(200);
+		const uni = await page.evaluate(() => {
+			const st = window.App.state;
+			const buttons = Array.from(document.querySelectorAll("#view button"))
+				.map((b) => b.textContent);
+			const merged = window.Engine.universePlayersFile(
+				st.results.filter(Boolean),
+				{ stats: true, prior: true, awards: true, seed: st.universe.baseSeed });
+			return {
+				buttons,
+				threads: (st.universe.threads || []).every(
+					(t) => t && typeof t === "object" && typeof t.text === "string"),
+				records: !!st.universe.records,
+				headings: Array.from(document.querySelectorAll("#view h4"))
+					.map((h) => h.textContent),
+				players: merged.file.players.length,
+				uniquePids: new Set(merged.file.players.map((p) => p.pid)).size,
+				fingerprints: (st.universe.rows || []).every((r) => r.result),
+			};
+		});
+		ok("the timeline offers the one-file players export",
+			uni.buttons.some((b) => /Export universe players/.test(b)),
+			uni.buttons.join(" | "));
+		ok("threads are structured data, not sentences", uni.threads);
+		ok("the tab carries a records book",
+			uni.records && uni.headings.indexOf("Records book") !== -1,
+			uni.headings.join(" | "));
+		ok("every season records a fingerprint of what it produced",
+			uni.fingerprints);
+		ok("the universe exports as one players file with unique pids",
+			uni.players > 100 && uni.players === uni.uniquePids,
+			uni.players + " players, " + uni.uniquePids + " pids");
+
 		/* Turning the setting off drops the chain's configs, so the tabs go
 		   back to standalone runs rather than silently keeping a world the
 		   user has switched out of. */
@@ -1703,6 +1747,117 @@ async function gotoProspects(page) {
 			/still loaded/.test(mergeText), mergeText.slice(0, 200));
 		await page.locator("#modalCancel").click();
 		await page.waitForTimeout(200);
+	}
+
+	console.log("\nThe randomizer, per loaded class");
+	{
+		const league = { version: 50, startingSeason: 2027, gameAttributes: { season: 2027 },
+			teams: [], players: [] };
+		let pid = 0;
+		for (const year of [2027, 2028]) {
+			const cls = V.syntheticClass(year, 40);
+			for (const p of cls.players) {
+				const copy = JSON.parse(JSON.stringify(p));
+				copy.pid = pid++;
+				copy.tid = -2;
+				copy.draft = { year, round: 0, pick: 0, tid: -1 };
+				copy.born = { year: year - 19, loc: (p.born && p.born.loc) || "USA" };
+				league.players.push(copy);
+			}
+		}
+		// classesFromFile only splits a file into one class per draft year
+		// once it is bigger than an ordinary class (see MAX_CLASS in
+		// js/engine.js) — under that it loads as a single 80-player class
+		// instead of two. Padded with rostered players, the same way the
+		// league-export fixture above does.
+		for (const p of V.syntheticClass(9, 200).players) {
+			const copy = JSON.parse(JSON.stringify(p));
+			copy.pid = pid++;
+			copy.tid = 5;
+			copy.draft = { year: 2020, round: 1, pick: 3, tid: 5 };
+			copy.born = { year: 2000, loc: "USA" };
+			copy.college = "Duke";
+			league.players.push(copy);
+		}
+		const leagueFixture = path.join(require("os").tmpdir(), "bbgm-uismoke-randomfile.json");
+		fs.writeFileSync(leagueFixture, JSON.stringify(league));
+
+		await page.goto(base);
+		await page.evaluate(() => localStorage.clear());
+		await page.goto(base);
+		await page.setInputFiles("#file", leagueFixture);
+		await page.waitForSelector("table tbody tr", { timeout: 60000 });
+		ok("two classes loaded", (await page.evaluate(() =>
+			window.App.state.files.length)) === 2);
+		ok("the per-file checkbox appears with more than one file loaded",
+			await page.locator("#randomPerFileRow").isVisible());
+
+		await page.locator("#randomizePerFile").check();
+		// "quality" — five settings at once, so an unlucky single-key
+		// collision between two independent draws cannot read as a failure.
+		await page.evaluate(() => { window.App.state.randomScope = "quality"; });
+		await page.locator("#btnRandomize").click();
+		await page.waitForTimeout(400);
+		const patches = await page.evaluate(() => {
+			const fc = window.App.state.fileCfgs || {};
+			return [JSON.stringify(fc[0] || {}), JSON.stringify(fc[1] || {})];
+		});
+		ok("checking it draws a distinct patch for each loaded file",
+			patches[0] !== "{}" && patches[1] !== "{}" && patches[0] !== patches[1],
+			patches.join(" vs "));
+		// The "quality" group has five keys; reading all five as one
+		// signature rather than just classDepth, because two independent
+		// draws landing on the SAME classDepth while every other key still
+		// differs is a real, if unlikely, coincidence — and a flaky check on
+		// one key out of five is a coin flip CI will eventually call.
+		const QUALITY_KEYS = ["classQuality", "classDepth", "eliteCount", "potBias", "potSpread"];
+		const cfgBeforeSwitch = await page.evaluate(
+			(keys) => keys.map((k) => window.App.state.cfg[k]).join(","), QUALITY_KEYS);
+		// File 1's result is not computed until something actually looks at
+		// it (ensureResult is lazy) — switch to it the way a user would.
+		await page.selectOption("#fileSelect", "1");
+		await page.waitForTimeout(300);
+		const cfgAfterSwitch = await page.evaluate(
+			(keys) => keys.map((k) => window.App.state.cfg[k]).join(","), QUALITY_KEYS);
+		ok("the shared settings panel is untouched by a per-file draw",
+			cfgBeforeSwitch === cfgAfterSwitch, cfgBeforeSwitch + " vs " + cfgAfterSwitch);
+		const ranWith = await page.evaluate((keys) =>
+			[0, 1].map((i) => {
+				const res = window.App.state.results[i];
+				return res && res.cfg ? keys.map((k) => res.cfg[k]).join(",") : null;
+			}), QUALITY_KEYS);
+		ok("each file actually ran with its own drawn settings, not the shared ones",
+			ranWith[0] && ranWith[1] && ranWith[0] !== ranWith[1],
+			ranWith.join(" vs "));
+		await page.selectOption("#fileSelect", "0");
+		await page.waitForTimeout(200);
+
+		// Unticking returns to one shared draw for every file.
+		await page.locator("#randomizePerFile").uncheck();
+		await page.locator("#btnRandomize").click();
+		await page.waitForTimeout(400);
+		const afterShared = await page.evaluate(() =>
+			Object.keys(window.App.state.fileCfgs || {}).length);
+		ok("unticking the box goes back to one shared draw for every file",
+			afterShared === 0, afterShared + " per-file patches left over");
+
+		// A fresh file load resets any leftover per-file patches. A second,
+		// differently-named copy of the same fixture: re-selecting the exact
+		// path Playwright already has loaded is not guaranteed to look like a
+		// new selection to the page.
+		await page.locator("#randomizePerFile").check();
+		await page.evaluate(() => { window.App.state.randomScope = "quality"; });
+		await page.locator("#btnRandomize").click();
+		await page.waitForTimeout(400);
+		const leagueFixture2 = path.join(
+			require("os").tmpdir(), "bbgm-uismoke-randomfile-2.json");
+		fs.writeFileSync(leagueFixture2, JSON.stringify(league));
+		await page.setInputFiles("#file", leagueFixture2);
+		await page.waitForSelector("table tbody tr", { timeout: 60000 });
+		const afterReload = await page.evaluate(() =>
+			Object.keys(window.App.state.fileCfgs || {}).length);
+		ok("loading a new set of files clears stale per-file patches",
+			afterReload === 0, afterReload + " leftover patches");
 	}
 
 	console.log("\nNo errors");

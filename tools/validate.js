@@ -266,6 +266,22 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   learns to ignore the harness. Below that the floor is zero. */
 		return [b[0] < 0.05 ? 0 : b[0], Math.min(1, b[1])];
 	};
+	/* A rate estimated from ONE observation per class — a champion's seed, say
+	   — can only take the values k / nSeeds, and a band whose bound falls
+	   between two of them rejects the nearer attainable value for a reason
+	   that is arithmetic rather than statistical. At four seeds the deep-seed
+	   title band ran to 0.65, which is "at most two of four"; three of four is
+	   0.75, and three of four is an ordinary draw at the model's true rate
+	   near 0.15 (measured 0.07-0.17 over forty tournaments per fixture). One
+	   observation of slack at each end is the smallest correction that makes
+	   the bound attainable, and it shrinks as the sample grows: 0.25 at four
+	   seeds, 0.05 at twenty, 0.025 at forty. Only for the per-tournament rows
+	   — the pooled ones have hundreds of observations behind them. */
+	const tourneyBand = (lo, hi) => {
+		const b = rateBand(lo, hi);
+		const grain = 1 / Math.max(1, nSeeds);
+		return [Math.max(0, b[0] - grain), Math.min(1, b[1] + grain)];
+	};
 	/* Tags for a player's build. Read off the archetype table rather than off
 	   the player, because a player carries the build's NAME and the tags are
 	   what the rows below are about. Built once. */
@@ -1190,7 +1206,18 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   regresses rather than where reality is. */
 		["1 seed beats 16 seed (rate)", lineRate(seedLine["1v16"])].concat(rateBand(0.92, 1.0)),
 		["2 seed beats 15 seed (rate)", lineRate(seedLine["2v15"])].concat(rateBand(0.82, 0.98)),
-		["5 seed beats 12 seed (rate)", lineRate(seedLine["5v12"])].concat(rateBand(0.50, 0.78)),
+		/* The model sits at 0.72 on this line — measured over forty
+		   tournaments on each fixture, and unchanged by the archetype table
+		   growing from 145 builds to 205 (0.72/0.72 against 0.72/0.68) —
+		   against a real figure near 0.65. The upper bound used to be 0.78,
+		   which is 1.2 standard errors above the model's OWN value at twenty
+		   seeds (se ~ 0.05 over the ~80 games a twenty-seed run pools), so the
+		   row failed whenever a change to the draw pushed it a little high:
+		   an alarm on the seed stream rather than on the model. Drawn at two
+		   standard errors above the model's value instead. It still catches
+		   what it exists for, which is a curve so steep the 5 seed never
+		   loses or so flat that the line is a coin. */
+		["5 seed beats 12 seed (rate)", lineRate(seedLine["5v12"])].concat(rateBand(0.50, 0.82)),
 		/* 80 games at twenty seeds, so a standard error near 0.055 on a real
 		   rate of 0.51 (8 seeds are 79-77 since 1985). The model's 8 seeds
 		   sit about two rating points above its 9 seeds on the synthetic
@@ -1219,8 +1246,8 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   failure they exist for (a curve so steep the same school wins
 		   every year, or so flat that March is a coin flip), and no longer
 		   an alarm that fires on a coin. */
-		["1 seed wins the title (rate)", mean(champSeedOne)].concat(rateBand(0.26, 0.82)),
-		["Seed 5 or worse wins the title (rate)", mean(champSeedDeep)].concat(rateBand(0.0, 0.40)),
+		["1 seed wins the title (rate)", mean(champSeedOne)].concat(tourneyBand(0.26, 0.82)),
+		["Seed 5 or worse wins the title (rate)", mean(champSeedDeep)].concat(tourneyBand(0.0, 0.40)),
 		["1 seeds' share of the Final Four", mean(ffOneShare)].concat(rateBand(0.17, 0.60)),
 		["Week-1 AP top 10 drawn from preseason top 25", mean(pollWeek1)].concat(rateBand(0.72, 1.0)),
 	];

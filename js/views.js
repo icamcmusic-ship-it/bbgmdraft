@@ -2241,6 +2241,130 @@
 	}
 
 	/* ------------------------------------------------------------ universe */
+	/* THE RECORDS BOOK.
+
+	   Universe-scale awards, which is what turns a timeline into a save: who
+	   has won what across the whole world, the longest run at AP No. 1, the
+	   best single season anybody had, a player of the decade and a hall of
+	   fame. Everything here is derived by Universe.records from rows the chain
+	   already carried — no re-simulation, and every program is a link. */
+	/* A program name that is a link only when it names a program. The
+	   timeline's player-of-the-year column carries `proClub || newCollege`, so
+	   a man who played in the EuroLeague brings a club name in with him — and
+	   a club has no team page to open. Text for those, a link for the rest. */
+	function programLink(name) {
+		const C = global.Colleges;
+		if (C && C.conferenceOf && C.conferenceOf(name)) return teamLink(name);
+		return document.createTextNode(String(name));
+	}
+
+	/* Named for what it is, and NOT `leaderTable`: this file already had one,
+	   500 lines down, for a season's statistical leaders. Two function
+	   declarations with one name in one module is legal JavaScript and the
+	   second one wins, so the records book called the stat-leaders table with
+	   the wrong arguments and the Universe tab threw. */
+	function recordLeaders(title, rows, unit) {
+		if (!rows || !rows.length) return null;
+		const box = el("div");
+		box.appendChild(el("h5", null, title));
+		const table = el("table");
+		const tb = el("tbody");
+		for (const r of rows) {
+			const tr = el("tr");
+			const td = el("td");
+			td.appendChild(programLink(r.team));
+			tr.appendChild(td);
+			tr.appendChild(el("td", "num", String(r.count) + " " + unit));
+			tb.appendChild(tr);
+		}
+		table.appendChild(tb);
+		box.appendChild(table);
+		return box;
+	}
+
+	function recordsSection(view, rec) {
+		view.appendChild(el("h4", null, "Records book"));
+		view.appendChild(el("p", "legendline",
+			"All-time across this universe — every line is derived from the " +
+			"timeline above, so it re-runs from the same seeds."));
+		const grid = el("div", "cards");
+		for (const [title, rows, unit] of [
+			["National titles", rec.titles, "titles"],
+			["Title games", rec.finals, "appearances"],
+			["Seasons at AP No. 1", rec.apOnes, "seasons"],
+			["Players of the year", rec.poys, "winners"],
+			["No. 1 picks", rec.no1s, "picks"],
+		]) {
+			const box = recordLeaders(title, rows, unit);
+			if (box) grid.appendChild(box);
+		}
+		view.appendChild(grid);
+		const notes = el("div", "note");
+		if (rec.longestApRun) {
+			const line = el("div");
+			line.appendChild(document.createTextNode("Longest run at AP No. 1: "));
+			line.appendChild(programLink(rec.longestApRun.team));
+			line.appendChild(document.createTextNode(", " + rec.longestApRun.length +
+				" season" + (rec.longestApRun.length > 1 ? "s" : "") + " (" +
+				rec.longestApRun.from + "–" + rec.longestApRun.to + ")"));
+			notes.appendChild(line);
+		}
+		if (rec.bestSeason) {
+			const b = rec.bestSeason;
+			const line = el("div");
+			line.appendChild(document.createTextNode("Best single season: "));
+			line.appendChild(programLink(b.team));
+			line.appendChild(document.createTextNode(", " + b.season + " — champions" +
+				(b.apOne ? ", AP No. 1" : "") + (b.poy ? ", player of the year" : "") +
+				(b.no1 ? ", the No. 1 pick" : "")));
+			notes.appendChild(line);
+		}
+		for (const d of rec.playersOfTheDecade || []) {
+			if (!d.player) continue;
+			notes.appendChild(el("div", null, "Player of the " + d.decade + "s: " +
+				d.player.name + " (" + d.player.school + ")"));
+		}
+		if (notes.childNodes.length) view.appendChild(notes);
+		if (rec.hall && rec.hall.length) {
+			view.appendChild(el("h5", null, "Hall of fame"));
+			view.appendChild(el("div", "note", rec.hall.map((m) =>
+				m.name + " (" + m.school + ", " + m.seasons.join(", ") + ") — " +
+				m.reasons.join("; ")).join("\n")));
+		}
+	}
+
+	/* THE COACHING TREE.
+
+	   Who hired whom, across the whole timeline. Every first-year hire is
+	   attributed to a head coach working the season before (see
+	   Universe.coachTreeStep), so after a decade a name has a tree — pure
+	   emergent narrative out of state the chain was already carrying. */
+	function coachTreeSection(view, tree) {
+		const names = Object.keys(tree.by || {})
+			.filter((n) => tree.by[n].length >= 2)
+			.sort((a, b) => tree.by[b].length - tree.by[a].length ||
+				(a < b ? -1 : 1))
+			.slice(0, 12);
+		if (!names.length) return;
+		view.appendChild(el("h4", null, "Coaching tree"));
+		view.appendChild(el("p", "legendline",
+			"Head coaches hired out of another head coach's staff. Only the " +
+			"trees with more than one job on them are listed."));
+		const box = el("div", "note");
+		for (const name of names) {
+			const line = el("div");
+			line.appendChild(document.createTextNode(
+				name + "'s tree holds " + tree.by[name].length + " head jobs: "));
+			tree.by[name].forEach((h, i) => {
+				if (i) line.appendChild(document.createTextNode(", "));
+				line.appendChild(programLink(h.school));
+				line.appendChild(document.createTextNode(" (" + h.coach + ", " + h.season + ")"));
+			});
+			box.appendChild(line);
+		}
+		view.appendChild(box);
+	}
+
 
 	function viewUniverse(view, res) {
 		const st = A().state;
@@ -2273,6 +2397,17 @@
 				"world” in the settings panel to make it the world.";
 		run.addEventListener("click", () => { A().runUniverse(); });
 		bar.appendChild(run);
+		/* A way out. Fifty seasons is close to a minute of work and the chain
+		   had `running` and no stop — the batch runner has had one since it
+		   existed. The seasons already finished are kept, exactly as a
+		   cancelled batch keeps its finished classes. */
+		if (u.running) {
+			const stop = el("button", "warn", "Stop");
+			stop.title = "Stop after the season now running. The seasons already " +
+				"finished are kept.";
+			stop.addEventListener("click", () => { A().cancelUniverse(); });
+			bar.appendChild(stop);
+		}
 		const exp = el("button", null, "Export universe JSON");
 		exp.disabled = !u.rows.length || !!u.running;
 		exp.title = "Seeds, settings and player biographies. Small, and it " +
@@ -2286,6 +2421,18 @@
 			"whole universe is one file to hand somebody. Larger.";
 		expAll.addEventListener("click", () => { A().exportUniverse(true); });
 		bar.appendChild(expAll);
+		/* The route that actually gets a universe into BBGM with its seasons
+		   intact. The draft-class import deletes stats; Tools → Import players
+		   does not, and it takes one array — so the whole universe is one
+		   file. See Engine.universePlayersFile. */
+		const expPlayers = el("button", null, "Export universe players (BBGM)");
+		expPlayers.disabled = !u.rows.length || !!u.running;
+		expPlayers.title = "One BBGM players file for the whole universe: every " +
+			"class at its own draft year, pids renumbered across the world, the " +
+			"seasons each man actually played, and father/son links. Load it with " +
+			"Tools → Import players and tick “include stats”.";
+		expPlayers.addEventListener("click", () => { A().exportUniversePlayers(); });
+		bar.appendChild(expPlayers);
 		const impBtn = el("button", null, "Import universe…");
 		impBtn.disabled = !!u.running;
 		const impInput = el("input");
@@ -2398,7 +2545,29 @@
 
 		if (u.threads && u.threads.length) {
 			view.appendChild(el("h4", null, "Threads"));
-			view.appendChild(el("div", "note", u.threads.join("\n")));
+			/* Threads are structured now ({kind, team, seasons, count, text}),
+			   so the program in one is a link to its team page rather than a
+			   word in a sentence. A timeline stored before that change is a
+			   list of strings and still renders. */
+			const tl = el("div", "note");
+			for (const t of u.threads) {
+				const line = el("div");
+				if (typeof t === "string") {
+					line.appendChild(document.createTextNode(t));
+				} else if (t.team) {
+					line.appendChild(programLink(t.team));
+					line.appendChild(document.createTextNode(
+						" " + String(t.text).slice(t.team.length + 1)));
+				} else {
+					line.appendChild(document.createTextNode(t.text || ""));
+				}
+				tl.appendChild(line);
+			}
+			view.appendChild(tl);
+		}
+		if (u.records) recordsSection(view, u.records);
+		if (u.coachTree && u.coachTree.hires && u.coachTree.hires.length) {
+			coachTreeSection(view, u.coachTree);
 		}
 		if (u.alumni && u.alumni.length) {
 			view.appendChild(el("h4", null, "Alumni index"));
