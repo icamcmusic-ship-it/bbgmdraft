@@ -567,7 +567,13 @@
 							f.player.transfer.kind
 						: "is a " + f.player.transfer.kind);
 				}
-				if (f.player.redshirt) bits.push("took a " + f.player.redshirt + " year");
+				/* "an academic redshirt" and "a medical redshirt" are both
+				   kinds this can be handed, so the article is the shared
+				   rule's rather than a letter typed in front of it. */
+				if (f.player.redshirt) {
+					bits.push("took " +
+						global.Text.withArticle(f.player.redshirt + " year"));
+				}
 				if (f.player.reclassified) bits.push(f.player.reclassified);
 				return [PL(f.player.name, f.player.key),
 					T(" " + bits.join(", ") + ". He is " +

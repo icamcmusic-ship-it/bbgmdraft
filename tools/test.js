@@ -4521,10 +4521,17 @@ console.log("\nAudit regressions (the second September 2026 pass)");
 		ok("the money mood letter can be earned",
 			global.Traits.TRAITS.some((t) => t.mood === "$"));
 	}
-	/* The 2026-27 map. */
+	/* The 2027-28 map. The table used to be authored half to 2026-27 and half
+	   to the season before it, which is how UC Davis sat in the Big West while
+	   UTEP and Grand Canyon had already moved; one target season, checked. */
 	{
-		ok("the Mountain West has its 2026 members", C.byConference["Mountain West"].length === 8 &&
-			C.conferenceOf("Grand Canyon") === "Mountain West" && C.conferenceOf("UTEP") === "Mountain West");
+		ok("the Mountain West has its 2027 members", C.byConference["Mountain West"].length === 9 &&
+			C.conferenceOf("Grand Canyon") === "Mountain West" && C.conferenceOf("UTEP") === "Mountain West" &&
+			C.conferenceOf("UC Davis") === "Mountain West");
+		ok("Louisiana Tech is in the Sun Belt, New Haven in the NEC",
+			C.conferenceOf("Louisiana Tech") === "Sun Belt" &&
+			C.conferenceOf("New Haven") === "NEC" &&
+			C.conferenceOf("St. Francis (PA)") === null);
 		ok("Seattle is in the WCC, Delaware in Conference USA, UMass in the MAC",
 			C.conferenceOf("Seattle") === "WCC" && C.conferenceOf("Delaware") === "Conference USA" &&
 			C.conferenceOf("Massachusetts") === "MAC");
