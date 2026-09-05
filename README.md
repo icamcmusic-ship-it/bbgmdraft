@@ -992,18 +992,29 @@ reproduce is a table nobody should believe.
 
 | Change | Phases re-run | Engine time |
 | --- | --- | --- |
-| Note template | notes | 0.1 ms |
-| Award strictness | awards → stock → notes | 25 ms |
-| Potential bias / spread | pot → awards → stock → notes | 24 ms |
-| March upsets | postseason → stats → … | 143 ms |
-| Pace, stat randomness | regular → postseason → stats → … | 269 ms |
-| Specialization, archetypes, seed | everything | 291 ms |
+| Note template | notes | 0.2 ms |
+| Award strictness | awards → stock → notes | 63 ms |
+| Potential bias / spread | pot → awards → stock → notes | 60 ms |
+| March upsets | postseason → stats → … | 297 ms |
+| Pace, stat randomness | regular → postseason → stats → … | 406 ms |
+| Specialization, archetypes, seed | everything | 446 ms |
 
-_Median of 9 runs on Node 22; a cold run of the whole pipeline is about 330 ms._
+_Median of 5 runs on Node 22; a cold run of the whole pipeline is about 550 ms._
 The numbers grew: the stats phase now also simulates each upperclassman's
 earlier seasons (about 220 ms of the total, and `Earlier seasons: reconstruct`
 gets it back), and every program carries a coach with a situation and a
-conference that may have changed.
+conference that may have changed. The September 2026 audit added to the two
+heaviest rows again — a team's stat pool is anchored to the season it actually
+played, the field's advanced block is computed on its own population, and the
+schedule is balanced rather than drawn a game at a time — which is where a cold
+run went from about 330 ms to about 550.
+
+**`era` re-runs the season now, not only the stat model.** The scoreboard used
+to multiply pace by one constant whatever era was selected, so a change there
+invalidated the stats phase alone; it reads the era's own points per possession
+since this pass, and a warm re-run that skipped the season left the box score
+and the results page in two different eras. It is the amber row it always
+looked like.
 
 Batch mode runs in a Web Worker with a progress bar and a cancel button; where a
 browser refuses to start a worker — which includes opening `index.html` straight
