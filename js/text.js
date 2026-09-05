@@ -55,8 +55,20 @@
 		   an article as often as they put schools there, and "a old-school
 		   disciplinarian coach" shipped in the champion's-coach story for
 		   exactly as long as the rule only looked at capitals. */
-		["a before a vowel sound", /\b[aA] ([AEIOUaeiou][a-z]+)/],
-		["an before a consonant sound", /\b[aA]n ([B-DF-HJ-NP-TV-Zb-df-hj-np-tv-z][a-z]+)/],
+		/* A CAPITAL "A" MID-SENTENCE IS USUALLY NOT AN ARTICLE.
+
+		   The single pattern above flagged "the LNB Pro A ends with a medal":
+		   the league's own name ends in a capital A and the next word starts
+		   with a vowel, so a correct sentence was reported as a text fault —
+		   and a false positive in a harness that scans every article and every
+		   note is worse than no rule, because it is the kind of failure a
+		   developer learns to wave through. English does not put a capital
+		   article in the middle of a sentence, so the capital form is checked
+		   only where a sentence can start. */
+		["a before a vowel sound", /\ba ([AEIOUaeiou][a-z]+)/],
+		["a before a vowel sound", /(?:^|[.!?:;]\s+|\n)A ([AEIOUaeiou][a-z]+)/],
+		["an before a consonant sound", /\ban ([B-DF-HJ-NP-TV-Zb-df-hj-np-tv-z][a-z]+)/],
+		["an before a consonant sound", /(?:^|[.!?:;]\s+|\n)An ([B-DF-HJ-NP-TV-Zb-df-hj-np-tv-z][a-z]+)/],
 		["space before punctuation", / [,.;:!?]/],
 		["doubled punctuation", /([,.;:])\1/],
 		/* "1 triple-doubles", "1 teams in the field": a count of one with a

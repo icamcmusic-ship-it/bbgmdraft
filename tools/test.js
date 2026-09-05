@@ -876,10 +876,21 @@ console.log("\nArchetypes");
 	   twenty classes is not the claim: a 14-build pool drawn from ninety-eight
 	   is roughly 300 draws against a coupon-collector requirement of 450, so a
 	   handful of builds legitimately miss a run of twenty.) */
+	/* THE SAMPLE SCALES WITH THE TABLE.
+
+	   Twenty classes was fitted when the table had 98 builds and then held
+	   while it grew: a class draws a pool of about nineteen builds, so twenty
+	   classes is roughly 380 pool slots against a coupon-collector requirement
+	   that rises with the table — at 205 builds, 1,400 sampled players cover
+	   about 83% of it and the row went red on arithmetic rather than on
+	   anything being wrong. The claim ("nearly all of it turns up") is worth
+	   keeping, so the SAMPLE is scaled to the table instead of the threshold
+	   being lowered to whatever the table happens to produce. */
 	const counts = {};
 	let total = 0;
 	for (const a of RB.ARCHETYPES) counts[a.name] = 0;
-	for (let s = 0; s < 20; s++) {
+	const CLASSES = Math.max(20, Math.ceil(RB.ARCHETYPES.length * 0.2));
+	for (let s = 0; s < CLASSES; s++) {
 		const res = global.Engine.run(V.syntheticClass(200 + s, 70),
 			global.Config.make({ seed: "arch" + s }));
 		for (const p of res.players) {
@@ -3330,6 +3341,59 @@ console.log("\nAudit regressions");
 			p.age === lf.startingSeason - lf.players[3].born.year);
 		const v = global.Engine.validateLeagueFile(lf);
 		ok("and the file check says so", v.warnings.some((w) => /draft year/.test(w)));
+	}
+
+	/* --- a file's own young ages are floored, not taken at face value ---
+
+	   A source file whose born.year varies enough to be trusted
+	   (ageIsInformative) used to be trusted completely: a sixteen-year-old
+	   in the file played a normal Freshman season with a normal stat line
+	   every single time, which is the opposite of the rarity this tool
+	   otherwise reserves for a seventeen-year-old (see "reclassified
+	   prodigy" in js/engine.js). realisticAge folds anything under
+	   eighteen into that same rare band. */
+	{
+		const lf = V.realisticClass(12, 70);
+		const season = lf.startingSeason;
+		// A spread wide enough to keep ageIsInformative on, with a third of
+		// the class planted well under the real-world floor.
+		lf.players.forEach((p, i) => {
+			const age = i < 24 ? 16 : 19 + (i % 8);
+			p.born = { year: season - age, loc: "USA" };
+		});
+		const seventeens = { yes: 0, no: 0 };
+		let under17 = 0;
+		let exportMismatches = 0;
+		for (let s = 0; s < 20; s++) {
+			const res = global.Engine.run(lf, global.Config.make({ seed: "youngage" + s }));
+			ok("ageIsInformative stayed on for this spread (seed " + s + ")",
+				res.ageIsInformative, String(res.ageIsInformative));
+			for (const p of res.players) {
+				if (p.age < 17) under17++;
+				if (p.age === 17) seventeens.yes++; else seventeens.no++;
+			}
+			const exported = global.Engine.exportFile(res, {});
+			for (let i = 0; i < res.players.length; i++) {
+				/* Only THE PLAYERS realisticAge actually corrected: with
+				   ageIsInformative on, an anomaly can already move p.age
+				   away from born.year on its own (a medical-redshirt grad
+				   transfer reads older than his birth year says, which the
+				   export deliberately leaves alone — see the comment on the
+				   skip condition itself) and that divergence is not this
+				   fix's to police. */
+				if (!res.players[i].ageFloored) continue;
+				const impliedAge = season - exported.players[i].born.year;
+				if (impliedAge !== res.players[i].age) exportMismatches++;
+			}
+		}
+		ok("nobody in the class is younger than seventeen",
+			under17 === 0, under17 + " players under 17");
+		const total = seventeens.yes + seventeens.no;
+		ok("seventeen stays a rare outcome, not the default for a young file age",
+			seventeens.yes > 0 && seventeens.yes / total < 0.15,
+			seventeens.yes + " of " + total);
+		ok("an exported file's implied age agrees with the age for every player this fix corrected",
+			exportMismatches === 0, exportMismatches + " mismatches");
 	}
 
 	/* --- the paper is not the same paper every year --------------------- */

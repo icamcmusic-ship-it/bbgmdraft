@@ -4484,6 +4484,54 @@
 			});
 		}
 
+		/* --- the world remembers (universe mode only) --------------------
+
+		   The chain builds an alumni index — who won player of the year, who
+		   went No. 1, who won a title and where — and it fed the Universe tab
+		   and nothing else. A paper in 2033 that cannot mention the 2027
+		   player of the year is not the paper of a world with a history, so
+		   the desk reads it: an earlier name, a program's banner count, "the
+		   third No. 1 pick this school has produced in eight years".
+
+		   Only present in a universe: a single class file has no earlier
+		   season and this writes nothing. */
+		{
+			const alumni = (res.cfg && res.cfg.universeAlumni) || [];
+			const titles = (res.cfg && res.cfg.universeTitles) || {};
+			const past = alumni.filter((a) => Number.isFinite(a.season) &&
+				Number.isFinite(season) && a.season < season - 1);
+			if (past.length && runs(0.75)) {
+				const a = rng.pick(past);
+				const ago = season - a.season;
+				const banners = titles[a.school] || 0;
+				const no1s = alumni.filter((x) => x.school === a.school &&
+					x.boardRank === 1).length;
+				const body = [T("A note from the archive: "), TM(a.school),
+					T(" is " + ago + " season" + (ago > 1 ? "s" : "") + " on from " +
+						a.name + ", who was " +
+						(a.why === "player of the year" ? "the national player of the year"
+							: a.why === "top of the board" ? "one of the top prospects in the country"
+							: a.why) + " in " + a.season + ".")];
+				if (banners >= 2) {
+					body.push(T(" The program has " + banners + " banners in this " +
+						"universe."));
+				}
+				if (no1s >= 2) {
+					body.push(T(" It is the " + (no1s === 2 ? "second" :
+						no1s === 3 ? "third" : no1s + "th") +
+						" No. 1 pick the school has produced."));
+				}
+				articles.push({
+					when: -0.25, kind: "universe history",
+					headline: fill(rng.pick([
+						"{school}, {n} years after {name}",
+						"What {school} has built since {name}",
+					]), { school: TM(a.school), n: T(String(ago)), name: T(a.name) }),
+					body,
+				});
+			}
+		}
+
 		// --- realignment (an offseason story) -----------------------------
 		/* One move is a story; a raid of four is one story too. Six
 		   near-identical "Realignment again" articles in a row read like a
