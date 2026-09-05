@@ -96,6 +96,18 @@
 		},
 		// The randomizer's scope select, persisted like every other control.
 		randomScope: "gentle",
+		/* Whether Randomize draws an independent settings patch for EACH
+		   loaded file, rather than one shared draw applied to all of them.
+		   Persisted like the scope it modifies; meaningless (and hidden)
+		   with fewer than two files loaded. */
+		randomizePerFile: false,
+		/* One randomized-settings patch per file index, when randomizePerFile
+		   is on: {key: value, ..., leagueWeights: {...}}, consumed by
+		   fileCfgFor. NOT persisted — files themselves are not persisted
+		   across a reload, so a patch keyed by file index would outlive the
+		   files it was drawn for and silently apply to whatever loads into
+		   that slot next. Reset whenever a new set of files is installed. */
+		fileCfgs: {},
 		// Settings the randomizer must not touch. {key: true}.
 		settingLocks: {},
 	};
@@ -191,6 +203,7 @@
 				compactBracket: state.compactBracket,
 				theme: state.theme,
 				randomScope: state.randomScope,
+				randomizePerFile: state.randomizePerFile,
 				settingLocks: state.settingLocks,
 				sort: state.sort,
 				tab: state.tab,
@@ -347,6 +360,7 @@
 			"years", "destinations", "season", "awards"])) {
 			state.randomScope = saved.randomScope;
 		}
+		state.randomizePerFile = !!saved.randomizePerFile;
 		state.settingLocks = validFlagMap(saved.settingLocks) || state.settingLocks;
 		const sort = validSortStack(saved.sort);
 		if (sort) state.sort = sort;
@@ -408,6 +422,13 @@
 			// the reason stated above: a restored class rebuilt against a
 			// memory it was never drawn with comes back as somebody else.
 			anomalyHistory: (state.anomalyHistory || []).map((a) => a.slice()),
+			/* Per-file randomized-settings patches (see randomizeSettings'
+			   "draw separately for each loaded class"), for the same reason
+			   lastSeed is here: it is an input that lives outside cfg, and an
+			   undone per-file draw that left the old patches in place would
+			   restore the settings panel without restoring what each file
+			   actually ran with. */
+			fileCfgs: JSON.parse(JSON.stringify(state.fileCfgs || {})),
 		};
 	}
 
@@ -426,6 +447,8 @@
 		if (snap.lastSeed !== undefined) state.lastSeed = snap.lastSeed;
 		if (Array.isArray(snap.poolHistory)) state.poolHistory = snap.poolHistory;
 		if (Array.isArray(snap.anomalyHistory)) state.anomalyHistory = snap.anomalyHistory;
+		state.fileCfgs = snap.fileCfgs && typeof snap.fileCfgs === "object"
+			? snap.fileCfgs : {};
 		// A restored class is a different class, so an editor open on somebody
 		// who may not be in it any more has to close.
 		state.editing = null;
@@ -1196,12 +1219,17 @@
 		return Number(v.toFixed(stepDecimals(step)));
 	}
 
-	function randomizeSettings(scope) {
-		if (RANDOM_SCOPES.indexOf(scope) === -1) scope = "gentle";
+	/* One independent draw for a scope: every key the scope covers, at most
+	   once, as a PATCH rather than an in-place mutation of state.cfg — so the
+	   same draw logic can either be applied straight to the shared settings
+	   (the original, one-class behavior) or stashed per file (see
+	   randomizePerFile below) without duplicating the sampling rules in two
+	   places that would drift apart the first time one of them changed. */
+	function drawRandomPatch(scope) {
 		const mode = scope === "wide" ? "wide" : scope === "gentle" ? "gentle" : "wide";
 		const groups = (scope === "gentle" || scope === "wide")
 			? Object.keys(RANDOM_GROUPS) : [scope];
-		pushUndo("randomized settings (" + scope + ")");
+		const patch = {};
 		let moved = 0;
 		let locked = 0;
 		for (const g of groups) {
@@ -1209,7 +1237,7 @@
 				if (state.settingLocks[key]) { locked++; continue; }
 				const v = randomSliderValue(key, mode);
 				if (v === null || v === state.cfg[key]) continue;
-				state.cfg[key] = v;
+				patch[key] = v;
 				moved++;
 			}
 		}
@@ -1224,16 +1252,66 @@
 				lw[k] = Math.max(0, Number(
 					(base[k] * Math.exp((Math.random() * 2 - 1) * spread)).toFixed(1)));
 			}
-			state.cfg.leagueWeights = lw;
+			patch.leagueWeights = lw;
 			moved++;
 		}
 		/* Repair the one contradiction the draw can produce: classFlavor 0
 		   disables the flavor system entirely, an explicitly named flavor
 		   included. The engine now floors this itself (see pickFlavor), but
-		   the panel should not display a contradiction either. */
-		if (state.cfg.flavorHint && state.cfg.classFlavor === 0) {
-			state.cfg.classFlavor = 0.5;
+		   the panel should not display a contradiction either. flavorHint
+		   itself is never randomized, so reading it off state.cfg is reading
+		   the one thing this patch cannot have touched. */
+		if (state.cfg.flavorHint && patch.classFlavor === 0) {
+			patch.classFlavor = 0.5;
 		}
+		return { patch, moved, locked };
+	}
+
+	function randomizeSettings(scope) {
+		if (RANDOM_SCOPES.indexOf(scope) === -1) scope = "gentle";
+		pushUndo("randomized settings (" + scope + ")");
+
+		/* Several files loaded, and the box below the button checked: instead
+		   of one shared draw applied to every class, each loaded file gets
+		   its OWN independent draw, stashed in state.fileCfgs and read back
+		   by fileCfgFor. The shared settings panel (state.cfg) is left alone
+		   — it stays the template Randomize draws around, the same way the
+		   panel already does not reflect what universe mode's carry-over
+		   actually ran a season with (see universeCfgFor). Off by default and
+		   forced off in universe mode, where a season's config is already
+		   something else entirely (see fileCfgFor's own guard). */
+		if (state.randomizePerFile && !state.cfg.universe && state.files.length > 1) {
+			const patches = {};
+			let moved = 0;
+			let locked = 0;
+			for (let i = 0; i < state.files.length; i++) {
+				const draw = drawRandomPatch(scope);
+				patches[i] = draw.patch;
+				moved += draw.moved;
+				// Every draw locks the same keys, so the count does not need summing.
+				locked = draw.locked;
+			}
+			if (!moved) {
+				setStatus(locked
+					? "Nothing to randomize: every setting in that scope is locked."
+					: "Nothing moved.");
+				return;
+			}
+			state.fileCfgs = patches;
+			/* Not markDirty(): the shared panel (state.cfg) was never
+			   touched, so it still matches whatever preset it matched a
+			   moment ago — the divergence lives in state.fileCfgs, which the
+			   preset-dirty indicator has no business reporting on. */
+			persist();
+			scheduleRun();
+			setStatus("Drew a separate " + scope + " randomization for each of " +
+				state.files.length + " loaded classes" +
+				(locked ? " (" + locked + " locked, untouched)" : "") +
+				". Ctrl+Z restores them in one step.");
+			return;
+		}
+
+		const { patch, moved, locked } = drawRandomPatch(scope);
 		if (!moved) {
 			// Undo entry stays — it is a no-op to undo — but say why nothing moved.
 			setStatus(locked
@@ -1241,6 +1319,7 @@
 				: "Nothing moved.");
 			return;
 		}
+		Object.assign(state.cfg, patch);
 		markDirty();
 		paintConfig();
 		persist();
@@ -1303,11 +1382,41 @@
 		}
 	}
 
+	/* The "draw separately for each loaded class" checkbox: shown only when
+	   there is a choice to make (more than one file loaded) and hidden with
+	   exactly one, where it would be a control with nothing to control. Also
+	   called whenever the file set changes (installFiles) since that is the
+	   only thing that can make the choice appear or disappear. */
+	function paintRandomPerFile() {
+		const row = $("randomPerFileRow");
+		const box = $("randomizePerFile");
+		if (!row || !box) return;
+		row.hidden = state.files.length < 2;
+		box.checked = state.randomizePerFile;
+	}
+
 	function bindRandomize() {
 		const btn = $("btnRandomize");
 		if (!btn) return;
 		paintRandomScope();
+		paintRandomPerFile();
 		btn.addEventListener("click", () => randomizeSettings(state.randomScope));
+		const perFile = $("randomizePerFile");
+		if (perFile) {
+			perFile.addEventListener("change", () => {
+				state.randomizePerFile = perFile.checked;
+				/* Unticking is "stop doing that", not "forget what I drew
+				   until I press Randomize again" — a per-file patch left in
+				   place after the box that turned it on is cleared would go
+				   on silently overriding the shared settings for whichever
+				   files it was drawn for. */
+				if (!state.randomizePerFile && Object.keys(state.fileCfgs).length) {
+					state.fileCfgs = {};
+					scheduleRun();
+				}
+				persist();
+			});
+		}
 	}
 
 	/* ------------------------------------------------- the settings filter
@@ -2182,6 +2291,12 @@
 			state.runners = state.files.map((f) => global.Engine.createRunner(f.data));
 			state.results = [];
 			state.active = 0;
+			/* Patches keyed by file index, and this is a new set of files —
+			   keeping the old map would silently hand a randomized-settings
+			   patch drawn for somebody else's third file to whatever loads
+			   into that slot now. */
+			state.fileCfgs = {};
+			paintRandomPerFile();
 			const sel = $("fileSelect");
 			sel.innerHTML = "";
 			state.files.forEach((f, i) => {
@@ -2427,6 +2542,24 @@
 		return cfg;
 	}
 
+	/* The per-file counterpart to universeCfgFor, for randomizeSettings'
+	   "draw separately for each loaded class" option: a file with its own
+	   randomized-settings patch runs with the shared config PLUS that patch
+	   on top, rather than the shared config alone. Returns null exactly when
+	   there is nothing file-specific to apply, so every call site can fall
+	   back to effectiveCfg() unconditionally. Guarded off in universe mode,
+	   where universeCfgFor already owns what a file runs with — the two are
+	   never meant to combine, since a season's config there already comes
+	   from carry-over rather than from this panel. */
+	function fileCfgFor(i) {
+		if (state.cfg.universe || !state.randomizePerFile) return null;
+		const patch = state.fileCfgs && state.fileCfgs[i];
+		if (!patch) return null;
+		const cfg = effectiveCfg();
+		Object.assign(cfg, patch);
+		return cfg;
+	}
+
 	/* THE SAME MAN, ACROSS FILES.
 
 	   After the chain has run, a player in the 2027 file who was on a 2025
@@ -2520,8 +2653,11 @@
 		if (state.results[i]) return state.results[i];
 		const runner = state.runners[i];
 		if (!runner) return null;
-		// Every file in a batch shares the seed, so they stay one set.
-		state.results[i] = runner.run(universeCfgFor(i) || effectiveCfg());
+		// Every file in a batch shares the seed, so they stay one set —
+		// unless it has its own randomized-settings patch (fileCfgFor), or
+		// is a universe-mode season with its own carry-over (universeCfgFor).
+		state.results[i] = runner.run(
+			universeCfgFor(i) || fileCfgFor(i) || effectiveCfg());
 		return state.results[i];
 	}
 
@@ -2667,7 +2803,8 @@
 		const t0 = performance.now();
 		try {
 			state.results = new Array(state.files.length).fill(null);
-			res = state.runners[state.active].run(effectiveCfg());
+			res = state.runners[state.active].run(
+				fileCfgFor(state.active) || effectiveCfg());
 			state.results[state.active] = res;
 			state.lastSeed = res.seed;
 			clearError();
@@ -5585,7 +5722,9 @@
 			"range; the other scopes randomize one fieldset. It never touches " +
 			"the seed (Reroll owns that), the per-build rarity table, or any " +
 			"setting you lock with the padlock next to its name. Ctrl+Z puts " +
-			"everything back in one step."],
+			"everything back in one step. With more than one file loaded, " +
+			"tick “Draw separately for each loaded class” to give every file " +
+			"its own independent draw instead of one shared set of settings."],
 		["6. Lock what must survive", "Open a prospect and lock his overall, " +
 			"build, school or individual ratings — locks survive rerolls, so " +
 			"you can keep the player you like while the class around him " +

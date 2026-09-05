@@ -56,6 +56,24 @@
 		return "Senior";
 	}
 
+	/* The youngest age a season is actually built for.
+
+	   "reclassified prodigy" below is the one deliberate exception to
+	   nineteen-year-old draft classes: a seventeen-year-old, drawn as a rare
+	   anomaly and gated by its own weight, on top of the normal build. A
+	   player's file age is a second, unguarded path to the exact same
+	   outcome — a source file whose born.year varies (ageIsInformative) is
+	   trusted at face value, so a sixteen- or seventeen-year-old sitting in
+	   the file played a normal season with a normal stat line every single
+	   time the class was built, which is the opposite of rare. This is
+	   where that path gets the same floor: nothing built from here is ever
+	   younger than seventeen, and seventeen itself stays a one-in-ten
+	   outcome rather than the default whenever the file happens to say so. */
+	function realisticAge(age, r) {
+		if (!Number.isFinite(age) || age >= 18) return age;
+		return r.random() < 0.1 ? 17 : 18;
+	}
+
 	/* Where a prospect came from, not only how long he has been there.
 
 	   The class-year system used to be one slider and a rank tilt, which in
@@ -423,7 +441,14 @@
 		/* Ages nobody checked: born.year only had to be a number, so a 2031
 		   birth year ran a class of minus-four-year-olds and a 1985 cohort
 		   ran as seniors without a word. A birth year after the season is a
-		   broken file; an age outside 16-30 is probably one. */
+		   broken file; an age outside 17-30 is probably one.
+
+		   The floor moved from 16 to 17 alongside realisticAge (see just
+		   above classYear): seventeen is the youngest this tool ever actually
+		   builds a season for, and it is a rare exception rather than a
+		   normal one, so a file that has several of them — or anyone
+		   younger — is worth a word even though the build itself now floors
+		   the age rather than failing on it. */
 		{
 			let odd = 0;
 			for (const p of leagueFile.players) {
@@ -434,13 +459,14 @@
 						season + "): check born.year on " +
 						((p.firstName || "") + " " + (p.lastName || "")).trim() + ".");
 				}
-				if (age < 16 || age > 30) odd++;
+				if (age < 17 || age > 30) odd++;
 			}
 			if (odd) {
 				warnings.push(odd + " player" + (odd === 1 ? " is" : "s are") +
-					" younger than 16 or older than 30 at " + season +
-					". Class years are rolled from those ages, so check born.year " +
-					"and startingSeason if that is not what you meant.");
+					" younger than 17 or older than 30 at " + season +
+					". Ages that young are floored to a rare seventeen rather " +
+					"than used as-is; check born.year and startingSeason if " +
+					"that is not what you meant.");
 			}
 		}
 		/* Physicals and ratings outside the range a person can occupy. Warned
@@ -1049,6 +1075,20 @@
 				? clamp(num(p.weight), PHYSICAL_RANGE.weight[0], PHYSICAL_RANGE.weight[1])
 				: Math.round(140 + hgtIn * 0.9 + (r.stre || 50) * 0.35);
 			const key = playerKey(p, idx, keysSeen);
+			/* Age at the class's own season, floored to what a season can
+			   actually contain — see realisticAge just above classYear.
+			   Taken raw, a file whose born.year varies (ageIsInformative)
+			   handed classYear() whatever it found with no gate at all: a
+			   sixteen-year-old read straight off the file played a normal
+			   Freshman year and got a normal stat line, every time, with none
+			   of the rarity this tool otherwise reserves for a seventeen-
+			   year-old (see "reclassified prodigy" below). realisticAge folds
+			   anything younger than that into the same rare band. `born` is
+			   copied rather than aliased before being corrected, so a class
+			   with one of these never rewrites the year on the caller's own
+			   file object. */
+			const fileAge = season - num(p.born.year);
+			const age = realisticAge(fileAge, rng.child("age:" + key));
 			return {
 				src: p,
 				idx,
@@ -1056,20 +1096,25 @@
 				key,
 				name: ((p.firstName || "") + " " + (p.lastName || "")).trim() ||
 					("Prospect " + (p.pid === undefined ? idx : p.pid)),
-				born: p.born,
+				born: age === fileAge ? p.born
+					: Object.assign({}, p.born, { year: season - age }),
+				// Read by exportFile: a floored age has to reach the exported
+				// file even when ageIsInformative otherwise leaves born.year
+				// alone, or the export would still say sixteen for a player
+				// this class only ever treated as seventeen or eighteen.
+				ageFloored: age !== fileAge,
 				/* Handedness: about one player in nine shoots left-handed, it
 				   is the first thing a scout writes after the height, and
 				   nothing in the tool carried it. Drawn per player key so it
 				   survives rerolls. */
 				hand: rng.child("hand:" + key).random() < 0.11 ? "left" : "right",
-				/* Age at the class's own season. It used to prefer each
-				   player's draft.year, so in an export whose top-level season
-				   and a player's draft year disagreed (a multi-year league
-				   subset), two prospects in the same class could have their
-				   ages measured from different years. One reference year for
-				   the whole class; validateLeagueFile warns when a draft year
-				   disagrees with it. */
-				age: season - num(p.born.year),
+				/* It used to prefer each player's draft.year, so in an export
+				   whose top-level season and a player's draft year disagreed
+				   (a multi-year league subset), two prospects in the same
+				   class could have their ages measured from different years.
+				   One reference year for the whole class; validateLeagueFile
+				   warns when a draft year disagrees with it. */
+				age,
 				draftRound: p.draft && Number.isFinite(p.draft.round) ? p.draft.round : null,
 				draftPick: p.draft && Number.isFinite(p.draft.pick) ? p.draft.pick : null,
 				origCollege: C.canonical(p.college),
@@ -5315,6 +5360,14 @@
 				out.born = Object.assign({}, out.born, {
 					year: exportSeason - ageForClassYear(p.classYear, p.transfer),
 				});
+			} else if (p.ageFloored && out.born && Number.isFinite(Number(out.born.year))) {
+				/* realisticAge corrected THIS player's file age (see
+				   phaseBuild) regardless of whether the flag above skipped
+				   everyone else — an exported file that still says sixteen
+				   for a player this class treated as seventeen the whole way
+				   through is a worse disagreement than the coarse-map one the
+				   flag above exists to avoid. */
+				out.born = Object.assign({}, out.born, { year: exportSeason - p.age });
 			}
 			const last = out.ratings.length - 1;
 			const r = out.ratings[last];

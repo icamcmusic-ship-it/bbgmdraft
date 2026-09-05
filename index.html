@@ -92,6 +92,9 @@
 	<div class="btngroup wide">
 		<button id="btnRandomize" type="button" title="Randomize the settings in the chosen scope (g). Ctrl+Z restores them in one step.">🎲 Randomize</button>
 	</div>
+	<div class="ctl" id="randomPerFileRow" hidden>
+		<label class="check"><input type="checkbox" id="randomizePerFile"> Draw separately for each loaded class</label>
+	</div>
 	<p class="hint">“Gently” draws near each setting's default; “wide open” draws across each slider's whole range. The seed, the per-build rarity weights and locked settings are never touched — reroll owns the seed.</p>
 	<div class="ctl">
 		<label for="seed">Seed <b id="seedNote">random</b></label>

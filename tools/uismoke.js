@@ -1705,6 +1705,110 @@ async function gotoProspects(page) {
 		await page.waitForTimeout(200);
 	}
 
+	console.log("\nThe randomizer, per loaded class");
+	{
+		const league = { version: 50, startingSeason: 2027, gameAttributes: { season: 2027 },
+			teams: [], players: [] };
+		let pid = 0;
+		for (const year of [2027, 2028]) {
+			const cls = V.syntheticClass(year, 40);
+			for (const p of cls.players) {
+				const copy = JSON.parse(JSON.stringify(p));
+				copy.pid = pid++;
+				copy.tid = -2;
+				copy.draft = { year, round: 0, pick: 0, tid: -1 };
+				copy.born = { year: year - 19, loc: (p.born && p.born.loc) || "USA" };
+				league.players.push(copy);
+			}
+		}
+		// classesFromFile only splits a file into one class per draft year
+		// once it is bigger than an ordinary class (see MAX_CLASS in
+		// js/engine.js) — under that it loads as a single 80-player class
+		// instead of two. Padded with rostered players, the same way the
+		// league-export fixture above does.
+		for (const p of V.syntheticClass(9, 200).players) {
+			const copy = JSON.parse(JSON.stringify(p));
+			copy.pid = pid++;
+			copy.tid = 5;
+			copy.draft = { year: 2020, round: 1, pick: 3, tid: 5 };
+			copy.born = { year: 2000, loc: "USA" };
+			copy.college = "Duke";
+			league.players.push(copy);
+		}
+		const leagueFixture = path.join(require("os").tmpdir(), "bbgm-uismoke-randomfile.json");
+		fs.writeFileSync(leagueFixture, JSON.stringify(league));
+
+		await page.goto(base);
+		await page.evaluate(() => localStorage.clear());
+		await page.goto(base);
+		await page.setInputFiles("#file", leagueFixture);
+		await page.waitForSelector("table tbody tr", { timeout: 60000 });
+		ok("two classes loaded", (await page.evaluate(() =>
+			window.App.state.files.length)) === 2);
+		ok("the per-file checkbox appears with more than one file loaded",
+			await page.locator("#randomPerFileRow").isVisible());
+
+		await page.locator("#randomizePerFile").check();
+		// "quality" — five settings at once, so an unlucky single-key
+		// collision between two independent draws cannot read as a failure.
+		await page.evaluate(() => { window.App.state.randomScope = "quality"; });
+		await page.locator("#btnRandomize").click();
+		await page.waitForTimeout(400);
+		const patches = await page.evaluate(() => {
+			const fc = window.App.state.fileCfgs || {};
+			return [JSON.stringify(fc[0] || {}), JSON.stringify(fc[1] || {})];
+		});
+		ok("checking it draws a distinct patch for each loaded file",
+			patches[0] !== "{}" && patches[1] !== "{}" && patches[0] !== patches[1],
+			patches.join(" vs "));
+		const cfgBeforeSwitch = await page.evaluate(() => window.App.state.cfg.classDepth);
+		// File 1's result is not computed until something actually looks at
+		// it (ensureResult is lazy) — switch to it the way a user would.
+		await page.selectOption("#fileSelect", "1");
+		await page.waitForTimeout(300);
+		const cfgAfterSwitch = await page.evaluate(() => window.App.state.cfg.classDepth);
+		ok("the shared settings panel is untouched by a per-file draw",
+			cfgBeforeSwitch === cfgAfterSwitch, cfgBeforeSwitch + " vs " + cfgAfterSwitch);
+		const ranWith = await page.evaluate(() =>
+			[0, 1].map((i) => {
+				const res = window.App.state.results[i];
+				return res && res.cfg ? res.cfg.classDepth : null;
+			}));
+		ok("each file actually ran with its own drawn settings, not the shared ones",
+			Number.isFinite(ranWith[0]) && Number.isFinite(ranWith[1]) &&
+				ranWith[0] !== ranWith[1],
+			ranWith.join(" vs "));
+		await page.selectOption("#fileSelect", "0");
+		await page.waitForTimeout(200);
+
+		// Unticking returns to one shared draw for every file.
+		await page.locator("#randomizePerFile").uncheck();
+		await page.locator("#btnRandomize").click();
+		await page.waitForTimeout(400);
+		const afterShared = await page.evaluate(() =>
+			Object.keys(window.App.state.fileCfgs || {}).length);
+		ok("unticking the box goes back to one shared draw for every file",
+			afterShared === 0, afterShared + " per-file patches left over");
+
+		// A fresh file load resets any leftover per-file patches. A second,
+		// differently-named copy of the same fixture: re-selecting the exact
+		// path Playwright already has loaded is not guaranteed to look like a
+		// new selection to the page.
+		await page.locator("#randomizePerFile").check();
+		await page.evaluate(() => { window.App.state.randomScope = "quality"; });
+		await page.locator("#btnRandomize").click();
+		await page.waitForTimeout(400);
+		const leagueFixture2 = path.join(
+			require("os").tmpdir(), "bbgm-uismoke-randomfile-2.json");
+		fs.writeFileSync(leagueFixture2, JSON.stringify(league));
+		await page.setInputFiles("#file", leagueFixture2);
+		await page.waitForSelector("table tbody tr", { timeout: 60000 });
+		const afterReload = await page.evaluate(() =>
+			Object.keys(window.App.state.fileCfgs || {}).length);
+		ok("loading a new set of files clears stale per-file patches",
+			afterReload === 0, afterReload + " leftover patches");
+	}
+
 	console.log("\nNo errors");
 	ok("no console or page errors", errors.length === 0, errors.join("\n         "));
 

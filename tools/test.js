@@ -3332,6 +3332,59 @@ console.log("\nAudit regressions");
 		ok("and the file check says so", v.warnings.some((w) => /draft year/.test(w)));
 	}
 
+	/* --- a file's own young ages are floored, not taken at face value ---
+
+	   A source file whose born.year varies enough to be trusted
+	   (ageIsInformative) used to be trusted completely: a sixteen-year-old
+	   in the file played a normal Freshman season with a normal stat line
+	   every single time, which is the opposite of the rarity this tool
+	   otherwise reserves for a seventeen-year-old (see "reclassified
+	   prodigy" in js/engine.js). realisticAge folds anything under
+	   eighteen into that same rare band. */
+	{
+		const lf = V.realisticClass(12, 70);
+		const season = lf.startingSeason;
+		// A spread wide enough to keep ageIsInformative on, with a third of
+		// the class planted well under the real-world floor.
+		lf.players.forEach((p, i) => {
+			const age = i < 24 ? 16 : 19 + (i % 8);
+			p.born = { year: season - age, loc: "USA" };
+		});
+		const seventeens = { yes: 0, no: 0 };
+		let under17 = 0;
+		let exportMismatches = 0;
+		for (let s = 0; s < 20; s++) {
+			const res = global.Engine.run(lf, global.Config.make({ seed: "youngage" + s }));
+			ok("ageIsInformative stayed on for this spread (seed " + s + ")",
+				res.ageIsInformative, String(res.ageIsInformative));
+			for (const p of res.players) {
+				if (p.age < 17) under17++;
+				if (p.age === 17) seventeens.yes++; else seventeens.no++;
+			}
+			const exported = global.Engine.exportFile(res, {});
+			for (let i = 0; i < res.players.length; i++) {
+				/* Only THE PLAYERS realisticAge actually corrected: with
+				   ageIsInformative on, an anomaly can already move p.age
+				   away from born.year on its own (a medical-redshirt grad
+				   transfer reads older than his birth year says, which the
+				   export deliberately leaves alone — see the comment on the
+				   skip condition itself) and that divergence is not this
+				   fix's to police. */
+				if (!res.players[i].ageFloored) continue;
+				const impliedAge = season - exported.players[i].born.year;
+				if (impliedAge !== res.players[i].age) exportMismatches++;
+			}
+		}
+		ok("nobody in the class is younger than seventeen",
+			under17 === 0, under17 + " players under 17");
+		const total = seventeens.yes + seventeens.no;
+		ok("seventeen stays a rare outcome, not the default for a young file age",
+			seventeens.yes > 0 && seventeens.yes / total < 0.15,
+			seventeens.yes + " of " + total);
+		ok("an exported file's implied age agrees with the age for every player this fix corrected",
+			exportMismatches === 0, exportMismatches + " mismatches");
+	}
+
 	/* --- the paper is not the same paper every year --------------------- */
 	{
 		const seen = {};
