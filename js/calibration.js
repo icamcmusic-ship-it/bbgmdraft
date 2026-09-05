@@ -227,8 +227,23 @@
 			},
 			/* Measured, not guessed. Each shift was fitted by sweeping it alone
 			   against the modern team targets above; see tools/validate.js,
-			   which checks every one of them. */
-			shift: { ftr: 0.845, tov: 0.96, inside: 0.021, mid: 0.017, three: 0.004, fieldEff: 0.010, ppgBoost: 0.02 },
+			   which checks every one of them.
+
+			   The four efficiency shifts were re-fitted after the September
+			   2026 audit. They had been sitting on the floor of their own
+			   bands — a draft-year TS% of 56.71 against a band that starts at
+			   56.70 is a check that passes by a hundredth and reports nothing
+			   about the model — and the audit's schedule work moved them the
+			   0.14 that turned the margin negative. Balanced home dates are
+			   the direct cause: the better programs, which is where the
+			   prospects are, used to play more of their games at home than
+			   they should have, and a home floor is worth real efficiency.
+			   The re-fit puts the draft-year anchor back in the middle of its
+			   band (56.99) rather than against its edge, and the whole field
+			   stays inside its own (56.91 against a 57.20 ceiling), which is
+			   the constraint that decides how far these can move: the two
+			   bands are 0.3 apart and a shift here moves both. */
+			shift: { ftr: 0.845, tov: 0.96, inside: 0.024, mid: 0.020, three: 0.011, fieldEff: 0.012, ppgBoost: 0.02 },
 		},
 	};
 	/* PPG, DERIVED.

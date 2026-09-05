@@ -3437,7 +3437,14 @@
 		// game is played, which is the whole point of it.
 		{
 			name: "regular",
-			deps: ["pace", "scoringEnv", "injuryRate", "realignmentRate",
+			/* `era` belongs here as well as on the stats phase now. The
+			   scoreboard used to multiply pace by one constant whatever era
+			   was selected, so an era change invalidated the stat model and
+			   nothing else; it reads the era's own points-per-possession
+			   ratio now, which is played out in this phase, and a warm re-run
+			   that skipped it left the box score and the results page in two
+			   different eras. */
+			deps: ["era", "pace", "scoringEnv", "injuryRate", "realignmentRate",
 				"bluebloodDownYears", "midMajorLift", "teamMomentum", "seasonEvents",
 				// The world dials: all three are read by buildPrograms.
 				"realignmentMemory", "starReturners", "portalRate", "styleDrift"],
