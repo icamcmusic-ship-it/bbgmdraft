@@ -2325,7 +2325,12 @@ console.log("\nWarm re-runs");
 
 	/* Each event's sentence describes where the player actually ended up. A
 	   later event's move() shifts everyone it passes by one, so a text written
-	   when the event fired disagreed with the rank printed beside it. */
+	   when the event fired disagreed with the rank printed beside it.
+
+	   The rank it has to agree with is `draftSlot` — where he was taken on the
+	   night. `boardRank` is the mock the events then moved him off, and while
+	   the two were one number a slide's sentence and the board's own ranking
+	   were the same field read twice. */
 	let mismatched = 0;
 	for (let s = 0; s < 12; s++) {
 		const res = global.Engine.run(V.realisticClass(s % 5, 70),
@@ -2333,7 +2338,7 @@ console.log("\nWarm re-runs");
 		for (const e of res.draftEvents) {
 			const p = res.board.filter((x) => x.key === e.key)[0];
 			const m = /until pick (\d+)/.exec(e.text);
-			if (m && Number(m[1]) !== p.boardRank) mismatched++;
+			if (m && Number(m[1]) !== p.draftSlot) mismatched++;
 		}
 	}
 	ok("a draft-day sentence agrees with the rank printed beside it",
