@@ -16,6 +16,16 @@
 
 	const { clamp } = global.BBGMRng;
 
+	/* Regular-season games only.
+
+	   Conference-tournament games belong on a real resume — a bid stealer's
+	   run changes nothing here, and the two seed it knocked out arrives at
+	   Selection Sunday with the same NET it had on Saturday morning — but
+	   adding them was measured and put five seeds past twelve seeds 81% of
+	   the time against a real 64% and the band's 78% ceiling: championship
+	   week is played on neutral floors against the rest of your own league,
+	   and folding it into a NET built for a 31-game schedule sharpens the
+	   seed line rather than describing it. Left as it was, deliberately. */
 	function regGames(t) {
 		return t.log.filter((g) => g.stage === "reg");
 	}
@@ -174,7 +184,10 @@
 				const opp = byName[g.opp];
 				const quad = quadOf(opp ? opp.netRank : list.length, g.home || 0);
 				q["q" + quad + (g.won ? "w" : "l")]++;
-				if ((g.home || 0) <= 0) { if (g.won) roadW++; else roadL++; }
+				// STRICTLY road. A neutral-court game is not a road game, and
+				// counting it as one credited a team for the holiday tournament
+				// it played in Orlando.
+				if ((g.home || 0) < 0) { if (g.won) roadW++; else roadL++; }
 			}
 			t.quads = q;
 			t.roadW = roadW;
@@ -236,6 +249,30 @@
 		for (const t of list) t.regGamesList = regGames(t)
 			.slice().sort((a, b) => a.when - b.when);
 
+		/* HOW GOOD THE OPPONENT WAS, FROM RESULTS.
+
+		   Strength of schedule, quality wins and bad losses all read
+		   `g.quality`, which js/teams.js stamps on every log row straight off
+		   `opp.rating` — the sim's hidden true strength. So the electorate
+		   this file's header says votes on observables was reading the answer
+		   key for three of its six features: a team that was secretly good and
+		   lost anyway still handed out quality wins, and a 24-7 record against
+		   a schedule that only LOOKED hard was marked down.
+
+		   computeRankings has already run and has already answered the same
+		   question from the game log alone (TVI plus margin-capped adjusted
+		   efficiency, iterated to a fixed point). Its ranking is what a voter
+		   has: results, and everyone else's results. */
+		const byName = {};
+		for (const t of list) byName[t.name] = t;
+		const oppRank = (g) => {
+			const o = byName[g.opp];
+			return o && Number.isFinite(o.netRank) ? o.netRank : n;
+		};
+		// On a 0-100 scale like the rating it replaces, so the voter weights
+		// and the percentile that reads it keep their range.
+		const oppStrength = (g) => 100 * (1 - (oppRank(g) - 1) / Math.max(1, n - 1));
+
 		// Voter biases, drawn once. Sum-normalized so every voter's ballot is
 		// on the same scale; the VARIATION between voters is the point.
 		const voters = [];
@@ -267,6 +304,11 @@
 			};
 		};
 
+		// Drawn once per program per season, outside the weekly loop: it is
+		// October's story and it does not change in January.
+		const hype = new Map();
+		for (const t of list) hype.set(t.name, rng.child("hype:" + t.name).normal(0, 7.5));
+
 		const history = [];
 		let lastRanked = null;
 		for (let week = 0; week < WEEKS; week++) {
@@ -277,7 +319,7 @@
 				const played = t.regGamesList.filter((g) => g.when <= cutoff);
 				const w = played.reduce((a, g) => a + (g.won ? 1 : 0), 0);
 				const sos = played.length
-					? played.reduce((a, g) => a + (g.quality || 50), 0) / played.length : 50;
+					? played.reduce((a, g) => a + oppStrength(g), 0) / played.length : 50;
 				/* Quality wins, graded and capped. A flat count over a 62
 				   bar let a power-conference team collect seven of them off
 				   its schedule alone and finish 17-14 in the final top 25;
@@ -286,9 +328,9 @@
 				   same way, and a loss to the middle of the country now
 				   costs something rather than nothing. */
 				const qual = Math.min(5.5, played.reduce((a, g) =>
-					a + (g.won ? clamp(((g.quality || 0) - 60) / 18, 0, 1) : 0), 0));
+					a + (g.won ? clamp((60 - oppRank(g)) / 45, 0, 1) : 0), 0));
 				const bad = played.reduce((a, g) =>
-					a + (!g.won ? clamp((52 - (g.quality || 50)) / 14, 0, 1) : 0), 0);
+					a + (!g.won ? clamp((oppRank(g) - 120) / 90, 0, 1) : 0), 0);
 				return {
 					games: played.length,
 					pct: played.length ? w / played.length : 0,
@@ -306,8 +348,19 @@
 					   A real October poll is reputation with a look at the
 					   roster, so reputation is prestige blended with a damped
 					   read of the level. */
+					/* Plus this OCTOBER's story, which is neither the program's
+					   reputation nor its true level: a recruiting class
+					   everybody watched, a transfer haul, a returning senior
+					   who nearly went pro. Without it the preseason ballot is
+					   a table — the same program was voted No. 1 in eight of
+					   twenty seasons and the top ten was the same nine names
+					   — because both terms it read are stable by design. It
+					   moves the ballot and nothing else: the season is played
+					   on the level, and a preseason No. 1 that was hype finds
+					   that out in November. */
 					reputation: 0.4 * (t.prestige || 0) +
-						0.6 * (Number.isFinite(t.level) ? t.level : (t.prestige || 0)),
+						0.6 * (Number.isFinite(t.level) ? t.level : (t.prestige || 0)) +
+						(hype.get(t.name) || 0),
 				};
 			});
 			const sosPct = pctRank(feats.map((f) => f.sos));

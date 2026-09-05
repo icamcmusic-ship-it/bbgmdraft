@@ -1913,6 +1913,33 @@
 	// A season's worth of `when`, matching the schedule's own axis.
 	const SEASON_GAMES = T.CONF_GAMES + T.NON_CONF_GAMES;
 
+	/* GAMES ARE NOT SPREAD EVENLY OVER THE SEASON.
+
+	   `when` runs 0 to 1, but simulateRegularSeason draws non-conference dates
+	   on [0, 0.55] and conference dates on [0.35, 1], so late January holds
+	   about 51 games per unit of `when` and November about 22. A window
+	   measured as `games / SEASON_GAMES` therefore covers the right number of
+	   games only by accident: measured over 1,140 prospects, 72 carried a
+	   weakened window at least four games longer than the games they actually
+	   missed — his team played shorthanded in a fortnight he was available
+	   for, or he sat out nights it was at full strength.
+
+	   So the window is measured in GAMES and converted, through the schedule's
+	   own density, into the `when` axis the season is played on. */
+	function gamesBefore(x) {
+		return T.NON_CONF_GAMES * clamp(x / 0.55, 0, 1) +
+			T.CONF_GAMES * clamp((x - 0.35) / 0.65, 0, 1);
+	}
+	function whenAfter(games) {
+		let lo = 0;
+		let hi = 1;
+		for (let i = 0; i < 40; i++) {
+			const mid = (lo + hi) / 2;
+			if (gamesBefore(mid) < games) lo = mid; else hi = mid;
+		}
+		return (lo + hi) / 2;
+	}
+
 	function assignAvailability(players, rng, cfg) {
 		const rate = clamp(
 			cfg && cfg.injuryRate !== undefined ? cfg.injuryRate : 1, 0, 3);
@@ -1947,16 +1974,18 @@
 			const pickKind = r.weighted(table);
 			const games = Math.max(1, Math.round(
 				r.uniform(pickKind.lo, pickKind.hi + 0.999)));
-			const span = games / SEASON_GAMES;
+			const out = Math.min(games, SEASON_GAMES - 5);
 			// A run of games for an injury; scattered nights for everything
 			// else, which is what "illness" and "a coach's decision" are.
-			const from = hurt ? r.uniform(0, Math.max(0, 1 - span)) : null;
+			// The window is placed on games and read back as a date.
+			const from = hurt
+				? r.uniform(0, whenAfter(Math.max(0, SEASON_GAMES - out))) : null;
 			p.availability = {
-				games: Math.min(games, SEASON_GAMES - 5),
+				games: out,
 				kind: pickKind.kind,
 				injury: hurt,
 				from,
-				to: hurt ? from + span : null,
+				to: hurt ? whenAfter(gamesBefore(from) + out) : null,
 			};
 		}
 	}
@@ -4520,7 +4549,17 @@
 					pos: line === row.line ? row.pos : null,
 					key: line === row.line ? key : null,
 				}));
-				addTeam(row.box, items, null, [{
+				/* The margin that season was played to. Passing null handed
+				   opponentTotals the FIELD's average points instead, so an
+				   earlier season's opponent column described a team nobody
+				   played — and every difference read off it (on/off above
+				   all: it ran to +265 per 100 on prior seasons and to +14 on
+				   draft years) was measured against the wrong opponent. */
+				const pg = (row.gameLog && row.gameLog.games) || [];
+				const pm = pg.length
+					? pg.reduce((a, g) => a + ((g.pf || 0) - (g.pa || 0)), 0) / pg.length
+					: null;
+				addTeam(row.box, items, pm, [{
 					key, player: p, season: row.season, team: row.team,
 					draftYear: false, prior: row,
 				}]);

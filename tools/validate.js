@@ -316,6 +316,9 @@ function collect(nSeeds, cfgOverrides, fixture) {
 	const paceOfHonored = [];
 	const paceOfAll = [];
 	const usgBins = {};
+	// The advanced block, off the exported draft-year rows. See below.
+	const adv = { bpm: [], vorp: [], per: [], ws40: [], onOff: [], pmg: [],
+		usgp: [], ortg: [] };
 	const scorers20 = [];
 	const scorers25 = [];
 	/* March. Nothing here was banded, so the bracket could be — and was —
@@ -501,7 +504,32 @@ function collect(nSeeds, cfgOverrides, fixture) {
 			(p.awards || []).some((a) => /^All-.+ Second Team$/.test(a))).length);
 		defAwards.push(res.players.reduce((a, p) => a +
 			(p.awards || []).filter((x) => /Defensive|Driesell/.test(x)).length, 0));
-		global.Engine.exportFile(res);
+		/* THE DERIVED HALF OF THE ROW.
+
+		   Every band above this line is about a counting stat, so the whole
+		   advanced block — the numbers a BBGM save actually shows on a player
+		   page — was unbanded: box plus/minus ran past 20, PER past 45 and
+		   on/off to nearly 300 per 100 with nothing to fail. These are read
+		   off the export because that is where they are computed, and off the
+		   DRAFT YEAR only, matched against real college leaders (a BPM leader
+		   near 12-14, a PER leader near 35, WS/40 near 0.30, an on/off extreme
+		   near 25). A reconstructed prior season carries zeros by design (see
+		   seasonRow) and is skipped. */
+		const exported = global.Engine.exportFile(res, { stats: true });
+		for (const p of exported.players || []) {
+			const rows = (p.stats || []).filter((r) => r.season === res.season);
+			for (const r of rows) {
+				if (!r.min || r.min < 200 || r.per === 0) continue;
+				adv.bpm.push(r.obpm + r.dbpm);
+				adv.vorp.push(r.vorp);
+				adv.per.push(r.per);
+				adv.ws40.push(((r.ows + r.dws) * 40) / r.min);
+				adv.onOff.push(r.onOff100);
+				adv.pmg.push(r.pm / Math.max(1, r.gp));
+				adv.usgp.push(r.usgp);
+				adv.ortg.push(r.ortg);
+			}
+		}
 	}
 
 	const g = (f) => all.map(f);
@@ -1057,6 +1085,36 @@ function collect(nSeeds, cfgOverrides, fixture) {
 			-0.75 - 1.75 * Math.min(matchedK, 1.6),
 			-0.75 + 1.75 * Math.min(matchedK, 1.6)],
 
+		/* THE ADVANCED BLOCK.
+
+		   A player page in BBGM shows these before it shows a rebound, and
+		   not one of them was banded: box plus/minus reached +20, PER +47,
+		   WS/40 0.53 and on/off nearly +300 per 100, all with every row in
+		   this file green. The anchors are real college leaders — a national
+		   BPM leader runs 12-14, a PER leader about 35, a WS/40 leader about
+		   0.30 (0.35 per 48), an on/off extreme about +25 per 100 and a
+		   per-game plus/minus leader about +15 — so the MEDIAN rows say the
+		   distribution is centered where BBGM's own normalization puts it
+		   (PER on 15 league-wide, BPM on 0) and the EXTREME rows say its tail
+		   ends somewhere a season could. */
+		["BPM median (draft year)", pct(adv.bpm, 0.5)].concat(within(1.0, 3.0)),
+		["BPM p99", pct(adv.bpm, 0.99)].concat(within(13, 4)),
+		["BPM max", Math.max.apply(null, adv.bpm)].concat(extreme(13, 22)),
+		["BPM min", Math.min.apply(null, adv.bpm)].concat(extreme(-24, -10)),
+		["PER median (draft year)", pct(adv.per, 0.5)].concat(within(16.5, 3.0)),
+		["PER max", Math.max.apply(null, adv.per)].concat(extreme(30, 48)),
+		["VORP max", Math.max.apply(null, adv.vorp)].concat(extreme(4.5, 11)),
+		["WS per 40 max", Math.max.apply(null, adv.ws40)].concat(extreme(0.28, 0.58)),
+		["ORtg median", pct(adv.ortg, 0.5)].concat(within(108, 6)),
+		["USG% max", Math.max.apply(null, adv.usgp)].concat(extreme(33, 42)),
+		/* On/off and per-game plus/minus are DIFFERENCES, so they are the two
+		   rows that catch a team's box score and its scoreboard disagreeing —
+		   which is what put on/off at +295. */
+		["On/off per 100, p99", pct(adv.onOff, 0.99)].concat(within(26, 12)),
+		["On/off per 100, max", Math.max.apply(null, adv.onOff)].concat(extreme(20, 60)),
+		["On/off per 100, min", Math.min.apply(null, adv.onOff)].concat(extreme(-60, -12)),
+		["Plus/minus per game, p99", pct(adv.pmg, 0.99)].concat(within(18, 6)),
+		["Plus/minus per game, max", Math.max.apply(null, adv.pmg)].concat(extreme(16, 32)),
 	];
 
 	/* Award volume is a statement about THE CLASS — how much of the country's
