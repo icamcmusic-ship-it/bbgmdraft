@@ -1375,6 +1375,10 @@
 			const bar = Math.exp(-lambda);
 			let prod = rng.random();
 			while (prod > bar && budget < 20) { budget++; prod *= rng.random(); }
+			// With a floor: a Division I season is never empty, and a draw
+			// that can come back with one thing in it is a different claim
+			// from "some seasons are quieter than others".
+			budget = Math.max(Math.min(4, Math.round(setting)), budget);
 		}
 		if (!budget) return [];
 		const all = Object.keys(teams).map((n) => teams[n]);
@@ -1417,7 +1421,7 @@
 			loser.rating >= topRating && winner.rating < loser.rating - 14)
 			.sort((a, b) => (b.loser.rating - b.winner.rating) -
 				(a.loser.rating - a.winner.rating));
-		if (upsets.length && tells(0.62)) {
+		if (upsets.length && tells(0.55)) {
 			const u = rng.pick(upsets.slice(0, 8));
 			/* Three texts per event kind rather than one.
 
@@ -1443,7 +1447,7 @@
 		const good = games.filter(({ winner, loser, g }) =>
 			winner.rating > topRating - 6 && loser.rating > topRating - 6 &&
 			Math.abs(g.pf - g.pa) <= 3);
-		if (good.length && tells(0.60)) {
+		if (good.length && tells(0.55)) {
 			const gm = rng.pick(good);
 			const otTag = gm.g.ot
 				? " (" + (gm.g.ot > 1 ? gm.g.ot + "OT" : "OT") + ")" : "";
@@ -1464,7 +1468,7 @@
 		const failing = all.filter((t) =>
 			t.games >= 10 && t.w / Math.max(1, t.games) < 0.35 &&
 			C.prestige(t.name) >= 55);
-		if (failing.length && tells(0.58)) {
+		if (failing.length && tells(0.52)) {
 			const t = rng.pick(failing);
 			/* The month is drawn first and the date follows it. They used to
 			   be two independent draws, so the text said February while the

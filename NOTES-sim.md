@@ -125,6 +125,8 @@ twenty consecutive seasons of one.
 Finally, a season's mid-season events were a fixed budget of seven, topped up
 from a flavor pool, so every season had exactly seven things happen in it and
 each KIND of thing happened in twelve to seventeen seasons of twenty. The budget
-is a Poisson draw now (the slider is its mean) and the gates on the result-driven
-kinds were loosened to match: 5.5 events a season, and no kind fires in more than
-fourteen of twenty.
+is a Poisson draw now (the slider is its mean, with a floor of four — a Division
+I season is never empty) and the gates on the result-driven kinds were loosened
+to match: 5.7 events a season, the most common kind fires in fifteen seasons of
+twenty rather than seventeen, and the rest are spread from seven to fourteen
+instead of bunched at twelve to sixteen.
