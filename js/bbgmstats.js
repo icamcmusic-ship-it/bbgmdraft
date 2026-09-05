@@ -195,7 +195,6 @@
 		const gameMinutes = o.gameMinutes || 48;
 		const numPlayersOnCourt = o.numPlayersOnCourt || 5;
 		const numGames = o.numGames || 82;
-		const gameLengthFactor = gameMinutes / 48;
 
 		const players = [];
 		for (const t of teams) {
@@ -273,8 +272,16 @@
 			for (let i = 0; i < players.length; i++) {
 				const per = leagueAPER > 0 ? aPER[i] * (15 / leagueAPER) : 0;
 				out[i].per = fix(per);
+				/* On HIS clock, not the field's. EWA divides by the game
+				   length because a win is worth a game and a game is not the
+				   same length everywhere; passing the run's nominal forty
+				   minutes gave a G League prospect's forty-eight-minute
+				   season a college-sized denominator — the one environment
+				   normalization this function was still getting wrong, since
+				   on/off, the league minute total and BPM's possession
+				   estimate all already read the team's own. */
 				out[i].ewa = fix(getEWA(out[i].per, players[i].p.stats.min,
-					players[i].p.pos, gameLengthFactor));
+					players[i].p.pos, gmOf(players[i].t) / 48));
 			}
 		}
 

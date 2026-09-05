@@ -26,6 +26,23 @@
 	const BB = global.BBGM;
 	const CAL = global.Calibration;
 
+	/* A CEILING THAT BENDS.
+
+	   A hard ceiling does not remove the players who would have gone past it,
+	   it stacks them ON it: measured over 33,617 stat lines, 245 finished with
+	   exactly 3.90 personal fouls, 639 sat to the decimal on the per-40
+	   rebounding cap and 118 on the assist one — a wall being reported as a
+	   distribution, which is the same failure the three-point ceiling was
+	   softened for years ago (see tpLim below). Above the knee the curve bends
+	   asymptotically toward the limit instead of arriving at it, so the top of
+	   the sample is spread over the last few percent rather than pinned to one
+	   number, and below the knee nothing moves at all. */
+	function softCeil(x, lim, knee) {
+		const t = lim * (knee === undefined ? 0.88 : knee);
+		if (!(x > t) || !(lim > t)) return x;
+		return t + (lim - t) * (1 - Math.exp(-(x - t) / (lim - t)));
+	}
+
 	/* Tuning constants for the volume model. Exported so tools/validate.js and
 	   any future calibration sweep can read the same numbers the sim uses. */
 	const TUNING = {
@@ -169,7 +186,19 @@
 		STL_EXP: 2.1,
 		/* 2.6 gave a big:guard BPG ratio of 4.1x against a real 8-10x, with
 		   seven-footers medianing 1.1 a game. Team blocks were on target, so
-		   the pool is fine and the share was too flat — steepen it. */
+		   the pool is fine and the share was too flat — steepen it.
+
+		   3.5 steepened it too far in the other direction: the national leader
+		   averaged 5.6 blocks a game against a real D-I leader's 3.6, 110
+		   lines of 33,617 cleared 4.5, and 301 of them sat on the share cap
+		   exactly. A power of 2.5 keeps the big:guard separation the comment
+		   above exists for and stops one shot-blocker taking most of a team's
+		   blocks on his own. But flattening the exponent flattens the
+		   big:guard ratio with it — 2.5 measured 3.7 against a band floor of
+		   4.5 — so the exponent stays where it was and the two CEILINGS do the
+		   work instead: a soft share cap and an absolute per-40 one. The
+		   leader now averages 4.1 against 5.6, nothing clears 4.5, and no line
+		   sits on the cap. */
 		BLK_EXP: 3.5,
 		/* 1.2 handed fouls out almost proportionally to minutes: a quarter
 		   of every class averaged over 4.0 PF/g and the max was 5.28, which
@@ -204,12 +233,23 @@
 		   draft-class maxima of 12-13 and 8-9 a game at 32-34 minutes. */
 		REB_PER40_CAP: 14.5,
 		AST_PER40_CAP: 10.0,
+		/* And the same statement about blocks, which had only a share cap and
+		   so could say "no college player blocks shots at this rate" only by
+		   accident of how few his team blocked. 5.5 per 40 is just above the
+		   real record season. */
+		BLK_PER40_CAP: 5.5,
 		/* Measured max share was 0.40 against a cap of 0.40 — binding
 		   exactly. Softened so the steeper REB_EXP has headroom. */
 		REB_CAP: 0.46,
-		// Walker Kessler took 4.6 of Auburn's 6.6 blocks — 70%. The old 0.50
-		// cap forbade by construction the exact season the comment cited.
-		BLK_CAP: 0.60,
+		/* Walker Kessler took 4.6 of Auburn's 6.6 blocks — 70%. The old 0.50
+		   cap forbade by construction the exact season the comment cited; 0.60
+		   then became a wall 301 lines sat on. It is a SOFT ceiling now (see
+		   softCeil), so a Kessler season can still bend past it while the
+		   ordinary shot-blocker is nowhere near, and the absolute per-40
+		   ceiling above is what actually forbids the impossible. 0.52 is as
+		   low as it goes without flattening the big:guard ratio the exponent
+		   exists to produce. */
+		BLK_CAP: 0.52,
 		STL_CAP: 0.42,
 		/* 0.28 let one player take 28% of a team's 16.6 fouls — 4.65 a
 		   game, past the number that ends a night. The real D-I leader in
@@ -1203,11 +1243,6 @@
 		   everyone on the limit. A volume shooter can now reach the high
 		   forties and essentially nobody reaches 50. */
 		const tpLim = 0.470 + 0.055 * Math.max(0, 1 - tpa / 3.5);
-		const softCeil = (x, lim, knee) => {
-			const t = lim * knee;
-			if (x <= t) return x;
-			return t + (lim - t) * (1 - Math.exp(-(x - t) / (lim - t)));
-		};
 		const tpp = clamp(softCeil(
 			(bend && bend.tpp ? bend.tpp : 0) +
 			0.339 + CAL.effShift("three") + envEff +
@@ -1645,6 +1680,14 @@
 				// too — without it every returning player's steal weight came
 				// out NaN and took the whole team steal pool with it.
 				athleticism: f(0.48 + d.athleticism, 0.09),
+				/* And ball-handling, for the same reason and with the same
+				   symptom one field over: astdRate reads it, a filler did not
+				   have it, and every filler line therefore carried
+				   astdRate: NaN — 66,243 of them over twenty classes, exported
+				   to the league file as null. Guards handle the ball; the slot
+				   shape's passing offset is the only read the composite table
+				   has on that. */
+				dribbling: f(0.47 + d.passing, 0.09),
 			};
 		});
 
@@ -2075,9 +2118,37 @@
 		   clipped surplus to the players with room. Below the cap nothing
 		   moves, so the distribution keeps the shape statLine gave it. */
 		reconcileTeamTotals(lines, pools, gameMinutes);
+		/* And then answer to the SCOREBOARD.
+
+		   A team's points existed three times over and no two of them agreed:
+		   the stat pool summed its rotation to one number, teamBox summed the
+		   same lines to a second, and js/teams.js had already played thirty-one
+		   games whose final scores said a third. Measured over 3,640
+		   team-seasons the box said 73.4 and the season the team actually
+		   played said 70.6, 1,231 of them differed by more than five points,
+		   and the worst was off by twenty-one — a program whose box score and
+		   whose results page described different teams. Everything that is a
+		   DIFFERENCE between the two (net rating, plus/minus, on/off, both team
+		   ratings) inherited the gap: the country netted +3.6 a hundred
+		   possessions on a true margin of -0.19.
+
+		   The scoreboard is the one of the three with a season behind it, so
+		   it wins: one factor over the whole rotation puts the pool's points on
+		   the points the team actually scored. One factor and not a per-player
+		   fit because the SHARES are the stat model's answer and are not in
+		   question — only the total is. Percentages are untouched (attempts and
+		   makes move together), and the bound keeps a freak schedule from
+		   rewriting a rotation rather than correcting it. */
+		anchorPointsToScoreboard(lines, team);
 		totals.ast = 0; totals.stl = 0; totals.blk = 0; totals.pf = 0;
 		totals.orb = 0; totals.trb = 0; totals.tov = 0;
+		// Points and the attempts behind them are re-summed too: the anchor
+		// above moved them, and they were accumulated as the lines were built.
+		totals.pts = 0; totals.fga = 0; totals.fta = 0;
 		for (const line of lines) {
+			totals.pts += line.ppg;
+			totals.fga += line.fga;
+			totals.fta += line.fta;
 			totals.ast += line.apg;
 			totals.stl += line.spg;
 			totals.blk += line.bpg;
@@ -2190,7 +2261,10 @@
 		for (let iter = 0; iter < 6; iter++) {
 			let excess = 0;
 			for (let i = 0; i < out.length; i++) {
-				if (out[i] > lim) { excess += out[i] - lim; out[i] = lim; }
+				// Soft, so the men at the top of a category are spread over
+				// the last few percent of the cap instead of stacked on it.
+				const v = softCeil(out[i], lim);
+				if (v < out[i]) { excess += out[i] - v; out[i] = v; }
 			}
 			if (excess < 1e-9) { converged = true; break; }
 			let room = 0;
@@ -2231,7 +2305,8 @@
 		let surplus = 0;
 		for (let i = 0; i < lines.length; i++) {
 			const v = lines[i][key] || 0;
-			if (v > limit[i]) { surplus += v - limit[i]; lines[i][key] = limit[i]; }
+			const s = softCeil(v, limit[i]);
+			if (s < v) { surplus += v - s; lines[i][key] = s; }
 		}
 		if (surplus <= 1e-9) return;
 		let room = 0;
@@ -2242,6 +2317,35 @@
 		const share = Math.min(1, surplus / room);
 		for (let i = 0; i < lines.length; i++) {
 			lines[i][key] += Math.max(0, limit[i] - (lines[i][key] || 0)) * share;
+		}
+	}
+
+	/* Put the rotation's points on the points the team's own results say it
+	   scored. `team.log` is the season js/teams.js played; a team with no
+	   season behind it (a prior year that was never scheduled) keeps the
+	   pool's own answer, which is all there is.
+
+	   Only the scoring volume moves — attempts and makes by the same factor,
+	   so every shooting percentage, every share and every non-scoring stat is
+	   exactly what the stat model said. Bounded at ±15%: past that the
+	   disagreement is not a reconciliation, and a rotation should not be
+	   rewritten to chase one. */
+	function anchorPointsToScoreboard(lines, team) {
+		const log = team && team.log;
+		if (!log || !log.length || !lines.length) return;
+		let pf = 0;
+		let n = 0;
+		for (const g of log) {
+			if (Number.isFinite(g.pf)) { pf += g.pf; n++; }
+		}
+		if (!n) return;
+		let pts = 0;
+		for (const l of lines) pts += l.ppg || 0;
+		if (pts <= 1e-9) return;
+		const k = clamp((pf / n) / pts, 0.85, 1.15);
+		if (Math.abs(k - 1) < 1e-6) return;
+		for (const l of lines) {
+			l.ppg *= k; l.fga *= k; l.tpa *= k; l.fta *= k;
 		}
 	}
 
@@ -2264,7 +2368,7 @@
 		   number that ends a night. 3.9 is just above the real D-I
 		   leader's 3.6-3.8. */
 		set("pfpg", pools.pfPool,
-			Math.min(TUNING.PF_CAP, 3.9 / Math.max(1e-9, pools.pfPool)));
+			Math.min(TUNING.PF_CAP, 4.1 / Math.max(1e-9, pools.pfPool)));
 		/* Turnovers: fixed at the rate level long ago, but the team total was
 		   still unconstrained the same way fouls were before pfpg was added
 		   here. A generous cap — one player CAN commit a third of a team's
@@ -2296,6 +2400,7 @@
 		   back over them. Rebounds are clipped on the total and the two halves
 		   are rescaled to match, the same way the share cap above works. */
 		clipPer40(lines, "apg", TUNING.AST_PER40_CAP, gameMinutes);
+		clipPer40(lines, "bpg", TUNING.BLK_PER40_CAP, gameMinutes);
 		const before = lines.map((l) => l.rpg);
 		clipPer40(lines, "rpg", TUNING.REB_PER40_CAP, gameMinutes);
 		lines.forEach((l, i) => {
@@ -2307,6 +2412,82 @@
 	}
 
 	/* -------------------------------------------------------------- game log */
+
+	/* ---------------------------------------------------- plus/minus impact */
+
+	/* How much better his team was with him on the floor, in points per 100
+	   possessions — the number on/off is, and the number the export's
+	   `onOff100` has to come out at.
+
+	   The old impact term was `share * (prod - 11 * share) * 0.22`, a per-GAME
+	   number added to every player's plus/minus. Two things were wrong with
+	   it, and both of them showed up in the export rather than here.
+
+	   It was not ZERO-SUM. Five men are on the floor for every point of a
+	   team's margin, so the rotation's plus/minus has to sum to five times it;
+	   an impact term that is positive for good players and negative for
+	   nobody hands the team more margin than it won. BBGM's on/off then reads
+	   the surplus off the OFF-court minutes, of which a starter has about nine
+	   a night, and divides by them.
+
+	   And it was not on a per-possession scale. On/off is amplified by
+	   1 / (share * (1 - share)) — about 6x for a 30-minute starter and 17x for
+	   a 37-minute one — so a five-point-a-game impact term is a fifty-point
+	   on/off. Measured over eight classes: on/off ran to +295 and -217 per 100
+	   with a p99 of +117, against a real college range of +10 to +20 and an
+	   extreme near +25.
+
+	   So the impact is DEFINED per 100 possessions, bounded there, and then
+	   converted into the per-game plus/minus that produces it. It is measured
+	   against his own rotation's production rather than a constant 11, which
+	   is what makes the sum zero: subtract the minutes-weighted mean and the
+	   team's margin is exactly the margin it won. */
+	const PM_IMPACT = new WeakMap();
+	const IMPACT_K = 0.8;
+	const IMPACT_CAP = 20;
+
+	function productionOf(l) {
+		return (l.ppg || 0) + 1.2 * (l.rpg || 0) + 1.5 * (l.apg || 0) +
+			2 * (l.spg || 0) + 2 * (l.bpg || 0) - 1.3 * (l.topg || 0);
+	}
+
+	/* Every rotation player's impact, per 100 and as a per-game plus/minus,
+	   cached on the team: it is a property of the whole rotation and the game
+	   log is built one player at a time. */
+	function impactTerms(team, gameMinutes) {
+		const cached = PM_IMPACT.get(team);
+		if (cached) return cached;
+		const gm = gameMinutes || team.gameMinutes || 40;
+		const lines = (team && team.lines) || [];
+		const pace = (team && team.box && team.box.pace) || 68;
+		const out = new Map();
+		let prodSum = 0;
+		let shareSum = 0;
+		for (const l of lines) {
+			prodSum += productionOf(l);
+			shareSum += Math.min(1, (l.mpg || 0) / gm);
+		}
+		// Production per full game on the floor, against the rotation's own.
+		const base = shareSum > 1e-9 ? prodSum / shareSum : 0;
+		const raw = [];
+		let rawSum = 0;
+		for (const l of lines) {
+			const s = clamp((l.mpg || 0) / gm, 0, 0.98);
+			const per40 = s > 1e-6 ? productionOf(l) / s : 0;
+			const imp100 = clamp(IMPACT_K * (per40 - base), -IMPACT_CAP, IMPACT_CAP);
+			const pg = s * (1 - s) * (pace / 100) * imp100;
+			raw.push({ l, s, pg });
+			rawSum += pg;
+		}
+		// Centered on the rotation's minutes, so the five men on the floor
+		// account for the team's margin and no more.
+		for (const r of raw) {
+			const pg = r.pg - (shareSum > 1e-9 ? (r.s * rawSum) / shareSum : 0);
+			out.set(r.l, pg);
+		}
+		PM_IMPACT.set(team, out);
+		return out;
+	}
 
 	/* One line per game, for a player who already has a season average.
 
@@ -2338,24 +2519,38 @@
 		let injury = null;
 		const av = p.availability;
 		if (missedCount > 0) {
+			/* The log is in the order the scheduler PAIRED the games, not the
+			   order they were played (see longestRun in js/teams.js), so a run
+			   of consecutive indices is a run of nothing. Both branches below
+			   work on the calendar. */
+			const byDate = schedule.map((g, i) => i)
+				.sort((a, b) => (schedule[a].when || 0) - (schedule[b].when || 0));
 			if (av && av.injury && av.from !== null) {
 				// Place the block on the same stretch of the calendar the
 				// season simulation took him out of.
 				let start = 0;
-				for (let i = 0; i < schedule.length; i++) {
-					if ((schedule[i].when || 0) >= av.from) { start = i; break; }
-					start = i;
+				for (let k = 0; k < byDate.length; k++) {
+					if ((schedule[byDate[k]].when || 0) >= av.from) { start = k; break; }
+					start = k;
 				}
-				start = Math.max(0, Math.min(start, schedule.length - missedCount));
-				for (let i = 0; i < missedCount; i++) missed.add(start + i);
+				start = Math.max(0, Math.min(start, byDate.length - missedCount));
+				for (let k = 0; k < missedCount; k++) missed.add(byDate[start + k]);
 				injury = {
 					from: start, to: start + missedCount - 1, games: missedCount,
 					kind: av.kind,
 				};
 			} else {
+				/* Scattered nights, and only out of the REGULAR SEASON: an
+				   ordinary absence drawn over the whole log took a man out of
+				   an NCAA tournament game his team played at full strength —
+				   33 prospects over ten classes — because a coach's decision
+				   or a one-game suspension in December has nothing to say
+				   about March. */
+				const reg = byDate.filter((i) => (schedule[i].stage || "reg") === "reg");
+				const pool = reg.length >= missedCount ? reg : byDate;
 				let guard = 0;
 				while (missed.size < missedCount && guard++ < 500) {
-					missed.add(rng.int(0, schedule.length - 1));
+					missed.add(pool[rng.int(0, pool.length - 1)]);
 				}
 				injury = {
 					from: null, to: null, games: missedCount,
@@ -2489,19 +2684,51 @@
 		/* An impact term, so on/off is not the noise term alone: the margin
 		   scaled by his floor time cancels exactly against the team's
 		   margin in the on/off formula below, which left on/off correlated
-		   with nothing (-0.02 against overall). A rough per-game production
-		   read against a rotation player's, scaled by his floor time. */
-		const prod = s.ppg + 1.2 * s.rpg + 1.5 * s.apg + 2 * (s.spg || 0) + 2 * (s.bpg || 0) -
-			1.3 * (s.topg || 0);
-		const impact = share * (prod - 11 * share) * 0.22;
+		   with nothing (-0.02 against overall). See impactTerms: it is
+		   defined per 100 possessions, bounded there, and zero-sum over the
+		   rotation. */
+		const impact = impactTerms(team, gameMinutes).get(s) || 0;
 		for (const g of games) {
 			const margin = Number.isFinite(g.pf) && Number.isFinite(g.pa) ? g.pf - g.pa : 0;
-			g.pm = Math.round(margin * share + impact + rng.normal(0, 5.0));
+			g.pm = margin * share + impact + rng.normal(0, 5.0);
+		}
+		/* The nights vary; the SEASON does not. The per-night noise is
+		   recentred to sum to zero, so his season plus/minus is exactly the
+		   margin he was on the floor for plus his impact — which is what the
+		   number means, and the only way on/off can be bounded at all. Left
+		   uncentred, a season's worth of lineup noise reached on/off through
+		   the same 1 / (share * (1 - share)) amplifier as everything else and
+		   carried a standard deviation near eight points per 100 on its own. */
+		{
+			let have = 0;
+			let want = 0;
+			for (const g of games) {
+				const margin = Number.isFinite(g.pf) && Number.isFinite(g.pa) ? g.pf - g.pa : 0;
+				want += margin * share + impact;
+				have += g.pm;
+			}
+			const off = (have - want) / games.length;
+			for (const g of games) g.pm = Math.round(g.pm - off);
+			// Rounding leaves a residue; hand it out a point at a time so the
+			// season total still lands where the model put it.
+			let residue = Math.round(want) - games.reduce((a, g) => a + g.pm, 0);
+			for (let i = 0; residue !== 0 && i < games.length; i++) {
+				const step = residue > 0 ? 1 : -1;
+				games[i].pm += step;
+				residue -= step;
+			}
 		}
 		const teamMargin = meanOf(games.map((g) =>
 			({ m: Number.isFinite(g.pf) && Number.isFinite(g.pa) ? g.pf - g.pa : 0 })), "m");
 		const plusMinus = meanOf(games, "pm");
-		const onOff = share > 0.05 ? plusMinus / share - teamMargin : 0;
+		/* On/off is his per-40 plus/minus less the team's margin per 40
+		   WITHOUT him, which is what the column has always said it was and
+		   not what it computed: subtracting the team's overall margin left
+		   his own minutes in the comparison and understated the difference by
+		   a factor of (1 - share). */
+		const without = share < 0.95 ? (teamMargin - plusMinus) / (1 - share) : null;
+		const onOff = share > 0.05 && without !== null
+			? plusMinus / share - without : 0;
 		// Close games: decided by five or fewer, or in overtime.
 		const closeGames = games.filter((g) =>
 			Number.isFinite(g.pf) && Number.isFinite(g.pa) && (Math.abs(g.pf - g.pa) <= 5 || g.ot));
