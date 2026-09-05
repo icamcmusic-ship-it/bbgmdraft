@@ -1805,22 +1805,29 @@ async function gotoProspects(page) {
 		ok("checking it draws a distinct patch for each loaded file",
 			patches[0] !== "{}" && patches[1] !== "{}" && patches[0] !== patches[1],
 			patches.join(" vs "));
-		const cfgBeforeSwitch = await page.evaluate(() => window.App.state.cfg.classDepth);
+		// The "quality" group has five keys; reading all five as one
+		// signature rather than just classDepth, because two independent
+		// draws landing on the SAME classDepth while every other key still
+		// differs is a real, if unlikely, coincidence — and a flaky check on
+		// one key out of five is a coin flip CI will eventually call.
+		const QUALITY_KEYS = ["classQuality", "classDepth", "eliteCount", "potBias", "potSpread"];
+		const cfgBeforeSwitch = await page.evaluate(
+			(keys) => keys.map((k) => window.App.state.cfg[k]).join(","), QUALITY_KEYS);
 		// File 1's result is not computed until something actually looks at
 		// it (ensureResult is lazy) — switch to it the way a user would.
 		await page.selectOption("#fileSelect", "1");
 		await page.waitForTimeout(300);
-		const cfgAfterSwitch = await page.evaluate(() => window.App.state.cfg.classDepth);
+		const cfgAfterSwitch = await page.evaluate(
+			(keys) => keys.map((k) => window.App.state.cfg[k]).join(","), QUALITY_KEYS);
 		ok("the shared settings panel is untouched by a per-file draw",
 			cfgBeforeSwitch === cfgAfterSwitch, cfgBeforeSwitch + " vs " + cfgAfterSwitch);
-		const ranWith = await page.evaluate(() =>
+		const ranWith = await page.evaluate((keys) =>
 			[0, 1].map((i) => {
 				const res = window.App.state.results[i];
-				return res && res.cfg ? res.cfg.classDepth : null;
-			}));
+				return res && res.cfg ? keys.map((k) => res.cfg[k]).join(",") : null;
+			}), QUALITY_KEYS);
 		ok("each file actually ran with its own drawn settings, not the shared ones",
-			Number.isFinite(ranWith[0]) && Number.isFinite(ranWith[1]) &&
-				ranWith[0] !== ranWith[1],
+			ranWith[0] && ranWith[1] && ranWith[0] !== ranWith[1],
 			ranWith.join(" vs "));
 		await page.selectOption("#fileSelect", "0");
 		await page.waitForTimeout(200);
