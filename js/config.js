@@ -417,7 +417,10 @@
 		"eliteCount", "bluebloodDownYears", "midMajorLift", "seasonEvents",
 		"draftEvents", "archetypePool", "surpriseBudget", "traitCount",
 		"freshmanShare", "transferShare", "redshirtShare", "reclassShare",
-		"archetypeDiversity", "pace", "buildNoise", "variation",
+		/* buildNoise is NOT here: its slider runs in steps of 0.5, so
+		   rounding it to a whole number was the injuryRate mistake again
+		   (a flavor bending 5 toward 7 landed on 6 rather than 5.5). */
+		"archetypeDiversity", "pace", "variation",
 		"coachTurnover", "realignmentMemory", "starReturners", "portalRate",
 		"recruitMomentum",
 		"flavorReach", "wEuroLeague", "wGLeague", "wNBL",

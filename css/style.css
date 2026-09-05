@@ -1065,3 +1065,66 @@ tr.bandrow td {
 }
 tr.bandrow { cursor: default; }
 tr.bandrow:hover td { background: var(--panel-2); }
+
+/* ---- the timeline's unplayed seasons ---------------------------------- */
+.gaprow td { color: var(--dim); font-style: italic; background: var(--surface-hover); }
+
+/* ---- "why is this player here?" -------------------------------------- */
+/* A per-row disclosure of what the engine already computed and mostly did
+   not show: board rank against preseason rank, the draft-day event and its
+   reason, the anomaly tag, the flavor. A popover under the button rather
+   than a title tooltip, so it can be read on a touch screen and copied. */
+.whybtn {
+	font-size: 10px; line-height: 1; padding: 1px 5px; margin-left: 4px;
+	border-radius: 999px; color: var(--dim); vertical-align: middle;
+}
+.whybtn[aria-expanded="true"], .whybtn:hover { color: var(--text); }
+.whypop {
+	position: absolute; z-index: 30; min-width: 240px; max-width: 360px;
+	background: var(--panel); color: var(--text); border: 1px solid var(--line);
+	border-radius: 8px; padding: 8px 10px; box-shadow: 0 6px 22px rgba(0,0,0,.18);
+	font-size: 12px; white-space: normal; text-align: left; font-weight: normal;
+}
+.whypop h5 { margin: 0 0 4px; font-size: 12px; }
+.whypop ul { margin: 0; padding-left: 16px; }
+.whypop li { margin: 2px 0; }
+.whypop .hint { margin-top: 6px; }
+
+/* ---- print --------------------------------------------------------------
+   A scouting note, a draft board and a bracket are things people print or
+   save as a PDF, and the page printed the settings panel, the header and the
+   tab strip around them. Only the view prints, at full width, in black on
+   white, with every scroll container unrolled so a forty-column table is
+   cut by the page and not by a 400px box. */
+@media print {
+	:root, [data-theme] { color-scheme: light; }
+	html, body { background: #fff !important; color: #000 !important; }
+	header, aside, #settings, .tabs, #status, #errBanner, #warnBanner,
+	#modal, .filters, .sortstack, .bulkbar, .drop, #fileSummary,
+	button:not(.linky), input, select, .whybtn, .whypop { display: none !important; }
+	.layout { display: block; }
+	main { padding: 0 !important; margin: 0 !important; max-width: none !important; }
+	#view { padding: 0; }
+	.scroll, .tablewrap, .drawer {
+		overflow: visible !important; max-height: none !important; max-width: none !important;
+	}
+	table { border-collapse: collapse; font-size: 9pt; page-break-inside: auto; }
+	tr { page-break-inside: avoid; }
+	th, td { border-bottom: 1px solid #bbb; padding: 2px 5px; }
+	th.sticky, td.sticky { position: static !important; box-shadow: none !important; }
+	.card { border: 1px solid #bbb; page-break-inside: avoid; box-shadow: none; }
+	.cards { display: block; }
+	.cards .card { margin: 0 0 8px; }
+	.linky { color: #000 !important; text-decoration: none; }
+	.note { white-space: pre-wrap; }
+	.legendline, .hint { color: #444; }
+	.up { color: #060; } .down { color: #900; }
+	.bracket, .region { page-break-inside: avoid; }
+	a[href]::after { content: ""; }
+}
+
+/* The run-history select's widest option is a fingerprint, a flavor, a seed
+   and a file name; without a cap the select takes that width and pushes the
+   header onto a new row and the page sideways on a phone. */
+#sessionHistory { max-width: 150px; min-width: 0; flex: 0 1 auto; text-overflow: ellipsis; }
+@media (max-width: 520px) { #sessionHistory { max-width: 96px; } }

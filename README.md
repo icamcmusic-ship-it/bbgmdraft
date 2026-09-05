@@ -631,7 +631,8 @@ differ from the preset.
 ### The randomizer
 
 The 🎲 **Randomize** button (shortcut `g`) draws new settings in the chosen
-scope. *Everything, gently* draws a triangular distribution centered on each
+scope, from a randomizer seed the status line reports afterwards (shift-click
+the button to replay one). *Everything, gently* draws a triangular distribution centered on each
 setting's own default, reaching about a third of the way toward each end;
 *everything, wide open* draws uniformly across each slider's declared range; the
 remaining scopes randomize one fieldset (quality, builds, years, destinations,
@@ -1950,6 +1951,106 @@ the tab switching ever feels heavy. `tools/uismoke.js` grew twelve checks over
 the chrome — the copy button's label, the wrapped header, the phone bracket, the
 accent contrast in all three dark themes, the dialog's route table, the per-note
 copy and the named export.
+
+---
+
+## The review round of September 2026
+
+An outside review read the code against its own comments and ran the engine
+through a fuzz pass. Everything it found, and what changed:
+
+**Bugs.**
+
+- **Blank values sorted first on descending columns.** The multi-key sort's
+  "missing sorts last" rule was multiplied by the sort direction, and numeric
+  columns open descending, so the first click on PPG put the men with no stat
+  line at the top. The rule is direction-independent now, and the browser
+  smoke test reads the rendered column both ways.
+- **`buildNoise` was in `COUNTS`** while its slider steps by 0.5 — the
+  `injuryRate` mistake the set exists to prevent, in a second setting. It is
+  out, and `tools/tests/review.js` reads every slider's step off the page so
+  the next misfiling fails in CI.
+- **The timeline's school could be a pro club.** `Universe.summarize` wrote
+  `proClub || newCollege` into `poy.school` and `no1.school`, so "Kansas
+  produced 2 No. 1 picks" could count a EuroLeague club and "back-to-back
+  players of the year" could match two pro clubs. `school` is the NCAA program
+  now, the club rides beside it, the timeline shows whichever the man played
+  for, and the threads and the records book skip non-NCAA men where the
+  sentence is about a program.
+- **The 250-player cap was a warning on one path and a rejection on the
+  other.** `Universe.validate` now makes the same offer `validateLeagueFile`
+  makes — the players drafted in the file's own season — and the chain runs
+  that subset; a file with no class to pick out is still refused by name.
+- **The preview pass bypassed the phase cache.** `Engine.previewClass` is
+  memoized on the build phase's own dependency key, so nudging an award dial
+  on a fifty-file universe no longer pays fifty build phases before the
+  awards phase it actually needs.
+- **Universe mode showed a standalone world while the chain ran** — after a
+  reload with the files re-dropped, or during the run itself, a tab rendered
+  before the chain reached that file re-simulated it with no carry-over and
+  the wrong seed. `ensureResult` returns nothing for a file the chain has not
+  recorded, and the tab says what it is waiting for.
+- **Importing a universe** pushes an undo entry, keeps the value under any
+  locked setting and says so.
+- The first window resize no longer re-renders when the card mode did not
+  change; every team and conference list sorts by `localeCompare` (byte order
+  put "St. John's (NY)" and "Texas A&M" in different places on different
+  tabs); the twenty script tags are `defer`red; and every exported prospect
+  carries `experience: 0`, since that field counts pro seasons and the
+  college rows this tool writes are not that.
+
+**Quick wins.**
+
+- A print stylesheet: only the view prints, at full width, in black on white,
+  with every scroll container unrolled.
+- **Seeded randomize.** Every 🎲 press draws from a randomizer seed, shown in
+  the status line; shift-click the button to replay one. The one action in a
+  deterministic tool that could not be reproduced now can.
+- **Column presets** are one click from the table (a select beside
+  *Columns…*), with an *Export* preset for the fields that reach the file, and
+  the picker and the select read one table so they cannot drift.
+- **Copy as markdown** on the draft board and the notes, beside the existing
+  copy actions.
+- **A "?" on every row** of the prospects table and the board opens a popover
+  with why the player is where he is: board against preseason rank, the
+  draft-day event and the reason the engine drew for it, the anomaly tag, the
+  build, the path, the flavor.
+- **Greyed rows in the Timeline** for seasons no file was loaded for.
+
+**Deeper.**
+
+- **Three tiers of the settings panel** — *Shape* (the class: quality, depth,
+  builds, flavor, paths), *Season* (plus the college year and its awards),
+  *Model* (everything). The search box and "only what I changed" cut across
+  the tier.
+- **A run history.** The seed list remembered twelve seeds, and a seed is not
+  a run. A second select beside it holds every class you rerolled away from as
+  a full restorable state — settings, locks, the drawn seed, the pool and
+  anomaly memories — labelled by class fingerprint and flavor. Restoring one
+  goes through the undo stack.
+- **Reroll until…** (the *Until…* button beside Reroll) wires a predicate to
+  the reroll loop: a 7'2" top-five pick, a mid-major champion, a freshman No.
+  1, a No. 11 seed in the Final Four, and so on, with a try limit. The search
+  is seeded from the class on screen, so it finds the same seed again.
+- **Diff two classes.** The Compare tab's pin now shows the curve (overall at
+  each slot down the class), the build pool (in both / only pinned / only
+  current), flavor, seed, champion and the top ten side by side.
+- **Empty states** on the notes search, the game log and the board.
+- **Universe-scoped anomaly memory.** The chain hands each season the
+  anomalies the previous seasons drew, the way it already hands on the pool,
+  so a ten-season universe stops re-using the same six.
+- **Coach careers and a conference map** on the Universe tab, built on a click
+  from the seasons the chain played: every head coach's record, titles,
+  tournament trips and programs, with his season lines and his mentor; and
+  each conference's membership with who joined and left, season by season.
+
+**Not done, and why.** The reverse link (an undrafted freshman in the 2025
+file reappearing as a 2026 sophomore) needs a persistent player registry
+across files rather than the per-file `futureRosterFor` projection, and is
+the same project as building on the biography map; game logs for returning
+rotation players are roughly three times the stats phase; and composable
+flavors change the engine's flavor pick. All three are real and none is a
+one-PR change beside the rest of this list.
 
 ---
 
