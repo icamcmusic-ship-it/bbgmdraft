@@ -156,7 +156,7 @@ function main() {
 	const f = fit(rows, meanPpg, minN);
 	if (!f) {
 		console.log("No build cleared the minimum sample of " + minN +
-			" — nothing to fit. Run more classes, or lower --min.");
+			" — nothing to fit. Run more classes.");
 		return;
 	}
 	console.log("Fitted ROLE_FIT over " + f.used + " builds — paste into js/ratings.js:\n");
