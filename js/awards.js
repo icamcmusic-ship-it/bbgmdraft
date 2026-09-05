@@ -193,10 +193,11 @@
 	   Team totals, the possession identity, minutes and usage allocation, the
 	   defensive box score — the fillers went through all of it already, and the
 	   lines were being thrown away. */
-	function buildField(teams, rng, noise) {
+	function buildField(teams, rng, noise, defCal) {
 		// Defaulted, because buildField is exported and a caller that predates
 		// the dial should get what it always got.
 		const noiseScale = Number.isFinite(noise) ? noise : 1;
+		const cal = defCal || DEF_CAL_FALLBACK;
 		const field = [];
 		for (const name of Object.keys(teams)) {
 			const t = teams[name];
@@ -211,7 +212,7 @@
 				// A returner's defensive composites are not stored, so the
 				// composite half of the defensive score is approximated from
 				// his defensive event rates, which are.
-				const def = fieldDefenseScore(stats);
+				const def = fieldDefenseScore(stats, cal);
 				field.push({
 					filler: true,
 					key: fp.key || null,
@@ -252,19 +253,107 @@
 
 	/* The defensive score for a player whose rating vector does not exist. The
 	   composite terms of defenseScore() are re-derived from the event rates the
-	   stat model produced, on the same scale. */
-	function fieldDefenseScore(s) {
+	   stat model produced, on the same scale.
+
+	   ON THE SAME SCALE was the claim and not the fact. Measured over fifteen
+	   classes: the composite half of a PROSPECT's defensive score runs
+	   mean -1.7, max +2.2 — three bounded composites, so it cannot go far —
+	   while this rate-derived half ran mean +0.4 and max +8.9, because a per-40
+	   contest rate has no ceiling at all. That is a systematic two-point gift
+	   to every returning player in the country plus a tail four times as long,
+	   and the event rates the stat model gives a filler run past anything it
+	   gives a prospect too (6.0 blocks a game against a prospect maximum of
+	   2.9). The consequence was total: over fifteen classes the Naismith DPOY,
+	   the NABC DPOY and the Lefty Driesell went to the unseen field 45 times
+	   out of 45, and no draft class could win a national defensive award.
+
+	   So the field is held to the envelope the stat model produces for the
+	   players it models in full: each event rate is capped at the prospect
+	   maximum, and the rate-derived composite term is mapped onto the mean and
+	   spread of the real composite term. Neither changes the ORDERING of the
+	   field — a better defender is still a better defender — only the scale it
+	   is compared to the class on. */
+	function fieldDefenseScore(s, defCal) {
+		const cal = defCal || DEF_CAL_FALLBACK;
+		const cap = (v, k) => Math.min(v || 0, cal.cap[k]);
 		const perMin = (v) => (s.mpg > 0 ? (v * 40) / s.mpg : 0);
+		const cs = cap(s.cspg, "cspg");
+		const defl = cap(s.deflpg, "deflpg");
 		const events =
-			2.4 * s.spg + 3.0 * s.bpg + 0.40 * s.drpg +
-			0.55 * (s.cspg || 0) + 0.90 * (s.deflpg || 0) + 1.60 * (s.chgpg || 0);
+			2.4 * cap(s.spg, "spg") + 3.0 * cap(s.bpg, "bpg") +
+			0.40 * cap(s.drpg, "drpg") +
+			0.55 * cs + 0.90 * defl + 1.60 * cap(s.chgpg, "chgpg");
 		// Contest and deflection rates per 40 carry the same information the
-		// defenseInterior / defensePerimeter composites carry for a prospect.
-		const skill =
-			1.05 * (perMin(s.cspg || 0) - 8.4) +
-			1.30 * (perMin(s.deflpg || 0) - 2.6);
-		const impact = Number.isFinite(s.drtg) ? 0.30 * (104 - s.drtg) : 0;
+		// defenseInterior / defensePerimeter composites carry for a prospect —
+		// once they are put on that term's mean and spread.
+		const raw = 1.05 * (perMin(cs) - 8.4) + 1.30 * (perMin(defl) - 2.6);
+		const skill = cal.skill.m +
+			(raw - cal.raw.m) * (cal.skill.sd / Math.max(0.2, cal.raw.sd));
+		// Defensive rating is part of the same box score and gets the same
+		// treatment: the best rating in the country is not better than the
+		// best rating the model gives a player it rates in full.
+		const impact = Number.isFinite(s.drtg)
+			? 0.30 * (104 - Math.max(s.drtg, cal.cap.drtg)) : 0;
 		return events + skill + impact - 0.5 * Math.max(0, s.pfpg - 2.6);
+	}
+
+	/* The envelope, when nobody measured one: the numbers the calibration below
+	   produces on a normal class, so a caller holding an old three-argument
+	   buildField still gets a field on the prospects' scale. */
+	const DEF_CAL_FALLBACK = {
+		cap: { spg: 2.8, bpg: 3.2, drpg: 9.6, cspg: 11.0, deflpg: 4.0, chgpg: 1.2,
+			drtg: 92 },
+		skill: { m: -1.6, sd: 1.7 },
+		raw: { m: 0.4, sd: 2.2 },
+	};
+
+	function moments(vals) {
+		const n = vals.length;
+		if (!n) return { m: 0, sd: 1 };
+		const m = vals.reduce((a, b) => a + b, 0) / n;
+		const v = vals.reduce((a, b) => a + (b - m) * (b - m), 0) / n;
+		return { m, sd: Math.sqrt(v) };
+	}
+
+	/* What the stat model actually produces, this class, for the players whose
+	   ratings exist — and what the rate-derived approximation produces for the
+	   ones whose do not. One pass over each population; the mapping in
+	   fieldDefenseScore is read off both. */
+	function defCalibration(ncaa, teams) {
+		const KEYS = ["spg", "bpg", "drpg", "cspg", "deflpg", "chgpg"];
+		const cap = {};
+		for (const k of KEYS) cap[k] = 0;
+		// Defensive rating is the one where small is good, so its envelope is
+		// a floor rather than a ceiling.
+		cap.drtg = Infinity;
+		const skill = [];
+		for (const p of ncaa) {
+			const s = p.stats;
+			if (!s || !(s.mpg >= RANK_MIN_MPG)) continue;
+			for (const k of KEYS) cap[k] = Math.max(cap[k], s[k] || 0);
+			if (Number.isFinite(s.drtg)) cap.drtg = Math.min(cap.drtg, s.drtg);
+			const c = global.BBGM.composites(p.newRatings);
+			skill.push(14 * (c.defense - 0.45) + 7 * (c.defenseInterior - 0.46) +
+				7 * (c.defensePerimeter - 0.46));
+		}
+		// A class of five would otherwise cap the whole country at five men's
+		// best game; below that the measured envelope is not one.
+		if (skill.length < 12) return DEF_CAL_FALLBACK;
+		if (!Number.isFinite(cap.drtg)) cap.drtg = DEF_CAL_FALLBACK.cap.drtg;
+		const raw = [];
+		for (const name of Object.keys(teams)) {
+			const t = teams[name];
+			if (!t || !t.fieldPlayers) continue;
+			for (const fp of t.fieldPlayers) {
+				const s = fp.line;
+				if (!s || s.mpg < RANK_MIN_MPG) continue;
+				const pm = (v, k) => (Math.min(v || 0, cap[k]) * 40) / s.mpg;
+				raw.push(1.05 * (pm(s.cspg, "cspg") - 8.4) +
+					1.30 * (pm(s.deflpg, "deflpg") - 2.6));
+			}
+		}
+		if (raw.length < 50) return DEF_CAL_FALLBACK;
+		return { cap, skill: moments(skill), raw: moments(raw) };
 	}
 
 	/* --------------------------------------------------------------- awards */
@@ -508,7 +597,7 @@
 	   into `p.awards`, which is the draft year and is what every count, band
 	   and export scope was written against — and `p.awards` stays the draft
 	   year's list. The export writes them as rows at their own seasons. */
-	function priorHonors(ncaa, teams, confBars, natBars, rng, noiseScale) {
+	function priorHonors(ncaa, teams, confBars, natBars, rng, noiseScale, defCal) {
 		const has = (v) => Number.isFinite(v);
 		for (const p of ncaa) {
 			p.priorAwards = [];
@@ -530,7 +619,7 @@
 				const resume = 0.18 * wins + 0.18 * (confStrength - 58);
 				const r = rng.child(p.key + "|" + row.season);
 				const score = prod + resume + r.normal(0, 1.4 * noiseScale);
-				const def = fieldDefenseScore(L) + resume * 0.35 + r.normal(0, 1.2 * noiseScale);
+				const def = fieldDefenseScore(L, defCal) + resume * 0.35 + r.normal(0, 1.2 * noiseScale);
 				const fresh = row.classYear === "Freshman";
 				const out = [];
 				const bars = conf && confBars[conf] && teams[row.team] ? confBars[conf] : null;
@@ -595,7 +684,12 @@
 			p.scoreTotal = p.scoreProd + p.scoreResume + rng.normal(0, 1.4 * noiseScale);
 			p.scoreDefTotal = p.scoreDef + p.scoreResume * 0.35 + rng.normal(0, 1.2 * noiseScale);
 			p.isFreshman = p.classYear === "Freshman";
-			p.isNewcomer = p.isFreshman || !!p.transfer;
+			/* A newcomer ARRIVED from somewhere. The transfer layer also
+			   carries in-house moves — the walk-on who won a scholarship, the
+			   redshirt who came back — and those have `from: null`, so nine
+			   players a run were named to an All-Conference Newcomer Team at
+			   the school they had been at the whole time. */
+			p.isNewcomer = p.isFreshman || !!(p.transfer && p.transfer.from);
 			p.isReserve = p.minutesRank !== undefined && p.minutesRank >= 5;
 			p.pos = p.newPos;
 			p.conf = team ? team.conf : "Independent";
@@ -603,7 +697,10 @@
 		}
 
 		// The rest of Division I, from its own simulated seasons.
-		const field = buildField(teams, rng.child("field"), noiseScale);
+		/* The scale the unseen field is scored on, measured against the players
+		   this class models in full. See fieldDefenseScore. */
+		const defCal = defCalibration(ncaa, teams);
+		const field = buildField(teams, rng.child("field"), noiseScale, defCal);
 		/* "Improvement" against what a player of this talent typically
 		   produces: there is no previous season to compare with, so
 		   outperforming your own baseline is the proxy, and it is the same
@@ -635,6 +732,26 @@
 
 		const label = T.label;
 
+		/* Honors that went to the field rather than the class. A returning
+		   player who beats every prospect to a trophy used to take the slot and
+		   vanish — the award was simply not handed out. He has a name here, so
+		   it is a result: "the class lost the POY race to a senior at Houston"
+		   is a fact about the class. Declared before the conference block
+		   because the conference races are lost to the field far more often than
+		   the national ones are. */
+		const fieldHonors = [];
+		const recordField = (x, award) => {
+			if (!x.filler || !x.name) return;
+			fieldHonors.push({
+				award,
+				name: x.name,
+				key: x.key || null,
+				school: x.school || (x.team ? x.team.name : null),
+				classYear: x.classYear || null,
+				starReturner: x.starReturner || null,
+			});
+		};
+
 		/* --- conference honors ------------------------------------------- */
 		const confBars = {};
 		const byConf = {};
@@ -648,8 +765,21 @@
 			const lb = label(conf);
 			// Offensive honors: a bit-part player never wins one however the
 			// maths ranked him.
+			/* A conference honor lost to the field is RECORDED, the way the
+			   national ones already are — but only the one-winner races, because
+			   a class that misses out on the fourth slot of an All-Sun Belt
+			   Second Team has not lost anything anybody would write down. 170
+			   conference player-of-the-year races over fifteen classes went to
+			   returning players with nothing left behind to say so.
+			   Kept to the headline race — the conference player of the year —
+			   so the list stays something a reader can read: recording every
+			   one-winner conference honor is 190 rows a class. */
+			const NAMED_RACE = /^(?!.*Defensive).* Player of the Year$/;
 			const give = (x, award) => {
-				if (x.filler || !x.awards) return;
+				if (x.filler || !x.awards) {
+					if (x.filler && NAMED_RACE.test(award)) recordField(x, award);
+					return;
+				}
 				if (!GATES.offensive(x)) return;
 				x.awards.push(award);
 			};
@@ -730,24 +860,9 @@
 		/* --- national honors ---------------------------------------------- */
 		const ranked = ncaa.slice().sort((a, b) => b.scoreTotal - a.scoreTotal);
 		const nation = everyone.slice().sort((a, b) => b.scoreTotal - a.scoreTotal);
-		/* Honors that went to the field rather than the class. A returning
-		   player who beats every prospect to a trophy used to take the slot
-		   and vanish — the award was simply not handed out. He has a name
-		   now, so it is a result: "the class lost the POY race to a senior
-		   at Houston" is a fact about the class. */
-		const fieldHonors = [];
 		const giveNat = (x, award, unshift) => {
 			if (x.filler || !x.awards) {
-				if (x.filler && x.name) {
-					fieldHonors.push({
-						award,
-						name: x.name,
-						key: x.key || null,
-						school: x.school || (x.team ? x.team.name : null),
-						classYear: x.classYear || null,
-						starReturner: x.starReturner || null,
-					});
-				}
+				recordField(x, award);
 				return;
 			}
 			if (x.stats && x.stats.mpg < 20) return;
@@ -862,14 +977,7 @@
 			const winner = ballots.length ? ballots[0].x : null;
 			if (!winner) continue;
 			if (winner.filler || !winner.awards) {
-				if (winner.filler && winner.name) {
-					fieldHonors.push({
-						award: award.name, name: winner.name, key: winner.key || null,
-						school: winner.school || (winner.team ? winner.team.name : null),
-						classYear: winner.classYear || null,
-						starReturner: winner.starReturner || null,
-					});
-				}
+				recordField(winner, award.name);
 				continue;
 			}
 			if (!GATES.defensive(winner)) continue;
@@ -897,7 +1005,7 @@
 			allFresh: natAt(freshmen, slots(5)).scoreTotal,
 			allDef1: natAt(natDef, slots(5)).scoreDefTotal,
 		};
-		priorHonors(ncaa, teams, confBars, natBars, rng.child("prior-honors"), noiseScale);
+		priorHonors(ncaa, teams, confBars, natBars, rng.child("prior-honors"), noiseScale, defCal);
 
 		/* Finalists.
 
@@ -1052,13 +1160,7 @@
 			} else if (champBest && !champBest.p) {
 				const x = (fieldByTeam[champ.name] || []).slice(0, 4)
 					.slice().sort((a, b) => b.scoreProd - a.scoreProd)[0];
-				if (x && x.name) {
-					fieldHonors.push({
-						award: lb + " Tournament MVP", name: x.name, key: x.key || null,
-						school: champ.name, classYear: x.classYear || null,
-						starReturner: x.starReturner || null,
-					});
-				}
+				if (x && x.name) recordField(x, lb + " Tournament MVP");
 			}
 			eligible.filter((x) => x !== mvp).slice(0, mvp ? 4 : 5).forEach((x) => {
 				x.p.awards.push("All-" + lb + " Tournament Team");
@@ -1183,6 +1285,12 @@
 			const names = PRO_AWARDS[lg] || [];
 			const meta = C.NON_NCAA[lg] || {};
 			const short = SHORT[lg];
+			/* A league whose own honors list already opens with a player of the
+			   year does not also hand out an MVP for the same season: "Division
+			   II Player of the Year" and "Division II MVP" are one trophy under
+			   two names, and 9 of 15 classes had a player holding both. Where
+			   the league's list names the trophy, that is the trophy. */
+			const hasPOY = /(Player of the Year|MVP)$/.test(names[0] || "");
 			if (short && !meta.youth && !meta.idle) {
 				const strength = Number.isFinite(meta.strength) ? meta.strength : 50;
 				const mvpBar = (22 + strength * 0.10) * proStrict;
@@ -1191,8 +1299,16 @@
 				const minMpg = env.youthCap ? Math.min(20, env.youthCap * 0.8) : 20;
 				list.forEach((p, i) => {
 					if (!p.stats || p.stats.mpg < minMpg) return;
-					if (i === 0 && p.scoreTotal > mvpBar) p.awards.push(short + " MVP");
-					else if (i < 5 && p.scoreTotal > firstBar) p.awards.push("All-" + short + " First Team");
+					/* The MVP is on the first team. It was an if/else, so the
+					   one man in the league who is certainly a first-teamer was
+					   the only one left off it: 40 pro MVPs across fifteen
+					   classes with no All-League First Team beside the trophy. */
+					if (!hasPOY && i === 0 && p.scoreTotal > mvpBar) {
+						p.awards.push(short + " MVP");
+						p.awards.push("All-" + short + " First Team");
+					} else if (!hasPOY && i < 5 && p.scoreTotal > firstBar) {
+						p.awards.push("All-" + short + " First Team");
+					}
 					const club = p.proTeam;
 					if (!club) return;
 					const bestAtClub = club.prospects.slice()
@@ -1482,7 +1598,7 @@
 		assign, productionScore, defenseScore, fieldDefenseScore, resumeScore,
 		rankAgainstField, rankHighlights, RANKED_STATS,
 		REF_PACE,
-		buildField, fitScores, fitTalentToScore, awardRank, sortAwards,
+		buildField, defCalibration, fitScores, fitTalentToScore, awardRank, sortAwards,
 		NATIONAL_POY, NATIONAL_DPOY, POSITION_AWARDS, AWARD_TIERS,
 		NCAA_BONUS, NIT_BONUS, GATES,
 		MAJOR_CONFERENCES, isMajorAward, scopeAwards,

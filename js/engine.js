@@ -2915,11 +2915,12 @@
 					from: i,
 					say: (moved) => "taken " + (-moved) +
 						" spots earlier than the board had him",
-					detail: r.pick([
-						"a 19-year-old with two tools and no production",
-						"the youngest player in the class",
-						"a project nobody else was willing to wait on",
-					]),
+					/* Keyed to the player. Two of the three details were
+					   assertions about his age — "a 19-year-old", "the youngest
+					   player in the class" — drawn at random from a pool that
+					   had never read p.age, so a 22-year-old senior was
+					   regularly reached on for being nineteen. */
+					detail: reachDetail(p, board, r),
 				};
 				move(board, i, to);
 				return true;
@@ -2949,6 +2950,27 @@
 		},
 	];
 
+	/* Why a team reached, in the player's own terms. A reach is a bet on
+	   upside, and what makes it a bet is either his age or the gap between
+	   what he can do and what he did. */
+	function reachDetail(p, board, r) {
+		const options = [];
+		const youngest = board.reduce(
+			(a, b) => (Number.isFinite(b.age) && (!a || b.age < a.age) ? b : a), null);
+		if (youngest === p) options.push("the youngest player in the class");
+		if (Number.isFinite(p.age) && p.age <= 19) {
+			options.push("a " + Math.floor(p.age) + "-year-old with two tools and " +
+				(p.stats && p.stats.ppg < 11 ? "no production" : "a lot to clean up"));
+		}
+		if (Number.isFinite(p.newPot) && Number.isFinite(p.newOvr) &&
+			p.newPot - p.newOvr >= 10) {
+			options.push("a project nobody else was willing to wait on");
+		}
+		if (p.stats && p.stats.mpg < 22) options.push("a reserve all season and a bet anyway");
+		if (!options.length) options.push("a fit their staff had talked themselves into");
+		return r.pick(options);
+	}
+
 	/* Move one entry of an array from `from` to `to`, keeping everything else
 	   in order. Splice-and-insert rather than a swap: a swap would send whoever
 	   is at the destination all the way back to the origin, which is two moves
@@ -2976,6 +2998,9 @@
 		   with the flags still set would leave those players permanently
 		   ineligible the next time the slider came back up. */
 		for (const p of board) p.draftEvent = null;
+		// Where the board had everybody before draft night touched it.
+		const startAt = {};
+		board.forEach((p, i) => { startAt[p.key] = i; });
 		const budget = Math.round(clamp(
 			cfg && cfg.draftEvents !== undefined ? cfg.draftEvents : 4, 0, 8));
 		if (!budget || board.length < 20) return [];
@@ -3022,12 +3047,25 @@
 		for (const e of out) {
 			const p = board[finalAt[e.key]];
 			const ev = p.draftEvent;
-			const moved = finalAt[e.key] - ev.from;
+			/* From where the BOARD had him, not from where an earlier event had
+			   already nudged him to. `ev.from` is the index this event read off
+			   the half-shuffled board, so a man the earlier events had already
+			   pushed down two places was described as sliding two fewer than he
+			   did against the ranking printed beside him. */
+			const moved = finalAt[e.key] - startAt[p.key];
 			ev.text = ev.say(moved, finalAt[e.key]);
 			e.text = ev.text;
 			delete ev.say;
 		}
 		return out;
+	}
+
+	/* How old a scout thinks he is. See AGE_FOR_CLASS: when the source file's
+	   own ages carry no information — which is most files, and what
+	   state.ageIsInformative measures — the class year is the age. */
+	function draftAge(p, state) {
+		if (state && state.ageIsInformative && Number.isFinite(p.age)) return p.age;
+		return ageForClassYear(p.classYear, p.transfer);
 	}
 
 	function phaseStock(state) {
@@ -3046,7 +3084,11 @@
 		for (const p of players) {
 			const s = p.stats;
 			const prod = s ? (AW.productionScore(p) || 0) : 0;
-			const awards = (p.awards || []).length;
+			/* Only the honors that mean something to a scout. `awards.length`
+			   counted every row, and 46% of the list is team trophies and
+			   finalist tiers — a reserve on the national champion picked up
+			   three or four points of draft stock for other people's rings. */
+			const awards = (p.awards || []).filter((a) => AW.awardRank(a) <= 19).length;
 			const march = p.gameLog && p.gameLog.postseason
 				? p.gameLog.postseason.ppg * 0.16 * Math.min(6, p.gameLog.postseason.gp)
 				: 0;
@@ -3055,19 +3097,50 @@
 				(p.newPot - p.newOvr) * 0.65 +
 				prod * 0.30 +
 				awards * 0.55 +
+				/* AGE. There was no age term at all, so a 22-year-old senior
+				   and a 19-year-old freshman with the same ovr and the same pot
+				   tied, and every scout in the sport would break that tie the
+				   same way. Small — a year is worth a little over half a point
+				   on a board whose ovr term is 1.25 a point — because the
+				   ceiling term already carries most of what youth is worth.
+
+				   The DRAFT age, not the file's: most source files carry 19 for
+				   everybody (that is what state.ageIsInformative measures), and
+				   the class year is then the only thing that says how old a man
+				   is — which is the same rule exportFile uses to write born.year. */
+				(21 - draftAge(p, state)) * 0.6 +
 				march +
 				(p.nonNcaa ? -1.2 : 0) +
 				rng.child("stock:" + p.key).normal(0, 1.8);
 		}
 		const board = players.slice().sort((a, b) => b.stockScore - a.stockScore);
-		state.draftEvents = applyDraftEvents(board, rng.child("draftday"),
-			state.effectiveCfg || state.cfg);
+		/* THE BOARD IS THE MOCK, AND THE MOCK IS WHAT THE SEASON PRODUCED.
+
+		   The draft-day events used to run BEFORE these were assigned, so
+		   `boardRank` and `stockMove` described where a player ended up on
+		   draft night and every story that read them called it his ranking: a
+		   late reach who moved up 22 places on the night printed as "has
+		   climbed 22 spots from his preseason ranking", and a man who rose on
+		   the workout circuit could carry a negative stockMove — 8 of 59
+		   events had a rise story sitting on a faller's number, with the note's
+		   own Board line saying "down 3" underneath it.
+
+		   So the ranking is assigned on the pre-event board, which is the thing
+		   a mock draft actually is, and the events then move a separate copy;
+		   where each player was TAKEN is `draftSlot`, which is what draft-night
+		   stories read. */
 		board.forEach((p, i) => {
 			p.boardRank = i + 1;
 			p.mockRound = i < 30 ? 1 : i < 60 ? 2 : null;
 			p.mockPick = i < 60 ? (i % 30) + 1 : null;
 			p.stockMove = p.preseasonRank - p.boardRank;   // + = riser
+			p.draftSlot = null;
 		});
+		const order = board.slice();
+		state.draftEvents = applyDraftEvents(order, rng.child("draftday"),
+			state.effectiveCfg || state.cfg);
+		order.forEach((p, i) => { p.draftSlot = i + 1; });
+		state.draftOrder = order;
 		state.board = board;
 		state.risers = board.slice().sort((a, b) => b.stockMove - a.stockMove)
 			.filter((p) => p.stockMove > 0).slice(0, 8);
@@ -3644,9 +3717,15 @@
 			const champ = alive[0];
 			if (champ) champ.leagueChamp = true;
 
-			/* A domestic cup, which every one of these leagues actually plays
-			   and none of them had. Straight knockout over the whole league. */
-			let cupAlive = lrng.shuffle(clubs);
+			/* A domestic cup, which every PROFESSIONAL league here actually
+			   plays and none of them had. Straight knockout over the whole
+			   league.
+
+			   It used to run for every destination in the table, including the
+			   ones that are not leagues with cups in them: the result was a
+			   "Division II Cup Winner", an "Overtime Elite Cup Winner" and a
+			   "Prep / Postgrad Cup Winner" on prospects' award lists. */
+			let cupAlive = lg.pro && !lg.youth ? lrng.shuffle(clubs) : [];
 			const cupRounds = [];
 			while (cupAlive.length > 1) {
 				const next = [];
@@ -4113,7 +4192,13 @@
 				: p.stockMove < 0 ? "down " + (-p.stockMove) : "level";
 			lines.push("Board: No. " + p.boardRank + " (" + move +
 				" from No. " + p.preseasonRank + " preseason)" +
-				(p.mockRound ? " · mock: round " + p.mockRound + ", pick " + p.mockPick : ""));
+				(p.mockRound ? " · mock: round " + p.mockRound + ", pick " + p.mockPick : "") +
+				/* Where he was actually taken, when draft night moved him. This
+				   line used to print the post-event slot under the pre-event
+				   label, so a man who rose on the workout circuit could read
+				   "down 3". */
+				(p.draftSlot && p.draftSlot !== p.boardRank
+					? " · drafted No. " + p.draftSlot : ""));
 		}
 		void state;
 		return lines.join("\n");
