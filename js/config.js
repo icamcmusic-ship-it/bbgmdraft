@@ -307,12 +307,29 @@
 		"Guard-heavy class": { classFlavor: 2, archetypeDiversity: 92 },
 		"Transfer-portal era": { transferShare: 62, freshmanShare: 26 },
 		"International class": {
+			/* EVERY league, not twelve of them. This named the twelve
+			   destinations the table held when the preset was written, and
+			   assignCollege falls back to a league's DEFAULT weight for any
+			   name the object omits — so the twenty-four leagues added since
+			   (Italy, Lithuania, Turkey, Greece, Israel, the BAL, Japan,
+			   Brazil, Korea, the PBA, Argentina and the rest) sat at their
+			   ordinary weight while the twelve were boosted around them. The
+			   preset that exists to send a class abroad was quietly holding
+			   back the leagues most of the world plays in. Every entry is
+			   the table's own weight, scaled: 2.2x abroad, 0.35x for the
+			   American paths. */
 			leagueWeights: {
-				"EuroLeague": 40, "Liga ACB": 22, "EuroCup": 20,
-				"Adriatic League": 18, "LNB Pro A": 18,
-				"Basketball Bundesliga": 16, "Chinese CBA": 10,
-				"NBA G League": 8, "NBL": 14, "NBL1": 4,
-				"Overtime Elite": 3, "NBA Academy": 8,
+				"EuroLeague": 57, "NBA G League": 11, "Liga ACB": 22, "NBL": 26,
+				"Chinese CBA": 13, "LNB Pro A": 20, "EuroCup": 20,
+				"Basketball Bundesliga": 18, "Adriatic League": 18, "NBL1": 9,
+				"Overtime Elite": 2, "NBA Academy": 9, "Basketball Champions League": 15,
+				"Turkish BSL": 13, "Greek Basket League": 11, "Israeli Premier League": 11,
+				"Japan B.League": 9, "Brazil NBB": 9, "Basketball Africa League": 9,
+				"CEBL": 7, "Prep / Postgrad": 1, "NAIA": 1, "Did not play": 1,
+				"Italian LBA": 13, "Lithuanian LKL": 9, "VTB United League": 9,
+				"Polish PLK": 7, "BNXT League": 7, "Korean KBL": 7, "Philippine PBA": 4,
+				"Argentine Liga Nacional": 7, "Mexican LNBP": 4, "Puerto Rico BSN": 4,
+				"New Zealand NBL": 4, "JUCO": 1, "DIII NCAA": 1,
 			},
 		},
 		"Vanilla builds": { specialization: 0.2, archetypeDiversity: 20 },

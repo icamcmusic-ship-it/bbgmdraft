@@ -344,39 +344,117 @@
 	   and `tenure` and `hot` feed Coach of the Year. Drawn from the program's
 	   own RNG child, so a given program gets a stable coach for a given seed. */
 	/* Names for the synthetic returning players. Distinct from the coach
-	   pools so a roster does not read like the staff directory. */
+	   pools so a roster does not read like the staff directory.
+
+	   These were 28 first names and 28 last ones — 784 combinations for the
+	   roughly 3,200 synthetic returners a season needs, so every name in the
+	   pool was used four times over and the honors page read like a family
+	   reunion. They were also entirely American, in a sport whose rosters
+	   are not: a college team's fillers now draw from the same range of
+	   origins the class itself does. 180 x 209 is 37,620.
+
+	   Nothing downstream reads the pool SIZE — the fillers are drawn by
+	   rng.pick and identified by their slot, not their name. */
 	const PLAYER_FIRST = [
 		"Jalen", "Marcus", "Tyrese", "DeShawn", "Caleb", "Jordan", "Malik",
 		"Trey", "Isaiah", "Xavier", "Devin", "Cam", "Andre", "Darius",
 		"Kobe", "Zion", "Jaylen", "Micah", "Elijah", "Noah", "Grant",
 		"Tucker", "Reed", "Cole", "Bryce", "Wes", "Donte", "Rasheed",
+		"Amari", "Antoine", "Ashton", "Braden", "Brandon", "Brayden", "Cameron",
+		"Carter", "Chandler", "Chase", "Christian", "Corey", "Dalton", "Damari",
+		"Damien", "Dante", "Daquan", "Darnell", "Davion", "Dawson", "Demetrius",
+		"Deonte", "Derrick", "Dominic", "Donovan", "Drew", "Emmanuel", "Eric",
+		"Evan", "Ezra", "Gabriel", "Gavin", "Hunter", "Ian", "Immanuel",
+		"Jace", "Jamari", "Jamir", "Jaquan", "Jared", "Jarrett", "Jayden",
+		"Jeremiah", "Jermaine", "Jaxon", "Josiah", "Julian", "Justin", "Kadeem",
+		"Kaleb", "Keegan", "Kendrick", "Keon", "Khalil", "Kyree", "Landon",
+		"Lawson", "Levi", "Logan", "Lucas", "Marquis", "Mason", "Maurice",
+		"Miles", "Myles", "Nasir", "Nolan", "Omari", "Owen", "Parker",
+		"Preston", "Quentin", "Quinn", "Raheem", "Rashad", "Rayshaun", "Rowan",
+		"Ryder", "Samir", "Sebastian", "Shamar", "Silas", "Solomon", "Tariq",
+		"Terrance", "Theo", "Trevon", "Tristan", "Tyrell", "Vaughn", "Wyatt",
+		"Zaire", "Zeke", "Amadou", "Ousmane", "Cheikh", "Ibrahima", "Adama",
+		"Kwame", "Kofi", "Emeka", "Chidi", "Obi", "Bilal", "Youssef",
+		"Karim", "Hakim", "Ismail", "Luka", "Nikola", "Marko", "Stefan",
+		"Vasilije", "Dario", "Andrej", "Matej", "Tomas", "Jonas", "Mateusz",
+		"Kacper", "Aleksei", "Dmitri", "Sasha", "Mateo", "Santiago", "Diego",
+		"Rafael", "Joao", "Bruno", "Andres", "Cristian", "Emilio", "Hugo",
+		"Mathieu", "Baptiste", "Yannick", "Lars", "Sven", "Kai", "Matteo",
+		"Alessandro", "Lorenzo", "Giacomo", "Yuto", "Ren", "Haruto", "Ji-ho",
+		"Min-jun", "Arjun", "Rohan", "Kian", "Amir",
 	];
 	const PLAYER_LAST = [
-		"Washington", "Carter", "Brooks", "Jenkins", "Hayes", "Porter",
-		"Bell", "Rivers", "Sims", "Whitfield", "Dillard", "McCray",
-		"Holloway", "Battle", "Vaughn", "Kessler", "Okafor", "Ramirez",
-		"Thompson", "Greer", "Lofton", "Pemberton", "Sanders", "Diallo",
-		"Barnes", "Hendricks", "Mosley", "Turner",
+		"Washington", "Carter", "Brooks", "Jenkins", "Hayes", "Porter", "Bell",
+		"Rivers", "Sims", "Whitfield", "Dillard", "McCray", "Holloway", "Battle",
+		"Vaughn", "Kessler", "Okafor", "Ramirez", "Thompson", "Greer", "Lofton",
+		"Pemberton", "Sanders", "Diallo", "Barnes", "Hendricks", "Mosley", "Turner",
+		"Abernathy", "Alston", "Ashford", "Baldwin", "Banks", "Bassett", "Beasley",
+		"Beckham", "Benjamin", "Bishop", "Bowman", "Bradley", "Braswell", "Bridgewater",
+		"Broadnax", "Bryant", "Buchanan", "Burnett", "Caldwell", "Calhoun", "Chambers",
+		"Chandler", "Cobb", "Coleman", "Conyers", "Crawford", "Crenshaw", "Cummings",
+		"Dandridge", "Daniels", "Dawkins", "Dixon", "Dorsey", "Dowdell", "Ellington",
+		"Ellis", "Fielder", "Flournoy", "Fontenot", "Foster", "Fuller", "Gaines",
+		"Gardner", "Gibbs", "Gilliam", "Glover", "Grady", "Hamlin", "Hardaway",
+		"Harper", "Harrell", "Haskins", "Hawkins", "Herrington", "Hicks", "Hilliard",
+		"Hobson", "Hollins", "Hopkins", "Ingram", "Isley", "Jeffries", "Jernigan",
+		"Kearse", "Kimbrough", "Lassiter", "Lawson", "Ledbetter", "Lott", "Lumpkin",
+		"Mackey", "Malloy", "Marbury", "Marshall", "Mayfield", "McCollum", "McKinney",
+		"Merriweather", "Middleton", "Milton", "Mobley", "Monroe", "Muhammad", "Nance",
+		"Nesmith", "Newsome", "Oglesby", "Outlaw", "Overton", "Pettiford", "Pinckney",
+		"Pippen", "Prosser", "Quarles", "Randle", "Rankin", "Reddick", "Rucker",
+		"Satterfield", "Shumpert", "Singletary", "Slaughter", "Southerland", "Spellman", "Stackhouse",
+		"Stubblefield", "Sumpter", "Swinton", "Tatum", "Teague", "Thornhill", "Tillman",
+		"Toppin", "Trapp", "Waiters", "Wallace", "Whitmore", "Wilkes", "Winston",
+		"Woodard", "Yeboah", "Mensah", "Adebayo", "Nwachukwu", "Ndiaye", "Sy",
+		"Traore", "Konate", "Bamba", "Kaba", "Mutombo", "Achiuwa", "Olubode",
+		"Marjanovic", "Petrovic", "Jovanovic", "Kovacevic", "Radulovic", "Bogdanovic", "Dragic",
+		"Zubac", "Kalinic", "Novak", "Vesely", "Jurkiewicz", "Zielinski", "Kaminski",
+		"Ivanov", "Popescu", "Balogh", "Virtanen", "Nilsson", "Andersen", "Bakker",
+		"Vermeulen", "Schroder", "Muller", "Weber", "Fournier", "Lemoine", "Dubois",
+		"Rossi", "Bellini", "Ferrari", "Esposito", "Silva", "Ferreira", "Cardoso",
+		"Ramos", "Delgado", "Ortega", "Salazar", "Guerrero", "Vargas", "Yamamoto",
+		"Tanabe", "Kobayashi", "Park", "Jung", "Sharma", "Patel",
 	];
 
-	/* 40 x 42 = 1,680 possible names for 368 programs a season. In a
+	/* 40 x 42 = 1,680 possible names for 364 programs a season. In a
 	   single class that is invisible; in Universe mode, where a coach persists
 	   until he is fired, a forty-name pool starts repeating inside a few
 	   seasons (measured over 40 classes: 1,679 distinct names across 14,720
-	   team-seasons, the commonest used 19 times). 96 x 132 is 12,672. */
+	   team-seasons, the commonest used 19 times). 194 x 132 is 25,608. */
+	/* One generation of Anglo first names is one generation of coaches:
+	   every staff in the country was named Hal, Walt or Boyd. The pool now
+	   carries the names of coaches who are forty as well as seventy, and
+	   the Hispanic, Balkan, African and Arabic names that a Division I
+	   bench actually holds. */
 	const COACH_FIRST = [
-		"Ray", "Dan", "Marcus", "Tom", "Bruce", "Leon", "Chris", "Pat", "Ed",
-		"Kevin", "Andre", "Mike", "Steve", "Wes", "Hal", "Dennis", "Craig",
-		"Tony", "Grant", "Sam", "Vince", "Nate", "Curtis", "Joel", "Roland",
-		"Rodney", "Jerome", "Cliff", "Walt", "Terrence", "Darren", "Phil",
-		"Reggie", "Lamont", "Oscar", "Calvin", "Mitch", "Boyd", "Russ", "Dwight",
-		"Aaron", "Barry", "Brad", "Brian", "Bryan", "Carl", "Chad", "Clay",
-		"Dale", "Dave", "Doug", "Drew", "Earl", "Eric", "Frank", "Fred",
-		"Gary", "Glen", "Greg", "Hank", "Howard", "Ira", "Jake", "Jay",
-		"Jeff", "Jim", "Joe", "Jon", "Keith", "Ken", "Kirk", "Kyle",
-		"Lance", "Larry", "Lee", "Len", "Lonnie", "Luke", "Marty", "Matt",
-		"Neil", "Nick", "Otis", "Paul", "Pete", "Rick", "Rob", "Ron",
-		"Roy", "Scott", "Shawn", "Ted", "Tim", "Todd", "Troy", "Wade",
+		"Ray", "Dan", "Marcus", "Tom", "Bruce", "Leon", "Chris",
+		"Pat", "Ed", "Kevin", "Andre", "Mike", "Steve", "Wes",
+		"Hal", "Dennis", "Craig", "Tony", "Grant", "Sam", "Vince",
+		"Nate", "Curtis", "Joel", "Roland", "Rodney", "Jerome", "Cliff",
+		"Walt", "Terrence", "Darren", "Phil", "Reggie", "Lamont", "Oscar",
+		"Calvin", "Mitch", "Boyd", "Russ", "Dwight", "Aaron", "Barry",
+		"Brad", "Brian", "Bryan", "Carl", "Chad", "Clay", "Dale",
+		"Dave", "Doug", "Drew", "Earl", "Eric", "Frank", "Fred",
+		"Gary", "Glen", "Greg", "Hank", "Howard", "Ira", "Jake",
+		"Jay", "Jeff", "Jim", "Joe", "Jon", "Keith", "Ken",
+		"Kirk", "Kyle", "Lance", "Larry", "Lee", "Len", "Lonnie",
+		"Luke", "Marty", "Matt", "Neil", "Nick", "Otis", "Paul",
+		"Pete", "Rick", "Rob", "Ron", "Roy", "Scott", "Shawn",
+		"Ted", "Tim", "Todd", "Troy", "Wade", "Andres", "Antonio",
+		"Alonzo", "Amir", "Arturo", "Bilal", "Cedric", "Cesar", "Damon",
+		"Darnell", "Demetrius", "Diego", "Dominic", "Dwayne", "Elias", "Emeka",
+		"Enrique", "Ezekiel", "Gio", "Hakeem", "Hector", "Ibrahim", "Isaac",
+		"Ismael", "Ivan", "Javier", "Jamal", "Jermaine", "Jesus", "Joaquin",
+		"Jorge", "Jose", "Josip", "Julio", "Karim", "Khalil", "Kwame",
+		"Lorenzo", "Luis", "Luka", "Marcos", "Mateo", "Miguel", "Mikhail",
+		"Milos", "Mohamed", "Nikola", "Omar", "Pablo", "Pedro", "Rafael",
+		"Ramon", "Ricardo", "Rodrigo", "Salim", "Samir", "Sergio", "Stefan",
+		"Tomas", "Vasilis", "Vicente", "Yannick", "Yusuf", "Zoran", "Aiden",
+		"Brandon", "Bryson", "Cody", "Corey", "Damian", "Derrick", "Devon",
+		"Dominique", "Elijah", "Evan", "Garrett", "Isaiah", "Jared", "Jarrod",
+		"Jaylen", "Jordan", "Justin", "Kendrick", "Malik", "Marquis", "Mason",
+		"Maurice", "Micah", "Miles", "Nasir", "Nolan", "Preston", "Quentin",
+		"Terrell", "Trevor", "Tyrone", "Xavier", "Zachary",
 	];
 	const COACH_LAST = [
 		"Aldrich", "Beauchamp", "Calloway", "Duvall", "Espinoza", "Fenwick",
@@ -1977,5 +2055,8 @@
 		midSeasonEvents, longestRun, coachingCarousel, RETIRE_AGE,
 		label, adoptConference, conferencePools, PROGRAM_STYLES,
 		CONF_GAMES, NON_CONF_GAMES,
+		// Exposed so tools/tests/export.js can check the pools for size and
+		// duplicates; nothing in the app reads them from here.
+		PLAYER_FIRST, PLAYER_LAST, COACH_FIRST, COACH_LAST,
 	};
 })(typeof window !== "undefined" ? window : self);

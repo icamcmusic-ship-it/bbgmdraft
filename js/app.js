@@ -2249,7 +2249,10 @@
 		const keys = Object.keys(state.overrides);
 		if (!keys.length || !file || !file.data) return;
 		const players = file.data.players || [];
-		const known = new Set(players.map((p, i) => global.Engine.playerKey(p, i)));
+		/* The same seen-set the engine uses, so a duplicate pid's second row
+		   gets the same distinct key here as it does there. */
+		const seen = new Set();
+		const known = new Set(players.map((p, i) => global.Engine.playerKey(p, i, seen)));
 		const lost = keys.filter((k) => !known.has(k));
 		if (!lost.length) return;
 		for (const k of lost) delete state.overrides[k];
