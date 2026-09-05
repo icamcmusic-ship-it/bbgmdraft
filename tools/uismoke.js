@@ -974,6 +974,137 @@ async function gotoProspects(page) {
 			(await page.locator("#view").innerHTML()).length > 2000);
 	}
 
+	/* ---------------------------------------------------------------------
+	   THE CHROME ITSELF: the header, the dialog and the two themes.
+
+	   Everything above this reads state. These read LAYOUT and COLOR, which is
+	   where the audit found what it found: a copy button that ate its own
+	   icon, a header that grew an empty band when it wrapped, a bracket that
+	   scrolled the whole page sideways on a phone, and white text on the
+	   light-blue accent every dark theme uses. None of it raises an error and
+	   none of it changes a number, so nothing here could see it. */
+	console.log("\nThe chrome");
+	{
+		// A copy button restores the label it HAD, not one a call site
+		// remembered: btnCopyLink is an icon and was passed the word "Link".
+		const icon = await page.locator("#btnCopyLink").textContent();
+		await page.locator("#btnCopyLink").click();
+		await page.waitForTimeout(1800);
+		ok("the copy-link button goes back to its own icon",
+			(await page.locator("#btnCopyLink").textContent()) === icon,
+			icon + " -> " + (await page.locator("#btnCopyLink").textContent()));
+
+		/* The header wraps at any width once the seed history and a long
+		   "Undo …" label are in it. The flex spacer must not become an empty
+		   row of its own when it does, and the undo label must not be able to
+		   push the bar wider on its own. */
+		await page.locator("#btnReroll").click();
+		await page.waitForTimeout(900);
+		const head = await page.evaluate(() => {
+			const hd = document.querySelector("header");
+			const sp = hd.querySelector(".spacer");
+			return {
+				h: Math.round(hd.getBoundingClientRect().height),
+				spacer: Math.round(sp.getBoundingClientRect().height),
+				undo: Math.round(document.getElementById("btnUndo").getBoundingClientRect().width),
+			};
+		});
+		ok("a wrapped header does not grow an empty band",
+			head.spacer === 0 && head.h <= 130, JSON.stringify(head));
+		ok("and the undo label cannot widen the bar without limit",
+			head.undo <= 200, String(head.undo));
+
+		// The bracket sized itself to its content and pushed the PAGE sideways.
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.locator("#tabs button", { hasText: "March Madness" }).first().click();
+		await page.waitForTimeout(400);
+		const scrolls = await page.evaluate(() => ({
+			sw: document.documentElement.scrollWidth,
+			cw: document.documentElement.clientWidth,
+		}));
+		ok("the bracket does not scroll the page sideways on a phone",
+			scrolls.sw <= scrolls.cw + 1, JSON.stringify(scrolls));
+		await page.setViewportSize({ width: 1500, height: 980 });
+		await page.waitForTimeout(300);
+
+		/* Contrast on the accent, in the theme where it fails: white on
+		   #4da3ff is 2.6:1, and it was on Export JSON and on the selected
+		   randomizer chip. */
+		const contrast = async (sel) => page.evaluate((s) => {
+			const lum = (c) => {
+				const m = c.match(/[\d.]+/g).map(Number);
+				const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+				return 0.2126 * f(m[0]) + 0.7152 * f(m[1]) + 0.0722 * f(m[2]);
+			};
+			const cs = getComputedStyle(document.querySelector(s));
+			const a = lum(cs.color), b = lum(cs.backgroundColor);
+			return Math.round(((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)) * 100) / 100;
+		}, sel);
+		const theme = await page.evaluate(() => document.getElementById("themeSelect").value);
+		for (const t of ["dark", "twilight-court", "night-game"]) {
+			await page.evaluate((v) => {
+				const s = document.getElementById("themeSelect");
+				s.value = v;
+				s.dispatchEvent(new Event("change", { bubbles: true }));
+			}, t);
+			await page.waitForTimeout(150);
+			const c1 = await contrast("#btnExport");
+			const c2 = await contrast("#randomScope .chip.on");
+			ok("text on the accent is readable in " + t, c1 >= 4.5 && c2 >= 4.5,
+				"Export " + c1 + ":1, chip " + c2 + ":1");
+		}
+		await page.evaluate((v) => {
+			const s = document.getElementById("themeSelect");
+			s.value = v;
+			s.dispatchEvent(new Event("change", { bubbles: true }));
+		}, theme);
+		await page.waitForTimeout(150);
+
+		// Five columns of route facts inside a 560px dialog: two of them used
+		// to sit off the right edge behind a scrollbar nobody looks for.
+		await page.locator("#btnExportMenu").click();
+		await page.waitForTimeout(300);
+		const fit = await page.evaluate(() => {
+			const t = document.querySelector("#modal table.routes");
+			const box = document.querySelector("#modal .modalbox");
+			return { t: Math.round(t.getBoundingClientRect().width), box: box.clientWidth };
+		});
+		ok("the import-route table fits inside the dialog", fit.t <= fit.box,
+			JSON.stringify(fit));
+		await page.locator("#modalCancel, #modalOk").first().click();
+		await page.waitForTimeout(200);
+
+		/* One note to the clipboard. "Copy all notes" wrote seventy of them,
+		   which is the wrong verb for pasting one prospect into a post. */
+		await page.locator("#tabs button", { hasText: "Player notes" }).first().click();
+		await page.waitForTimeout(350);
+		const copies = await page.locator(".notehead button").count();
+		ok("every note card carries a copy button of its own", copies > 10, String(copies));
+		await page.locator(".notehead button").first().click();
+		await page.waitForTimeout(250);
+		ok("copying one note confirms on the button",
+			/Copied/.test(await page.locator(".notehead button").first().innerText()));
+		await page.waitForTimeout(1500);
+		ok("and the button goes back to its own label",
+			(await page.locator(".notehead button").first().innerText()).trim() === "Copy");
+
+		/* An export that says only "Season exported." is not a confirmation
+		   that a file was written, and it does not say which file. */
+		await page.locator("#btnExportMenu").click();
+		await page.waitForTimeout(300);
+		await page.locator("#modal button", { hasText: "Season as CSV" }).first().click();
+		await page.waitForTimeout(700);
+		ok("an export names the file it wrote",
+			/Wrote .+\.csv/.test(await page.locator("#status").innerText()),
+			(await page.locator("#status").innerText()).slice(0, 80));
+		if (!(await page.locator("#modal").isHidden())) {
+			await page.locator("#modalCancel, #modalOk").first().click();
+			await page.waitForTimeout(200);
+		}
+		await page.locator("#tabs button", { hasText: "Draft board" }).first().click();
+		await page.waitForTimeout(250);
+	}
+
 	console.log("\nThe settings filter");
 	{
 		const visibleCtls = async () => page.evaluate(() =>
