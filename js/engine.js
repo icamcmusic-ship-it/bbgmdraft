@@ -258,9 +258,6 @@
 			(hgtRating / 100) * (HGT_MAX_IN - HGT_MIN_IN));
 	}
 
-	function hgtRatingFromInches(inches) {
-		return Math.round(100 * (inches - HGT_MIN_IN) / (HGT_MAX_IN - HGT_MIN_IN));
-	}
 
 	/* Where a BBGM export can keep the season, in the order worth trying. */
 	function findSeason(lf) {
