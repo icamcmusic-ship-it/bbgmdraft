@@ -2,3 +2,6 @@ node_modules/
 package-lock.json
 package.json
 *.log
+
+# Agent worktrees created by Claude Code (never part of the project)
+.claude/worktrees/

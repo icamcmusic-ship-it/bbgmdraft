@@ -2325,7 +2325,12 @@ console.log("\nWarm re-runs");
 
 	/* Each event's sentence describes where the player actually ended up. A
 	   later event's move() shifts everyone it passes by one, so a text written
-	   when the event fired disagreed with the rank printed beside it. */
+	   when the event fired disagreed with the rank printed beside it.
+
+	   The rank it has to agree with is `draftSlot` — where he was taken on the
+	   night. `boardRank` is the mock the events then moved him off, and while
+	   the two were one number a slide's sentence and the board's own ranking
+	   were the same field read twice. */
 	let mismatched = 0;
 	for (let s = 0; s < 12; s++) {
 		const res = global.Engine.run(V.realisticClass(s % 5, 70),
@@ -2333,7 +2338,7 @@ console.log("\nWarm re-runs");
 		for (const e of res.draftEvents) {
 			const p = res.board.filter((x) => x.key === e.key)[0];
 			const m = /until pick (\d+)/.exec(e.text);
-			if (m && Number(m[1]) !== p.boardRank) mismatched++;
+			if (m && Number(m[1]) !== p.draftSlot) mismatched++;
 		}
 	}
 	ok("a draft-day sentence agrees with the rank printed beside it",
@@ -4521,10 +4526,17 @@ console.log("\nAudit regressions (the second September 2026 pass)");
 		ok("the money mood letter can be earned",
 			global.Traits.TRAITS.some((t) => t.mood === "$"));
 	}
-	/* The 2026-27 map. */
+	/* The 2027-28 map. The table used to be authored half to 2026-27 and half
+	   to the season before it, which is how UC Davis sat in the Big West while
+	   UTEP and Grand Canyon had already moved; one target season, checked. */
 	{
-		ok("the Mountain West has its 2026 members", C.byConference["Mountain West"].length === 8 &&
-			C.conferenceOf("Grand Canyon") === "Mountain West" && C.conferenceOf("UTEP") === "Mountain West");
+		ok("the Mountain West has its 2027 members", C.byConference["Mountain West"].length === 9 &&
+			C.conferenceOf("Grand Canyon") === "Mountain West" && C.conferenceOf("UTEP") === "Mountain West" &&
+			C.conferenceOf("UC Davis") === "Mountain West");
+		ok("Louisiana Tech is in the Sun Belt, New Haven in the NEC",
+			C.conferenceOf("Louisiana Tech") === "Sun Belt" &&
+			C.conferenceOf("New Haven") === "NEC" &&
+			C.conferenceOf("St. Francis (PA)") === null);
 		ok("Seattle is in the WCC, Delaware in Conference USA, UMass in the MAC",
 			C.conferenceOf("Seattle") === "WCC" && C.conferenceOf("Delaware") === "Conference USA" &&
 			C.conferenceOf("Massachusetts") === "MAC");
@@ -4645,6 +4657,27 @@ console.log("\nExport: stats rows, the class's own year, the envelope and the me
 		for (const p of old.players) p.born.year = 1990;
 		ok("an implausible age is warned about",
 			global.Engine.validateLeagueFile(old).warnings.some((w) => /older than 30/.test(w)));
+	}
+}
+
+/* ------------------------------------------------------- the area suites */
+/* One file per area, each exporting `(ok, V)`. This file had grown past four
+   thousand lines and every audit pass added to the same end of it, which is
+   also how two passes writing at once conflict on a file neither of them is
+   really editing. A new area's checks go in tools/tests/<area>.js and are
+   picked up here by being on disk. */
+{
+	const dir = path.join(__dirname, "tests");
+	const files = fs.existsSync(dir)
+		? fs.readdirSync(dir).filter((f) => f.endsWith(".js")).sort()
+		: [];
+	for (const f of files) {
+		console.log("\n" + f.replace(/\.js$/, "") + " (tools/tests/" + f + ")");
+		try {
+			require(path.join(dir, f))(ok, V);
+		} catch (e) {
+			ok("tools/tests/" + f + " runs", false, e && e.stack ? e.stack : String(e));
+		}
 	}
 }
 

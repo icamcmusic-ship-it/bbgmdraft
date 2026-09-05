@@ -31,11 +31,17 @@
 	   rerolls" is not rarity, it is absence, and a raw, toolsy, nobody-knows
 	   project is the character a draft class is remembered for. */
 	const ARCHETYPES = [
+		/* Two of the guards below carry `wing` as well, because their height
+		   gate says so: Sharpshooter runs to hgt 62 and Slasher to 64, which
+		   is 6'8" and 6'9", and a class flavor asking for wings could not
+		   reach either of them while a guard-heavy one drew them at 6'9". A
+		   tag is a claim about who the build is for and the gate is the same
+		   claim in numbers; they now agree. */
 		// --- guards -------------------------------------------------------
 		{ name: "Floor General", min: 0, max: 46, w: 2.6, pot: -3, t: ["guard", "playmaking"], o: { pss: 22, drb: 16, oiq: 14, ft: 6, spd: 6, ins: -14, dnk: -12, reb: -10, stre: -8 } },
 		{ name: "Combo Guard", min: 0, max: 50, w: 3.6, t: ["guard", "scoring"], o: { fg: 14, tp: 12, drb: 12, spd: 8, pss: -4, diq: -8, reb: -10, ins: -10 } },
-		{ name: "Sharpshooter", min: 0, max: 62, w: 2.6, t: ["guard", "shooting"], o: { tp: 24, ft: 18, fg: 10, oiq: 4, ins: -14, dnk: -12, diq: -10, stre: -8, reb: -8 } },
-		{ name: "Slasher", min: 0, max: 64, w: 3.0, t: ["guard", "athletic", "scoring"], o: { dnk: 20, spd: 16, jmp: 14, drb: 10, tp: -16, ft: -8, fg: -4, reb: -6 } },
+		{ name: "Sharpshooter", min: 0, max: 62, w: 2.6, t: ["guard", "wing", "shooting"], o: { tp: 24, ft: 18, fg: 10, oiq: 4, ins: -14, dnk: -12, diq: -10, stre: -8, reb: -8 } },
+		{ name: "Slasher", min: 0, max: 64, w: 3.0, t: ["guard", "wing", "athletic", "scoring"], o: { dnk: 20, spd: 16, jmp: 14, drb: 10, tp: -16, ft: -8, fg: -4, reb: -6 } },
 		{ name: "Defensive Pest", min: 0, max: 54, w: 1.9, t: ["guard", "defense"], o: { diq: 22, spd: 18, jmp: 8, endu: 8, ins: -14, dnk: -6, stre: -8, tp: -6, pss: -4 } },
 		{ name: "Heliocentric Guard", min: 0, max: 44, w: 0.45, t: ["guard", "playmaking", "scoring"], o: { pss: 18, drb: 18, oiq: 16, fg: 10, endu: 8, diq: -16, reb: -12, ins: -10, stre: -6 } },
 		{ name: "Pick-and-Roll Maestro", min: 0, max: 46, w: 1.0, t: ["guard", "playmaking"], o: { pss: 18, oiq: 16, drb: 12, fg: 8, tp: 4, dnk: -10, reb: -10, diq: -8, stre: -6 } },
@@ -963,6 +969,10 @@
 	   three of them, so the solved shift is still exact to far below the
 	   rounding threshold. */
 	const SHIFT_RANGE = 500;
+	/* How far above the 1 floor the downward shift starts easing. See
+	   applyShift. Ten points: below that a rating has nothing left to
+	   specialize with anyway, and above it the shift is untouched. */
+	const FLOOR_KNEE = 10;
 
 	/* BBGM's usage composite, which decides how much of an offense a player is
 	   given: ins 1.5, dnk 1, fg 1, tp 1, spd 0.5, hgt 0.5, drb 0.5, oiq 0.5.
@@ -1071,12 +1081,49 @@
 				scale[k] = Math.max(0, SHIFT_SCALE[k] * clamp(protect, 0.1, 1));
 				w += OVR_W[k] * scale[k];
 			}
-			const u = push / (w || shiftW);
-			const o = {};
+			/* An authored sign is an authored intent, and the normalizer used
+			   to reverse it: Matchup-Zone Defender's stre +4 came out -2.25,
+			   Two-Way Wing's tp +4 came out 0, Wing Stopper's stre +6 came out
+			   0, Point-of-Attack Menace's stre +6 came out -0.25. The editor's
+			   tooltip reads RAW_OFFSETS and showed "+6 strength" while the
+			   solver applied the opposite sign, so the one place a user can
+			   see what a build is FOR disagreed with what the build did.
+
+			   So the subtraction runs in passes. A rating the build authored
+			   positive is floored at zero rather than pushed through it, the
+			   ovr the floor left unspent is taken from the ratings the build
+			   did NOT author positive, and the pass repeats until the vector
+			   is ovr-neutral again or there is nothing left to take it from. */
+			const v = {};
 			for (const k of BB.RATING_KEYS) {
-				if (k === "hgt") continue;
-				const v = (a.o[k] || 0) - u * scale[k];
-				if (Math.abs(v) >= 0.25) o[k] = Math.round(v * 4) / 4;
+				if (k !== "hgt") v[k] = a.o[k] || 0;
+			}
+			const sgn = (k) => Math.sign(a.o[k] || 0);
+			let rest = push;
+			for (let pass = 0; pass < 12 && Math.abs(rest) > 0.02; pass++) {
+				/* Every rating that can still absorb the push without crossing
+				   its authored sign. An authored positive absorbs down to zero
+				   and no further, and drops out of the set once it is there —
+				   which is what leaves a shortfall for the next pass. */
+				const free = Object.keys(v).filter((k) => scale[k] > 0 &&
+					!(rest > 0 && sgn(k) > 0 && v[k] <= 0) &&
+					!(rest < 0 && sgn(k) < 0 && v[k] >= 0));
+				let fw = 0;
+				for (const k of free) fw += OVR_W[k] * scale[k];
+				if (!(fw > 0)) break;
+				const u = rest / fw;
+				for (const k of free) {
+					let nv = v[k] - u * scale[k];
+					if (sgn(k) > 0) nv = Math.max(0, nv);
+					else if (sgn(k) < 0) nv = Math.min(0, nv);
+					v[k] = nv;
+				}
+				rest = 0;
+				for (const k of Object.keys(v)) rest += OVR_W[k] * v[k];
+			}
+			const o = {};
+			for (const k of Object.keys(v)) {
+				if (Math.abs(v[k]) >= 0.25) o[k] = Math.round(v[k] * 4) / 4;
 			}
 			a.o = o;
 		}
@@ -1133,14 +1180,25 @@
 			m: { big: 2.4, wing: 0.95, guard: 0.5, rebounding: 1.5 } },
 		{ name: "wing-heavy", w: 1.1, label: "wing-heavy",
 			m: { wing: 2.3, guard: 0.75, big: 0.7 } },
+		/* `traits` is a tilt on the TRAIT groups, read by Traits.assign. A
+		   flavor said what a class was made of and nothing about what its
+		   scouting reports said, so the year everybody got hurt had exactly
+		   as many clean medical files as any other year. Nine of the
+		   twenty-nine carry one; the rest deliberately do not, because a
+		   flavor with an opinion about everything is a flavor about
+		   nothing. */
 		{ name: "shooting-rich", w: 1.0, label: "full of shooters",
-			m: { shooting: 2.6, scoring: 1.2, defense: 0.75, raw: 0.6 } },
+			m: { shooting: 2.6, scoring: 1.2, defense: 0.75, raw: 0.6 },
+			traits: { shooting: 1.8, defense: 0.7 } },
 		{ name: "defensive", w: 0.9, label: "defense-first",
-			m: { defense: 2.6, shooting: 0.7, scoring: 0.65 } },
+			m: { defense: 2.6, shooting: 0.7, scoring: 0.65 },
+			traits: { defense: 1.8, motor: 1.3, shooting: 0.7 } },
 		{ name: "athletic", w: 0.9, label: "athletic and raw",
-			m: { athletic: 2.5, raw: 2.2, shooting: 0.6, playmaking: 0.7 } },
+			m: { athletic: 2.5, raw: 2.2, shooting: 0.6, playmaking: 0.7 },
+			traits: { athleticism: 1.8, frame: 1.3, shooting: 0.6 } },
 		{ name: "skilled", w: 0.8, label: "skilled and cerebral",
-			m: { playmaking: 2.5, shooting: 1.3, raw: 0.45, athletic: 0.7 } },
+			m: { playmaking: 2.5, shooting: 1.3, raw: 0.45, athletic: 0.7 },
+			traits: { passing: 1.8, character: 1.2, athleticism: 0.6 } },
 		{ name: "top-heavy scoring", w: 0.8, label: "score-first",
 			m: { scoring: 2.4, defense: 0.7, playmaking: 0.85 } },
 		/* Seven more, because nine flavors of which four barely differed is
@@ -1154,9 +1212,11 @@
 			c: { pDII: 0.02, wEuroLeague: 46, wNBL: 20 } },
 		{ name: "one-and-done", w: 0.8, label: "one-and-done heavy",
 			m: { athletic: 1.6, raw: 1.8, scoring: 1.2 },
+			traits: { frame: 1.8, background: 1.3, medical: 0.7 },
 			c: { freshmanShare: 68, transferShare: 18, potBias: 1.1 } },
 		{ name: "portal", w: 0.8, label: "a transfer-portal year",
 			m: { shooting: 1.3, scoring: 1.2, raw: 0.5 },
+			traits: { background: 1.8, role: 1.3, frame: 0.7 },
 			c: { freshmanShare: 24, transferShare: 62, potBias: -0.8 } },
 		{ name: "weak", w: 0.85, label: "a weak year",
 			m: { raw: 1.3, athletic: 1.1, shooting: 0.9 },
@@ -1169,6 +1229,7 @@
 			c: { classDepth: -2.2, eliteCount: 2, classQuality: 0.4 } },
 		{ name: "veteran", w: 0.7, label: "old and finished",
 			m: { shooting: 1.4, defense: 1.3, raw: 0.35, athletic: 0.7 },
+			traits: { character: 1.5, background: 1.3, athleticism: 0.6 },
 			c: { freshmanShare: 18, potBias: -1.3, potSpread: 0.7 } },
 
 		/* --- narrative flavors ----------------------------------------------
@@ -1187,6 +1248,7 @@
 		   the year those three stories get told. */
 		{ name: "injury year", w: 0.9, label: "the year everybody got hurt",
 			m: { raw: 1.2, athletic: 1.1, durability: 2.4 },
+			traits: { medical: 2.0, motor: 0.6 },
 			c: { injuryRate: 2.0 } },
 		{ name: "blue bloods down", w: 0.9, label: "the year the blue bloods fell over",
 			m: {},
@@ -1251,6 +1313,7 @@
 			   shoot is a class of stretch fives. This one cuts shooting hard,
 			   which is what makes it a POST-UP year rather than a tall one. */
 			m: { big: 2.2, scoring: 1.6, rebounding: 1.8, shooting: 0.35, guard: 0.6 },
+			traits: { rebounding: 1.8, frame: 1.3, shooting: 0.5 },
 			c: { pace: 63, efficiencyEnv: -0.5 } },
 		{ name: "three-and-d only", w: 0.6, label: "3&D wings and rim protectors",
 			/* Extreme specialization, which no existing flavor asks for: every
@@ -1310,8 +1373,8 @@
 		if (strength <= 0) return null;
 		const f = asked || rng.weighted(CLASS_FLAVORS);
 		if (f.name === "balanced") {
-			return { name: f.name, label: f.label, mult: {}, cfg: null, strength,
-				asked: !!asked };
+			return { name: f.name, label: f.label, mult: {}, traits: null, cfg: null,
+				strength, asked: !!asked };
 		}
 		const mult = {};
 		for (const tag of Object.keys(f.m)) {
@@ -1319,8 +1382,17 @@
 			// log space, so a 2.2x becomes ~4.8x.
 			mult[tag] = Math.pow(f.m[tag], strength);
 		}
-		return { name: f.name, label: f.label, mult, cfg: f.c || null, strength,
-			asked: !!asked };
+		// The trait tilt scales with `strength` in log space, exactly as the
+		// archetype multipliers above do.
+		let traits = null;
+		if (f.traits) {
+			traits = {};
+			for (const g of Object.keys(f.traits)) {
+				traits[g] = Math.pow(f.traits[g], strength);
+			}
+		}
+		return { name: f.name, label: f.label, mult, traits, cfg: f.c || null,
+			strength, asked: !!asked };
 	}
 
 	function flavorMultiplier(arch, flavor) {
@@ -1468,8 +1540,14 @@
 	}
 
 	function pickClassPool(rng, cfg, flavor) {
+		/* Clamped to the TABLE, not to 60. The comment above promises that a
+		   size at or above the table turns the pool off; with 145 builds and a
+		   clamp at 60 that promise was unreachable, so "pool off" could only be
+		   said as 0. (The index.html slider still stops at 40 — raising its max
+		   to the table size is the other half of this.) */
 		const size = Math.round(clamp(
-			cfg && cfg.archetypePool !== undefined ? cfg.archetypePool : 0, 0, 60));
+			cfg && cfg.archetypePool !== undefined ? cfg.archetypePool : 0,
+			0, ARCHETYPES.length));
 		const specialists = ARCHETYPES.filter((a) => a.name !== "Balanced");
 		if (!size || size >= specialists.length) return null;
 		/* The exclusion memory. cfg.recentPools is [newestClassBuildNames, …],
@@ -1483,25 +1561,50 @@
 			poolMemoryFactor(a.name, recent, strength);
 		const remaining = specialists.slice();
 		const pool = [];
+		/* The guaranteed slots — the rare draw, the centers, the height bands.
+		   Kept apart from the weighted draw because the trim below may not
+		   take them back out; they are the reason the pool exists at the size
+		   it does. */
+		const forced = new Set();
+		const take = (a, isForced) => {
+			pool.push(a);
+			if (isForced) forced.add(a);
+			remaining.splice(remaining.indexOf(a), 1);
+		};
+		/* A guaranteed slot is not a weighted draw, it is a promise, and a
+		   promise that always lands on the same build is not memory-free — it
+		   is memory-proof. Shot-Blocking Anchor sat in 28-31 of 60 consecutive
+		   pools at EVERY poolMemory setting, because the three center slots
+		   were filled from the same nine builds by weight whatever the memory
+		   said. The guarantees now rotate: at any memory above zero the
+		   builds in the newest pool are skipped while alternatives remain. */
+		const lastPool = (strength > 0 && recent && recent[0]) || null;
+		const fresh = (options) => {
+			if (!lastPool) return options;
+			const f = options.filter((a) => lastPool.indexOf(a.name) === -1);
+			return f.length ? f : options;
+		};
 		while (pool.length < size && remaining.length) {
-			const pick = rng.weighted(remaining, wOf);
-			pool.push(pick);
-			remaining.splice(remaining.indexOf(pick), 1);
+			take(rng.weighted(remaining, wOf), false);
 		}
 		/* One slot for a build the weights never reach. Point Center and
 		   Jumbo Playmaker were drawn zero times in 2,800 players; a rare
-		   build is rare, not absent. Drawn uniformly from the sub-1.0
-		   weights that did not make the pool, and only when the pool has
+		   build is rare, not absent. Drawn uniformly from the low-weight
+		   builds that did not make the pool, and only when the pool has
 		   room for it to mean something. About every other class: the rare
 		   builds are mostly non-scoring bigs, and one in every pool moved
-		   the big-versus-guard scoring band a full point. */
+		   the big-versus-guard scoring band a full point.
+
+		   Filtered on the EFFECTIVE weight, not the authored `a.w`. A user
+		   who zeroed a build in cfg.archetypeWeights had said the clearest
+		   thing the UI can say about it, and the rare slot read past that
+		   straight to the table: a zeroed build made the pool in 23 of 40
+		   classes, and spent the slot meant for a rare build on one the user
+		   had switched off. */
 		if (size >= 8 && remaining.length && rng.random() < 0.5) {
-			const rare = remaining.filter((a) => a.w < 1.0 && a.name !== "Balanced");
-			if (rare.length) {
-				const pick = rare[Math.floor(rng.random() * rare.length)];
-				pool.push(pick);
-				remaining.splice(remaining.indexOf(pick), 1);
-			}
+			const rare = remaining.filter((a) => a.w < 1.0 &&
+				poolWeight(a, cfg, flavor) > 0);
+			if (rare.length) take(rare[Math.floor(rng.random() * rare.length)], true);
 		}
 		// The seven-footers' own builds. See CENTER_MIN.
 		{
@@ -1510,9 +1613,7 @@
 			while (have < CENTER_IN_POOL) {
 				const options = remaining.filter(isCenter);
 				if (!options.length) break;
-				const pick = rng.weighted(options, wOf);
-				pool.push(pick);
-				remaining.splice(remaining.indexOf(pick), 1);
+				take(rng.weighted(fresh(options), wOf), true);
 				have++;
 			}
 		}
@@ -1523,11 +1624,36 @@
 			while (have < MIN_PER_BAND) {
 				const options = eligibleAt(remaining, h);
 				if (!options.length) break;
-				const pick = rng.weighted(options, wOf);
-				pool.push(pick);
-				remaining.splice(remaining.indexOf(pick), 1);
+				take(rng.weighted(fresh(options), wOf), true);
 				have++;
 			}
+		}
+		/* Trim back to the size that was asked for.
+
+		   The guarantees used to be added ON TOP of `size`, so "19 builds per
+		   class" realized 20-23 and a flavor asking for 8 got 10-12 — the
+		   label was wrong by two to four every single class, and the one
+		   flavor whose whole identity is a small pool was the one it lied to
+		   most. The guarantees now come out of the budget instead. Removal is
+		   UNIFORM among the weighted draws that nothing depends on: dropping
+		   the lowest-weight member instead would quietly undo the weighted
+		   sample and make the rare builds rarer again. */
+		const covered = (list) => {
+			if (list.filter((a) => a.min >= CENTER_MIN).length <
+				Math.min(CENTER_IN_POOL, size)) return false;
+			for (const h of POOL_PROBES) {
+				const n = eligibleAt(list, h).length;
+				if (n < MIN_PER_BAND && n < eligibleAt(specialists, h).length) return false;
+			}
+			return true;
+		};
+		while (pool.length > size) {
+			const cands = pool.filter((a) => !forced.has(a) &&
+				covered(pool.filter((x) => x !== a)));
+			if (!cands.length) break;
+			const drop = cands[Math.floor(rng.random() * cands.length)];
+			pool.splice(pool.indexOf(drop), 1);
+			remaining.push(drop);
 		}
 		return pool;
 	}
@@ -1546,7 +1672,36 @@
 		return true;
 	}
 
-	function pickArchetype(rng, hgtRating, cfg, flavor, pool, rank, bio) {
+	/* Per-class draw memory. A pool slot is won once and then spent all class:
+	   Athletic Freak came out 50 times and Raw Project 43 in 2,100 players
+	   (the next build managed 40, and a gated build that made a pool drew 0 of
+	   47 eligible players), because a build with no height gate is eligible for
+	   everybody and the pool draw is the only scarcity there is. And twelve
+	   classes in thirty had the same build twice inside the top five, which is
+	   the part of the board a user actually reads.
+
+	   So the class counts its own draws. Past DRAW_SOFT_CAP the weight halves
+	   for each further one — a soft cap, so a genuinely common build stays
+	   common and simply stops being half the class — and inside the top ten a
+	   build already used up there is quartered per use. It is a penalty and
+	   not an exclusion on purpose: two of the best three prospects in a class
+	   being the same kind of player is a thing that happens, it just should
+	   not happen two years in five. */
+	const DRAW_SOFT_CAP = 6;
+	const TOP_OF_BOARD = 10;
+	function newDrawCounts() { return { n: {}, top: {} }; }
+	function drawPenalty(name, counts, rank) {
+		if (!counts) return 1;
+		let f = 1;
+		const c = (counts.n && counts.n[name]) || 0;
+		if (c > DRAW_SOFT_CAP) f *= Math.pow(0.6, c - DRAW_SOFT_CAP);
+		if (Number.isFinite(rank) && rank < TOP_OF_BOARD && counts.top) {
+			f *= Math.pow(0.25, counts.top[name] || 0);
+		}
+		return f;
+	}
+
+	function pickArchetype(rng, hgtRating, cfg, flavor, pool, rank, bio, counts) {
 		const source = pool && pool.length ? pool.concat(BALANCED) : ARCHETYPES;
 		const eligible = source.filter(
 			(a) => hgtRating >= a.min && hgtRating <= a.max && bioFits(a, bio),
@@ -1554,7 +1709,13 @@
 		if (!eligible.length) {
 			return ARCHETYPES.filter((a) => a.name === "Balanced")[0];
 		}
-		let diversity = clamp(cfg.archetypeDiversity, 0, 100) / 100;
+		/* Coerced, because cfg reaches here from a URL and from localStorage:
+		   a string "85" or an undefined turned the whole expression NaN, every
+		   weight below became NaN, and rng.weighted then handed back the first
+		   eligible entry — which made EVERY player in the class Balanced with
+		   no error anywhere. */
+		const askedDiv = Number(cfg && cfg.archetypeDiversity);
+		let diversity = clamp(Number.isFinite(askedDiv) ? askedDiv : 85, 0, 100) / 100;
 		/* The top of the board is the part of the class everyone looks at,
 		   and the uniform Balanced share made the No. 1 pick the player MOST
 		   likely to have no identity — measured, Balanced 20% of the time at
@@ -1565,7 +1726,8 @@
 		if (Number.isFinite(rank) && rank >= 0 && rank < 10) {
 			diversity = 1 - (1 - diversity) * (0.25 + 0.075 * rank);
 		}
-		const wOf = (a) => archetypeWeight(a, cfg, flavor);
+		const wOf = (a) => archetypeWeight(a, cfg, flavor) *
+			drawPenalty(a.name, counts, rank);
 		/* Balanced keeps exactly (1 - diversity) of the probability mass however
 		   many specialist builds are eligible; the rest is split by rarity
 		   weight.
@@ -1613,15 +1775,50 @@
 		return out;
 	}
 
-	function applyShift(base, k, scales) {
+	function applyShift(base, k, scales, pinned) {
 		const sc = scales || SHIFT_SCALE;
 		const out = {};
 		for (const key of BB.RATING_KEYS) {
+			/* A pinned rating is the value the user typed, not whatever the
+			   base happened to carry. rebuild() writes the pin into `base`
+			   before it solves, so this changed nothing there — but every
+			   other caller (solveToOvr and ovrRange as public API, the lock
+			   editor's range preview) passed a base the pin had never
+			   reached, and the pin was silently ignored: solveToOvr with
+			   {tp: 100} came back with tp 45. */
+			if (pinned && Number.isFinite(pinned[key])) {
+				out[key] = clamp(Math.round(pinned[key]), 0, 100);
+				continue;
+			}
+			let v = base[key] + k * sc[key];
+			/* A shift DOWN eases onto the floor instead of driving through it,
+			   the same way the archetype's own negative offsets do (see
+			   rebuild). Without it the two guards disagreed: the offset was
+			   careful not to put a low rating on 1 and the solver then put it
+			   there anyway — at specialization 3, 6.2% of a class's ratings
+			   sat on exactly 1, a vector with no shape left in it that the
+			   solver can only de-specialize further.
+
+			   The ease is quadratic and starts FLOOR_KNEE points above the
+			   floor, so it is the identity for every rating that is not
+			   already low — a third of a class's ratings move and by 1.2
+			   points on average — and it is C1 at the knee and monotone
+			   below it, which is what the bisection above needs. The floor
+			   is still reachable, so the range ovrRange promises is still a
+			   range the solver keeps. */
+			if (key !== "hgt") {
+				const t = v - 1;
+				if (t < FLOOR_KNEE) {
+					v = t <= -FLOOR_KNEE
+						? 1
+						: 1 + ((t + FLOOR_KNEE) * (t + FLOOR_KNEE)) / (4 * FLOOR_KNEE);
+				}
+			}
 			// The same floor and ceiling the base is built on. A 0/100 clamp
 			// here put 2.6% of a class's tp ratings on exactly 0.
 			out[key] = key === "hgt"
 				? clamp(Math.round(base[key] + k * sc[key]), 0, 100)
-				: clamp(Math.round(base[key] + k * sc[key]), 1, 99);
+				: clamp(Math.round(v), 1, 99);
 		}
 		return out;
 	}
@@ -1638,7 +1835,6 @@
 			const dir = targetOvr > cur ? 1 : -1;
 			let best = null;
 			let bestGap = Math.abs(cur - targetOvr);
-			let bestStep = Infinity;
 			/* One point of one rating can leave the rounded ovr where it
 			   was, so the step is allowed to grow to three; the smallest
 			   step that closes the gap wins. */
@@ -1650,9 +1846,11 @@
 					if (v < 1 || v > 99) continue;
 					const trial = Object.assign({}, ratings, { [key]: v });
 					const gap = Math.abs(BB.ovr(trial) - targetOvr);
-					if (gap < bestGap || (gap === bestGap && best && step < bestStep)) {
-						bestGap = gap; best = trial; bestStep = step;
-					}
+					/* Strictly better only. The step loop stops as soon as a
+					   candidate is found, so a tie inside one pass is always a
+					   tie at the SAME step — the old `step < bestStep` arm of
+					   this test could never be true. */
+					if (gap < bestGap) { bestGap = gap; best = trial; }
 				}
 			}
 			if (!best) break;
@@ -1682,8 +1880,8 @@
 		const upScales = arch ? shiftScales(arch, true, pinned) : SHIFT_SCALE;
 		const downScales = arch ? shiftScales(arch, false, pinned) : SHIFT_SCALE;
 		return {
-			min: BB.ovr(applyShift(base, -SHIFT_RANGE, downScales)),
-			max: BB.ovr(applyShift(base, SHIFT_RANGE, upScales)),
+			min: BB.ovr(applyShift(base, -SHIFT_RANGE, downScales, pinned)),
+			max: BB.ovr(applyShift(base, SHIFT_RANGE, upScales, pinned)),
 		};
 	}
 
@@ -1711,7 +1909,7 @@
 		// and the bisection below is still valid.
 		const upScales = arch ? shiftScales(arch, true, pinned) : SHIFT_SCALE;
 		const downScales = arch ? shiftScales(arch, false, pinned) : SHIFT_SCALE;
-		const shift = (k) => applyShift(base, k, k >= 0 ? upScales : downScales);
+		const shift = (k) => applyShift(base, k, k >= 0 ? upScales : downScales, pinned);
 		let lo = -SHIFT_RANGE;
 		let hi = SHIFT_RANGE;
 		if (BB.ovr(shift(lo)) > targetOvr) return shift(lo);
@@ -1757,7 +1955,7 @@
 	/* Rebuild one player's ratings.
 	   orig: the ratings row from the league file
 	   targetOvr / targetPot: what the rebuilt player must come out to */
-	function rebuild(rng, orig, targetOvr, targetPot, cfg, forcedArchetype, flavor, pinned, pool, rank, bio) {
+	function rebuild(rng, orig, targetOvr, targetPot, cfg, forcedArchetype, flavor, pinned, pool, rank, bio, counts) {
 		const forced = forcedArchetype
 			? ARCHETYPES.filter((a) => a.name === forcedArchetype)[0]
 			: null;
@@ -1765,8 +1963,17 @@
 		   to skip it, which shifted every jitter draw after it, so locking a
 		   player to the build he already had re-rolled all fourteen of his
 		   ratings. */
-		const rolled = pickArchetype(rng, orig.hgt, cfg, flavor, pool, rank, bio);
+		const rolled = pickArchetype(rng, orig.hgt, cfg, flavor, pool, rank, bio, counts);
 		const arch = forced || rolled;
+		/* Counted on the FINAL build, so a build the user locked onto three
+		   prospects pushes the fourth toward something else exactly as a
+		   rolled one would. */
+		if (counts) {
+			if (counts.n) counts.n[arch.name] = (counts.n[arch.name] || 0) + 1;
+			if (counts.top && Number.isFinite(rank) && rank < TOP_OF_BOARD) {
+				counts.top[arch.name] = (counts.top[arch.name] || 0) + 1;
+			}
+		}
 		const spec = clamp(cfg.specialization, 0, 3);
 		const noise = Math.max(0, cfg.buildNoise);
 
@@ -1795,11 +2002,19 @@
 			   exactly, concentrated in the ovr 20-39 band — a 25-overall
 			   walk-on candidate with four 1s — and once a rating is on the
 			   floor the solver can only de-specialize him. The cut still
-			   points the same way; it just cannot go through the floor. */
+			   points the same way; it just cannot go through the floor.
+
+			   The halving in the denominator meant the scaling only bit at
+			   specialization 1, which is where it was measured: at 3 the cut
+			   is three times the size and the room is the same, so 6.2% of a
+			   class's ratings sat on 1 exactly — the specialization slider's
+			   top third bought floor collisions rather than specialists. The
+			   denominator now carries the whole cut, so the guard scales with
+			   the setting it is guarding against. */
 			let off = arch.o[key] || 0;
 			if (off < 0 && key !== "hgt") {
 				const room = Math.max(0, orig[key] - lo);
-				off *= room / (room + 0.5 * Math.abs(spec * off));
+				off *= room / (room + Math.abs(spec * off));
 			}
 			base[key] = clamp(orig[key] + spec * off + jitter, lo, hi);
 			cleanBase[key] = clamp(orig[key] + spec * off, lo, hi);
@@ -1855,5 +2070,6 @@
 		CLASS_FLAVORS, pickFlavor, flavorMultiplier, flavorConfig, pickClassPool,
 		poolMemoryFactor, POOL_MEMORY_DEPTH,
 		archetypeWeight, poolWeight, RARITY_COMPRESS, CENTER_MIN, CENTER_IN_POOL,
+		newDrawCounts, DRAW_SOFT_CAP, TOP_OF_BOARD, ROLE_U0,
 	};
 })(typeof window !== "undefined" ? window : self);

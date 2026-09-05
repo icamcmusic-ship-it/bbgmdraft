@@ -2249,7 +2249,10 @@
 		const keys = Object.keys(state.overrides);
 		if (!keys.length || !file || !file.data) return;
 		const players = file.data.players || [];
-		const known = new Set(players.map((p, i) => global.Engine.playerKey(p, i)));
+		/* The same seen-set the engine uses, so a duplicate pid's second row
+		   gets the same distinct key here as it does there. */
+		const seen = new Set();
+		const known = new Set(players.map((p, i) => global.Engine.playerKey(p, i, seen)));
 		const lost = keys.filter((k) => !known.has(k));
 		if (!lost.length) return;
 		for (const k of lost) delete state.overrides[k];
@@ -3933,6 +3936,13 @@
 	/* ------------------------------------------------------------- clipboard */
 
 	function copyText(text, button, restore) {
+		/* The label to put back is the one the button HAS, not one the caller
+		   remembered: the header's copy-link button is an icon (🔗) and the
+		   call site passed the word "Link", so one copy replaced the icon with
+		   a word for the rest of the session — and the wider button reflowed
+		   the whole header. The parameter is still honoured where a caller
+		   wants a different resting label. */
+		const was = button ? button.textContent : "";
 		const done = () => {
 			/* Announce it. The seed pill's copy changed the BUTTON's text and
 			   nothing else, so a screen reader user pressing it got no
@@ -3942,7 +3952,7 @@
 			announce("Copied: " + String(text).slice(0, 60));
 			if (!button) return;
 			button.textContent = "Copied ✓";
-			setTimeout(() => { button.textContent = restore; }, 1400);
+			setTimeout(() => { button.textContent = restore || was; }, 1400);
 		};
 		function fallback() {
 			const ta = document.createElement("textarea");
@@ -4035,6 +4045,21 @@
 		document.body.appendChild(a);
 		a.click();
 		setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+		/* What was written, by name. A browser that saves to a download folder
+		   without asking gives no visible sign at all, and the statuses the
+		   callers wrote said what had happened ("Season exported.") without
+		   ever naming the file — so "which of these four JSONs is the one I
+		   just made" was unanswerable from inside the tool. */
+		lastDownload = name;
+		setStatus("Wrote " + name + ".");
+		return name;
+	}
+
+	/* The status a caller writes after download(): its own sentence, with the
+	   file name download() recorded in front of it. */
+	let lastDownload = "";
+	function exported(extra) {
+		setStatus("Wrote " + lastDownload + (extra ? " — " + extra : "") + ".");
 	}
 
 	function exportOne(i, opts) {
@@ -4133,24 +4158,24 @@
 		   out. */
 		download(skipped ? "prospects_filtered.csv" : "prospects.csv",
 			csvJoin(lines), "text/csv");
-		setStatus(skipped
-			? "CSV exported — " + (res.players.length - skipped) + " of " +
-				res.players.length + " prospects (the current filter). " +
-				"Use “Prospect table as CSV (whole class)” for all of them."
-			: "CSV exported — all " + res.players.length + " prospects.");
+		exported(skipped
+			? (res.players.length - skipped) + " of " + res.players.length +
+				" prospects (the current filter); use “Prospect table as CSV " +
+				"(whole class)” for all of them"
+			: "all " + res.players.length + " prospects");
 	}
 
 	/* The whole simulated season was throwaway except for the note strings. */
 	function exportSeasonJson(res) {
 		download("season_" + res.seed + ".json",
 			JSON.stringify(global.Engine.exportSeason(res), null, 2), "application/json");
-		setStatus("Season exported.");
+		exported();
 	}
 
 	function exportLeagueFragment(res) {
 		download(state.files[state.active].name.replace(/\.json(\.gz)?$|\.gz$/i, "") + "_league_fragment.json",
 			JSON.stringify(global.Engine.exportLeagueFragment(res), null, 2), "application/json");
-		setStatus("League fragment exported.");
+		exported();
 	}
 
 	function exportSeasonCsv(res) {
@@ -4176,7 +4201,7 @@
 				.map(esc).join(","));
 		}
 		download("season_" + res.seed + ".csv", csvJoin(lines), "text/csv");
-		setStatus("Season CSV exported.");
+		exported();
 	}
 
 	function exportNotes(res) {
@@ -4185,7 +4210,7 @@
 			lines.push(p.name + "\t" + (p.note || "").replace(/\n/g, " · "));
 		}
 		download("notes.tsv", csvJoin(lines), "text/tab-separated-values");
-		setStatus("Notes exported.");
+		exported();
 	}
 
 	/* The same notes as Markdown, so they survive a paste into a forum post or
@@ -4214,7 +4239,7 @@
 			out.push("");
 		}
 		download("notes.md", out.join("\n"), "text/markdown");
-		setStatus("Notes exported as Markdown.");
+		exported();
 	}
 
 	/* Re-apply locks in bulk from a CSV. The natural workflow — export the
@@ -4409,8 +4434,8 @@
 	   in the status line instead of overwriting it a moment later. */
 	function exportActive(opts) {
 		if (!exportOne(state.active, opts)) return;
-		setStatus("Exported " + state.files[state.active].name + "." +
-			(exportOne.warning ? " " + exportOne.warning : ""));
+		exported("from " + state.files[state.active].name +
+			(exportOne.warning ? ". " + exportOne.warning : ""));
 	}
 
 	function exportMenu() {
@@ -4609,8 +4634,8 @@
 				const base = state.files[state.active].name.replace(/\.json(\.gz)?$|\.gz$/i, "");
 				download(base + "_players.json", "\ufeff" + JSON.stringify(out, null, 2),
 					"application/json");
-				setStatus("Wrote " + out.players.length + " players. Load it with " +
-					"Tools → Import players, select them all and tick “Include stats”.");
+				exported(out.players.length + " players; load it with " +
+					"Tools → Import players, select them all and tick “Include stats”");
 			} catch (err) {
 				setStatus("Could not export: " + (err && err.message ? err.message : err));
 			}
@@ -4665,13 +4690,13 @@
 		const years = out.seasons.slice().sort((a, b) => a - b).join("_");
 		download(base + "_with_" + years + "_class.json",
 			JSON.stringify(out.file), "application/json");
-		setStatus("Merged " + (out.replaced + out.added) + " players into " +
+		exported("merged " + (out.replaced + out.added) + " players into " +
 			leagueName + " (" + out.replaced + " replaced, " + out.added + " added, " +
 			out.removed + " generated prospects dropped) for the " +
 			out.seasons.slice().sort((a, b) => a - b).join(", ") + " draft" +
 			(out.seasons.length === 1 ? "" : "s") + ". Load the new file with " +
-			"Create New League \u2192 upload." +
-			(out.warnings && out.warnings.length ? " " + out.warnings.join(" ") : ""));
+			"Create New League \u2192 upload" +
+			(out.warnings && out.warnings.length ? ". " + out.warnings.join(" ") : ""));
 	}
 
 	/* Where the league file comes from. When the classes were lifted out of a
@@ -5330,7 +5355,7 @@
 	}
 	$("btnCopyLink").addEventListener("click", () => {
 		writeHash(true);
-		copyText(location.href, $("btnCopyLink"), "Link");
+		copyText(location.href, $("btnCopyLink"));
 	});
 	$("btnBatch").addEventListener("click", () => {
 		if (!state.files.length) return;

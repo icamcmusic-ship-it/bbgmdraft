@@ -89,10 +89,16 @@ function fit(rows, meanPpg, minN) {
 		const du = R.usageCompositeDelta(a);
 		// Current log-multiplier, plus the correction the residual implies.
 		const target = Math.log(R.ROLE_USAGE[r.name]) - (r.resid / meanPpg) / DAMPING;
-		const x = [Math.log(0.394 / Math.max(0.05, 0.394 + du)), R.creationDelta(a), 1];
+		// The solver's own reference usage, not a copy of it that goes stale
+		// the moment ROLE_U0 is retuned.
+		const U0 = Number.isFinite(R.ROLE_U0) ? R.ROLE_U0 : 0.394;
+		const x = [Math.log(U0 / Math.max(0.05, U0 + du)), R.creationDelta(a), 1];
 		for (const t of TAGS) x.push(a.t.indexOf(t) !== -1 ? 1 : 0);
 		design.push({ x, y: target });
 	}
+	// Nothing to fit: every row was filtered out by minN, or there were no
+	// rows at all. Reporting that beats a TypeError on design[0].
+	if (!design.length) return null;
 	const P = design[0].x.length;
 	const A = Array.from({ length: P }, () => new Array(P).fill(0));
 	const B = new Array(P).fill(0);
@@ -148,6 +154,11 @@ function main() {
 	console.log("\nworst bias beyond noise = " + worst.toFixed(2) +
 		" points   (tools/validate.js bands this at 2.00)\n");
 	const f = fit(rows, meanPpg, minN);
+	if (!f) {
+		console.log("No build cleared the minimum sample of " + minN +
+			" — nothing to fit. Run more classes.");
+		return;
+	}
 	console.log("Fitted ROLE_FIT over " + f.used + " builds — paste into js/ratings.js:\n");
 	console.log("\t\tcreateW: " + f.createW.toFixed(2) + ",");
 	console.log("\t\tcompExp: " + f.compExp.toFixed(2) + ",");

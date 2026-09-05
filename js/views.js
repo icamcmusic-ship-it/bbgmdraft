@@ -3259,7 +3259,19 @@
 		for (const p of res.players.slice().sort((a, b) => b.newOvr - a.newOvr)) {
 			if (q && (p.name + "\n" + p.note).toLowerCase().indexOf(q) === -1) continue;
 			const c = el("div", "card");
-			c.appendChild(el("h4", null, p.name));
+			const head = el("div", "rowflex notehead");
+			head.appendChild(el("h4", null, p.name));
+			/* One note, on its own. "Copy all notes" wrote seventy of them into
+			   the clipboard, which is the wrong verb for the common case:
+			   pasting ONE scouting note into a post about one prospect. */
+			const one = el("button", "tiny", "Copy");
+			one.title = "Copy this note to the clipboard";
+			one.setAttribute("aria-label", "Copy the note for " + p.name);
+			one.addEventListener("click", () => {
+				A().copyText(p.name + "\n" + p.note, one, "Copy");
+			});
+			head.appendChild(one);
+			c.appendChild(head);
 			c.appendChild(el("div", "note", p.note));
 			cards.appendChild(c);
 		}

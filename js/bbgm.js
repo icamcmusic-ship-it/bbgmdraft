@@ -11,6 +11,17 @@
 (function (global) {
 	"use strict";
 
+	/* The schema version BBGM stamps on its own exports
+	   (src/common/constants.ts, LEAGUE_DATABASE_VERSION).
+
+	   It matters on the way IN: augmentPartialPlayer branches on it, and a
+	   file with NO version runs the pre-versioning migration path, which
+	   recomputes every player's hgt rating from his listed height and
+	   rewrites the ratings season and draft year. A class this tool built to
+	   the point of every rating then arrives in the game with a different
+	   one. So anything written here says which schema it is. */
+	const LEAGUE_DATABASE_VERSION = 73;
+
 	const RATING_KEYS = [
 		"hgt", "stre", "spd", "jmp", "endu", "ins", "dnk", "ft",
 		"fg", "tp", "oiq", "diq", "drb", "pss", "reb",
@@ -208,7 +219,7 @@
 	}
 
 	global.BBGM = {
-		RATING_KEYS, ovr, ovrRaw, pos, skills, composites, compositeRating,
+		RATING_KEYS, LEAGUE_DATABASE_VERSION, ovr, ovrRaw, pos, skills, composites, compositeRating,
 		COMPOSITE_WEIGHTS, fuzzRating,
 	};
 })(typeof window !== "undefined" ? window : self);

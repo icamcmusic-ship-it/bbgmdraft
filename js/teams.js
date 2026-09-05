@@ -36,8 +36,25 @@
 		   — but Duke going 17-15 is a thing that happens and the model could
 		   not express it. The slope is flat now, and a rare down year (or a
 		   breakout) is drawn on top. */
-		let level = base + rng.normal(0, PROGRAM_VOL);
-		if (rng.random() < DOWN_YEAR_RATE) {
+		/* VOLATILITY IS NOT THE SAME AT EVERY LEVEL.
+
+		   One sigma of 7 for all 364 programs, plus a 9% down year drawn on
+		   top, was too much for the top of the sport and not enough for the
+		   bottom. Measured over twenty seasons: Kentucky missed the tournament
+		   three times, the final AP top 25 shared a Jaccard of 0.18 between
+		   any two seasons against a real 0.45, and yet the same program won a
+		   one-bid league eight to ten times out of twenty.
+
+		   That is backwards on both ends, and for a real reason. A blue blood
+		   is stable because its floor is structural — the recruiting, the
+		   money and the staff do not leave in one summer — while a one-bid
+		   league is two rosters wide and swings on who stayed. So sigma runs
+		   from 4 at the top of the sport to 9 at the bottom, and the down year
+		   a program with everything to lose draws is rarer than the one a
+		   low-major draws. */
+		const tier = clamp((C.prestige(name) - 40) / 50, 0, 1);
+		let level = base + rng.normal(0, 10 - 6 * tier);
+		if (rng.random() < DOWN_YEAR_RATE * (1.3 - 0.6 * tier)) {
 			// It falls apart: transfers out, an injury in November, a freshman
 			// class that did not arrive. Bigger for a program with more to lose.
 			level -= 6 + 0.14 * C.prestige(name) + rng.uniform(0, 6);
@@ -52,7 +69,9 @@
 		return clamp(level, 12, 95);
 	}
 
-	const PROGRAM_VOL = 7.0;
+	// The middle of the tiered range in programLevel, kept because the batch
+	// harness and tools/validate.js report it.
+	const PROGRAM_VOL = 6.5;
 	const DOWN_YEAR_RATE = 0.09;
 	const BREAKOUT_RATE = 0.09;
 
@@ -344,39 +363,117 @@
 	   and `tenure` and `hot` feed Coach of the Year. Drawn from the program's
 	   own RNG child, so a given program gets a stable coach for a given seed. */
 	/* Names for the synthetic returning players. Distinct from the coach
-	   pools so a roster does not read like the staff directory. */
+	   pools so a roster does not read like the staff directory.
+
+	   These were 28 first names and 28 last ones — 784 combinations for the
+	   roughly 3,200 synthetic returners a season needs, so every name in the
+	   pool was used four times over and the honors page read like a family
+	   reunion. They were also entirely American, in a sport whose rosters
+	   are not: a college team's fillers now draw from the same range of
+	   origins the class itself does. 180 x 209 is 37,620.
+
+	   Nothing downstream reads the pool SIZE — the fillers are drawn by
+	   rng.pick and identified by their slot, not their name. */
 	const PLAYER_FIRST = [
 		"Jalen", "Marcus", "Tyrese", "DeShawn", "Caleb", "Jordan", "Malik",
 		"Trey", "Isaiah", "Xavier", "Devin", "Cam", "Andre", "Darius",
 		"Kobe", "Zion", "Jaylen", "Micah", "Elijah", "Noah", "Grant",
 		"Tucker", "Reed", "Cole", "Bryce", "Wes", "Donte", "Rasheed",
+		"Amari", "Antoine", "Ashton", "Braden", "Brandon", "Brayden", "Cameron",
+		"Carter", "Chandler", "Chase", "Christian", "Corey", "Dalton", "Damari",
+		"Damien", "Dante", "Daquan", "Darnell", "Davion", "Dawson", "Demetrius",
+		"Deonte", "Derrick", "Dominic", "Donovan", "Drew", "Emmanuel", "Eric",
+		"Evan", "Ezra", "Gabriel", "Gavin", "Hunter", "Ian", "Immanuel",
+		"Jace", "Jamari", "Jamir", "Jaquan", "Jared", "Jarrett", "Jayden",
+		"Jeremiah", "Jermaine", "Jaxon", "Josiah", "Julian", "Justin", "Kadeem",
+		"Kaleb", "Keegan", "Kendrick", "Keon", "Khalil", "Kyree", "Landon",
+		"Lawson", "Levi", "Logan", "Lucas", "Marquis", "Mason", "Maurice",
+		"Miles", "Myles", "Nasir", "Nolan", "Omari", "Owen", "Parker",
+		"Preston", "Quentin", "Quinn", "Raheem", "Rashad", "Rayshaun", "Rowan",
+		"Ryder", "Samir", "Sebastian", "Shamar", "Silas", "Solomon", "Tariq",
+		"Terrance", "Theo", "Trevon", "Tristan", "Tyrell", "Vaughn", "Wyatt",
+		"Zaire", "Zeke", "Amadou", "Ousmane", "Cheikh", "Ibrahima", "Adama",
+		"Kwame", "Kofi", "Emeka", "Chidi", "Obi", "Bilal", "Youssef",
+		"Karim", "Hakim", "Ismail", "Luka", "Nikola", "Marko", "Stefan",
+		"Vasilije", "Dario", "Andrej", "Matej", "Tomas", "Jonas", "Mateusz",
+		"Kacper", "Aleksei", "Dmitri", "Sasha", "Mateo", "Santiago", "Diego",
+		"Rafael", "Joao", "Bruno", "Andres", "Cristian", "Emilio", "Hugo",
+		"Mathieu", "Baptiste", "Yannick", "Lars", "Sven", "Kai", "Matteo",
+		"Alessandro", "Lorenzo", "Giacomo", "Yuto", "Ren", "Haruto", "Ji-ho",
+		"Min-jun", "Arjun", "Rohan", "Kian", "Amir",
 	];
 	const PLAYER_LAST = [
-		"Washington", "Carter", "Brooks", "Jenkins", "Hayes", "Porter",
-		"Bell", "Rivers", "Sims", "Whitfield", "Dillard", "McCray",
-		"Holloway", "Battle", "Vaughn", "Kessler", "Okafor", "Ramirez",
-		"Thompson", "Greer", "Lofton", "Pemberton", "Sanders", "Diallo",
-		"Barnes", "Hendricks", "Mosley", "Turner",
+		"Washington", "Carter", "Brooks", "Jenkins", "Hayes", "Porter", "Bell",
+		"Rivers", "Sims", "Whitfield", "Dillard", "McCray", "Holloway", "Battle",
+		"Vaughn", "Kessler", "Okafor", "Ramirez", "Thompson", "Greer", "Lofton",
+		"Pemberton", "Sanders", "Diallo", "Barnes", "Hendricks", "Mosley", "Turner",
+		"Abernathy", "Alston", "Ashford", "Baldwin", "Banks", "Bassett", "Beasley",
+		"Beckham", "Benjamin", "Bishop", "Bowman", "Bradley", "Braswell", "Bridgewater",
+		"Broadnax", "Bryant", "Buchanan", "Burnett", "Caldwell", "Calhoun", "Chambers",
+		"Chandler", "Cobb", "Coleman", "Conyers", "Crawford", "Crenshaw", "Cummings",
+		"Dandridge", "Daniels", "Dawkins", "Dixon", "Dorsey", "Dowdell", "Ellington",
+		"Ellis", "Fielder", "Flournoy", "Fontenot", "Foster", "Fuller", "Gaines",
+		"Gardner", "Gibbs", "Gilliam", "Glover", "Grady", "Hamlin", "Hardaway",
+		"Harper", "Harrell", "Haskins", "Hawkins", "Herrington", "Hicks", "Hilliard",
+		"Hobson", "Hollins", "Hopkins", "Ingram", "Isley", "Jeffries", "Jernigan",
+		"Kearse", "Kimbrough", "Lassiter", "Lawson", "Ledbetter", "Lott", "Lumpkin",
+		"Mackey", "Malloy", "Marbury", "Marshall", "Mayfield", "McCollum", "McKinney",
+		"Merriweather", "Middleton", "Milton", "Mobley", "Monroe", "Muhammad", "Nance",
+		"Nesmith", "Newsome", "Oglesby", "Outlaw", "Overton", "Pettiford", "Pinckney",
+		"Pippen", "Prosser", "Quarles", "Randle", "Rankin", "Reddick", "Rucker",
+		"Satterfield", "Shumpert", "Singletary", "Slaughter", "Southerland", "Spellman", "Stackhouse",
+		"Stubblefield", "Sumpter", "Swinton", "Tatum", "Teague", "Thornhill", "Tillman",
+		"Toppin", "Trapp", "Waiters", "Wallace", "Whitmore", "Wilkes", "Winston",
+		"Woodard", "Yeboah", "Mensah", "Adebayo", "Nwachukwu", "Ndiaye", "Sy",
+		"Traore", "Konate", "Bamba", "Kaba", "Mutombo", "Achiuwa", "Olubode",
+		"Marjanovic", "Petrovic", "Jovanovic", "Kovacevic", "Radulovic", "Bogdanovic", "Dragic",
+		"Zubac", "Kalinic", "Novak", "Vesely", "Jurkiewicz", "Zielinski", "Kaminski",
+		"Ivanov", "Popescu", "Balogh", "Virtanen", "Nilsson", "Andersen", "Bakker",
+		"Vermeulen", "Schroder", "Muller", "Weber", "Fournier", "Lemoine", "Dubois",
+		"Rossi", "Bellini", "Ferrari", "Esposito", "Silva", "Ferreira", "Cardoso",
+		"Ramos", "Delgado", "Ortega", "Salazar", "Guerrero", "Vargas", "Yamamoto",
+		"Tanabe", "Kobayashi", "Park", "Jung", "Sharma", "Patel",
 	];
 
-	/* 40 x 42 = 1,680 possible names for 368 programs a season. In a
+	/* 40 x 42 = 1,680 possible names for 364 programs a season. In a
 	   single class that is invisible; in Universe mode, where a coach persists
 	   until he is fired, a forty-name pool starts repeating inside a few
 	   seasons (measured over 40 classes: 1,679 distinct names across 14,720
-	   team-seasons, the commonest used 19 times). 96 x 132 is 12,672. */
+	   team-seasons, the commonest used 19 times). 194 x 132 is 25,608. */
+	/* One generation of Anglo first names is one generation of coaches:
+	   every staff in the country was named Hal, Walt or Boyd. The pool now
+	   carries the names of coaches who are forty as well as seventy, and
+	   the Hispanic, Balkan, African and Arabic names that a Division I
+	   bench actually holds. */
 	const COACH_FIRST = [
-		"Ray", "Dan", "Marcus", "Tom", "Bruce", "Leon", "Chris", "Pat", "Ed",
-		"Kevin", "Andre", "Mike", "Steve", "Wes", "Hal", "Dennis", "Craig",
-		"Tony", "Grant", "Sam", "Vince", "Nate", "Curtis", "Joel", "Roland",
-		"Rodney", "Jerome", "Cliff", "Walt", "Terrence", "Darren", "Phil",
-		"Reggie", "Lamont", "Oscar", "Calvin", "Mitch", "Boyd", "Russ", "Dwight",
-		"Aaron", "Barry", "Brad", "Brian", "Bryan", "Carl", "Chad", "Clay",
-		"Dale", "Dave", "Doug", "Drew", "Earl", "Eric", "Frank", "Fred",
-		"Gary", "Glen", "Greg", "Hank", "Howard", "Ira", "Jake", "Jay",
-		"Jeff", "Jim", "Joe", "Jon", "Keith", "Ken", "Kirk", "Kyle",
-		"Lance", "Larry", "Lee", "Len", "Lonnie", "Luke", "Marty", "Matt",
-		"Neil", "Nick", "Otis", "Paul", "Pete", "Rick", "Rob", "Ron",
-		"Roy", "Scott", "Shawn", "Ted", "Tim", "Todd", "Troy", "Wade",
+		"Ray", "Dan", "Marcus", "Tom", "Bruce", "Leon", "Chris",
+		"Pat", "Ed", "Kevin", "Andre", "Mike", "Steve", "Wes",
+		"Hal", "Dennis", "Craig", "Tony", "Grant", "Sam", "Vince",
+		"Nate", "Curtis", "Joel", "Roland", "Rodney", "Jerome", "Cliff",
+		"Walt", "Terrence", "Darren", "Phil", "Reggie", "Lamont", "Oscar",
+		"Calvin", "Mitch", "Boyd", "Russ", "Dwight", "Aaron", "Barry",
+		"Brad", "Brian", "Bryan", "Carl", "Chad", "Clay", "Dale",
+		"Dave", "Doug", "Drew", "Earl", "Eric", "Frank", "Fred",
+		"Gary", "Glen", "Greg", "Hank", "Howard", "Ira", "Jake",
+		"Jay", "Jeff", "Jim", "Joe", "Jon", "Keith", "Ken",
+		"Kirk", "Kyle", "Lance", "Larry", "Lee", "Len", "Lonnie",
+		"Luke", "Marty", "Matt", "Neil", "Nick", "Otis", "Paul",
+		"Pete", "Rick", "Rob", "Ron", "Roy", "Scott", "Shawn",
+		"Ted", "Tim", "Todd", "Troy", "Wade", "Andres", "Antonio",
+		"Alonzo", "Amir", "Arturo", "Bilal", "Cedric", "Cesar", "Damon",
+		"Darnell", "Demetrius", "Diego", "Dominic", "Dwayne", "Elias", "Emeka",
+		"Enrique", "Ezekiel", "Gio", "Hakeem", "Hector", "Ibrahim", "Isaac",
+		"Ismael", "Ivan", "Javier", "Jamal", "Jermaine", "Jesus", "Joaquin",
+		"Jorge", "Jose", "Josip", "Julio", "Karim", "Khalil", "Kwame",
+		"Lorenzo", "Luis", "Luka", "Marcos", "Mateo", "Miguel", "Mikhail",
+		"Milos", "Mohamed", "Nikola", "Omar", "Pablo", "Pedro", "Rafael",
+		"Ramon", "Ricardo", "Rodrigo", "Salim", "Samir", "Sergio", "Stefan",
+		"Tomas", "Vasilis", "Vicente", "Yannick", "Yusuf", "Zoran", "Aiden",
+		"Brandon", "Bryson", "Cody", "Corey", "Damian", "Derrick", "Devon",
+		"Dominique", "Elijah", "Evan", "Garrett", "Isaiah", "Jared", "Jarrod",
+		"Jaylen", "Jordan", "Justin", "Kendrick", "Malik", "Marquis", "Mason",
+		"Maurice", "Micah", "Miles", "Nasir", "Nolan", "Preston", "Quentin",
+		"Terrell", "Trevor", "Tyrone", "Xavier", "Zachary",
 	];
 	const COACH_LAST = [
 		"Aldrich", "Beauchamp", "Calloway", "Duvall", "Espinoza", "Fenwick",
@@ -1078,6 +1175,21 @@
 		return clamp(3.2 + (prestige - 60) / 34, 2.1, 4.5);
 	}
 
+	/* Points per possession-pair for the era being simulated.
+
+	   The scoreboard used to multiply pace by a hardcoded 2.06 — one number
+	   for every era, which put both the modern game and 2009-2021 on about 70
+	   points a team while js/calibration.js anchors the modern game at 73.6
+	   points on 67.4 possessions (2.184 a pair) and the older one at 70.0 on
+	   68.5 (2.044). So the stat model and the scoreboard were reading two
+	   different rulebooks, and switching era moved one and not the other. */
+	function pointsPerPair(cfg) {
+		const CAL = global.Calibration;
+		const e = CAL && CAL.eraInfo ? CAL.eraInfo(cfg && cfg.era) : null;
+		const t = e && e.team;
+		return t && t.poss > 0 ? t.pts / t.poss : 1.03;
+	}
+
 	function playGameScore(rng, A, B, homeForA, cfg, when, postseason) {
 		const noise = postseason
 			? 1 + 0.2 * clamp(cfg.upsetFactor, 0, 3)
@@ -1100,7 +1212,8 @@
 		   be 92 and 190 for college and 92 and 260 for anything with its own
 		   pace, which is two magic pairs describing one relationship: a game
 		   is between about 1.35 and 2.95 points per possession-pair. */
-		const total = clamp(pace * 2.06 + rng.normal(0, 9), pace * 1.35, pace * 2.95);
+		const total = clamp(pace * 2 * pointsPerPair(cfg) + rng.normal(0, 9),
+			pace * 1.35, pace * 2.95);
 		let a = Math.round((total + margin) / 2);
 		let b = Math.round((total - margin) / 2);
 		/* THE LAST MINUTE IS NOT A RANDOM WALK.
@@ -1320,8 +1433,31 @@
 	   The one exception is the postponement, which is a fact about a game
 	   nobody would otherwise mention and changes nothing about it. */
 	function midSeasonEvents(teams, rng, cfg) {
-		const budget = Math.round(clamp(
-			cfg && cfg.seasonEvents !== undefined ? cfg.seasonEvents : 7, 0, 20));
+		/* HOW MANY, DRAWN — not set.
+
+		   The budget was a constant and the flavor pool below topped every
+		   season up to it exactly, so every season had precisely seven things
+		   happen in it and each KIND of thing happened in twelve to seventeen
+		   seasons out of twenty. A season nobody fought in, and a season with
+		   three storms and a firing, are both ordinary; a fixed budget can
+		   produce neither. The slider still says how eventful a season is —
+		   it is the MEAN of a Poisson draw now instead of the count, and the
+		   gates on the result-driven kinds were loosened to match, so no kind
+		   fires in much more than two thirds of seasons. */
+		const setting = clamp(
+			cfg && cfg.seasonEvents !== undefined ? cfg.seasonEvents : 7, 0, 20);
+		let budget = 0;
+		if (setting > 0) {
+			// Knuth, on a mean of 0.7 of the setting: five at the default.
+			const lambda = 0.7 * setting;
+			const bar = Math.exp(-lambda);
+			let prod = rng.random();
+			while (prod > bar && budget < 20) { budget++; prod *= rng.random(); }
+			// With a floor: a Division I season is never empty, and a draw
+			// that can come back with one thing in it is a different claim
+			// from "some seasons are quieter than others".
+			budget = Math.max(Math.min(4, Math.round(setting)), budget);
+		}
 		if (!budget) return [];
 		const all = Object.keys(teams).map((n) => teams[n]);
 		const ranked = all.slice().sort((a, b) => b.rating - a.rating);
@@ -1363,7 +1499,7 @@
 			loser.rating >= topRating && winner.rating < loser.rating - 14)
 			.sort((a, b) => (b.loser.rating - b.winner.rating) -
 				(a.loser.rating - a.winner.rating));
-		if (upsets.length && tells(0.8)) {
+		if (upsets.length && tells(0.55)) {
 			const u = rng.pick(upsets.slice(0, 8));
 			/* Three texts per event kind rather than one.
 
@@ -1389,7 +1525,7 @@
 		const good = games.filter(({ winner, loser, g }) =>
 			winner.rating > topRating - 6 && loser.rating > topRating - 6 &&
 			Math.abs(g.pf - g.pa) <= 3);
-		if (good.length && tells(0.75)) {
+		if (good.length && tells(0.55)) {
 			const gm = rng.pick(good);
 			const otTag = gm.g.ot
 				? " (" + (gm.g.ot > 1 ? gm.g.ot + "OT" : "OT") + ")" : "";
@@ -1410,7 +1546,7 @@
 		const failing = all.filter((t) =>
 			t.games >= 10 && t.w / Math.max(1, t.games) < 0.35 &&
 			C.prestige(t.name) >= 55);
-		if (failing.length && tells(0.7)) {
+		if (failing.length && tells(0.52)) {
 			const t = rng.pick(failing);
 			/* The month is drawn first and the date follows it. They used to
 			   be two independent draws, so the text said February while the
@@ -1443,7 +1579,7 @@
 		// season and not only about one night.
 		const blowouts = games.filter(({ g }) => g.pf - g.pa >= 38)
 			.sort((a, b) => (b.g.pf - b.g.pa) - (a.g.pf - a.g.pa));
-		if (blowouts.length && tells(0.65)) {
+		if (blowouts.length && tells(0.55)) {
 			const b = blowouts[0];
 			const by = b.g.pf - b.g.pa;
 			add("blowout", rng.pick([
@@ -1460,7 +1596,7 @@
 		// A winning streak that changed a team's season.
 		const streaks = all.map((t) => ({ t, n: longestRun(t) }))
 			.filter((x) => x.n >= 12).sort((a, b) => b.n - a.n);
-		if (streaks.length && tells(0.7)) {
+		if (streaks.length && tells(0.55)) {
 			const st = rng.pick(streaks.slice(0, 5));
 			add("streak", rng.pick([
 				st.t.name + " won " + st.n + " in a row",
@@ -1623,7 +1759,45 @@
 
 	function simulateRegularSeason(teams, cfg, rng) {
 		const names = Object.keys(teams);
+		/* WHERE THE GAME IS PLAYED.
+
+		   Every conference game flipped a coin and every non-conference game
+		   went to whichever program had the higher prestige, and neither
+		   remembered anything. So home games ran from 3 to 27 in a 31-game
+		   season, against a real 13-19: a low-major that drew badly played
+		   most of its league schedule on the road AND every non-conference
+		   game, and the home edge — worth about three points a night — was
+		   handed out by accident.
+
+		   Three rules replace them. A second meeting between the same two
+		   teams is the return leg and is played at the other building. A
+		   single meeting goes to whoever has fewer home dates so far, which
+		   keeps a league's home counts within a game of half its slate. And a
+		   non-conference game is a NEGOTIATION: the bigger program usually
+		   buys the game, but the gap decides how usually, and about one in
+		   seven is played somewhere else entirely. */
+		const homeCount = new Map();
+		const venue = new Map();
+		const homeOf = (t) => homeCount.get(t) || 0;
+		const vKey = (a, b) => (a.name < b.name ? a.name + "|" + b.name : b.name + "|" + a.name);
+		const pickVenue = (A, B, conference) => {
+			const prev = venue.get(vKey(A, B));
+			// The return leg.
+			if (prev !== undefined) return prev === A ? -1 : 1;
+			if (conference) {
+				const d = homeOf(A) - homeOf(B);
+				return d === 0 ? (rng.random() < 0.5 ? 1 : -1) : (d < 0 ? 1 : -1);
+			}
+			if (rng.random() < 0.15) return 0;   // a neutral-site or holiday event
+			const gap = (A.prestige || 60) - (B.prestige || 60) +
+				2.5 * (homeOf(B) - homeOf(A));
+			return rng.random() < 1 / (1 + Math.exp(-gap / 20)) ? 1 : -1;
+		};
 		const play = (A, B, aHome, conference) => {
+			if (aHome === null) aHome = pickVenue(A, B, conference);
+			if (aHome > 0) homeCount.set(A, homeOf(A) + 1);
+			else if (aHome < 0) homeCount.set(B, homeOf(B) + 1);
+			if (aHome !== 0) venue.set(vKey(A, B), aHome > 0 ? A : B);
 			// Conference play sits later in the calendar than non-conference.
 			const when = conference ? rng.uniform(0.35, 1) : rng.uniform(0, 0.55);
 			const sc = playGameScore(rng, A, B, aHome, cfg, when);
@@ -1647,7 +1821,7 @@
 			   conference below. */
 			const n = clamp(2 * (pool.length - 1), 14, 20);
 			pairUp(rng, pool, n, null, (A, B) => {
-				play(A, B, rng.random() < 0.5 ? 1 : -1, true);
+				play(A, B, null, true);
 			}, 2);
 		}
 
@@ -1665,7 +1839,7 @@
 			(a, b, roll) => a.conf !== b.conf &&
 				roll < Math.exp(-Math.abs(a.rating - b.rating) / 24) + 0.06,
 			(A, B) => {
-				play(A, B, A.prestige > B.prestige ? 1 : -1, false);
+				play(A, B, null, false);
 			}, 1);
 
 		// Anyone still short (a lone Independent, or the odd-total victim)
@@ -1775,11 +1949,46 @@
 		const pools = conferencePools(teams);
 
 		for (const conf of Object.keys(pools)) {
-			const seeds = pools[conf]
-				.slice()
-				.sort((a, b) => b.cw - b.cl - (a.cw - a.cl) || b.rating - a.rating);
+			/* SEEDING, WITHOUT THE ANSWER KEY.
+
+			   Conference record first, and then `b.rating` — the sim's hidden
+			   true strength — which decided 1,062 ties over ten seasons. A
+			   league office breaks a tie on the games: head to head, then the
+			   record inside the league, then how the two played. */
+			const pool = pools[conf];
+			const h2h = (a, b) => {
+				let d = 0;
+				for (const g of a.log) {
+					if (g.stage !== "reg" || g.opp !== b.name) continue;
+					d += g.won ? 1 : -1;
+				}
+				return d;
+			};
+			const confMargin = (t) => {
+				let m = 0;
+				let n = 0;
+				for (const g of t.log) {
+					if (g.stage !== "reg" || !g.conference) continue;
+					m += (g.pf || 0) - (g.pa || 0); n++;
+				}
+				return n ? m / n : 0;
+			};
+			const margins = new Map(pool.map((t) => [t, confMargin(t)]));
+			const seeds = pool.slice().sort((a, b) =>
+				(b.cw - b.cl) - (a.cw - a.cl) ||
+				h2h(b, a) ||
+				(b.w - b.l) - (a.w - a.l) ||
+				margins.get(b) - margins.get(a) ||
+				(a.name < b.name ? -1 : 1));
 			if (!seeds.length) continue;
-			let field = seeds.slice(0, Math.min(12, seeds.length));
+			/* EVERY member plays. The field was capped at twelve, so six ACC
+			   and Big Ten teams and four from the SEC and Big 12 finished a
+			   season without a conference tournament game — and an eleventh
+			   seed's run to the title, which is where a bid gets stolen, could
+			   not happen in the leagues it happens in. The bye maths below
+			   already hands the top seeds the byes (and the double byes) a
+			   large league's bracket gives them. */
+			let field = seeds.slice();
 			// Only teams actually in the bracket play tournament games — the
 			// old code credited every program in the country with one, which
 			// inflated everybody's games played.
@@ -1977,5 +2186,8 @@
 		midSeasonEvents, longestRun, coachingCarousel, RETIRE_AGE,
 		label, adoptConference, conferencePools, PROGRAM_STYLES,
 		CONF_GAMES, NON_CONF_GAMES,
+		// Exposed so tools/tests/export.js can check the pools for size and
+		// duplicates; nothing in the app reads them from here.
+		PLAYER_FIRST, PLAYER_LAST, COACH_FIRST, COACH_LAST,
 	};
 })(typeof window !== "undefined" ? window : self);

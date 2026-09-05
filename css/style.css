@@ -9,7 +9,7 @@
 	--text: #1c2128;
 	--dim: #59636e;
 	--accent: #0969da;
-	--accent-2: #a2601a;
+	--accent-2: #8a5115;
 	--good: #1a7f4b;
 	--bad: #c0323a;
 	--rowH: 6px;
@@ -22,10 +22,19 @@
 	--shadow-1: 0 1px 2px rgba(16, 24, 40, .06);
 	--shadow-2: 0 8px 28px rgba(16, 24, 40, .16);
 	--surface-hover: rgba(127, 127, 127, .10);
+	/* The quiet fill behind a tag. Referenced as var(--chip, …) and never
+	   defined, which is how --ok and --win were wrong for a year. */
+	--chip: rgba(127, 127, 127, .12);
+	/* Text ON the accent. A theme whose accent is light enough to need dark
+	   text overrides it; white on the dark palette's #4da3ff was 2.6:1, on the
+	   most-pressed button in the tool. */
+	--on-accent: #ffffff;
 	--mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
 	:root:not([data-theme="light"]) {
+		--on-accent: #10161d;
+		--upset-bg2: rgba(255,180,84,.24); --upset-bg3: rgba(255,180,84,.34);
 		--bg: #0f1216; --panel: #161b22; --panel-2: #1c232c; --line: #2a323d;
 		--text: #e6edf3; --dim: #9aa7b4; --accent: #4da3ff; --accent-2: #ffb454;
 		--good: #57c78a; --bad: #f2686a;
@@ -35,6 +44,10 @@
 	--tag-arch-border: #3b5b7d; --tag-arch-text: #8fc0f0;
 	--tag-pro-border: #6b5230; --tag-pro-text: var(--accent-2);
 	--win-bg: rgba(87,199,138,.10); --upset-bg: rgba(255,180,84,.13);
+	/* upset-bg2/3 were never defined anywhere, so a dark bracket painted its
+	   heaviest upsets in the light theme's browns. */
+	--on-accent: #10161d;
+	--upset-bg2: rgba(255,180,84,.24); --upset-bg3: rgba(255,180,84,.34);
 	--bg: #0f1216; --panel: #161b22; --panel-2: #1c232c; --line: #2a323d;
 	--text: #e6edf3; --dim: #9aa7b4; --accent: #4da3ff; --accent-2: #ffb454;
 	--good: #57c78a; --bad: #f2686a;
@@ -53,6 +66,10 @@
 	--tag-arch-border: #3b5b7d; --tag-arch-text: #8fc0f0;
 	--tag-pro-border: #6b5230; --tag-pro-text: var(--accent-2);
 	--win-bg: rgba(87,199,138,.10); --upset-bg: rgba(255,180,84,.13);
+	/* upset-bg2/3 were never defined anywhere, so a dark bracket painted its
+	   heaviest upsets in the light theme's browns. */
+	--on-accent: #10161d;
+	--upset-bg2: rgba(255,180,84,.24); --upset-bg3: rgba(255,180,84,.34);
 	--bg: #17151f; --panel: #1e1b28; --panel-2: #272332; --line: #383343;
 	--text: #ded9e2; --dim: #a79fc0; --accent: #80a1d4; --accent-2: #75c9c8;
 	--good: #75c9c8; --bad: #e89197;
@@ -76,6 +93,10 @@
 	--tag-arch-border: #3b5b7d; --tag-arch-text: #8fc0f0;
 	--tag-pro-border: #6b5230; --tag-pro-text: var(--accent-2);
 	--win-bg: rgba(87,199,138,.10); --upset-bg: rgba(255,180,84,.13);
+	/* upset-bg2/3 were never defined anywhere, so a dark bracket painted its
+	   heaviest upsets in the light theme's browns. */
+	--on-accent: #10161d;
+	--upset-bg2: rgba(255,180,84,.24); --upset-bg3: rgba(255,180,84,.34);
 	--bg: #171123; --panel: #221631; --panel-2: #2c1c3d; --line: #414770;
 	--text: #f4efe8; --dim: #9a93b0; --accent: #5b85aa; --accent-2: #f46036;
 	--good: #57c78a; --bad: #e0574a;
@@ -111,7 +132,18 @@ header h1 span { color: var(--accent); font-weight: 600; }
 #btnSettings { border-color: var(--line); color: var(--text); background: var(--panel-2); }
 .btngroup.tools > .iconbtn { border-color: var(--line); }
 .btngroup.tools > .iconbtn:hover:not(:disabled) { border-color: var(--accent); }
-.spacer { flex: 1; }
+/* paintUndo writes what the button will undo into the label, so its width
+   changes with every action. Uncapped, one long label rewrapped the whole
+   header — the toolbar jumped a row down mid-session. */
+#btnUndo {
+	max-width: 17ch; overflow: hidden; text-overflow: ellipsis;
+	white-space: nowrap; display: inline-block;
+}
+/* The spacer pushes the right-hand groups over on a single-line header. When
+   the header wraps — a long "Undo …" label and the seed history are enough at
+   1400px — a flex item with a height of its own becomes an empty band across
+   the page, which is what the 90px hole between the two header rows was. */
+.spacer { flex: 1 1 0; height: 0; }
 /* Six loose buttons in a row read as one undifferentiated bar. */
 .btngroup { display: inline-flex; gap: 0; align-items: center; }
 .btngroup.wide { display: flex; gap: 6px; margin: 6px 0; }
@@ -127,7 +159,7 @@ button, select, input[type=text], input[type=number], input[type=search] {
 button { cursor: pointer; }
 button:hover:not(:disabled) { border-color: var(--accent); position: relative; z-index: 1; }
 button:disabled { opacity: .45; cursor: default; }
-button.primary { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+button.primary { background: var(--accent); color: var(--on-accent, #fff); border-color: var(--accent); font-weight: 600; }
 button.warn { border-color: var(--accent-2); color: var(--accent-2); }
 button.tiny { padding: 2px 7px; font-size: 11px; }
 .layout { display: flex; align-items: flex-start; gap: 0; }
@@ -253,6 +285,14 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 	background: var(--panel); box-shadow: var(--shadow-1);
 }
 .card h4 { margin: 0 0 6px; font-size: 13px; }
+/* The name and the per-note copy button share a line; the button is quiet
+   until the card is hovered or the button itself is focused, so seventy cards
+   do not read as seventy buttons. */
+.notehead { justify-content: space-between; gap: 6px; flex-wrap: nowrap; }
+.notehead h4 { margin: 0; }
+.notehead button { opacity: 0; transition: opacity .12s ease; }
+.card:hover .notehead button, .notehead button:focus-visible { opacity: 1; }
+@media (hover: none) { .notehead button { opacity: 1; } }
 .note { font-family: var(--mono); font-size: 11.5px; white-space: pre-wrap; color: var(--dim); }
 .bracket { display: flex; gap: 18px; overflow-x: auto; padding-bottom: 10px; }
 .round { min-width: 190px; }
@@ -268,7 +308,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .game.upset2 .w { background: var(--upset-bg2, rgba(162,96,26,.24)); }
 .game.upset3 .w { background: var(--upset-bg3, rgba(190,72,20,.34)); }
 .game .sdtop { color: var(--accent); font-weight: 700; }
-.game .sdlow { opacity: .65; }
+.game .sdlow { opacity: .8; }
 /* Hovering a team lights its whole path through the rounds. */
 .game .pathlit { color: var(--accent); font-weight: 700; }
 /* Connector elbows: each game joins toward its parent round, which is what
@@ -279,8 +319,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 	width: 9px; height: 1px; background: var(--line);
 }
 /* Poll movement coloring. */
-td.pollup { color: var(--win, #1a7f4b); }
-td.polldown { color: var(--accent-2, #a2601a); }
+td.pollup { color: var(--good); }
+td.polldown { color: var(--accent-2); }
 .game .gn { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .game .score { font-size: 10.5px; color: var(--dim); font-variant-numeric: tabular-nums; border-top: 1px solid var(--line); }
 .drop { border: 2px dashed var(--line); border-radius: 12px; padding: 46px; text-align: center; color: var(--dim); margin: 40px auto; max-width: 620px; }
@@ -370,6 +410,11 @@ tbody tr { cursor: pointer; }
    room for both. */
 .bracketwrap { display: grid; gap: 16px; grid-template-columns: 1fr; }
 .bracketwrap .half { min-width: 0; display: grid; gap: 14px; }
+/* Without this the region sizes to the whole bracket (814px at the sample
+   class) and the PAGE scrolls sideways on a phone instead of the bracket
+   scrolling inside its own box: every other tab sat in a 390px column with
+   half the viewport blank to the right of it. */
+.bracketwrap .half > *, .regionbox { min-width: 0; max-width: 100%; }
 .bracketwrap .centercol { min-width: 0; order: 1; }
 @media (min-width: 1850px) {
 	.bracketwrap { grid-template-columns: 1fr 240px 1fr; align-items: start; }
@@ -396,6 +441,14 @@ tbody tr { cursor: pointer; }
 	padding: 16px 18px; max-width: 560px; width: 100%; max-height: 80vh; overflow: auto;
 }
 .modalbox h3 { margin: 0 0 10px; }
+/* The import-route table is five columns of two or three words each. Left to
+   size itself it was 200px wider than the dialog, so the two columns that
+   answer "does this keep my awards" sat off the right edge behind a scrollbar
+   nobody looks for inside a dialog. Fixed layout wraps them instead. */
+.modalbox table.routes { width: 100%; table-layout: fixed; font-size: 11.5px; }
+.modalbox table.routes th, .modalbox table.routes td {
+	white-space: normal; overflow-wrap: anywhere; padding: 4px 6px; vertical-align: top;
+}
 .modalbtns { justify-content: flex-end; margin-top: 12px; }
 
 /* ---- narrow viewports ---------------------------------------------------- */
@@ -534,7 +587,9 @@ tbody tr.editing td.sticky { background: rgba(9,105,218,.14); }
 	.scroll { max-height: none; }
 	/* A 40-column table on a phone is a horizontal scroll no matter what, so
 	   make the row header narrower rather than pretending otherwise. */
-	th.sticky, td.sticky { max-width: 120px; }
+	th.sticky, td.sticky {
+		max-width: 120px; overflow: hidden; text-overflow: ellipsis;
+	}
 	.editgrid, .ratinggrid { grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); }
 }
 
@@ -914,7 +969,7 @@ th.dropafter { box-shadow: inset -2px 0 0 0 var(--accent); }
 .chips .chip.on {
 	background: var(--accent, #3b82f6);
 	border-color: var(--accent, #3b82f6);
-	color: #fff;
+	color: var(--on-accent, #fff);
 }
 .ctl .lbl { display: block; font-size: 11px; margin-bottom: 3px; }
 /* The settings filter sits above the groups and is not itself a setting. */
@@ -926,9 +981,13 @@ th.dropafter { box-shadow: inset -2px 0 0 0 var(--accent); }
    nobody reads. Green: milliseconds. Amber: the season is re-simulated.
    Red: the whole class is rebuilt. */
 .ctl .phasecost { font-size: 10px; letter-spacing: .04em; }
-.ctl .phasecost.cheap { color: var(--ok, #16a34a); }
-.ctl .phasecost.mid { color: var(--warn, #d97706); }
-.ctl .phasecost.dear { color: var(--bad, #dc2626); }
+/* These read var(--ok) and var(--warn), which no theme defines, so every
+   theme got the same three light-theme hexes — 3.2:1 on white, and a green
+   that a dark panel swallowed. The palette already carries a per-theme good,
+   warning and bad. */
+.ctl .phasecost.cheap { color: var(--good); }
+.ctl .phasecost.mid { color: var(--accent-2); }
+.ctl .phasecost.dear { color: var(--bad); }
 
 /* Modal buttons are thumb targets on a phone. */
 @media (max-width: 520px) {

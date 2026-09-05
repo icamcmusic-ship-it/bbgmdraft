@@ -14,7 +14,7 @@
 	/* Words whose first letter lies about their first sound. The list is not
 	   exhaustive English; it is the vocabulary this tool actually emits. */
 	const AN_BEFORE_CONSONANT = /^(hour|honou?r|honest|heir)/i;
-	const A_BEFORE_VOWEL = /^(uni|use|usu|utah|utility|europe|euro|one|once|ou[ai])/i;
+	const A_BEFORE_VOWEL = /^(uni|usa|use|usu|utah|utility|europe|euro|one|once|ou[ai])/i;
 	// Initialisms read letter by letter: "an NBA", "an FBI", "a UCLA".
 	const INITIALISM = /^[A-Z]{2,}\b/;
 	const LETTER_SOUND_VOWEL = /^[AEFHILMNORSX]/;
@@ -45,11 +45,17 @@
 		["object leaked", /\[object Object\]/],
 		["double space", /  /],
 		["empty parenthesis", /\(\s*\)/],
-		/* "a Arizona", "a Ohio State". "a one-and-done" and "a European"
-		   are legal, which is why this reads the same list article() does:
-		   a capitalized vowel-led word after "a " that article() would have
-		   given "an". */
-		["a before a vowel sound", /\b[aA] ([AEIOU][a-z]+)/],
+		/* "a Arizona", "a Ohio State", "a old-school disciplinarian". "a
+		   one-and-done" and "a European" are legal, which is why this reads
+		   the same list article() does: a vowel-led word after "a " that
+		   article() would have given "an".
+
+		   Lowercase words are checked too. They were not, on the theory that
+		   the bug was a program name — but the templates put adjectives after
+		   an article as often as they put schools there, and "a old-school
+		   disciplinarian coach" shipped in the champion's-coach story for
+		   exactly as long as the rule only looked at capitals. */
+		["a before a vowel sound", /\b[aA] ([AEIOUaeiou][a-z]+)/],
 		["an before a consonant sound", /\b[aA]n ([B-DF-HJ-NP-TV-Zb-df-hj-np-tv-z][a-z]+)/],
 		["space before punctuation", / [,.;:!?]/],
 		["doubled punctuation", /([,.;:])\1/],
@@ -58,6 +64,10 @@
 		   votes" are legal, which is what the lookbehind and the stop list
 		   below are for. */
 		["number agreement", /(?<![\d.]|No\. )\b1 ([a-z][a-z-]*[b-df-hj-np-tv-ze]s)\b/],
+		/* "his 1th season", "a 2th-round pick": an ordinal written as n+"th"
+		   by a template that did not have ordinal(). 11th/12th/13th are the
+		   legal exceptions the lookbehind protects. */
+		["bad ordinal", /(?<!1)[123]th\b/],
 	];
 	const ONE_OK = /^(is|was|has|vs|as|this|plus|its|his|does|goes|us|across|minus|less|unless|yes|thus|always|perhaps|seeds?|points?)$/;
 
@@ -85,6 +95,17 @@
 		return num + " " + (num === 1 ? word : (pluralWord || word + "s"));
 	}
 
+	/* "1st", "2nd", "3rd", "11th". Every template that wanted an ordinal
+	   wrote `n + "th"`, which is right for eight numbers in ten and produced
+	   "his 1th season" and "a 2th-round pick" for the rest. */
+	function ordinal(n) {
+		const num = Number(n);
+		if (!Number.isFinite(num)) return String(n);
+		const v = Math.abs(num) % 100;
+		if (v >= 11 && v <= 13) return num + "th";
+		return num + (["th", "st", "nd", "rd"][Math.abs(num) % 10] || "th");
+	}
+
 	/* Capitalize the first letter of a sentence that begins with generated
 	   text ("a Louisiana dunk was the most-watched clip" as a body). */
 	function capitalize(s) {
@@ -108,5 +129,5 @@
 		return segs.map((x) => (x && x.v !== undefined ? String(x.v) : "")).join("");
 	}
 
-	global.Text = { article, withArticle, endSentence, textFaults, segsToText, plural, capitalize };
+	global.Text = { article, withArticle, endSentence, textFaults, segsToText, plural, capitalize, ordinal };
 })(typeof window !== "undefined" ? window : self);
