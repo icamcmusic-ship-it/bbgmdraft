@@ -61,6 +61,15 @@
 	     years             the class years it can apply to
 	     minOvr / maxOvr
 	     transfer          true if the player must be a transfer
+	     off               the BUILD's authored offsets, [lo, hi] per rating
+	                       and either side null — "his build has to be at
+	                       least this good at this" (see RAW_OFFSETS)
+	     minInj / maxInj   the build's own injury multiplier (`inj` in the
+	                       archetype table, 1 when it has none). A durability
+	                       build sits at 0.45 and an injury-prone one at 2.0,
+	                       so maxInj gates the clean-file traits away from the
+	                       fragile builds and minInj the medical-history ones
+	                       away from the iron men.
 	   `eff` fields, all optional:
 	     vol               multiplier on night-to-night spread (see gameLog)
 	     orbBias           shifts the offensive/defensive rebound split
@@ -80,27 +89,32 @@
 		{ name: "room to fill out", group: "frame", w: 2.6, needs: { years: ["Freshman", "Sophomore"] },
 			note: "a frame that will carry another twenty pounds",
 			adj: "wiry" },
-		{ name: "maxed-out frame", group: "frame", w: 1.4, needs: { years: ["Senior", "Graduate"] },
+		{ name: "maxed-out frame", group: "frame", w: 1.4, needs: { years: ["Senior", "Graduate"], off: { stre: [-10, null] } },
 			note: "a body that is not going to change much from here",
 			adj: "physically finished" },
 		{ name: "narrow-shouldered", group: "frame", w: 1.1,
 			note: "narrow shoulders that make contact a problem he has to solve some other way",
 			adj: "slight" },
-		{ name: "genuinely strong", group: "frame", w: 1.6,
+		/* The physical traits are gated on the BUILD's own offsets, not only
+		   on height and class year. "Genuinely strong" was drawable on 19
+		   builds that author stre -8 or worse (Toughness Question at -22),
+		   "explosive first step" on 38 with spd -8 or worse, and so on down —
+		   a scouting line that the rating vector beside it flatly denies. */
+		{ name: "genuinely strong", group: "frame", w: 1.6, needs: { off: { stre: [-4, null] } },
 			note: "the kind of strength that decides where he gets to catch it",
 			adj: "powerful" },
 
 		// ---------------------------------------------------- athleticism
-		{ name: "explosive first step", group: "athleticism", w: 2.0, needs: { maxHgt: 62 },
+		{ name: "explosive first step", group: "athleticism", w: 2.0, needs: { maxHgt: 62, off: { spd: [-4, null] } },
 			note: "a first step that gets him past his man without a screen",
 			adj: "explosive" },
-		{ name: "two-foot leaper", group: "athleticism", w: 1.6,
+		{ name: "two-foot leaper", group: "athleticism", w: 1.6, needs: { off: { jmp: [-6, null] } },
 			note: "a two-foot leaper who needs a gather but goes very high off it",
 			adj: "bouncy" },
-		{ name: "quick off one foot", group: "athleticism", w: 1.6,
+		{ name: "quick off one foot", group: "athleticism", w: 1.6, needs: { off: { jmp: [-6, null] } },
 			note: "a one-foot leaper in traffic, which is the useful kind",
 			adj: "springy" },
-		{ name: "lateral quickness", group: "athleticism", w: 1.8,
+		{ name: "lateral quickness", group: "athleticism", w: 1.8, needs: { off: { spd: [-4, null] } },
 			note: "lateral quickness that is better than his straight-line speed",
 			adj: "quick-footed" },
 		{ name: "straight-line only", group: "athleticism", w: 1.3,
@@ -183,10 +197,10 @@
 		{ name: "quick release", group: "shooting", w: 1.8, needs: { anyTag: ["shooting", "scoring"], off: { tp: [-6, null] } },
 			note: "a release quick enough that a closeout does not reach it",
 			adj: "quick-triggered" },
-		{ name: "slow, high release", group: "shooting", w: 1.2,
+		{ name: "slow, high release", group: "shooting", w: 1.2, needs: { off: { tp: [-8, null] } },
 			note: "a slow release he gets away because of his height and will not at the next level",
 			adj: "deliberate" },
-		{ name: "two-motion jumper", group: "shooting", w: 1.3,
+		{ name: "two-motion jumper", group: "shooting", w: 1.3, needs: { off: { tp: [-8, null] } },
 			note: "a two-motion jumper that works standing still and not off the move",
 			adj: "mechanical" },
 		{ name: "step-back in his bag", group: "shooting", w: 1.2, needs: { maxHgt: 60, anyTag: ["scoring", "shooting"], off: { tp: [-6, null] } },
@@ -249,7 +263,7 @@
 		{ name: "boxes out", group: "rebounding", w: 1.4, needs: { minHgt: 48 },
 			note: "a genuine box-out habit, which is the least glamorous thing on this list",
 			adj: "fundamental", eff: { orbBias: -0.05 } },
-		{ name: "chases his own miss", group: "rebounding", w: 1.5,
+		{ name: "chases his own miss", group: "rebounding", w: 1.5, needs: { off: { reb: [-6, null] } },
 			note: "an instinct for his own miss that produces second chances nobody schemed",
 			adj: "opportunistic", eff: { orbBias: 0.08 } },
 		{ name: "rebounds out of area", group: "rebounding", w: 1.2, needs: { minHgt: 52 },
@@ -263,13 +277,13 @@
 		{ name: "clean medical", group: "medical", w: 2.6, needs: { maxInj: 1.4 },
 			note: "a clean file, which is worth saying out loud",
 			adj: "durable", eff: { inj: 0.85 } },
-		{ name: "prior surgery", group: "medical", w: 1.2,
+		{ name: "prior surgery", group: "medical", w: 1.2, needs: { minInj: 0.7 },
 			note: "a surgery in his file that teams will want their own doctors to read",
 			adj: "reconstructed", eff: { inj: 1.25 } },
-		{ name: "chronic knee", group: "medical", w: 0.8,
+		{ name: "chronic knee", group: "medical", w: 0.8, needs: { minInj: 0.7 },
 			note: "a knee that is managed rather than fixed",
 			adj: "managed", eff: { inj: 1.5 } },
-		{ name: "ankle history", group: "medical", w: 1.1,
+		{ name: "ankle history", group: "medical", w: 1.1, needs: { minInj: 0.7 },
 			note: "ankles that have cost him games in each of the last two seasons",
 			adj: "brittle", eff: { inj: 1.3 } },
 		{ name: "has not missed a game", group: "medical", w: 1.6, needs: { years: ["Junior", "Senior", "Graduate"], maxInj: 1.4 },
@@ -328,6 +342,9 @@
 	   is drawn around 1 with a spread, so two players of the same build are
 	   still not identical. Traits multiply on top. */
 	const VOL_SPREAD = 0.06;
+
+	/* The heaviest weight a trait can be drawn at. See assign. */
+	const W_CAP = 1.6;
 
 	function matches(t, p) {
 		const n = t.needs;
@@ -391,7 +408,17 @@
 
 	   `cfg.traitCount` scales how many are drawn; 0 turns the layer off
 	   entirely, which is what a user who wants a plain note wants. */
-	function assign(p, rng, cfg) {
+	/* Per-flavor group tilt. A flavor already bends which BUILDS a class is
+	   made of and said nothing at all about its traits, so "the year everybody
+	   got hurt" produced a class whose medical files were exactly as clean as
+	   any other year's. `traits: { group: multiplier }` on a CLASS_FLAVORS row
+	   is read here and multiplies that group's chance of being drawn from. */
+	function groupTilt(flavor, group) {
+		const t = flavor && flavor.traits;
+		return t && Number.isFinite(t[group]) && t[group] > 0 ? t[group] : 1;
+	}
+
+	function assign(p, rng, cfg, flavor) {
 		const want = clamp(
 			cfg && Number.isFinite(cfg.traitCount) ? cfg.traitCount : 3, 0, 6);
 		const arch = archOf(p);
@@ -405,7 +432,23 @@
 			let pool = TRAITS.filter((t) => matches(t, p));
 			const n = Math.max(1, Math.round(want + rng.uniform(-0.9, 0.9)));
 			for (let i = 0; i < n && pool.length; i++) {
-				const pick = rng.weighted(pool, (t) => t.w);
+				/* The authored weight, capped.
+
+				   The one-per-group rule gives every heavy row a clear run at
+				   every player, and four of them were heavy enough to take it:
+				   over 2,100 prospects "clean medical" (w 2.6) landed on 10.1%
+				   of the class against a median trait's 4.0%, and the same
+				   three or four clauses opened most of the notes in the file.
+				   Drawing the GROUP first and the trait inside it was the
+				   other candidate and measured WORSE (spread 0.51 -> 0.53):
+				   rebounding has four traits and three are gated on height, so
+				   a flat group draw handed "chases his own miss" one draw in
+				   twelve. A cap leaves the ordering alone and only stops the
+				   top of it running away.
+
+				   The flavor's group tilt (see groupTilt) multiplies here. */
+				const pick = rng.weighted(pool, (t) =>
+					Math.min(t.w, W_CAP) * groupTilt(flavor, t.group));
 				out.push(pick);
 				usedGroups[pick.group] = 1;
 				pool = pool.filter((t) => !usedGroups[t.group]);
