@@ -1204,8 +1204,29 @@
 		// The system he plays in. A shooter at a four-out program and the same
 		// shooter in a pack-line offense do not take the same shots.
 		const style = teamCtx.style || { three: 0, rim: 0, press: 0 };
-		let share3 = CAL.threeShare(bigness, ratings.tp + refVol * 100) + style.three +
-			rng.normal(0, 0.045 * noise);
+		/* A system does not make a non-shooter shoot.
+
+		   The height-and-talent term below is damped for a player who cannot
+		   shoot (see threeShare in js/calibration.js) and the two terms added
+		   to it were not, so a four-out program's +share and the shot-mix
+		   noise landed in full on a seven-footer with a tp of 25 — measured at
+		   a sixth of his attempts from three, which is about 1.3 a game
+		   against the 0.2 a real post-only big takes. What a four-out offense
+		   actually does with a big who cannot shoot is give the shots to
+		   somebody else, so both terms are scaled by the same willingness
+		   factor the base term uses. */
+		const willing = ratings.tp >= 30 ? 1 : Math.max(0, ratings.tp) / 30;
+		const base3 = CAL.threeShare(bigness, ratings.tp + refVol * 100, ratings.tp) +
+			willing * style.three;
+		/* The shot-mix noise is RELATIVE. A flat sd of 0.045 is a tenth of a
+		   guard's 0.39 share and half of a seven-footer's 0.085, so the same
+		   draw that moved a guard from 12 threes a hundred shots to 16 moved a
+		   post player from two to seven — and the tail of that distribution is
+		   how a big who cannot shoot ended up taking a sixth of his shots from
+		   range. The floor keeps a genuinely small share from being noiseless,
+		   which would be its own artifact. */
+		let share3 = base3 + rng.normal(0,
+			0.045 * noise * clamp(base3 / 0.30, 0.3, 1));
 		share3 = clamp(share3, 0.0, 0.75);
 
 		const tpa = fga * share3;

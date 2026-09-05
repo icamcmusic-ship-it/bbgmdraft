@@ -492,8 +492,14 @@ async function gotoProspects(page) {
 		   which pickClassPool reads to push a repeated build toward the back
 		   of the queue; the dial the user turns is poolMemory, which does have
 		   a control. */
+		/* `biography` is on it for exactly the same reason: it is the class
+		   years and transfer paths a SHARED UNIVERSE already drew, supplied by
+		   importUniverse and read by the build phase so that replaying
+		   somebody's world reproduces the same men. There is nothing for a
+		   user to set. */
 		const EXEMPT = ["seed", "overrides", "leagueWeights", "archetypeWeights",
-			"noteLines", "wEuroLeague", "wGLeague", "wNBL", "recentPools"];
+			"noteLines", "wEuroLeague", "wGLeague", "wNBL", "recentPools",
+			"biography"];
 		const missing = await page.evaluate((exempt) =>
 			Object.keys(window.Config.DEFAULTS)
 				.filter((k) => exempt.indexOf(k) === -1)
@@ -1497,6 +1503,44 @@ async function gotoProspects(page) {
 				marked);
 			await page.evaluate(() => window.App.showPlayer(null));
 		}
+		/* THE UNIVERSE TAB'S OWN FURNITURE. The chain now produces structured
+		   threads, a records book and a coaching tree, and writes one BBGM
+		   players file for the whole world — all of which is reachable from
+		   this tab and none of which the engine harness can see. */
+		await page.evaluate(() => { window.App.state.tab = "universe"; window.App.render(); });
+		await page.waitForTimeout(200);
+		const uni = await page.evaluate(() => {
+			const st = window.App.state;
+			const buttons = Array.from(document.querySelectorAll("#view button"))
+				.map((b) => b.textContent);
+			const merged = window.Engine.universePlayersFile(
+				st.results.filter(Boolean),
+				{ stats: true, prior: true, awards: true, seed: st.universe.baseSeed });
+			return {
+				buttons,
+				threads: (st.universe.threads || []).every(
+					(t) => t && typeof t === "object" && typeof t.text === "string"),
+				records: !!st.universe.records,
+				headings: Array.from(document.querySelectorAll("#view h4"))
+					.map((h) => h.textContent),
+				players: merged.file.players.length,
+				uniquePids: new Set(merged.file.players.map((p) => p.pid)).size,
+				fingerprints: (st.universe.rows || []).every((r) => r.result),
+			};
+		});
+		ok("the timeline offers the one-file players export",
+			uni.buttons.some((b) => /Export universe players/.test(b)),
+			uni.buttons.join(" | "));
+		ok("threads are structured data, not sentences", uni.threads);
+		ok("the tab carries a records book",
+			uni.records && uni.headings.indexOf("Records book") !== -1,
+			uni.headings.join(" | "));
+		ok("every season records a fingerprint of what it produced",
+			uni.fingerprints);
+		ok("the universe exports as one players file with unique pids",
+			uni.players > 100 && uni.players === uni.uniquePids,
+			uni.players + " players, " + uni.uniquePids + " pids");
+
 		/* Turning the setting off drops the chain's configs, so the tabs go
 		   back to standalone runs rather than silently keeping a world the
 		   user has switched out of. */
