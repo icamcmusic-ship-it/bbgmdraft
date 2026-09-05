@@ -115,11 +115,16 @@ of twenty — so it now carries October's story as well, a draw that moves the
 ballot and nothing else, weighted by how far up the ballot the program already
 is — a preseason story is about a contender, and a flat draw moved teams into
 and out of the top 25 rather than around inside it. Eight different programs are
-preseason No. 1 over twenty seasons rather than four. It is deliberately smaller
-than variety alone would want: at a wider draw thirteen of twenty seasons had a
-different No. 1, but that No. 1 missed the tournament in three of them and the
-share of preseason top-25 teams reaching the field fell from 67% to 66%. The
-point is which blue blood is No. 1, not whether the ballot is any good.
+preseason No. 1 over twenty seasons rather than six.
+
+The draw is deliberately much smaller than variety alone would want, and that is
+the one place this whole pass had to give something back. A ballot is judged on
+whether it is any good: with no hype at all, 71.7% of preseason top-25 teams
+reach the tournament, and a wide enough draw to make thirteen seasons of twenty
+have a different No. 1 takes that to 63.7% — a noisier poll rather than a more
+interesting one, and past the 65% the harness requires. At the sigma actually
+shipped it is 68%. The point is WHICH blue blood is No. 1, not whether the
+ballot means anything.
 
 The one target not reached is the final top 25's season-to-season overlap, which
 sits at 0.18 against a real 0.45. It is not the programs: setting the level draw

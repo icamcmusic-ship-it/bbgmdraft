@@ -313,18 +313,22 @@
 		   share of preseason top-25 teams that reached the tournament fell
 		   from 66% to 63% — a noisier poll, not a more interesting one.
 		   Above a reputation of 80 the story is worth several places; below
-		   60 nobody is writing one. And the draw is deliberately smaller than
-		   variety alone would want: at a sigma of 8 the preseason No. 1 was a
-		   different program in thirteen seasons of twenty, but it missed the
-		   tournament in three of them and the top-25 hit rate fell to 66%.
-		   The point is which blue blood is No. 1, not whether the ballot is
-		   any good. */
+		   60 nobody is writing one.
+
+		   And the draw is deliberately much smaller than variety alone would
+		   want. Measured on the twelve seasons tools/test.js checks: with no
+		   hype at all, 71.7% of preseason top-25 teams reach the tournament;
+		   at a sigma of 6.5 that falls to 63.7%, past the 65% the harness
+		   requires and past what a real preseason poll manages. At 3.5 it is
+		   68% and the preseason No. 1 is a different program in eight seasons
+		   of twenty rather than six. The point is WHICH blue blood is No. 1,
+		   not whether the ballot is any good. */
 		const hype = new Map();
 		for (const t of list) {
 			const base = 0.4 * (t.prestige || 0) +
 				0.6 * (Number.isFinite(t.level) ? t.level : (t.prestige || 0));
 			const w = clamp((base - 60) / 20, 0, 1);
-			hype.set(t.name, w * rng.child("hype:" + t.name).normal(0, 6.5));
+			hype.set(t.name, w * rng.child("hype:" + t.name).normal(0, 3.5));
 		}
 
 		const history = [];
