@@ -94,6 +94,12 @@
 			rows: [], threads: [], alumni: [], baseSeed: "", running: false,
 			cfgs: {},
 		},
+		/* An imported universe's player biographies and its per-season result
+		   fingerprints. Neither is a setting and neither is persisted: they
+		   belong to the file that was imported, and they are consumed by the
+		   chain it starts. */
+		universeBiography: null,
+		universeExpect: null,
 		// The randomizer's scope select, persisted like every other control.
 		randomScope: "gentle",
 		// Settings the randomizer must not touch. {key: true}.
@@ -159,65 +165,117 @@
 	}
 	let quotaWarned = false;
 
+	/* THE PERSISTENCE BUDGET.
+
+	   A universe's rows, threads and alumni all grow with the timeline —
+	   alumni at about five a season, threads with every repeat champion — and
+	   a fifty-season universe plus a folder of overrides is a plausible quota
+	   failure with no recovery path, because the thing that overflows is
+	   written by the same call that writes the settings. So what is stored is
+	   BOUNDED: the whole timeline (small, and the point of the tab), the most
+	   recent alumni, and the threads. Anything dropped is one re-run away —
+	   the chain rebuilds all of it from seeds — while settings, presets and
+	   pinned classes are not, which is why they are the ones protected.
+
+	   If it still does not fit, the second attempt drops the universe payload
+	   entirely rather than losing everything else with it. */
+	const PERSIST_ALUMNI = 400;
+	const PERSIST_ROWS = 200;
+	const PERSIST_THREADS = 120;
+
+	function universeForStorage() {
+		return {
+			rows: state.universe.rows.slice(-PERSIST_ROWS),
+			threads: (state.universe.threads || []).slice(0, PERSIST_THREADS),
+			alumni: (state.universe.alumni || []).slice(-PERSIST_ALUMNI),
+			baseSeed: state.universe.baseSeed,
+			records: state.universe.records || null,
+			coachTree: state.universe.coachTree || null,
+			broken: state.universe.broken || null,
+		};
+	}
+
 	function persist() {
 		try {
-			localStorage.setItem(STORE_KEY, JSON.stringify({
-				v: STORE_VERSION,
-				cfg: state.cfg,
-				overrides: state.overrides,
-				overrideFingerprint: state.overrideFingerprint,
-				history: state.history.slice(0, 12),
-				poolHistory: state.poolHistory,
-				anomalyHistory: state.anomalyHistory,
-				presetName: state.presetName,
-				presetDirty: state.presetDirty,
-				customPresets: state.customPresets,
-				hiddenColumns: state.hiddenColumns,
-				columnOrder: state.columnOrder,
-				statMode: state.statMode,
-				compare: state.compare,
-				columnLayouts: state.columnLayouts,
-				standingsConf: state.standingsConf,
-				player: state.player,
-				team: state.team,
-				game: state.game,
-				universe: {
-					rows: state.universe.rows, threads: state.universe.threads,
-					alumni: state.universe.alumni, baseSeed: state.universe.baseSeed,
-				},
-				density: state.density,
-				cardView: state.cardView,
-				cardAll: state.cardAll,
-				compactBracket: state.compactBracket,
-				theme: state.theme,
-				randomScope: state.randomScope,
-				settingLocks: state.settingLocks,
-				sort: state.sort,
-				tab: state.tab,
-				boardMode: state.boardMode,
-				// Small (a name and six numbers per prospect) and the whole
-				// point of pinning is that it outlives the class you pinned.
-				// byKey is a lookup index rebuilt on restore, not state worth storing.
-				pinned: state.pinned
-					? Object.assign({}, state.pinned, { byKey: undefined })
-					: null,
-				open: openGroups(),
-			}));
+			localStorage.setItem(STORE_KEY, JSON.stringify(payload()));
 		} catch (e) {
-			/* Private browsing and "no storage at all" are nothing to say
-			   anything about — the tool works, settings just do not survive a
-			   refresh. A full quota is different: it happens gradually, as
-			   custom presets and pinned classes and a seed history accumulate,
-			   and it is the user's own data that stops being saved. Say so
-			   once. */
 			const quota = e && (e.name === "QuotaExceededError" ||
 				e.name === "NS_ERROR_DOM_QUOTA_REACHED" || e.code === 22);
-			if (quota && !quotaWarned) {
-				quotaWarned = true;
-				setStatus("Browser storage is full, so settings will not survive a " +
-					"refresh. Clearing some saved presets or pinned classes will fix it.",
-					true);
+			if (quota) {
+				/* Shed the universe and try once more: a timeline is derived
+				   state and re-runs from its seeds, and settings are not. */
+				try {
+					localStorage.setItem(STORE_KEY,
+						JSON.stringify(Object.assign(payload(), { universe: null })));
+					if (!quotaWarned) {
+						quotaWarned = true;
+						setStatus("Browser storage is full, so the saved timeline was " +
+							"dropped to keep your settings. Rebuild it any time — a " +
+							"universe re-runs from its seeds.", true);
+					}
+					return;
+				} catch (e2) { /* fall through to the warning below */ }
 			}
+			persistFailed(e);
+		}
+	}
+
+	function payload() {
+		return {
+			v: STORE_VERSION,
+			cfg: state.cfg,
+			overrides: state.overrides,
+			overrideFingerprint: state.overrideFingerprint,
+			history: state.history.slice(0, 12),
+			poolHistory: state.poolHistory,
+			anomalyHistory: state.anomalyHistory,
+			presetName: state.presetName,
+			presetDirty: state.presetDirty,
+			customPresets: state.customPresets,
+			hiddenColumns: state.hiddenColumns,
+			columnOrder: state.columnOrder,
+			statMode: state.statMode,
+			compare: state.compare,
+			columnLayouts: state.columnLayouts,
+			standingsConf: state.standingsConf,
+			player: state.player,
+			team: state.team,
+			game: state.game,
+			universe: universeForStorage(),
+			density: state.density,
+			cardView: state.cardView,
+			cardAll: state.cardAll,
+			compactBracket: state.compactBracket,
+			theme: state.theme,
+			randomScope: state.randomScope,
+			settingLocks: state.settingLocks,
+			sort: state.sort,
+			tab: state.tab,
+			boardMode: state.boardMode,
+			// Small (a name and six numbers per prospect) and the whole
+			// point of pinning is that it outlives the class you pinned.
+			// byKey is a lookup index rebuilt on restore, not state worth storing.
+			pinned: state.pinned
+				? Object.assign({}, state.pinned, { byKey: undefined })
+				: null,
+			open: openGroups(),
+		};
+	}
+
+	function persistFailed(e) {
+		/* Private browsing and "no storage at all" are nothing to say
+		   anything about — the tool works, settings just do not survive a
+		   refresh. A full quota is different: it happens gradually, as
+		   custom presets and pinned classes and a seed history accumulate,
+		   and it is the user's own data that stops being saved. Say so
+		   once. */
+		const quota = e && (e.name === "QuotaExceededError" ||
+			e.name === "NS_ERROR_DOM_QUOTA_REACHED" || e.code === 22);
+		if (quota && !quotaWarned) {
+			quotaWarned = true;
+			setStatus("Browser storage is full, so settings will not survive a " +
+				"refresh. Clearing some saved presets or pinned classes will fix it.",
+				true);
 		}
 	}
 
@@ -330,9 +388,21 @@
 			Array.isArray(saved.universe.rows)) {
 			state.universe = {
 				rows: saved.universe.rows,
+				/* Threads used to be sentences and are objects now (see
+				   Universe.threads). A stored timeline from before that is
+				   still readable — the view renders either — so it is kept
+				   rather than thrown away on a shape change that costs
+				   nothing to tolerate. */
 				threads: Array.isArray(saved.universe.threads) ? saved.universe.threads : [],
 				alumni: Array.isArray(saved.universe.alumni) ? saved.universe.alumni : [],
 				baseSeed: validString(saved.universe.baseSeed) || "",
+				records: saved.universe.records && typeof saved.universe.records === "object"
+					? saved.universe.records : null,
+				coachTree: saved.universe.coachTree &&
+					typeof saved.universe.coachTree === "object"
+					? saved.universe.coachTree : null,
+				broken: saved.universe.broken || null,
+				cfgs: {},
 				running: false,
 			};
 		}
@@ -489,6 +559,7 @@
 		"anomalyMemory", "flavorReach", "styleDrift",
 		"realignmentRate", "bluebloodDownYears", "midMajorLift",
 		"coachTurnover", "realignmentMemory", "starReturners", "portalRate",
+		"recruitMomentum",
 		"awardStrictness", "confAwardStrictness", "proAwardStrictness",
 		"variation", "poolMemory", "teamMomentum", "awardNoise",
 		"seasonEvents", "draftEvents",
@@ -652,6 +723,11 @@
 		portalRate: (v) => (v <= 0 ? "every star returner comes back to the same program"
 			: "about " + Math.round(v * 0.18) + "% of returning stars leave through " +
 				"the portal each year (universe mode only)"),
+		recruitMomentum: (v) => (v <= 0
+			? "last season's results do not affect where anybody is recruited"
+			: "about " + v + "% of blank-college prospects are recruited by a " +
+				"program in proportion to its level, its banners and last season's " +
+				"title (universe mode only)"),
 	};
 
 	/* What universe mode will actually do with what is loaded right now. A
@@ -2424,6 +2500,9 @@
 		cfg.carryOver = saved.carryOver || null;
 		cfg.recentPools = (saved.recentPools || []).map((a) => a.slice());
 		cfg.universeRoster = saved.universeRoster || null;
+		cfg.universeAlumni = saved.universeAlumni || null;
+		cfg.universeTitles = saved.universeTitles || null;
+		cfg.biography = state.universeBiography || null;
 		return cfg;
 	}
 
@@ -2438,16 +2517,29 @@
 	   before the world existed. So the played season replaces the guessed
 	   one on his career page, in his honors, in the export and in the note,
 	   and the earlier season's page links forward to the man he became. */
-	function linkCareers(runnable) {
+	/* `onlyIndex`, when given, links just that file — which is what a
+	   rehydrated result needs. A result rebuilt from its recorded config is
+	   the RAW season: the linking pass is not part of the engine, so a file
+	   evicted to bound memory and re-run on demand would come back with the
+	   freshman year its own file guessed rather than the one the universe
+	   played, which is the same disagreement between tabs that keeping the
+	   results was meant to end. See ensureResult. */
+	function linkCareers(runnable, onlyIndex) {
 		const E = global.Engine;
 		for (let j = 0; j < runnable.length; j++) {
 			const dj = runnable[j];
-			const resJ = state.results[dj.index];
+			if (onlyIndex !== undefined && dj.index !== onlyIndex) continue;
+			const resJ = ensureResult(dj.index);
 			if (!resJ || !resJ.players) continue;
 			const touched = new Set();
 			for (let k = 0; k < j; k++) {
 				const dk = runnable[k];
-				const resK = state.results[dk.index];
+				/* ensureResult, not state.results: a long chain evicts older
+				   results to bound memory (see evictUniverseResults) and this
+				   pass needs every earlier season. Rehydration is exact — the
+				   chain recorded the config each file ran under — and costs a
+				   re-simulation only for the seasons that were dropped. */
+				const resK = ensureResult(dk.index);
 				if (!resK || !resK.futurePlayers) continue;
 				for (const fp of resK.futurePlayers) {
 					if (fp.fileIndex !== dj.index || !fp.stats) continue;
@@ -2462,7 +2554,22 @@
 						p.priorSeasons.sort((a, b) => a.season - b.season);
 					}
 					const gl = fp.gameLog || null;
+					/* THE SEASON THIS ROW EXPORTS AS.
+
+					   A prior-season row is normally in its own file's LEAGUE
+					   time, and exportFile shifts every row by this file's own
+					   startingSeason-to-draft-year difference. A row played in
+					   another file of the universe is in THAT file's league
+					   time, and the two files need not share a shift: one BBGM
+					   export can carry startingSeason 2026 with draft.year 2027
+					   and the next carry both at 2028. Shifting it by this
+					   file's difference then dates the season wrong by exactly
+					   that mismatch. So the absolute season is computed once,
+					   here, where the file it was played in is known, and
+					   exportFile uses it in place of the shift. */
+					const shiftK = E.classSeasonOf(resK) - resK.season;
 					Object.assign(row, {
+						exportSeason: resK.season + shiftK,
 						team: fp.newCollege, classYear: fp.classYear, ovr: fp.newOvr,
 						gp: Math.round(fp.stats.gp), mpg: fp.stats.mpg, ppg: fp.stats.ppg,
 						rpg: fp.stats.rpg, apg: fp.stats.apg, usg: fp.stats.usg, ts: fp.stats.ts,
@@ -2485,7 +2592,8 @@
 				p.priorAwards = [];
 				for (const r of p.priorSeasons) {
 					for (const award of r.awards || []) {
-						p.priorAwards.push({ season: r.season, classYear: r.classYear, award });
+						p.priorAwards.push({ season: r.season, classYear: r.classYear, award,
+							exportSeason: r.exportSeason });
 					}
 				}
 				p.betterEarlier = null;
@@ -2516,12 +2624,25 @@
 		showPlayer(key);
 	}
 
+	/* Guard against re-entry: linkCareers rehydrates the earlier seasons it
+	   reads, and each of those would otherwise ask to be linked in turn. The
+	   earlier seasons are read for their `futurePlayers`, which the raw
+	   simulation produces, so an unlinked one is the right input. */
+	let linking = false;
+
 	function ensureResult(i) {
 		if (state.results[i]) return state.results[i];
 		const runner = state.runners[i];
 		if (!runner) return null;
 		// Every file in a batch shares the seed, so they stay one set.
 		state.results[i] = runner.run(universeCfgFor(i) || effectiveCfg());
+		if (!linking && state.cfg.universe && !state.universe.running &&
+			Array.isArray(state.universe.order)) {
+			linking = true;
+			try { linkCareers(state.universe.order, i); }
+			catch (e) { /* the page still renders without the links */ }
+			finally { linking = false; }
+		}
 		return state.results[i];
 	}
 
@@ -2804,6 +2925,45 @@
 	   pool memory) from each season to the next. Asynchronous in slices so
 	   the page stays alive; ~330ms a season means 50 classes is a progress
 	   bar, not a click. */
+	/* Cancellation. Fifty seasons at ~550ms cold is close to a minute, and
+	   the chain used to have `running` and no way out — the batch runner has
+	   had a cancel button since it existed (see cancelBatch). Set by the
+	   button, read at the top of every step, and the seasons already finished
+	   are KEPT, exactly as a cancelled batch keeps its finished classes. */
+	let universeCancel = false;
+
+	function cancelUniverse() {
+		if (!state.universe.running) return;
+		universeCancel = true;
+		setStatus("Stopping the universe after this season…", true);
+	}
+
+	/* MEMORY.
+
+	   state.results holds a live result object per file — teams, box scores,
+	   game logs, every player's season — and a fifty-file chain held fifty of
+	   them at once. Everything needed to rebuild one on demand is already in
+	   state.universe.cfgs (see universeCfgFor), so past a budget the older
+	   ones are dropped and rehydrated lazily by ensureResult. The active file
+	   and the files linkCareers still needs are never evicted. */
+	const UNIVERSE_LIVE_RESULTS = 15;
+
+	function evictUniverseResults(keepIndices) {
+		const keep = new Set(keepIndices || []);
+		keep.add(state.active);
+		const held = [];
+		for (let i = 0; i < state.results.length; i++) {
+			if (state.results[i] && !keep.has(i)) held.push(i);
+		}
+		const over = held.length - UNIVERSE_LIVE_RESULTS;
+		for (let i = 0; i < over; i++) state.results[held[i]] = null;
+	}
+
+	/* Run every loaded file as one continuous world, oldest season first,
+	   handing carry-over state (conference map, program levels, coaches,
+	   pool memory) from each season to the next. Asynchronous in slices so
+	   the page stays alive; ~330ms a season means 50 classes is a progress
+	   bar, not a click. */
 	function runUniverse(after) {
 		const U = global.Universe;
 		if (!state.files.length) {
@@ -2824,9 +2984,27 @@
 		const baseSeed = state.cfg.seed && state.cfg.seed.trim()
 			? state.cfg.seed.trim()
 			: "universe-" + Math.floor(Math.random() * 1e9);
+		/* THE CONFIG IS FROZEN BEFORE SEASON ONE.
+
+		   step(k) used to call CFG.make(state.cfg) fresh for every season, so
+		   a slider nudged while a forty-file chain was running gave seasons
+		   1-12 one world and 13-40 another, and nothing recorded that it had
+		   happened. One config object is built here and handed down; a change
+		   made mid-run re-invalidates and restarts the chain, which is what
+		   the user meant, rather than splicing two worlds together. */
+		const frozen = CFG.make(state.cfg);
+		/* An imported universe's own biographies, so the replay produces the
+		   same men and not merely the same seeds. See importUniverse. */
+		frozen.biography = state.universeBiography || null;
+		universeCancel = false;
 		state.universe = {
 			rows: [], threads: [], alumni: [], baseSeed, cfgs: {},
+			/* The chain's own order, so a result evicted to bound memory can
+			   be rebuilt AND relinked on demand — see ensureResult. */
+			order: runnable,
 			running: true, diags, total: runnable.length, done: 0,
+			settings: frozen, coachTree: null, records: null,
+			engineRev: U.ENGINE_REV, cancelled: false, broken: null,
 		};
 		/* Only jump to the Timeline when the user asked for a universe
 		   explicitly. With universe mode on as a SETTING the chain re-runs
@@ -2844,14 +3022,16 @@
 		   it exactly as the full run will), and each earlier season is then
 		   handed the underclassmen the later classes say were there. See
 		   Engine.previewClass and Engine.futureRosterFor. */
+		const seedAt = (k) => U.seedFor(baseSeed, k, runnable[k].season,
+			state.files[runnable[k].index].fingerprint);
 		const previews = [];
 		let previewPools = [];
 		for (let k = 0; k < runnable.length; k++) {
 			const d = runnable[k];
 			let prev = null;
 			try {
-				const pcfg = CFG.make(state.cfg);
-				pcfg.seed = baseSeed + "#" + (d.season || k);
+				const pcfg = CFG.make(frozen);
+				pcfg.seed = seedAt(k);
 				pcfg.overrides = {};
 				pcfg.recentPools = previewPools.map((a) => a.slice());
 				prev = global.Engine.previewClass(state.files[d.index].data, pcfg);
@@ -2877,32 +3057,72 @@
 		};
 		let carry = null;
 		let recentPools = [];
+		let coachTree = null;
+		let lastSeason = null;
+		const finish = () => {
+			state.universe.running = false;
+			state.universe.threads = U.threads(state.universe.rows);
+			state.universe.coachTree = coachTree;
+			state.universe.records = U.records(
+				state.universe.rows, state.universe.alumni);
+			/* PASS THREE: the seasons a player actually played, on his
+			   own page. See linkCareers. */
+			linking = true;
+			try { linkCareers(runnable); }
+			catch (e) { showError(e); }
+			finally { linking = false; }
+			evictUniverseResults(runnable.slice(-UNIVERSE_LIVE_RESULTS)
+				.map((d) => d.index));
+			persist();
+			const diverged = checkUniverseDivergence();
+			if (diverged) showError(new Error(diverged));
+			setStatus((state.universe.cancelled ? "Universe stopped: " : "Universe complete: ") +
+				state.universe.rows.length + " seasons, " +
+				state.universe.threads.length + " threads." +
+				(state.universe.broken
+					? " Season " + state.universe.broken + " failed; the world was aged " +
+						"across it rather than frozen."
+					: ""));
+			/* The active file's seed pill and title describe the universe
+			   run now, not a standalone re-simulation of it. */
+			const active = state.results[state.active];
+			if (active) stampSeedPill(active, null);
+			render();
+			if (typeof after === "function") after();
+		};
 		const step = (k) => {
-			if (k >= runnable.length) {
-				state.universe.running = false;
-				state.universe.threads = U.threads(state.universe.rows);
-				/* PASS THREE: the seasons a player actually played, on his
-				   own page. See linkCareers. */
-				try { linkCareers(runnable); } catch (e) { showError(e); }
-				persist();
-				setStatus("Universe complete: " + state.universe.rows.length +
-					" seasons, " + state.universe.threads.length + " threads.");
-				/* The active file's seed pill and title describe the universe
-				   run now, not a standalone re-simulation of it. */
-				const active = state.results[state.active];
-				if (active) stampSeedPill(active, null);
-				render();
-				if (typeof after === "function") after();
+			if (k >= runnable.length || universeCancel) {
+				state.universe.cancelled = universeCancel && k < runnable.length;
+				universeCancel = false;
+				finish();
 				return;
 			}
 			const d = runnable[k];
+			/* A HOLE IN THE FILES IS TIME PASSING.
+
+			   2025, 2026, 2031 is six years and three files, and the carry
+			   used to be handed straight across as if one season had gone by.
+			   See Universe.ageCarry: coaches age and the oldest leave, program
+			   levels regress toward their own mean, star returners advance a
+			   class year and graduate out. */
+			const gap = (carry && Number.isFinite(lastSeason) && Number.isFinite(d.season))
+				? Math.max(0, d.season - lastSeason - 1) : 0;
+			if (gap > 0) carry = U.ageCarry(carry, gap);
 			try {
-				const cfg = CFG.make(state.cfg);
-				cfg.seed = baseSeed + "#" + (d.season || k);
+				const cfg = CFG.make(frozen);
+				cfg.seed = seedAt(k);
 				cfg.overrides = {};
 				cfg.recentPools = recentPools.map((a) => a.slice());
 				cfg.carryOver = carry;
 				cfg.universeRoster = rosterFor(k);
+				/* What the world remembers, for the news desk. The alumni
+				   index was built and only ever rendered on the Universe tab;
+				   a 2033 paper that can mention the 2027 player of the year is
+				   the difference between a timeline and a history. Bounded,
+				   because it rides in a config that is kept per file. */
+				cfg.universeAlumni = state.universe.alumni.slice(-120);
+				cfg.universeTitles = (carry && carry.titles) || {};
+				const prevCarry = carry;
 				const res = state.runners[d.index].run(cfg);
 				/* KEEP the result and the config that produced it. The chain
 				   used to discard both, which is the whole of bug B1: every
@@ -2915,24 +3135,50 @@
 					carryOver: cfg.carryOver,
 					recentPools: (cfg.recentPools || []).map((a) => a.slice()),
 					universeRoster: cfg.universeRoster,
+					universeAlumni: cfg.universeAlumni,
+					universeTitles: cfg.universeTitles,
 				};
+				coachTree = U.coachTreeStep(coachTree, prevCarry, res, d.season, baseSeed);
 				state.universe.rows.push(Object.assign(
 					U.summarize(res, cfg.seed, d.name),
-					{ fingerprint: state.files[d.index].fingerprint || null }));
+					{
+						fingerprint: state.files[d.index].fingerprint || null,
+						/* What came OUT, not only what went in — see
+						   Universe.resultFingerprint. An import replaying this
+						   universe compares these and can say a season
+						   diverged instead of silently handing back a
+						   different world with the same name. */
+						result: U.resultFingerprint(res),
+						gap,
+					}));
 				state.universe.alumni = state.universe.alumni
 					.concat(U.alumniOf(res, d.season));
-				carry = U.harvest(res);
+				carry = U.harvest(res, prevCarry);
+				lastSeason = d.season;
 				if (res.archetypePool) {
 					recentPools.unshift(res.archetypePool.slice());
 					recentPools = recentPools.slice(0, 3);
 				}
 			} catch (e) {
+				/* A FAILED SEASON STILL PASSES TIME.
+
+				   The error row used to be pushed and `carry` left pointing at
+				   season k-1, so season k+1 inherited a two-year-old world in
+				   which nothing had aged. The world is aged across the failure
+				   exactly as it is across a missing file, and the chain records
+				   where it broke so the timeline and the export can say the
+				   world after that point is not the world before it. */
 				state.universe.rows.push({
-					season: d.season, fileName: d.name, seed: null,
+					season: d.season, fileName: d.name, seed: null, gap,
 					error: e && e.message ? e.message : String(e),
 				});
+				carry = U.ageCarry(carry, 1);
+				if (Number.isFinite(d.season)) lastSeason = d.season;
+				if (!state.universe.broken) state.universe.broken = d.season || d.name;
 			}
 			state.universe.done = k + 1;
+			evictUniverseResults(runnable.slice(Math.max(0, k - UNIVERSE_LIVE_RESULTS + 1), k + 1)
+				.map((x) => x.index));
 			setStatus("Universe: season " + (k + 1) + " of " + runnable.length + "…", true);
 			render();
 			setTimeout(() => step(k + 1), 0);
@@ -2949,21 +3195,104 @@
 		/* Settings and biographies travel with the seeds now. A universe is
 		   only reproducible if the settings it ran under are part of it —
 		   replaying somebody's fifty-season world at your own coachTurnover
-		   and your own era gives you a different world with the same seeds. */
+		   and your own era gives you a different world with the same seeds.
+
+		   The settings written are the FROZEN ones the chain actually ran
+		   under, not whatever the panel says now: a slider moved after the run
+		   would otherwise be exported as the world's own settings. */
 		const payload = U.exportUniverse(Object.assign({}, state.universe, {
-			settings: CFG.make(state.cfg),
-			biography: U.biographyOf(state.results.filter(Boolean)),
+			settings: state.universe.settings || CFG.make(state.cfg),
+			biography: U.biographyOf(liveResults()),
 		}), { embedFiles: !!embedFiles, files: state.files });
-		const blob = new Blob([JSON.stringify(payload, null, "\t")],
-			{ type: "application/json" });
-		const a = document.createElement("a");
-		a.href = URL.createObjectURL(blob);
-		a.download = embedFiles ? "universe-with-classes.json" : "universe.json";
-		a.click();
-		setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-		setStatus(embedFiles
-			? "Exported the universe with its class files embedded."
-			: "Exported the universe (seeds and settings; load the class files beside it).");
+		/* SIZE.
+
+		   The seeds-and-fingerprints file is a kilobyte and is pretty-printed
+		   for the person who opens it in an editor. The embedded variant is
+		   every class file inlined, and tab-indenting thirty megabytes of
+		   generated JSON is thirty megabytes nobody will send: it is read by
+		   this tool, not by a human. So the embedded variant is written
+		   compactly, and gzipped where the browser has CompressionStream —
+		   which is every browser this tool supports except older Safari, where
+		   it falls back to the plain file rather than failing. */
+		const text = JSON.stringify(payload, null, embedFiles ? 0 : "\t");
+		const done = (blob, name, note) => {
+			const a = document.createElement("a");
+			a.href = URL.createObjectURL(blob);
+			a.download = name;
+			a.click();
+			setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+			setStatus(note);
+		};
+		if (!embedFiles) {
+			done(new Blob([text], { type: "application/json" }), "universe.json",
+				"Exported the universe (seeds and settings; load the class files beside it).");
+			return;
+		}
+		const plain = () => done(
+			new Blob([text], { type: "application/json" }), "universe-with-classes.json",
+			"Exported the universe with its class files embedded.");
+		if (typeof CompressionStream !== "function") { plain(); return; }
+		try {
+			new Response(new Blob([text]).stream()
+				.pipeThrough(new CompressionStream("gzip"))).blob()
+				.then((gz) => done(gz, "universe-with-classes.json.gz",
+					"Exported the universe with its class files embedded, gzipped (" +
+					Math.round(gz.size / 1024) + " KB from " +
+					Math.round(text.length / 1024) + " KB)."))
+				.catch(plain);
+		} catch (e) { plain(); }
+	}
+
+	/* THE WHOLE UNIVERSE AS ONE PLAYERS FILE.
+
+	   The single change that makes the mode feel like a world rather than a
+	   spreadsheet. BBGM's draft-class import deletes `stats` on every uploaded
+	   player, so a universe exported as a folder of per-class files loses the
+	   thing the mode exists for: a man's life spanning several seasons. Tools
+	   -> Import players keeps the rows, and it takes one array — so the whole
+	   universe goes in as one file, every class at its own draft year, pids
+	   renumbered across the world, awards deduped, second generations linked.
+	   See Engine.universePlayersFile. */
+	function exportUniversePlayers() {
+		if (!state.universe.rows.length) {
+			setStatus("Build a timeline first.");
+			return;
+		}
+		try {
+			/* The whole point is the seasons, so stats, prior seasons and
+			   awards are always on for this route whatever the export menu
+			   says — a universe players file without them is a class list. */
+			const out = global.Engine.universePlayersFile(liveResults(), Object.assign(
+				{}, currentExportOpts(),
+				{ stats: true, prior: true, awards: true,
+					seed: state.universe.baseSeed }));
+			const blob = new Blob([JSON.stringify(out.file, null, "\t")],
+				{ type: "application/json" });
+			const a = document.createElement("a");
+			a.href = URL.createObjectURL(blob);
+			a.download = "universe-players.json";
+			a.click();
+			setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+			setStatus("Exported " + out.file.players.length + " players across " +
+				out.seasons.length + " seasons" +
+				(out.relatives ? ", " + out.relatives + " father/son links" : "") +
+				(out.duplicates ? ", " + out.duplicates + " duplicate men merged" : "") +
+				". Load it with Tools → Import players (tick “include stats”).");
+		} catch (e) {
+			showError(e);
+		}
+	}
+
+	/* Every result the chain produced, rehydrating the ones eviction dropped.
+	   Bounding memory during a run must not mean exporting half a universe. */
+	function liveResults() {
+		const out = [];
+		for (let i = 0; i < state.files.length; i++) {
+			if (!state.universe.cfgs || state.universe.cfgs[i] === undefined) continue;
+			const res = ensureResult(i);
+			if (res) out.push(res);
+		}
+		return out.length ? out : state.results.filter(Boolean);
 	}
 
 	/* Re-import: a universe file carries seeds and file fingerprints, not
@@ -3019,6 +3348,34 @@
 			note = " This export predates settings capture (version " +
 				(json.version || 1) + "), so it replays under your current settings.";
 		}
+		/* THE BIOGRAPHIES ARE READ.
+
+		   They were exported and never consumed by anything — the field that
+		   makes a shared universe replay the same MEN rather than the same
+		   seeds was write-only. The engine reads cfg.biography now (see
+		   assignClassYears); this is where it comes from. Kept off state.cfg
+		   because it is a fact about THIS universe, not a setting, and it must
+		   not be persisted into every later run. */
+		state.universeBiography = json.biography && typeof json.biography === "object"
+			? json.biography : null;
+		if (state.universeBiography) {
+			note += " " + Object.keys(state.universeBiography).length +
+				" player biographies were applied, so the same men come back.";
+		}
+		/* WHAT THE FILE SAYS EACH SEASON PRODUCED.
+
+		   Replaying somebody's universe on a newer engine reproduces the seeds
+		   and not necessarily the world. The per-season result fingerprints are
+		   kept here and checked once the chain finishes, so a divergence is
+		   named — "season 2034 diverged" — rather than silently handed back as
+		   the same universe. */
+		state.universeExpect = {
+			engineRev: Number.isFinite(json.engineRev) ? json.engineRev : null,
+			bySeason: {},
+		};
+		for (const sn of json.seasons || []) {
+			if (sn && sn.result) state.universeExpect.bySeason[sn.season] = sn.result;
+		}
 		state.cfg.universe = true;
 		state.cfg.seed = json.baseSeed || state.cfg.seed;
 		$("seed").value = state.cfg.seed;
@@ -3032,6 +3389,30 @@
 			setStatus("Replaying " + (json.seasons || []).length + " seasons." + note);
 		}
 		runUniverse();
+	}
+
+	/* Did the replay produce the world the file describes? Called once a
+	   chain that came from an import has finished. */
+	function checkUniverseDivergence() {
+		const want = state.universeExpect;
+		if (!want) return null;
+		const diverged = [];
+		for (const r of state.universe.rows) {
+			const expected = want.bySeason[r.season];
+			if (!expected || !r.result) continue;
+			if (expected !== r.result) diverged.push(r.season);
+		}
+		state.universeExpect = null;
+		if (!diverged.length) return null;
+		const revNote = want.engineRev !== null && want.engineRev !== global.Universe.ENGINE_REV
+			? " This universe was built on engine revision " + want.engineRev +
+				" and you are running " + global.Universe.ENGINE_REV + "."
+			: " The class files or the settings differ from the ones it was built on.";
+		return "Season" + (diverged.length > 1 ? "s " : " ") +
+			diverged.slice(0, 6).join(", ") +
+			(diverged.length > 6 ? " (+" + (diverged.length - 6) + " more)" : "") +
+			(diverged.length > 1 ? " diverged from the imported universe." :
+				" diverged from the imported universe.") + revNote;
 	}
 
 	/* ------------------------------------------------------------ routing */
@@ -5148,7 +5529,8 @@
 		state, render, run, persist, openEditor, revealPlayer, visibleRows,
 		editorPanel, modal, closeModal,
 		clearLock, showPlayer, showTeam, showGame,
-		runUniverse, exportUniverse, importUniverse, showPlayerInFile,
+		runUniverse, cancelUniverse, exportUniverse, exportUniversePlayers,
+		importUniverse, showPlayerInFile,
 		// Exposed for tools/uismoke.js, which loads files without a file input.
 		installFiles, paintConfig,
 		copyText, announce, bulkApply, bulkShiftOvr, bulkLockAsIs, bulkClear, refreshBulkBar,

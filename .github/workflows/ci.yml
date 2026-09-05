@@ -21,6 +21,10 @@ jobs:
       # which is how a developer learns to ignore the harness.
       - name: Calibration bands (low seed count)
         run: node tools/validate.js 4
+      # The seeds-and-fingerprints export design rests on one property — a
+      # chain replays into the same world — and nothing guarded it.
+      - name: Universe determinism, idempotency and round trip
+        run: node tools/universe.js
       - name: Staged-pipeline timings
         run: node tools/bench.js 5
       - name: Calibration report (JSON, for diffing across runs)

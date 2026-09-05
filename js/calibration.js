@@ -417,7 +417,17 @@
 	   the height-bucket means, then stretched by how far the player's three
 	   rating sits from a typical drafted prospect of that size (tp ~55 for
 	   guards down to ~35 for centers in preserved BBGM classes). */
-	function threeShare(bigness, tpRating) {
+	/* `tpRating` is the shooting level the SHARE is stretched by, which the
+	   caller may have adjusted for the class's reference volume; `ownTp` is
+	   the player's own three-point rating and is what the cannot-shoot damping
+	   below reads. They used to be one argument, and the consequence was that
+	   the class-level volume correction (up to about ten rating points, see
+	   classRefVolume in js/engine.js) lifted a genuine non-shooter over the
+	   damping threshold: a seven-footer with a tp of 25 was treated as a
+	   35 and took a sixth of his shots from three. The correction exists to
+	   align a class's VOLUME with the level the model was fitted at; it is not
+	   a claim that anybody can shoot. */
+	function threeShare(bigness, tpRating, ownTp) {
 		const base = byHeight("share3", bigness);
 		const typicalTp = 58 - 26 * clamp(bigness, 0, 1);
 		// The slope decides how far a specialist departs from his size's norm.
@@ -430,7 +440,8 @@
 		   rating in the twenties still launched about two a game and made a
 		   quarter of them; real post-only bigs take 0.2 a game. Below a tp of
 		   30 the share is scaled down towards zero rather than floored. */
-		if (tpRating < 30) share *= Math.max(0, tpRating) / 30;
+		const gate = ownTp === undefined ? tpRating : ownTp;
+		if (gate < 30) share *= Math.max(0, gate) / 30;
 		return clamp(share, 0, 0.72);
 	}
 

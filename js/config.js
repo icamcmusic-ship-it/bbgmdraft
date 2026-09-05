@@ -105,6 +105,11 @@
 		   the caller (the UI keeps it across rerolls and persists it); the
 		   engine never writes it. */
 		recentPools: null,
+		/* The class year, transfer path and college a SHARED universe already
+		   drew for each player key, so replaying it reproduces the same men
+		   rather than the same seeds. Supplied by the caller (importUniverse);
+		   the engine reads it in assignClassYears and never writes it. */
+		biography: null,
 
 		/* --- the world -----------------------------------------------------
 
@@ -138,6 +143,14 @@
 		   between seasons, as a percentage. Only meaningful in a universe,
 		   where there is a previous season to leave. */
 		portalRate: 100,
+		/* RECRUITING MOMENTUM. How strongly last season's programs recruit
+		   this season's blank-college prospects, as a percentage. 0 restores
+		   the pre-universe draw (region-weighted destinations only, with no
+		   memory of who won anything); 100 sends every one of them to a
+		   domestic program weighted by level, banners and last season's title.
+		   Only meaningful in a universe: it reads the carry-over, and a single
+		   class file has none. See assignCollege in js/engine.js. */
+		recruitMomentum: 55,
 
 		// --- the season's own story ----------------------------------------
 		/* How often the map of college basketball changes. Conference STRENGTH
@@ -406,6 +419,7 @@
 		"freshmanShare", "transferShare", "redshirtShare", "reclassShare",
 		"archetypeDiversity", "pace", "buildNoise", "variation",
 		"coachTurnover", "realignmentMemory", "starReturners", "portalRate",
+		"recruitMomentum",
 		"flavorReach", "wEuroLeague", "wGLeague", "wNBL",
 	]);
 	function isCount(key) { return COUNTS.has(key); }

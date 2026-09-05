@@ -392,6 +392,118 @@
 		{ name: "Craft Over Bounce", min: 0, max: 100, w: 1.3, pot: -4, t: ["scoring", "playmaking", "durability"], o: { oiq: 14, ft: 12, ins: 10, drb: 8, fg: 6, jmp: -20, spd: -14, dnk: -12, endu: -4 } },
 		{ name: "Motor-Only Prospect", min: 0, max: 100, w: 1.1, t: ["raw", "rebounding", "athletic"], o: { endu: 18, reb: 12, spd: 8, jmp: 8, diq: 6, fg: -16, tp: -14, pss: -10, ins: -8, oiq: -4 } },
 
+		/* --- sixty more: the table as a vocabulary --------------------------
+
+		   The 144 builds above cover the shapes a scout names; what they do
+		   not cover is how OFTEN each of those shapes can be asked for. The
+		   flavor system multiplies a tag by up to 2.6, and a multiplier on a
+		   small pool is a blunt instrument: measured over the table above,
+		   `durability` had sixteen members and `raw` twenty against `big`'s
+		   forty-nine, so a "weak year" or a "year everybody got hurt" could
+		   only ever be the same handful of builds while a big-heavy one had
+		   fifty to choose from. Thirty-eight of the sixty below carry
+		   `durability`, `raw`, `rebounding` or `shooting`.
+
+		   The admission test is unchanged and is the reason this is sixty
+		   names and not a hundred: each one was run through the cosine
+		   similarity x height-overlap sweep in tools/test.js, and a build that
+		   was another build with a different label was cut rather than
+		   renamed. Where one sits close to an existing build, the height gate
+		   is what separates them and the comment says so.
+
+		   They are grouped by who they are for, which is also how a reader
+		   looks for redundancy.
+
+		   ONE THING A NEW BUILD MUST NOT DO is move a calibrated distribution.
+		   The stat model's anchors are empirical — drafted point guards
+		   average 5.3 assists a game and centers 1.4 — and a build's passing
+		   offset is one of the inputs to that. The first draft of these sixty
+		   lowered the mean pass offset of the builds a sub-6'2" prospect is
+		   eligible for (1.57 -> 0.88) and raised it for the ones a 6'9" player
+		   is eligible for, and the PG:C assist ratio duly fell out of its band
+		   in tools/validate.js — a change about VARIETY quietly moved the
+		   basketball. The passing offsets here are set so that both profiles
+		   land back where they were; a build added later should check the same
+		   two numbers. The same argument applies to the potential term, which
+		   is why POT_BY_ARCHETYPE is centered (see below). */
+		// --- guards ---------------------------------------------------------
+		{ name: "Press-Break Handler", min: 0, max: 46, w: 1.2, t: ["guard", "playmaking", "durability"], o: { drb: 18, endu: 14, pss: 20, oiq: 6, stre: -14, reb: -12, ins: -12, dnk: -8, jmp: -4 } },
+		{ name: "Two-Foot Finisher", min: 0, max: 50, w: 1.0, t: ["guard", "scoring", "athletic"], o: { ins: 18, jmp: 12, dnk: 10, ft: 8, tp: -18, pss: -8, diq: -8, reb: -6 } },
+		{ name: "Deep-Range Bomber", min: 0, max: 54, w: 1.0, t: ["guard", "shooting"], o: { tp: 26, oiq: 6, drb: 4, ins: -16, stre: -14, reb: -10, diq: -8, dnk: -6, ft: -2 } },
+		{ name: "Charge-Taker", min: 0, max: 54, w: 0.9, t: ["guard", "defense", "durability"], o: { diq: 16, stre: 14, endu: 12, oiq: 8, jmp: -18, spd: -10, dnk: -10, tp: -6, pss: 6 } },
+		{ name: "Second-Half Closer", min: 0, max: 52, w: 0.9, t: ["guard", "scoring", "durability"], o: { ft: 18, endu: 14, fg: 10, oiq: 6, reb: -12, diq: -10, jmp: -10, ins: -8, pss: 8 } },
+		{ name: "Turnover-Free Steward", min: 0, max: 46, w: 1.0, t: ["guard", "playmaking"], o: { oiq: 16, pss: 24, ft: 8, drb: 6, jmp: -14, spd: -10, dnk: -10, reb: -8, ins: -4 } },
+		{ name: "Undersized Bulldog", min: 0, max: 42, w: 0.9, t: ["guard", "defense", "rebounding"], o: { stre: 16, reb: 14, diq: 12, endu: 8, tp: -14, ins: -12, jmp: -8, drb: -6 } },
+		{ name: "Shot-Fake Specialist", min: 0, max: 52, w: 0.85, t: ["guard", "scoring", "shooting"], o: { ft: 20, tp: 12, oiq: 10, fg: 4, diq: -14, reb: -12, stre: -12, dnk: -6 } },
+		/* Ball-Stopping Wing is the same idea at 6'6"-6'9"; the gates barely
+		   touch, and a 6'1" isolation guard and a 6'8" one are not
+		   alternatives for the same prospect. */
+		{ name: "Empty-Corner Isolationist", min: 0, max: 50, w: 0.85, t: ["guard", "scoring"], o: { drb: 16, fg: 14, ft: 8, ins: 6, pss: -8, diq: -12, reb: -10, endu: -4 } },
+		{ name: "Junk-Defense Guard", min: 0, max: 52, w: 0.9, t: ["guard", "defense", "raw"], o: { spd: 16, diq: 12, jmp: 8, endu: 8, oiq: -14, ft: -12, ins: -10, pss: -6, tp: -4 } },
+		{ name: "Walk-On Made Good", min: 0, max: 56, w: 0.8, pot: -6, inj: 0.8, t: ["guard", "durability", "shooting"], o: { ft: 16, tp: 12, endu: 12, oiq: 8, stre: -14, jmp: -12, dnk: -12, ins: -8, pss: 8 } },
+		{ name: "Hesitation Creator", min: 0, max: 48, w: 1.1, t: ["guard", "scoring", "playmaking"], o: { drb: 18, spd: 10, fg: 8, pss: 18, reb: -12, stre: -12, diq: -10, ins: -6 } },
+		{ name: "Bench-Spark Defender", min: 0, max: 50, w: 1.0, t: ["guard", "defense", "athletic"], o: { spd: 18, diq: 12, endu: 8, jmp: 6, ins: -14, tp: -12, stre: -8, reb: -4 } },
+		{ name: "Left-Hand-Only Guard", min: 0, max: 50, w: 0.7, t: ["guard", "raw", "scoring"], o: { fg: 14, spd: 12, dnk: 8, jmp: 8, drb: -14, oiq: -12, pss: -6, diq: -8 } },
+		{ name: "Recruited-Over Senior", min: 0, max: 54, w: 0.9, pot: -7, bio: { years: ["Senior", "Graduate"] }, t: ["guard", "durability", "defense"], o: { endu: 16, diq: 12, oiq: 10, ft: 8, jmp: -16, spd: -12, dnk: -10, tp: -6, pss: 12 } },
+		{ name: "Combo Guard Without a Position", min: 0, max: 52, w: 1.1, t: ["guard", "raw"], o: { fg: 12, spd: 10, drb: 8, jmp: 8, pss: -6, diq: -10, oiq: -10, reb: -6 } },
+		// --- wings ----------------------------------------------------------
+		{ name: "Baseline-Drift Finisher", min: 36, max: 66, w: 1.2, t: ["wing", "athletic", "scoring"], o: { dnk: 16, jmp: 12, ins: 10, endu: 6, drb: -16, pss: -12, tp: -8, ft: -6 } },
+		{ name: "Closeout Attacker", min: 34, max: 66, w: 1.3, t: ["wing", "scoring", "shooting"], o: { fg: 14, tp: 12, drb: 10, ft: 8, diq: -14, reb: -12, stre: -10, endu: -4 } },
+		{ name: "Rebound-and-Push Wing", min: 38, max: 68, w: 1.2, t: ["wing", "rebounding", "playmaking"], o: { reb: 16, pss: 12, spd: 10, endu: 6, tp: -14, ins: -12, ft: -10, stre: -6 } },
+		{ name: "No-Middle Wing Defender", min: 36, max: 66, w: 1.2, t: ["wing", "defense", "durability"], o: { diq: 18, endu: 12, stre: 10, spd: 6, fg: -14, tp: -12, pss: -10, ins: -8 } },
+		{ name: "Straight-Line Athlete", min: 36, max: 68, w: 1.1, inj: 1.15, t: ["wing", "athletic", "raw"], o: { spd: 20, jmp: 12, dnk: 8, stre: 6, oiq: -14, drb: -12, tp: -12, ft: -8 } },
+		{ name: "Skip-Pass Wing", min: 36, max: 68, w: 1.0, t: ["wing", "playmaking", "shooting"], o: { pss: 16, tp: 12, oiq: 10, ft: 6, spd: -14, dnk: -12, reb: -10, stre: -8 } },
+		{ name: "Physical Cutter", min: 38, max: 68, w: 1.1, t: ["wing", "athletic", "durability"], o: { stre: 16, endu: 14, dnk: 10, oiq: 6, tp: -16, drb: -12, pss: -10, ft: -6 } },
+		{ name: "Corner-to-Corner Runner", min: 34, max: 64, w: 1.2, t: ["wing", "shooting", "durability"], o: { endu: 18, tp: 12, spd: 10, ft: 6, ins: -14, drb: -12, pss: -10, stre: -8 } },
+		{ name: "Long-Armed Deflector", min: 38, max: 70, w: 1.2, t: ["wing", "defense", "raw"], o: { diq: 18, jmp: 10, spd: 8, reb: 6, oiq: -12, ft: -12, tp: -10, fg: -8 } },
+		{ name: "Trail-Three Forward", min: 40, max: 70, w: 1.1, t: ["wing", "shooting", "rebounding"], o: { tp: 16, reb: 12, endu: 8, oiq: 6, drb: -14, spd: -12, ins: -10, pss: -6 } },
+		{ name: "Wing With No Handle", min: 36, max: 68, w: 1.0, t: ["wing", "raw", "shooting"], o: { tp: 16, ft: 12, diq: 8, jmp: 6, drb: -22, pss: -12, ins: -6 } },
+		{ name: "Postseason Riser", min: 34, max: 68, w: 0.85, pot: 4, t: ["wing", "scoring", "raw"], o: { fg: 14, tp: 10, jmp: 8, drb: 8, endu: -14, diq: -12, pss: -8, reb: -6 } },
+		{ name: "Sit-Down Screener Wing", min: 40, max: 70, w: 1.0, t: ["wing", "durability", "rebounding"], o: { stre: 18, endu: 12, reb: 10, oiq: 6, drb: -14, tp: -12, spd: -10, ft: -8 } },
+		{ name: "Broken-Play Scorer", min: 36, max: 66, w: 0.9, t: ["wing", "scoring", "athletic"], o: { fg: 14, jmp: 12, spd: 8, ins: 8, oiq: -14, pss: -12, tp: -10, diq: -4 } },
+		{ name: "Third-Option Wing", min: 34, max: 68, w: 1.3, t: ["wing", "defense", "shooting"], o: { tp: 12, diq: 12, endu: 10, oiq: 8, fg: -12, drb: -12, ins: -10, pss: -6 } },
+		{ name: "Undersized Wing Stopper", min: 30, max: 56, w: 1.0, t: ["wing", "defense", "durability"], o: { diq: 18, stre: 12, endu: 10, reb: 6, ins: -14, dnk: -12, tp: -10, pss: -6 } },
+		// --- bigs -----------------------------------------------------------
+		{ name: "Short-Roll Decision-Maker", min: 56, max: 100, w: 1.1, t: ["big", "playmaking", "scoring"], o: { pss: 14, oiq: 12, fg: 12, ins: 8, spd: -14, tp: -12, diq: -10, jmp: -8 } },
+		{ name: "Deep-Seal Post", min: 62, max: 100, w: 1.1, t: ["big", "scoring", "rebounding"], o: { ins: 18, stre: 16, reb: 10, ft: 6, spd: -16, tp: -16, drb: -12, jmp: -6, pss: -10 } },
+		{ name: "Two-Nine-Foot Wingspan", min: 66, max: 100, w: 1.0, pot: 4, t: ["big", "defense", "raw"], o: { diq: 18, jmp: 12, reb: 10, dnk: 6, oiq: -14, ft: -12, tp: -12, drb: -10, fg: -4, pss: -10 } },
+		{ name: "Elbow-Extended Passer", min: 58, max: 92, w: 1.0, t: ["big", "shooting", "playmaking"], o: { ft: 16, pss: 12, oiq: 10, tp: 10, spd: -14, dnk: -12, reb: -10, diq: -8 } },
+		{ name: "Foul-Trouble Anchor", min: 64, max: 100, w: 0.9, inj: 1.1, t: ["big", "defense", "raw"], o: { diq: 20, jmp: 10, stre: 8, reb: 6, endu: -18, oiq: -12, ft: -8, tp: -6, pss: -10 } },
+		{ name: "Roll-Man Only", min: 58, max: 100, w: 1.2, t: ["big", "athletic", "raw"], o: { dnk: 20, spd: 10, jmp: 10, endu: 6, oiq: -14, tp: -14, drb: -12, pss: -17, ft: -4 } },
+		{ name: "Backup-Five Rebounder", min: 60, max: 100, w: 1.2, inj: 0.85, t: ["big", "rebounding", "durability"], o: { reb: 18, endu: 12, stre: 10, diq: 6, tp: -16, ft: -12, drb: -10, spd: -8, pss: -10 } },
+		{ name: "Perimeter-Shy Shooter", min: 54, max: 88, w: 0.9, t: ["big", "shooting", "scoring"], o: { fg: 18, ft: 12, oiq: 8, ins: 6, tp: -14, spd: -12, drb: -10, diq: -8, pss: -10 } },
+		{ name: "Zone-Anchor Center", min: 66, max: 100, w: 1.1, t: ["big", "defense", "durability"], o: { diq: 16, endu: 14, reb: 10, stre: 8, spd: -16, drb: -12, tp: -12, fg: -8, pss: -10 } },
+		{ name: "Slow-Twitch Skilled Big", min: 58, max: 96, w: 1.0, pot: -3, t: ["big", "scoring", "playmaking"], o: { oiq: 14, ins: 12, pss: 8, ft: 8, spd: -18, jmp: -12, dnk: -8, diq: -4 } },
+		{ name: "Second-Jump Big", min: 58, max: 100, w: 1.2, t: ["big", "rebounding", "athletic"], o: { jmp: 16, reb: 14, endu: 10, dnk: 8, tp: -16, ft: -12, pss: -17, drb: -8 } },
+		{ name: "Boxing-Out Specialist", min: 56, max: 96, w: 1.0, t: ["big", "rebounding", "durability"], o: { stre: 16, reb: 14, endu: 10, oiq: 8, jmp: -14, spd: -12, tp: -12, drb: -8, pss: -10 } },
+		{ name: "Skinny Seven-Footer", min: 76, max: 100, w: 1.0, pot: 6, t: ["big", "raw"], o: { jmp: 12, diq: 10, reb: 8, dnk: 6, stre: -24, endu: -8, drb: -8, tp: -4, pss: -10 } },
+		{ name: "Free-Throw-Shooting Five", min: 62, max: 100, w: 0.9, t: ["big", "shooting", "durability"], o: { ft: 22, endu: 10, oiq: 8, ins: 6, spd: -14, drb: -12, jmp: -10, diq: -6, tp: -4, pss: -10 } },
+		{ name: "Undersized Rim Runner", min: 46, max: 66, w: 1.1, t: ["big", "athletic", "raw"], o: { dnk: 18, spd: 12, jmp: 10, endu: 8, tp: -16, ft: -12, pss: -10, oiq: -8 } },
+		{ name: "Foreign-League Big", min: 56, max: 96, w: 0.9, pot: -4, bio: { proOrReturned: true }, t: ["big", "shooting", "playmaking"], o: { ft: 14, tp: 12, oiq: 10, pss: 6, spd: -14, jmp: -12, dnk: -10, endu: -6 } },
+		// --- everyone -------------------------------------------------------
+		{ name: "Redshirt Year Away", min: 0, max: 100, w: 1.1, pot: 7, bio: { notYears: ["Senior", "Graduate"] }, t: ["raw", "durability"], o: { endu: 14, stre: 12, jmp: 6, spd: 6, oiq: -14, fg: -12, ft: -8, diq: -6 } },
+		{ name: "Weight-Room Project", min: 30, max: 100, w: 1.2, pot: 5, t: ["raw", "athletic"], o: { stre: 18, jmp: 8, dnk: 8, reb: 6, oiq: -14, pss: -12, ft: -8, tp: -8 } },
+		/* The closest pair in the table at 0.90, and kept: Fifth-Year Senior
+		   is a biography gate (Senior or Graduate only) with a negative
+		   potential, and this is a freshman who already knows where to stand.
+		   Same shape, opposite point in a career, and the flavor and note
+		   systems read them differently. */
+		{ name: "Coach's Son", min: 0, max: 100, w: 1.0, pot: -5, inj: 0.85, t: ["playmaking", "durability"], o: { oiq: 18, ft: 10, pss: 8, diq: 6, jmp: -16, spd: -12, dnk: -10, stre: -6 } },
+		/* Iron Man is the every-game BODY — strength, defensive feel, a
+		   frame that does not break. This is the every-minute ROLE: the man
+		   who plays 38 a night because the rotation is seven deep, does the
+		   rebounding nobody else will and cannot shoot. Reshaped away from
+		   Iron Man deliberately after the similarity sweep put the two at
+		   0.96 in offset space with identical gates. */
+		{ name: "Never-Off-the-Floor Starter", min: 0, max: 100, w: 1.2, inj: 0.55, t: ["durability", "rebounding"], o: { endu: 22, reb: 12, pss: 8, drb: 6, tp: -16, ins: -12, jmp: -10, fg: -8 } },
+		{ name: "One-Year Wonder", min: 0, max: 100, w: 1.0, vol: 1.25, t: ["scoring", "raw"], o: { fg: 16, tp: 10, drb: 8, jmp: 6, diq: -14, endu: -12, pss: -8, reb: -6 } },
+		{ name: "Injury-Shortened Season", min: 0, max: 100, w: 0.8, inj: 1.85, pot: 3, t: ["raw", "durability", "shooting"], o: { tp: 14, ft: 10, oiq: 8, fg: 6, endu: -20, spd: -12, stre: -6 } },
+		{ name: "Late-Arriving International", min: 0, max: 100, w: 1.0, bio: { proOrReturned: true }, t: ["raw", "shooting"], o: { tp: 14, oiq: 10, pss: 8, ft: 8, spd: -12, dnk: -12, diq: -10, endu: -6 } },
+		{ name: "Junior-College Import", min: 0, max: 100, w: 1.1, pot: -2, t: ["scoring", "raw", "athletic"], o: { fg: 14, jmp: 10, spd: 8, dnk: 8, oiq: -14, diq: -12, pss: -8, ft: -6 } },
+		{ name: "Practice-Player Turned Starter", min: 0, max: 100, w: 0.9, pot: -4, t: ["defense", "durability"], o: { diq: 14, endu: 14, stre: 8, oiq: 6, fg: -14, tp: -12, drb: -10, ins: -6 } },
+		{ name: "Positional Question Mark", min: 40, max: 78, w: 1.2, t: ["raw", "rebounding", "defense"], o: { reb: 12, diq: 10, stre: 8, jmp: 8, tp: -12, pss: -10, drb: -10, oiq: -6 } },
+		{ name: "Body-Type Outlier", min: 0, max: 100, w: 0.9, inj: 1.2, t: ["raw", "athletic", "rebounding"], o: { stre: 16, reb: 12, dnk: 8, ins: 6, spd: -18, endu: -12, tp: -8, drb: -4 } },
+		{ name: "Two-Way Contract Body", min: 0, max: 100, w: 1.0, pot: -5, inj: 0.9, t: ["durability", "shooting"], o: { tp: 14, endu: 12, ft: 10, diq: 8, jmp: -14, ins: -12, drb: -10, pss: -8 } },
 		{ name: "Balanced", min: 0, max: 100, w: 1.0, t: [], o: {} },
 	];
 
@@ -786,8 +898,37 @@
 	   solver's arithmetic and the potential fit reads what was written. */
 	const RAW_OFFSETS = {};
 	for (const a of ARCHETYPES) RAW_OFFSETS[a.name] = Object.assign({}, a.o);
+	/* THE POTENTIAL TERM IS RELATIVE TO THE FIELD.
+
+	   computePotGap answers "how much more potential does this build carry
+	   than a plain one", and the answer is added to every prospect drawn into
+	   the build. Uncentered, that made the LEVEL of potential in a class a
+	   function of the size and shape of the table: the sixty builds added
+	   below lean less subtractive than the ones above them by design, and
+	   adding them moved the mean gap from -0.72 to -0.46 — a quarter of a
+	   potential point on every prospect in every class, from a change that was
+	   supposed to be about variety.
+
+	   So the gaps are centered on the mean the calibrations were fitted at.
+	   Relative structure is untouched (a Raw Project still carries nine points
+	   more than a Glue Guy); what is removed is the coupling between how many
+	   builds the table has and how good the players in it are. */
+	const POT_LEVEL_ANCHOR = -0.72;
 	const POT_BY_ARCHETYPE = {};
-	for (const a of ARCHETYPES) POT_BY_ARCHETYPE[a.name] = computePotGap(a);
+	{
+		const raw = {};
+		let total = 0;
+		for (const a of ARCHETYPES) {
+			raw[a.name] = computePotGap(a);
+			total += raw[a.name];
+		}
+		const shift = ARCHETYPES.length
+			? POT_LEVEL_ANCHOR - total / ARCHETYPES.length : 0;
+		for (const a of ARCHETYPES) {
+			// Balanced is the reference build and stays at exactly zero.
+			POT_BY_ARCHETYPE[a.name] = a.name === "Balanced" ? 0 : raw[a.name] + shift;
+		}
+	}
 
 	/* What a basketball player of a given listed height typically weighs.
 
@@ -1338,6 +1479,111 @@
 			   like from the outside. */
 			m: { raw: 1.2, defense: 0.85 },
 			c: { bluebloodDownYears: 5, transferShare: 55, upsetFactor: 1.3 } },
+
+		/* --- twelve more, chosen against the table rather than for it -------
+
+		   Twenty-nine flavors is a long list and the test for a thirtieth is
+		   not "is this a kind of class" but "does the tool draw a class this
+		   one cannot already draw". Two things make room for these twelve:
+
+		     - THE ARCHETYPE TABLE GREW. Sixty builds were added, and thirty-
+		       eight of them carry `durability`, `raw`, `rebounding` or
+		       `shooting` — the four tags whose pools used to be too small for
+		       a 2.2x multiplier to mean anything. A flavor that leans on one
+		       of those tags now has a real pool behind it, which is what makes
+		       "the year everybody was hurt and nobody could shoot" a different
+		       class rather than the same eight names.
+		     - A UNIVERSE IS LONG. In a twenty-season chain a flavor is not the
+		       character of one class, it is the character of one YEAR of a
+		       history, and the years that stand out in a real one are the odd
+		       ones: the year the freshmen were all bigs, the year nobody could
+		       shoot, the year every good player was hurt in March.
+
+		   Each carries a config bend no other flavor carries, for the reason
+		   the five above it were added: an archetype tilt alone cannot say
+		   "weak year", and two flavors that differ only in their tilt are one
+		   flavor with two names. */
+		{ name: "no-shooting year", w: 0.7, label: "nobody could shoot",
+			/* The inverse of shooting-rich, and not the same as defensive: it
+			   cuts shooting hard AND raises pace and rebounding, which is what
+			   a season of missed threes and long rebounds actually looks like
+			   in a box score. efficiencyEnv carries the rest. */
+			m: { shooting: 0.3, rebounding: 1.8, athletic: 1.3, defense: 1.2 },
+			traits: { shooting: 0.4, rebounding: 1.6 },
+			c: { efficiencyEnv: -1.2, pace: 72 } },
+		{ name: "freshman bigs", w: 0.65, label: "a class of freshman bigs",
+			/* big-heavy says the class is tall; one-and-done says it is young.
+			   Neither says both, and the year six freshman centers go in the
+			   lottery is a specific and rare kind of draft. */
+			m: { big: 2.2, rebounding: 1.6, raw: 1.7, guard: 0.4, shooting: 0.6 },
+			traits: { frame: 1.8, medical: 1.2 },
+			c: { freshmanShare: 64, potBias: 1.2, potSpread: 2.0 } },
+		{ name: "iron year", w: 0.65, label: "the year nobody got hurt",
+			/* The mirror of the injury year, which existed alone — so the
+			   availability axis could only ever bend one way. */
+			m: { durability: 2.4, athletic: 1.2, raw: 0.7 },
+			traits: { medical: 0.35, motor: 1.5 },
+			c: { injuryRate: 0.35 } },
+		{ name: "march attrition", w: 0.7, label: "everybody was hurt by March",
+			/* An injury year is a season-long fact; this one is about WHEN,
+			   and it is the reason a bracket comes apart. The upset factor is
+			   what a country of short-handed favorites produces. */
+			m: { durability: 2.0, raw: 1.3, defense: 0.85 },
+			traits: { medical: 1.8, motor: 0.7 },
+			c: { injuryRate: 1.5, upsetFactor: 1.45, potSpread: 2.2 } },
+		{ name: "senior-laden", w: 0.75, label: "a senior-laden year",
+			/* veteran is old AND finished (potBias -1.3, raw cut to 0.35).
+			   This one is old and GOOD: fifth-year men who stayed, which is
+			   what the portal era actually produced, and the potential spread
+			   narrows rather than the level dropping. */
+			m: { durability: 1.8, defense: 1.4, playmaking: 1.3, raw: 0.5 },
+			traits: { character: 1.6, role: 1.4 },
+			c: { freshmanShare: 12, transferShare: 46, potSpread: 0.6, classQuality: 0.3 } },
+		{ name: "juco wave", w: 0.6, label: "a junior-college wave",
+			m: { raw: 1.6, athletic: 1.5, scoring: 1.2, shooting: 0.7 },
+			traits: { background: 1.9, character: 0.8 },
+			c: { transferShare: 70, freshmanShare: 20, buildNoise: 8 } },
+		{ name: "positionless", w: 0.7, label: "a positionless class",
+			/* Every other flavor bends the mix TOWARD a position. This one
+			   flattens it: guards, wings and bigs all lifted together with
+			   playmaking on top, which is the modern class where nobody has a
+			   position and the archetype diversity dial says so. */
+			m: { wing: 1.5, playmaking: 1.6, rebounding: 1.3, big: 1.1, guard: 1.1 },
+			traits: { passing: 1.4 },
+			c: { archetypeDiversity: 92, specialization: 0.7 } },
+		{ name: "defensive bigs", w: 0.7, label: "rim protection everywhere",
+			m: { big: 1.9, defense: 2.2, shooting: 0.5, scoring: 0.6 },
+			traits: { defense: 1.7, frame: 1.3 },
+			c: { efficiencyEnv: -0.8, pace: 64 } },
+		{ name: "track meet", w: 0.7, label: "a track meet of a season",
+			/* The pace flavor. post-up renaissance drops pace to 63; nothing
+			   pushed it the other way, so the fast season did not exist. */
+			m: { athletic: 2.0, scoring: 1.4, shooting: 1.2, big: 0.6 },
+			traits: { athleticism: 1.6, motor: 1.4 },
+			c: { pace: 76, efficiencyEnv: 0.4, upsetFactor: 1.2 } },
+		{ name: "high-floor year", w: 0.75, label: "everybody is a rotation player",
+			/* The exact inverse of feast or famine: a class with no top and no
+			   bust either, which is a real and specific kind of draft board —
+			   forty men a scout would put in a rotation and none he would
+			   build around. */
+			m: { defense: 1.4, playmaking: 1.3, durability: 1.5, raw: 0.35 },
+			traits: { character: 1.4, medical: 0.7 },
+			c: { classDepth: 2.6, potSpread: 0.4, eliteCount: 0, buildNoise: 3 } },
+		{ name: "bloodlines", w: 0.6, label: "a class of second generations",
+			/* The narrative flavor a long universe earns: sons of men the
+			   world already remembers. Skill over tools, because that is the
+			   scouting cliché and it is mostly true. */
+			m: { playmaking: 1.6, shooting: 1.4, durability: 1.3, athletic: 0.6, raw: 0.5 },
+			traits: { character: 1.7, background: 1.6, athleticism: 0.7 },
+			c: { buildNoise: 4, freshmanShare: 44, potSpread: 0.8 } },
+		{ name: "scandal year", w: 0.6, label: "an off-court year",
+			/* Nothing in the table said a class was remembered for something
+			   that happened off the floor. The archetype tilt is deliberately
+			   small: the class is ordinary and the YEAR is not, which is what
+			   the config bend and the trait tilt say. */
+			m: { raw: 1.2, defense: 0.9 },
+			traits: { background: 2.2, character: 0.45 },
+			c: { transferShare: 64, bluebloodDownYears: 4, coachTurnover: 165 } },
 	];
 
 	/* The config bend a flavor applies to the whole class. Returned separately

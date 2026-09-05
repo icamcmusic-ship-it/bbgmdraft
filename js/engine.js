@@ -127,6 +127,22 @@
 			"Snow College", "Southern Idaho", "Tallahassee CC", "Gillette College",
 		];
 
+		/* THE BIOGRAPHY A SHARED UNIVERSE CARRIES.
+
+		   A universe export stores every player's class year and transfer path
+		   by player key (see Universe.biographyOf), for a reason the comment
+		   there states: a man who is a junior in the 2027 class has to have
+		   been a sophomore in 2026, and re-drawing it per run makes him a
+		   different person every time. The field was written and never read —
+		   grep found no consumer anywhere — so the one thing that made a
+		   shared universe replay the same MEN rather than the same seeds did
+		   nothing at all.
+
+		   It is read here, and it wins over the draw for exactly the fields it
+		   carries. A key that is not in it falls through to the draw, so a
+		   partial biography (a version 1 export, a universe whose files have
+		   changed) degrades to the old behaviour rather than failing. */
+		const bio = (cfg && cfg.biography) || null;
 		order.forEach((p, i) => {
 			const r = rng.child("class:" + p.key);
 			const rank = i / n;                    // 0 = best prospect in the class
@@ -185,6 +201,16 @@
 				};
 				if (kind.fifthYear) p.classYear = "Graduate";
 			}
+			const b = bio && bio[p.key];
+			if (b) {
+				if (b.classYear) p.classYear = b.classYear;
+				if (b.redshirt !== undefined) p.redshirt = b.redshirt;
+				if (b.reclassified !== undefined) p.reclassified = b.reclassified;
+				if (b.transfer !== undefined) {
+					p.transfer = b.transfer ? Object.assign({}, b.transfer) : null;
+				}
+				p.biographyFixed = true;
+			}
 		});
 	}
 
@@ -235,6 +261,46 @@
 			return C.canonical(player.college);
 		}
 		if (rng.chance(clamp(cfg.pDII, 0, 1))) return "DII NCAA";
+		/* RECRUITING MOMENTUM (universe mode only).
+
+		   A blank-college prospect used to be drawn from region-weighted
+		   league weights alone — the same draw in 2027 as in 2047, with no
+		   memory of what had happened in between. So a program could win three
+		   titles in five seasons and recruit exactly as it had before it won
+		   any, and a twenty-season timeline read as twenty unrelated years.
+
+		   With a carry-over in hand (which only a universe has) some share of
+		   these prospects are recruited by a domestic program instead of
+		   defaulting abroad, weighted by where the program actually SITS —
+		   last season's level, its banners, and the title it just won. That is
+		   what a dynasty recruiting like a dynasty is, and every term in it is
+		   state the chain already carried.
+
+		   Deliberately gated on cfg.carryOver: a single class file run on its
+		   own has no previous season, and this must not change what it draws.
+		   `recruitMomentum` is 0-100 and scales the whole thing, so a universe
+		   can turn it off. */
+		const carry = cfg.carryOver;
+		const momentum = clamp(
+			(cfg.recruitMomentum === undefined ? 55 : cfg.recruitMomentum) / 100, 0, 1);
+		if (carry && carry.levels && momentum > 0 && rng.chance(momentum)) {
+			const pool = [];
+			for (const name of Object.keys(carry.levels)) {
+				if (C.NON_NCAA[name]) continue;
+				const level = carry.levels[name];
+				if (!Number.isFinite(level)) continue;
+				/* Level is the whole story of how good a program was last
+				   season; the exponent is what makes the top of it recruit
+				   disproportionately, which is the actual asymmetry. A title
+				   is worth a big one-year bump and every banner a small
+				   permanent one. */
+				let w = Math.pow(Math.max(1, level - 20) / 60, 2.4);
+				if (carry.champion === name) w *= 2.2;
+				w *= 1 + 0.18 * Math.min(6, (carry.titles && carry.titles[name]) || 0);
+				if (w > 0) pool.push({ name, w });
+			}
+			if (pool.length) return rng.weighted(pool).name;
+		}
 		const loc = player.born && player.born.loc;
 		const weights = cfg.leagueWeights || {};
 		const opts = [];
@@ -1116,7 +1182,12 @@
 			// A renamed prospect keeps the new name everywhere, including in
 			// the exported file.
 			if (ov.name && String(ov.name).trim()) p.name = String(ov.name).trim();
-			p.newCollege = ov.college ||
+			/* The universe's own record of where he went, when it has one —
+			   the same argument as the class year above: a shared universe has
+			   to replay the same men. An override still wins, because that is
+			   the user saying so about this run. */
+			const bioRow = cfg && cfg.biography ? cfg.biography[p.key] : null;
+			p.newCollege = ov.college || (bioRow && bioRow.college) ||
 				assignCollege(
 					rng.child("college:" + p.key + rerollSalt(p, "school") + vsalt), p.src, cfg);
 			p.collegeChanged = p.newCollege !== p.origCollege;
@@ -3435,6 +3506,11 @@
 				   on. Declared here so that turning it on invalidates
 				   everything, which is what it does. */
 				"universe",
+				/* Both are read in the build phase: the biography decides
+				   class years, redshirts, transfers and colleges (see
+				   assignClassYears), and recruiting momentum decides where a
+				   blank-college prospect is recruited (see assignCollege). */
+				"biography", "recruitMomentum",
 			],
 			run: phaseBuild,
 		},
@@ -5434,7 +5510,17 @@
 				const priorRows = [];
 				for (const a of p.priorAwards || []) {
 					if (awardsInScope([a.award], opts.awardsScope, opts.majorConferences).length) {
-						priorRows.push({ season: a.season + seasonShift, type: a.award });
+						/* A season played in ANOTHER file of a universe carries
+						   the absolute season it exports as (see linkCareers in
+						   js/app.js), because that file's own league-to-draft
+						   shift need not be this one's. Everything else is in
+						   this file's league time and takes this file's
+						   shift. */
+						priorRows.push({
+							season: Number.isFinite(a.exportSeason)
+								? a.exportSeason : a.season + seasonShift,
+							type: a.award,
+						});
 					}
 				}
 				/* Ours: the draft year and the five seasons before it. A draft
@@ -5506,14 +5592,26 @@
 				if (opts.prior && Array.isArray(p.priorSeasons)) {
 					for (const r of p.priorSeasons) {
 						if (r.redshirt) continue;
-						rows.push(seasonRow(built, p, r.season, r, opts));
+						const row = seasonRow(built, p, r.season, r, opts);
+						// See the priorAwards block above: a season played in
+						// another file of a universe knows its own absolute
+						// season and must not take this file's shift.
+						if (Number.isFinite(r.exportSeason)) row.__absSeason = r.exportSeason;
+						rows.push(row);
 					}
 				}
 				rows.push(seasonRow(built, p, result.season, null, opts));
 				/* The rows were built at the league's season (that is the key
 				   the season-stats cache is filled under); they are LABELLED
 				   with the class's own. */
-				if (seasonShift) for (const row of rows) row.season += seasonShift;
+				for (const row of rows) {
+					if (Number.isFinite(row.__absSeason)) {
+						row.season = row.__absSeason;
+						delete row.__absSeason;
+					} else if (seasonShift) {
+						row.season += seasonShift;
+					}
+				}
 				/* yearsWithTeam counts consecutive seasons at the same
 				   program, which is what a transfer breaks — the one thing
 				   about a multi-season row that a reader would notice being
@@ -5815,6 +5913,177 @@
 			startingSeason: full.startingSeason,
 			players,
 		};
+	}
+
+	/* ------------------------------------- ONE FILE FOR A WHOLE UNIVERSE
+
+	   A universe used to export as a manifest plus a folder of per-class
+	   exports, because exportFile throws on anything that is not the loaded
+	   draft class and a universe is N loaded draft classes. That is a
+	   spreadsheet, not a world: the point of the mode is that a player's life
+	   spans several files, and the only import route that keeps a statline —
+	   Tools -> Import players — takes ONE players array.
+
+	   So this builds that one array. Every class in the chain, each player at
+	   his own draft.year, tid UNDRAFTED, with the multi-season stats rows the
+	   universe actually played (linkCareers has already replaced each guessed
+	   freshman year with the season that was really played, on the roster it
+	   was really played on). One action in BBGM, and the seasons survive.
+
+	   Three things a merge has to do that a single file never had to:
+
+	     - RENUMBER pids. Every BBGM export starts at 0, so a five-class
+	       universe has five player 0s. validate() warns about this and nothing
+	       resolved it. pids are rewritten monotonically across the whole
+	       universe and everything that references one is rewritten with it.
+	     - DEDUPE AND RE-SEASON the awards array. Awards are the one rich field
+	       that survives both import routes, and in a universe a 2027 prospect
+	       can win honors in the 2025 and 2026 seasons as an underclassman on
+	       somebody else's file. Rows are deduped on {season, type} AFTER each
+	       file's own season shift is applied, so a shift is never applied
+	       twice and never to the wrong row.
+	     - RELATIVES. BBGM renders father/son/brother links natively and
+	       nothing in this repo ever wrote one. A twenty-season universe is
+	       exactly the artifact that can produce a legitimate second
+	       generation, with the pid link intact. */
+	const RELATIVE_MIN_GAP = 18;
+	const RELATIVE_MAX_GAP = 32;
+
+	function universePlayersFile(results, opts) {
+		opts = opts || {};
+		const ordered = (results || []).filter(Boolean).slice()
+			.sort((a, b) => (exportSeasonOf(a) - exportSeasonOf(b)));
+		const players = [];
+		const perFile = [];
+		let nextPid = Number.isFinite(opts.firstPid) ? Number(opts.firstPid) : 0;
+		let version = null;
+		const seen = new Map();
+		let duplicates = 0;
+		for (const res of ordered) {
+			const file = exportPlayersFile(res, opts);
+			if (version === null) version = file.version;
+			const season = classDraftYear(file.players, res.season);
+			const rows = [];
+			for (const p of file.players) {
+				const idKey = ((p.firstName || "") + "|" + (p.lastName || "") + "|" +
+					(p.born && p.born.year)).toLowerCase();
+				/* The same man in two class files (a reclassification, or the
+				   same export loaded twice) is one player in the merged file:
+				   the later row wins, because it is the one whose draft year
+				   the universe actually played to. */
+				if (seen.has(idKey)) {
+					duplicates++;
+					const prev = seen.get(idKey);
+					p.pid = prev.pid;
+					players[prev.at] = p;
+					prev.season = season;
+					continue;
+				}
+				p.pid = nextPid++;
+				/* Awards: deduped on {season, type}. exportFile has already
+				   shifted each row to the season it belongs to, so the dedupe
+				   is over rows that are already in universe time. */
+				if (Array.isArray(p.awards)) {
+					const keep = [];
+					const has = new Set();
+					for (const a of p.awards) {
+						if (!a) continue;
+						const k = a.season + "|" + a.type;
+						if (has.has(k)) continue;
+						has.add(k);
+						keep.push(a);
+					}
+					p.awards = keep;
+				}
+				/* Same argument for the statline: two files can each carry the
+				   season a man actually played once. */
+				if (Array.isArray(p.stats)) {
+					const keep = [];
+					const has = new Set();
+					for (const r of p.stats) {
+						if (!r) continue;
+						const k = r.season + "|" + r.tid + "|" + (r.playoffs ? 1 : 0);
+						if (has.has(k)) continue;
+						has.add(k);
+						keep.push(r);
+					}
+					p.stats = keep;
+				}
+				seen.set(idKey, { pid: p.pid, at: players.length, season });
+				rows.push(p);
+				players.push(p);
+			}
+			perFile.push({ season, players: rows });
+		}
+		const relatives = opts.relatives === false
+			? 0 : addRelatives(perFile, opts.seed || "universe");
+		return {
+			file: {
+				version: version === null ? undefined : version,
+				startingSeason: perFile.length ? perFile[0].season : undefined,
+				players,
+			},
+			seasons: perFile.map((f) => ({ season: f.season, players: f.players.length })),
+			duplicates,
+			relatives,
+			pids: { first: Number.isFinite(opts.firstPid) ? Number(opts.firstPid) : 0,
+				last: nextPid - 1 },
+		};
+	}
+
+	/* The season a result's class belongs to, read the same way exportFile
+	   reads it — off the players, not off the league's startingSeason. */
+	function exportSeasonOf(res) {
+		const src = res && res.leagueFile;
+		return classDraftYear((src && src.players) || [], (res && res.season) || 0);
+	}
+
+	/* Second generations.
+
+	   A father is a man drafted 18-32 seasons before his son, and a son is
+	   only drawn when the universe is long enough to contain one. Both ends of
+	   the link are written, because BBGM reads relatives from each player
+	   rather than deriving the other direction. Deterministic off the universe
+	   seed, so a replay produces the same families. */
+	function addRelatives(perFile, seed) {
+		if (perFile.length < 2) return 0;
+		let made = 0;
+		for (let i = 0; i < perFile.length; i++) {
+			const son = perFile[i];
+			const pool = [];
+			for (let j = 0; j < i; j++) {
+				const gap = son.season - perFile[j].season;
+				if (gap < RELATIVE_MIN_GAP || gap > RELATIVE_MAX_GAP) continue;
+				for (const p of perFile[j].players) pool.push(p);
+			}
+			if (!pool.length) continue;
+			/* Ordered by draft position, so the man a universe remembers is
+			   the one whose son somebody notices — which is the whole appeal
+			   of the field. */
+			pool.sort((a, b) => (a.pid - b.pid));
+			const taken = new Set();
+			for (const p of son.players) {
+				const r = new Rng(String(seed) + "|rel|" + son.season + "|" + p.pid);
+				if (r.random() > 0.02) continue;
+				let pick = null;
+				for (let tries = 0; tries < 6 && !pick; tries++) {
+					const cand = pool[r.int(0, pool.length - 1)];
+					if (cand && !taken.has(cand.pid)) pick = cand;
+				}
+				if (!pick) continue;
+				taken.add(pick.pid);
+				p.relatives = (p.relatives || []).concat([{
+					type: "father", pid: pick.pid,
+					name: ((pick.firstName || "") + " " + (pick.lastName || "")).trim(),
+				}]);
+				pick.relatives = (pick.relatives || []).concat([{
+					type: "son", pid: p.pid,
+					name: ((p.firstName || "") + " " + (p.lastName || "")).trim(),
+				}]);
+				made++;
+			}
+		}
+		return made;
 	}
 
 	/* ------------------------------------------------ merge into a league
@@ -6119,6 +6388,7 @@
 
 	global.Engine = {
 		run, createRunner, exportFile, exportPlayersFile, exportSeason,
+		universePlayersFile, classSeasonOf: exportSeasonOf,
 		exportLeagueFragment, mergeIntoLeague, mergeManyIntoLeague, classDraftYear,
 		buildNote, classYear,
 		assignClassYears, inchesFromHgtRating, validateLeagueFile, findSeason, playerKey,

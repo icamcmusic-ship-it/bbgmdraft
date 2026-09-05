@@ -876,10 +876,21 @@ console.log("\nArchetypes");
 	   twenty classes is not the claim: a 14-build pool drawn from ninety-eight
 	   is roughly 300 draws against a coupon-collector requirement of 450, so a
 	   handful of builds legitimately miss a run of twenty.) */
+	/* THE SAMPLE SCALES WITH THE TABLE.
+
+	   Twenty classes was fitted when the table had 98 builds and then held
+	   while it grew: a class draws a pool of about nineteen builds, so twenty
+	   classes is roughly 380 pool slots against a coupon-collector requirement
+	   that rises with the table — at 205 builds, 1,400 sampled players cover
+	   about 83% of it and the row went red on arithmetic rather than on
+	   anything being wrong. The claim ("nearly all of it turns up") is worth
+	   keeping, so the SAMPLE is scaled to the table instead of the threshold
+	   being lowered to whatever the table happens to produce. */
 	const counts = {};
 	let total = 0;
 	for (const a of RB.ARCHETYPES) counts[a.name] = 0;
-	for (let s = 0; s < 20; s++) {
+	const CLASSES = Math.max(20, Math.ceil(RB.ARCHETYPES.length * 0.2));
+	for (let s = 0; s < CLASSES; s++) {
 		const res = global.Engine.run(V.syntheticClass(200 + s, 70),
 			global.Config.make({ seed: "arch" + s }));
 		for (const p of res.players) {
