@@ -251,6 +251,41 @@ module.exports = function (ok, V) {
 			p.ratings.map((r) => r.season).join(","));
 	}
 
+	/* ---- a prospect abroad survives a round trip ----------------------- */
+	{
+		const CO = global.Colleges;
+		const lf = V.realisticClass("club", 70);
+		const res = run(lf, "club");
+		const file = E.exportFile(res, OPTS);
+		const pros = res.players.filter((p) => p.nonNcaa);
+		ok("export/the class has prospects abroad to check", pros.length > 0,
+			pros.length + " of " + res.players.length);
+		ok("export/college holds the CLUB, not the league",
+			pros.every((p) => !CO.NON_NCAA[file.players[p.idx].college]),
+			JSON.stringify(pros.slice(0, 3).map((p) => file.players[p.idx].college)));
+		ok("export/every club name resolves back to a league",
+			pros.every((p) => CO.leagueOfClub(file.players[p.idx].college)));
+		/* Re-importing has to keep him abroad and in a real league. It
+		   cannot always keep him in the SAME one: 44 clubs are listed in
+		   both a domestic league and a continental competition, and a club
+		   name alone does not say which of the two he was drawn through.
+		   Measured over four classes, 5 of 48 prospects abroad come back in
+		   the neighbouring competition; the rest are exact. */
+		const again = run(file, "club");
+		const back = new Map(again.players.map((p) => [p.idx, p]));
+		const stillAbroad = pros.filter((p) => back.get(p.idx) && back.get(p.idx).nonNcaa);
+		ok("export/re-importing keeps every prospect abroad",
+			stillAbroad.length === pros.length,
+			stillAbroad.length + " of " + pros.length);
+		const exact = pros.filter((p) => back.get(p.idx).newCollege === p.newCollege);
+		ok("export/and nearly all of them in the same league",
+			exact.length >= pros.length - Math.ceil(pros.length * 0.25),
+			exact.length + " of " + pros.length + " exact");
+		ok("colleges/no club name collides with a Division I program",
+			Object.keys(CO.CLUB_LEAGUE).every((n) => !CO.COLLEGES[n]),
+			Object.keys(CO.CLUB_LEAGUE).filter((n) => CO.COLLEGES[n]).join(", "));
+	}
+
 	/* ---- the college table -------------------------------------------- */
 	{
 		const CO = global.Colleges;

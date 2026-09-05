@@ -225,7 +225,15 @@
 	}
 
 	function assignCollege(rng, player, cfg) {
-		if (player.college && player.college.trim() !== "") return C.canonical(player.college);
+		if (player.college && player.college.trim() !== "") {
+			/* A file this tool wrote carries a prospect abroad's CLUB here
+			   (BBGM prints the field as College and a league name is not a
+			   school). Route him back to his league, or a round trip demotes
+			   him to a college player at a program nothing recognises. */
+			const lg = C.leagueOfClub(player.college);
+			if (lg) return lg;
+			return C.canonical(player.college);
+		}
 		if (rng.chance(clamp(cfg.pDII, 0, 1))) return "DII NCAA";
 		const loc = player.born && player.born.loc;
 		const weights = cfg.leagueWeights || {};

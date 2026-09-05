@@ -762,7 +762,7 @@
 			["Cedevita Olimpija", 1], ["Wolves Twinsbet", 0], ["Aris Midea", 0],
 			["Dolomiti Energia Trento", 0], ["Veolia Towers Hamburg", -1],
 			["Slask Wroclaw", -2], ["U-BT Cluj-Napoca", -1], ["Trefl Sopot", -3],
-			["Besiktas", -2], ["La Laguna Tenerife", 1], ["Cholet Basket", -2],
+			["Besiktas", -2], ["Ratiopharm Ulm", 1], ["Hapoel Holon", -2],
 		],
 		"Basketball Bundesliga": [
 			["Bayern Munich", 6], ["Alba Berlin", 4], ["Ratiopharm Ulm", 3],
@@ -811,6 +811,33 @@
 			["Angelo State", -5],
 		],
 	};
+
+	/* Club -> the league it plays in.
+
+	   The export writes a prospect abroad's CLUB into `college`, because that
+	   is the field BBGM prints under that heading and "LNB Pro A" is not a
+	   school. Re-importing the same file then has to get him back to the
+	   right league, or a round trip turns a Cholet player into a college
+	   prospect at an unrecognised program. A club that plays in more than one
+	   competition resolves to the CONTINENTAL one — the EuroLeague, the
+	   EuroCup, the Champions League — because that is the league the tool
+	   sent him to in the first place: assignCollege draws a league and then
+	   a club from it, and a club good enough to be in Europe is reached
+	   through Europe far more often than through its domestic table. Getting
+	   this backwards put a Barcelona player in the ACB on re-import. */
+	const CLUB_LEAGUE = {};
+	{
+		const order = Object.keys(PRO_CLUBS).slice().sort((a, b) => {
+			const dom = (n) => (NON_NCAA[n] && NON_NCAA[n].domestic ? 1 : 0);
+			return dom(a) - dom(b);
+		});
+		for (const lg of order) {
+			for (const [club] of PRO_CLUBS[lg]) {
+				if (CLUB_LEAGUE[club] === undefined) CLUB_LEAGUE[club] = lg;
+			}
+		}
+	}
+	const leagueOfClub = (name) => CLUB_LEAGUE[String(name || "").trim()] || null;
 
 	// Countries/regions that read as European for EuroLeague weighting.
 	const EURO_HINTS = [
@@ -1213,7 +1240,7 @@
 	global.Colleges = {
 		COLLEGES, CONFERENCES, NON_NCAA, PRO_CLUBS, byConference,
 		conferenceOf, frequencyOf, prestige, region, isUSA, leagueWeight,
-		ALIASES, canonical,
+		ALIASES, canonical, CLUB_LEAGUE, leagueOfClub,
 		ABBREVS, abbrev,
 		CANADA_HINTS, US_STATES, GEORGIAN_CITIES, EURO_HINTS, OCEANIA_HINTS, ASIA_HINTS, LATAM_HINTS, AFRICA_HINTS,
 		names: Object.keys(COLLEGES),

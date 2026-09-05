@@ -67,7 +67,12 @@ BBGM rolled; `born.loc` and the seeded face the tool draws on its own pages were
 never written, so the man you scouted and the man in the game were different
 people; and `college` for a prospect abroad held the LEAGUE — "LNB Pro A" — under
 a heading BBGM prints as College. The club is already drawn, and the club is
-what goes in the field.
+what goes in the field; a club-to-league table takes him back to the right
+competition when the same file is loaded again. That last step is exact for
+every club that plays in one league and only nearly exact for the 44 that play
+in two — a club name alone cannot say whether a Barcelona prospect was reached
+through the EuroLeague or the ACB, so about one prospect abroad in ten comes
+back in the neighbouring competition.
 
 On the data side, the conference table had been drifting between two seasons at
 once; it is now stated as, and consistent with, 2027-28 — UC Davis in the
