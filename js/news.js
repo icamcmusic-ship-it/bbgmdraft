@@ -22,10 +22,24 @@
 	/* `when` runs 0..1 across the regular season and above 1 in March. */
 	const MONTHS = ["November", "November", "December", "December",
 		"January", "January", "February", "February", "March"];
+	/* March runs 1.1 to about 1.25 and then the calendar keeps going: the
+	   lottery is in May and the combine, the pro days and the draft itself are
+	   in June. Everything above 1.1 used to be clamped to "March", so 171
+	   articles across fifteen classes — every mock draft, every workout, the
+	   draft night — filed from a month they did not happen in. */
+	const LATE = [
+		// The bracket, the awards and the all-America roundup.
+		[1.25, "March"],
+		// The lottery and the front half of the pre-draft circuit.
+		[1.37, "May"],
+	];
 	function dateline(when) {
 		if (when === undefined || when === null) return "Preseason";
 		if (when < 0) return "Offseason";
-		if (when > 1.1) return "March";
+		if (when > 1.1) {
+			for (const [bound, name] of LATE) if (when <= bound) return name;
+			return "June";
+		}
 		if (when > 1) return "Championship Week";
 		return MONTHS[Math.min(MONTHS.length - 1,
 			Math.floor(when * MONTHS.length))];
@@ -191,6 +205,49 @@
 			"I have him higher than the boards do. I have had him higher all year.",
 			"There is a version of him in two years that nobody in this building is imagining.",
 		] },
+		/* --- what the scouting file says ------------------------------
+		   The trait layer (js/traits.js) is the richest thing on a player and
+		   no quote in the paper had ever read it: every scout in these pages
+		   talked about tools and feel in general terms whatever the man's
+		   actual file said. These are keyed to the trait GROUP, so a trait
+		   added there falls into the right bucket without a new pool. */
+		{ s: "trait:motor", who: "scout", attribution: "an NBA scout in the building", lines: [
+			"The talent has never been in question. The other twenty-eight minutes are.",
+			"When he decides the game matters, he is the best player on the floor. That is the whole scouting report.",
+			"You are drafting the nights he plays like that, and hoping there are more of them.",
+		] },
+		{ s: "trait:medical", who: "scout", attribution: "an NBA scout in the building", lines: [
+			"Everybody's doctors will have an opinion. Ours is that he is worth the risk.",
+			"He has played through it all season, which tells you something the imaging will not.",
+			"The medical is the whole conversation in our room. The player is not in dispute.",
+		] },
+		{ s: "trait:shooting", who: "scout", attribution: "an NBA scout in the building", lines: [
+			"The release is the same every time. That travels.",
+			"If the shot is real, he is a rotation player in October. That is the bet.",
+			"He is going to have to make them from further out. He knows that better than we do.",
+		] },
+		{ s: "trait:frame", who: "scout", attribution: "an NBA scout in the building", lines: [
+			"He measured better than he looks on tape, which happens more than people think.",
+			"The frame is going to hold more weight, and everything gets easier when it does.",
+			"You cannot teach the arms. Everything else on the list you can.",
+		] },
+		{ s: "trait:defense", who: "rival", attribution: "an opposing coach", lines: [
+			"We could not get our best action off against him. That is not normal at this level.",
+			"He guarded three positions for us tonight and did not complain about any of them.",
+			"Take him off the floor and it is a different game. We counted.",
+		] },
+		{ s: "trait:passing", who: "coach", lines: [
+			"He sees it a half-second before everybody else. You cannot coach the half-second.",
+			"The pass he made in the second half is one most people in this league do not see.",
+		] },
+		{ s: "trait:character", who: "coach", lines: [
+			"He is the first one in the gym and he has been all year. The younger ones have noticed.",
+			"You would want him around your program whatever he averaged.",
+		] },
+		{ s: "trait:background", who: "coach", lines: [
+			"Where he has come from to be standing here is the part nobody writes about.",
+			"He has had to do this the long way, and it shows in how he plays.",
+		] },
 		/* --- an underdog, a surprise ----------------------------------- */
 		{ s: "surprise", who: "coach", lines: [
 			"Our guys have been reading what everybody wrote about us. They can read.",
@@ -252,6 +309,10 @@
 		}
 		if (f.underdog) out.push("surprise");
 		if (f.injury) out.push("injury");
+		// The scouting file, when the article is about somebody who has one.
+		for (const t of (f.player && f.player.traits) || []) {
+			if (t && t.group) out.push("trait:" + t.group);
+		}
 		if (!out.length) out.push(f.player ? "big" : "good");
 		return out;
 	}
@@ -314,11 +375,27 @@
 	const PARAGRAPHS = [
 		/* --- the stat paragraph ---------------------------------------- */
 		{
+			/* Four voices drew from ONE sentence, so the second paragraph of
+			   every article a beat writer filed opened the same way — fifteen
+			   times a class. The facts are identical; the sentence is not. */
 			id: "line", voices: ["wire", "beat", "local", "analytics"],
 			need: (f) => f.player && f.player.stats && f.player.stats.gp > 0,
-			build: (f) => [PL(f.player.name, f.player.key),
-				T(" is at " + statBlurb(f.player.stats) + " in " +
-					global.Text.plural(Math.round(f.player.stats.gp), "game") + ".")],
+			build: (f, rng) => {
+				const s = f.player.stats;
+				const gp = global.Text.plural(Math.round(s.gp), "game");
+				const p = PL(f.player.name, f.player.key);
+				return rng.pick([
+					() => [p, T(" is at " + statBlurb(s) + " in " + gp + ".")],
+					() => [T("The season, in one line: "), p,
+						T(", " + statBlurb(s) + " over " + gp + ".")],
+					() => [T("Through " + gp + ", "), p,
+						T(" has been at " + statBlurb(s) + ".")],
+					() => [p, T(" has played " + gp + " and is at " + statBlurb(s) + ".")],
+					() => [T("His numbers say " + statBlurb(s) + ", across " + gp +
+						". They are "), p, T("'s.")],
+					() => [p, T(": " + statBlurb(s) + ", " + gp + " into it.")],
+				])();
+			},
 		},
 		{
 			id: "efficiency", voices: ["analytics", "beat"],
@@ -366,8 +443,9 @@
 		{
 			id: "record", voices: ["wire", "beat", "local"],
 			need: (f) => f.team && Number.isFinite(f.team.w) && f.team.w + f.team.l >= 5,
-			build: (f) => [TM(f.team.name),
-				T(" is " + f.team.w + "-" + f.team.l +
+			build: (f, rng) => [TM(f.team.name),
+				T(rng.pick([" is ", " sits at ", " has gone ", " stands "]) +
+					f.team.w + "-" + f.team.l +
 					(Number.isFinite(f.team.cw)
 						? " overall and " + f.team.cw + "-" + f.team.cl + " in the " + f.team.conf
 						: " in the " + f.team.conf) +
@@ -390,8 +468,8 @@
 			build: (f) => [T(f.team.coach.name + " is in his " +
 				ordinal(f.team.coach.tenure || 1) + " season at "), TM(f.team.name),
 				T((f.team.coach.situationLabel ? ", " + f.team.coach.situationLabel : "") +
-					(f.team.coach.philosophy ? " — a " + f.team.coach.philosophy + " staff"
-						: "") + ".")],
+					(philosophyPhrase(f.team.coach, "staff")
+						? " — " + philosophyPhrase(f.team.coach, "staff") : "") + ".")],
 		},
 		{
 			id: "style", voices: ["analytics", "columnist"],
@@ -699,12 +777,57 @@
 		"Scouts keep circling back to {player}",
 		"Every class has one: {player}",
 		"The name on everybody's board notes: {player}",
+		"Nobody has a clean read on {player}",
+		"{player} is the argument in every war room",
+		"The one they cannot agree on: {player}",
+		"Four scouts, four answers on {player}",
+		"{player} does not fit the file",
 	];
 
+	/* Keyed to what actually happened to him. Three headlines shared four
+	   draft-day events a class, so "The pick that made the room gasp" ran 23
+	   times over fifteen classes and sat above slides, rises and trades alike
+	   — a headline that describes a surprise, printed over a man who tested
+	   well in May. */
+	const DRAFT_HEADS_BY_KIND = {
+		fall: [
+			"The green room got quiet for {player}",
+			"{player} waited, and waited",
+			"The slide nobody in the building wanted to watch: {player}",
+			"Fourteen picks of silence for {player}",
+			"{player} fell, and somebody got a bargain",
+			"The longest night belonged to {player}",
+		],
+		rise: [
+			"{player} tested his way into the first round",
+			"The workout circuit made {player} a lot of money",
+			"Nobody climbed like {player}",
+			"{player} was not in this range a month ago",
+			"Six weeks of gym work, and {player} goes early",
+			"The pre-draft riser cashes in: {player}",
+		],
+		trade: [
+			"Somebody wanted {player} badly enough to pay a first",
+			"A trade up, and the board reads {player}",
+			"They moved for {player} and did not blink",
+			"The phone call that cost a first-rounder: {player}",
+			"{player} was the target all along",
+			"A war room jumped the queue for {player}",
+		],
+		reach: [
+			"The pick that made the room gasp",
+			"A reach on {player}, and they know it",
+			"Nobody had {player} here",
+			"{player} goes well before the board said",
+			"They took {player} on the tools",
+			"The boldest pick of the night: {player}",
+		],
+	};
 	const DRAFT_HEADS = [
 		"Draft day: {player} moves the board",
 		"War rooms react to {player}",
-		"The pick that made the room gasp",
+		"The name called next is {player}",
+		"{player}, and the room turns over",
 	];
 
 	const CONF_TOURNEY_HEADS = [
@@ -966,18 +1089,72 @@
 		"Somebody is getting a steal in {player}",
 	];
 
-	/* One line of numbers a story can carry: the scoring average and the
-	   one other thing his line is about. */
+	/* One line of numbers a story can carry: the scoring average and the one
+	   other thing his line is about.
+
+	   Four branches and a fallback is not enough shapes. A player who is not a
+	   7-rebound big, a 4.5-assist guard or a shot-blocker fell through to the
+	   true-shooting sentence — 162 of 1,050 scouting notes across fifteen
+	   classes opened with the identical sentence, because the opener is built
+	   on this. The branches below are the other things a college line is
+	   actually about, in the order of how much they distinguish him: the
+	   offensive glass, a real three-point season, a guard who does not turn it
+	   over, a man who lives at the line, thirty-six minutes a night, and the
+	   low-usage finisher whose case IS his efficiency. */
 	function statBlurb(s) {
 		const n1 = (x) => x.toFixed(1);
-		const bits = [n1(s.ppg) + " points"];
-		if (s.rpg >= 7) bits.push(n1(s.rpg) + " rebounds");
-		else if (s.apg >= 4.5) bits.push(n1(s.apg) + " assists");
-		else if (s.bpg >= 1.8) bits.push(n1(s.bpg) + " blocks");
-		else if (s.spg >= 1.8) bits.push(n1(s.spg) + " steals");
-		else if (Number.isFinite(s.ts)) return n1(s.ppg) + " points a game on " +
-			(s.ts * 100).toFixed(1) + "% true shooting";
-		return bits.join(" and ") + " a game";
+		const pct = (x) => (x * 100).toFixed(1) + "%";
+		const pts = n1(s.ppg) + " points";
+		const pair = (x) => pts + " and " + x + " a game";
+		if (s.rpg >= 7 && s.bpg >= 1.2) {
+			return pts + ", " + n1(s.rpg) + " rebounds and " + n1(s.bpg) +
+				" blocks a game";
+		}
+		if (s.rpg >= 7 && s.orpg >= 2.6) {
+			return pts + " and " + n1(s.rpg) + " rebounds a game, " + n1(s.orpg) +
+				" of them offensive";
+		}
+		if (s.rpg >= 7) return pair(n1(s.rpg) + " rebounds");
+		if (s.apg >= 6) {
+			return pts + " a game while running the offense, at " + n1(s.apg) +
+				" assists a night";
+		}
+		if (s.apg >= 4.5) return pair(n1(s.apg) + " assists");
+		if (s.bpg >= 1.8) return pair(n1(s.bpg) + " blocks");
+		if (s.spg >= 1.8) return pair(n1(s.spg) + " steals");
+		if (s.orpg >= 2.0) return pair(n1(s.orpg) + " offensive rebounds");
+		if (s.tpp >= 0.375 && s.tpa >= 3.5) {
+			return pts + " a game on " + pct(s.tpp) + " from three, on " +
+				n1(s.tpa) + " attempts";
+		}
+		if (s.apg >= 2.5 && s.topg <= 1.5) {
+			return pts + " a game with " + n1(s.apg) + " assists against " +
+				n1(s.topg) + " turnovers";
+		}
+		if (s.fta >= 5) {
+			return pts + " a game on " + n1(s.fta) + " free-throw attempts a night";
+		}
+		if (s.mpg >= 33) {
+			return pts + " a game in " + n1(s.mpg) + " minutes, which is nearly all of them";
+		}
+		if (s.usg <= 0.20 && s.ts >= 0.56) {
+			return pts + " a game on " + pct(s.usg) + " usage and " + pct(s.ts) +
+				" true shooting";
+		}
+		if (s.rpg >= 4 && s.apg >= 2) {
+			return pts + " a game with " + n1(s.rpg) + " rebounds and " +
+				n1(s.apg) + " assists";
+		}
+		if (s.usg >= 0.26) {
+			return pts + " a game on " + pct(s.usg) + " of his team's possessions";
+		}
+		if (s.fga >= 10) {
+			return pts + " a game on " + n1(s.fga) + " shots";
+		}
+		if (Number.isFinite(s.ts)) {
+			return pts + " a game on " + pct(s.ts) + " true shooting";
+		}
+		return pts + " a game";
 	}
 
 	/* ============================================================== TEMPLATES
@@ -1029,6 +1206,29 @@
 	/* A prospect's own game log entries, which carry both his line and the
 	   game's result — the two facts most of these stories are made of. */
 	function logGames(p) { return (p && p.gameLog && p.gameLog.games) || []; }
+
+	/* The coaching-philosophy labels are model keys, not prose: "neutral" is
+	   the do-nothing archetype and it was printing as "He is a neutral coach",
+	   which is a leaked internal name and not a sentence about anybody. The
+	   ones that read fine keep their own words; the article in front of them
+	   goes through Text so "a old-school disciplinarian" cannot happen. */
+	const PHILOSOPHY_WORDS = {
+		"player-developer": "player-development",
+		"Xs-and-Os tactician": "tactically-minded",
+		"recruiter-first": "recruiting-first",
+		"defensive-minded": "defensive-minded",
+		"uptempo innovator": "uptempo",
+		"old-school disciplinarian": "old-school",
+		"stars-and-scrubs": "stars-and-scrubs",
+		"egalitarian": "egalitarian",
+		"analytics-driven": "analytics-driven",
+		// "neutral" is deliberately absent: there is nothing to say.
+	};
+	function philosophyPhrase(coach, noun) {
+		const word = coach && PHILOSOPHY_WORDS[coach.philosophy];
+		if (!word) return null;
+		return global.Text.withArticle(word + " " + (noun || "coach"));
+	}
 
 	// ---------------------------------------------------------------- offseason
 
@@ -1094,7 +1294,7 @@
 		},
 		slots: (t) => ({
 			team: TM(t.name), coach: T(t.coach.name), conf: T(t.conf),
-			philosophy: T(t.coach.philosophy || "hands-on"),
+			philosophy: T(philosophyPhrase(t.coach) || "a hands-on coach"),
 			style: T(t.coach.style && t.coach.style.name ? t.coach.style.name : "two-way"),
 		}),
 		headlines: [
@@ -1104,7 +1304,7 @@
 			"New voices in the {conf}: {team}'s staff is set",
 		],
 		bodies: [
-			"{coach} has filled out his first staff at {team}. He is a {philosophy} coach and the practice plan will look like one inside a fortnight.",
+			"{coach} has filled out his first staff at {team}. He is {philosophy} and the practice plan will look like one inside a fortnight.",
 			"The last assistant is hired and {team} can get to work. {coach} inherits a roster he did not recruit and a system, {style}, that he did.",
 			"{team} spent six weeks on the search and three days on the staff. {coach} takes over in the {conf} with the people he wanted.",
 			"There is a version of a first year that is all installation and no results, and {coach} has said out loud that {team} will not be having one.",
@@ -1282,10 +1482,12 @@
 			"A marathon at {team}",
 		],
 		bodies: [
-			"{team} beat {opp} {score} after {ot} overtimes. Six players fouled out between them and neither bench had anything left.",
+			/* The score text already carries "(3OT)", so "beat {opp} {score}
+			   after {ot} overtimes" said it twice in the same clause. */
+			"{team} beat {opp} {score}. Six players fouled out between them and neither bench had anything left.",
 			"{ot} extra periods, and {team} finally put {opp} away {score}. The last twenty minutes of it were played by whoever was still standing.",
 			"There is a kind of game where the basketball gets worse and the theatre gets better. {team} and {opp} played one; the final was {score}.",
-			"{score}, after {ot} overtimes. {opp} led in each of them and {team} won anyway.",
+			"{score}. {opp} led in each of the extra periods and {team} won anyway.",
 		],
 	});
 
@@ -1304,7 +1506,7 @@
 		},
 		slots: (f) => ({
 			player: PL(f.p.name, f.p.key), team: TM(f.p.newCollege), opp: TM(f.g.opp),
-			pts: T(String(f.g.pts)), n: T(String(f.n)),
+			pts: T(String(f.g.pts)), n: T(String(f.n)), nth: T(global.Text.ordinal(f.n)),
 			games: T(global.Text.plural(f.n, "game")), score: T(scoreText(f.g)),
 		}),
 		headlines: [
@@ -1314,7 +1516,7 @@
 			"{team}'s freshman finds the floor",
 		],
 		bodies: [
-			"{player} scored {pts} against {opp}, his first twenty-point game in college and his {n}th game in it. {team} won by the margin he provided.",
+			"{player} scored {pts} against {opp}, his first twenty-point game in college and his {nth} game in it. {team} won by the margin he provided.",
 			"It took {games}. {player} put {pts} on {opp} and looked, for the first time, like the player the recruiting rankings said he was.",
 			"There is a night in every freshman season where the speed of it stops being a problem. {player} had his against {opp}: {pts} points, {score}.",
 			"{team} has been waiting for this since November. {player}, {pts} points, and a shot chart that finally looks like a plan.",
@@ -1388,19 +1590,23 @@
 			return {
 				player: PL(p.name, p.key), team: TM(p.newCollege),
 				opp: g.opp ? TM(g.opp) : T("a league opponent"),
-				ast: T(String(p.gameLog.highs.ast)), tov: T(String(g.tov || 0)),
+				ast: T(String(p.gameLog.highs.ast)),
+				// "1 turnovers", "turned it over 1 times".
+				tov: T(global.Text.plural(g.tov || 0, "turnover")),
+				times: T((g.tov || 0) === 1 ? "once" : (g.tov || 0) + " times"),
+				giveaways: T(global.Text.plural(g.tov || 0, "giveaway")),
 			};
 		},
 		headlines: [
 			"{ast} assists for {player}",
 			"{player} runs {team} to a rout of {opp}",
 			"The passing night of the season belongs to {player}",
-			"{player}: {ast} assists, {tov} turnovers",
+			"{player}: {ast} assists, {tov}",
 		],
 		bodies: [
-			"{player} had {ast} assists against {opp} and turned it over {tov} times. {team}'s offence has looked like his idea for a month.",
+			"{player} had {ast} assists against {opp} and turned it over {times}. {team}'s offence has looked like his idea for a month.",
 			"{ast} assists is a season for some point guards. {player} had them in one night against {opp}.",
-			"There is a way to score twenty and a way to create thirty, and {player} did the second one: {ast} assists, {tov} giveaways, {team} in cruise control.",
+			"There is a way to score twenty and a way to create thirty, and {player} did the second one: {ast} assists, {giveaways}, {team} in cruise control.",
 			"{team} shot the ball well because {player} decided when they would. {ast} assists against {opp}, most of them at the rim.",
 		],
 	});
@@ -1511,15 +1717,21 @@
 			confArticle: T(global.Text.withArticle(f.t.conf, true)),
 		}),
 		headlines: [
-			"{team} beats a ranked team for the first time in years",
+			/* The tool simulates ONE season. It has no record of the last
+			   time this programme beat a ranked team, how many it had lost in
+			   a row, or when it was last in the second weekend — so the
+			   templates that asserted those invented them. What the model
+			   does know is the prestige gap it selected on, and that is what
+			   these say now. */
+			"{team} beats a ranked team it had no business beating",
 			"{team} {score} over {rank} {opp}",
 			"The court came down at {team}",
 			"{rank} {opp} goes down at {team}",
 		],
 		bodies: [
-			"{team} beat {rank} {opp} {score}, and the students were on the floor before the horn finished. Nobody in the building could remember the last one.",
+			"{team} beat {rank} {opp} {score}, and the students were on the floor before the horn finished.",
 			"{confArticle} programme with no business winning that game won it {score}. {rank} {opp} shot it badly and {team} did not care why.",
-			"{team} had lost to ranked opponents eleven straight times. Not this one: {score} over {rank} {opp}.",
+			"{team} does not beat ranked teams. It beat this one: {score} over {rank} {opp}.",
 			"They will replay the last ninety seconds at {team} for a decade. {score}, over {rank} {opp}, on a Tuesday.",
 		],
 	});
@@ -1769,16 +1981,18 @@
 			seed: T(f.t.ncaaSeed ? "a No. " + f.t.ncaaSeed + " seed" : "a place in the field"),
 		}),
 		headlines: [
-			"{team} is going to the tournament for the first time",
+			/* Selected on prestige <= 32, which is "a programme nobody has
+			   heard of" and not "a programme that has never been". */
+			"{team} is going to the tournament, which nobody predicted",
 			"The {conf} bid belongs to {team}",
 			"{team} cuts down a net nobody expected",
 			"A first for {team}",
 		],
 		bodies: [
-			"{team} won the {conf} tournament at {w}-{l} and will play in the NCAA tournament for the first time in the programme's history, as {seed}.",
-			"Nobody at {team} had done this before — not the coach, not the players, not the athletic director who was hired to make it possible. The {conf} bid is theirs.",
+			"{team} won the {conf} tournament at {w}-{l} and will play in the NCAA tournament as {seed}, which nobody in the league had them doing in November.",
+			"Nobody at {team} is pretending this was the plan — not the coach, not the players, not the athletic director who hired him. The {conf} bid is theirs anyway.",
 			"{w}-{l}, a conference nobody outside it watches, and a bid. {team} is in, as {seed}.",
-			"The nets came down at {team} and the celebration went on long enough that the trophy presentation started late. First time. {conf} champions.",
+			"The nets came down at {team} and the celebration went on long enough that the trophy presentation started late. {conf} champions.",
 		],
 	});
 
@@ -1991,19 +2205,25 @@
 		slots: (t) => ({
 			team: TM(t.name), coach: T(t.coach.name),
 			years: T(String(t.coach.tenure)), conf: T(t.conf),
-			philosophy: T(t.coach.philosophy || "player-first"),
+			// "{years} years" gave "1 years" and "{years}th season" gave
+			// "1th season"; both are one helper away from right.
+			yearsPl: T(global.Text.plural(t.coach.tenure, "year")),
+			seasonsPl: T(global.Text.plural(t.coach.tenure, "season")),
+			nth: T(global.Text.ordinal(t.coach.tenure)),
+			philosophy: T(philosophyPhrase(t.coach) || "a coach who does not " +
+				"advertise a system"),
 		}),
 		headlines: [
 			"{coach} wins a title in year {years}",
-			"{years} seasons, and {coach} has a championship",
+			"{seasonsPl}, and {coach} has a championship",
 			"The fastest build in the sport belongs to {coach}",
 			"{team} hired right",
 		],
 		bodies: [
-			"{coach} has been at {team} for {years} seasons and has a national championship. The programme he inherited had not been to a second weekend in a decade.",
-			"It took {coach} {years} years. He is a {philosophy} coach and the roster he won with is mostly people he recruited himself.",
+			"{coach} has been at {team} for {seasonsPl} and has a national championship. The programme he inherited was not winning games like this one when he took it.",
+			"It took {coach} {yearsPl}. He is {philosophy} and the roster he won with is mostly people he recruited himself.",
 			"There will be four athletic directors in the {conf} watching {coach} lift that trophy and thinking about their own search process.",
-			"{team} is a national champion in {coach}'s {years}th season, which is not how this is supposed to work and is exactly how it happened.",
+			"{team} is a national champion in {coach}'s {nth} season, which is not how this is supposed to work and is exactly how it happened.",
 		],
 	});
 
@@ -3501,6 +3721,290 @@
 		],
 	});
 
+	/* ---------------------------------------------------------------------
+	   EIGHT KINDS THE MODEL HAD THE FACTS FOR AND NEVER PRINTED.
+
+	   Every one of these reads something the engine already computes and
+	   nothing else wrote about: the Final Four's own award (assigned in
+	   js/awards.js and never mentioned in the paper), the earlier seasons on
+	   a fourth-year senior, the game log's per-game rows, the coach's tenure
+	   and record, the transfer's old school on the schedule, the conference
+	   player-of-the-year races the class lost to returning players, the
+	   twelve games somebody missed with a shoulder, and the night a bad team
+	   beat a good one. */
+
+	TPL({
+		kind: "final four mop", group: "ncaa tournament", p: 0.85, when: 1.21,
+		find: (ctx) => {
+			const mop = ctx.ncaa.filter((p) =>
+				(p.awards || []).indexOf("Final Four Most Outstanding Player") !== -1)[0];
+			if (!mop) return null;
+			const team = ctx.ncaa.filter((p) => p !== mop &&
+				(p.awards || []).indexOf("NCAA All-Tournament Team") !== -1)
+				.sort((a, b) => b.stats.ppg - a.stats.ppg);
+			return { mop, team };
+		},
+		slots: (f) => ({
+			player: PL(f.mop.name, f.mop.key), team: TM(f.mop.newCollege),
+			line: T(statBlurb(f.mop.stats)),
+			march: T(f.mop.gameLog && f.mop.gameLog.postseason
+				? f.mop.gameLog.postseason.ppg.toFixed(1) + " a game in the tournament"
+				: "his best basketball in March"),
+			others: T(f.team.length
+				? f.team.slice(0, 2).map((p) => p.name).join(" and ")
+				: "the rest of the floor"),
+		}),
+		headlines: [
+			"{player} is the Most Outstanding Player",
+			"The Final Four belonged to {player}",
+			"{player} takes the Most Outstanding Player award",
+			"They will remember {player} in April",
+		],
+		bodies: [
+			"{player} of {team} was named Most Outstanding Player of the Final Four, on {march}. {others} were named alongside him on the all-tournament team.",
+			"The award goes to {player}, who was at {line} for the season and better than that when it mattered. {others} join him on the all-tournament five.",
+			"Two games decided it and {player} was the best player in both. {team} has its Most Outstanding Player, and {others} have the other places on the team.",
+		],
+	});
+
+	TPL({
+		kind: "career milestone", group: "regular season", p: 0.6, when: 0.9,
+		find: (ctx) => {
+			const cand = [];
+			for (const p of ctx.ncaa) {
+				const prior = (p.priorSeasons || []).filter((r) => r.line && !r.redshirt);
+				if (prior.length < 2 || !p.stats.gp) continue;
+				let pts = p.stats.ppg * p.stats.gp;
+				let gp = p.stats.gp;
+				for (const r of prior) { pts += r.line.ppg * r.line.gp; gp += r.line.gp; }
+				if (pts < 1200) continue;
+				cand.push({ p, pts: Math.round(pts), gp, years: prior.length + 1 });
+			}
+			return cand.length ? bestBy(cand, (c) => c.pts) : null;
+		},
+		slots: (f) => ({
+			player: PL(f.p.name, f.p.key), team: TM(f.p.newCollege),
+			pts: T(String(f.pts)), gp: T(String(f.gp)),
+			years: T(global.Text.plural(f.years, "season")),
+			avg: T((f.pts / f.gp).toFixed(1)),
+			now: T(f.p.stats.ppg.toFixed(1)),
+		}),
+		headlines: [
+			"{player} passes {pts} career points",
+			"{years} and {pts} points for {player}",
+			"The long way: {player} reaches {pts}",
+			"{player} has been doing this for {years}",
+		],
+		bodies: [
+			"{player} has scored {pts} points in {gp} college games across {years}, at {avg} a night. He is at {now} a game this season, which is the best of them.",
+			"{years} at {team}, {gp} games, {pts} points. The one-and-dones get the coverage; {player} has been the best player on his floor since he was a freshman.",
+			"A number worth stopping on: {pts} career points for {player}, over {years} and {gp} games. Nobody gets there without staying.",
+		],
+	});
+
+	TPL({
+		kind: "player of the week", group: "regular season", p: 0.7,
+		when: (f) => f.g.when,
+		find: (ctx) => {
+			const out = [];
+			for (const p of ctx.ncaa) {
+				for (const g of logGames(p)) {
+					if (g.stage !== "reg" || !g.won || g.pts < 28) continue;
+					out.push({ p, g });
+				}
+			}
+			return out.length ? ctx.rng.pick(out) : null;
+		},
+		slots: (f) => ({
+			player: PL(f.p.name, f.p.key), team: TM(f.p.newCollege),
+			opp: TM(f.g.opp), conf: T(f.p.conf || "his conference"),
+			pts: T(String(f.g.pts)),
+			reb: T(global.Text.plural(f.g.reb, "rebound")),
+			ast: T(global.Text.plural(f.g.ast, "assist")),
+			score: T(f.g.pf + "-" + f.g.pa),
+			month: T(dateline(f.g.when)),
+		}),
+		headlines: [
+			"{conf} player of the week: {player}",
+			"{player} takes the weekly award",
+			"A {pts}-point week for {player}",
+			"The league's best week belonged to {player}",
+		],
+		bodies: [
+			"{player} was named {conf} player of the week after {pts} points, {reb} and {ast} in the win over {opp}, {score}.",
+			"{pts} points, {reb} and {ast} against {opp} in {month}, and {team} won {score}. The {conf} gave {player} the weekly award for it.",
+			"The weekly honor is a small thing that adds up. {player} has one for the {pts} he scored on {opp}.",
+		],
+	});
+
+	TPL({
+		kind: "coaching record", group: "regular season", p: 0.5, when: 0.97,
+		find: (ctx) => {
+			const cand = ctx.teamList.filter((t) => t.coach && t.coach.tenure >= 4 &&
+				Number.isFinite(t.regW) && t.regW >= 20);
+			return cand.length ? bestBy(cand, (t) => t.regW + (t.prestige || 0) * 0.05) : null;
+		},
+		slots: (t) => ({
+			team: TM(t.name), coach: T(t.coach.name),
+			w: T(String(t.regW)), l: T(String(t.regL)),
+			years: T(global.Text.plural(t.coach.tenure, "season")),
+			nth: T(global.Text.ordinal(t.coach.tenure)),
+			conf: T(t.conf),
+		}),
+		headlines: [
+			"{coach}'s best team at {team}",
+			"{w} wins in {coach}'s {nth} season",
+			"{years} in, and {coach} has {team} where he wants it",
+			"{team} wins {w} under {coach}",
+		],
+		bodies: [
+			"{coach} is {w}-{l} in his {nth} season at {team}. It is the kind of record that turns a hire into a tenure.",
+			"{years} at {team} and {coach} has a {w}-{l} regular season out of it, in a {conf} that did not make it easy.",
+			"The {conf} has spent {years} watching {coach} build this. {team} is {w}-{l}.",
+		],
+	});
+
+	TPL({
+		kind: "facing the old school", group: "regular season",
+		p: 0.75, when: (f) => f.g.when,
+		find: (ctx) => {
+			const out = [];
+			for (const p of ctx.ncaa) {
+				const from = p.transfer && p.transfer.from;
+				if (!from) continue;
+				for (const g of logGames(p)) {
+					if (g.opp === from) out.push({ p, g, from });
+				}
+			}
+			return out.length ? ctx.rng.pick(out) : null;
+		},
+		slots: (f) => ({
+			player: PL(f.p.name, f.p.key), team: TM(f.p.newCollege),
+			old: TM(f.from), pts: T(String(f.g.pts)),
+			score: T(f.g.pf + "-" + f.g.pa),
+			result: T(f.g.won ? "won" : "lost"),
+			month: T(dateline(f.g.when)),
+		}),
+		headlines: [
+			"{player} faces {old}",
+			"The game {player} had circled",
+			"{player} against the school he left",
+			"A return to {old} for {player}",
+		],
+		bodies: [
+			"{player} left {old} for {team} in the offseason and played them in {month}. He scored {pts}, and {team} {result}, {score}.",
+			"Every portal season writes one of these. {player} put up {pts} against {old}, the programme he transferred out of, and {team} {result} {score}.",
+			"{pts} points against {old}. {player} did not say anything about it afterwards, which is its own kind of statement; {team} {result} the game {score}.",
+		],
+	});
+
+	TPL({
+		kind: "poy race lost", group: "awards", p: 0.7, when: 1.16,
+		find: (ctx) => {
+			const races = (ctx.res.fieldHonors || [])
+				.filter((h) => / Player of the Year$/.test(h.award) &&
+					!/Defensive/.test(h.award) && h.school);
+			if (!races.length) return null;
+			for (const h of ctx.rng.shuffle(races.slice())) {
+				const t = ctx.teams[h.school];
+				if (!t) continue;
+				// The best prospect in that conference — the man who lost it.
+				const lost = ctx.ncaa.filter((p) => p.conf === t.conf &&
+					p.stats.mpg >= 20)
+					.sort((a, b) => (b.scoreProd || 0) - (a.scoreProd || 0))[0];
+				if (lost) return { h, lost, conf: t.conf };
+			}
+			return null;
+		},
+		slots: (f) => ({
+			winner: T(f.h.name), school: TM(f.h.school),
+			year: T(String(f.h.classYear || "returner").toLowerCase()),
+			award: T(f.h.award), player: PL(f.lost.name, f.lost.key),
+			team: TM(f.lost.newCollege), line: T(statBlurb(f.lost.stats)),
+		}),
+		headlines: [
+			"The award the class didn't win: {award}",
+			"{winner} beat the draft class to the {award}",
+			"{player} finishes second in his own conference",
+			"A {year} took the {award}",
+		],
+		bodies: [
+			"The {award} went to {winner}, a {year} at {school} who is not in this draft class. {player} of {team} was at {line} and finished behind him.",
+			"{player} had the best season of any prospect in the league and did not win it: the {award} belongs to {winner} of {school}.",
+			"Not every honor goes to somebody with a draft grade. {winner}, a {year} at {school}, took the {award} ahead of {player}.",
+		],
+	});
+
+	TPL({
+		kind: "back from injury", group: "regular season",
+		p: 0.75, when: (f) => f.g.when,
+		find: (ctx) => {
+			const out = [];
+			for (const p of ctx.ncaa) {
+				const inj = p.gameLog && p.gameLog.injury;
+				if (!inj || !(inj.games >= 4)) continue;
+				const after = logGames(p).filter((g) => g.i > inj.to);
+				if (!after.length) continue;
+				out.push({ p, inj, g: after[0], back: after.slice(0, 5) });
+			}
+			return out.length ? ctx.rng.pick(out) : null;
+		},
+		slots: (f) => ({
+			player: PL(f.p.name, f.p.key), team: TM(f.p.newCollege),
+			opp: TM(f.g.opp), missed: T(global.Text.plural(f.inj.games, "game")),
+			why: T(f.inj.kind), pts: T(String(f.g.pts)), min: T(String(f.g.min)),
+			since: T((f.back.reduce((a, g) => a + g.pts, 0) / f.back.length).toFixed(1)),
+			n: T(global.Text.plural(f.back.length, "game")),
+		}),
+		headlines: [
+			"{player} is back",
+			"{missed} later, {player} returns",
+			"The return of {player}",
+			"{player} plays his first game since {why}",
+		],
+		bodies: [
+			"{player} missed {missed} with {why} and came back against {opp}: {pts} points in {min} minutes. He has averaged {since} in the {n} since.",
+			"{missed} out with {why}, and {player} walked back onto the floor at {team} and scored {pts}. The next {n} say the shot came back with him — {since} a game.",
+			"There is a version of this season where {player} does not come back at all. He did, against {opp}, for {pts} in {min} minutes.",
+		],
+	});
+
+	TPL({
+		kind: "upset hero", group: "regular season", p: 0.7, when: (f) => f.g.when,
+		find: (ctx) => {
+			const out = [];
+			for (const p of ctx.ncaa) {
+				const t = ctx.teams[p.newCollege];
+				if (!t || t.prestige >= 60) continue;
+				for (const g of logGames(p)) {
+					if (!g.won || g.stage !== "reg" || g.pts < 18) continue;
+					const opp = ctx.teams[g.opp];
+					if (!opp || !opp.apRank || opp.apRank > 25) continue;
+					out.push({ p, g, opp });
+				}
+			}
+			return out.length ? ctx.rng.pick(out) : null;
+		},
+		slots: (f) => ({
+			player: PL(f.p.name, f.p.key), team: TM(f.p.newCollege),
+			opp: TM(f.opp.name), rank: T("No. " + f.opp.apRank),
+			pts: T(String(f.g.pts)),
+			reb: T(global.Text.plural(f.g.reb, "rebound")),
+			score: T(f.g.pf + "-" + f.g.pa), min: T(String(f.g.min)),
+		}),
+		headlines: [
+			"{player} beats {rank} {opp} on his own",
+			"{pts} from {player}, and {rank} {opp} is beaten",
+			"The night {team} had a star",
+			"{rank} {opp} had no answer for {player}",
+		],
+		bodies: [
+			"{team} beat {rank} {opp} {score}, and {player} scored {pts} of it with {reb} in {min} minutes. A prospect at a programme like this gets four chances a season to be seen; he took one.",
+			"{pts} points against {rank} {opp}. {team} won {score}, which nobody outside the building expected, and {player} is the reason it happened.",
+			"There is a particular kind of night that makes a scout book a flight. {player} had one: {pts} points and {reb} in the {score} win over {rank} {opp}.",
+		],
+	});
+
 	/* The context every row's `find` and `slots` read. Built once per class,
 	   because forty-odd rows each recomputing "the NCAA prospects with a stat
 	   line" is forty passes over the same array. */
@@ -3768,16 +4272,49 @@
 			for (let w = 1; w < hist.length; w++) {
 				const top = hist[w].ranks[0] && hist[w].ranks[0].team;
 				if (top && prevTop && top !== prevTop && tell.has(w) && runs(0.85)) {
+					/* The poll's own history, which the body had never read:
+					   how long the man being replaced had held it, and where
+					   the new No. 1 had been sitting. One template ran 26
+					   times over fifteen classes. */
+					let held = 0;
+					for (let k = w - 1; k >= 0; k--) {
+						const at = hist[k].ranks[0] && hist[k].ranks[0].team;
+						if (at !== prevTop) break;
+						held++;
+					}
+					const wasAt = (hist[w - 1].ranks || [])
+						.filter((r) => r.team === top)[0];
+					const month = hist[w].label.toLowerCase();
+					const bodies = [
+						[TM(top), T(" replaces "), TM(prevTop),
+							T(" at the top of the AP poll in " + month + ".")],
+						[TM(prevTop), T(" held the top spot for " +
+							global.Text.plural(held, "week") + ". "), TM(top),
+							T(" has it now.")],
+						[TM(top), T(wasAt ? " had been No. " + wasAt.rank +
+							" a week ago. The ballots moved him past " : " moves past "),
+							TM(prevTop), T(" in " + month + ".")],
+						[T("The voters blinked in " + month + ": "), TM(top),
+							T(" is No. 1 and "), TM(prevTop), T(" is not.")],
+						[TM(top), T(" is No. 1 for the first time this season, at the " +
+							"expense of "), TM(prevTop), T(".")],
+						[T("A new name at the top of the poll. "), TM(top),
+							T(" over "), TM(prevTop),
+							T(", after " + global.Text.plural(held, "week") +
+								" of the other order.")],
+					];
 					articles.push({
 						when: (w / (hist.length - 1)) * 0.98,
 						kind: "new number one",
 						headline: fill(rng.pick([
 							"A new No. 1: {top}",
 							"{top} takes over the top spot",
-						]), { top: TM(top) }),
-						body: [TM(top), T(" replaces "), TM(prevTop),
-							T(" at the top of the AP poll in " +
-								hist[w].label.toLowerCase() + ".")],
+							"The poll turns over: {top}",
+							"{top} climbs to the top of the ballot",
+							"{prev} is no longer No. 1",
+							"After " + global.Text.plural(held, "week") + ", a change at No. 1",
+						]), { top: TM(top), prev: TM(prevTop) }),
+						body: rng.pick(bodies),
 					});
 				}
 				prevTop = top || prevTop;
@@ -4047,22 +4584,45 @@
 		}
 
 		// --- awards -------------------------------------------------------
-		const poy = (res.players || []).filter((p) => (p.awards || []).some(
-			(a) => /Player of the Year|Naismith Trophy$|Wooden Award$/.test(a) &&
-				!/finalist|Top 20|Defensive/.test(a)));
+		/* THE NATIONAL trophies, by name.
+
+		   The filter used to be /Player of the Year|Naismith Trophy$|Wooden
+		   Award$/, which is a rule about the WORDS and not about the trophies:
+		   "WCC Player of the Year" matches it, and so does every one of the
+		   thirty-two conferences'. Over fifteen classes this fired in all
+		   fifteen and in nine of them the "winner" held no national trophy at
+		   all — "sweeps the hardware || took 1 national honors", in a paper
+		   that was simultaneously running the field-honors story naming the
+		   man who actually won it. The names come from js/awards.js so a
+		   trophy added there is picked up here rather than missed. */
+		const NAT_POY = new Set((global.Awards.NATIONAL_POY || [])
+			.map((a) => a.name).concat(["Consensus National Player of the Year"]));
+		const natCount = (p) => (p.awards || []).filter((a) => NAT_POY.has(a)).length;
+		// If a returning player took a national player-of-the-year trophy,
+		// the class did not sweep anything and the field-honors story in the
+		// same paper says so.
+		const fieldTookPOY = (res.fieldHonors || []).some((h) => NAT_POY.has(h.award));
+		const poy = (res.players || []).filter((p) => natCount(p) > 0)
+			.sort((a, b) => natCount(b) - natCount(a));
 		if (poy.length) {
 			const p = poy[0];
+			const n = natCount(p);
+			// "Sweeps" is a claim about more than one trophy.
+			const sweep = n >= 2 && !fieldTookPOY;
 			articles.push({
 				when: 1.15, kind: "awards",
-				headline: fill(rng.pick([
+				headline: fill(rng.pick(sweep ? [
 					"{player} sweeps the hardware",
+					"{player} takes them all",
+					"Unanimous, near enough: {player}",
+				] : [
 					"{player}, player of the year",
+					"The vote goes to {player}",
+					"{player} takes the biggest one",
 				]), { player: PL(p.name, p.key) }),
-				body: [PL(p.name, p.key), T(" (" ), TM(p.newCollege),
-					T(") took " + (p.awards || []).filter((a) =>
-						/Player of the Year|Trophy|Award/.test(a) &&
-						!/finalist|Top 20|watch/.test(a)).length +
-						" national honors" +
+				body: [PL(p.name, p.key), T(" ("), TM(p.newCollege),
+					T(") took " + global.Text.plural(n, "national player-of-the-year trophy",
+						"national player-of-the-year trophies") +
 						(p.stats ? " on " + p.stats.ppg.toFixed(1) + " points a game." : ".")),
 				],
 			});
@@ -4597,8 +5157,13 @@
 		{
 			const NATIONAL = /Naismith|Wooden|Oscar Robertson|^AP |NABC|Sporting News|Consensus|Defensive/;
 			let cpoy = null;
-			for (const p of (res.players || []).slice()
+			for (const p of (res.players || []).filter((x) => !x.nonNcaa)
 				.sort((a, b) => ((b.stats && b.stats.ppg) || 0) - ((a.stats && a.stats.ppg) || 0))) {
+				/* NCAA only. A prospect abroad or in prep ball holds honors of
+				   the same SHAPE — "National Prep Player of the Year", "NAIA
+				   Player of the Year" — and this template renders his league
+				   as a team link, so the story pointed at a team page called
+				   "Prep / Postgrad" that does not exist. */
 				const award = (p.awards || []).filter((a) =>
 					/ Player of the Year$/.test(a) && !NATIONAL.test(a))[0];
 				if (award) { cpoy = { p, award }; break; }
@@ -4766,13 +5331,25 @@
 		}
 
 		// --- draft day ----------------------------------------------------
-		for (const e of res.draftEvents || []) {
-			articles.push({
-				when: 1.4, kind: "draft",
-				headline: fill(rng.pick(DRAFT_HEADS), { player: PL(e.player, e.key) }),
-				body: [PL(e.player, e.key), T(" — " + global.Text.endSentence(e.text +
-					(e.detail ? " (" + e.detail + ")" : "")))],
-			});
+		{
+			const slotOf = {};
+			for (const p of res.board || []) if (p.draftSlot) slotOf[p.key] = p.draftSlot;
+			for (const e of res.draftEvents || []) {
+				const kind = (e.name || "").indexOf("slide") !== -1 ? "fall"
+					: (e.name || "").indexOf("riser") !== -1 ? "rise"
+					: (e.name || "").indexOf("trade") !== -1 ? "trade"
+					: (e.name || "").indexOf("reach") !== -1 ? "reach" : null;
+				const heads = (kind && DRAFT_HEADS_BY_KIND[kind]) || DRAFT_HEADS;
+				const slot = slotOf[e.key];
+				articles.push({
+					when: 1.4, kind: "draft",
+					headline: fill(rng.pick(heads), { player: PL(e.player, e.key) }),
+					body: [PL(e.player, e.key),
+						T((slot ? " went No. " + slot + " — " : " — ") +
+							global.Text.endSentence(e.text +
+								(e.detail ? " (" + e.detail + ")" : "")))],
+				});
+			}
 		}
 
 		articles.sort((a, b) => a.when - b.when);
