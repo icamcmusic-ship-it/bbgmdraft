@@ -109,6 +109,13 @@
 		{ key: "awards", label: "Honors", num: false },
 	];
 	const PCT_KEYS = { usg: 1, fgp: 1, tpp: 1, ftp: 1, ts: 1, efg: 1 };
+	/* Columns that are a RATIO on 0-1 and are printed as one — .381, the way
+	   a box score prints a rate that is not a percentage. Two of them (astd,
+	   trans) were falling through to the one-decimal default, so "assisted on
+	   64% of his makes" rendered as the cell "0.6" and "0.7" was every player
+	   between .650 and .749 — a column with three distinguishable values in
+	   it, under a tooltip that promised ".640 = 64%". */
+	const RATIO_KEYS = { tpar: 1, ftr: 1, astd: 1, trans: 1 };
 
 	/* Columns computed from the stat line rather than stored on it. They were
 	   all derivable and none of them was derived, which is why a table with
@@ -127,10 +134,17 @@
 			const used = s.fga + 0.44 * s.fta + s.topg;
 			return used > 0 ? (100 * (s.ppg + 1.1 * s.apg)) / used : undefined;
 		},
-		// awards.js already computes exactly this to rank the whole country;
-		// there was no reason for it to be invisible.
-		prod: (s) => s.ppg + 1.2 * s.rpg + 1.7 * s.apg + 2.6 * s.spg + 2.6 * s.bpg -
-			0.8 * s.topg + 55 * (s.ts - 0.52),
+		/* awards.js already computes exactly this to rank the whole country;
+		   there was no reason for it to be invisible. It is CALLED there
+		   rather than copied here, because the copy had gone stale: the award
+		   model normalizes the counting half for team pace (see REF_PACE in
+		   js/awards.js) and this column did not, so the number on screen
+		   disagreed with the ranking it claimed to explain and handed a
+		   run-and-gun program's best player about 8% of a bonus for nothing he
+		   had done — the exact tilt the pace term exists to remove. */
+		prod: (s, p) => global.Awards.productionScore({
+			stats: s, teamPace: p ? p.teamPace : undefined,
+		}),
 	};
 
 	/* Per-game, totals or per-40. The table only ever showed per-game, which is
@@ -145,7 +159,7 @@
 		const s = p.stats;
 		if (!s) return undefined;
 		if (DERIVED[key]) {
-			const d = DERIVED[key](s);
+			const d = DERIVED[key](s, p);
 			return Number.isFinite(d) ? d : undefined;
 		}
 		if (s[key] === undefined) return undefined;
@@ -780,7 +794,7 @@
 			   nobody. */
 			if (r.key) {
 				const unit = PCT_KEYS[r.key] ? "%"
-					: (r.key === "tpar" || r.key === "ftr") ? "rate 0-1"
+					: RATIO_KEYS[r.key] ? "rate 0-1"
 					: r.key === "hgtInches" ? "inches"
 					: r.key === "weight" ? "lb"
 					: "";
@@ -1392,9 +1406,16 @@
 					const base = v === undefined ? ""
 						: PCT_KEYS[col.key] ? pc(v)
 						// Rate ratios read as .381, the way every box score prints them.
-						: (col.key === "tpar" || col.key === "ftr") ? v.toFixed(3)
-						: col.key === "gp" ||
-							(mode === "totals" && !col.derived && col.key !== "drtg")
+						: RATIO_KEYS[col.key] ? v.toFixed(3)
+						/* Whole numbers only where the value really is a count.
+						   The test used to be "totals mode and not derived",
+						   which swept in every column that is a rate the mode
+						   does not convert — on/off and the close-game average
+						   were rounded to integers in totals mode while still
+						   showing the per-40 and per-game number they always
+						   show, so switching units changed the precision of two
+						   columns and nothing else about them. */
+						: col.key === "gp" || (mode === "totals" && col.stat)
 							? String(Math.round(v)) : n1(v);
 					td = el("td", "num", base);
 					/* A small delta against the pinned class, so Pin is useful
@@ -3772,7 +3793,13 @@
 				tb.appendChild(tr);
 			}
 			if (s) {
-				const team = res.teams[p.newCollege];
+				/* A prospect abroad plays for a club, not for `newCollege` —
+				   which for him is the LEAGUE. Looking his record up in
+				   res.teams therefore missed every time, and the one row on
+				   the page that carries this season printed "—" for its record
+				   for every international and G League prospect while the
+				   earlier rows above it showed theirs. */
+				const team = p.nonNcaa ? p.proTeam : res.teams[p.newCollege];
 				const tr = el("tr");
 				tr.appendChild(el("td", null, String(res.leagueFile.startingSeason || "")));
 				tr.appendChild(el("td", null, p.proClub || p.newCollege));
@@ -4789,8 +4816,8 @@
 
 	/* Derived columns, for anything outside this file that needs the same
 	   arithmetic (the CSV export, so a file and the screen cannot disagree). */
-	function derived(key, stats) {
-		return DERIVED[key] ? DERIVED[key](stats) : undefined;
+	function derived(key, stats, player) {
+		return DERIVED[key] ? DERIVED[key](stats, player) : undefined;
 	}
 
 	global.Views = {

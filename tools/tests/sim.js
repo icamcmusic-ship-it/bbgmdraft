@@ -383,6 +383,45 @@ module.exports = function (ok, V) {
 			shared >= 20, shared + " of the top 25 survive blanking g.quality");
 	}
 
+	/* ON/OFF IS NOT A FUNCTION OF MINUTES PLAYED.
+
+	   on/off divides a player's impact by share * (1 - share) — the amplifier
+	   is exact and deliberate, which is why impactTerms builds the impact with
+	   that factor already in it. Anything ELSE the impact carries that is not
+	   shaped like share * (1 - share) comes back out of that division as a
+	   term in 1 / (1 - share), and for a thirty-seven-minute starter that is a
+	   fourteen-fold amplification. The rotation-centering correction used to
+	   be spread on the minutes, so it did exactly that: on/off ran to +30 per
+	   forty on the heaviest-minutes players and the column measured floor time
+	   rather than the player.
+
+	   The check is the shape, not a band: the men who play the most cannot be
+	   separated from the rest of the rotation by an order of magnitude. Better
+	   players do play more, so the gap is real and positive — it is the SIZE
+	   of it that says whether an artifact is in there. */
+	{
+		const heavy = [];
+		const middle = [];
+		let worst = 0;
+		for (const res of runs) {
+			for (const p of res.players) {
+				const st = p.stats;
+				if (!st || p.nonNcaa || !Number.isFinite(st.onOff)) continue;
+				if (Math.abs(st.onOff) > worst) worst = Math.abs(st.onOff);
+				if (st.mpg >= 34) heavy.push(st.onOff);
+				else if (st.mpg >= 20 && st.mpg < 30) middle.push(st.onOff);
+			}
+		}
+		const mean = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
+		ok("on/off does not explode on the heaviest-minutes players",
+			worst <= 22, "largest |on/off| " + worst.toFixed(1));
+		ok("on/off separates minutes bands by a believable margin",
+			heavy.length > 20 && middle.length > 10 &&
+				mean(heavy) - mean(middle) < 12,
+			"heavy " + mean(heavy).toFixed(2) + " (" + heavy.length + ") vs middle " +
+				mean(middle).toFixed(2) + " (" + middle.length + ")");
+	}
+
 	/* ---------------------------------------------- conference tournaments */
 	{
 		let missing = 0;

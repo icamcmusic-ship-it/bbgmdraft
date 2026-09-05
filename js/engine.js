@@ -2593,9 +2593,14 @@
 			const home = teams[p.newCollege];
 			p.gameLog = home ? S.gameLog(p, home, logRng.child("gl:" + p.key)) : null;
 			p.signature = p.gameLog ? p.gameLog.best : null;
+			/* The same three fields the draft class gets, clutch included: a
+			   future class is shown through the same table and the same CSV,
+			   and leaving one of the three off made the close-game column
+			   blank for every player in it for no reason a reader could see. */
 			if (p.stats && p.gameLog) {
 				p.stats.pm = p.gameLog.plusMinus;
 				p.stats.onOff = p.gameLog.onOff;
+				p.stats.clutchPpg = p.gameLog.clutch ? p.gameLog.clutch.ppg : undefined;
 			}
 		}
 		buildPriorSeasons(state.players, state.season, state.rng.child("prior"),
@@ -3097,7 +3102,7 @@
 				p.draftEvent = {
 					kind: "fall",
 					from: i,
-					say: (moved) => "flagged at the combine and slid " + moved + " spots",
+					say: (moved) => "flagged at the combine and slid " + Text.plural(moved, "spot"),
 					detail: r.pick([
 						"a stress reaction in the foot",
 						"a back issue teams could not agree on",
@@ -3119,7 +3124,7 @@
 				p.draftEvent = {
 					kind: "rise",
 					from: i,
-					say: (moved) => "rose " + (-moved) + " spots on the workout circuit",
+					say: (moved) => "rose " + Text.plural(-moved, "spot") + " on the workout circuit",
 					detail: r.pick([
 						"measured longer than his listed height",
 						"shot it far better in a gym than he had all season",
@@ -3141,7 +3146,7 @@
 				p.draftEvent = {
 					kind: "trade",
 					from: i,
-					say: (moved) => "a team moved up " + (-moved) + " spots to take him",
+					say: (moved) => "a team moved up " + Text.plural(-moved, "spot") + " to take him",
 					detail: "the pick cost a future first",
 				};
 				move(board, i, to);
@@ -3161,8 +3166,8 @@
 				p.draftEvent = {
 					kind: "reach",
 					from: i,
-					say: (moved) => "taken " + (-moved) +
-						" spots earlier than the board had him",
+					say: (moved) => "taken " + Text.plural(-moved, "spot") +
+						" earlier than the board had him",
 					/* Keyed to the player. Two of the three details were
 					   assertions about his age — "a 19-year-old", "the youngest
 					   player in the class" — drawn at random from a pool that
@@ -4690,7 +4695,7 @@
 	/* Season totals from a rate line, for a season with no game log behind it:
 	   a reconstructed prior year (cfg.priorSeasons = "reconstruct"), or a log
 	   that never got its shooting attached. */
-	function rateTotals(rates, ref, seasonYear) {
+	function rateTotals(rates, ref, seasonYear, gameMinutes) {
 		const row = bbgmStatsRow(rates, ref, seasonYear);
 		const gp = row.gp;
 		const orb = row.orb;
@@ -4702,7 +4707,15 @@
 			orb, drb: row.drb, trb: orb + row.drb,
 			ast: row.ast, tov: row.tov, stl: row.stl, blk: row.blk, pf: row.pf,
 			pm: Number.isFinite(rates.pm) ? Math.round(rates.pm * gp) : 0,
-			minAvailable: 40 * gp,
+			/* Minutes available is the length of the nights he could have
+			   played, and a night is not forty minutes everywhere: a G League
+			   season written off a rate line reported 40 * gp against a
+			   forty-eight-minute schedule, which is the one number in the row
+			   that says what share of his team's game he was on the floor for.
+			   The log-backed path has read the night's own length all along
+			   (see gameRows); this is the same fact for the path with no log
+			   behind it. */
+			minAvailable: (Number.isFinite(gameMinutes) ? gameMinutes : 40) * gp,
 		};
 	}
 
@@ -4773,7 +4786,7 @@
 				const games = gameRows(glog, line);
 				const totals = games
 					? sumGames(games)
-					: rateTotals(line, null, season);
+					: rateTotals(line, null, season, box.gameMinutes);
 				const zones = zoneSplit(totals.fg, totals.fga, totals.tp, totals.tpa, line);
 				players.push({
 					pos: item.pos || sizePos(line.bigness),
@@ -5046,7 +5059,12 @@
 			return row;
 		}
 		const rates = prior || p.stats;
-		const totals = rateTotals(rates, prior ? p.stats : null, season);
+		/* A prior season is a college year by construction (a prospect abroad
+		   keeps only the years he played at a program), so it is forty
+		   minutes; a draft year that reached this fallback is whatever league
+		   he is actually in. */
+		const totals = rateTotals(rates, prior ? p.stats : null, season,
+			prior ? 40 : (p.nonNcaa && p.proTeam ? p.proTeam.gameMinutes : 40));
 		const row = BS.blankRow(season, BS.TID_DOES_NOT_EXIST,
 			String(statsHash(String(p.key || p.name || "")) % 55));
 		row.gp = totals.gp;

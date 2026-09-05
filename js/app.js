@@ -4092,6 +4092,13 @@
 		"apg", "spg", "bpg", "topg", "pfpg", "cspg", "deflpg", "chgpg", "drtg",
 		// The volume behind every percentage, which the table now shows too.
 		"fga", "tpa", "fta", "tpar", "ftr", "efg", "astTo", "ortg", "prod",
+		/* The lineup and playmaking columns. Every one of these is on the
+		   table and none of them was in the file, so a spreadsheet built off
+		   "Export CSV" could not answer the questions the columns beside them
+		   were added to answer — which is the same disagreement between the
+		   file and the screen the derived columns below are routed through
+		   Views.derived to avoid. */
+		"pm", "onOff", "astd", "trans", "clutchPpg",
 		"usg", "fgp", "tpp", "ftp", "ts", "awards"];
 
 	/* A field beginning =, +, - or @ is executed as a FORMULA when the file is
@@ -4135,7 +4142,7 @@
 			const t = res.teams[p.newCollege];
 			// Derived columns come from the same place the table reads them, so
 			// the file and the screen can never disagree.
-			const d = (k) => (p.stats ? V.derived(k, p.stats) : undefined);
+			const d = (k) => (p.stats ? V.derived(k, p.stats, p) : undefined);
 			lines.push([
 				p.key, p.name, p.newPos, p.classYear, p.newOvr, p.newPot, p.archetype,
 				p.proClub || p.newCollege, t ? t.conf : p.newCollege,
@@ -4146,6 +4153,7 @@
 				s.topg, s.pfpg, s.cspg, s.deflpg, s.chgpg, s.drtg,
 				s.fga, s.tpa, s.fta, d("tpar"), d("ftr"), d("efg"), d("astTo"),
 				d("ortg"), d("prod"),
+				s.pm, s.onOff, d("astd"), d("trans"), s.clutchPpg,
 				s.usg, s.fgp, s.tpp, s.ftp, s.ts,
 				global.Awards.scopeAwards(p.awards, scope, confs).join("; "),
 			].map((v) => esc(typeof v === "number" && Number.isFinite(v)
