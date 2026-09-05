@@ -113,7 +113,8 @@
 				pid: i,
 				firstName: first, lastName: last,
 				born: { year: yr - age, loc },
-				hgt: 66 + Math.round((hgt / 100) * 24),
+				// BBGM's own map (heightToRating.ts): 66-93 inches over 0-100.
+				hgt: 66 + Math.round((hgt / 100) * 27),
 				weight: Math.round(165 + hgt * 0.9),
 				college: pr.random() < 0.18 ? "" : pickCollege(pr.random()),
 				/* Shaped like BBGM's own draft-class export: an undrafted
@@ -126,7 +127,10 @@
 				ratings: [Object.assign({ season: yr, fuzz: 0 }, r)],
 			});
 		}
-		return { startingSeason: yr, players };
+		/* Stamped, like BBGM's own exports: a file with no version sends the
+		   game down its pre-versioning migration path, which recomputes every
+		   hgt rating from the listed height. See js/bbgm.js. */
+		return { version: BB.LEAGUE_DATABASE_VERSION, startingSeason: yr, players };
 	}
 
 	global.Sample = { makeClass };

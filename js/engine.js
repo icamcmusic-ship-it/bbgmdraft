@@ -239,9 +239,27 @@
 		return rng.weighted(opts).name;
 	}
 
+	/* BBGM's own map, from src/worker/core/player/heightToRating.ts:
+	   rating = 100 * (inches - 66) / (93 - 66). Inverted here.
+
+	   The span used to be 24 inches rather than 27, so every height this
+	   derived was short — an 80-rating big came out 85 inches where BBGM
+	   reads him as 87 — and the error grew with the rating, which is exactly
+	   the population the archetype gates care about. */
+	const HGT_MIN_IN = 66;
+	const HGT_MAX_IN = 93;
+	/* Rating points per listed inch, on that same map. Read by the size
+	   variance and the hand-set-height paths so the rating and the listed
+	   height cannot drift apart. */
+	const HGT_PER_INCH = 100 / (HGT_MAX_IN - HGT_MIN_IN);
+
 	function inchesFromHgtRating(hgtRating) {
-		// BBGM height ratings map roughly linearly onto listed height.
-		return Math.round(66 + (hgtRating / 100) * 24);
+		return Math.round(HGT_MIN_IN +
+			(hgtRating / 100) * (HGT_MAX_IN - HGT_MIN_IN));
+	}
+
+	function hgtRatingFromInches(inches) {
+		return Math.round(100 * (inches - HGT_MIN_IN) / (HGT_MAX_IN - HGT_MIN_IN));
 	}
 
 	/* Where a BBGM export can keep the season, in the order worth trying. */
@@ -404,10 +422,42 @@
 					"and startingSeason if that is not what you meant.");
 			}
 		}
+		/* Physicals and ratings outside the range a person can occupy. Warned
+		   about here and clamped where they are read (the sim's own view of
+		   the player, and the export's copy) — the caller's file is never
+		   edited by its validator. */
+		{
+			let odd = 0;
+			for (const p of leagueFile.players) {
+				if (!p) continue;
+				for (const k of ["hgt", "weight"]) {
+					const n = Number(p[k]);
+					if (p[k] !== undefined && p[k] !== null && Number.isFinite(n) &&
+						(n < PHYSICAL_RANGE[k][0] || n > PHYSICAL_RANGE[k][1])) odd++;
+				}
+				const last = Array.isArray(p.ratings) && p.ratings.length
+					? p.ratings[p.ratings.length - 1] : null;
+				if (last) {
+					for (const k of BB.RATING_KEYS) {
+						const n = Number(last[k]);
+						if (Number.isFinite(n) && (n < RATING_RANGE[0] || n > RATING_RANGE[1])) odd++;
+					}
+				}
+			}
+			if (odd) {
+				warnings.push(odd + " height, weight or rating value" +
+					(odd === 1 ? " is" : "s are") + " outside the range a " +
+					"basketball player occupies (" + PHYSICAL_RANGE.hgt[0] + "-" +
+					PHYSICAL_RANGE.hgt[1] + " inches, " + PHYSICAL_RANGE.weight[0] + "-" +
+					PHYSICAL_RANGE.weight[1] + " lbs, ratings 0-100). " +
+					"They are clamped into it; check the file if that is not " +
+					"what you meant.");
+			}
+		}
 		/* How many of these players actually belong to the draft class.
 
 		   Dropping a full BBGM league export (5,000+ players) instead of a
-		   draft class rebuilt every player and simulated 368 programs with
+		   draft class rebuilt every player and simulated 364 programs with
 		   hundreds of prospects apiece: the tab locked with no progress and no
 		   way out, and nothing in here checked the count. The class is the
 		   players whose draft year is this season; if that leaves a plausible
@@ -580,9 +630,99 @@
 	const SIZE_OVERRIDE_KEYS = ["hgtInches", "weight"];
 
 	/* The stable per-player key every RNG stream and every lock is derived
-	   from. */
-	function playerKey(p, idx) {
-		return Number.isFinite(Number(p && p.pid)) ? String(p.pid) : "idx" + idx;
+	   from.
+
+	   `seen` makes it UNIQUE. Without it two rows carrying the same pid got
+	   the same key, and since every stream is rng.child("build:" + key) the
+	   two players drew the identical sequence — which is not merely a
+	   duplicated prospect: state.overrides collided, and the shared draft-day
+	   stream handed the second man the first one's already-consumed events,
+	   so applyDraftEvents died with "ev.say is not a function" and the whole
+	   run fell over. validateLeagueFile only warned about it.
+
+	   Callers pass a fresh Set and walk the players in file order. The key of
+	   a FIRST occurrence is unchanged, so a well-formed file keys exactly as
+	   it always did. */
+	function playerKey(p, idx, seen) {
+		const pid = Number(p && p.pid);
+		if (!Number.isFinite(pid)) return "idx" + idx;
+		const key = String(pid);
+		if (!seen) return key;
+		if (!seen.has(key)) { seen.add(key); return key; }
+		let k;
+		for (let n = 2; ; n++) {
+			k = key + "#" + n;
+			if (!seen.has(k)) break;
+		}
+		seen.add(k);
+		return k;
+	}
+
+	/* WHAT A HUMAN BEING CAN BE.
+
+	   hgt: -5, hgt: 120 and weight: 0 all passed validation and exported
+	   verbatim, because the only test on any of them was "is it a number".
+	   58-96 inches is 4'10" to 8'0" — wider than any basketball player has
+	   ever been, which is the point: this is a nonsense filter, not a
+	   realism one. Ratings are 0-100 by BBGM's own definition. */
+	const PHYSICAL_RANGE = {
+		hgt: [58, 96],
+		weight: [120, 400],
+	};
+	const RATING_RANGE = [0, 100];
+
+	/* Number(), but only when the result is a real number.
+
+	   BBGM writes these fields as numbers; hand-edited and third-party files
+	   write them as strings, and a string sailed through validateLeagueFile
+	   (which checked Number.isFinite(Number(v)) and then kept the raw value)
+	   into arithmetic that produced NaN and exported `ovr: null`. Every
+	   numeric field this tool reads or writes goes through here. */
+	function num(v) {
+		const n = Number(v);
+		return Number.isFinite(n) ? n : undefined;
+	}
+
+	/* One ratings row with every numeric field coerced. Returns a copy: the
+	   caller's object is never edited. */
+	function coerceRatingsRow(r) {
+		if (!r || typeof r !== "object") return r;
+		const out = Object.assign({}, r);
+		for (const k of BB.RATING_KEYS.concat(["ovr", "pot"])) {
+			const n = num(out[k]);
+			if (n !== undefined) out[k] = clamp(n, RATING_RANGE[0], RATING_RANGE[1]);
+		}
+		for (const k of ["season", "fuzz"]) {
+			const n = num(out[k]);
+			if (n !== undefined) out[k] = n;
+		}
+		return out;
+	}
+
+	/* The numeric fields of a player row, coerced IN PLACE. Called on the
+	   export's own deep copy, never on the caller's object. */
+	function coerceNumbers(out) {
+		if (!out || typeof out !== "object") return out;
+		for (const k of ["hgt", "weight", "pid", "tid"]) {
+			const n = num(out[k]);
+			if (n === undefined) continue;
+			const range = PHYSICAL_RANGE[k];
+			out[k] = range ? clamp(n, range[0], range[1]) : n;
+		}
+		if (out.born && typeof out.born === "object") {
+			const n = num(out.born.year);
+			if (n !== undefined) out.born.year = n;
+		}
+		if (out.draft && typeof out.draft === "object") {
+			for (const k of ["year", "round", "pick", "tid", "originalTid"]) {
+				const n = num(out.draft[k]);
+				if (n !== undefined) out.draft[k] = n;
+			}
+		}
+		if (Array.isArray(out.ratings)) {
+			out.ratings = out.ratings.map(coerceRatingsRow);
+		}
+		return out;
 	}
 
 	/* ------------------------------------------------------------- phase 1 */
@@ -868,17 +1008,26 @@
 		state.archetypePool = RB.pickClassPool(rng.child("pool"), cfg, flavor);
 
 		const raw = leagueFile.players || [];
+		/* Duplicate pids get distinct keys — see playerKey. */
+		const keysSeen = new Set();
 		const players = raw.map((p, idx) => {
-			const r = p.ratings[p.ratings.length - 1];
+			/* Coerced, not used raw: a file whose ratings are strings ("hgt":
+			   "62") passed validation and then made every rating arithmetic
+			   below NaN. The copy is the sim's view; the source object is
+			   left exactly as the user gave it. */
+			const r = coerceRatingsRow(p.ratings[p.ratings.length - 1]);
 			// Defensive defaults: files without listed height/weight would
 			// otherwise export NaN -> null and produce 0-inch players in BBGM.
-			const hgtIn = Number.isFinite(p.hgt)
-				? p.hgt
+			/* Clamped, not taken at face value: a nonsense listed height
+			   (validateLeagueFile warns about them) used to run the whole
+			   build off it. */
+			const hgtIn = num(p.hgt) !== undefined
+				? clamp(num(p.hgt), PHYSICAL_RANGE.hgt[0], PHYSICAL_RANGE.hgt[1])
 				: inchesFromHgtRating(r.hgt);
-			const wt = Number.isFinite(p.weight)
-				? p.weight
+			const wt = num(p.weight) !== undefined
+				? clamp(num(p.weight), PHYSICAL_RANGE.weight[0], PHYSICAL_RANGE.weight[1])
 				: Math.round(140 + hgtIn * 0.9 + (r.stre || 50) * 0.35);
-			const key = playerKey(p, idx);
+			const key = playerKey(p, idx, keysSeen);
 			return {
 				src: p,
 				idx,
@@ -899,7 +1048,7 @@
 				   ages measured from different years. One reference year for
 				   the whole class; validateLeagueFile warns when a draft year
 				   disagrees with it. */
-				age: season - Number(p.born.year),
+				age: season - num(p.born.year),
 				draftRound: p.draft && Number.isFinite(p.draft.round) ? p.draft.round : null,
 				draftPick: p.draft && Number.isFinite(p.draft.pick) ? p.draft.pick : null,
 				origCollege: C.canonical(p.college),
@@ -975,7 +1124,7 @@
 			// Size variance happens BEFORE the rebuild so the hgt rating and the
 			// listed height stay in sync (they'd otherwise drift up to 3 inches
 			// apart and the player would simulate at a different size than
-			// listed). ~4.2 rating points per inch on BBGM's mapping.
+			// listed). ~3.7 rating points per inch on BBGM's mapping.
 			p.newHgtInches = p.hgtInches;
 			let baseRatings = p.origRatings;
 			// A hand-set listed height moves the hgt rating with it, so the
@@ -984,7 +1133,7 @@
 				p.newHgtInches = clamp(Math.round(ov.hgtInches), 58, 96);
 				baseRatings = Object.assign({}, p.origRatings, {
 					hgt: clamp(Math.round(p.origRatings.hgt +
-						(p.newHgtInches - p.hgtInches) * (100 / 24)), 0, 100),
+						(p.newHgtInches - p.hgtInches) * HGT_PER_INCH), 0, 100),
 				});
 			} else if (cfg.varySize) {
 				p.newHgtInches = clamp(
@@ -993,7 +1142,7 @@
 				const dIn = p.newHgtInches - p.hgtInches;
 				if (dIn !== 0) {
 					baseRatings = Object.assign({}, p.origRatings, {
-						hgt: clamp(Math.round(p.origRatings.hgt + dIn * (100 / 24)), 0, 100),
+						hgt: clamp(Math.round(p.origRatings.hgt + dIn * HGT_PER_INCH), 0, 100),
 					});
 				}
 			}
@@ -1150,7 +1299,7 @@
 				   export round-trip test says so. */
 				const base = Object.assign({}, p.buildBase || p.newRatings, {
 					hgt: clamp(Math.round((p.buildBase || p.newRatings).hgt +
-						(inches - p.newHgtInches) * (100 / 24)), 0, 100),
+						(inches - p.newHgtInches) * HGT_PER_INCH), 0, 100),
 				});
 				/* The height change has to reach the jitter-free vector too, or
 				   the reported ovr range would go back to describing the
@@ -4410,7 +4559,7 @@
 
 	/* Every season this class played, as complete BBGM stats rows.
 
-	   Runs once per result: the field is 368 programs and the two statistics
+	   Runs once per result: the field is 364 programs and the two statistics
 	   that cannot be computed a team at a time (PER's league normalization,
 	   BPM's adjustment to the league average team) need all of it. */
 	function collegeSeasonStats(result) {
@@ -4854,10 +5003,28 @@
 			throw new Error("Only the loaded draft class can be exported.");
 		}
 		const src = result.leagueFile;
+		/* THE SEASON THE CLASS BELONGS TO.
+
+		   `result.season` is the file's startingSeason — the season the
+		   LEAGUE was in when the class was exported. For a class a year
+		   ahead (BBGM writes those: startingSeason 2026, draft.year 2027 on
+		   every player) the two differ, and everything below used to stamp
+		   the league's year: the prospect's final college season came out
+		   labelled 2026, his honors were dated 2026, and born.year was
+		   measured from 2026, so the whole biography sat a year behind the
+		   draft it belongs to. mergeIntoLeague already read the year off the
+		   players (classDraftYear); the export now does the same, and every
+		   season it writes is shifted by the difference. */
+		const exportSeason = classDraftYear(src.players, result.season);
+		const seasonShift = exportSeason - result.season;
 		// Match by array position, not pid: files with duplicate pids would
 		// otherwise silently give every duplicate the same rebuilt ratings.
 		const byIdx = result.players;
 		let passthroughs = 0;
+		/* The rows whose hgt/weight this export actually rewrote, by array
+		   position. mergeIntoLeague overlays size onto a league player only
+		   for these — see the overlay comment there. */
+		const sizeRewritten = new Set();
 		/* Shirt numbers already spoken for, so a class does not import with
 		   three number 23s. Seeded with whatever the source file had. */
 		const jerseysTaken = new Set();
@@ -4872,8 +5039,24 @@
 			// counted now, so the caller can warn instead of shipping a
 			// half-modified file in silence.
 			if (!p) { passthroughs++; return orig; }
-			const out = JSON.parse(JSON.stringify(orig));
-			out.college = p.newCollege;
+			const out = coerceNumbers(JSON.parse(JSON.stringify(orig)));
+			/* A file that carries a single `name` instead of firstName /
+			   lastName (several third-party class files do) exported with
+			   neither field, and BBGM showed a nameless player. Split it once
+			   here; the source's own `name` is left where it was. */
+			if (!String(out.firstName || "").trim() && !String(out.lastName || "").trim() &&
+				String(out.name || "").trim()) {
+				const parts = String(out.name).trim().split(/\s+/);
+				out.firstName = parts.shift();
+				out.lastName = parts.join(" ");
+			}
+			/* BBGM prints this field under the heading "College", and for a
+			   prospect abroad it used to hold the LEAGUE — "LNB Pro A",
+			   "Liga ACB" — which reads as a school he never attended. The
+			   club is already drawn (it is in his note and on the board), so
+			   the club is what goes in the field; the league is what the
+			   note says around it. */
+			out.college = p.proClub || p.newCollege;
 			const ov = p.override || {};
 			if (ov.name && String(ov.name).trim()) {
 				const parts = String(ov.name).trim().split(/\s+/);
@@ -4894,8 +5077,14 @@
 			   against it by tools/test.js. */
 			const sized = result.cfg.varySize ||
 				SIZE_OVERRIDE_KEYS.some((k) => Number.isFinite(ov[k]));
-			if (sized || !Number.isFinite(orig.hgt)) out.hgt = p.newHgtInches;
-			if (sized || !Number.isFinite(orig.weight)) out.weight = p.newWeight;
+			if (sized || num(orig.hgt) === undefined) {
+				out.hgt = p.newHgtInches;
+				sizeRewritten.add(i);
+			}
+			if (sized || num(orig.weight) === undefined) {
+				out.weight = p.newWeight;
+				sizeRewritten.add(i);
+			}
 			/* Age. See AGE_FOR_CLASS: a class year that the tool rolled has to
 			   reach the file, or BBGM shows a graduate transfer as 19 and then
 			   develops him like one. Skipped when the source file's own ages
@@ -4905,7 +5094,7 @@
 			if (opts.ages !== false && !result.ageIsInformative &&
 				out.born && Number.isFinite(Number(out.born.year))) {
 				out.born = Object.assign({}, out.born, {
-					year: result.season - ageForClassYear(p.classYear, p.transfer),
+					year: exportSeason - ageForClassYear(p.classYear, p.transfer),
 				});
 			}
 			const last = out.ratings.length - 1;
@@ -4913,7 +5102,7 @@
 			/* A rating row without a season (the sample class, several
 			   third-party class files) is legal in a draft-class import,
 			   which stamps one, and not in a league file, which does not. */
-			if (!Number.isFinite(Number(r.season))) r.season = result.season;
+			r.season = exportSeason;
 			if (!Number.isFinite(Number(r.fuzz))) r.fuzz = 0;
 			for (const k of BB.RATING_KEYS) {
 				r[k] = Number.isFinite(p.newRatings[k]) ? p.newRatings[k] : 0;
@@ -4955,9 +5144,9 @@
 			if (opts.injuries && p.availability && p.availability.injury &&
 				p.availability.games > 0) {
 				const rows = (Array.isArray(out.injuries) ? out.injuries : [])
-					.filter((r) => !r || Number(r.season) !== Number(result.season));
+					.filter((r) => !r || Number(r.season) !== Number(exportSeason));
 				rows.push({
-					season: result.season,
+					season: exportSeason,
 					games: Math.round(p.availability.games),
 					// BBGM's own strings are capitalised nouns; ours read "a
 					// back strain" because they are written into prose.
@@ -5026,7 +5215,7 @@
 				const priorRows = [];
 				for (const a of p.priorAwards || []) {
 					if (awardsInScope([a.award], opts.awardsScope, opts.majorConferences).length) {
-						priorRows.push({ season: a.season, type: a.award });
+						priorRows.push({ season: a.season + seasonShift, type: a.award });
 					}
 				}
 				/* Ours: the draft year and the five seasons before it. A draft
@@ -5036,12 +5225,12 @@
 				   same season, or a re-run that gave him fewer earlier honors
 				   would leave the last run's behind. Anything older is a real
 				   history and is left alone. */
-				const draftSeason = Number(result.season);
+				const draftSeason = Number(exportSeason);
 				const kept = (Array.isArray(out.awards) ? out.awards : [])
 					.filter((a) => !a || !(Number(a.season) <= draftSeason &&
 						Number(a.season) >= draftSeason - 5));
 				out.awards = kept.concat(priorRows,
-					scoped.map((type) => ({ season: result.season, type })));
+					scoped.map((type) => ({ season: exportSeason, type })));
 				/* `awards` does not survive Tools -> Import players: that
 				   function builds the imported player from a fixed list of
 				   fields (born, college, contract, draft, face, names, hgt,
@@ -5102,6 +5291,10 @@
 					}
 				}
 				rows.push(seasonRow(built, p, result.season, null, opts));
+				/* The rows were built at the league's season (that is the key
+				   the season-stats cache is filled under); they are LABELLED
+				   with the class's own. */
+				if (seasonShift) for (const row of rows) row.season += seasonShift;
 				/* yearsWithTeam counts consecutive seasons at the same
 				   program, which is what a transfer breaks — the one thing
 				   about a multi-season row that a reader would notice being
@@ -5122,7 +5315,7 @@
 				   the five before it is this tool's, from an earlier export
 				   of the same class. Without this a round trip doubled the
 				   rows: 2, 4, 6 per player on three exports. */
-				const draftSeason = Number(result.season);
+				const draftSeason = Number(exportSeason);
 				const kept = (Array.isArray(out.stats) ? out.stats : []).filter((r) =>
 					!r || !(Number(r.tid) === BS.TID_DOES_NOT_EXIST &&
 						Number(r.season) <= draftSeason && Number(r.season) >= draftSeason - 5));
@@ -5132,6 +5325,59 @@
 					? String(out.jerseyNumber) : null;
 				if (jersey !== null) for (const r of rows) r.jerseyNumber = jersey;
 				out.stats = kept.concat(rows);
+			}
+			/* AN UNDRAFTED PROSPECT IS tid -2.
+
+			   BBGM's Draft -> Import filters the uploaded file to players
+			   whose tid is UNDRAFTED (-2) before it reads anything else, so a
+			   class whose rows carry a team's tid — a class pulled out of a
+			   league export by hand, or a file another tool wrote — imported
+			   as ZERO players, with no error on either side. Applied only to
+			   the rows of this class's own draft year, so a file that also
+			   carries other players is left alone. */
+			if (Number(out.draft && out.draft.year) === Number(exportSeason)) {
+				out.tid = -2;
+			}
+			/* BBGM needs an injury object; the tool knew the season's
+			   availability and never wrote one. A prospect arrives HEALTHY —
+			   games remaining would carry into a league that has not played
+			   the college season — but a man who ended the year hurt says so,
+			   which is what the injuries[] row above is about. */
+			if (!out.injury || typeof out.injury !== "object") {
+				out.injury = { type: "Healthy", gamesRemaining: 0 };
+			}
+			/* Where he is from. BBGM prints born.loc on the player page and a
+			   file that never carried one exported without one, so the field
+			   was simply blank in the game. The tool does not draw a
+			   birthplace — it READS one, to decide where a prospect without a
+			   college ends up — so the honest fallback is the other
+			   direction: a man playing in a domestic league abroad is from
+			   that country, and everyone else is from the United States. */
+			if (out.born && typeof out.born === "object" &&
+				!String(out.born.loc || "").trim()) {
+				const lg = C.NON_NCAA[p.newCollege];
+				// `domestic` is written for prose ("the Philippines"); a
+				// birthplace is a plain country name.
+				out.born.loc = (lg && lg.domestic
+					? lg.domestic.replace(/^the /, "") : "USA");
+			}
+			/* THE FACE. js/faces.js already draws a seeded face for every
+			   prospect on the tool's own pages, and the export never wrote
+			   it — so the man you scouted and the man in the game were two
+			   different people. Written only when the source had none (a
+			   complete face blob round-trips untouched, as it always has).
+
+			   The jersey is BBGM's own default (DEFAULT_JERSEY = "jersey3")
+			   and no teamColors are written: those belong to the team the
+			   player ends up on, and BBGM supplies them at draw time. The
+			   tool's college kit is a display choice, not a fact about him. */
+			if (opts.faces !== false && global.Faces &&
+				typeof global.Faces.seededFace === "function" &&
+				!global.Faces.usable(out.face)) {
+				const f = JSON.parse(JSON.stringify(global.Faces.seededFace(p.key)));
+				f.jersey = { id: "jersey3" };
+				delete f.teamColors;
+				out.face = f;
 			}
 			return out;
 		});
@@ -5145,9 +5391,19 @@
 		const file = LEAGUE_ENVELOPE.some((k) => src[k] !== undefined)
 			? { version: src.version, startingSeason: src.startingSeason, players }
 			: Object.assign({}, src, { players });
-		if (file.version === undefined) delete file.version;
+		/* THE SCHEMA VERSION IS NOT OPTIONAL.
+
+		   A file with no `version` used to go out with none, and BBGM reads
+		   that as a pre-versioning save: augmentPartialPlayer's <= 23 branch
+		   RECOMPUTES every ratings row's hgt from the player's listed height,
+		   and the <= 32 branch rewrites the ratings season and the draft
+		   year. So a class this tool solved to the exact rating arrived in
+		   the game with a different one. Stamping the version the game is on
+		   skips all of it. */
+		if (num(file.version) === undefined) file.version = BB.LEAGUE_DATABASE_VERSION;
 		// Readable by the caller, never written into the file.
 		exportFile.passthroughs = passthroughs;
+		exportFile.sizeRewritten = sizeRewritten;
 		return file;
 	}
 
@@ -5406,6 +5662,7 @@
 			throw new Error("That file has no players array — it is not a BBGM league file.");
 		}
 		const ours = exportFile(result, opts).players;
+		const sized = exportFile.sizeRewritten || new Set();
 		const season = classDraftYear(ours, result.season);
 		/* Players an earlier class in the same merge already wrote. They look
 		   exactly like the generated prospects this pass is replacing, so
@@ -5442,8 +5699,55 @@
 		   actually produced goes on top of him. statsTids is the one field
 		   that has to be recomputed rather than kept, because the rows being
 		   written name a team the player has no history with. */
-		const overlay = (target, p) => {
-			const out = Object.assign({}, target, JSON.parse(JSON.stringify(p)));
+		const overlay = (target, p, sized) => {
+			/* A WHITELIST, not a spread.
+
+			   This used to be Object.assign({}, target, p) — the whole
+			   exported player over the league's — and a class file is not a
+			   complete player. So a file exported from an older run, or from
+			   another league, wrote its stale `value`, `contract`, `born`,
+			   `hgt`, `weight`, `injury`, `face` and `relatives` over the
+			   league's current ones: a prospect the user had already edited
+			   in-game silently reverted, and a merged player could end up
+			   with a contract from a league he was never in.
+
+			   Only what this tool actually PRODUCES goes on top of him.
+			   Everything else about the league's player is the league's. */
+			const out = Object.assign({}, target);
+			const src2 = JSON.parse(JSON.stringify(p));
+			for (const key of ["college", "note", "noteBool", "awards", "injuries",
+				"stats", "moodTraits", "jerseyNumber"]) {
+				if (src2[key] !== undefined) out[key] = src2[key];
+			}
+			if (src2.noteBool === undefined) delete out.noteBool;
+			/* Size only when the tool rewrote it (Vary size, a hand-set
+			   height, or a source file that listed none). Otherwise the
+			   league's own listing stands. */
+			if (sized) {
+				if (src2.hgt !== undefined) out.hgt = src2.hgt;
+				if (src2.weight !== undefined) out.weight = src2.weight;
+			}
+			/* The class's ratings row replaces the league prospect's row for
+			   the same season, and is appended when he has none. His earlier
+			   rows (a league that has already progressed him) are his. */
+			if (Array.isArray(src2.ratings) && src2.ratings.length) {
+				const mine = src2.ratings[src2.ratings.length - 1];
+				const rows = (Array.isArray(target.ratings) ? target.ratings : [])
+					.map((r) => JSON.parse(JSON.stringify(r)))
+					.filter((r) => !r || Number(r.season) !== Number(mine.season));
+				rows.push(mine);
+				rows.sort((a, b) => Number(a.season) - Number(b.season));
+				out.ratings = rows;
+			}
+			/* The draft board's view of him, which is the whole point of the
+			   class — but not his draft YEAR, round, pick or team: those are
+			   the league's. */
+			if (src2.draft && typeof src2.draft === "object") {
+				out.draft = Object.assign({}, target.draft);
+				for (const key of ["ovr", "pot", "skills"]) {
+					if (src2.draft[key] !== undefined) out.draft[key] = src2.draft[key];
+				}
+			}
 			/* The league's prospect may carry honors and injuries of his own
 			   (a hand-added HS All-American, say); the export's arrays are
 			   the CLASS file's plus ours, so writing them over his lost them.
@@ -5467,7 +5771,9 @@
 
 		const replacements = new Map();
 		const added = [];
+		let oi = -1;
 		for (const p of ours) {
+			oi++;
 			const pid = Number(p.pid);
 			const target = byPid.get(pid);
 			/* A pid match is identity only if the name agrees: a class
@@ -5478,7 +5784,7 @@
 			   used to write the second over the first and lose a player,
 			   past the guard below, which only counts the league's side. */
 			if (target && sameName(target, p) && !replacements.has(target)) {
-				replacements.set(target, overlay(target, p));
+				replacements.set(target, overlay(target, p, sized.has(oi)));
 			} else {
 				const copy = JSON.parse(JSON.stringify(p));
 				copy.pid = ++maxPid;

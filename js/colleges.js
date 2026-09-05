@@ -54,6 +54,15 @@
 		"Independent":    { strength: 62, bids: 0, tier: "mid" },
 	};
 
+	/* THE SEASON THIS TABLE IS AUTHORED TO: 2027-28.
+
+	   It had been drifting between two of them, which is how a conference
+	   table goes quietly wrong — UC Davis sat in the Big West it leaves in
+	   2026, Louisiana Tech in the Conference USA it leaves in 2027, St.
+	   Francis (PA) was still here after dropping to Division II at the end
+	   of 2025-26, and New Haven, Division I since 2025-26, was missing. One
+	   season, applied to all four: UC Davis is Mountain West, Louisiana Tech
+	   is Sun Belt, New Haven is in the NEC and St. Francis (PA) is out. */
 	// school -> [BBGM frequency, conference]
 	const COLLEGES = {
 		"Abilene Christian": [0.1, "WAC"],
@@ -203,7 +212,7 @@
 		"Lipscomb": [1, "ASUN"],
 		"Long Beach State": [20, "Big West"],
 		"Longwood": [1, "Big South"],
-		"Louisiana Tech": [8, "Conference USA"],
+		"Louisiana Tech": [8, "Sun Belt"],
 		"Louisiana": [10, "Sun Belt"],
 		"Louisiana-Monroe": [6, "Sun Belt"],
 		"Louisville": [60, "ACC"],
@@ -332,7 +341,6 @@
 		"Southern University": [6, "SWAC"],
 		"Southern Utah": [0.1, "WAC"],
 		"St. Bonaventure": [17, "Atlantic 10"],
-		"St. Francis (PA)": [5, "NEC"],
 		"St. John's": [54, "Big East"],
 		"St. Peter's": [4, "MAAC"],
 		"Stanford": [32, "ACC"],
@@ -359,7 +367,7 @@
 		"Tulane": [14, "American"],
 		"Tulsa": [18, "American"],
 		"UAB": [10, "American"],
-		"UC Davis": [0.1, "Big West"],
+		"UC Davis": [0.1, "Mountain West"],
 		"UC Irvine": [8, "Big West"],
 		"UC Riverside": [1, "Big West"],
 		"UC San Diego": [0.3, "Big West"],
@@ -392,6 +400,7 @@
 		   them has produced an NBA pick, which is the honest number and is what
 		   prestige() reads. */
 		"Le Moyne": [0.1, "NEC"],
+		"New Haven": [0.1, "NEC"],
 		"Stonehill": [0.1, "NEC"],
 		"Mercyhurst": [0.1, "NEC"],
 		"Queens": [0.1, "ASUN"],
@@ -562,10 +571,10 @@
 			["Capital City Go-Go", -4],
 		],
 		"Basketball Champions League": [
-			["Unicaja Malaga", 6], ["Tenerife", 5], ["Hapoel Jerusalem", 4],
+			["Unicaja Malaga", 6], ["La Laguna Tenerife", 5], ["Hapoel Jerusalem", 4],
 			["Telekom Baskets Bonn", 2], ["Galatasaray", 2], ["Pinar Karsiyaka", 1],
 			["Tofas Bursa", 0], ["Rytas Vilnius", 0], ["Nymburk", -2],
-			["Peristeri", -2], ["Cholet", -3], ["Falco Szombathely", -4],
+			["Peristeri", -2], ["Cholet Basket", -3], ["Falco Szombathely", -4],
 		],
 		"Turkish BSL": [
 			["Fenerbahce", 8], ["Anadolu Efes", 7], ["Galatasaray", 3],
@@ -575,7 +584,7 @@
 		],
 		"Greek Basket League": [
 			["Panathinaikos", 9], ["Olympiacos", 9], ["AEK Athens", 3],
-			["Peristeri", 1], ["PAOK", 0], ["Aris", 0], ["Promitheas", -2],
+			["Peristeri", 1], ["PAOK", 0], ["Aris Midea", 0], ["Promitheas", -2],
 			["Kolossos Rodou", -3], ["Lavrio", -4], ["Panionios", -5],
 		],
 		"Israeli Premier League": [
@@ -597,7 +606,8 @@
 		"Basketball Africa League": [
 			["Al Ahly", 6], ["Petro de Luanda", 5], ["US Monastir", 4],
 			["Zamalek", 3], ["AS Sale", 1], ["Rivers Hoopers", 0],
-			["APR", -1], ["FUS Rabat", -2], ["City Oilers", -3], ["Kriol Star", -5],
+			["APR", -1], ["FUS Rabat", -2], ["Al Ahli Tripoli", -1],
+			["Stade Malien", -2], ["City Oilers", -3], ["Kriol Star", -5],
 		],
 		"CEBL": [
 			["Scarborough Shooting Stars", 4], ["Niagara River Lions", 3],
@@ -616,12 +626,12 @@
 			["Virtus Bologna", 8], ["Olimpia Milano", 8], ["Germani Brescia", 4],
 			["Reyer Venezia", 3], ["Dolomiti Energia Trento", 2], ["Derthona Tortona", 2],
 			["Dinamo Sassari", 1], ["Pallacanestro Trieste", 0], ["Reggio Emilia", 0],
-			["Napoli Basket", -1], ["Vanoli Cremona", -2], ["Pistoia", -2],
-			["Scafati", -3], ["Trapani Shark", -1], ["Varese", -2], ["Treviso", -3],
+			["Napoli Basket", -1], ["Vanoli Cremona", -2], ["Udine", -2],
+			["Cantu", -3], ["Trapani Shark", -1], ["Varese", -2], ["Treviso", -3],
 		],
 		"Lithuanian LKL": [
 			["Zalgiris Kaunas", 9], ["Rytas Vilnius", 6], ["Lietkabelis Panevezys", 2],
-			["Neptunas Klaipeda", 1], ["Juventus Utena", 0], ["Wolves Vilnius", 1],
+			["Neptunas Klaipeda", 1], ["Juventus Utena", 0], ["Wolves Twinsbet", 1],
 			["Siauliai", -1], ["Nevezis Kedainiai", -3], ["Jonava", -3], ["Pieno Zvaigzdes", -4],
 		],
 		"VTB United League": [
@@ -652,7 +662,8 @@
 			["San Miguel Beermen", 6], ["Barangay Ginebra", 5], ["TNT Tropang Giga", 5],
 			["Magnolia Hotshots", 2], ["Meralco Bolts", 2], ["Rain or Shine", 0],
 			["NLEX Road Warriors", -1], ["Phoenix Fuel Masters", -2],
-			["Converge FiberXers", -2], ["Terrafirma Dyip", -5], ["Blackwater Bossing", -4],
+			["Converge FiberXers", -2], ["NorthPort Batang Pier", -3],
+			["Terrafirma Dyip", -5], ["Blackwater Bossing", -4],
 		],
 		"Argentine Liga Nacional": [
 			["Quimsa", 5], ["Boca Juniors", 4], ["Instituto de Cordoba", 4],
@@ -676,7 +687,7 @@
 		"New Zealand NBL": [
 			["Canterbury Rams", 4], ["Wellington Saints", 4], ["Auckland Tuatara", 3],
 			["Otago Nuggets", 2], ["Hawke's Bay Hawks", 1], ["Nelson Giants", 0],
-			["Taranaki Airs", -1], ["Southland Sharks", -1], ["Franklin Bulls", -2],
+			["Taranaki Airs", -1], ["Tauranga Whai", -1], ["Franklin Bulls", -2],
 			["Manawatu Jets", -3],
 		],
 		"JUCO": [
@@ -684,7 +695,7 @@
 			["South Plains College", 3], ["Salt Lake CC", 3], ["Northwest Florida State", 2],
 			["Trinity Valley CC", 2], ["Odessa College", 1], ["Hutchinson CC", 1],
 			["Vincennes", 0], ["Casper College", -1], ["Cowley College", -1],
-			["Eastern Florida State", -2], ["Moberly Area CC", -2], ["Tallahassee CC", -3],
+			["Eastern Florida State", -2], ["Moberly Area CC", -2], ["Tallahassee State College", -3],
 			["Northeastern JC", -4],
 		],
 		"DIII NCAA": [
@@ -705,7 +716,9 @@
 			["Joventut Badalona", 2], ["La Laguna Tenerife", 3],
 			["UCAM Murcia", 0], ["Casademont Zaragoza", 0], ["Bilbao Basket", -1],
 			["BAXI Manresa", -1], ["Basquet Girona", -2], ["MoraBanc Andorra", -3],
-			["Rio Breogan", -3], ["Leyma Coruna", -4],
+			/* Rio Breogan and Leyma Coruna were relegated; these three are
+			   the sides actually in the ACB. */
+			["Hiopos Lleida", -3], ["Coviran Granada", -3], ["San Pablo Burgos", -4],
 		],
 		"NBL": [
 			["Melbourne United", 4], ["Sydney Kings", 4], ["Perth Wildcats", 3],
@@ -727,17 +740,29 @@
 			["AS Monaco", 7], ["LDLC ASVEL", 5], ["Paris Basketball", 5],
 			["Cholet Basket", 1], ["Nanterre 92", 1], ["Le Mans Sarthe", 1],
 			["SIG Strasbourg", 0], ["JDA Dijon", 0], ["Limoges CSP", -1],
-			["JL Bourg", 2], ["BCM Gravelines-Dunkerque", -2], ["Chorale Roanne", -2],
+			["JL Bourg", 2], ["BCM Gravelines-Dunkerque", -2],
 			["Saint-Quentin", -2], ["ESSM Le Portel", -3], ["SLUC Nancy", -3],
 			["Elan Chalon", -3],
 		],
 		"EuroCup": [
 			["Dreamland Gran Canaria", 4], ["Turk Telekom", 3], ["Buducnost", 2],
 			["Joventut Badalona", 3], ["Bahcesehir Koleji", 2],
-			["Cedevita Olimpija", 1], ["Wolves Vilnius", 0], ["Aris Midea", 0],
-			["Trento", 0], ["Veolia Towers Hamburg", -1], ["Wolves Twinsbet", -1],
+			/* Four clubs used to be listed under a name their own domestic
+			   league did not use — and the pro-league sim matches a prospect
+			   to his club BY NAME, so Trento, Aris, Cholet and Tenerife were
+			   four different clubs depending on which competition you asked
+			   about.
+			   The names agree now, and the sponsor name is the one that wins
+			   because that is what the leagues themselves print.
+
+			   Two clubs were also in this list TWICE under two names of their
+			   own (Wolves Vilnius / Wolves Twinsbet, Veolia Towers Hamburg /
+			   Hamburg Towers), which gave a sixteen-team EuroCup fourteen
+			   clubs and two ghosts. */
+			["Cedevita Olimpija", 1], ["Wolves Twinsbet", 0], ["Aris Midea", 0],
+			["Dolomiti Energia Trento", 0], ["Veolia Towers Hamburg", -1],
 			["Slask Wroclaw", -2], ["U-BT Cluj-Napoca", -1], ["Trefl Sopot", -3],
-			["Besiktas", -2], ["Hamburg Towers", 1],
+			["Besiktas", -2], ["La Laguna Tenerife", 1], ["Cholet Basket", -2],
 		],
 		"Basketball Bundesliga": [
 			["Bayern Munich", 6], ["Alba Berlin", 4], ["Ratiopharm Ulm", 3],
@@ -754,7 +779,7 @@
 			["Cedevita Olimpija", 2], ["Igokea", 0], ["Zadar", 0], ["Cibona", -1],
 			["Split", -2], ["Mega Basket", 1], ["FMP Beograd", -1],
 			["Borac Cacak", -2], ["Studentski Centar", -3], ["Krka", -3],
-			["Spartak Subotica", -4],
+			["Dubai BC", 5], ["Spartak Subotica", -4],
 		],
 		"NBL1": [
 			["Melbourne Tigers", 3], ["Nunawading Spectres", 2],
@@ -772,8 +797,9 @@
 		],
 		"NBA Academy": [
 			["NBA Global Academy", 3], ["NBA Academy Africa", 1],
+			/* One academy, not two: the Latin America academy IS the one in
+			   Mexico City. */
 			["NBA Academy Latin America", 0], ["NBA Academy India", -2],
-			["NBA Academy Mexico City", -1],
 		],
 		"DII NCAA": [
 			["Northwest Missouri State", 6], ["Nova Southeastern", 5],
@@ -794,12 +820,18 @@
 		"Netherlands","Belgium","Switzerland","Austria","Portugal","Hungary","Romania",
 		"Bulgaria","Slovakia","North Macedonia","Kosovo","Albania","England","Scotland",
 		"Ireland","Wales","Iceland","Cyprus","Armenia",
+		/* The country a BBGM export actually writes for a British player.
+		   England / Scotland / Wales are above, but "United Kingdom" — which
+		   is the string BBGM's own country list uses — matched none of them
+		   and fell through to `other`, so a British prospect got a flat 1.0
+		   on every destination and was as likely to turn up in the PBA as in
+		   the BBL. */
+		"United Kingdom","UK","Great Britain","Northern Ireland",
 		// Everything below fell through to "other", i.e. to a flat 1.0
-		// multiplier on every destination — no regional signal at all.
-		"Moldova","Belarus","Luxembourg","Malta","Azerbaijan","Estonia","Latvia",
-		"Lithuania","Montenegro","Bosnia","Herzegovina","Serbia","Croatia",
-		"Slovenia","Greece","Italy","Spain","France","Germany","Poland","Russia",
-		"Turkey",
+		// multiplier on every destination — no regional signal at all. (The
+		// sixteen that were already listed above are not repeated: the list
+		// is scanned in order and a duplicate is dead weight.)
+		"Moldova","Belarus","Luxembourg","Malta","Azerbaijan","Herzegovina",
 	];
 	const OCEANIA_HINTS = ["Australia","New Zealand","Fiji","Samoa","Tonga","Papua"];
 	const ASIA_HINTS = [
@@ -817,7 +849,7 @@
 		"El Salvador","Nicaragua","Guyana","Suriname","Belize","Barbados",
 		"Curacao","Cura\u00e7ao","Aruba","Cayman","Saint Lucia","St. Lucia",
 		"Saint Vincent","St. Vincent","Grenada","Antigua","Dominica",
-		"Guadeloupe","Martinique","Bermuda","Nicaragua",
+		"Guadeloupe","Martinique","Bermuda",
 	];
 	const AFRICA_HINTS = [
 		"Nigeria","Senegal","Cameroon","Congo","Sudan","Mali","Angola","Egypt",
@@ -922,6 +954,18 @@
 	   know that. Everything not listed here falls through to the generated
 	   abbreviation in abbrev() below. Hand-checked unique. */
 	const ABBREVS = {
+		/* The initials generator is right about most schools and confidently
+		   wrong about a handful, because the abbreviation a school uses is
+		   not a function of its name: it produced IC, MO, II, WG, GC, TAC and
+		   SPS where the tickers read UIC, M-OH, IUI, UWG, GCU, TAMUCC and
+		   SPU. Named here, which is what this table is for. */
+		"Illinois-Chicago": "UIC",
+		"Miami (OH)": "M-OH",
+		"IU Indianapolis": "IUI",
+		"West Georgia": "UWG",
+		"Grand Canyon": "GCU",
+		"Texas A&M-CC": "TAMUCC",
+		"St. Peter's": "SPU",
 		"Kentucky": "UK",
 		"UCLA": "UCLA",
 		"North Carolina": "UNC",
@@ -1113,7 +1157,8 @@
 		"Texas-Rio Grande Valley": "UT Rio Grande Valley",
 		"UTRGV": "UT Rio Grande Valley",
 		/* The 2022 rename. BBGM's own college list still writes the old
-		   name for older players. St. Francis (NY) is gone from here: the
+		   name for older players. St. Francis (BKN) — BBGM's own string for
+		   it — is gone from here: the
 		   Brooklyn school dropped athletics in 2023 and was never the
 		   Pennsylvania one, so a player from it is an out-of-table program
 		   rather than a Red Flash alumnus. */
@@ -1122,6 +1167,25 @@
 		"Louisiana-Lafayette": "Louisiana",
 		"Louisiana Lafayette": "Louisiana",
 		"UL Lafayette": "Louisiana",
+		/* The other direction. Every entry above answers "the file has the
+		   old name" — but a modded or hand-edited class carries the OTHER
+		   spelling just as often, and each of these landed as an
+		   out-of-database program: no conference, no prestige, no schedule,
+		   and the export wrote the unrecognised string back out. The
+		   right-hand side is always the key this table actually holds. */
+		"Dixie State": "Utah Tech",
+		"UMKC": "Kansas City",
+		"Missouri-Kansas City": "Kansas City",
+		"IPFW": "Purdue Fort Wayne",
+		"Fort Wayne": "Purdue Fort Wayne",
+		"College of Charleston": "Charleston",
+		"Charleston (SC)": "Charleston",
+		"Central Florida": "UCF",
+		"Southern Mississippi": "Southern Miss",
+		"Miami": "Miami (FL)",
+		"UConn": "Connecticut",
+		"Mississippi": "Ole Miss",
+		"Penn": "Pennsylvania",
 	};
 	const canonical = (name) => {
 		if (name === undefined || name === null) return name;
