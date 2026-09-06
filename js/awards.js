@@ -1255,9 +1255,19 @@
 		const byLeague = {};
 		for (const p of pros) {
 			p.awards = [];
-			// A prospect with no stat line (a club that never got simulated)
-			// cannot be scored; he must not take the rest of the list down.
-			if (!p.stats) { p.scoreProd = 0; p.scoreTotal = -Infinity; continue; }
+			/* A prospect with no stat line (a club that never got simulated)
+			   cannot be scored; he must not take the rest of the list down.
+
+			   `null`, not -Infinity. The sentinel sorted correctly and was
+			   correct in every comparison it took part in, but it is a LIVE
+			   VALUE on a `res.board` row, and -Infinity is not a JSON number:
+			   `JSON.stringify` turns it into `null` and every formatter that
+			   walks the board printed either "null" or the literal string
+			   "-Infinity" (seeds b2 and b6 both produce one). Writing the
+			   null ourselves means the board says the same thing in memory
+			   and on disk. He is skipped before any sort here can see him;
+			   `scoreOf` below is the guard for the comparators that can. */
+			if (!p.stats) { p.scoreProd = 0; p.scoreTotal = null; continue; }
 			p.scoreProd = productionScore(p);
 			p.scoreDef = defenseScore(p, global.BBGM.composites(p.newRatings));
 			// A club that finished top of its league helps a case; a prospect
@@ -1280,8 +1290,11 @@
 		   strength raises it — an MVP in the EuroLeague is a harder thing
 		   than one in NBL1. */
 		const SHORT = PRO_SHORT;
+		// An unscored prospect sorts last rather than turning the comparison
+		// into NaN, which is what `null - number` would do.
+		const scoreOf = (x) => (Number.isFinite(x.scoreTotal) ? x.scoreTotal : -Infinity);
 		for (const lg of Object.keys(byLeague)) {
-			const list = byLeague[lg].sort((a, b) => b.scoreTotal - a.scoreTotal);
+			const list = byLeague[lg].sort((a, b) => scoreOf(b) - scoreOf(a));
 			const names = PRO_AWARDS[lg] || [];
 			const meta = C.NON_NCAA[lg] || {};
 			const short = SHORT[lg];
@@ -1312,7 +1325,7 @@
 					const club = p.proTeam;
 					if (!club) return;
 					const bestAtClub = club.prospects.slice()
-						.sort((a, b) => b.scoreTotal - a.scoreTotal)[0] === p;
+						.sort((a, b) => scoreOf(b) - scoreOf(a))[0] === p;
 					if (club.leagueChamp && bestAtClub && p.scoreTotal > firstBar * 0.8) {
 						p.awards.push(short + " Finals MVP");
 					}

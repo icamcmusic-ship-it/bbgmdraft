@@ -1129,7 +1129,7 @@
 		for (const n of [4, 5, 6]) {
 			if (letters.length >= 2) cands.push(letters.slice(0, n));
 		}
-		// Last resort: a fifth-letter suffix walk. With 368 schools this is
+		// Last resort: a fifth-letter suffix walk. With 364 schools this is
 		// essentially never reached, but it keeps resolution total.
 		const stem = letters.slice(0, 5);
 		for (const c of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") cands.push(stem + c);

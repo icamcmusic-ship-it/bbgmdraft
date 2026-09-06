@@ -23,6 +23,19 @@
 	"use strict";
 
 	const { clamp } = global.BBGMRng;
+
+	/* The free-throw-trip coefficient of the possession identity above.
+
+	   It was a bare 0.44 at five sites across three files. The offensive
+	   rebound chain was de-literalized for exactly this reason — a constant
+	   written twice is a constant that can drift — and the possession
+	   coefficient was left behind, which is the same fault at a second site.
+	   Unlike the rebound share this one is NOT read off the model: 0.44 is
+	   part of the definition of a possession, not a measurement of one, so
+	   every place that computes possessions or true shooting has to use the
+	   same number or the two stop reconciling. Naming it is what makes that
+	   checkable. */
+	const FT_TRIP = 0.44;
 	const BB = global.BBGM;
 	const CAL = global.Calibration;
 
@@ -1196,7 +1209,7 @@
 		// stay reconcilable with the attempts printed beside them.
 		const jv = (x, sd) => Math.max(0, x * (1 + rng.normal(0, sd * noise)));
 		const tov = jv(tovPoss * tovRate, 0.10);
-		const fga = jv((poss - tov) / (1 + 0.44 * ftRate), 0.045);
+		const fga = jv((poss - tov) / (1 + FT_TRIP * ftRate), 0.045);
 		const fta = jv(fga * ftRate, 0.06);
 
 		// Shot mix: 3PA share anchored to the height buckets (.39 for guards
@@ -1496,7 +1509,7 @@
 			twoPct: twoP,
 			usg: usgRate,        // USG%: share of chances used while on the floor
 			usgShare,            // share of all team chances (sums to 1)
-			ts: fga + 0.44 * fta > 0 ? pts / (2 * (fga + 0.44 * fta)) : 0,
+			ts: fga + FT_TRIP * fta > 0 ? pts / (2 * (fga + FT_TRIP * fta)) : 0,
 		};
 	}
 
@@ -2178,7 +2191,7 @@
 			totals.trb += line.rpg;
 			totals.tov += line.topg;
 		}
-		totals.poss = totals.fga - totals.orb + totals.tov + 0.44 * totals.fta;
+		totals.poss = totals.fga - totals.orb + totals.tov + FT_TRIP * totals.fta;
 		team.teamTotals = totals;
 		/* The same totals as a full box score — makes as well as attempts, and
 		   the defensive glass. `teamTotals` is what the calibration harness
@@ -2252,7 +2265,7 @@
 			box.pf += L.pfpg;
 			box.pts += L.ppg;
 		}
-		box.poss = box.fga - box.orb + box.tov + 0.44 * box.fta;
+		box.poss = box.fga - box.orb + box.tov + FT_TRIP * box.fta;
 		// Possessions per game IS the pace when a game is one game long; the
 		// distinction matters only for overtime, which the log carries and
 		// these season averages do not.

@@ -262,7 +262,7 @@
 	   untouched too, because the cap is not binding there. */
 	const FILLER_GAP = 4;
 	const NEXT_CLASS_YEAR = { Freshman: "Sophomore", Sophomore: "Junior", Junior: "Senior" };
-	/* Per top-three rotation slot, so roughly a dozen across 368 programs.
+	/* Per top-three rotation slot, so roughly a dozen across 364 programs.
 	   Raised from 0.012 (task 4.6): at the old rate about seven programs in
 	   the country had a star returner, and the uniform talent bump (+10-24)
 	   produced the same kind of player every time. The rate is doubled so a
@@ -817,7 +817,7 @@
 	   name to the rebuilt draft prospects who play there. */
 	function buildPrograms(prospectsBySchool, rng, cfg) {
 		const teams = {};
-		// Colleges outside the built-in 368 (league files drift across BBGM
+		// Colleges outside the built-in 364 (league files drift across BBGM
 		// versions) become independent mid-level programs instead of crashing.
 		const extra = Object.keys(prospectsBySchool).filter((n) => !C.COLLEGES[n]);
 		const confStrength = conferenceDrift(rng.child("confdrift"));
@@ -1611,7 +1611,7 @@
 		/* Color, which changes nothing and is the point: a season with only
 		   consequential events in it reads like a summary. */
 		/* Two DIFFERENT programs. r.pick(all) twice can return the same one,
-		   and at 368 teams that is about one flavor event in every 368 — which
+		   and at 364 teams that is about one flavor event in every 364 — which
 		   is often enough to be seen and is "Duke's trip to Duke was postponed
 		   by a snowstorm". */
 		const twoTeams = (r) => {
@@ -1905,7 +1905,7 @@
 	}
 
 	/* Conference -> its teams, the single place that decides where programs
-	   outside the built-in 368 play.
+	   outside the built-in 364 play.
 
 	   Two or more of them form a synthetic "Independent" league. Exactly one
 	   used to fall through every branch — a conference of one cannot play
@@ -2038,7 +2038,7 @@
 	   `harvest()` read firings out of `seasonEvents`, one of ~4 stories drawn
 	   from a budget of seven, and a "coaching change" fired at most once a
 	   season. Measured over ten universes: exactly one fired coach a year
-	   across 368 programs. Real Division I turns over 40-60 head coaches every
+	   across 364 programs. Real Division I turns over 40-60 head coaches every
 	   April, and in Universe mode the old number meant a decade of play left
 	   the sidelines essentially untouched.
 
@@ -2095,7 +2095,7 @@
 			   Fitted to the simulation's OWN relation between prestige and
 			   record rather than to an assumed one, because the two disagree
 			   and the firing rate is the difference between them: measured
-			   over three seasons of 368 programs, median win rate runs .344 at
+			   over three seasons of 364 programs, median win rate runs .344 at
 			   prestige 0 to .657 at prestige 80, which is 0.35 + 0.0037p. An
 			   earlier 0.40 + 0.0045p put every blue blood permanently below its
 			   own bar and fired Arizona at 21-14.

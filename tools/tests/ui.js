@@ -82,4 +82,36 @@ module.exports = function (ok, V) {
 	/* prefers-reduced-motion, for the spinner and the note-card reveal. */
 	ok("the stylesheet answers prefers-reduced-motion",
 		/@media\s*\(prefers-reduced-motion/.test(CSS));
+
+	/* ------------------------------- the September 2026 external audit */
+
+	/* A prospect with no season is dimmed rather than left as two blank cells
+	   that read as missing data. The rule and the class that sets it have to
+	   exist together: either one alone is dead code. */
+	const VIEWS = fs.readFileSync(path.join(ROOT, "js", "views.js"), "utf8");
+	ok("a prospect with no season is marked on the board",
+		/classList\.add\("dnp"\)/.test(VIEWS) && /tr\.dnp/.test(CSS));
+	ok("and the marked row still explains itself",
+		/did not play/i.test(VIEWS));
+
+	/* Long tables skip their off-screen rows, and stop skipping them when the
+	   page is printed — where every row has to be on the paper. */
+	ok("long tables skip their off-screen rows",
+		/content-visibility:\s*auto/.test(CSS));
+	ok("and stop skipping them when the page is printed",
+		/@media print[\s\S]*content-visibility:\s*visible/.test(CSS));
+
+	/* The two copy buttons: a link for someone who will click it, and plain
+	   text for the places a link is eaten. */
+	ok("the header offers both a link and a plain-text copy",
+		/id="btnCopyLink"/.test(HTML) && /id="btnCopyText"/.test(HTML));
+
+	/* The build-pool slider's cap is written from the build table at startup,
+	   so the markup's own number is only a floor. It still must not be the
+	   stale 40 that made the documented off switch unreachable. */
+	{
+		const m = /id="archetypePool"[^>]*max="(\d+)"/.exec(HTML);
+		ok("the build-pool slider is not still capped at 40",
+			!!m && Number(m[1]) > 40, m ? "max " + m[1] : "slider not found");
+	}
 };

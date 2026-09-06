@@ -127,7 +127,7 @@
 		   it. */
 		universe: false,
 		/* Head-coaching turnover, as a percentage of the built-in rates. 100
-		   turns over 40-60 of the 368 programs a year, which is what Division
+		   turns over 40-60 of the 364 programs a year, which is what Division
 		   I does; 0 freezes every sideline; 200 is a bloodbath. */
 		coachTurnover: 100,
 		/* How strongly a universe remembers last season's conference map. 100

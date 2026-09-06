@@ -88,7 +88,7 @@
 		   the chain ran that file with (its universe seed, the carry-over
 		   state handed to it, and the pool memory at that point). Without it
 		   every other tab re-simulated the file from scratch — see
-		   ensureResult. Not persisted: carryOver is a map of 368 programs and
+		   ensureResult. Not persisted: carryOver is a map of 364 programs and
 		   it is cheap to rebuild by re-running the chain. */
 		universe: {
 			rows: [], threads: [], alumni: [], baseSeed: "", running: false,
@@ -614,6 +614,12 @@
 		"seasonEvents", "draftEvents",
 	];
 
+	// The build table is the authority on how many builds there are; every
+	// place that used to guess (98, 117, 121) has been wrong at some point.
+	function archetypeTableSize() {
+		return global.RatingsBuilder ? global.RatingsBuilder.ARCHETYPES.length : 205;
+	}
+
 	const FORMAT = {
 		pDII: (v) => (v * 100).toFixed(1) + "%",
 		specialization: (v) => v.toFixed(2) + "x",
@@ -632,7 +638,10 @@
 		redshirtShare: (v) => v + "%",
 		reclassShare: (v) => v + "%",
 		injuryRate: (v) => v.toFixed(2) + "x",
-		archetypePool: (v) => (v ? v + " builds" : "off"),
+		/* Zero is off, and so is anything at or past the size of the build
+		   table: a pool that can hold every build is not a restriction. The
+		   label used to say "205 builds" for a setting that does nothing. */
+		archetypePool: (v) => (v && v < archetypeTableSize() ? v + " builds" : "off"),
 		surpriseBudget: (v) => (v ? "about " + v : "none"),
 		realignmentRate: (v) => (v ? Math.round(v * 100) + "%" : "off"),
 		bluebloodDownYears: (v) => (v ? v + " program" + (v === 1 ? "" : "s") : "none"),
@@ -644,8 +653,7 @@
 	const SLIDER_HINT = {
 		archetypePool: (v) => (v
 			? "this class is drawn from about " + v + " of the " +
-				(global.RatingsBuilder ? global.RatingsBuilder.ARCHETYPES.length : 98) +
-				" builds — " +
+				archetypeTableSize() + " builds — " +
 				"lower is more distinctive, higher is one of everything"
 			: "off: every build is eligible in every class"),
 		surpriseBudget: (v) => (v
@@ -840,7 +848,20 @@
 					hint = el("p", "unit");
 					ctl.appendChild(hint);
 				}
-				hint.textContent = SLIDER_HINT[key](Number(input.value));
+				/* The hint says what the value MEANS; it did not say what the
+				   value would be if you had never touched it. "Have I moved
+				   this?" was answerable only by hunting for the modified dot,
+				   or by opening the only-changed filter and losing the rest of
+				   the panel. The default rides along in the units the slider
+				   already prints, so "21 builds · default 21 builds" answers it
+				   in place. Suppressed when the value IS the default, where it
+				   would only be the same string twice. */
+				const fmt = FORMAT[key] || ((v) => String(v));
+				const def = CFG.DEFAULTS[key];
+				const atDefault = Number(input.value) === Number(def);
+				hint.textContent = SLIDER_HINT[key](Number(input.value)) +
+					(atDefault || !Number.isFinite(Number(def))
+						? "" : " · default " + fmt(Number(def)));
 			}
 			// Per-setting modified marker + revert (Part 5C)
 			paintModifiedMarker(ctl, key, Number(input.value));
@@ -892,6 +913,7 @@
 		   can now ask for cards at any width. */
 		document.body.className = "density-" + state.density;
 		paintLockButtons();
+		paintGroupResets();
 	}
 
 	/* The era selector. The stat model targets one of the anchor sets in
@@ -1155,6 +1177,89 @@
 	}
 
 	/* ---- numeric input for each slider (Part 5A) + modified markers (Part 5C) */
+
+	/* Ranges that are facts about a table, not about the markup.
+
+	   `archetypePool` is the size of the build pool a class is drawn from, and
+	   its documented off switch is "set it to the size of the build table or
+	   above". The slider was written with max="40" when the table held about
+	   that many builds; the table holds 205 now, so the documented off switch
+	   had been unreachable from the UI for a long time and every position on
+	   the slider was somewhere in the bottom fifth of the range. The cap is
+	   read off the table it caps. */
+	function retuneSliderRanges() {
+		const pool = $("archetypePool");
+		if (pool && global.RatingsBuilder) {
+			pool.max = String(global.RatingsBuilder.ARCHETYPES.length);
+		}
+	}
+
+	/* One "reset this group" button per settings group.
+
+	   There is a per-setting revert (the ↺ beside a modified label) and a
+	   whole-panel reset, and nothing in between — so backing out of one
+	   session of fiddling with the season meant finding every dot in the
+	   group by eye. The button knows what is in its own group because it
+	   reads the DOM: every control inside the <details> that has a config
+	   key. It is hidden when nothing in the group is modified, so it is also
+	   a group-level answer to "have I touched this?". */
+	function groupKeys(details) {
+		const keys = [];
+		for (const node of details.querySelectorAll("input[id], select[id]")) {
+			const key = node.id;
+			if (key && Object.prototype.hasOwnProperty.call(CFG.DEFAULTS, key)) keys.push(key);
+		}
+		return keys;
+	}
+
+	function addGroupResets() {
+		for (const details of document.querySelectorAll("details.grp")) {
+			const summary = details.querySelector("summary");
+			if (!summary || summary.querySelector(".grp-reset")) continue;
+			const btn = el("button", "grp-reset", "Reset group");
+			btn.type = "button";
+			btn.hidden = true;
+			btn.addEventListener("click", (e) => {
+				// The summary is a toggle; resetting must not also collapse it.
+				e.preventDefault();
+				e.stopPropagation();
+				const keys = groupKeys(details).filter(
+					(k) => JSON.stringify(state.cfg[k]) !== JSON.stringify(CFG.DEFAULTS[k]));
+				if (!keys.length) return;
+				pushUndo("reset " + (summary.dataset.label || "a group") + " to defaults");
+				for (const k of keys) {
+					const d = CFG.DEFAULTS[k];
+					state.cfg[k] = typeof d === "number" ? Number(d) : d;
+					const inp = $(k);
+					if (inp) {
+						if (inp.type === "checkbox") inp.checked = !!d;
+						else inp.value = d;
+					}
+				}
+				markDirty();
+				paintConfig();
+				persist();
+				scheduleRun();
+				setStatus("Reset " + keys.length + " setting" + (keys.length === 1 ? "" : "s") +
+					" in " + (summary.dataset.label || "this group") + " to default.");
+			});
+			summary.dataset.label = (summary.firstChild && summary.firstChild.textContent || "")
+				.trim() || details.id;
+			btn.title = "Reset every setting in " + summary.dataset.label + " to its default";
+			summary.appendChild(btn);
+		}
+	}
+
+	function paintGroupResets() {
+		for (const details of document.querySelectorAll("details.grp")) {
+			const btn = details.querySelector(".grp-reset");
+			if (!btn) continue;
+			const n = groupKeys(details).filter(
+				(k) => JSON.stringify(state.cfg[k]) !== JSON.stringify(CFG.DEFAULTS[k])).length;
+			btn.hidden = n === 0;
+			btn.textContent = n ? "Reset " + n : "Reset group";
+		}
+	}
 
 	/* Create a numeric <input> for each slider, placed inside a wrapper div. */
 	function wrapSlidersWithNumbers() {
@@ -2277,6 +2382,50 @@
 		return out;
 	}
 
+	/* The same class, as prose you can paste into a forum post.
+
+	   A link is the right thing to hand somebody who will click it, and the
+	   wrong thing everywhere links get eaten, shortened or stripped — which is
+	   most of the places people actually talk about draft classes. It also
+	   answers nothing on its own: a reader cannot see from a URL that the
+	   sender ran the class at specialization 2.4 unless they open it. This is
+	   the same payload encodeConfig puts in the hash, written out as lines,
+	   with the seed and the class fingerprint on top so the recipient can
+	   check they are looking at the same seventy players. */
+	function configAsText() {
+		const payload = encodeConfig(true);
+		delete payload.overrides;
+		delete payload.fp;
+		const lines = [];
+		const res = state.results[state.active];
+		lines.push("BBGM Draft Class Workshop");
+		if (res) {
+			lines.push("seed: " + res.seed + "  ·  fingerprint: " + classFingerprint(res));
+			if (res.flavor && res.flavor.label) lines.push("flavor: " + res.flavor.label);
+		} else if (payload.seed) {
+			lines.push("seed: " + payload.seed);
+		}
+		delete payload.seed;
+		const keys = Object.keys(payload).sort();
+		lines.push("");
+		if (!keys.length) {
+			lines.push("settings: all defaults");
+		} else {
+			lines.push("settings changed from default (" + keys.length + "):");
+			for (const k of keys) {
+				const v = payload[k];
+				const shown = typeof v === "number" && FORMAT[k] ? FORMAT[k](v) : String(v);
+				const def = CFG.DEFAULTS[k];
+				const defShown = typeof def === "number" && FORMAT[k] ? FORMAT[k](def) : String(def);
+				lines.push("  " + k + ": " + shown + "  (default " + defShown + ")");
+			}
+		}
+		const locks = Object.keys(state.overrides).length;
+		if (locks) lines.push("", locks + " locked player" + (locks === 1 ? "" : "s") +
+			" — not carried by this text; share the link or the locks CSV for those.");
+		return lines.join("\n");
+	}
+
 	/* Roughly where browsers and the things people paste links into start
 	   truncating. A class with 70 fully-locked players clears it easily, and a
 	   silently truncated link is worse than no link: it opens, parses as far as
@@ -2950,7 +3099,7 @@
 
 	/* The engine is staged: a runner only redoes the phases whose settings
 	   changed. Moving the note template or an award dial used to re-simulate
-	   368 programs, 11,000 games and every stat line in the country — about
+	   364 programs, 11,000 games and every stat line in the country — about
 	   200ms of blocking work every 140ms while a slider was moving. */
 	/* --- the busy indicator ---------------------------------------------
 
@@ -3059,8 +3208,23 @@
 		   file, a lock one of them set, a version of the tool with a different
 		   model in it — and had no way to notice. Matching fingerprints mean
 		   the same seventy players. */
-		$("seedPill").textContent = "seed " + res.seed + " · " + classFingerprint(res);
-		$("seedPill").dataset.seed = res.seed;
+		/* THE LABEL IS DATA, not whatever the element happens to be showing.
+
+		   The copy confirmation used to capture `p.textContent` and put it
+		   back 1.2 seconds later. A reroll that finished inside that window —
+		   which is most rerolls — repainted the pill with the NEW seed and the
+		   timer then overwrote it with the old one, so the header sat there
+		   claiming a seed the class on screen was not built from. The label is
+		   stored, the flash restores from the store, and a repaint cancels a
+		   flash that is still pending. */
+		const pill = $("seedPill");
+		if (pill.dataset.flashTimer) {
+			clearTimeout(Number(pill.dataset.flashTimer));
+			delete pill.dataset.flashTimer;
+		}
+		pill.dataset.label = "seed " + res.seed + " · " + classFingerprint(res);
+		pill.textContent = pill.dataset.label;
+		pill.dataset.seed = res.seed;
 		/* The fingerprint and flavor in the tab title, so two browser tabs
 		   comparing two classes are distinguishable from the tab strip. */
 		document.title = classFingerprint(res) +
@@ -3852,7 +4016,7 @@
 	   Coaches persist across the chain with a tenure, a reputation and an
 	   age, and conference membership carries from season to season — every
 	   fact a coach's career page or a realignment map needs is already in
-	   the results the chain produced. Neither is persisted (368 programs
+	   the results the chain produced. Neither is persisted (364 programs
 	   times fifty seasons is not a localStorage payload); both are built
 	   here from liveResults(), which rehydrates evicted seasons from the
 	   configs the chain recorded, and cached on the universe object until
@@ -6229,7 +6393,9 @@
 	syncHeaderHeight();
 
 	bindSettingsSearch();
+	retuneSliderRanges();
 	wrapSlidersWithNumbers();
+	addGroupResets();
 	bindSettingTier();
 	bindSessions();
 	bindConfig();
@@ -6393,9 +6559,13 @@
 		if (e.shiftKey) return;
 		copyText($("seedPill").dataset.seed || "", null, "");
 		const p = $("seedPill");
-		const was = p.textContent;
+		if (p.dataset.flashTimer) clearTimeout(Number(p.dataset.flashTimer));
 		p.textContent = "seed copied ✓";
-		setTimeout(() => { p.textContent = was; }, 1200);
+		p.dataset.flashTimer = String(setTimeout(() => {
+			// Whatever the pill says NOW, not what it said when this fired.
+			p.textContent = p.dataset.label || p.textContent;
+			delete p.dataset.flashTimer;
+		}, 1200));
 	});
 	/* You could share a seed and not receive one: taking somebody else's meant
 	   opening the settings panel and finding the field by hand. Shift-click (or
@@ -6432,9 +6602,16 @@
 		modal("Use a seed", box, () => take(input.value));
 		setTimeout(() => input.focus(), 0);
 	}
-	$("btnCopyLink").addEventListener("click", () => {
+	$("btnCopyLink").addEventListener("click", (e) => {
 		writeHash(true);
-		copyText(location.href, $("btnCopyLink"));
+		// Shift-click copies the settings as prose instead of as a URL, for
+		// the forums and chat clients that eat links. Advertised in the title.
+		if (e.shiftKey) copyText(configAsText(), $("btnCopyLink"));
+		else copyText(location.href, $("btnCopyLink"));
+	});
+	$("btnCopyText").addEventListener("click", () => {
+		writeHash(true);
+		copyText(configAsText(), $("btnCopyText"));
 	});
 	$("btnBatch").addEventListener("click", () => {
 		if (!state.files.length) return;

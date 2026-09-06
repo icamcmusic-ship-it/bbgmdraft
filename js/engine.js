@@ -4,7 +4,7 @@
    run() is a thin wrapper over a staged pipeline (see PHASES). Each stage
    declares which settings it depends on, so the UI can re-run only what a
    given slider actually changed: moving "Award strictness" or the note
-   template no longer re-simulates 368 programs, 11,000 games and 3,500 stat
+   template no longer re-simulates 364 programs, 11,000 games and 3,500 stat
    lines to change one line of text. */
 (function (global) {
 	"use strict";
@@ -17,6 +17,19 @@
 	const T = global.TeamsSim;
 	const S = global.StatsSim;
 	const TN = global.Tournament;
+
+	/* The pace band the whole engine works in, named once.
+
+	   There were two of them and they disagreed. The class-environment jitter
+	   floors pace at 55 — deliberately three points below the slider's own
+	   minimum of 58, because a slow season should be able to be slower than
+	   the slowest thing a user can dial — and `priorSchedule` then clamped
+	   what it was handed to [58, 82], so the whole bottom of that jitter was
+	   truncated: at the slider's floor the prior-season scoreboard could not
+	   express a slow year at all, and the two halves of one run described
+	   different games. One band, read by both. */
+	const PACE_MIN = 55;
+	const PACE_MAX = 82;
 	const RK = global.Rankings;
 	const AW = global.Awards;
 	const CAL = global.Calibration;
@@ -1108,7 +1121,7 @@
 		   make two classes with the same settings feel different. */
 		const envRng = rng.child("classEnv");
 		const jitteredCfg = Object.assign({}, cfg);
-		jitteredCfg.pace = Math.max(55, cfg.pace + envRng.normal(0, 2.5));
+		jitteredCfg.pace = Math.max(PACE_MIN, cfg.pace + envRng.normal(0, 2.5));
 		jitteredCfg.efficiencyEnv = clamp(
 			(cfg.efficiencyEnv || 0) + envRng.normal(0, 0.6), -3, 3);
 		jitteredCfg.statNoise = Math.max(0,
@@ -2406,7 +2419,7 @@
 
 	/* Recruiting class rankings (§8.8). Per-player recruiting data existed —
 	   rank, stars, committed — but the aggregate every fan actually argues
-	   about did not. To rank all 368 programs the class needs synthetic
+	   about did not. To rank all 364 programs the class needs synthetic
 	   recruits for every school (the same move the returning-talent model
 	   makes); real prospects keep the national rank assignRecruiting gave
 	   them and the synthetics fill the remaining slots in quality order.
@@ -2741,7 +2754,7 @@
 	   year's class year (so the experience curve and the college-role draw
 	   apply), in a rotation rebuilt at his program's level for that year.
 	   The cost is one team simulation per prior season — a few hundred against
-	   the 368 the season itself runs — and `cfg.priorSeasons` turns it off,
+	   the 364 the season itself runs — and `cfg.priorSeasons` turns it off,
 	   which restores the old reconstruction exactly.
 
 	   A transfer's earlier seasons still happen at the school he came from, and
@@ -2801,7 +2814,7 @@
 		const confMates = (C.byConference[home.conf] || []).filter((n) => n !== home.name);
 		const pool = C.names.filter((n) => n !== home.name);
 		const n = SEASON_GAMES;
-		const pace = clamp(Number.isFinite(cfg.pace) ? cfg.pace : 68, 58, 82);
+		const pace = clamp(Number.isFinite(cfg.pace) ? cfg.pace : 68, PACE_MIN, PACE_MAX);
 		const log = [];
 		for (let i = 0; i < n; i++) {
 			const conference = i >= T.NON_CONF_GAMES && confMates.length > 0;
@@ -3531,7 +3544,7 @@
 
 	/* Which settings each phase reads. The UI uses this to re-run only what a
 	   given change actually invalidates: the note template and the award dials
-	   used to cost a full 368-program season simulation each time they moved. */
+	   used to cost a full 364-program season simulation each time they moved. */
 	const PHASES = [
 		{
 			name: "build",
@@ -3752,7 +3765,7 @@
 				   skips the build phase would lose the jitter. */
 				const envRng = new Rng(seed).child("classEnv");
 				const j = Object.assign({}, bent);
-				j.pace = Math.max(55, bent.pace + envRng.normal(0, 2.5));
+				j.pace = Math.max(PACE_MIN, bent.pace + envRng.normal(0, 2.5));
 				j.efficiencyEnv = clamp(
 					(bent.efficiencyEnv || 0) + envRng.normal(0, 0.6), -3, 3);
 				j.statNoise = Math.max(0,
@@ -6475,7 +6488,7 @@
 		exportLeagueFragment, mergeIntoLeague, mergeManyIntoLeague, classDraftYear,
 		buildNote, classYear,
 		assignClassYears, inchesFromHgtRating, validateLeagueFile, findSeason, playerKey,
-		SIZE_OVERRIDE_KEYS, SURPRISES, DRAFT_EVENTS,
+		SIZE_OVERRIDE_KEYS, SURPRISES, DRAFT_EVENTS, PACE_MIN, PACE_MAX,
 		draftClassesIn, extractDraftClass, MIN_CLASS, PROSPECT_TIDS,
 		MAX_CLASS, ANOMALY_MEMORY_DEPTH, NARRATIVES,
 		rerollSalt,

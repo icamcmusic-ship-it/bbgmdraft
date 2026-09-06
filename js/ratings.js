@@ -2051,13 +2051,34 @@
 			   points on average — and it is C1 at the knee and monotone
 			   below it, which is what the bisection above needs. The floor
 			   is still reachable, so the range ovrRange promises is still a
-			   range the solver keeps. */
+			   range the solver keeps.
+
+			   THE KNEE IS ANCHORED AT THE BASE, and that is the whole of this
+			   block's correctness. A fixed knee at FLOOR_KNEE is a map from
+			   value to value, not from shift to shift, so it fired at k = 0
+			   too: a base ins of 3 came back 4, dnk 5 came back 6, ft 1 came
+			   back 3 — every rating under 11 lifted by up to +2.5, ALWAYS
+			   upward, for a shift of nothing. That broke three promises at
+			   once ("Preserve never inflates", "forcing the build a player
+			   already drew leaves every other rating where it was", and the
+			   pin/re-solve identity), and it broke them invisibly, because
+			   ft/fg/ins carry almost no ovr weight so touchUp never saw a
+			   target to correct back to.
+
+			   Clamping the knee to `base - 1` fixes it by construction. At
+			   raw = base the value sits exactly ON the knee (t = K), where
+			   both branches agree at 1 + K = base, so k = 0 is the identity
+			   for every rating and every base. Above the base t > K and the
+			   ease does not apply at all, so a shift UP is untouched — which
+			   it always should have been; this is a floor guard. Below it the
+			   quadratic runs as before, still C1 at the knee (both slopes are
+			   1 there), still monotone, still reaching 1. A base of 1 has no
+			   room to ease at all, so K <= 0 short-circuits to the clamp. */
 			if (key !== "hgt") {
+				const K = Math.min(FLOOR_KNEE, base[key] - 1);
 				const t = v - 1;
-				if (t < FLOOR_KNEE) {
-					v = t <= -FLOOR_KNEE
-						? 1
-						: 1 + ((t + FLOOR_KNEE) * (t + FLOOR_KNEE)) / (4 * FLOOR_KNEE);
+				if (K > 0 && t < K) {
+					v = t <= -K ? 1 : 1 + ((t + K) * (t + K)) / (4 * K);
 				}
 			}
 			// The same floor and ceiling the base is built on. A 0/100 clamp
@@ -2194,6 +2215,32 @@
 			}
 			out.push(clamp(Math.round(v + rng.normal(0, 1.6)), 0, 100));
 		}
+		/* SORTED AFTER THE NOISE, and that is deliberate.
+
+		   The sort looks like it throws the noise away — a slot that drew
+		   +3 and one that drew -3 swap places and the array comes back
+		   descending either way. It does not. This function returns a CURVE
+		   OF TARGETS, not an assignment of targets to players: slot 0 is
+		   "whatever the best ovr in this class turns out to be", and the
+		   engine hands the targets to players in board order afterwards. So
+		   the noise is doing the only job it was ever given, which is to
+		   roughen the SHAPE of the curve — the gaps between consecutive
+		   slots — and re-ordering the slots it perturbed is what keeps the
+		   curve a curve.
+
+		   The one thing worth naming is the elite bump, which is added before
+		   the noise and so is not guaranteed to survive to the top of the
+		   array. It does in practice: the smallest bump handed out is
+		   2.2 + U(0,3) against noise of sd 1.6, so an elite slot falling
+		   below a non-elite one needs better than a 2-sigma draw against it
+		   AND the elite's own uniform to come in low. Measured over 5,000
+		   sixty-man classes across the whole eliteCount range, one elite slot
+		   is displaced in 3.1% of classes and never by more than a single
+		   rank — a class where the fifth-best player is an ordinary prospect
+		   rather than the last of the stars, which is a thing that happens.
+		   Bumping after the noise instead would guarantee it, and would also
+		   change every seed's output for a defect nobody can see, so the
+		   guarantee is not worth its price. */
 		out.sort((a, b) => b - a);
 		return out;
 	}
@@ -2306,7 +2353,11 @@
 
 	global.RatingsBuilder = {
 		ARCHETYPES, RAW_OFFSETS, OVR_W, SHIFT_SCALE, USAGE_W,
-		rebuild, classCurve, pickArchetype, solveToOvr, shiftScales, ovrRange, resolveTo,
+		// applyShift is exported for tools/tests/audit.js, which asserts the
+		// zero-shift identity and the monotonicity solveToOvr's bisection
+		// needs — both properties OF THIS FUNCTION, not of a class built with
+		// it, and neither reachable through the public entry points.
+		rebuild, classCurve, pickArchetype, solveToOvr, shiftScales, applyShift, ovrRange, resolveTo,
 		potAdjust, potFactors, potFromRole, ROLE_USG_CENTER, POT_BY_ARCHETYPE, computePotGap,
 		POT_SKILL_W, POT_INTENT, typicalWeight,
 		ROLE_USAGE, roleUsage, computeRoleUsage, usageCompositeDelta, creationDelta,

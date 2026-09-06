@@ -285,9 +285,22 @@ console.log("\nGaps, failures and the carry");
 		!aged.coaches[name].coach || aged.coaches[name].coach.age >= carry.coaches[name].coach.age + 5 ||
 		aged.coaches[name].fired);
 	ok("aging the carry counts the unplayed seasons", aged.stale === 5);
-	ok("a program level regresses toward the middle across a gap",
-		Object.keys(carry.levels).every((n) =>
-			Math.abs(aged.levels[n] - 55) <= Math.abs(carry.levels[n] - 55) + 1e-9));
+	/* Toward THIS field's mean, not toward a literal. The target used to be a
+	   hardcoded 55, which is the middle of the default field and of no other:
+	   a universe run at midMajorLift 12, or one carrying only blue bloods, was
+	   dragged across a gap toward a number from a different world. */
+	{
+		const names = Object.keys(carry.levels);
+		const mean = names.reduce((x, n) => x + carry.levels[n], 0) / names.length;
+		ok("a program level regresses toward the field's own mean across a gap",
+			names.every((n) =>
+				Math.abs(aged.levels[n] - mean) <= Math.abs(carry.levels[n] - mean) + 1e-9));
+		// And the mean itself is a fixed point: a gap decays the SPREAD, it
+		// does not move the field.
+		const agedMean = names.reduce((x, n) => x + aged.levels[n], 0) / names.length;
+		ok("a gap does not move the field's mean", Math.abs(agedMean - mean) < 1e-6,
+			mean.toFixed(3) + " -> " + agedMean.toFixed(3));
+	}
 }
 
 console.log("\nThreads and the records book");

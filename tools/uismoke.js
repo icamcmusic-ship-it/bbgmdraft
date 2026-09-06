@@ -1888,6 +1888,112 @@ async function gotoProspects(page) {
 			afterReload === 0, afterReload + " leftover patches");
 	}
 
+	/* ---------------------------------------------------------------------
+	   THE SETTINGS PANEL, after the September 2026 external audit.
+
+	   Four changes that live entirely in the DOM, which is the half of the UI
+	   the engine harness cannot reach: the per-group reset, the default value
+	   printed in a slider's hint, the build-pool slider's cap, and the copy
+	   of the seed and settings as plain text. */
+	{
+		console.log("\nThe settings panel");
+		await page.goto(base);
+		await page.evaluate(() => localStorage.clear());
+		await page.goto(base);
+		await page.evaluate(() => {
+			const data = window.Sample.makeClass(909, 40, 2027);
+			window.App.state.cfg.seed = "uismoke-settings";
+			window.App.installFiles([{ name: "settings-sample.json", data }], []);
+		});
+		await page.waitForSelector("table tbody tr", { timeout: 60000 });
+
+		const poolMax = await page.evaluate(() => ({
+			max: Number(document.getElementById("archetypePool").max),
+			builds: window.RatingsBuilder.ARCHETYPES.length,
+		}));
+		ok("the build-pool slider reaches the size of the build table",
+			poolMax.max >= poolMax.builds,
+			"slider max " + poolMax.max + " against " + poolMax.builds + " builds");
+
+		// At the default, the hint does not repeat the value as a default.
+		const hintAtDefault = await page.evaluate(() => {
+			const ctl = document.getElementById("specialization").closest(".ctl");
+			const u = ctl.querySelector(".unit");
+			return u ? u.textContent : "";
+		});
+		ok("a slider at its default does not print its default twice",
+			hintAtDefault.indexOf("default") === -1, hintAtDefault);
+
+		// Move it, and the hint says what it was.
+		await page.evaluate(() => {
+			const el = document.getElementById("specialization");
+			el.value = "2";
+			el.dispatchEvent(new Event("input", { bubbles: true }));
+		});
+		await page.waitForTimeout(300);
+		const hintMoved = await page.evaluate(() => {
+			const ctl = document.getElementById("specialization").closest(".ctl");
+			const u = ctl.querySelector(".unit");
+			return u ? u.textContent : "";
+		});
+		ok("a moved slider's hint carries its default", /default/.test(hintMoved), hintMoved);
+
+		// The group's own reset appears, names how many, and puts them back.
+		const resetBefore = await page.evaluate(() => {
+			const b = document.querySelector("#grp-builds summary .grp-reset");
+			return b ? { hidden: b.hidden, text: b.textContent } : null;
+		});
+		ok("a group with a modified setting offers a reset",
+			!!resetBefore && !resetBefore.hidden && /\d/.test(resetBefore.text),
+			JSON.stringify(resetBefore));
+		const otherGroup = await page.evaluate(() => {
+			const b = document.querySelector("#grp-years summary .grp-reset");
+			return b ? b.hidden : null;
+		});
+		ok("a group at its defaults offers nothing", otherGroup === true, String(otherGroup));
+		const wasOpen = await page.evaluate(() =>
+			document.getElementById("grp-builds").open);
+		await page.evaluate(() =>
+			document.querySelector("#grp-builds summary .grp-reset").click());
+		await page.waitForTimeout(500);
+		const after = await page.evaluate(() => ({
+			spec: window.App.state.cfg.specialization,
+			def: window.Config.DEFAULTS.specialization,
+			hidden: document.querySelector("#grp-builds summary .grp-reset").hidden,
+			open: document.getElementById("grp-builds").open,
+		}));
+		ok("resetting a group puts its settings back", after.spec === after.def,
+			after.spec + " vs default " + after.def);
+		ok("and the button goes away again", after.hidden === true);
+		// The button lives in a <summary>, which is a toggle. Pressing it must
+		// not also collapse the group the user is working in.
+		ok("resetting a group does not collapse it", after.open === wasOpen,
+			"open " + wasOpen + " -> " + after.open);
+
+		// The seed and settings as prose, for a forum post.
+		await page.evaluate(() => {
+			const el = document.getElementById("specialization");
+			el.value = "2";
+			el.dispatchEvent(new Event("input", { bubbles: true }));
+		});
+		await page.waitForTimeout(400);
+		const text = await page.evaluate(() => {
+			let copied = "";
+			const real = navigator.clipboard && navigator.clipboard.writeText;
+			// The harness cannot read the system clipboard; it can read what
+			// the page tried to put there.
+			if (real) {
+				navigator.clipboard.writeText = (t) => { copied = t; return Promise.resolve(); };
+			}
+			document.getElementById("btnCopyText").click();
+			if (real) navigator.clipboard.writeText = real;
+			return copied;
+		});
+		ok("the settings copy as text carries the seed", /seed: \S/.test(text), text.slice(0, 120));
+		ok("and names the setting that was changed and its default",
+			/specialization: .*default/.test(text), text.slice(0, 400));
+	}
+
 	console.log("\nNo errors");
 	ok("no console or page errors", errors.length === 0, errors.join("\n         "));
 
