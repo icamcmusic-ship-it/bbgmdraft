@@ -34,7 +34,7 @@
 
 	   Team Value Index: per-game credit, weighted by opponent strength and
 	   location, where opponent strength is itself derived from results. Seeded
-	   from win percentage and iterated to a fixed point: a few passes over 368
+	   from win percentage and iterated to a fixed point: a few passes over 364
 	   teams is a few milliseconds, and after 4 passes the ordering is stable. */
 	const TVI_PASSES = 4;
 
@@ -128,7 +128,7 @@
 	/* --------------------------------------------------------- quadrants
 
 	   The standard NET quadrant map: opponent rank thresholds by location.
-	   With 368 programs in the database the real ~360-team thresholds
+	   With 364 programs in the database the real ~360-team thresholds
 	   transfer almost directly. */
 	const QUADS = [
 		{ q: 1, home: 30, neutral: 50, away: 75 },
@@ -390,7 +390,7 @@
 
 			/* Voters only ever score a CANDIDATE set — the teams a real voter
 			   actually considers: the top of the shared feature score plus
-			   everyone ranked anywhere last week. Scoring all 368 for all 60
+			   everyone ranked anywhere last week. Scoring all 364 for all 60
 			   voters at all 15 checkpoints tripled the postseason phase for
 			   ballots that were identical below the top fifty. */
 			/* Reputation fades out over the first REP_GAMES games rather than

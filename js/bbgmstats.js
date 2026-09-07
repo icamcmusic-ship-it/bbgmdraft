@@ -67,7 +67,14 @@
 		for (const k of STATS.derived) row[k] = 0;
 		for (const k of STATS.raw) row[k] = 0;
 		for (const k of STATS.max) row[k] = null;
-		row.jerseyNumber = jerseyNumber === undefined ? undefined : String(jerseyNumber);
+		/* Present with a value, or absent — never present holding `undefined`.
+		   `row.jerseyNumber = undefined` reads as "the key is there" to
+		   Object.keys and to the KEYS invariant above, and then vanishes the
+		   moment the row is stringified, so the row that shipped was not the
+		   row this function said it built. BBGM's own addStatsRow only sets
+		   the field when the player has a number, which is what this does
+		   now: the exported row's key set is exactly its in-memory one. */
+		if (jerseyNumber !== undefined) row.jerseyNumber = String(jerseyNumber);
 		return row;
 	}
 

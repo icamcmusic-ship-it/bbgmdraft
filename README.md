@@ -1519,16 +1519,28 @@ where it was measured — at 3 the cut is three times the size and the room is t
 same, and 6.2% of a class's ratings sat on exactly 1, a vector with no shape
 left in it. The scaling now carries the whole cut and the solver's downward
 shift eases onto the floor over its last ten points instead of driving through
-it; the floor share at specialization 3 is 1.9% and at 1 it is 0.09%, and 35% of
-a 70-man class's ratings move by an average of 1.2 points. Two guard builds were
+it; the floor share at specialization 3 is 2.9% and at 1 it is 1.0%, and about a
+third of a 70-man class's ratings move by an average of 1.2 points. (Those two
+figures were 1.9% and 0.09% until the September 2026 external audit found that
+the ease was not the identity at zero shift — it lifted every rating under 11
+upward whatever the shift was, which pushed the bottom of the distribution off
+the floor for free. See *The external audit of September 2026*. The room-scaling
+above is still doing most of the work: the defect this replaced put 6.2% of a
+class's ratings on 1.) Two guard builds were
 tagged in a way their own gates contradicted (Sharpshooter runs to 6'8" and
 Slasher to 6'9", and neither could be reached by a wing-leaning flavor); both
 carry `wing` now.
 
 One thing was left for the UI: `archetypePool` was clamped at 60 against a
 205-build table, so the documented "a size at or above the table turns the pool
-off" could not be said. The clamp is the table size now, but the slider in
-index.html still stops at 40.
+off" could not be said. The clamp is the table size now — and so, since the
+September 2026 external audit, is the slider: it stopped at 40, which put every
+reachable position in the bottom fifth of the range and made the documented off
+switch unreachable from the UI entirely. The slider's `max` is written from
+`ARCHETYPES.length` at startup rather than typed into the markup, the label
+reads "off" at or past the table size rather than printing a build count for a
+setting that does nothing, and `tools/tests/audit.js` fails if the table grows
+past what index.html carries.
 
 ### The season, the scoreboard and the advanced block
 
@@ -2051,6 +2063,178 @@ the same project as building on the biography map; game logs for returning
 rotation players are roughly three times the stats phase; and composable
 flavors change the engine's flavor pick. All three are real and none is a
 one-PR change beside the rest of this list.
+
+---
+
+## The external audit of September 2026
+
+A reader cloned the repository, ran both harnesses green (719 checks and 39
+universe checks), and then went looking for the things a green harness does not
+prove. What follows is every finding, what changed, and — because several of
+the findings turned out not to be faults — what was checked and left alone.
+
+### Bugs, fixed
+
+**The solver's floor ease was not the identity at zero shift.** This is the
+real one. `applyShift` in js/ratings.js eases a rating onto the floor over its
+last `FLOOR_KNEE` (10) points, so that a shift DOWN does not drive a
+specialist's weak ratings into 1. The ease was written as a map from value to
+value with a fixed knee, which means it did not care whether there was a shift
+at all: it fired at `k = 0` too, and every rating under 11 came back LIFTED by
+up to +2.5 points, always upward. A base `ins` of 3 came back 4, `dnk` 5 came
+back 6, `ft` 1 came back 3.
+
+Three claims in this file depended on that not happening — "Preserve never
+inflates", "forcing the build a player already drew leaves every other rating
+where it was", and the pin-and-re-solve identity — and it broke all three
+invisibly, because `ft`, `fg` and `ins` carry so little weight in BBGM's `ovr`
+that the lift never moved the overall and `touchUp` therefore never saw a
+target to correct back to. No test looked at individual ratings at `k = 0`.
+
+The knee is clamped to `base - 1` now. At `raw = base` the value sits exactly
+on the knee, where both branches of the ease agree at `1 + K = base`, so zero
+shift is the identity for every rating and every base by construction; above
+the base the ease does not apply at all, which is correct for a floor guard;
+below it the quadratic runs as before, still C1 at the knee, still monotone,
+still reaching 1. `tools/tests/audit.js` asserts the identity, the
+monotonicity the bisection in `solveToOvr` depends on, that a large shift down
+still reaches the floor, and that a shift up is untouched.
+
+Every golden hash moved, which is what a fix to the rating solver looks like.
+
+**A `-Infinity` draft-board score.** js/awards.js gave a prospect with no stat
+line — a club that never got simulated, or a man who did not play — a
+`scoreTotal` of `-Infinity`. It sorted correctly and it is not a JSON number:
+`JSON.stringify` turns it into `null`, so anything that serialised or formatted
+`res.board` printed either "null" or the literal string "-Infinity". It is
+`null` now, written deliberately, with a `scoreOf` guard on the comparators
+that can see one. The suite sweeps every number on `res.board` and `res.poll`
+for non-finite values.
+
+**A blank stats row held an `undefined`.** `BBGMStats.blankRow` set
+`jerseyNumber: undefined` when the player had no number. The key was present to
+`Object.keys` and to the file's stated invariant ("every key `addStatsRow`
+writes"), and absent the moment the row was stringified — so the row the
+function claimed to build was not the row that shipped. The field is set only
+when there is a number, which is what BBGM's own `addStatsRow` does.
+
+**A gap year regressed program levels toward a literal.** `Universe.ageCarry`
+pulled every carried program level toward a hardcoded 55 across unplayed
+seasons. 55 is the middle of the DEFAULT field and of no other: a universe run
+at `midMajorLift` 12, or one carrying only blue bloods, was dragged toward a
+number from a different world. It regresses toward the carried field's own mean
+now, with 55 kept as the fallback for an empty carry. A uniform field does not
+move at all across ten unplayed years; a spread one still compresses, which is
+the behaviour the regression exists for.
+
+**Two pace bands.** The class-environment jitter floors pace at 55 —
+deliberately three points below the slider's own minimum of 58, so a slow
+season can be slower than the slowest thing a user can dial — and
+`priorSchedule` then clamped what it was handed to `[58, 82]`. The bottom of
+the jitter was truncated, so the prior seasons of a run described a faster game
+than the season beside them. `PACE_MIN` / `PACE_MAX` are named once and read by
+both; the suite fails on a hardcoded pace bound reappearing in js/engine.js.
+
+**Stale program counts.** Two comments in js/config.js and js/colleges.js said
+368 programs against a table of 364 (which is what this file says); five more
+across js/rankings.js, js/teams.js and js/tournament.js said the same. All
+corrected, and the suite asserts the table's size against the number the docs
+claim.
+
+**The seed pill could show the wrong seed.** Clicking the pill flashed "seed
+copied ✓" and restored the label 1.2 seconds later from a string captured at
+click time. A reroll finishing inside that window — which is most rerolls —
+repainted the pill with the new seed and the timer then overwrote it with the
+old one, so the header claimed a seed the class on screen was not built from.
+The label is stored on the element, the flash restores from the store, and a
+repaint cancels a pending flash.
+
+**The build-pool slider could not reach its own off switch.** See the
+`archetypePool` note in the audit section above.
+
+### One constant, named
+
+`0.44` — the free-throw-trip coefficient of the possession identity — was a
+bare literal at five sites across three files. The offensive-rebound chain was
+de-literalized for exactly this reason and this second site was left behind. It
+is `FT_TRIP` in js/stats.js and in js/calibration.js now, with a check that the
+two agree and a check that team possessions reconcile to the identity using
+it. Unlike the rebound share it is deliberately NOT read off the model: 0.44 is
+part of the definition of a possession, not a measurement of one. The copies
+inside js/bbgmstats.js stay literal on purpose — that file is a port of BBGM's
+own formulas and is supposed to read like them.
+
+### Checked, and not faults
+
+- **The `hgt` fuzz exclusion in `compositeRating`.** The comment said it was
+  unverified against upstream. It is verified now: `compositeRating.ts` in
+  zengm reads `// Don't fuzz height` and does exactly this. The comment records
+  the upstream path and the excerpt.
+- **An empty `Independent` conference.** It has no members by design — it is
+  the catch-all every `CONFERENCES[x] ||` in the engine falls through to for a
+  program outside the built-in table. Nothing iterates `CONFERENCES` to render
+  rows; the awards, standings and tournament code all iterate a `byConf` map
+  built from teams that exist. A check now asserts that `Independent` is the
+  ONLY memberless conference, so a table edit that empties a real one fails.
+- **`classCurve` sorting after the noise.** The function returns a curve of
+  targets, not an assignment of targets to players, so re-ordering the slots
+  the noise perturbed is what keeps it a curve. The one measurable effect is
+  that an elite bump is not guaranteed to survive to the top of the array:
+  measured over 5,000 sixty-man classes, one elite slot is displaced in 3.1% of
+  them and never by more than a single rank. Documented in place; bumping after
+  the noise would change every seed's output for a defect nobody can see.
+- **Game-log minutes.** The generator already caps per-game minutes at the
+  game's own length, regulation plus five a period, and the 46–47 minute nights
+  the audit saw were 2OT games. Now asserted rather than assumed.
+- **`seasonEvents` at 0.** Gives zero events, as the audit says. The README
+  claim it contradicts ("floor 4") does not appear in this file; the floor of 4
+  exists only when the setting is above zero, which is what the code comment
+  says.
+- **`innerHTML` and file-derived strings.** All ten `innerHTML` sites in
+  js/app.js are `= ""` clears; js/views.js and js/news.js have none. Every
+  user-file string reaches the DOM through `createTextNode` or `el(...)`. There
+  is no injection surface to close.
+- **The `?` sheet and the undo tooltip.** `s` is already listed among the
+  shortcuts, and the undo button's `title` already carries the untruncated
+  label beside the 22-character button text.
+
+### Interface
+
+- **Reset this group.** Each settings group's summary carries a "Reset *n*"
+  button when anything in it differs from default, and nothing when it does
+  not — so it is also a group-level answer to "have I touched this?". Between
+  the per-setting ↺ and the whole-panel reset there was nothing.
+- **Defaults in the slider hints.** A hint now ends "· default 21 builds", in
+  the same units the slider prints, suppressed when the value already is the
+  default.
+- **Copy seed and settings as text.** A 📋 button beside the link button (and
+  shift-click on the link button) copies the seed, the class fingerprint, the
+  flavor and every setting changed from default, one per line with its default
+  beside it — for the forums and chat clients where a URL is eaten, shortened
+  or simply unreadable.
+- **Prospects who did not play.** A blank PPG cell and an empty award cell read
+  as a bug rather than a fact. Those rows are dimmed, say "did not play" where
+  the awards go, and carry a title and an `aria-label` explaining the blank.
+  They keep their board rank: not playing is a thing that happens to real
+  prospects.
+- **`content-visibility` on long tables.** Rows inside a scroller are skipped
+  while off-screen, with an intrinsic size so the scrollbar stays honest.
+  Disabled under `@media print`, where every row has to be on the page.
+
+### Left undone, and why
+
+The audit's larger suggestions are real and none of them is a change that
+belongs in the same commit as a solver fix. A **persistent player registry**
+keyed on `Engine.playerKey` — the thing that would unlock the reverse roster
+link, true star returners and career pages across files — is the enabling
+change for half the Universe list and is a schema change to the carry, the
+export and the timeline at once. **Composable flavors** change the engine's
+flavor pick. A **third era** needs anchors fitted by sweeping
+`tools/validate.js`, not anchors invented from memory, and shipping an
+unfitted one would make the era dial less trustworthy rather than more. The
+**persistent ledger**, **challenge seeds**, **anomaly authoring checklist**
+and **hidden-info mode** are all features rather than fixes. They are recorded
+here rather than half-built.
 
 ---
 

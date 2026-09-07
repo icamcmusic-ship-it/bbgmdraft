@@ -835,6 +835,17 @@ body.busy button, body.busy input[type=range] { cursor: progress; }
 }
 .ctl .revert-btn:hover { color: var(--accent); opacity: 1; }
 
+/* Group-level reset. Pushed to the right-hand end of the summary row and
+   only present when the group holds something modified, so a group at its
+   defaults still reads as a plain heading. */
+details.grp > summary .grp-reset {
+	margin-left: auto; background: none; border: 1px solid var(--line);
+	border-radius: 5px; padding: 1px 7px; cursor: pointer; color: var(--dim);
+	font: inherit; font-size: 10px; letter-spacing: .06em; text-transform: none;
+	flex-shrink: 0;
+}
+details.grp > summary .grp-reset:hover { color: var(--accent); border-color: var(--accent); }
+
 /* Per-setting randomizer lock. Dim until locked, so eighty padlocks do not
    shout over the sliders they guard. */
 .ctl .lock-btn {
@@ -1128,3 +1139,30 @@ tr.bandrow:hover td { background: var(--panel-2); }
    header onto a new row and the page sideways on a phone. */
 #sessionHistory { max-width: 150px; min-width: 0; flex: 0 1 auto; text-overflow: ellipsis; }
 @media (max-width: 520px) { #sessionHistory { max-width: 96px; } }
+
+
+/* ---- draft board: a prospect with no season ------------------------------ */
+/* Dimmed rather than hidden or dropped: he is on the board because he is
+   draftable, and the two blank cells beside him are a fact about his year,
+   not a gap in the data. */
+tr.dnp > td { opacity: .58; font-style: italic; }
+tr.dnp > td.sticky, tr.dnp > td.num { font-style: normal; }
+
+/* ---- long tables and the poll grid --------------------------------------- */
+/* The AP-poll week table is 60 weeks x 25 rows and the prospect table is 40
+   columns; both paint every cell on every render whether or not any of it is
+   on screen. `content-visibility` lets the browser skip the ones that are
+   not, and `contain-intrinsic-size` keeps the scrollbar honest while they
+   are skipped, so the page does not jump as they come into view. The value
+   is a rough per-row height, not a measurement: it only has to be close. */
+@supports (content-visibility: auto) {
+	.scroll > table > tbody > tr {
+		content-visibility: auto;
+		contain-intrinsic-size: auto 28px;
+	}
+}
+/* Never while printing: a skipped row is a row that does not appear on the
+   page, and the print stylesheet above exists to put all of them there. */
+@media print {
+	.scroll > table > tbody > tr { content-visibility: visible; }
+}

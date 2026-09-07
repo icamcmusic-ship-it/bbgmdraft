@@ -247,7 +247,7 @@
 		   per-program draw over record, prestige, situation, tenure and age),
 		   not from the news feed: the feed carried at most one "coaching
 		   change" a season out of a budget of seven stories, so a decade of
-		   universe used to move about ten jobs across 368 programs.
+		   universe used to move about ten jobs across 364 programs.
 
 		   `fired` is a misnomer kept for the shape of the carry object: a
 		   retirement and a coach hired away are the same fact to the next
@@ -306,11 +306,27 @@
 			titles: Object.assign({}, carry.titles || {}),
 			stale: (carry.stale || 0) + years,
 		};
-		for (const name of Object.keys(carry.levels || {})) {
-			/* Regress toward the middle of the range, one step a year: an
-			   unplayed decade should not preserve a 94 that nobody defended. */
+		/* Regress toward THIS field's own mean, not a literal.
+
+		   The target was a hardcoded 55, which is only the middle of the range
+		   in a universe that happens to look like the default one. A universe
+		   built at midMajorLift 12, or one whose only carried programs are the
+		   twenty-four blue bloods, has a mean nowhere near 55, and regressing
+		   it toward 55 across a gap does not "let the levels decay" — it drags
+		   the whole field toward a number from another world, upward for a
+		   weak field and downward for a strong one. The field's own mean is
+		   the only fixed point that leaves a gap-year universe recognisable as
+		   itself. The 55 survives as the fallback for an empty carry, where
+		   there is no field to take a mean of. */
+		const names = Object.keys(carry.levels || {});
+		const fieldMean = names.length
+			? names.reduce((a, n) => a + carry.levels[n], 0) / names.length
+			: 55;
+		for (const name of names) {
+			// One step a year: an unplayed decade should not preserve a 94
+			// that nobody defended.
 			let lvl = carry.levels[name];
-			for (let y = 0; y < years; y++) lvl = lvl + (55 - lvl) * 0.18;
+			for (let y = 0; y < years; y++) lvl = lvl + (fieldMean - lvl) * 0.18;
 			out.levels[name] = lvl;
 		}
 		for (const name of Object.keys(carry.coaches || {})) {

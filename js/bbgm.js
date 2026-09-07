@@ -202,10 +202,18 @@
 	/* Labels are pushed in COMPOSITE_WEIGHTS order, which is how BBGM itself
 	   builds the array. This used to sort alphabetically — cosmetic in-game,
 	   but a needless difference in a file whose premise is byte-level
-	   fidelity. (The `c !== "hgt"` fuzz exclusion in compositeRating is
-	   unverified against upstream compositeRating.ts; if BBGM does not
-	   special-case height, exported skills can still differ for fuzzed
-	   ratings.) */
+	   fidelity.
+
+	   The `c !== "hgt"` fuzz exclusion in compositeRating was carried here
+	   with a note saying it was unverified against upstream. It is verified
+	   now: src/worker/core/player/compositeRating.ts reads
+
+	       if (fuzz) {
+	           // Don't fuzz height
+	           factor = component === "hgt" ? rating : fuzzRating(rating, ratings.fuzz);
+
+	   which is exactly what this file does, so fuzzed composites — and
+	   therefore the exported `skills` array — match upstream. */
 	function skills(ratings) {
 		const sk = [];
 		for (const key of Object.keys(COMPOSITE_WEIGHTS)) {

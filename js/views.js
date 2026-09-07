@@ -2153,7 +2153,7 @@
 		if (res.recruitingClasses && res.recruitingClasses.length) {
 			view.appendChild(el("h3", null, "Recruiting class rankings"));
 			view.appendChild(el("p", "legendline",
-				"All 368 programs, scored 247-style: per-signee points decay " +
+				"All 364 programs, scored 247-style: per-signee points decay " +
 				"steeply with national rank, with diminishing returns after the " +
 				"top handful. Prospects in this class keep their real national " +
 				"ranks; the rest of every class is synthesized from program " +
@@ -3348,7 +3348,8 @@
 
 		view.appendChild(el("h3", null, "Honors"));
 		const honored = res.players.filter((p) => p.awards && p.awards.length)
-			.sort((a, b) => (b.scoreTotal || 0) - (a.scoreTotal || 0));
+			.sort((a, b) => (Number.isFinite(b.scoreTotal) ? b.scoreTotal : -Infinity) -
+				(Number.isFinite(a.scoreTotal) ? a.scoreTotal : -Infinity));
 		if (!honored.length) {
 			view.appendChild(el("p", "legendline",
 				"Nobody in this class cleared the field. Lower the award sliders to hand out more."));
@@ -3534,6 +3535,23 @@
 			}
 			const tr = el("tr");
 			tr.tabIndex = 0;
+			/* A prospect who did not play a season anywhere — a redshirt year
+			   lost to an injury, a man who sat out a transfer, a signing that
+			   never got minutes — has a blank PPG cell and no awards, and the
+			   board said nothing about why. Two blanks in a table of numbers
+			   read as a bug, not as a fact about the player. The row is dimmed
+			   and says so on hover and to a screen reader, which is the whole
+			   of the fix: he is still ranked, still draftable, and still in
+			   board order, because not playing is a thing that happens to real
+			   prospects and the board is supposed to show it. */
+			if (!p.stats) {
+				tr.classList.add("dnp");
+				tr.title = p.newCollege === "Did not play"
+					? "Did not play this season — no stat line to show."
+					: "No simulated season for " + p.newCollege +
+						" — the PPG and award cells are blank for that reason.";
+				tr.setAttribute("aria-label", p.name + ", did not play this season");
+			}
 			// The board is for LOOKING, not editing — clicking a row (or the
 			// name link inside it) opens the player's own page. The inline
 			// editor is one keystroke away from there ("Edit this prospect…").
@@ -3569,8 +3587,10 @@
 			mv.appendChild(el("span", p.stockMove > 0 ? "up" : p.stockMove < 0 ? "down" : "",
 				p.stockMove === 0 ? "—" : (p.stockMove > 0 ? "+" : "") + p.stockMove));
 			tr.appendChild(mv);
-			tr.appendChild(el("td", "num", p.stats ? n1(p.stats.ppg) : ""));
-			tr.appendChild(wrapCell((p.awards || []).slice(0, 3).join("; ")));
+			tr.appendChild(el("td", "num", p.stats ? n1(p.stats.ppg) : "—"));
+			tr.appendChild(wrapCell(p.stats
+				? (p.awards || []).slice(0, 3).join("; ")
+				: "did not play"));
 			tb.appendChild(tr);
 		}
 		table.appendChild(tb);

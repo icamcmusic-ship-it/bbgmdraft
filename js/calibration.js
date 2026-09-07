@@ -164,6 +164,14 @@
 	   model was fitted to. Its turnover shift is not, because the model used to
 	   apply a per-possession turnover rate to scoring chances (see js/stats.js)
 	   and 1.09 is what the pooled dataset actually implies once that is fixed. */
+	/* The free-throw-trip coefficient of the possession identity. The same
+	   number is named FT_TRIP in js/stats.js — it is part of the DEFINITION
+	   of a possession, so the two must agree or the anchors this file states
+	   and the totals js/stats.js produces stop describing the same quantity.
+	   tools/test.js asserts they are equal, which is the point of naming it
+	   at both sites rather than writing 0.44 at five of them. */
+	const FT_TRIP = 0.44;
+
 	const ERAS = {
 		"2009-2021": {
 			label: "2009-2021 (the source dataset)",
@@ -278,7 +286,7 @@
 	   (24.0 / 16.0): the LEVEL was wrong, the SHAPE of the distribution around
 	   it was not what was being disputed. */
 	function impliedPpg(dy, team) {
-		const chances = team.fga + 0.44 * team.fta + team.tov;
+		const chances = team.fga + FT_TRIP * team.fta + team.tov;
 		const chanceMult = chances / team.poss;
 		const tovShare = team.tov / chances;
 		const mean = team.poss * chanceMult * (dy.mpg.mean / 40) * dy.usg.mean *
@@ -368,7 +376,7 @@
 	   matched anything the sim produced. */
 	function chanceShapeIn(e) {
 		const t = e.team;
-		const chances = t.fga + 0.44 * t.fta + t.tov;
+		const chances = t.fga + FT_TRIP * t.fta + t.tov;
 		return {
 			chances,
 			fgaShare: t.fga / chances,
@@ -446,7 +454,7 @@
 	}
 
 	global.Calibration = {
-		HEIGHT_TABLE, ALL_SEASONS, ERAS, DEFAULT_ERA,
+		HEIGHT_TABLE, ALL_SEASONS, ERAS, DEFAULT_ERA, FT_TRIP,
 		setEra, currentEra, eraInfo, forEra, chanceShape, impliedPpg,
 		byHeight, effShift, threeShare, talentUsageMult, talentEffAdj,
 		// Live views of the selected era, for callers that want the numbers.
