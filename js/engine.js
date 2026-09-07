@@ -2109,6 +2109,24 @@
 				};
 			}
 		}
+		/* A "walk-on turned starter" is drawn here (assignClassYears) as one
+		   of eleven ordinary transfer kinds, with no knowledge of where he
+		   would land in the recruiting rankings above — so a top-eight
+		   origOvr prospect could roll it and come out both a 5-star and a
+		   walk-on in the same note. The dedicated walk-on anomaly avoids this
+		   because it runs after recruiting stars are assigned and forces them
+		   down (see the "walk-on" anomaly, applied later); this transfer kind
+		   needs the same correction since it can be drawn independently. */
+		for (const p of ncaa) {
+			if (p.transfer && p.transfer.kind === "walk-on turned starter" &&
+				p.recruiting && p.recruiting.stars > 2) {
+				p.recruiting.rank = Math.max(p.recruiting.rank, 250);
+				p.recruiting.stars = 2;
+				p.recruiting.composite = Number((1.005 - 0.075 *
+					Math.log10(1 + p.recruiting.rank / 1.4) /
+					Math.log10(1 + 400 / 1.4) * 4).toFixed(4));
+			}
+		}
 		/* THE REST OF THE RECRUITMENT.
 
 		   A prospect had a rank, a star count and the school he ended up at,
