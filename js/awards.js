@@ -900,6 +900,33 @@
 		   the slider caption and Config.DEFAULTS promise that 0 hands every
 		   trophy to whoever the production model ranks first. */
 		const mood = (0.55 + rng.child("voters").uniform(-0.55, 1.15)) * noiseScale;
+		/* VOTER FAMILIARITY, for the national ballot only.
+		   scoreTotal treats a sophomore and a fifth-year senior who put up
+		   the same box score identically, but real POY electorates do not: an
+		   established upperclassman who is already a known quantity — and,
+		   above all, a man who has already had a POY-calibre season on his
+		   transcript — gets a real, if modest, edge over a first-year
+		   phenom putting up the same numbers for the first time. That is
+		   also the only mechanism by which this model can produce a genuine
+		   repeat winner rather than a new one every season. Kept small and
+		   confined to the six trophies below: this nudges who wins a close
+		   race, it does not rewrite who actually had the better year. */
+		const classAge = { Freshman: 0, Sophomore: 1, Junior: 2, Senior: 3, Graduate: 3 };
+		const familiarity = (x) => {
+			const cy = String(x.classYear || "").replace(/^Redshirt /, "");
+			const age = classAge[cy] !== undefined ? classAge[cy] : 1;
+			let priorElite = 0;
+			if (Array.isArray(x.priorSeasons)) {
+				for (const row of x.priorSeasons) {
+					if (!row.simulated || !row.line || !(row.line.mpg >= 24)) continue;
+					const prod = productionScore({ stats: row.line, teamPace: x.teamPace });
+					if (prod > priorElite) priorElite = prod;
+				}
+			}
+			// A prior season that would itself have been in POY contention —
+			// the closest thing this model has to "he already won this".
+			return age * 0.12 + (priorElite >= 24 ? 0.5 : 0);
+		};
 		for (const award of NATIONAL_POY) {
 			const vrng = rng.child("poy|" + award.name);
 			const lean = (award.resume || 0) * mood;
@@ -912,7 +939,7 @@
 			   sampled electorate. */
 			const ballots = top.map((x) => ({
 				x,
-				score: x.scoreTotal + lean * (x.scoreResume || 0) +
+				score: x.scoreTotal + lean * (x.scoreResume || 0) + familiarity(x) +
 					vrng.normal(0, award.sd * noiseScale),
 			}));
 			ballots.sort((a, b) => b.score - a.score);
