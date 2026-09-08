@@ -965,14 +965,19 @@
 	}
 
 	/* Weight of one non-NCAA destination for a player born in `loc`. */
-	function leagueWeight(name, loc, override) {
+	/* `regionPower` scales how much birthplace matters: 1 is the table as
+	   written, 0 ignores where he was born, 2 squares the region multiplier
+	   so a Serbian all but never leaves Europe. See the "Birthplace weight"
+	   setting. */
+	function leagueWeight(name, loc, override, regionPower) {
 		const lg = NON_NCAA[name];
 		if (!lg) return 0;
 		const base = Number.isFinite(override) ? override : lg.w;
 		const mult = (lg.regions && lg.regions[region(loc)]) !== undefined
 			? lg.regions[region(loc)]
 			: 1;
-		return Math.max(0, base) * mult;
+		const power = Number.isFinite(regionPower) ? Math.max(0, regionPower) : 1;
+		return Math.max(0, base) * (power === 1 ? mult : Math.pow(mult, power));
 	}
 
 	/* Real abbreviations for the well-known programs, the way a ticker or a
@@ -1221,14 +1226,39 @@
 	};
 
 	const conferenceOf = (name) => (COLLEGES[name] ? COLLEGES[name][1] : null);
-	const frequencyOf = (name) => (COLLEGES[name] ? COLLEGES[name][0] : 1);
+	/* BBGM draft frequency, or null for a name the database does not carry.
+
+	   This used to default to 1, so prestige(null), prestige(""),
+	   prestige("Moberly Area CC") and prestige("Real Madrid") all came back
+	   16.16 — a middling low-major — and nothing downstream could tell a weak
+	   program from something that is not a program at all. That is how a
+	   junior college got into a Division I recruiting calculation and a
+	   five-star "committed to" an NAIA school. A miss is null now and every
+	   caller says what it wants to do about one. */
+	const frequencyOf = (name) => (COLLEGES[name] ? COLLEGES[name][0] : null);
+	const isKnown = (name) => Object.prototype.hasOwnProperty.call(COLLEGES, name);
+
+	/* The prestige a caller gets for a name the database does not carry, when
+	   it has decided an unknown program should be played as a low-major
+	   (the program-strength model does: a file can name a school that is not
+	   in the table, and its season still has to be played). Chosen to equal
+	   what the old silent default produced, so no season moved. */
+	const UNKNOWN_PRESTIGE = 16.160508649487742;
 
 	// Program prestige 0-100 from BBGM draft frequency (log-scaled: Kentucky 116
-	// and Wagner 0.1 should not be 1000x apart in on-court terms).
+	// and Wagner 0.1 should not be 1000x apart in on-court terms). Null for a
+	// name outside the database — see frequencyOf.
 	function prestige(name) {
 		const f = frequencyOf(name);
+		if (f === null) return null;
 		const p = (Math.log(f + 0.6) - Math.log(0.7)) / (Math.log(116.6) - Math.log(0.7));
 		return Math.max(0, Math.min(1, p)) * 100;
+	}
+	/* prestige() for callers that have decided an unknown name is a low
+	   major. Explicit at the call site, rather than a default nobody chose. */
+	function prestigeOrLowMajor(name) {
+		const p = prestige(name);
+		return p === null ? UNKNOWN_PRESTIGE : p;
 	}
 
 	const byConference = {};
@@ -1239,7 +1269,8 @@
 
 	global.Colleges = {
 		COLLEGES, CONFERENCES, NON_NCAA, PRO_CLUBS, byConference,
-		conferenceOf, frequencyOf, prestige, region, isUSA, leagueWeight,
+		conferenceOf, frequencyOf, prestige, prestigeOrLowMajor, isKnown,
+		UNKNOWN_PRESTIGE, region, isUSA, leagueWeight,
 		ALIASES, canonical, CLUB_LEAGUE, leagueOfClub,
 		ABBREVS, abbrev,
 		CANADA_HINTS, US_STATES, GEORGIAN_CITIES, EURO_HINTS, OCEANIA_HINTS, ASIA_HINTS, LATAM_HINTS, AFRICA_HINTS,

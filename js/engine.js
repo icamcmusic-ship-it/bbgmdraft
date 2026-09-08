@@ -269,6 +269,7 @@
 		if (!known(t.from) || !known(p.newCollege)) return;
 		const before = C.prestige(t.from);
 		const after = C.prestige(p.newCollege);
+		if (before === null || after === null) return;
 		t.fromPrestige = before;
 		t.toPrestige = after;
 		const step = after - before;
@@ -281,8 +282,107 @@
 				: "a lateral move from " + t.from;
 	}
 
-	function assignCollege(rng, player, cfg) {
-		if (player.college && player.college.trim() !== "") {
+	/* THE DESTINATION MODEL.
+
+	   Where a prospect goes used to be decided in three unrelated places —
+	   the blank-college draw (region-weighted league table), the universe
+	   momentum block (level and banners), and nowhere at all for a college
+	   the file already named — and NONE of them read the player. A walk-on
+	   and the No. 1 prospect were recruited by the defending champion with
+	   identical probability, and that is the root of every "5-star at
+	   Wagner" the recruiting layer produced: there was no talent→program
+	   coupling anywhere in the tool.
+
+	   destinationPool is the one place it lives now. Every option, college
+	   or league, carries weight = base × talentTerm × regionTerm, where
+
+	     talentTerm  = exp(coupling × talent × (quality − 50) / 40)
+	                   — talent is the prospect's original overall on a
+	                   ±2 scale around a draft class's middle; quality is a
+	                   program's prestige or a league's strength. At
+	                   coupling 0 the term is 1 and the draw is what it
+	                   always was.
+	     regionTerm  = the league table's birthplace multiplier, raised to
+	                   the birthplace weight, so region can be told to
+	                   override talent (a strong Serbian to a top European
+	                   club rather than to Kansas) or to matter not at all.
+
+	   All three paths — blank, momentum, rewrite — draw from it. */
+	const TALENT_MID = 38;     // a realistic class's middle, in origOvr
+	const TALENT_SPAN = 10;    // one unit of talent, in origOvr
+	function talentOf(prospect) {
+		const ovr = prospect && Number.isFinite(prospect.origOvr) ? prospect.origOvr : TALENT_MID;
+		return clamp((ovr - TALENT_MID) / TALENT_SPAN, -2, 2);
+	}
+	function talentTerm(prospect, quality, coupling) {
+		if (!(coupling > 0) || !Number.isFinite(quality)) return 1;
+		return Math.exp(coupling * talentOf(prospect) * (quality - 50) / 40);
+	}
+	function destinationSettings(cfg) {
+		return {
+			mode: cfg && (cfg.collegeSource === "respect" || cfg.collegeSource === "rewrite")
+				? cfg.collegeSource : "blanks",
+			coupling: clamp(cfg && Number.isFinite(cfg.talentCoupling) ? cfg.talentCoupling : 0, 0, 2),
+			regionPower: clamp(cfg && Number.isFinite(cfg.birthplaceWeight) ? cfg.birthplaceWeight : 1, 0, 2),
+		};
+	}
+	/* Weighted options for one prospect. `opts.colleges` puts the Division
+	   I table in the pool (the rewrite path); `opts.leagues` puts the league
+	   table in (blank and rewrite); `carry` adds the universe's momentum
+	   weighting for the programs it knows. */
+	function destinationPool(player, cfg, carry, prospect, opts) {
+		const ds = destinationSettings(cfg);
+		const loc = player && player.born && player.born.loc;
+		const weights = (cfg && cfg.leagueWeights) || {};
+		const out = [];
+		if (opts.leagues) {
+			for (const name of Object.keys(C.NON_NCAA)) {
+				if (name === "DII NCAA") continue;
+				const lg = C.NON_NCAA[name];
+				let w = C.leagueWeight(name, loc, weights[name], ds.regionPower);
+				w *= talentTerm(prospect, lg.strength, ds.coupling);
+				if (w > 0) out.push({ name, w, league: true });
+			}
+		}
+		if (opts.colleges) {
+			/* BBGM's own draft frequency is the base — it is how the game
+			   itself distributes a class — so at coupling 0 a rewrite is a
+			   file BBGM could have written. Scaled so a US prospect's total
+			   league mass is REWRITE_ABROAD_SHARE of the pool at coupling 0;
+			   a prospect from abroad carries more, because his region
+			   multipliers do. */
+			const leagueMass = out.reduce((a, o) => a + o.w, 0);
+			const usaMass = Object.keys(C.NON_NCAA).reduce((a, name) => name === "DII NCAA"
+				? a : a + C.leagueWeight(name, "Anytown, USA", weights[name], ds.regionPower), 0);
+			const cols = [];
+			let colMass = 0;
+			for (const name of C.names) {
+				const f = C.frequencyOf(name) || 0;
+				if (!(f > 0)) continue;
+				let w = f;
+				if (carry && carry.levels && Number.isFinite(carry.levels[name])) {
+					/* The momentum term, where a universe has one: the same
+					   shape assignCollege's momentum block uses. */
+					w *= 0.5 + 0.5 * Math.pow(Math.max(1, carry.levels[name] - 20) / 60, 2.4) * 4;
+				}
+				w *= talentTerm(prospect, C.prestige(name), ds.coupling);
+				cols.push({ name, w, league: false });
+				colMass += w;
+			}
+			const share = REWRITE_ABROAD_SHARE;
+			const k = leagueMass > 0 && usaMass > 0
+				? (colMass * share / (1 - share)) / usaMass : 0;
+			for (const o of out) o.w *= k;
+			for (const c of cols) out.push(c);
+		}
+		return out;
+	}
+	const REWRITE_ABROAD_SHARE = 0.14;
+
+	function assignCollege(rng, player, cfg, prospect) {
+		const ds = destinationSettings(cfg);
+		const named = !!(player.college && player.college.trim() !== "");
+		if (named && ds.mode !== "rewrite") {
 			/* A file this tool wrote carries a prospect abroad's CLUB here
 			   (BBGM prints the field as College and a league name is not a
 			   school). Route him back to his league, or a round trip demotes
@@ -290,6 +390,16 @@
 			const lg = C.leagueOfClub(player.college);
 			if (lg) return lg;
 			return C.canonical(player.college);
+		}
+		/* "Respect file": a blank college is what BBGM says it is — no
+		   college — and the tool stops inventing one. He did not play. */
+		if (!named && ds.mode === "respect") return "Did not play";
+		/* "Rewrite all": the file's own college is overwritten, so the
+		   whole map — every D-I program and every league — is the pool. */
+		if (ds.mode === "rewrite") {
+			const pool = destinationPool(player, cfg, cfg.carryOver, prospect,
+				{ colleges: true, leagues: true });
+			if (pool.length) return rng.weighted(pool).name;
 		}
 		if (rng.chance(clamp(cfg.pDII, 0, 1))) return "DII NCAA";
 		/* RECRUITING MOMENTUM (universe mode only).
@@ -328,18 +438,17 @@
 				let w = Math.pow(Math.max(1, level - 20) / 60, 2.4);
 				if (carry.champion === name) w *= 2.2;
 				w *= 1 + 0.18 * Math.min(6, (carry.titles && carry.titles[name]) || 0);
+				/* The prospect, at last: a dynasty recruits like a dynasty
+				   in quality and not only in volume. Level and prestige
+				   together, because a program's level is one season and
+				   its prestige is the structure under it. */
+				w *= talentTerm(prospect,
+					0.5 * level + 0.5 * C.prestigeOrLowMajor(name), ds.coupling);
 				if (w > 0) pool.push({ name, w });
 			}
 			if (pool.length) return rng.weighted(pool).name;
 		}
-		const loc = player.born && player.born.loc;
-		const weights = cfg.leagueWeights || {};
-		const opts = [];
-		for (const name of Object.keys(C.NON_NCAA)) {
-			if (name === "DII NCAA") continue;
-			const w = C.leagueWeight(name, loc, weights[name]);
-			if (w > 0) opts.push({ name, w });
-		}
+		const opts = destinationPool(player, cfg, null, prospect, { leagues: true });
 		if (!opts.length) return "NBA G League";
 		return rng.weighted(opts).name;
 	}
@@ -1247,7 +1356,7 @@
 			const bioRow = cfg && cfg.biography ? cfg.biography[p.key] : null;
 			p.newCollege = ov.college || (bioRow && bioRow.college) ||
 				assignCollege(
-					rng.child("college:" + p.key + rerollSalt(p, "school") + vsalt), p.src, cfg);
+					rng.child("college:" + p.key + rerollSalt(p, "school") + vsalt), p.src, cfg, p);
 			p.collegeChanged = p.newCollege !== p.origCollege;
 			// Professional (a EuroLeague club) as against amateur (DII, an NBA
 			// Academy). The UI tags the two differently and the award bar
@@ -1380,9 +1489,15 @@
 
 		state.players = players;
 		state.season = season;
-		assignRecruiting(players, rng.child("recruiting" + vsalt));
+		assignRecruiting(players, rng.child("recruiting" + vsalt), season, cfg);
 		state.surprises = assignSurprises(players, rng.child("surprises" + vsalt), cfg,
 			{ cfg, flavor: state.flavor, pool: state.archetypePool, counts: drawCounts });
+		/* An anomaly can hand a man a rank outright (a hometown holdout at
+		   No. 12-40, a late bloomer at No. 1-9) or move him to another
+		   class year, and either can land on a number somebody in that
+		   class already holds. A ranking is a list: settle it once more,
+		   and the man the anomaly touched is the one who moves. */
+		dedupeRecruitingRanks(players, season);
 		/* TRAITS. Drawn after the build AND after the anomalies, because
 		   every prerequisite in the table is about the finished player: his
 		   height, his class year, his build's tags, his overall — and an
@@ -1706,7 +1821,9 @@
 		{
 			name: "hometown holdout", w: 1.0,
 			label: "turned down the blue bloods to stay home",
-			pick: (p) => !p.nonNcaa && p.recruiting && C.prestige(p.newCollege) < 55,
+			// A school the database does not know is not a blue blood.
+			pick: (p) => !p.nonNcaa && p.recruiting && p.recruiting.diOnly !== false &&
+				(C.prestige(p.newCollege) === null || C.prestige(p.newCollege) < 55),
 			apply: (p, r) => {
 				p.recruiting.rank = r.int(12, 40);
 				p.recruiting.stars = 4;
@@ -2060,10 +2177,125 @@
 	   three-star at Davidson are not the same player even at the same ovr, and
 	   the tool knew nothing about the difference: prospects were simply dropped
 	   onto whatever school BBGM assigned. */
-	function assignRecruiting(players, rng) {
+	/* THE RANK MODEL.
+
+	   rank = 1 + RANK_BASE * (class percentile by origOvr, 0-100)
+	            + RANK_PULL * (RANK_PIVOT - prestige of the school he SIGNED with)
+	            + normal(0, RANK_NOISE)
+
+	   The pull used to be (60 - prestige) * 0.28 against normal(0, 14) — a
+	   span of -11 to +17 under fourteen points of noise on a 0-100 base —
+	   and measured over 674 prospects the correlation between recruiting
+	   rank and commit-school prestige was -0.03. Nothing. A quarter of the
+	   five-stars had signed with programs under prestige 50, and the tool's
+	   own README said blue bloods get the blue-chippers. It also read the
+	   prestige of p.newCollege (where he plays NOW) and displayed
+	   transfer.from (where he SIGNED), so for every transfer the rank was
+	   computed against one school and shown against another.
+
+	   The terms are sized so the pull is a real second axis rather than a
+	   rounding error: tools/validate.js bands corr(rank, commit prestige)
+	   the way it bands the location-bias correlations, so it cannot drift
+	   back to zero. Ranks now run 1 to about 250, which is what lets the
+	   3-star and 2-star bands hold most of a draft class the way a real one
+	   does (former 3-stars and unranked players are most of every draft). */
+	const RANK_BASE = 1.6;
+	const RANK_PULL = 1.6;
+	const RANK_PIVOT = 55;
+	const RANK_NOISE = 12;
+	const RANK_CURVE_SHIFT = 55;   // the best raw scores pile at 0 and take 1, 2, 3...
+	const RANK_CURVE_EXP = 1.57;
+	const RANK_CURVE_K = 0.035;    // the worst possible raw score lands near 300
+	/* Star bands on the national rank. 247's own: ten five-stars, roughly
+	   forty four-stars; the rest of the top 150 or so three-stars. */
+	const STARS_5 = 10;
+	const STARS_4 = 40;
+	const STARS_3 = 150;
+	const starsFor = (rank) => (rank <= STARS_5 ? 5 : rank <= STARS_4 ? 4
+		: rank <= STARS_3 ? 3 : 2);
+	/* The 247-style composite: a fixed function of the rank, anchored so
+	   the No. 1 sits near 1.00 and a low three-star near 0.85. */
+	const compositeFor = (rank) => Number((1.005 - 0.075 *
+		Math.log10(1 + rank / 1.4) / Math.log10(1 + 400 / 1.4) * 4).toFixed(4));
+	/* Where a recruit is placed when the school he actually signed with is
+	   not a Division I program — a JUCO, an NAIA school, an academy abroad,
+	   a club, or a name the file carried that the database does not know.
+	   National recruiting rankings rank high-school seniors signing with
+	   D-I programs; a man who went to Moberly Area CC or KK Mega Basket
+	   out of school was not on that list, however good he is now. This is
+	   the same correction the walk-on already had, extended to everything
+	   else that is not a D-I commitment. */
+	const NON_DI_RANK = 250;
+	/* The high-school class a player came out of: the draft year less his
+	   seasons of college less a redshirt year. Every rank is assigned
+	   WITHIN this cohort — it is the list he was actually on — and it is
+	   the key a universe uses to rank one cohort across several files (a
+	   2027 freshman and a 2028 sophomore are the same recruiting class). */
+	function hsClassOf(p, season) {
+		return season - priorYears(p.classYear) - (p.redshirt ? 1 : 0);
+	}
+	/* The rank a player's own score says he holds, before cohort collision
+	   resolution. Exposed so a universe can pool scores across files. */
+	function recruitingScore(p, rng, base) {
+		const r = rng.child("rec:" + p.key);
+		const pull = (RANK_PIVOT - p.recruiting.commitPrestige) * RANK_PULL;
+		const raw = base * RANK_BASE + pull + r.normal(0, RANK_NOISE);
+		/* Convex in the raw score, because a ranking is dense at the top
+		   and sparse at the bottom: a linear map put every blue-blood
+		   signee in the top ten and, with four high-school classes to a
+		   draft class, made a fifth of every class five-stars. On this
+		   curve the top ten wants both the top of the class and a top
+		   program, the top forty wants one of the two, and the middle of
+		   the class at a middling program is a three-star, which is what
+		   most of a draft was. */
+		return 1 + RANK_CURVE_K * Math.pow(Math.max(0, raw + RANK_CURVE_SHIFT), RANK_CURVE_EXP);
+	}
+	/* Sort one recruiting class by score and hand out ranks without
+	   collisions. Works on any array of players carrying p.recruiting.score
+	   — one file's cohort, or a universe's across several files. A non-D-I
+	   commitment is never lifted above NON_DI_RANK. */
+	function rankCohort(group) {
+		const sorted = group.slice().sort((a, b) => a.recruiting.score - b.recruiting.score);
+		let last = 0;
+		for (const p of sorted) {
+			const floor = p.recruiting.diOnly ? 1 : NON_DI_RANK;
+			const rank = Math.max(last + 1, clamp(Math.round(p.recruiting.score), floor, 400));
+			last = rank;
+			p.recruiting.rank = rank;
+			p.recruiting.stars = starsFor(rank);
+			p.recruiting.composite = compositeFor(rank);
+		}
+		return sorted;
+	}
+	function dedupeRecruitingRanks(players, season) {
+		const byClass = {};
+		for (const p of players) {
+			if (!p.recruiting || !Number.isFinite(p.recruiting.rank)) continue;
+			p.recruiting.hsClass = hsClassOf(p, season);
+			(byClass[p.recruiting.hsClass] = byClass[p.recruiting.hsClass] || []).push(p);
+		}
+		for (const key of Object.keys(byClass)) {
+			const group = byClass[key].sort((a, b) =>
+				(a.recruiting.rank - b.recruiting.rank) || ((a.surprise ? 1 : 0) - (b.surprise ? 1 : 0)));
+			let last = 0;
+			for (const p of group) {
+				if (p.recruiting.rank <= last) {
+					p.recruiting.rank = last + 1;
+					p.recruiting.stars = starsFor(p.recruiting.rank);
+					p.recruiting.composite = compositeFor(p.recruiting.rank);
+				}
+				last = p.recruiting.rank;
+			}
+		}
+	}
+	function assignRecruiting(players, rng, season, cfg) {
 		const ncaa = players.filter((p) => !p.nonNcaa);
 		const order = ncaa.slice().sort((a, b) => b.origOvr - a.origOvr);
 		const n = Math.max(1, order.length);
+		/* Ranks a universe computed across every loaded file, keyed by
+		   player key (see Universe.recruitingCohorts). A file run inside
+		   a universe takes them; a file run alone ranks within itself. */
+		const given = (cfg && cfg.universeRecruiting && cfg.universeRecruiting.byKey) || null;
 		/* Each player's score is drawn independently; the RANK is not. A
 		   rank was rounded and clamped straight off the draw, with no
 		   collision check, so every class carried more than one "No. 1
@@ -2074,58 +2306,48 @@
 		   sorted and each man takes the next free number. */
 		const cohorts = {};
 		order.forEach((p, i) => {
-			const r = rng.child("rec:" + p.key);
-			const prestige = C.prestige(p.newCollege);
-			// Recruiting rank blends where the player actually is in the class
-			// with how good his program is: blue bloods get the blue-chippers.
-			const base = (i / n) * 100;
-			const pull = (60 - prestige) * 0.28;
-			const score = base + pull + r.normal(0, 14);
-			const cohort = priorYears(p.classYear) + (p.redshirt ? 1 : 0);
-			(cohorts[cohort] = cohorts[cohort] || []).push({ p, score });
+			/* A transfer was recruited somewhere else; a freshman was
+			   recruited here. The pull reads the SAME school the page
+			   displays. */
+			const signed = (p.transfer && p.transfer.from) || p.newCollege;
+			const commitPrestige = C.prestige(signed);
+			/* Not a D-I commitment: the walk-on (no recruitment at all), a
+			   JUCO / NAIA / overseas origin, or a school the database does
+			   not know. He is placed at the bottom of the list rather than
+			   given a prestige he does not have. */
+			const nonDI = commitPrestige === null ||
+				(p.transfer && p.transfer.kind === "walk-on turned starter");
+			p.recruiting = {
+				rank: null,
+				stars: null,
+				committed: signed,
+				commitPrestige: nonDI ? null : commitPrestige,
+				diOnly: !nonDI,
+				hsClass: hsClassOf(p, season),
+				composite: null,
+			};
+			if (nonDI) {
+				p.recruiting.score = NON_DI_RANK + (i / n) * 100;
+			} else {
+				p.recruiting.score = recruitingScore(p, rng, (i / n) * 100);
+			}
+			const g = given && given[p.key];
+			if (g && Number.isFinite(g.rank)) {
+				p.recruiting.rank = g.rank;
+				p.recruiting.stars = starsFor(g.rank);
+				p.recruiting.composite = compositeFor(g.rank);
+				p.recruiting.cohortPartial = !!g.partial;
+				p.recruiting.cohortSize = g.cohortSize || null;
+				p.recruiting.universeRanked = true;
+				return;
+			}
+			(cohorts[p.recruiting.hsClass] = cohorts[p.recruiting.hsClass] || []).push(p);
 		});
+		/* A ranking is a list: within a recruiting class the scores are
+		   sorted and each man takes the next free number, so no class
+		   carries two No. 1s. */
 		for (const key of Object.keys(cohorts)) {
-			const group = cohorts[key].sort((a, b) => a.score - b.score);
-			let last = 0;
-			for (const { p, score } of group) {
-				const rank = Math.max(last + 1, clamp(Math.round(score), 1, 400));
-				last = rank;
-				const stars = rank <= 8 ? 5 : rank <= 40 ? 4 : rank <= 130 ? 3 : 2;
-				p.recruiting = {
-					rank,
-					stars,
-					// A transfer was recruited somewhere else; a freshman was
-					// recruited here.
-					committed: (p.transfer && p.transfer.from) || p.newCollege,
-					/* The 247-style composite. A star rating has four values
-					   and a national rank has four hundred; the number every
-					   recruiting argument is actually conducted in is the
-					   composite between them, and it is a fixed function of
-					   the rank, so the tool was throwing away resolution it
-					   already had. Anchored so that the No. 1 in a class
-					   sits near 1.00 and a low three-star near 0.85. */
-					composite: Number((1.005 - 0.075 *
-						Math.log10(1 + rank / 1.4) / Math.log10(1 + 400 / 1.4) * 4).toFixed(4)),
-				};
-			}
-		}
-		/* A "walk-on turned starter" is drawn here (assignClassYears) as one
-		   of eleven ordinary transfer kinds, with no knowledge of where he
-		   would land in the recruiting rankings above — so a top-eight
-		   origOvr prospect could roll it and come out both a 5-star and a
-		   walk-on in the same note. The dedicated walk-on anomaly avoids this
-		   because it runs after recruiting stars are assigned and forces them
-		   down (see the "walk-on" anomaly, applied later); this transfer kind
-		   needs the same correction since it can be drawn independently. */
-		for (const p of ncaa) {
-			if (p.transfer && p.transfer.kind === "walk-on turned starter" &&
-				p.recruiting && p.recruiting.stars > 2) {
-				p.recruiting.rank = Math.max(p.recruiting.rank, 250);
-				p.recruiting.stars = 2;
-				p.recruiting.composite = Number((1.005 - 0.075 *
-					Math.log10(1 + p.recruiting.rank / 1.4) /
-					Math.log10(1 + 400 / 1.4) * 4).toFixed(4));
-			}
+			rankCohort(cohorts[key]);
 		}
 		/* THE REST OF THE RECRUITMENT.
 
@@ -2155,7 +2377,9 @@
 			const r = rng.child("recdepth:" + p.key);
 			const rec = p.recruiting;
 			const home = rec.committed;
-			const homePrestige = C.prestige(home);
+			/* A non-D-I origin has no place on this axis; his "offers" are
+			   drawn around what his rank says, which is the bottom. */
+			const homePrestige = rec.commitPrestige === null ? 0 : rec.commitPrestige;
 			/* Who else was in on him. A five-star hears from thirty programs
 			   and a two-star from four, and the programs that call are the
 			   ones at his own level: a top-ten recruit does not hold a Big
@@ -2459,7 +2683,9 @@
 		const synth = [];
 		for (const name of names) {
 			const r = rng.child("rc:" + name);
-			const prestige = C.prestige(name);
+			// A program the file named that the table does not know recruits
+			// like a low major.
+			const prestige = C.prestigeOrLowMajor(name);
 			const n = 3 + r.int(0, 2);
 			synthBySchool[name] = [];
 			for (let i = 0; i < n; i++) {
@@ -2839,7 +3065,7 @@
 			const opp = rng.pick(conference ? confMates : pool);
 			const oconf = C.CONFERENCES[C.conferenceOf(opp)] || C.CONFERENCES.Independent;
 			const oppLevel = clamp(
-				0.45 * C.prestige(opp) + 0.4 * oconf.strength + rng.normal(0, 7), 5, 99);
+				0.45 * C.prestigeOrLowMajor(opp) + 0.4 * oconf.strength + rng.normal(0, 7), 5, 99);
 			const homeSide = conference
 				? (i % 2 ? 1 : -1)
 				: (rng.random() < 0.55 ? 1 : rng.random() < 0.5 ? -1 : 0);
@@ -2856,7 +3082,7 @@
 				b += Math.round(6 - swing / 2);
 			}
 			log.push({
-				opp, won: a > b, conference, pf: a, pa: b, ot, home: homeSide,
+				opp, won: a > b, conference, teamPts: a, oppPts: b, ot, home: homeSide,
 				when: (i + 0.5) / n, quality: oppLevel, stage: "reg", round: null,
 			});
 		}
@@ -3058,22 +3284,13 @@
 				});
 			}
 			p.priorSeasons = rows;
-			/* The flag a scout actually reads off a multi-year page: he was
-			   better before. Prior seasons were simulated and nothing ranked
-			   on them. A real edge only — two clear points on meaningful
-			   minutes — so it marks a trajectory, not noise. */
-			p.betterEarlier = null;
-			if (p.stats) {
-				for (const row of rows) {
-					if (row.redshirt || !(row.mpg >= 15)) continue;
-					if (row.ppg > p.stats.ppg + 2 &&
-						(!p.betterEarlier || row.ppg > p.betterEarlier.ppg)) {
-						p.betterEarlier = {
-							season: row.season, classYear: row.classYear, ppg: row.ppg,
-						};
-					}
-				}
-			}
+			/* There is deliberately no "was better as a sophomore" flag here.
+			   It compared raw prior-season PPG against the draft year's and
+			   fired on a quarter of all upperclassmen — every one of whom had
+			   a HIGHER overall now than in the flagged season, because the
+			   prior-season model hands a low-ovr player on a bad team more
+			   usage than the draft-year model hands the same man on a good
+			   one. A promotion read as a decline. See tools/tests/audit.js. */
 		}
 	}
 
@@ -3572,6 +3789,8 @@
 				"archetypeWeights", "classFlavor", "freshmanShare", "transferShare",
 				"redshirtShare", "reclassShare", "leagueWeights", "wEuroLeague",
 				"wGLeague", "wNBL", "pDII", "overrides",
+				// The destination model (see destinationPool).
+				"collegeSource", "talentCoupling", "birthplaceWeight",
 				"archetypePool", "surpriseBudget", "traitCount",
 				// See variationSalt / pickClassPool: both reshape the class
 				// from the build phase down.
@@ -3587,6 +3806,10 @@
 				   assignClassYears), and recruiting momentum decides where a
 				   blank-college prospect is recruited (see assignCollege). */
 				"biography", "recruitMomentum",
+				/* Recruiting ranks a universe computed across every loaded
+				   file (see Universe.recruitingCohorts) — read by
+				   assignRecruiting, which runs here. */
+				"universeRecruiting",
 			],
 			run: phaseBuild,
 		},
@@ -4502,14 +4725,6 @@
 				" PPG, " + n1(s.rpg) + " RPG, " + n1(s.apg) + " APG, " + n1(s.spg) +
 				" SPG, " + n1(s.bpg) + " BPG",
 			);
-			// "He was better as a sophomore" is exactly what a scout reads off
-			// a multi-year page, and the simulated prior seasons can say it.
-			if (p.betterEarlier) {
-				lines.push("Was better as a " +
-					String(p.betterEarlier.classYear || "").toLowerCase() +
-					" (" + n1(p.betterEarlier.ppg) + " PPG in " +
-					p.betterEarlier.season + ")");
-			}
 		}
 		if (s && on("shooting")) {
 			lines.push(
@@ -4546,8 +4761,8 @@
 					: "") +
 				" in " + (g.won ? "a win over " : "a loss to ") + g.opp +
 				(g.round ? " in the " + g.round : "") +
-				(g.pf !== null && g.pf !== undefined
-					? " (" + g.pf + "-" + g.pa + (g.ot ? " " + (g.ot > 1 ? g.ot + "OT" : "OT") : "") + ")"
+				(g.teamPts !== null && g.teamPts !== undefined
+					? " (" + g.teamPts + "-" + g.oppPts + (g.ot ? " " + (g.ot > 1 ? g.ot + "OT" : "OT") : "") + ")"
 					: ""),
 			);
 		}
@@ -5001,7 +5216,7 @@
 				.filter((p) => p && p.stats && !p.nonNcaa)
 				.map((p) => ({ key: p.key, player: p, season, team: name, draftYear: true }));
 			const margin = team.log && team.log.length
-				? team.log.reduce((a, g) => a + ((g.pf || 0) - (g.pa || 0)), 0) /
+				? team.log.reduce((a, g) => a + ((g.teamPts || 0) - (g.oppPts || 0)), 0) /
 					team.log.length
 				: null;
 			addTeam(team.box, items, margin, wanted);
@@ -5028,7 +5243,7 @@
 				const wanted = club.prospects.filter((p) => p && p.stats)
 					.map((p) => ({ key: p.key, player: p, season, team: club.name, draftYear: true }));
 				const margin = club.log && club.log.length
-					? club.log.reduce((a, g) => a + ((g.pf || 0) - (g.pa || 0)), 0) / club.log.length
+					? club.log.reduce((a, g) => a + ((g.teamPts || 0) - (g.oppPts || 0)), 0) / club.log.length
 					: null;
 				addTeam(club.box, items, margin, wanted);
 			}
@@ -5057,7 +5272,7 @@
 				   draft years) was measured against the wrong opponent. */
 				const pg = (row.gameLog && row.gameLog.games) || [];
 				const pm = pg.length
-					? pg.reduce((a, g) => a + ((g.pf || 0) - (g.pa || 0)), 0) / pg.length
+					? pg.reduce((a, g) => a + ((g.teamPts || 0) - (g.oppPts || 0)), 0) / pg.length
 					: null;
 				addTeam(row.box, items, pm, [{
 					key, player: p, season: row.season, team: row.team,
@@ -6504,7 +6719,7 @@
 		run, createRunner, exportFile, exportPlayersFile, exportSeason,
 		universePlayersFile, classSeasonOf: exportSeasonOf,
 		exportLeagueFragment, mergeIntoLeague, mergeManyIntoLeague, classDraftYear,
-		buildNote, classYear,
+		buildNote, classYear, rankCohort, hsClassOf, destinationPool, talentTerm,
 		assignClassYears, inchesFromHgtRating, validateLeagueFile, findSeason, playerKey,
 		SIZE_OVERRIDE_KEYS, SURPRISES, DRAFT_EVENTS, PACE_MIN, PACE_MAX,
 		draftClassesIn, extractDraftClass, MIN_CLASS, PROSPECT_TIDS,

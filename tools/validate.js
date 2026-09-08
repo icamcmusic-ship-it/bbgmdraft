@@ -74,7 +74,7 @@ function makeClass(rng, n, targetOvrAt) {
 	// Colleges are drawn frequency-weighted, matching how BBGM itself assigns
 	// them — most prospects come from power programs, not random mid-majors.
 	const names = global.Colleges.names;
-	const weights = names.map((x) => global.Colleges.frequencyOf(x));
+	const weights = names.map((x) => global.Colleges.frequencyOf(x) || 0);
 	const wTotal = weights.reduce((a, b) => a + b, 0);
 	const pickCollege = (r) => {
 		let x = r * wTotal;
@@ -329,6 +329,28 @@ function collect(nSeeds, cfgOverrides, fixture) {
 	   own mean, and a band on either one cannot see the other. */
 	const midClass = [];
 	const backTen = [];
+	/* RECRUITING. Rank against the prestige of the school he SIGNED with,
+	   pooled across seeds, and the star shares of every ranked prospect. */
+	const recRank = [];
+	const recPrestige = [];
+	const recStars = { 2: 0, 3: 0, 4: 0, 5: 0 };
+	let recRanked = 0;
+	let fiveStarWeak = 0;
+	let fiveStars = 0;
+	/* EARLIER SEASONS. The prior-season model was banded nowhere while the
+	   draft year was banded everywhere, which is how a 274-row band of
+	   ovr-under-20 seasons averaging 9.4 points a game went unnoticed until
+	   an outside audit read it off a career table. Both models by ovr band,
+	   so the prior-season rows are held to the draft year's own gradient. */
+	const OVR_BANDS = [[0, 22], [22, 28], [28, 36], [36, 46], [46, 100]];
+	const bandOf = (ovr) => OVR_BANDS.findIndex(([a, z]) => ovr >= a && ovr < z);
+	const draftPpgByBand = OVR_BANDS.map(() => []);
+	const priorPpgByBand = OVR_BANDS.map(() => []);
+	let priorLowRows = 0;
+	let priorLowBig = 0;
+	/* FOUL-OUTS, per player-game across every prospect's log. */
+	let logGames = 0;
+	let logFoulOuts = 0;
 	const paceOfHonored = [];
 	const paceOfAll = [];
 	const usgBins = {};
@@ -398,6 +420,36 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   the floor of the class; this sees its LEVEL, which is a different
 		   failure and moved differently under every fix tried. */
 		for (const p of byRank.slice(Math.max(0, byRank.length - 10))) backTen.push(p.stats.ppg);
+		for (const p of ncaa) {
+			const rec = p.recruiting;
+			if (rec && Number.isFinite(rec.rank)) {
+				recRanked++;
+				if (recStars[rec.stars] !== undefined) recStars[rec.stars]++;
+				if (rec.stars === 5) {
+					fiveStars++;
+					if (!(rec.commitPrestige >= 50)) fiveStarWeak++;
+				}
+				if (rec.diOnly && Number.isFinite(rec.commitPrestige)) {
+					recRank.push(rec.rank);
+					recPrestige.push(rec.commitPrestige);
+				}
+			}
+			const b = bandOf(p.newOvr);
+			if (b >= 0) draftPpgByBand[b].push(p.stats.ppg);
+			for (const r of p.priorSeasons || []) {
+				if (r.redshirt || !Number.isFinite(r.ovr) || !Number.isFinite(r.ppg)) continue;
+				const pb = bandOf(r.ovr);
+				if (pb >= 0) priorPpgByBand[pb].push(r.ppg);
+				if (r.ovr < 22) {
+					priorLowRows++;
+					if (r.ppg >= 17) priorLowBig++;
+				}
+			}
+			for (const g of (p.gameLog && p.gameLog.games) || []) {
+				logGames++;
+				if (g.fouls >= 5) logFoulOuts++;
+			}
+		}
 		scorers20.push(ncaa.filter((p) => p.stats.ppg >= 20).length);
 		scorers25.push(ncaa.filter((p) => p.stats.ppg >= 25).length);
 		/* Usage, in one-point bins. No per-stat distribution band can see a
@@ -971,6 +1023,51 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		["Field ORtg", mean(teamOrtg)].concat(within(rot.ortg, 3)),
 	];
 
+	/* The prior-season gradient against the draft year's, band by band:
+	   the difference of the two means in each ovr band. Zero is the two
+	   models agreeing; the band is how far an earlier season may sit from
+	   what the same overall produces in the draft year. */
+	const priorGapRows = OVR_BANDS.map(([a, z], i) => {
+		const d = draftPpgByBand[i];
+		const q = priorPpgByBand[i];
+		const gap = d.length >= 8 && q.length >= 8 ? mean(q) - mean(d) : 0;
+		return ["Earlier-season PPG minus draft-year PPG, ovr " + a + "-" + (z - 1), gap]
+			.concat(within(0, 2.5));
+	});
+	const recruitingRows = [
+		/* The talent-to-program coupling the README promised and the code
+		   did not deliver: measured at -0.03 before the rank model was
+		   rebuilt. Banded like the location-bias correlations so it cannot
+		   drift back to zero. */
+		["corr(recruiting rank, commit-school prestige)", corr(recRank, recPrestige)]
+			.concat(corrBand(-0.72, -0.42)),
+		/* A draft is mostly former three-stars and unranked players; it used
+		   to be 13% five-stars and 2.7% two-stars. */
+		["5-star share of ranked prospects", recRanked ? recStars[5] / recRanked : 0]
+			.concat(rateBand(0.04, 0.13)),
+		["4-star share of ranked prospects", recRanked ? recStars[4] / recRanked : 0]
+			.concat(rateBand(0.12, 0.30)),
+		["3-star share of ranked prospects", recRanked ? recStars[3] / recRanked : 0]
+			.concat(rateBand(0.38, 0.66)),
+		["2-star share of ranked prospects", recRanked ? recStars[2] / recRanked : 0]
+			.concat(rateBand(0.10, 0.32)),
+		/* Was 24%: Moberly Area CC, Ottawa (AZ) and KK Mega Basket had
+		   five-star signees. */
+		["5-stars signed with a program under prestige 50 (rate)",
+			fiveStars ? fiveStarWeak / fiveStars : 0].concat(rateBand(0, 0.06)),
+	];
+	const priorRows = priorGapRows.concat([
+		/* The tail the audit found: an ovr-18 season at 20 points a game.
+		   The draft-year model puts about one low-ovr prospect in twelve at
+		   17+; the earlier seasons may not do much worse. */
+		["Earlier seasons under ovr 22 at 17+ PPG (rate)",
+			priorLowRows ? priorLowBig / priorLowRows : 0].concat(rateBand(0, 0.09)),
+		/* The README used to say about 7%; the model measured under 2% and
+		   real Division I sits near that. Documented and banded at the
+		   measured figure now. */
+		["Foul-outs per player-game (rate)", logGames ? logFoulOuts / logGames : 0]
+			.concat(rateBand(0.005, 0.04)),
+	]);
 	const prospectRows2 = [
 		/* The documented per-player share ceilings, measured the way a reader
 		   would check them: against the team total, not against the pool. */
@@ -1260,6 +1357,8 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		tag(prospectRows, "prospect"),
 		tag(fieldRows, "field"),
 		tag(prospectRows2, "prospect"),
+		tag(recruitingRows, "prospect"),
+		tag(priorRows, "prospect"),
 		tag(awardRows, "prospect"),
 		tag(structureRows, "structure"),
 	);

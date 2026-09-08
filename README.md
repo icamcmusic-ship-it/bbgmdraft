@@ -333,8 +333,12 @@ night-to-night spread is a square-root law now rather than a share of the
 average: the old `sd = 0.34·avg + 2.6` put a 27-point scorer at a per-game
 SD of 13 against the 7–8 a real one carries, and over 47,000 sampled games
 produced 43 nights of 50, eight of 60 and an 81. Fouls are tighter still,
-because a man on four sits: the foul-out rate came down from 31% of games to
-about 7%, against a class whose starters average three fouls a night.
+because a man on four sits: the foul-out rate came down from 31% of
+player-games to under 2% — this paragraph said "about 7%" for a year while
+the model measured 1.7%, and nothing could tell the two apart because the
+test only demanded "under 10%"; real Division I sits near 2%, and
+`tools/validate.js` bands the rate at 0.5-4% now — against a class whose
+starters average three fouls a night.
 
 Every program is simulated, not only the forty with a prospect on them, which is
 what makes the AP poll's ratings real and gives the award model an actual field to
@@ -707,8 +711,15 @@ liked. Ctrl+Z undoes a reroll like any other change.
   that stops consecutive classes repeating themselves.
 - *Class years & paths* sets how the class got here: freshmen, transfers,
   redshirts, reclassifications.
-- *Players with no college* routes them across thirty-seven real leagues and
-  academies, weighted by where each player was born.
+- *Colleges & destinations* decides where a prospect goes. *College source*
+  is the file's own colleges with the blanks filled in (the default), the
+  file exactly as written (a blank college did not play), or every college
+  and league redrawn — the last overwrites the file's data and the panel
+  says so. *Talent → program coupling* is how strongly a prospect's rating
+  pulls him toward a strong program or league (0 is talent-blind, which is
+  what the tool always was); *Birthplace weight* is how strongly his region
+  overrides that. Below them the thirty-seven leagues and academies a
+  blank-college prospect is routed across, weighted by where he was born.
 - *College season* is the era, pace, efficiency, injuries, upsets,
   realignment, streaks and mid-season events the class plays through.
 - *Awards* controls how much hardware reaches the class and how much the
@@ -781,6 +792,61 @@ All of it is drawn from the player's own key, so it survives a reroll of
 somebody else and a warm phase skip. It reaches the player page, the note's
 *path* line, and two stories in the paper — the recruitment that came down to
 four schools, and the showcase circuit.
+
+**The rank means something now.** Measured over 674 prospects before the
+second September audit, the correlation between a prospect's recruiting rank
+and the prestige of the school he committed to was −0.03: the pull existed in
+the code, `(60 − prestige) × 0.28`, but it spanned −11 to +17 against a base
+spanning 0-100 under fourteen points of noise. A quarter of the five-stars
+had signed with programs under prestige 50, and the sampled ones included a
+junior college, an NAIA school and a Serbian club — because `prestige()`
+returned 16.16 for any name it did not know, `committed` could be a JUCO
+drawn by the biography, and the pull read where he plays now while the page
+displayed where he signed. Three fixes, in order:
+
+- `Colleges.prestige()` returns **null** outside the database and every
+  caller decides what to do about it (the program-strength model plays an
+  unknown school as a low major, explicitly, through `prestigeOrLowMajor`;
+  recruiting treats it as not a Division I signing). `tools/tests/audit.js`
+  holds the misses visible.
+- The pull reads **the school he signed with** — the same one `committed`
+  displays — and a signing that is not a Division I program (a JUCO, an
+  NAIA school, an academy abroad, a walk-on's nothing) is placed at No. 250
+  and two stars, the correction the walk-on already had, extended.
+- The model is `rank = 1 + 1.6·base + 1.6·(55 − prestige) + N(0, 12)` on a
+  convex curve — dense at the top, sparse at the bottom, as a ranking is —
+  so the top ten wants both the top of the class and a top program, and the
+  middle of the class at a middling program is a three-star. Measured:
+  corr(rank, commit prestige) −0.59, and the star shares 8 / 20 / 53 / 20
+  against the old 13 / 32 / 52 / 3, which is what a draft looks like from
+  the recruiting side: mostly former three-stars. `tools/validate.js` bands
+  the correlation and all four shares the way it bands the location-bias
+  correlations, so they cannot drift back.
+
+**In a universe, a recruiting class is one class.** Ranks are assigned within
+a high-school class, and a file run alone can only see the members of that
+class who are in the file — so the 2027 freshman and the 2028 sophomore who
+came out of the same high-school class were both No. 1. The chain already
+runs every file's build phase alone, oldest first, before any season is
+played; `Universe.recruitingCohorts` pools every prospect's recruiting score
+by high-school class across all of those previews, ranks each class once,
+and hands the ranks back per file for the real run to take. A class that
+feeds a draft year with no file loaded is **partial** — the oldest file's
+seniors have no cohort-mates loaded, the newest file's freshmen have some
+who are not drafted yet — and is ranked as-is and marked, on the player page
+and in a *Recruiting classes* table on the Universe tab that says which
+draft years are missing, rather than pretended complete.
+
+**There is no "was better as a sophomore" line any more.** It compared raw
+prior-season points against the draft year's and fired on 24% of
+upperclassmen — every one of whom had a higher overall now than in the
+flagged season, 92% of whom had simply had more usage on a worse team. A
+promotion read as a decline, against the tool's own rating, every time. It
+lived verbatim in both `engine.js` and the universe path in `app.js`; both
+are gone. A defensible trajectory line needs the prior-season model banded
+the way the draft year is, which `tools/validate.js` now begins: earlier
+seasons are held to the draft year's own PPG-by-overall gradient, band by
+band, and the low-overall tail is capped.
 
 The aggregate every fan argues about is there too: **recruiting class
 rankings** for all 364 programs, real signees plus synthetic ones, scored on
@@ -906,7 +972,7 @@ a filtered feed agree.
 
 Every player name across the season views — including every row on the
 **draft board** — is a link to a real player page: stats, shooting, career
-(the simulated prior seasons), honors, recruiting path, trajectory,
+(the simulated prior seasons), honors, recruiting path,
 scouting note, and an edit button. Team pages gained NET, quadrant records
 and the AP rank history — the quadrant record drawn as a shape (segment width is
 games played, the filled part the share won) and the rank history as an inline
@@ -1027,7 +1093,13 @@ universe is a file somebody will actually send).
 **And the world means something.** Recruiting has momentum: a blank-college
 prospect is recruited in proportion to the program's level, its banners and the
 title it just won, so dynasties start recruiting like dynasties (the
-*Recruiting momentum* dial, universe mode only). The paper reads the alumni
+*Recruiting momentum* dial, universe mode only). The momentum draw reads the
+prospect too, through the same talent term the destination model uses, so
+with *Talent → program coupling* above zero a dynasty recruits like a dynasty
+in quality and not only in volume — it used to be recruited by the defending
+champion with identical probability whether he was a walk-on or the No. 1
+prospect. And every high-school class is ranked once across the whole chain
+(see *Recruiting*). The paper reads the alumni
 index, so a 2033 article can mention the 2027 player of the year and a
 program's banner count. Every first-year hire is attributed to a head coach
 working the season before, so after a decade a name has a **coaching tree**.
@@ -2018,9 +2090,11 @@ through a fuzz pass. Everything it found, and what changed:
 - **Seeded randomize.** Every 🎲 press draws from a randomizer seed, shown in
   the status line; shift-click the button to replay one. The one action in a
   deterministic tool that could not be reproduced now can.
-- **Column presets** are one click from the table (a select beside
-  *Columns…*), with an *Export* preset for the fields that reach the file, and
-  the picker and the select read one table so they cannot drift.
+- **Column presets** are one click from the table — a row of chips above
+  it, the way the randomizer's scopes are, with the one matching the current
+  layout lit — with an *Export* preset for the fields that reach the file.
+  The picker and the chips read one table so they cannot drift; saved
+  layouts keep a select of their own.
 - **Copy as markdown** on the draft board and the notes, beside the existing
   copy actions.
 - **A "?" on every row** of the prospects table and the board opens a popover
@@ -2237,6 +2311,39 @@ and **hidden-info mode** are all features rather than fixes. They are recorded
 here rather than half-built.
 
 ---
+
+## The second external audit of September 2026
+
+A second reader measured the recruiting layer and the earlier seasons and
+found the things listed under *Recruiting* above: a rank uncorrelated with
+the school it was displayed against, a prestige default that let junior
+colleges into a Division I calculation, a trajectory line that contradicted
+the overall rating on every player it fired on, recruiting classes ranked
+per file in a mode whose whole point is that files share a world, and a
+momentum block that never read the player. What changed, beyond that
+section:
+
+- **The destination model is one subsystem.** `destinationPool(player, cfg,
+  carry, prospect, opts)` returns weighted options across every Division I
+  program and every league, each weight `base × talentTerm × regionTerm`,
+  and the blank draw, the universe momentum draw and the new rewrite path
+  all take from it. *College source* gained *Respect file* and *Rewrite all*
+  beside the default; *Talent → program coupling* and *Birthplace weight*
+  are the two dials, both at values that reproduce the old draw exactly.
+- **`pf`/`pa` on the team game log are `teamPts`/`oppPts`.** Two letters
+  meant points for and against on the log and personal fouls per game on the
+  season line, in one codebase; the log's fields say what they are.
+- **Every column header carries `scope="col"`**, from the one element
+  helper every table uses, and every portrait is an image with the
+  player's name as its text.
+- **Column presets are chips**, not a select nobody opened.
+- `--r-sm` and `--shadow-2` were defined and never used; gone.
+- The foul-out rate is documented at what it measures.
+
+Left for their own commits, as before: the persistent player registry, the
+ledger, compound reroll-until predicates, a "how weird is this world" dial,
+and a full recalibration of the earlier seasons, which this round only
+begins to band.
 
 ## Known limits
 

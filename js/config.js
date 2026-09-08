@@ -184,6 +184,20 @@
 		wGLeague: null,
 		wNBL: null,
 		pDII: 0.02,            // rare DII NCAA conversion
+		/* THE DESTINATION MODEL (see destinationPool in js/engine.js).
+		   collegeSource: "blanks" fills in only the colleges the file left
+		   blank (what the tool always did); "respect" leaves them blank —
+		   he did not play; "rewrite" redraws EVERY prospect's college or
+		   league, overwriting what the file said. Rewrite is destructive to
+		   the file's data and the panel says so.
+		   talentCoupling: 0-2, how strongly a prospect's rating pulls him
+		   toward a high-prestige program or a strong league. 0 is the old
+		   talent-blind draw.
+		   birthplaceWeight: 0-2, how strongly where he was born overrides
+		   that. 1 is the league table as written. */
+		collegeSource: "blanks",
+		talentCoupling: 0,
+		birthplaceWeight: 1,
 		// Destination weights for players whose college is blank. Each is
 		// further scaled by where the player was born (see Colleges.regions).
 		leagueWeights: null,   // null = each league's built-in default weight

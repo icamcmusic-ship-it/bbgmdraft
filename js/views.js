@@ -15,6 +15,10 @@
 		const n = document.createElement(tag);
 		if (cls) n.className = cls;
 		if (text !== undefined) n.textContent = text;
+		/* Every header this tool builds is a column header, and a screen
+		   reader only associates a cell with its header when the header
+		   says so. One place, rather than one line per header loop. */
+		if (tag === "th") n.scope = "col";
 		return n;
 	};
 	/* A cell whose text is allowed to wrap, but only to a couple of lines. The
@@ -1101,29 +1105,45 @@
 		}
 
 		/* The presets, one click from the table rather than two clicks
-		   into the picker. Everyone rebuilt the same three arrangements. */
-		const quick = el("select");
-		quick.setAttribute("aria-label", "Column preset");
-		quick.title = "Column presets — Columns… has the full picker and your saved layouts";
-		quick.appendChild(new Option("columns: preset…", ""));
-		for (const pr of COLUMN_PRESETS) quick.appendChild(new Option(pr.name, pr.name));
-		for (const name of sortedNames(Object.keys(st.columnLayouts || {}))) {
-			quick.appendChild(new Option("saved: " + name, "\u0000" + name));
+		   into the picker. They sat in a select nobody opened; they are
+		   chips now, the way the randomizer's scopes are, and the one that
+		   matches the current layout is lit. Saved layouts keep the select. */
+		const chips = el("div", "chips presetchips");
+		chips.setAttribute("role", "group");
+		chips.setAttribute("aria-label", "Column presets");
+		const current = currentColumnPreset();
+		for (const pr of COLUMN_PRESETS) {
+			const b = el("button", "chip" + (current === pr.name ? " on" : ""), pr.name);
+			b.type = "button";
+			b.title = pr.keys ? "Show " + pr.keys.length + " columns: " + pr.keys.join(", ")
+				: "Show every column";
+			b.setAttribute("aria-pressed", current === pr.name ? "true" : "false");
+			b.addEventListener("click", () => {
+				applyColumnPreset(pr.name);
+				A().persist();
+				A().render();
+			});
+			chips.appendChild(b);
 		}
-		quick.addEventListener("change", () => {
-			const v = quick.value;
-			quick.value = "";
-			if (!v) return;
-			if (v.charAt(0) === "\u0000") {
-				const saved = (st.columnLayouts || {})[v.slice(1)];
+		bar.appendChild(chips);
+		const savedNames = sortedNames(Object.keys(st.columnLayouts || {}));
+		if (savedNames.length) {
+			const quick = el("select");
+			quick.setAttribute("aria-label", "Saved column layout");
+			quick.title = "Your saved layouts — Columns… has the full picker";
+			quick.appendChild(new Option("saved layout…", ""));
+			for (const name of savedNames) quick.appendChild(new Option(name, name));
+			quick.addEventListener("change", () => {
+				const v = quick.value;
+				quick.value = "";
+				if (!v) return;
+				const saved = (st.columnLayouts || {})[v];
 				if (saved) st.hiddenColumns = Object.assign({}, saved);
-			} else {
-				applyColumnPreset(v);
-			}
-			A().persist();
-			A().render();
-		});
-		bar.appendChild(quick);
+				A().persist();
+				A().render();
+			});
+			bar.appendChild(quick);
+		}
 		const cols = el("button", null, "Columns…");
 		cols.addEventListener("click", () => columnPicker());
 		bar.appendChild(cols);
@@ -1152,6 +1172,22 @@
 		{ name: "Export", keys: ["pos", "year", "newOvr", "newPot", "archetype", "college",
 			"hgtInches", "weight", "board", "awards"] },
 	];
+	/* Which preset the table is showing right now, or null when the layout
+	   is none of them. Lights the matching chip. */
+	function currentColumnPreset() {
+		const st = A().state;
+		const hidden = st.hiddenColumns || {};
+		for (const pr of COLUMN_PRESETS) {
+			let match = true;
+			for (const col of COLUMNS) {
+				if (col.fixed) continue;
+				const shouldHide = pr.keys ? pr.keys.indexOf(col.key) === -1 : false;
+				if (!!hidden[col.key] !== shouldHide) { match = false; break; }
+			}
+			if (match) return pr.name;
+		}
+		return null;
+	}
 	function applyColumnPreset(name) {
 		const st = A().state;
 		const pr = COLUMN_PRESETS.filter((x) => x.name === name)[0];
@@ -2243,7 +2279,7 @@
 				"\n" + (t.ncaaSeed ? "No. " + t.ncaaSeed + " seed, " + t.ncaaResult
 					: t.nitResult ? t.nitResult : "Did not make the field") +
 				(t.offRtg ? "\nORtg " + t.offRtg.toFixed(1) + " · DRtg " + t.defRtg.toFixed(1) : "") +
-				(best ? "\nBest win: " + best.pf + "-" + best.pa + " over " + best.opp : "") +
+				(best ? "\nBest win: " + best.teamPts + "-" + best.oppPts + " over " + best.opp : "") +
 				"\n" + t.prospects.map((p) =>
 					"  " + p.name + " — " + p.newOvr + "/" + p.newPot + " " + p.newPos +
 					", " + n1(p.stats.ppg) + "/" + n1(p.stats.rpg) + "/" + n1(p.stats.apg)).join("\n")));
@@ -2838,6 +2874,42 @@
 			"on this season's rosters as underclassmen — a 2027 junior playing " +
 			"his 2025 freshman year here. They take minutes, shots and honors " +
 			"from this season, and their own pages show the season they played."));
+
+		if (u.recruiting && u.recruiting.length) {
+			view.appendChild(el("h4", null, "Recruiting classes"));
+			view.appendChild(el("p", "legendline",
+				"Each high-school class is ranked once across every loaded file, " +
+				"so a 2027 freshman and a 2028 sophomore who came out of the same " +
+				"class share one list. A class is partial when a draft year it " +
+				"feeds is not loaded — its members are ranked as-is against " +
+				"whoever is here, not against a full class."));
+			const rw = el("div", "scroll");
+			const rt = el("table");
+			const rhr = el("tr");
+			for (const h of ["HS class", "Prospects", "Drafted in", "No. 1", "Coverage"]) {
+				const th = el("th", h === "Prospects" ? "num" : null, h);
+				th.scope = "col";
+				rhr.appendChild(th);
+			}
+			const rthead = el("thead");
+			rthead.appendChild(rhr);
+			rt.appendChild(rthead);
+			const rtb = el("tbody");
+			for (const c of u.recruiting) {
+				const tr = el("tr", c.partial ? "gaprow" : "");
+				tr.appendChild(el("td", null, String(c.hsClass)));
+				tr.appendChild(el("td", "num", String(c.size)));
+				tr.appendChild(el("td", null, c.seasons.join(", ")));
+				tr.appendChild(el("td", null, c.top ? c.top.name + " (" + c.top.season + ")" : "—"));
+				tr.appendChild(el("td", c.partial ? "hint" : null, c.partial
+					? "partial — no file for " + c.missing.join(", ")
+					: "complete"));
+				rtb.appendChild(tr);
+			}
+			rt.appendChild(rtb);
+			rw.appendChild(rt);
+			view.appendChild(rw);
+		}
 
 		if (u.threads && u.threads.length) {
 			view.appendChild(el("h4", null, "Threads"));
@@ -3990,7 +4062,7 @@
 			tr.appendChild(el("td", "num", String(i + 1)));
 			tr.appendChild(el("td", "sticky", g.opp));
 			tr.appendChild(el("td", null, g.round || (g.conference ? "conference" : "non-conference")));
-			tr.appendChild(el("td", null, (g.won ? "W " : "L ") + g.pf + "-" + g.pa +
+			tr.appendChild(el("td", null, (g.won ? "W " : "L ") + g.teamPts + "-" + g.oppPts +
 				(g.ot ? (g.ot > 1 ? " " + g.ot + "OT" : " OT") : "")));
 			tr.appendChild(el("td", "num", Number.isFinite(g.min) ? String(g.min) : ""));
 			const ptsTd = el("td", "num", String(g.pts));
@@ -4327,7 +4399,12 @@
 			row("Recruiting", rec.stars + "-star, No. " + rec.rank + " nationally" +
 				(rec.posRank ? " · No. " + rec.posRank + " " + rec.posLabel : "") +
 				(Number.isFinite(rec.composite) ? " · " + rec.composite.toFixed(4) : "") +
-				(rec.headliner ? " — headline signing" : ""));
+				(rec.headliner ? " — headline signing" : "") +
+				(rec.diOnly === false ? " · not a Division I signing" : "") +
+				(rec.universeRanked
+					? " · class of " + rec.hsClass + " ranked across this universe" +
+						(rec.cohortPartial ? " (partial class)" : "")
+					: ""));
 			if (rec.offerCount) {
 				row("Recruitment", rec.offerCount + " offers" +
 					(rec.finalists && rec.finalists.length > 1
@@ -4344,11 +4421,6 @@
 		if (p.transfer) row("Path", p.transfer.kind +
 			(p.transfer.from ? " — from " + p.transfer.from : ""));
 		if (p.backstory) row("Story", p.backstory);
-		if (p.betterEarlier) {
-			row("Trajectory", "Was better as a " +
-				String(p.betterEarlier.classYear || "").toLowerCase() + " (" +
-				n1(p.betterEarlier.ppg) + " PPG in " + p.betterEarlier.season + ")");
-		}
 		if (p.awards && p.awards.length) row("Honors", p.awards.join("; "));
 		if (p.priorAwards && p.priorAwards.length) {
 			row("Earlier honors", p.priorAwards.slice()
@@ -4993,8 +5065,8 @@
 			tr.appendChild(el("td", null,
 				g.home > 0 ? "home" : g.home < 0 ? "away" : "neutral"));
 			tr.appendChild(el("td", null, g.won ? "W" : "L"));
-			tr.appendChild(el("td", null, g.pf !== null
-				? g.pf + "-" + g.pa + (g.ot ? " (" + g.ot + "OT)" : "") : "—"));
+			tr.appendChild(el("td", null, g.teamPts !== null
+				? g.teamPts + "-" + g.oppPts + (g.ot ? " (" + g.ot + "OT)" : "") : "—"));
 			tr.appendChild(el("td", null,
 				g.round || (g.conference ? "conference" : g.stage)));
 			tb.appendChild(tr);
@@ -5049,9 +5121,9 @@
 
 		const title = el("h3");
 		title.appendChild(teamLink(g.opp));
-		title.appendChild(document.createTextNode(" " + g.pa + " at "));
+		title.appendChild(document.createTextNode(" " + g.oppPts + " at "));
 		title.appendChild(teamLink(home.name));
-		title.appendChild(document.createTextNode(" " + g.pf +
+		title.appendChild(document.createTextNode(" " + g.teamPts +
 			(g.ot ? " (" + (g.ot > 1 ? g.ot + "OT" : "OT") + ")" : "")));
 		box.appendChild(title);
 		const when = global.News ? global.News.dateline(g.when || 0) : "";
@@ -5123,8 +5195,8 @@
 				" assists. The rest belongs to the returning rotation, which " +
 				"carries season averages rather than per-game lines."));
 		};
-		side(home, idx, g.pf);
-		side(away, awayIdx, g.pa);
+		side(home, idx, g.teamPts);
+		side(away, awayIdx, g.oppPts);
 		return box;
 	}
 

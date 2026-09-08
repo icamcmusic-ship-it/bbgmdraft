@@ -472,7 +472,7 @@
 				return [T("His best night of the season is still the " + b.pts +
 					" he put up against "), TM(b.opp),
 					T(" — " + b.fgm + " of " + b.fga + " from the floor in a " +
-						(b.won ? "win" : "loss") + ", " + b.pf + "-" + b.pa + ".")];
+						(b.won ? "win" : "loss") + ", " + b.teamPts + "-" + b.oppPts + ".")];
 			},
 		},
 		/* --- the team context paragraph -------------------------------- */
@@ -1243,7 +1243,7 @@
 	}
 	function gamesOf(team) { return (team && team.log) || []; }
 	function scoreText(g) {
-		return g.pf + "-" + g.pa + (g.ot ? (g.ot > 1 ? " (" + g.ot + "OT)" : " (OT)") : "");
+		return g.teamPts + "-" + g.oppPts + (g.ot ? (g.ot > 1 ? " (" + g.ot + "OT)" : " (OT)") : "");
 	}
 	/* A prospect's own game log entries, which carry both his line and the
 	   game's result — the two facts most of these stories are made of. */
@@ -1476,7 +1476,7 @@
 			for (const p of ctx.ncaa) {
 				for (const g of logGames(p)) {
 					if (g.stage !== "reg" || !g.won || g.ot) continue;
-					if (g.pf - g.pa > 2 || g.pts < 14) continue;
+					if (g.teamPts - g.oppPts > 2 || g.pts < 14) continue;
 					out.push({ p, g });
 				}
 			}
@@ -1485,7 +1485,7 @@
 		slots: (f) => ({
 			player: PL(f.p.name, f.p.key), team: TM(f.p.newCollege), opp: TM(f.g.opp),
 			score: T(scoreText(f.g)), pts: T(String(f.g.pts)),
-			margin: T(String(f.g.pf - f.g.pa)),
+			margin: T(String(f.g.teamPts - f.g.oppPts)),
 		}),
 		headlines: [
 			"{player} wins it at the horn",
@@ -1689,7 +1689,7 @@
 					if (g.stage !== "reg" || !g.conference) continue;
 					const opp = ctx.teams[g.opp];
 					if (!opp || !opp.apRank) continue;
-					if (Math.abs(g.pf - g.pa) <= 6 && g.won) out.push({ t, opp, g });
+					if (Math.abs(g.teamPts - g.oppPts) <= 6 && g.won) out.push({ t, opp, g });
 				}
 			}
 			return out.length ? ctx.rng.pick(out) : null;
@@ -1822,7 +1822,7 @@
 					if (g.stage !== "reg" || g.conference || !g.won) continue;
 					const opp = ctx.teams[g.opp];
 					const oc = opp && ctx.confOf(opp.name);
-					if (oc && oc.tier === "high" && g.pf - g.pa >= 8) out.push({ t, opp, g });
+					if (oc && oc.tier === "high" && g.teamPts - g.oppPts >= 8) out.push({ t, opp, g });
 				}
 			}
 			return out.length ? ctx.rng.pick(out) : null;
@@ -1830,7 +1830,7 @@
 		slots: (f) => ({
 			team: TM(f.t.name), opp: TM(f.opp.name), score: T(scoreText(f.g)),
 			conf: T(f.t.conf), oppConf: T(f.opp.conf),
-			margin: T(String(f.g.pf - f.g.pa)),
+			margin: T(String(f.g.teamPts - f.g.oppPts)),
 		}),
 		headlines: [
 			"{team} goes into the {oppConf} and wins by {margin}",
@@ -2991,15 +2991,15 @@
 			let best = null;
 			for (const t of ctx.teamList) {
 				for (const g of gamesOf(t)) {
-					if (!g.won || g.stage !== "reg" || !Number.isFinite(g.pf)) continue;
-					if (g.pf - g.pa >= 40 && (!best || g.pf - g.pa > best.g.pf - best.g.pa)) best = { t, g };
+					if (!g.won || g.stage !== "reg" || !Number.isFinite(g.teamPts)) continue;
+					if (g.teamPts - g.oppPts >= 40 && (!best || g.teamPts - g.oppPts > best.g.teamPts - best.g.oppPts)) best = { t, g };
 				}
 			}
 			return best;
 		},
 		slots: ({ t, g }) => ({
-			team: TM(t.name), opp: TM(g.opp), score: T(g.pf + "-" + g.pa),
-			margin: T(String(g.pf - g.pa)),
+			team: TM(t.name), opp: TM(g.opp), score: T(g.teamPts + "-" + g.oppPts),
+			margin: T(String(g.teamPts - g.oppPts)),
 		}),
 		headlines: [
 			"{team} wins by {margin}",
@@ -3127,14 +3127,14 @@
 			let best = null;
 			for (const p of ctx.ncaa) {
 				const g = p.gameLog && p.gameLog.best;
-				if (!g || g.won || !Number.isFinite(g.pf) || g.pts < 27 || g.pa - g.pf < 12) continue;
+				if (!g || g.won || !Number.isFinite(g.teamPts) || g.pts < 27 || g.oppPts - g.teamPts < 12) continue;
 				if (!best || g.pts > best.g.pts) best = { p, g };
 			}
 			return best;
 		},
 		slots: ({ p, g }) => ({
 			player: PL(p.name, p.key), team: TM(p.newCollege), opp: TM(g.opp),
-			pts: T(String(g.pts)), score: T(g.pa + "-" + g.pf), margin: T(String(g.pa - g.pf)),
+			pts: T(String(g.pts)), score: T(g.oppPts + "-" + g.teamPts), margin: T(String(g.oppPts - g.teamPts)),
 		}),
 		headlines: [
 			"{pts} for {player}, and nobody else showed up",
@@ -3870,7 +3870,7 @@
 			pts: T(String(f.g.pts)),
 			reb: T(global.Text.plural(f.g.reb, "rebound")),
 			ast: T(global.Text.plural(f.g.ast, "assist")),
-			score: T(f.g.pf + "-" + f.g.pa),
+			score: T(f.g.teamPts + "-" + f.g.oppPts),
 			month: T(dateline(f.g.when)),
 		}),
 		headlines: [
@@ -3930,7 +3930,7 @@
 		slots: (f) => ({
 			player: PL(f.p.name, f.p.key), team: TM(f.p.newCollege),
 			old: TM(f.from), pts: T(String(f.g.pts)),
-			score: T(f.g.pf + "-" + f.g.pa),
+			score: T(f.g.teamPts + "-" + f.g.oppPts),
 			result: T(f.g.won ? "won" : "lost"),
 			month: T(dateline(f.g.when)),
 		}),
@@ -4039,7 +4039,7 @@
 			opp: TM(f.opp.name), rank: T("No. " + f.opp.apRank),
 			pts: T(String(f.g.pts)),
 			reb: T(global.Text.plural(f.g.reb, "rebound")),
-			score: T(f.g.pf + "-" + f.g.pa), min: T(String(f.g.min)),
+			score: T(f.g.teamPts + "-" + f.g.oppPts), min: T(String(f.g.min)),
 		}),
 		headlines: [
 			"{player} beats {rank} {opp} on his own",
@@ -5362,10 +5362,10 @@
 				const ra = preRankMap[tm.name];
 				if (!ra || ra > 25) continue;
 				for (const g of tm.log || []) {
-					if (!g.won || g.stage !== "reg" || g.pf === null) continue;
+					if (!g.won || g.stage !== "reg" || g.teamPts === null) continue;
 					const rb = preRankMap[g.opp];
 					if (!rb || rb > 25) continue;
-					const score = 60 - ra - rb - Math.abs(g.pf - g.pa);
+					const score = 60 - ra - rb - Math.abs(g.teamPts - g.oppPts);
 					if (!clash || score > clash.score) clash = { tm, g, ra, rb, score };
 				}
 			}
@@ -5378,7 +5378,7 @@
 					}),
 					body: [T("No. " + clash.ra + " "), TM(clash.tm.name),
 						T(" beat No. " + clash.rb + " "), TM(clash.g.opp),
-						T(" " + clash.g.pf + "-" + clash.g.pa +
+						T(" " + clash.g.teamPts + "-" + clash.g.oppPts +
 							(clash.g.ot ? " in overtime" : "") +
 							" in the marquee matchup of the regular season.")],
 				});
@@ -5402,7 +5402,7 @@
 						ot: T(String(epic.g.ot)),
 					}),
 					body: [TM(epic.tm.name), T(" finally put away "), TM(epic.g.opp),
-						T(" " + epic.g.pf + "-" + epic.g.pa + " after " + epic.g.ot +
+						T(" " + epic.g.teamPts + "-" + epic.g.oppPts + " after " + epic.g.ot +
 							" overtimes.")],
 				});
 			}

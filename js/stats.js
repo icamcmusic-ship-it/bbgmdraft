@@ -2211,7 +2211,7 @@
 		// Team defensive efficiency: points allowed per 100 possessions, read
 		// off the scores the team actually gave up.
 		const paAvg = team.log && team.log.length
-			? team.log.reduce((a, g) => a + (g.pa || 0), 0) / team.log.length
+			? team.log.reduce((a, g) => a + (g.oppPts || 0), 0) / team.log.length
 			: null;
 		team.oppPpg = paAvg;
 		team.defRtg = paAvg !== null && totals.poss > 0
@@ -2370,7 +2370,7 @@
 		let pf = 0;
 		let n = 0;
 		for (const g of log) {
-			if (Number.isFinite(g.pf)) { pf += g.pf; n++; }
+			if (Number.isFinite(g.teamPts)) { pf += g.teamPts; n++; }
 		}
 		if (!n) return;
 		let pts = 0;
@@ -2686,7 +2686,7 @@
 			};
 			games.push({
 				i,
-				opp: g.opp, won: g.won, pf: g.pf, pa: g.pa, ot: g.ot, home: g.home,
+				opp: g.opp, won: g.won, teamPts: g.teamPts, oppPts: g.oppPts, ot: g.ot, home: g.home,
 				stage: g.stage, round: g.round, quality: g.quality, when: g.when,
 				conference: !!g.conference,
 				pts: draw("pts", s.ppg),
@@ -2740,7 +2740,7 @@
 		   rotation. */
 		const impact = impactTerms(team, gameMinutes).get(s) || 0;
 		for (const g of games) {
-			const margin = Number.isFinite(g.pf) && Number.isFinite(g.pa) ? g.pf - g.pa : 0;
+			const margin = Number.isFinite(g.teamPts) && Number.isFinite(g.oppPts) ? g.teamPts - g.oppPts : 0;
 			g.pm = margin * share + impact + rng.normal(0, 5.0);
 		}
 		/* The nights vary; the SEASON does not. The per-night noise is
@@ -2754,7 +2754,7 @@
 			let have = 0;
 			let want = 0;
 			for (const g of games) {
-				const margin = Number.isFinite(g.pf) && Number.isFinite(g.pa) ? g.pf - g.pa : 0;
+				const margin = Number.isFinite(g.teamPts) && Number.isFinite(g.oppPts) ? g.teamPts - g.oppPts : 0;
 				want += margin * share + impact;
 				have += g.pm;
 			}
@@ -2770,7 +2770,7 @@
 			}
 		}
 		const teamMargin = meanOf(games.map((g) =>
-			({ m: Number.isFinite(g.pf) && Number.isFinite(g.pa) ? g.pf - g.pa : 0 })), "m");
+			({ m: Number.isFinite(g.teamPts) && Number.isFinite(g.oppPts) ? g.teamPts - g.oppPts : 0 })), "m");
 		const plusMinus = meanOf(games, "pm");
 		/* On/off is his per-40 plus/minus less the team's margin per 40
 		   WITHOUT him, which is what the column has always said it was and
@@ -2782,7 +2782,7 @@
 			? plusMinus / share - without : 0;
 		// Close games: decided by five or fewer, or in overtime.
 		const closeGames = games.filter((g) =>
-			Number.isFinite(g.pf) && Number.isFinite(g.pa) && (Math.abs(g.pf - g.pa) <= 5 || g.ot));
+			Number.isFinite(g.teamPts) && Number.isFinite(g.oppPts) && (Math.abs(g.teamPts - g.oppPts) <= 5 || g.ot));
 		const clutch = closeGames.length ? {
 			gp: closeGames.length,
 			ppg: meanOf(closeGames, "pts"),

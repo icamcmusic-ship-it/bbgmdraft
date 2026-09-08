@@ -100,21 +100,21 @@
 	function computeAdjEff(list, byName) {
 		const e = new Map();
 		const rawMargin = (t) => {
-			const games = t.regGamesList.filter((g) => Number.isFinite(g.pf));
+			const games = t.regGamesList.filter((g) => Number.isFinite(g.teamPts));
 			if (!games.length) return 0;
 			return games.reduce((a, g) =>
-				a + clamp(g.pf - g.pa, -MARGIN_CAP, MARGIN_CAP), 0) / games.length;
+				a + clamp(g.teamPts - g.oppPts, -MARGIN_CAP, MARGIN_CAP), 0) / games.length;
 		};
 		for (const t of list) e.set(t.name, rawMargin(t));
 		for (let pass = 0; pass < EFF_PASSES; pass++) {
 			const next = new Map();
 			for (const t of list) {
-				const games = t.regGamesList.filter((g) => Number.isFinite(g.pf));
+				const games = t.regGamesList.filter((g) => Number.isFinite(g.teamPts));
 				if (!games.length) { next.set(t.name, 0); continue; }
 				let sum = 0;
 				for (const g of games) {
 					const opp = byName[g.opp];
-					sum += clamp(g.pf - g.pa, -MARGIN_CAP, MARGIN_CAP) +
+					sum += clamp(g.teamPts - g.oppPts, -MARGIN_CAP, MARGIN_CAP) +
 						(opp ? e.get(opp.name) : 0) -
 						HOME_EDGE * (g.home || 0);
 				}
