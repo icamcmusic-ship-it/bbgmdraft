@@ -1448,7 +1448,18 @@ row carries the player's own jersey number, and a rating row without a
 `season` or `fuzz` gets one. The sample class is shaped like BBGM's own export
 (tid −2, an empty draft slot, a season on the rating row). A file whose
 players' `draft.year` disagrees with its `startingSeason` is warned about, and
-a birth year after the season is refused.
+a birth year after the player's own draft year is refused
+in a draft-class file and warned about in a league.
+
+That distinction is the file's structure, not its size. A league export
+carries its next two or three draft classes inside it, so a 2029 prospect in a
+2027 league is nineteen at the draft he is actually in and sixteen measured
+against the league's season — and BBGM writes birth years for a class two or
+three years out that land past the league's own season entirely. Aging every
+player from one season refused whole leagues over rows that were not wrong, so
+each player is measured against his own draft year now, and a league is never
+rejected over one impossible row: the row is named in a warning and the
+classes inside the file load as they should.
 
 ### The college statline
 

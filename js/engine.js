@@ -527,6 +527,23 @@
 	/* Above this, a file is a league export and not a draft class. */
 	const MAX_CLASS = 250;
 
+	/* A league carries structure a draft-class export never does. Exported so
+	   the loader can ask the same question when it decides whether to split a
+	   file into one class per draft year (see classesFromFile in js/app.js).
+	   Deliberately not a size test: size is a hint, and a first-season league
+	   is under the class cap. */
+	const LEAGUE_KEYS = ["teams", "games", "schedule", "draftPicks",
+		"gameAttributes", "trade", "playoffSeries"];
+
+	function isLeagueFile(data) {
+		if (!data || typeof data !== "object") return false;
+		for (const key of LEAGUE_KEYS) {
+			const v = data[key];
+			if (Array.isArray(v) ? v.length > 0 : (v && typeof v === "object")) return true;
+		}
+		return false;
+	}
+
 	function validateLeagueFile(leagueFile) {
 		if (!leagueFile || typeof leagueFile !== "object") {
 			throw new Error("That file is not a BBGM league or draft-class export.");
@@ -548,6 +565,15 @@
 				'"startingSeason": <year> to the file.');
 		}
 		const seasonRecovered = !Number.isFinite(Number(leagueFile.startingSeason));
+		/* IS THIS A LEAGUE OR A DRAFT CLASS?
+
+		   Structure answers it and size does not: a league in its first season
+		   can be smaller than the class cap and still carry teams, a schedule
+		   and three future draft classes, while a class export is players and
+		   almost nothing else. The two are held to different standards below —
+		   a class file is refused for a birth year it cannot have, a league is
+		   warned about one — so the question is asked once, here. */
+		const isLeagueShaped = isLeagueFile(leagueFile);
 		/* The season is REPORTED, not written back.
 
 		   This used to do `leagueFile.startingSeason = season`, quietly editing
@@ -637,21 +663,58 @@
 		   normal one, so a file that has several of them — or anyone
 		   younger — is worth a word even though the build itself now floors
 		   the age rather than failing on it. */
+		/* AND EVERY PLAYER IS MEASURED AGAINST HIS OWN YEAR.
+
+		   `season` is the file's season, which is the right year to age a
+		   DRAFT CLASS against and the wrong one to age a LEAGUE against. A
+		   BBGM league export carries the next two or three draft classes
+		   inside it, and a 2030 prospect in a 2027 league is a sixteen-year-
+		   old measured against 2027 and a nineteen-year-old measured against
+		   the draft he is actually in. Measured against the file's season,
+		   a whole league's future classes read as children, and a prospect
+		   whose birth year sits past the league's season — which BBGM writes
+		   for a class two or three years out — was a hard REFUSAL of the
+		   entire file.
+
+		   So the reference year is the player's own draft year when he has
+		   one later than the file's season, and the file's season otherwise.
+
+		   And the refusal only stands for a draft-class file. A league is not
+		   rejected over one row: it is a file whose interesting part is the
+		   classes inside it (see draftClassesIn), each of which is validated
+		   again on its own season by the caller that pulls it out, and one
+		   impossible birth year among five thousand players is a warning
+		   naming the player rather than a door closed on the file. */
 		{
 			let odd = 0;
+			const future = [];
 			for (const p of leagueFile.players) {
-				const age = Number(season) - Number(p && p.born && p.born.year);
+				const own = p && p.draft && Number(p.draft.year);
+				const ref = Number.isFinite(own) && own > Number(season) ? own : Number(season);
+				const age = ref - Number(p && p.born && p.born.year);
 				if (!Number.isFinite(age)) continue;
 				if (age < 0) {
-					throw new Error("A player is born after the class's season (" +
-						season + "): check born.year on " +
-						((p.firstName || "") + " " + (p.lastName || "")).trim() + ".");
+					const name = ((p.firstName || "") + " " + (p.lastName || "")).trim();
+					if (!isLeagueShaped) {
+						throw new Error("A player is born after the class's season (" +
+							season + "): check born.year on " + name + ".");
+					}
+					if (future.length < 4) future.push(name || "an unnamed player");
+					continue;
 				}
 				if (age < 17 || age > 30) odd++;
 			}
+			if (future.length) {
+				warnings.push(future.length + " player" +
+					(future.length === 1 ? " is" : "s are") +
+					" born after the year they are drafted in (" +
+					future.join(", ") + "). Their ages are unusable and are " +
+					"floored where they are read; nothing else in the file is " +
+					"affected.");
+			}
 			if (odd) {
 				warnings.push(odd + " player" + (odd === 1 ? " is" : "s are") +
-					" younger than 17 or older than 30 at " + season +
+					" younger than 17 or older than 30 at their own draft year" +
 					". Ages that young are floored to a rare seventeen rather " +
 					"than used as-is; check born.year and startingSeason if " +
 					"that is not what you meant.");
@@ -733,7 +796,16 @@
 			warnings.push(duplicatePid + " players share a pid with another player. " +
 				"Row order is used to tell them apart.");
 		}
-		if (draftYearMismatch && !oversized) {
+		/* A LEAGUE IS SUPPOSED TO HOLD SEVERAL DRAFT YEARS.
+
+		   This warning is about a CLASS file with stray draft years in it,
+		   where everyone really is aged from one season. A league carries its
+		   next two or three classes by design and is split into one file per
+		   draft year on load (see draftClassesIn), so telling the user that
+		   two hundred of his players are drafted in another year is describing
+		   the feature. The size test was standing in for this and only caught
+		   the large ones. */
+		if (draftYearMismatch && !oversized && !isLeagueShaped) {
 			warnings.push(draftYearMismatch + " of " + leagueFile.players.length +
 				" players carry a draft year that is not " + season + ". Ages and " +
 				"class years are measured from " + season + " for everyone, so a " +
@@ -6723,7 +6795,7 @@
 		assignClassYears, inchesFromHgtRating, validateLeagueFile, findSeason, playerKey,
 		SIZE_OVERRIDE_KEYS, SURPRISES, DRAFT_EVENTS, PACE_MIN, PACE_MAX,
 		draftClassesIn, extractDraftClass, MIN_CLASS, PROSPECT_TIDS,
-		MAX_CLASS, ANOMALY_MEMORY_DEPTH, NARRATIVES,
+		MAX_CLASS, ANOMALY_MEMORY_DEPTH, NARRATIVES, isLeagueFile,
 		rerollSalt,
 		signatureGame, simulateProLeagues, assignRecruiting,
 		NOTE_LINES, DEFAULT_NOTE_LINES, PHASES, PRO_GAMES,
