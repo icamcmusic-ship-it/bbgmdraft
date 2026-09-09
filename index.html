@@ -18,10 +18,16 @@
 	<button id="btnSettings" class="iconbtn" aria-expanded="true"
 		aria-controls="settings" title="Show or hide the settings panel"><span aria-hidden="true">☰</span> Settings</button>
 	<input type="file" id="file" accept=".json,.gz,.json.gz" multiple hidden>
+	<input type="file" id="addFile" accept=".json,.gz,.json.gz" multiple hidden>
 	<input type="file" id="csvFile" accept=".csv" hidden>
 	<input type="file" id="leagueMergeFile" accept=".json,.gz,.json.gz" hidden>
 	<div class="btngroup">
 		<button id="btnLoad">Load file…</button>
+		<!-- Adding classes to a session rather than starting a new one. Load
+		     replaces everything; this keeps every class already loaded, and a
+		     universe whose new classes are all later than its last season is
+		     extended rather than redrawn. See appendFiles. -->
+		<button id="btnAddFiles" hidden title="Add more draft classes, keeping the ones already loaded">Add classes…</button>
 		<select id="fileSelect" hidden aria-label="Loaded file"></select>
 	</div>
 	<span class="spacer"></span>
