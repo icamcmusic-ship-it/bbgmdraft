@@ -2933,14 +2933,16 @@ console.log("\nThe paper: kinds, variants, voices and quotes");
 		/* Run the table over several classes and check nothing renders a
 		   literal brace. Rows whose `find` never fires in the sample are
 		   reported separately below rather than silently passing. */
-		/* Ten classes rather than six: several rows depend on a season
-		   producing a particular thing (a champion whose coach is in his first
-		   six years, a 15-over-2, a first-ever bid) and six seasons is not
-		   always enough for all of them. A row that needs more than ten is a
-		   row nobody would see either. */
+		/* Twenty classes rather than ten, because the desk budget changed
+		   what "reachable" means. Every row still gets its own draw; the desk
+		   then runs the sixty it has room for (see DESK_BUDGET), so a row's
+		   rate is its draw times its share of the cut rather than its draw
+		   alone. Ten classes was fitted when every successful draw became an
+		   article. A row that does not appear in twenty seasons is still a row
+		   nobody would see. */
 		const fired = new Set();
 		const faults = [];
-		for (let s = 0; s < 10; s++) {
+		for (let s = 0; s < 20; s++) {
 			const res = global.Engine.run(V.realisticClass(s, 70),
 				global.Config.make({ seed: "tpl" + s }));
 			for (const a of N.build(res)) {
