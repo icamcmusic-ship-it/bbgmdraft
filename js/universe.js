@@ -13,7 +13,11 @@
 (function (global) {
 	"use strict";
 
-	const VERSION = 2;
+	/* 3: the export carries the timeline itself — the rows, the threads, the
+	   records book, the alumni index and the chain's tail — beside the seeds
+	   that produced it. A version 1 or 2 file still imports; it simply has
+	   nothing to restore a diverged season from. See exportUniverse. */
+	const VERSION = 3;
 
 	/* WHICH ENGINE BUILT IT.
 
@@ -1501,7 +1505,7 @@
 	     - `files`, optional, so a universe can be one file you hand somebody
 	       instead of a file plus a folder of class exports.
 
-	   `version` goes to 2. Version 1 files still import — see importUniverse,
+	   `version` goes to 3. Older files still import — see importUniverse,
 	   which reads what is present and says what is missing. */
 	function exportUniverse(u, opts) {
 		opts = opts || {};
@@ -1525,6 +1529,34 @@
 				gap: r.gap || 0,
 				error: r.error || null,
 			})),
+			/* THE WORLD ITSELF, NOT ONLY ITS SEEDS.
+
+			   The export carried seeds, fingerprints and settings, which is
+			   everything needed to REPRODUCE the universe and nothing at all
+			   about what it was. So a shared universe whose replay diverged —
+			   a newer engine, a class file the recipient had a different copy
+			   of, a locked setting — arrived as a different world with the
+			   right name, and the file it came from could not even say who had
+			   won. Divergence was detected and then had nothing to show.
+
+			   The rows are the timeline as it was played: champion, runner-up,
+			   player of the year, No. 1 pick, the poll, the Final Four, the
+			   coaching carousel counts. They are small — a season is a few
+			   hundred bytes — and they are the whole of what a person means
+			   when they say they want to keep somebody's universe. Threads,
+			   the records book and the alumni index travel with them because
+			   all three are derived from the rows and re-deriving them on
+			   import would produce a book that disagreed with its own
+			   timeline.
+
+			   `tail` is what step() carried out of the last season, so an
+			   imported universe can be EXTENDED with a later class file
+			   instead of only replayed (see canExtendUniverse in js/app.js). */
+			timeline: (u.rows || []).map((r) => Object.assign({}, r)),
+			threads: (u.threads || []).slice(0, 400),
+			records: u.records || null,
+			alumni: (u.alumni || []).slice(-400),
+			tail: u.tail || null,
 		};
 		if (u.broken) out.broken = u.broken;
 		if (u.biography && Object.keys(u.biography).length) out.biography = u.biography;

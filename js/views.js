@@ -2843,8 +2843,12 @@
 			   the player of the year are inferred from the world either side
 			   of the gap. */
 			const tr = el("tr", r.extrapolated ? "gaprow" : null);
+			/* “*” is an extrapolated season (no class file); “†” is a season
+			   restored from an imported universe because the replay of it
+			   diverged. Both are rows the tool is telling you it did not
+			   simulate on this machine. */
 			tr.appendChild(el("td", null, String(r.season || "?") +
-				(r.extrapolated ? " *" : "")));
+				(r.extrapolated ? " *" : "") + (r.restored ? " †" : "")));
 			if (r.error) {
 				const td = el("td", null, "failed: " + r.error);
 				td.colSpan = 7;
@@ -2853,7 +2857,8 @@
 				continue;
 			}
 			tr.appendChild(el("td", null, (r.flavor || "—") +
-				(r.partial ? " · partial class, honours topped up" : "")));
+				(r.partial ? " · partial class, honours topped up" : "") +
+				(r.restored ? " · restored from the imported universe" : "")));
 			tr.appendChild(el("td", null, r.apOne || "—"));
 			tr.appendChild(el("td", null, (r.champion || "—") +
 				(r.champSeed ? " (No. " + r.champSeed + ")" : "")));

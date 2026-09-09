@@ -686,8 +686,22 @@ first, and *Export → Merge into a league file* offers to write all of them
 straight back into the league they came from, without asking you to find the
 same file on disk twice.
 
+**Any** league is split, not only a huge one. The test used to be size alone —
+a file above the class cap was a league and everything else was a class — which
+is right about a fifty-megabyte export and wrong about the common case: a
+league in its first season, or a small custom one, is under the cap and still
+carries three future draft classes. Dropping one loaded a single "class" of two
+thousand men and the tool tried to simulate it. A file that carries teams, a
+schedule, `gameAttributes` or draft picks is a league whatever it weighs, and
+its classes are pulled out and listed separately with their years and player
+counts.
+
 Everything runs locally in your browser; nothing is uploaded. You can load
-several files at once and switch between them in the header. No export to
+several files at once and switch between them in the header. *Add classes…*
+loads more without discarding what is already there — and, in universe mode,
+extends the chain rather than redrawing it (see **Universe mode**); dropping
+files onto a session that already has one does the same, while *Load file…*
+still replaces everything. No export to
 hand? *Try a sample class* loads a synthetic 70-man class — the same kind of
 draft-slot-shaped fixture the calibration harness runs on, with names — through
 exactly the path a real file takes, so every tab can be evaluated before
@@ -932,7 +946,7 @@ transfer who moved up into a losing season, and — for the prospects abroad
 — the national-team caps and the loan spell the development model was
 already drawing.
 
-**A hundred and thirty-nine kinds now, in three registers.** The material was always
+**Two hundred and fifty-odd kinds now, in three registers.** The material was always
 there and the *writing* was the tell: one body template for most kinds, no
 quotes anywhere, and every article in the same flat declarative.
 
@@ -963,6 +977,36 @@ night, bracketology, 15-over-2s, All-America snubs, combine measurements,
 withdrawals, and a handful that only fire inside a universe. A row returning
 "no story this year" is the normal case: a season does not have a 16-over-1 in
 it, and a paper that runs one anyway is the machine showing.
+
+**A hundred more kinds, and a desk budget to make room for them.** The table
+ran at about a hundred and sixteen articles a season and every season's paper
+was made of the same material: the country (the poll, the bracket, the awards,
+the leaders) and the season (a big night, a streak, a title). Almost nothing
+was about a career, a building, a rivalry with a history, a game decided in a
+way worth describing, or a player considered as a professional prospect rather
+than as a college statistic. The hundred new rows are chosen against that list
+— the shot chart (rim rate, free-throw rate, true shooting, empty calories), the
+building (a sellout streak, an unbeaten home floor, an arena that stopped
+showing up), rivalries (a sweep, a revenge game, a snapped streak), the staff
+(a hot seat, a first year, an assistant promoted, a coach hired away), the
+newcomers (a portal haul that did not fit, a recruiting class and a recruiting
+miss), the long view (career points, a senior day, a walk-on's scholarship, a
+season ended by an injury), the leagues abroad, the scouting file itself (the
+motor, the frame, the mechanics, the medicals), the class as a whole (deep,
+thin, international, one-and-done), and the columns a draft board produces —
+the case for and the case against.
+
+Two hundred and five rows would be four hundred articles a season under the old
+arrangement, because the size of the paper was the *sum* of two hundred
+independent probabilities: adding kinds for variety made the paper longer
+instead. A paper is a page count, not an inbox. Every row still gets its own
+draw and its own seeded child rng; the **desk** then runs the sixty it has room
+for, keyed against each row's own `p`, so a load-bearing kind almost always
+survives the cut and a marginal one appears when the season is quiet enough to
+have room for it. The measured result is the point of the exercise: the same
+hundred and fourteen articles a season, drawn from two hundred and fifty-five
+distinct kinds over twenty seasons instead of a hundred and fifty-seven, with
+under a tenth of them firing every single year.
 
 The feed filters by kind (grouped), by team or player, and by "only my
 prospects", which reads the prospect table's own filter so a filtered board and
@@ -1017,8 +1061,25 @@ pool is 12,672 names deep, so a multi-season save does not start handing the
 same man three programs. The Universe tab shows per-file diagnostics (a bad file is
 rejected by name; the rest run), the timeline (champion, POY, No. 1 pick,
 flavor, realignment, coaching changes per season), continuity threads
-(repeat champions, programs with multiple No. 1 picks), and the alumni
-index. The export stores seeds and file fingerprints, not simulated output —
+and the alumni index. **The threads are fifty-six kinds now, not six.** The
+original six each counted a repeat — this program won N, that one produced N —
+because the season row carried eleven facts and a count is all eleven facts
+support. A history is not only a tally: it is droughts and first titles,
+three-peats and bridesmaids, a final played twice, a team that lost one and
+came back to win it, champions seeded fourth or worse, a decade of chalk,
+double-digit seeds in Final Fours, preseason No. 1s that went wire to wire,
+polls led by programmes that never won anything, unbeaten regular seasons, the
+best record in the timeline, conferences that owned a decade and title games
+played inside one, men who won it twice, No. 1 picks off champions, second
+generations arriving a decade after the first, the busiest April on the
+sideline and the quietest, retirement waves, realignment waves and serial
+movers, classes that came out the same way three times running, the strongest
+and weakest class in the world, the longest unbroken run of played seasons, and
+the seasons that failed or were extrapolated. Each of those reads a field the
+season row now records — the Final Four, the NIT champion, the preseason poll
+No. 1, the best record, unbeaten teams, the deepest run by a long-shot seed,
+the champion's and the player of the year's conference, the class's own flavor
+name, its anomalies, its size and how much of it was freshmen or transfers. The export stores seeds and file fingerprints, not simulated output —
 with the same files loaded, importing it replays the identical world.
 
 **The classes share rosters now.** A junior in the 2027 file was a freshman in
@@ -1042,6 +1103,52 @@ actually played replace the ones his own file simulated for him alone: his
 career table marks them ★ and links to that year, his earlier honors are the
 ones he really took, and his note says so. The timeline counts the roster
 spots each season filled from a later class.
+
+**The years nobody played get an account of themselves.** A universe built
+from 2025, 2026 and 2031 is a six-year world with three seasons in it. The
+carry-over was already aged across the hole — coaches age and the oldest
+leave, program levels regress toward the field's own mean, star returners
+advance a class year and graduate out — and the timeline still skipped from
+2026 to 2031 as though nothing had happened between them. **Extrapolated
+seasons** fill the gap with what a season is remembered by: a champion and a
+runner-up drawn against program strength, a poll No. 1, a player of the year
+and a five-man All-America taken from the named star returners the carry is
+holding. It is not a simulation and does not pretend to be — every row is
+flagged (a `*` on the timeline), nothing derived from one is fed back into the
+chain, and the names run out as the gap lengthens, because a world five years
+past the last file it was given genuinely does not know who is playing. The
+same machinery **tops up a partial class**: a league export whose future draft
+class is forty men produces a real season whose honours were drawn from a thin
+field, and the All-America places that field could not fill are added and
+flagged rather than left missing.
+
+**Adding classes does not redraw the world.** Loading more files used to mean
+one thing: every season re-ran from season one. That is correct — a class file
+inserted anywhere changes the pool memory, the future rosters and the carry
+from that point on — and it is why nobody added a file to a forty-season
+universe. **Add classes…** (beside *Load file…*; dropping files onto a live
+session does the same) keeps everything already loaded, and when every added
+class is later than the last season played the chain is **extended**: same
+seeds, same settings, same men, same results, and the new seasons are the next
+links on it. The chain's *tail* — the carry, the pool memory, the anomaly
+memory, the coach tree, the seed index — is saved when a run finishes, which is
+what makes that possible. What is given up is stated rather than hidden: the
+underclassmen in an appended 2038 class do not retro-appear on the 2035 rosters
+that were already played. A class that lands in the middle of the timeline
+cannot extend it, and the tool says so instead of silently rebuilding.
+
+**An imported universe stays the one you were given.** The export carried
+seeds, fingerprints and settings — everything needed to *reproduce* a universe
+and nothing about what it *was* — so a shared world whose replay diverged
+arrived as a different world with the right name, and the file it came from
+could not even say who had won. Version 3 exports carry the timeline itself:
+the rows, the threads, the records book, the alumni index and the tail. The
+replay runs as before, and any season whose result fingerprint disagrees is
+**restored** from the file (marked `†`, with the threads and the records book
+rebuilt from the merged timeline), so the world on the Universe tab is the one
+that was shared while the other tabs stay honestly labelled as this machine's
+replay of it. The tail travels too, so an imported universe can be extended
+with a later class rather than only replayed.
 
 **The chain is hard to break.** A universe used to be a chain of assumptions
 about what would not change while it ran, and each of them is now a fact the

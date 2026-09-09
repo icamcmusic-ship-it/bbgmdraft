@@ -2595,18 +2595,43 @@
 	   picker lists them, universe mode runs them as one continuous world
 	   oldest first, and "Merge into a league file" writes all of them back
 	   into the league they came from. */
+	/* IS THIS A LEAGUE OR IS IT A CLASS?
+
+	   The split used to be decided by size alone: a file above the class cap
+	   was a league and everything else was a class. That is right about a
+	   fifty-megabyte export and wrong about the common case it was written
+	   for — a BBGM league in its first season, or a small custom league, is
+	   under the cap and is still a league carrying three future draft classes
+	   that the user wants split out. Dropping one loaded a single "class" of
+	   two thousand men, which the tool then tried to simulate.
+
+	   A league says so in its own structure: it carries teams, a schedule,
+	   gameAttributes or draft picks, none of which a draft-class export has.
+	   Size stays as a fallback for a file that carries only players. */
+	function looksLikeLeague(data) {
+		if (!data || typeof data !== "object") return false;
+		for (const key of ["teams", "games", "schedule", "draftPicks",
+			"gameAttributes", "trade", "playoffSeries"]) {
+			const v = data[key];
+			if (Array.isArray(v) ? v.length > 0 : (v && typeof v === "object")) return true;
+		}
+		return false;
+	}
+
 	function classesFromFile(name, data, check) {
 		const base = name.replace(/\.json(\.gz)?$|\.gz$/i, "");
 		const found = global.Engine.draftClassesIn(data);
 		/* Not a league export: an ordinary draft-class file, loaded as
-		   itself. The size check is what tells the two apart — a class is
-		   sixty to eighty players and a league is thousands — because a
-		   class file's own players carry UNDRAFTED tids too. */
-		if (!check.oversized || found.length === 0) {
+		   itself. Either the file says it is a league (teams, schedule,
+		   gameAttributes) or it is over the class cap; a class file's own
+		   players carry UNDRAFTED tids too, so the tids alone cannot tell
+		   the two apart. */
+		const isLeague = looksLikeLeague(data) || check.oversized;
+		if (!isLeague || found.length === 0) {
 			/* The old fallback, for a big file whose prospects carry no tid
 			   this tool recognizes: take the players drafted in the file's
 			   own season rather than simulating five thousand men. */
-			if (check.oversized && check.classPids) {
+			if (isLeague && check.classPids) {
 				const keep = new Set(check.classPids);
 				const players = data.players.filter((p, i) =>
 					keep.has(Number.isFinite(Number(p.pid)) ? Number(p.pid) : -1 - i));
@@ -2618,7 +2643,10 @@
 			return [{ name, data, warnings: check.warnings }];
 		}
 		const years = found.map((c) => c.year);
-		const note = "This is a full league export. " +
+		const note = "This is a full league export (" +
+			((data.players || []).length) + " players" +
+			(Array.isArray(data.teams) && data.teams.length
+				? ", " + data.teams.length + " teams" : "") + "). " +
 			(found.length === 1
 				? "The " + years[0] + " draft class inside it (" + found[0].count +
 					" players) was loaded; the rest of the league was left alone."
@@ -4510,6 +4538,27 @@
 		for (const sn of json.seasons || []) {
 			if (sn && sn.result) state.universeExpect.bySeason[sn.season] = sn.result;
 		}
+		/* THE WORLD THE FILE DESCRIBES, KEPT.
+
+		   A version 3 export carries the timeline itself and not only the
+		   seeds that produced it (see Universe.exportUniverse). Divergence
+		   used to be detected and then reported as a sentence, which left the
+		   user holding a universe that is not the one they were given and no
+		   way to see the one they were. The file's own rows are held here and
+		   any season whose replay diverged is RESTORED from them once the
+		   chain finishes — so the timeline, the threads and the records book
+		   are the ones that were shared, flagged season by season, while the
+		   simulated detail on the other tabs stays honestly labelled as this
+		   machine's replay. */
+		state.universeImported = json.timeline && json.timeline.length
+			? {
+				rows: json.timeline,
+				threads: json.threads || null,
+				records: json.records || null,
+				alumni: json.alumni || null,
+				tail: json.tail || null,
+			}
+			: null;
 		state.cfg.universe = true;
 		state.cfg.seed = json.baseSeed || state.cfg.seed;
 		$("seed").value = state.cfg.seed;
@@ -4537,6 +4586,7 @@
 			if (expected !== r.result) diverged.push(r.season);
 		}
 		state.universeExpect = null;
+		const kept = restoreImportedWorld(diverged);
 		if (!diverged.length) return null;
 		const revNote = want.engineRev !== null && want.engineRev !== global.Universe.ENGINE_REV
 			? " This universe was built on engine revision " + want.engineRev +
@@ -4545,8 +4595,59 @@
 		return "Season" + (diverged.length > 1 ? "s " : " ") +
 			diverged.slice(0, 6).join(", ") +
 			(diverged.length > 6 ? " (+" + (diverged.length - 6) + " more)" : "") +
-			(diverged.length > 1 ? " diverged from the imported universe." :
-				" diverged from the imported universe.") + revNote;
+			" diverged from the imported universe." + revNote +
+			(kept
+				? " The timeline, the threads and the records book have been " +
+					"restored from the file, so the world you were given is the " +
+					"one on the Universe tab; the other tabs show this machine's " +
+					"replay of it."
+				: " This export predates timeline capture, so there is nothing " +
+					"to restore it from.");
+	}
+
+	/* Put the imported universe's own rows back where the replay disagreed.
+
+	   Only the diverged seasons are replaced: a season that replayed
+	   identically is better represented by the row the chain just built, which
+	   carries the same facts plus the result fingerprint and the live links.
+	   The threads and the records book are rebuilt from the merged rows rather
+	   than copied, so they cannot disagree with the timeline above them —
+	   except where the file carries its own and the whole timeline came from
+	   it, in which case the file's are used verbatim. */
+	function restoreImportedWorld(diverged) {
+		const imported = state.universeImported;
+		state.universeImported = null;
+		if (!imported || !imported.rows || !imported.rows.length) return false;
+		if (!diverged.length) return false;
+		const bySeason = {};
+		for (const r of imported.rows) if (r && Number.isFinite(r.season)) bySeason[r.season] = r;
+		let n = 0;
+		state.universe.rows = state.universe.rows.map((r) => {
+			if (diverged.indexOf(r.season) === -1) return r;
+			const src = bySeason[r.season];
+			if (!src) return r;
+			n++;
+			/* `restored` is the flag every consumer needs: this row is what
+			   the file said happened, not what this machine simulated. */
+			return Object.assign({}, src, {
+				restored: true,
+				replayResult: r.result || null,
+				seed: r.seed || src.seed || null,
+			});
+		});
+		if (!n) return false;
+		state.universe.threads = global.Universe.threads(state.universe.rows);
+		state.universe.records = global.Universe.records(
+			state.universe.rows, imported.alumni && imported.alumni.length
+				? imported.alumni : state.universe.alumni);
+		if (imported.alumni && imported.alumni.length) {
+			state.universe.alumni = imported.alumni.slice();
+		}
+		/* And the tail, so an imported world can be extended with a later
+		   class rather than only replayed. The replay's own tail is kept when
+		   nothing diverged, because it matches the loaded files exactly. */
+		if (imported.tail) state.universe.tail = imported.tail;
+		return true;
 	}
 
 	/* ------------------------------------------------------------ routing */
