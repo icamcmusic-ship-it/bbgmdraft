@@ -1292,7 +1292,7 @@
 		headlines: [
 			"{player} commits to {to} out of the portal",
 			"{to} lands {player}",
-			"Portal: {player} leaves {from} for {to}",
+			"Portal: {player} is leaving for {to}",
 			"{player} picks {to}",
 		],
 		bodies: [
@@ -4569,7 +4569,7 @@
 			record: T(t.w + "-" + t.l), coach: T(t.coach ? t.coach.name : "the staff"),
 		}),
 		headlines: [
-			"The building at {team} has not had an empty seat since November",
+			"The building at {team} has not had an empty seat all season",
 			"{team} is selling out again",
 			"{record}, and a home floor nobody wants to visit",
 		],
@@ -4614,6 +4614,9 @@
 		},
 		slots: (t) => ({
 			team: TM(t.name), conf: T(t.conf), record: T(t.w + "-" + t.l),
+			/* "a {conf} programme" cannot be written by hand: the ACC and the
+			   American both take "an". */
+			aConf: T(global.Text.withArticle(String(t.conf) + " programme")),
 			coach: T(t.coach ? t.coach.name : "the staff"),
 			tenure: T(String(t.coach ? t.coach.tenure : 1)),
 		}),
@@ -4625,7 +4628,7 @@
 		bodies: [
 			"{team} is {record} and the top tier has been closed since January. {coach} is in year {tenure} and the arithmetic of that is being done out loud by people who used to buy season tickets.",
 			"A programme with this history does not usually get to be this empty. {team} at {record} is the kind of season that ends with a search firm.",
-			"{coach} has coached most of the second half of this season in a building with the sound of individual voices in it. {record} does that to a {conf} programme.",
+			"{coach} has coached most of the second half of this season in a building with the sound of individual voices in it. {record} does that to {aConf}.",
 		],
 	});
 
@@ -6722,7 +6725,7 @@
 		headlines: [
 			"{n} freshmen in the top thirty",
 			"One season each",
-			"{first} was never going to be there in November",
+			"{first} was only ever staying one year",
 		],
 		bodies: [
 			"{n} first-year players are inside the top thirty, {first} of {team} at the head of them. Every one of those programmes recruited a player it knew it would coach for thirty-two games.",
