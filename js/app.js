@@ -2608,14 +2608,11 @@
 	   A league says so in its own structure: it carries teams, a schedule,
 	   gameAttributes or draft picks, none of which a draft-class export has.
 	   Size stays as a fallback for a file that carries only players. */
+	/* One definition, in the engine, because the validator asks the same
+	   question — a league is warned about a birth year a class file is
+	   refused for. Two copies of it would drift. */
 	function looksLikeLeague(data) {
-		if (!data || typeof data !== "object") return false;
-		for (const key of ["teams", "games", "schedule", "draftPicks",
-			"gameAttributes", "trade", "playoffSeries"]) {
-			const v = data[key];
-			if (Array.isArray(v) ? v.length > 0 : (v && typeof v === "object")) return true;
-		}
-		return false;
+		return global.Engine.isLeagueFile(data);
 	}
 
 	function classesFromFile(name, data, check) {
