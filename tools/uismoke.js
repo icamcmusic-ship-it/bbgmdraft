@@ -1332,7 +1332,7 @@ async function gotoProspects(page) {
 			const away = res.teams[g.opp];
 			const mirror = away.log.filter((x) => x.opp === home.name &&
 				Math.abs(x.when - g.when) < 1e-9)[0];
-			return !!mirror && mirror.pf === g.pa && mirror.pa === g.pf;
+			return !!mirror && mirror.teamPts === g.oppPts && mirror.oppPts === g.teamPts;
 		});
 		ok("and the opponent's schedule agrees with it", consistent);
 		await page.evaluate(() => { window.App.showGame(null); window.App.showTeam(null); });

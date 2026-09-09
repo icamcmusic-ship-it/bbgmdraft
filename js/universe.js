@@ -760,9 +760,75 @@
 		return out;
 	}
 
+	/* ONE RECRUITING CLASS ACROSS SEVERAL FILES.
+
+	   assignRecruiting ranks within the high-school cohort, and a file run
+	   alone can only see the members of a cohort that are in that file. So
+	   a 19-year-old freshman in the 2027 class and the 20-year-old
+	   sophomore in the 2028 class — the same high-school class — each came
+	   out No. 1 nationally in his own file, and the universe, which chains
+	   everything else, did not chain the one layer most visible on a player
+	   page.
+
+	   The chain already runs every file's build phase alone, oldest first,
+	   before any season is played (see runUniverse's preview pass). This
+	   takes those previews, pools every player's recruiting score by his
+	   high-school class across all of them, ranks each pooled cohort once
+	   with the engine's own rankCohort, and hands the ranks back per player
+	   for the real run to take (cfg.universeRecruiting).
+
+	   A cohort is PARTIAL when a draft year it would feed is not loaded: the
+	   oldest file's seniors have no cohort-mates loaded, and the newest
+	   file's freshmen have cohort-mates who have not been drafted yet. They
+	   are ranked as-is and marked, rather than pretended complete, and the
+	   Universe tab says which. */
+	function recruitingCohorts(previews) {
+		const E = global.Engine;
+		const loaded = new Set();
+		for (const pv of previews || []) {
+			if (pv && Number.isFinite(pv.season)) loaded.add(pv.season);
+		}
+		const groups = {};
+		/* One map PER FILE, because a player key is a pid and two class
+		   files can reuse the same pids for different men. */
+		const byFile = (previews || []).map(() => ({}));
+		(previews || []).forEach((pv, fileIdx) => {
+			if (!pv || !pv.players || !Number.isFinite(pv.season)) return;
+			for (const p of pv.players) {
+				const rec = p.recruiting;
+				if (!rec || !Number.isFinite(rec.score) || !Number.isFinite(rec.hsClass)) continue;
+				(groups[rec.hsClass] = groups[rec.hsClass] || []).push({
+					key: p.key, fileIdx, season: pv.season, name: p.name,
+					recruiting: { score: rec.score, diOnly: rec.diOnly },
+				});
+			}
+		});
+		const cohorts = [];
+		for (const h of Object.keys(groups).map(Number).sort((a, b) => a - b)) {
+			const members = groups[h];
+			/* Freshman through senior: the draft years this class feeds. */
+			const missing = [];
+			for (let y = h + 1; y <= h + 4; y++) if (!loaded.has(y)) missing.push(y);
+			const partial = missing.length > 0;
+			const seasons = Array.from(new Set(members.map((m) => m.season))).sort();
+			E.rankCohort(members);
+			let top = null;
+			for (const m of members) {
+				byFile[m.fileIdx][m.key] = {
+					rank: m.recruiting.rank, partial, cohortSize: members.length,
+				};
+				if (!top || m.recruiting.rank < top.rank) {
+					top = { rank: m.recruiting.rank, name: m.name, season: m.season };
+				}
+			}
+			cohorts.push({ hsClass: h, size: members.length, seasons, partial, missing, top });
+		}
+		return { byFile, cohorts };
+	}
+
 	global.Universe = {
 		VERSION, ENGINE_REV, validate, harvest, returnersOf, alumniOf, summarize,
 		threads, records, exportUniverse, biographyOf, seedFor, resultFingerprint,
-		ageCarry, coachTreeStep, nationalPOYSet,
+		ageCarry, coachTreeStep, nationalPOYSet, recruitingCohorts,
 	};
 })(typeof window !== "undefined" ? window : self);

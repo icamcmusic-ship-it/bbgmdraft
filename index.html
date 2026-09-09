@@ -158,8 +158,19 @@
 	</details>
 
 	<details class="grp" id="grp-leagues">
-		<summary>Players with no college</summary>
-		<p class="hint">Destination weights. Each is scaled by where the player was born — a Serbian leans EuroLeague and the Adriatic League, an Australian leans NBL.</p>
+		<summary>Colleges &amp; destinations</summary>
+		<div class="ctl">
+			<label for="collegeSource">College source</label>
+			<select id="collegeSource">
+				<option value="blanks">Rewrite blanks only — keep the file's colleges</option>
+				<option value="respect">Respect file — a blank college stays blank (did not play)</option>
+				<option value="rewrite">Rewrite all — redraw every college and league</option>
+			</select>
+			<p class="hint" id="collegeSourceHint"></p>
+		</div>
+		<div class="ctl"><label for="talentCoupling">Talent → program coupling <b></b></label><input type="range" id="talentCoupling" min="0" max="2" step="0.1"></div>
+		<div class="ctl"><label for="birthplaceWeight">Birthplace weight <b></b></label><input type="range" id="birthplaceWeight" min="0" max="2" step="0.1"></div>
+		<p class="hint">Destination weights for players with no college. Each is scaled by where the player was born — a Serbian leans EuroLeague and the Adriatic League, an Australian leans NBL.</p>
 		<div id="leagueWeights" class="archlist"></div>
 		<button id="btnLeagueReset" type="button">Reset destinations</button>
 		<div class="ctl"><label for="pDII">DII NCAA chance <b></b></label><input type="range" id="pDII" min="0" max="0.15" step="0.005"></div>

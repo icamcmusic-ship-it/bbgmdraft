@@ -50,7 +50,7 @@
 		const rng = new Rng("sample:" + String(seed));
 		const yr = Number.isFinite(season) ? season : 2026;
 		const names = C.names;
-		const weights = names.map((x) => C.frequencyOf(x));
+		const weights = names.map((x) => C.frequencyOf(x) || 0);
 		const wTotal = weights.reduce((a, b) => a + b, 0);
 		const pickCollege = (r) => {
 			let x = r * wTotal;

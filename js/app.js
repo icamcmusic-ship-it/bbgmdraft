@@ -603,6 +603,7 @@
 		"classQuality", "classDepth", "eliteCount", "potBias", "potSpread",
 		"specialization", "archetypeDiversity", "classFlavor", "buildNoise",
 		"freshmanShare", "transferShare", "redshirtShare", "reclassShare", "pDII",
+		"talentCoupling", "birthplaceWeight",
 		"pace", "scoringEnv", "efficiencyEnv", "statNoise", "upsetFactor",
 		"archetypePool", "surpriseBudget", "injuryRate", "traitCount",
 		"anomalyMemory", "flavorReach", "styleDrift",
@@ -622,6 +623,8 @@
 
 	const FORMAT = {
 		pDII: (v) => (v * 100).toFixed(1) + "%",
+		talentCoupling: (v) => v.toFixed(1) + "x",
+		birthplaceWeight: (v) => v.toFixed(1) + "x",
 		specialization: (v) => v.toFixed(2) + "x",
 		classFlavor: (v) => v.toFixed(2) + "x",
 		statNoise: (v) => v.toFixed(2) + "x",
@@ -724,6 +727,18 @@
 		reclassShare: (v) => "≈" + v + "% reclassified in or out of their year",
 		pDII: (v) => (v <= 0 ? "no DII conversions" :
 			"about " + (v * 100).toFixed(1) + "% of blank colleges become DII"),
+		talentCoupling: (v) => (v <= 0
+			? "where a prospect goes ignores how good he is"
+			: v < 1
+				? "better prospects lean toward stronger programs and leagues"
+				: "the best prospects go almost only to the strongest programs and leagues"),
+		birthplaceWeight: (v) => (v <= 0
+			? "birthplace does not affect where a prospect goes"
+			: v < 1
+				? "birthplace nudges a prospect toward his region's leagues"
+				: v === 1
+					? "the league table's own birthplace weighting"
+					: "birthplace overrides talent — a Serbian goes to Europe, not to Kansas"),
 		/* Derived from the selected era's own offensive rating rather than from
 		   a constant: the hint said "≈70 points" whatever era was chosen,
 		   because it was written when there was only one. */
@@ -869,6 +884,16 @@
 		// Also mark non-slider settings
 		paintModifiedMarkerFor("ovrMode", state.cfg.ovrMode);
 		paintModifiedMarkerFor("priorSeasons", state.cfg.priorSeasons);
+		paintModifiedMarkerFor("collegeSource", state.cfg.collegeSource);
+		$("collegeSource").value = state.cfg.collegeSource || "blanks";
+		$("collegeSourceHint").textContent = state.cfg.collegeSource === "rewrite"
+			? "Destructive: every prospect's college or league is redrawn and the " +
+				"file's own colleges are overwritten in the export. Reroll draws a new map."
+			: state.cfg.collegeSource === "respect"
+				? "The file is taken as written. A prospect with no college did not play " +
+					"a season and gets no stat line."
+				: "Prospects the file sends nowhere are sent somewhere real; everyone " +
+					"else keeps the college BBGM gave him.";
 		paintModifiedMarkerFor("varySize", state.cfg.varySize);
 		paintModifiedMarkerFor("universe", state.cfg.universe);
 		paintModifiedMarkerFor("narrative", state.cfg.narrative);
@@ -977,7 +1002,8 @@
 	}
 	function paintPhaseCosts() {
 		for (const key of SLIDERS.concat(
-			["era", "ovrMode", "varySize", "priorSeasons", "universe", "narrative"])) {
+			["era", "ovrMode", "varySize", "priorSeasons", "universe", "narrative",
+				"collegeSource"])) {
 			const input = $(key);
 			if (!input) continue;
 			const ctl = input.closest(".ctl");
@@ -1384,7 +1410,7 @@
 		builds: ["specialization", "archetypeDiversity", "classFlavor",
 			"archetypePool", "surpriseBudget", "buildNoise", "poolMemory"],
 		years: ["freshmanShare", "transferShare", "redshirtShare", "reclassShare"],
-		destinations: ["pDII"],
+		destinations: ["pDII", "talentCoupling", "birthplaceWeight"],
 		season: ["pace", "scoringEnv", "efficiencyEnv", "statNoise", "injuryRate",
 			"upsetFactor", "realignmentRate", "bluebloodDownYears", "midMajorLift",
 			"teamMomentum", "seasonEvents", "draftEvents"],
@@ -1703,7 +1729,7 @@
 		"preset", "seed", "ovrMode", "classQuality", "classDepth", "eliteCount",
 		"specialization", "classFlavor", "flavorHint", "archetypePool",
 		"freshmanShare", "transferShare", "varySize", "universe", "era",
-		"pDII",
+		"pDII", "collegeSource", "talentCoupling", "birthplaceWeight",
 	]);
 	const TIER_SEASON = new Set([
 		"potBias", "potSpread", "surpriseBudget", "traitCount", "narrative",
@@ -1902,6 +1928,13 @@
 		$("era").addEventListener("change", () => {
 			pushUndo("changed the era");
 			state.cfg.era = $("era").value;
+			markDirty();
+			paintConfig();
+			scheduleRun();
+		});
+		$("collegeSource").addEventListener("change", () => {
+			pushUndo("changed the college source");
+			state.cfg.collegeSource = $("collegeSource").value;
 			markDirty();
 			paintConfig();
 			scheduleRun();
@@ -2915,6 +2948,7 @@
 		cfg.recentPools = (saved.recentPools || []).map((a) => a.slice());
 		cfg.recentAnomalies = (saved.recentAnomalies || []).map((a) => a.slice());
 		cfg.universeRoster = saved.universeRoster || null;
+		cfg.universeRecruiting = saved.universeRecruiting || null;
 		cfg.universeAlumni = saved.universeAlumni || null;
 		cfg.universeTitles = saved.universeTitles || null;
 		cfg.biography = state.universeBiography || null;
@@ -3027,13 +3061,6 @@
 					for (const award of r.awards || []) {
 						p.priorAwards.push({ season: r.season, classYear: r.classYear, award,
 							exportSeason: r.exportSeason });
-					}
-				}
-				p.betterEarlier = null;
-				for (const r of p.priorSeasons) {
-					if (r.redshirt || !(r.mpg >= 15) || !p.stats) continue;
-					if (r.ppg > p.stats.ppg + 2 && (!p.betterEarlier || r.ppg > p.betterEarlier.ppg)) {
-						p.betterEarlier = { season: r.season, classYear: r.classYear, ppg: r.ppg };
 					}
 				}
 				try {
@@ -3749,6 +3776,16 @@
 				previewPools = previewPools.slice(0, 3);
 			}
 		}
+		/* PASS ONE AND A HALF: rank every recruiting class across all the
+		   files at once, from the previews just built. See
+		   Universe.recruitingCohorts. */
+		let universeRecruiting = null;
+		try {
+			universeRecruiting = U.recruitingCohorts(previews);
+			state.universe.recruiting = universeRecruiting.cohorts;
+		} catch (e) {
+			universeRecruiting = null;
+		}
 		const rosterFor = (k) => {
 			const season = runnable[k].season;
 			if (!Number.isFinite(season)) return [];
@@ -3826,6 +3863,8 @@
 				cfg.recentAnomalies = recentAnomalies.map((a) => a.slice());
 				cfg.carryOver = carry;
 				cfg.universeRoster = rosterFor(k);
+				cfg.universeRecruiting = universeRecruiting
+					? { byKey: universeRecruiting.byFile[k] || {} } : null;
 				/* What the world remembers, for the news desk. The alumni
 				   index was built and only ever rendered on the Universe tab;
 				   a 2033 paper that can mention the 2027 player of the year is
@@ -3847,6 +3886,7 @@
 					recentPools: (cfg.recentPools || []).map((a) => a.slice()),
 					recentAnomalies: (cfg.recentAnomalies || []).map((a) => a.slice()),
 					universeRoster: cfg.universeRoster,
+					universeRecruiting: cfg.universeRecruiting,
 					universeAlumni: cfg.universeAlumni,
 					universeTitles: cfg.universeTitles,
 				};

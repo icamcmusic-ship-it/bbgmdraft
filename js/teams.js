@@ -26,7 +26,7 @@
 	function programLevel(name, rng, confStrength) {
 		const conf = C.CONFERENCES[C.conferenceOf(name)] || C.CONFERENCES.Independent;
 		const strength = Number.isFinite(confStrength) ? confStrength : conf.strength;
-		const base = 0.45 * C.prestige(name) + 0.4 * strength;
+		const base = 0.45 * C.prestigeOrLowMajor(name) + 0.4 * strength;
 		/* Year-to-year variance. The slope used to be `9 - 0.03 * prestige`,
 		   which shrank the noise exactly where you would most want it:
 		   Kentucky drew sigma 5.5 around a high base and Wagner sigma 9 around
@@ -52,19 +52,19 @@
 		   from 4 at the top of the sport to 9 at the bottom, and the down year
 		   a program with everything to lose draws is rarer than the one a
 		   low-major draws. */
-		const tier = clamp((C.prestige(name) - 40) / 50, 0, 1);
+		const tier = clamp((C.prestigeOrLowMajor(name) - 40) / 50, 0, 1);
 		let level = base + rng.normal(0, 10 - 6 * tier);
 		if (rng.random() < DOWN_YEAR_RATE * (1.3 - 0.6 * tier)) {
 			// It falls apart: transfers out, an injury in November, a freshman
 			// class that did not arrive. Bigger for a program with more to lose.
-			level -= 6 + 0.14 * C.prestige(name) + rng.uniform(0, 6);
+			level -= 6 + 0.14 * C.prestigeOrLowMajor(name) + rng.uniform(0, 6);
 		} else if (rng.random() < BREAKOUT_RATE / (1 - DOWN_YEAR_RATE)) {
 			/* Divided by (1 - DOWN_YEAR_RATE): this branch is only reached in
 			   the 91% of seasons that were not down years, so a bare
 			   BREAKOUT_RATE here realized 8.2%, not the 9% the constant beside
 			   DOWN_YEAR_RATE reads as. */
 			// The other direction: a mid-major that keeps everybody.
-			level += 5 + 0.10 * (100 - C.prestige(name)) + rng.uniform(0, 5);
+			level += 5 + 0.10 * (100 - C.prestigeOrLowMajor(name)) + rng.uniform(0, 5);
 		}
 		return clamp(level, 12, 95);
 	}
@@ -788,17 +788,17 @@
 			if (confOf[n] === to) return false;
 			const sf = strength(confOf[n]);
 			return sf < strength(to) - 4 && sf > strength(to) - 26 &&
-				C.prestige(n) >= 60;
+				C.prestigeOrLowMajor(n) >= 60;
 		};
 		let candidates = C.names
 			.filter((n) => tier(n) && regionsOverlap(confOf[n], to))
-			.sort((a, b) => C.prestige(b) - C.prestige(a))
+			.sort((a, b) => C.prestigeOrLowMajor(b) - C.prestigeOrLowMajor(a))
 			.slice(0, 30);
 		// A raider with nobody in reach on the map takes the tier anyway,
 		// which is what a raid across the country is.
 		if (candidates.length < wanted) {
 			candidates = C.names.filter(tier)
-				.sort((a, b) => C.prestige(b) - C.prestige(a))
+				.sort((a, b) => C.prestigeOrLowMajor(b) - C.prestigeOrLowMajor(a))
 				.slice(0, 30);
 		}
 		for (const name of rng.shuffle(candidates)) {
@@ -911,7 +911,7 @@
 				coach.age = clamp((coach.age || 34 + coach.tenure) + 1, 30, 78);
 				const roll = trng.child("coach").random();
 				coach.situation = coach.tenure >= 16 && roll < 0.55 ? "fixture"
-					: level < C.prestige(name) - 12 && roll < 0.40 ? "hot seat"
+					: level < C.prestigeOrLowMajor(name) - 12 && roll < 0.40 ? "hot seat"
 					: "settled";
 				const sit = SITUATION_BY_NAME[coach.situation];
 				coach.situationLabel = sit.label;
@@ -919,7 +919,7 @@
 				coach.formAdj = sit.form;
 				coach.carried = true;
 			} else {
-				coach = makeCoach(trng.child("coach"), level, C.prestige(name), coachNames);
+				coach = makeCoach(trng.child("coach"), level, C.prestigeOrLowMajor(name), coachNames);
 				if (kept && kept.fired) {
 					// The replacement hire: always a first-year man, and the
 					// team page can say whom he replaced.
@@ -952,7 +952,7 @@
 				// THIS season (a carried move from an earlier universe season
 				// is simply where it plays now).
 				movedFrom: (map.moves.filter((m) => m.school === name)[0] || {}).from || null,
-				prestige: C.prestige(name),
+				prestige: C.prestigeOrLowMajor(name),
 				level: coachedLevel,
 				members,
 				rating: teamRating(members),
@@ -998,7 +998,7 @@
 			cfg && cfg.bluebloodDownYears !== undefined ? cfg.bluebloodDownYears : 0, 0, 8));
 		if (down > 0) {
 			const blue = C.names.slice()
-				.sort((a, b) => C.prestige(b) - C.prestige(a)).slice(0, 24);
+				.sort((a, b) => C.prestigeOrLowMajor(b) - C.prestigeOrLowMajor(a)).slice(0, 24);
 			for (const name of nrng.shuffle(blue).slice(0, down)) {
 				const t = teams[name];
 				if (!t) continue;
@@ -1012,7 +1012,7 @@
 		if (lift > 0) {
 			for (const name of C.names) {
 				const t = teams[name];
-				if (!t || C.prestige(name) >= 62) continue;
+				if (!t || C.prestigeOrLowMajor(name) >= 62) continue;
 				t.level = clamp(t.level + lift * nrng.uniform(0.4, 1.0), 5, 99);
 				t.midMajorSurge = true;
 			}
@@ -1292,7 +1292,7 @@
 		// Kept so a prospect's best night can name a real opponent and date.
 		t.log.push({
 			opp: opp.name, won, conference: !!conference,
-			pf: score ? score.us : null, pa: score ? score.them : null,
+			teamPts: score ? score.us : null, oppPts: score ? score.them : null,
 			ot: score ? score.ot : 0,
 			home: home === undefined ? 0 : home,
 			when: when === undefined ? 0.5 : when,
@@ -1510,13 +1510,13 @@
 			   where the variety has to be. */
 			const half = u.g.when < 0.5 ? "season's first half" : "conference season";
 			add("upset", rng.pick([
-				u.winner.name + " beat " + u.loser.name + " " + u.g.pf + "-" + u.g.pa +
+				u.winner.name + " beat " + u.loser.name + " " + u.g.teamPts + "-" + u.g.oppPts +
 					", the result of the " + half,
-				u.loser.name + " lost at " + u.winner.name + ", " + u.g.pa + "-" + u.g.pf +
+				u.loser.name + " lost at " + u.winner.name + ", " + u.g.oppPts + "-" + u.g.teamPts +
 					", and did not lead in the second half",
 				u.winner.name + " had no business in that game and won it anyway, " +
-					u.g.pf + "-" + u.g.pa + " over " + u.loser.name,
-				u.loser.name + " was ranked and is now " + u.g.pa + "-" + u.g.pf +
+					u.g.teamPts + "-" + u.g.oppPts + " over " + u.loser.name,
+				u.loser.name + " was ranked and is now " + u.g.oppPts + "-" + u.g.teamPts +
 					" worse off, beaten by " + u.winner.name + " in the " + half,
 			]), u.g.when, [u.winner.name, u.loser.name]);
 		}
@@ -1524,28 +1524,28 @@
 		// The game of the year: the closest game between two good teams.
 		const good = games.filter(({ winner, loser, g }) =>
 			winner.rating > topRating - 6 && loser.rating > topRating - 6 &&
-			Math.abs(g.pf - g.pa) <= 3);
+			Math.abs(g.teamPts - g.oppPts) <= 3);
 		if (good.length && tells(0.55)) {
 			const gm = rng.pick(good);
 			const otTag = gm.g.ot
 				? " (" + (gm.g.ot > 1 ? gm.g.ot + "OT" : "OT") + ")" : "";
 			add("game of the year", rng.pick([
-				gm.winner.name + " " + gm.g.pf + ", " + gm.loser.name + " " + gm.g.pa +
+				gm.winner.name + " " + gm.g.teamPts + ", " + gm.loser.name + " " + gm.g.oppPts +
 					otTag + " — the game of the year",
-				gm.winner.name + " beat " + gm.loser.name + " " + gm.g.pf + "-" + gm.g.pa +
+				gm.winner.name + " beat " + gm.loser.name + " " + gm.g.teamPts + "-" + gm.g.oppPts +
 					otTag + " in the best game anybody has played this season",
-				"Nobody deserved to lose it: " + gm.winner.name + " " + gm.g.pf + ", " +
-					gm.loser.name + " " + gm.g.pa + otTag,
+				"Nobody deserved to lose it: " + gm.winner.name + " " + gm.g.teamPts + ", " +
+					gm.loser.name + " " + gm.g.oppPts + otTag,
 				gm.loser.name + " and " + gm.winner.name + " traded the lead nine times " +
-					"before " + gm.winner.name + " took it for good, " + gm.g.pf + "-" +
-					gm.g.pa + otTag,
+					"before " + gm.winner.name + " took it for good, " + gm.g.teamPts + "-" +
+					gm.g.oppPts + otTag,
 			]), gm.g.when, [gm.winner.name, gm.loser.name]);
 		}
 
 		// A coach fired in-season: a program with real expectations losing.
 		const failing = all.filter((t) =>
 			t.games >= 10 && t.w / Math.max(1, t.games) < 0.35 &&
-			C.prestige(t.name) >= 55);
+			C.prestigeOrLowMajor(t.name) >= 55);
 		if (failing.length && tells(0.52)) {
 			const t = rng.pick(failing);
 			/* The month is drawn first and the date follows it. They used to
@@ -1577,18 +1577,18 @@
 
 		// A blowout worth naming, because a 40-point game is a fact about a
 		// season and not only about one night.
-		const blowouts = games.filter(({ g }) => g.pf - g.pa >= 38)
-			.sort((a, b) => (b.g.pf - b.g.pa) - (a.g.pf - a.g.pa));
+		const blowouts = games.filter(({ g }) => g.teamPts - g.oppPts >= 38)
+			.sort((a, b) => (b.g.teamPts - b.g.oppPts) - (a.g.teamPts - a.g.oppPts));
 		if (blowouts.length && tells(0.55)) {
 			const b = blowouts[0];
-			const by = b.g.pf - b.g.pa;
+			const by = b.g.teamPts - b.g.oppPts;
 			add("blowout", rng.pick([
 				b.winner.name + " beat " + b.loser.name + " by " + by,
 				b.winner.name + " led " + b.loser.name + " by more than thirty at the " +
 					"half and won by " + by,
 				b.loser.name + " lost by " + by + " at " + b.winner.name + ", the " +
 					"largest margin of the season",
-				b.winner.name + " " + b.g.pf + ", " + b.loser.name + " " + b.g.pa +
+				b.winner.name + " " + b.g.teamPts + ", " + b.loser.name + " " + b.g.oppPts +
 					" — a " + by + "-point game that stopped being one early",
 			]), b.g.when, [b.winner.name, b.loser.name]);
 		}
@@ -1969,7 +1969,7 @@
 				let n = 0;
 				for (const g of t.log) {
 					if (g.stage !== "reg" || !g.conference) continue;
-					m += (g.pf || 0) - (g.pa || 0); n++;
+					m += (g.teamPts || 0) - (g.oppPts || 0); n++;
 				}
 				return n ? m / n : 0;
 			};
@@ -2089,7 +2089,7 @@
 			const coach = t.coach;
 			const games = Math.max(1, t.games || (t.w + t.l) || 1);
 			const winPct = t.w / games;
-			const prestige = C.prestige(name);
+			const prestige = C.prestigeOrLowMajor(name);
 			/* What this program expects to win.
 
 			   Fitted to the simulation's OWN relation between prestige and

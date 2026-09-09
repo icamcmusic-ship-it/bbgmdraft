@@ -384,6 +384,217 @@ module.exports = function (ok, V) {
 			below > 0, "no seed in 60 produced a sub-58 effective pace");
 	}
 
+	/* ------------------------------------------------ prestige is not a default
+
+	   frequencyOf defaulted to 1, so prestige(null), prestige(""),
+	   prestige("Real Madrid") and prestige("Moberly Area CC") all returned
+	   16.16 and a junior college entered a Division I recruiting
+	   calculation silently. A miss is visible now. */
+	{
+		const misses = [null, undefined, "", "!!!nonsense!!!", "Real Madrid",
+			"Moberly Area CC", "Georgetown (KY)", "KK Mega Basket"];
+		ok("frequencyOf is null, not 1, for a name outside the database",
+			misses.every((n) => C.frequencyOf(n) === null));
+		ok("prestige is null for a name outside the database",
+			misses.every((n) => C.prestige(n) === null));
+		ok("prestige is a number for every program in the database",
+			C.names.every((n) => Number.isFinite(C.prestige(n))));
+		ok("prestigeOrLowMajor is the explicit stand-in and equals the old default",
+			C.prestigeOrLowMajor("Real Madrid") === C.UNKNOWN_PRESTIGE &&
+			Math.abs(C.UNKNOWN_PRESTIGE - 16.1605) < 0.001 &&
+			C.prestigeOrLowMajor("Kentucky") === C.prestige("Kentucky"));
+	}
+
+	/* ------------------------------------------- recruiting reads the signing
+
+	   The pull read p.newCollege (where he plays now) while `committed`
+	   displayed transfer.from (where he signed), and a JUCO / NAIA /
+	   overseas origin got a five-star rating against a prestige it did not
+	   have. Every rank now reads the school it displays, and a non-D-I
+	   signing is capped where the walk-on already was. */
+	{
+		const E = global.Engine;
+		let n = 0;
+		let mismatch = 0;
+		let nonDIHigh = 0;
+		let noFlag = 0;
+		let dupNo1 = 0;
+		for (let s = 0; s < 6; s++) {
+			const res = E.run(V.realisticClass(900 + s, 70),
+				global.Config.make({ seed: "rec" + s, transferShare: 60 }));
+			const firsts = {};
+			for (const p of res.players) {
+				const rec = p.recruiting;
+				/* An anomaly (a JUCO star, a late bloomer) rewrites the
+				   biography after the rank is drawn, on purpose. */
+				if (!rec || p.surprise) continue;
+				n++;
+				const signed = (p.transfer && p.transfer.from) || p.newCollege;
+				if (rec.committed !== signed) mismatch++;
+				const known = C.prestige(signed) !== null;
+				if (!known && rec.stars > 2) nonDIHigh++;
+				if (!known && rec.diOnly !== false) noFlag++;
+				if (rec.rank === 1 && !p.surprise) {
+					firsts[rec.hsClass] = (firsts[rec.hsClass] || 0) + 1;
+				}
+				if (p.betterEarlier !== undefined) noFlag++;
+			}
+			for (const k of Object.keys(firsts)) if (firsts[k] > 1) dupNo1++;
+		}
+		ok("the committed school is the school the rank was computed from", mismatch === 0,
+			mismatch + " of " + n);
+		ok("no non-Division-I signing carries more than two stars", nonDIHigh === 0,
+			String(nonDIHigh));
+		ok("a non-Division-I signing is flagged, and the trajectory flag is gone",
+			noFlag === 0, String(noFlag));
+		ok("one No. 1 per high-school class", dupNo1 === 0, String(dupNo1));
+	}
+
+	/* ------------------------------------ one recruiting class across files
+
+	   assignRecruiting ranked within a file, so the 2027 freshman and the
+	   2028 sophomore who came out of the same high-school class were both
+	   No. 1. Universe.recruitingCohorts pools the previews and ranks once. */
+	{
+		const E = global.Engine;
+		const U = global.Universe;
+		const files = [2026, 2027, 2028].map((y, i) => {
+			const lf = V.realisticClass(700 + i, 60);
+			lf.startingSeason = y;
+			/* Three different classes, not one class three times: the
+			   fixture names every player Test P<n>, and the same key in two
+			   files is the same man to the universe. */
+			for (const p of lf.players) { p.draft.year = y; p.lastName += "-" + y; }
+			return lf;
+		});
+		const previews = files.map((lf, i) =>
+			E.previewClass(lf, global.Config.make({ seed: "u" + i })));
+		const rc = U.recruitingCohorts(previews);
+		const ranksBy = {};
+		let seen = 0;
+		previews.forEach((pv, i) => {
+			for (const p of pv.players) {
+				const g = rc.byFile[i][p.key];
+				if (!g || !p.recruiting) continue;
+				seen++;
+				const h = p.recruiting.hsClass;
+				(ranksBy[h] = ranksBy[h] || []).push(g.rank);
+			}
+		});
+		const collisions = Object.values(ranksBy)
+			.filter((rs) => new Set(rs).size !== rs.length).length;
+		const spansFiles = rc.cohorts.filter((c) => c.seasons.length > 1).length;
+		ok("the universe pass ranks every ranked prospect", seen > 100, String(seen));
+		ok("a pooled high-school class has no duplicate ranks", collisions === 0,
+			String(collisions));
+		ok("a high-school class spans more than one file", spansFiles > 0,
+			String(spansFiles));
+		ok("a class missing a draft year is marked partial and says which",
+			rc.cohorts.every((c) => c.partial === (c.missing.length > 0)) &&
+			rc.cohorts.some((c) => c.partial) &&
+			rc.cohorts.filter((c) => c.partial).every((c) => c.missing.length > 0));
+		/* The real run takes the universe's ranks. */
+		const cfg = global.Config.make({ seed: "u1",
+			universeRecruiting: { byKey: rc.byFile[1] } });
+		const res = E.run(files[1], cfg);
+		let taken = 0;
+		let differ = 0;
+		for (const p of res.players) {
+			const g = rc.byFile[1][p.key];
+			if (!g || !p.recruiting || p.surprise) continue;
+			taken++;
+			if (p.recruiting.rank !== g.rank || !p.recruiting.universeRanked) differ++;
+		}
+		ok("a file run inside the universe takes the pooled ranks", taken > 30 && differ === 0,
+			differ + " of " + taken + " differ");
+	}
+
+	/* --------------------------------------------- the destination model
+
+	   assignCollege returned early for any named college, the momentum
+	   block never read the player, and the blank draw was talent-blind.
+	   destinationPool is the one draw now; these hold its three modes and
+	   its two dials to what the panel says they do. */
+	{
+		const E = global.Engine;
+		const run = (o) => {
+			const out = [];
+			for (let s = 0; s < 4; s++) {
+				out.push(E.run(V.realisticClass(800 + s, 70),
+					global.Config.make(Object.assign({ seed: "dest" + s }, o))));
+			}
+			return out;
+		};
+		const flat = (rs) => rs.reduce((a, r) => a.concat(r.players), []);
+		const baseRuns = run({});
+		const respectRuns = run({ collegeSource: "respect" });
+		const base = flat(baseRuns);
+		const rewrite = flat(run({ collegeSource: "rewrite" }));
+		const coupled = flat(run({ collegeSource: "rewrite", talentCoupling: 1.5 }));
+		/* Seed by seed, because keys are pids and every fixture reuses
+		   them. An anomaly can move a man's college after the draw, and
+		   which men the anomalies pick depends on who is abroad, so the
+		   comparison skips anyone an anomaly touched in either run. */
+		let respectOk = true;
+		respectRuns.forEach((res, i) => {
+			for (const p of res.players) {
+				const q = baseRuns[i].players.find((x) => x.key === p.key);
+				if (!q || p.surprise || q.surprise) continue;
+				const want = !p.src.college ? "Did not play" : q.newCollege;
+				if (p.newCollege !== want) respectOk = false;
+			}
+		});
+		ok("respect: every blank college is 'Did not play' and nothing else moves", respectOk);
+		ok("blanks (default) still fills only the blanks",
+			base.every((p) => !p.src.college || !p.collegeChanged));
+		const rewritten = rewrite.filter((p) => p.collegeChanged).length;
+		ok("rewrite all redraws nearly every college", rewritten > rewrite.length * 0.9,
+			rewritten + " of " + rewrite.length);
+		const corr = (xs, ys) => {
+			const mx = xs.reduce((a, b) => a + b, 0) / xs.length;
+			const my = ys.reduce((a, b) => a + b, 0) / ys.length;
+			let n = 0; let dx = 0; let dy = 0;
+			for (let i = 0; i < xs.length; i++) {
+				n += (xs[i] - mx) * (ys[i] - my);
+				dx += (xs[i] - mx) * (xs[i] - mx);
+				dy += (ys[i] - my) * (ys[i] - my);
+			}
+			return dx > 0 && dy > 0 ? n / Math.sqrt(dx * dy) : 0;
+		};
+		const c = (ps) => {
+			const xs = []; const ys = [];
+			for (const p of ps) {
+				const pr = C.prestige(p.newCollege);
+				if (pr === null) continue;
+				xs.push(p.origOvr); ys.push(pr);
+			}
+			return corr(xs, ys);
+		};
+		ok("at coupling 0 a rewrite is talent-blind", Math.abs(c(rewrite)) < 0.15,
+			c(rewrite).toFixed(3));
+		ok("talent coupling sends better prospects to better programs", c(coupled) > 0.35,
+			c(coupled).toFixed(3));
+		ok("talentTerm is 1 at coupling 0 and rises with prestige for a top prospect",
+			E.talentTerm({ origOvr: 55 }, 95, 0) === 1 &&
+			E.talentTerm({ origOvr: 55 }, 95, 1) > 2 &&
+			E.talentTerm({ origOvr: 55 }, 10, 1) < 0.5 &&
+			E.talentTerm({ origOvr: 25 }, 95, 1) < 0.5);
+		const pool = (loc, power) => E.destinationPool(
+			{ born: { loc } }, global.Config.make({ birthplaceWeight: power }), null,
+			{ origOvr: 40 }, { leagues: true });
+		const share = (opts, name) => {
+			const t = opts.reduce((a, o) => a + o.w, 0);
+			const o = opts.find((x) => x.name === name);
+			return o ? o.w / t : 0;
+		};
+		ok("birthplace weight 0 ignores where he was born",
+			Math.abs(share(pool("Belgrade, Serbia", 0), "EuroLeague") -
+				share(pool("Anytown, USA", 0), "EuroLeague")) < 1e-9);
+		ok("birthplace weight 2 sends a Serbian to Europe harder than 1 does",
+			share(pool("Belgrade, Serbia", 2), "EuroLeague") >
+			share(pool("Belgrade, Serbia", 1), "EuroLeague"));
+	}
+
 	/* ------------------------------------------------ the build table's size
 
 	   The Builds-per-class slider was capped at 40 against a table of 205, so

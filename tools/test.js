@@ -3694,8 +3694,12 @@ console.log("\nAudit regressions (September 2026)");
 	}
 	ok("no more than one game in five hundred is a 40-point night",
 		forty / games < 0.005, (forty / games * 100).toFixed(2) + "% of " + games);
-	ok("foul-outs are rare, not routine (under 10% of games)",
-		foulOuts / games < 0.10, (foulOuts / games * 100).toFixed(1) + "%");
+	/* The README said "about 7%" for years while the model measured 1.7%,
+	   and this band, at "under 10%", could not tell the two apart. Real
+	   Division I is near 2% of player-games; the README says so now. */
+	ok("foul-outs are rare, not routine (0.5-4% of player-games)",
+		foulOuts / games >= 0.005 && foulOuts / games < 0.04,
+		(foulOuts / games * 100).toFixed(1) + "%");
 	ok("a 20-point scorer's night-to-night spread is 4.5-9 points",
 		sdHi.length > 10 && mean(sdHi) > 4.5 && mean(sdHi) < 9, mean(sdHi).toFixed(1));
 	ok("every game's points equal 2*(FGM-3PM) + 3*3PM + FTM", idBad === 0, String(idBad));
@@ -4532,7 +4536,7 @@ console.log("\nAudit regressions (the second September 2026 pass)");
 				const p = res.players.find((x) => x.newCollege === "NBA G League" && x.proTeam && x.proTeam.log.length);
 				if (!p) return true;
 				const l = p.proTeam.log;
-				const avg = l.reduce((a, g) => a + g.pf, 0) / l.length;
+				const avg = l.reduce((a, g) => a + g.teamPts, 0) / l.length;
 				return avg > 95 && l.every((g, i) => !i || l[i - 1].when <= g.when);
 			})());
 		ok("a prospect abroad carries no fabricated college seasons",

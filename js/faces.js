@@ -189,6 +189,9 @@
 	   and a bad blob must not take a page down. */
 	function render(container, p) {
 		if (!global.FacesJS || !container) return false;
+		/* An SVG portrait is an image; say so, and whose it is. */
+		container.setAttribute("role", "img");
+		container.setAttribute("aria-label", (p && p.name ? p.name + "'s" : "A") + " portrait");
 		// Already in the document (the editor drawer, a re-render into a live
 		// node): draw straight away so there is no visible flash.
 		if (document.contains(container)) return paint(container, p);

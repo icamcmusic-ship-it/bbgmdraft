@@ -54,8 +54,8 @@ module.exports = function (ok, V) {
 			for (const t of Object.values(res.teams)) {
 				if (!t.box || !t.log || !t.log.length) continue;
 				teams++;
-				const pf = t.log.reduce((a, g) => a + (g.pf || 0), 0) / t.log.length;
-				const pa = t.log.reduce((a, g) => a + (g.pa || 0), 0) / t.log.length;
+				const pf = t.log.reduce((a, g) => a + (g.teamPts || 0), 0) / t.log.length;
+				const pa = t.log.reduce((a, g) => a + (g.oppPts || 0), 0) / t.log.length;
 				const d = Math.abs(t.box.pts - pf);
 				if (d > 3) over3++;
 				if (d > worst) { worst = d; worstName = t.name; }
@@ -95,7 +95,7 @@ module.exports = function (ok, V) {
 				let pts = 0;
 				let n = 0;
 				for (const t of Object.values(res.teams)) {
-					for (const g of t.log) { if (g.stage === "reg") { pts += g.pf; n++; } }
+					for (const g of t.log) { if (g.stage === "reg") { pts += g.teamPts; n++; } }
 				}
 				scored[era].push(n ? pts / n : 0);
 			}
