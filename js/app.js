@@ -5497,6 +5497,128 @@
 		exported();
 	}
 
+	/* ---------------------------------------------------------- the almanac */
+
+	/* The whole season as one document. Everything below is assembly and
+	   plumbing; what goes IN the document is js/almanac.js, which knows
+	   nothing about the DOM so the tests can read what a user downloads. */
+
+	function almanacName(res, ext) {
+		return "almanac_" + res.season + "_" + res.seed + "." + ext;
+	}
+
+	/* The dialog's choices, remembered between openings the way the export
+	   menu's are, and shared by both buttons so the PDF and the .md are the
+	   same document. The awards scope is the export menu's own setting: a
+	   user who narrowed the honors there meant it here too. */
+	function almanacOpts() {
+		const chosen = state.almanacSections || null;
+		const sections = {};
+		for (const s of global.Almanac.SECTIONS) {
+			sections[s.id] = chosen ? chosen[s.id] !== false : true;
+		}
+		return {
+			sections,
+			newsLimit: Number.isFinite(state.almanacNewsLimit)
+				? state.almanacNewsLimit : 0,
+			awardsScope: state.exportAwardsScope || "all",
+			majorConferences: state.exportMajorConfs || null,
+		};
+	}
+
+	function exportAlmanacMarkdown(res) {
+		download(almanacName(res, "md"),
+			global.Almanac.markdown(res, almanacOpts()), "text/markdown");
+		exported("the whole season as one document");
+	}
+
+	/* "PDF" without a PDF library: the printable document opens in a tab and
+	   the browser's own print dialog writes the file. Every browser this tool
+	   runs in can save a page as PDF, and a bundled renderer would be the
+	   first dependency in a tool that has none. A blocked pop-up falls back to
+	   downloading the same HTML, which prints identically from a double-click.  */
+	function printAlmanac(res) {
+		const html = global.Almanac.html(res, almanacOpts());
+		let w = null;
+		try { w = window.open("", "_blank"); } catch (err) { w = null; }
+		if (!w) {
+			download(almanacName(res, "html"), html, "text/html");
+			exported("your browser blocked the print tab — open the file and " +
+				"print it to PDF from there");
+			return;
+		}
+		w.document.write(html);
+		w.document.close();
+		/* Print once the document has laid out — a print() on a page still
+		   parsing gives a blank first page in Safari — but document.close()
+		   can have fired `load` already, and waiting for an event that has
+		   been and gone leaves the tab sitting there with no print dialog. */
+		const print = () => { try { w.focus(); w.print(); } catch (err) { /* closed */ } };
+		if (w.document.readyState === "complete") setTimeout(print, 0);
+		else w.addEventListener("load", print);
+		setStatus("Opened the printable almanac — use your browser's " +
+			"“Save as PDF” in the print dialog.");
+	}
+
+	function almanacDialog() {
+		const res = state.results[state.active];
+		if (!res) return;
+		const box = el("div");
+		box.appendChild(el("p", "hint",
+			"The season as one document: the poll, every conference's standings, " +
+			"the bracket round by round, the honors, the leader boards, the pro " +
+			"leagues, the board, a capsule for every prospect and the news feed. " +
+			"Download it as Markdown, or open it printable and save it as a PDF."));
+		const list = el("div", "checks");
+		const boxes = {};
+		const remembered = state.almanacSections || null;
+		for (const s of global.Almanac.SECTIONS) {
+			const lab = el("label", "check");
+			const cb = el("input");
+			cb.type = "checkbox";
+			cb.checked = remembered ? remembered[s.id] !== false : true;
+			cb.addEventListener("change", () => { state.almanacSections = read(); });
+			boxes[s.id] = cb;
+			lab.appendChild(cb);
+			lab.appendChild(document.createTextNode(" " + s.label));
+			list.appendChild(lab);
+		}
+		const read = () => {
+			const out = {};
+			for (const id of Object.keys(boxes)) out[id] = boxes[id].checked;
+			return out;
+		};
+		box.appendChild(list);
+		/* The news feed is eighty to a hundred and twenty articles and it is
+		   the one section that can double the page count on its own. */
+		const newsWrap = el("div", "ctl");
+		const newsLab = el("label", null, "Most news articles");
+		newsLab.htmlFor = "almanacNewsLimit";
+		const newsInput = el("input");
+		newsInput.id = "almanacNewsLimit";
+		newsInput.type = "number";
+		newsInput.min = "0";
+		newsInput.value = String(state.almanacNewsLimit || 0);
+		newsInput.addEventListener("input", () => {
+			state.almanacNewsLimit = Math.max(0, Number(newsInput.value) || 0);
+		});
+		newsWrap.appendChild(newsLab);
+		newsWrap.appendChild(newsInput);
+		newsWrap.appendChild(el("p", "unit", "0 means every article."));
+		box.appendChild(newsWrap);
+		const pdf = el("button", "tiny", "Open printable (save as PDF)\u2026");
+		pdf.addEventListener("click", () => {
+			state.almanacSections = read();
+			closeModal();
+			printAlmanac(res);
+		});
+		box.appendChild(pdf);
+		modal("Season almanac", box, () => {
+			state.almanacSections = read();
+			exportAlmanacMarkdown(res);
+		}, "Download Markdown");
+	}
+
 	/* Re-apply locks in bulk from a CSV. The natural workflow — export the
 	   table, edit ovr/archetype/college in a spreadsheet, bring it back — had
 	   no return path at all. */
@@ -5903,6 +6025,8 @@
 		item("Prospect table as CSV (whole class)", () => exportCsv(res, true));
 		item("Season as JSON — records, bracket, awards, board", () => exportSeasonJson(res));
 		item("Season as CSV", () => exportSeasonCsv(res));
+		item("Season almanac — the whole season as Markdown or a PDF\u2026",
+			() => almanacDialog());
 		item("Season as a BBGM league fragment — teams, records, coaches", () => exportLeagueFragment(res));
 		item("Note text only, for a spreadsheet", () => exportNotes(res));
 		item("Notes as Markdown, for a forum post", () => exportNotesMarkdown(res));
