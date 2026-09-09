@@ -538,7 +538,7 @@
 		{ name: "Weak-Side Cutter Guard", min: 0, max: 52, w: 0.9, t: ["guard", "athletic", "scoring"], o: { oiq: 14, dnk: 12, jmp: 10, spd: 8, tp: -16, pss: -12, drb: -10, stre: -6 } },
 		{ name: "Under-Six-Foot Starter", min: 0, max: 34, w: 0.8, t: ["guard", "playmaking", "durability"], o: { pss: 18, spd: 14, endu: 10, drb: 8, ins: -18, reb: -14, dnk: -12, stre: -6 } },
 		{ name: "Sixth-Year Point Guard", min: 0, max: 46, w: 0.7, pot: -8, bio: { years: ["Graduate"] }, t: ["guard", "playmaking", "durability"], o: { oiq: 18, diq: 12, ft: 8, stre: 6, jmp: -18, spd: -14, dnk: -10, tp: -2 } },
-		{ name: "Two-Point-Only Scorer", min: 0, max: 50, w: 0.9, t: ["guard", "scoring"], o: { fg: 16, ins: 14, drb: 8, ft: 6, tp: -24, pss: -8, diq: -8, reb: -4 } },
+		{ name: "Two-Point-Only Scorer", min: 0, max: 50, w: 0.9, t: ["guard", "scoring"], o: { fg: 16, ins: 14, drb: 8, ft: 6, tp: -20, pss: -8, diq: -8, reb: -4 } },
 		{ name: "Deny-the-Wing Defender", min: 0, max: 52, w: 1.05, t: ["guard", "defense", "athletic"], o: { diq: 16, spd: 14, endu: 10, jmp: 6, ins: -16, tp: -12, oiq: -8, reb: -6 } },
 		{ name: "Rhythm Shooter", min: 0, max: 54, w: 1.1, vol: 1.25, t: ["guard", "shooting"], o: { tp: 20, ft: 12, fg: 8, oiq: 4, ins: -16, diq: -12, drb: -8, reb: -8 } },
 		{ name: "Blow-By Only Guard", min: 0, max: 48, w: 0.9, t: ["guard", "athletic", "raw"], o: { spd: 20, drb: 10, dnk: 6, jmp: 6, tp: -16, oiq: -12, ft: -8, reb: -6 } },
@@ -547,23 +547,23 @@
 		{ name: "Runs-the-Team-Cold Guard", min: 0, max: 46, w: 0.85, vol: 1.3, t: ["guard", "playmaking", "raw"], o: { pss: 18, drb: 12, spd: 8, oiq: 6, fg: -16, tp: -12, ins: -10, diq: -6 } },
 		{ name: "Screen-and-Slip Guard", min: 0, max: 50, w: 0.8, t: ["guard", "scoring", "playmaking"], o: { oiq: 16, ins: 12, pss: 10, dnk: 6, tp: -16, stre: -12, reb: -10, diq: -6 } },
 		{ name: "Full-Court Outlet Guard", min: 0, max: 48, w: 0.85, t: ["guard", "playmaking", "rebounding"], o: { pss: 18, reb: 12, oiq: 8, endu: 6, ins: -16, dnk: -12, tp: -10, stre: -6 } },
-		{ name: "Skinny Combo Guard", min: 0, max: 50, w: 1.0, pot: 4, t: ["guard", "raw", "shooting"], o: { tp: 16, drb: 12, spd: 8, oiq: 6, stre: -22, reb: -10, ins: -8, dnk: -2 } },
+		{ name: "Skinny Combo Guard", min: 0, max: 50, w: 1.0, pot: 4, t: ["guard", "raw", "shooting"], o: { tp: 16, drb: 12, spd: 8, oiq: 6, stre: -20, reb: -10, ins: -8, dnk: -2 } },
 		{ name: "Bulldozing Lead Guard", min: 24, max: 48, w: 0.9, t: ["guard", "scoring", "durability"], o: { stre: 18, ins: 12, ft: 10, endu: 6, tp: -16, spd: -12, drb: -10, jmp: -8 } },
 		{ name: "Playmaking Two", min: 0, max: 52, w: 1.2, t: ["guard", "playmaking", "scoring"], o: { pss: 14, fg: 12, drb: 10, oiq: 8, ins: -14, reb: -12, diq: -10, stre: -8 } },
 		{ name: "Anchor-Down Guard Defender", min: 0, max: 50, w: 0.95, t: ["guard", "defense", "durability"], o: { stre: 16, diq: 14, endu: 10, reb: 6, tp: -16, ins: -12, jmp: -10, drb: -8 } },
 		{ name: "Clock-Killing Guard", min: 0, max: 48, w: 0.8, t: ["guard", "playmaking", "durability"], o: { drb: 18, ft: 12, oiq: 10, endu: 6, jmp: -16, reb: -12, ins: -10, tp: -8 } },
 		{ name: "Second-Unit Organizer", min: 0, max: 48, w: 1.1, pot: -4, t: ["guard", "playmaking"], o: { pss: 16, oiq: 12, ft: 8, drb: 8, ins: -14, dnk: -12, reb: -10, jmp: -8 } },
-		{ name: "Cold-Blooded Free-Throw Guard", min: 0, max: 52, w: 0.8, t: ["guard", "shooting", "durability"], o: { ft: 24, oiq: 8, endu: 6, drb: 4, ins: -14, reb: -12, jmp: -10, stre: -8 } },
+		{ name: "Cold-Blooded Free-Throw Guard", min: 0, max: 52, w: 0.8, t: ["guard", "shooting", "durability"], o: { ft: 20, oiq: 8, endu: 6, drb: 4, ins: -14, reb: -12, jmp: -10, stre: -8 } },
 		{ name: "Perimeter Rebounding Guard", min: 24, max: 48, w: 0.85, t: ["guard", "rebounding", "durability"], o: { reb: 18, endu: 12, stre: 10, diq: 6, tp: -16, ins: -12, dnk: -10, drb: -6 } },
 		{ name: "Read-and-React Backup", min: 0, max: 50, w: 1.0, pot: -3, t: ["guard", "playmaking", "defense"], o: { oiq: 16, ft: 12, pss: 8, drb: 6, jmp: -16, stre: -12, ins: -10, spd: -4 } },
 		{ name: "Two-Foot-in-the-Paint Guard", min: 0, max: 46, w: 0.75, t: ["guard", "scoring", "raw"], o: { ins: 20, ft: 10, stre: 8, drb: 6, tp: -20, diq: -10, reb: -8, pss: -6 } },
 		{ name: "Screen-Setting Guard", min: 20, max: 50, w: 0.7, t: ["guard", "durability", "playmaking"], o: { stre: 16, endu: 14, oiq: 10, pss: 6, tp: -16, ins: -12, jmp: -10, spd: -8 } },
 		{ name: "Injured-Wrist Shooter", min: 0, max: 54, w: 0.6, inj: 1.6, pot: 4, t: ["guard", "shooting", "durability"], o: { tp: 16, ft: 12, oiq: 8, drb: 6, stre: -16, endu: -12, ins: -8, jmp: -6 } },
 		{ name: "Downhill Bulldog Two", min: 0, max: 52, w: 1.0, t: ["guard", "scoring", "athletic"], o: { dnk: 16, stre: 12, spd: 10, ft: 8, tp: -18, pss: -12, oiq: -10, reb: -6 } },
-		{ name: "Never-Passes-Up-a-Three Guard", min: 0, max: 54, w: 0.9, vol: 1.35, t: ["guard", "shooting", "scoring"], o: { tp: 24, fg: 8, ft: 6, spd: 4, ins: -16, diq: -14, pss: -10, reb: -6 } },
+		{ name: "Never-Passes-Up-a-Three Guard", min: 0, max: 54, w: 0.9, vol: 1.35, t: ["guard", "shooting", "scoring"], o: { tp: 20, fg: 8, ft: 6, spd: 4, ins: -16, diq: -14, pss: -10, reb: -6 } },
 		{ name: "Backup-Point Insurance", min: 0, max: 46, w: 1.15, pot: -6, inj: 0.8, t: ["guard", "durability", "playmaking"], o: { endu: 16, diq: 12, reb: 8, ft: 6, ins: -16, dnk: -12, tp: -10, jmp: -4 } },
-		{ name: "Track-Star Guard", min: 0, max: 52, w: 0.8, pot: 6, t: ["guard", "athletic", "raw"], o: { spd: 22, jmp: 12, endu: 8, dnk: 6, oiq: -18, tp: -14, pss: -10, ft: -6 } },
-		{ name: "Point Guard Who Cannot Finish", min: 0, max: 46, w: 1.0, t: ["guard", "playmaking", "raw"], o: { pss: 18, tp: 12, oiq: 8, drb: 6, ins: -24, dnk: -14, stre: -6, jmp: -2 } },
+		{ name: "Track-Star Guard", min: 0, max: 52, w: 0.8, pot: 6, t: ["guard", "athletic", "raw"], o: { spd: 20, jmp: 12, endu: 8, dnk: 6, oiq: -18, tp: -14, pss: -10, ft: -6 } },
+		{ name: "Point Guard Who Cannot Finish", min: 0, max: 46, w: 1.0, t: ["guard", "playmaking", "raw"], o: { pss: 18, tp: 12, oiq: 8, drb: 6, ins: -20, dnk: -14, stre: -6, jmp: -2 } },
 		// --- wings ----------------------------------------------------------
 		{ name: "Ghost-Screen Wing", min: 36, max: 66, w: 1.1, t: ["wing", "shooting", "playmaking"], o: { tp: 16, pss: 12, oiq: 10, drb: 6, ins: -16, stre: -12, reb: -10, jmp: -6 } },
 		{ name: "Dunker-Spot Wing", min: 38, max: 68, w: 1.2, t: ["wing", "athletic", "rebounding"], o: { dnk: 16, reb: 12, jmp: 10, ins: 6, tp: -18, pss: -12, drb: -10, ft: -4 } },
@@ -572,7 +572,7 @@
 		{ name: "Bump-Cutter Forward", min: 40, max: 70, w: 1.0, t: ["wing", "durability", "scoring"], o: { stre: 16, ins: 12, endu: 10, oiq: 8, tp: -18, drb: -12, spd: -10, pss: -6 } },
 		{ name: "Grab-and-Go Wing", min: 38, max: 68, w: 1.2, t: ["wing", "rebounding", "athletic"], o: { reb: 16, spd: 14, dnk: 8, endu: 6, tp: -16, ft: -12, pss: -10, oiq: -6 } },
 		{ name: "Mismatch Post-Up Wing", min: 40, max: 68, w: 0.9, t: ["wing", "scoring", "durability"], o: { ins: 16, pss: 12, reb: 10, stre: 6, tp: -18, spd: -12, drb: -10, jmp: -4 } },
-		{ name: "Wing With a Post Game and No Jumper", min: 38, max: 68, w: 0.8, t: ["wing", "scoring", "raw"], o: { ins: 16, stre: 12, dnk: 10, reb: 6, tp: -22, ft: -12, pss: -6, oiq: -4 } },
+		{ name: "Wing With a Post Game and No Jumper", min: 38, max: 68, w: 0.8, t: ["wing", "scoring", "raw"], o: { ins: 16, stre: 12, dnk: 10, reb: 6, tp: -20, ft: -12, pss: -6, oiq: -4 } },
 		{ name: "Face-Guarded Scorer", min: 34, max: 64, w: 0.85, vol: 1.2, t: ["wing", "scoring", "shooting"], o: { fg: 16, tp: 12, ft: 10, drb: 6, diq: -16, reb: -12, pss: -10, endu: -6 } },
 		{ name: "Second-Jump Wing", min: 36, max: 66, w: 1.05, t: ["wing", "rebounding", "athletic"], o: { jmp: 16, reb: 14, dnk: 8, endu: 6, tp: -16, pss: -12, drb: -10, ft: -6 } },
 		{ name: "Low-Usage Connector Wing", min: 36, max: 68, w: 1.4, pot: -3, t: ["wing", "playmaking", "defense"], o: { oiq: 12, pss: 12, diq: 10, ft: 6, fg: -14, ins: -12, drb: -8, tp: -6 } },
@@ -587,7 +587,7 @@
 		{ name: "Junior-Year Breakout Wing", min: 34, max: 68, w: 1.0, pot: 3, bio: { years: ["Junior", "Senior"] }, t: ["wing", "scoring", "shooting"], o: { fg: 14, tp: 12, ft: 10, oiq: 6, diq: -14, reb: -12, pss: -10, stre: -6 } },
 		{ name: "Wing Who Guards Fives", min: 42, max: 70, w: 1.0, t: ["wing", "defense", "rebounding"], o: { stre: 16, diq: 12, reb: 12, endu: 6, tp: -16, drb: -12, pss: -10, spd: -8 } },
 		{ name: "Cut-and-Cut-Again Forward", min: 38, max: 68, w: 1.1, t: ["wing", "athletic", "durability"], o: { endu: 16, oiq: 12, dnk: 10, jmp: 6, tp: -16, drb: -12, pss: -10, stre: -6 } },
-		{ name: "Perimeter-Shy Wing", min: 38, max: 68, w: 1.0, t: ["wing", "scoring", "raw"], o: { fg: 16, ins: 12, ft: 8, stre: 6, tp: -22, pss: -10, diq: -6, drb: -4 } },
+		{ name: "Perimeter-Shy Wing", min: 38, max: 68, w: 1.0, t: ["wing", "scoring", "raw"], o: { fg: 16, ins: 12, ft: 8, stre: 6, tp: -20, pss: -10, diq: -6, drb: -4 } },
 		{ name: "Guard-Sized Four", min: 44, max: 64, w: 0.9, t: ["wing", "rebounding", "scoring"], o: { reb: 14, ins: 12, stre: 10, fg: 8, tp: -18, drb: -12, pss: -8, spd: -6 } },
 		{ name: "Three-Level Wing", min: 36, max: 66, w: 0.7, pot: 5, t: ["wing", "scoring", "shooting"], o: { fg: 14, tp: 12, ins: 10, ft: 8, diq: -16, reb: -14, pss: -10, endu: -4 } },
 		{ name: "Wing Off the Bench for Defense", min: 34, max: 66, w: 1.25, pot: -5, t: ["wing", "defense", "durability"], o: { diq: 16, reb: 12, jmp: 8, stre: 6, tp: -16, drb: -12, pss: -10, ft: -4 } },
@@ -625,7 +625,7 @@
 		{ name: "Post-Entry Magnet", min: 60, max: 100, w: 0.9, t: ["big", "scoring", "rebounding"], o: { ins: 16, reb: 12, ft: 8, stre: 8, tp: -18, spd: -12, drb: -10, pss: -4 } },
 		{ name: "Second-Unit Five", min: 58, max: 100, w: 1.3, pot: -6, inj: 0.85, t: ["big", "durability", "rebounding"], o: { endu: 16, reb: 12, diq: 8, stre: 8, tp: -18, drb: -12, pss: -8, fg: -6 } },
 		{ name: "Center With Guard Feet", min: 60, max: 100, w: 0.75, pot: 5, t: ["big", "athletic", "defense"], o: { spd: 18, diq: 12, jmp: 8, drb: 6, ins: -16, stre: -12, ft: -10, tp: -6 } },
-		{ name: "Non-Jumping Five", min: 62, max: 100, w: 1.0, t: ["big", "scoring", "durability"], o: { ins: 14, oiq: 12, stre: 12, endu: 6, jmp: -22, spd: -12, tp: -6, drb: -4 } },
+		{ name: "Non-Jumping Five", min: 62, max: 100, w: 1.0, t: ["big", "scoring", "durability"], o: { ins: 14, oiq: 12, stre: 12, endu: 6, jmp: -20, spd: -12, tp: -6, drb: -4 } },
 		{ name: "Big Who Shoots Only in Practice", min: 56, max: 96, w: 0.8, pot: 4, t: ["big", "raw", "shooting"], o: { ft: 16, tp: 10, oiq: 8, fg: 6, ins: -16, reb: -12, dnk: -8, spd: -4 } },
 		{ name: "Wide-Body Wall", min: 60, max: 100, w: 1.1, inj: 0.8, t: ["big", "defense", "durability"], o: { stre: 20, diq: 12, reb: 8, endu: 6, spd: -18, jmp: -12, tp: -10, drb: -6 } },
 		{ name: "Trailing Big", min: 58, max: 100, w: 0.85, t: ["big", "shooting", "athletic"], o: { tp: 16, spd: 12, endu: 10, ft: 6, ins: -16, reb: -12, drb: -10, stre: -6 } },
@@ -639,7 +639,7 @@
 		{ name: "Big Who Is Always in Foul Trouble", min: 58, max: 100, w: 0.8, vol: 1.25, t: ["big", "defense", "raw"], o: { diq: 16, stre: 14, reb: 8, jmp: 6, endu: -20, oiq: -12, ft: -8, tp: -4 } },
 		{ name: "Skywalking Freshman Four", min: 52, max: 80, w: 0.85, pot: 7, bio: { years: ["Freshman", "Sophomore"] }, t: ["big", "athletic", "raw"], o: { jmp: 18, dnk: 12, spd: 8, reb: 6, oiq: -18, ft: -12, tp: -8, drb: -6 } },
 		{ name: "Center Who Never Sits", min: 60, max: 100, w: 0.95, inj: 0.6, t: ["big", "durability", "defense"], o: { endu: 20, diq: 10, reb: 8, oiq: 6, tp: -18, drb: -12, jmp: -8, spd: -6 } },
-		{ name: "Big Who Shoots Free Throws Badly and Lives at the Line", min: 58, max: 100, w: 0.75, t: ["big", "scoring", "raw"], o: { ins: 16, dnk: 12, stre: 10, jmp: 6, ft: -24, tp: -10, pss: -6, oiq: -4 } },
+		{ name: "Big Who Shoots Free Throws Badly and Lives at the Line", min: 58, max: 100, w: 0.75, t: ["big", "scoring", "raw"], o: { ins: 16, dnk: 12, stre: 10, jmp: 6, ft: -20, tp: -10, pss: -6, oiq: -4 } },
 		{ name: "Four Who Guards Guards", min: 52, max: 78, w: 1.0, t: ["big", "defense", "durability"], o: { spd: 14, diq: 14, endu: 10, stre: 6, ins: -16, tp: -12, pss: -10, jmp: -6 } },
 		{ name: "Junk-Minutes Big", min: 58, max: 100, w: 1.25, pot: -8, t: ["big", "rebounding", "durability"], o: { stre: 16, reb: 12, ins: 8, ft: 6, spd: -18, tp: -12, pss: -10, drb: -2 } },
 		{ name: "Seven-Foot Shooter", min: 78, max: 100, w: 0.7, t: ["big", "shooting", "scoring"], o: { tp: 20, ft: 14, oiq: 6, fg: 4, spd: -18, drb: -12, reb: -8, diq: -6 } },
@@ -2442,15 +2442,35 @@
 	function resolveTo(base, targetOvr, archName, fuzz, pinned, cleanBase) {
 		const arch = ARCHETYPES.filter((a) => a.name === archName)[0] ||
 			ARCHETYPES[ARCHETYPES.length - 1];
-		const solved = solveToOvr(base, targetOvr, arch, pinned);
+		/* THE TARGET HAS TO BE REACHABLE AT THE NEW HEIGHT.
+
+		   This is the re-solve a size surprise runs (see js/engine.js): a
+		   prospect who measures 6'10" instead of 6'2" keeps his overall and is
+		   rebuilt around the new hgt rating. Handed an overall the new height
+		   cannot produce — the hgt rating alone puts a seven-footer's floor in
+		   the thirties, which ovrRange has always been able to say and nothing
+		   asked — solveToOvr walks its shift to the end of the search and
+		   returns the closest it got, with every other rating on its clamp.
+
+		   Solving to the nearest overall the height ALLOWS is the same answer
+		   without the ruined vector, and it makes the miss explicit rather
+		   than leaving the caller to notice that ovr and the ratings beside it
+		   disagree. `ovrShortfall` is the signed gap, so an editor can report
+		   an impossible request instead of appearing to grant it. */
+		const range = ovrRange(cleanBase || base, arch, pinned);
+		const reachable = Number.isFinite(range.min) && Number.isFinite(range.max)
+			? clamp(targetOvr, range.min, range.max) : targetOvr;
+		const solved = solveToOvr(base, reachable, arch, pinned);
+		const ovr = BB.ovr(solved);
 		return {
 			base,
 			cleanBase: cleanBase || base,
 			ratings: solved,
-			ovr: BB.ovr(solved),
+			ovr: Number.isFinite(ovr) ? ovr : reachable,
 			pos: BB.pos(solved),
 			skills: BB.skills(Object.assign({ fuzz }, solved)),
-			ovrRange: ovrRange(cleanBase || base, arch, pinned),
+			ovrRange: range,
+			ovrShortfall: (reachable - targetOvr) || 0,
 		};
 	}
 
@@ -2591,14 +2611,43 @@
 			let off = arch.o[key] || 0;
 			if (off < 0 && key !== "hgt") {
 				const room = Math.max(0, orig[key] - lo);
-				off *= room / (room + Math.abs(spec * off));
+				/* ZERO OVER ZERO.
+
+				   A rating that is already on the floor has no room, and at
+				   specialization 0 the cut is zero too, so the scaling
+				   computed 0/0 — NaN — and wrote it into the base. The solver
+				   then produced a whole vector of NaN, BBGM's ovr formula
+				   returned NaN for the player, and the engine's finite-check
+				   clamped the rating to 0 while the overall stayed NaN.
+				   Measured on six classes at specialization 0, eleven players
+				   in 420 came out with an overall of NaN and a rating vector
+				   of ones: the flooring the guard exists to prevent, produced
+				   by the guard.
+
+				   There is nothing to take off a rating with no room, so the
+				   offset is zero — which is what the scaling says everywhere
+				   the denominator is not also zero. */
+				const denom = room + Math.abs(spec * off);
+				off = denom > 0 ? off * (room / denom) : 0;
 			}
 			base[key] = clamp(orig[key] + spec * off + jitter, lo, hi);
 			cleanBase[key] = clamp(orig[key] + spec * off, lo, hi);
 		}
 
 		const range = ovrRange(cleanBase, arch, pinned);
-		let solved = solveToOvr(base, targetOvr, arch, pinned);
+		/* AN UNREACHABLE TARGET IS SOLVED TO THE NEAREST REACHABLE ONE.
+
+		   `ovrRange` is the honest answer to "what overall can this player be
+		   built to" and the solver was not being told: handed a target below
+		   range.min — a seven-footer whose file says overall 25 — it walked the
+		   shift to the end of its search and returned a vector on its clamps,
+		   with nothing anywhere recording that the target had been impossible.
+		   Solving to the nearest reachable overall keeps the build's shape and
+		   misses by exactly the amount the request was impossible by;
+		   `ovrShortfall` is that amount. */
+		const reachable = clamp(targetOvr, range.min, range.max);
+		const shortfall = reachable - targetOvr;
+		let solved = solveToOvr(base, reachable, arch, pinned);
 		let finalOvr = BB.ovr(solved);
 		/* The reported range describes the jitter-free build, so it has to be
 		   a promise the solver keeps. Per-rating jitter can push a rating onto
@@ -2606,9 +2655,9 @@
 		   ends of the scale, which would leave the editor offering a lock it
 		   then silently missed. In that rare case the jitter is dropped for
 		   this player rather than the promise. */
-		if (finalOvr !== targetOvr && targetOvr >= range.min && targetOvr <= range.max) {
-			const retry = solveToOvr(cleanBase, targetOvr, arch, pinned);
-			if (Math.abs(BB.ovr(retry) - targetOvr) < Math.abs(finalOvr - targetOvr)) {
+		if (finalOvr !== reachable && reachable >= range.min && reachable <= range.max) {
+			const retry = solveToOvr(cleanBase, reachable, arch, pinned);
+			if (Math.abs(BB.ovr(retry) - reachable) < Math.abs(finalOvr - reachable)) {
 				solved = retry;
 				finalOvr = BB.ovr(retry);
 			}
@@ -2632,6 +2681,10 @@
 			// What this player's height actually allows, so an impossible lock
 			// can be reported instead of quietly ignored.
 			ovrRange: range,
+			// Non-zero when the file asked for an overall this player cannot
+			// be built to: the signed distance from the asked-for overall to
+			// the one he was actually solved to.
+			ovrShortfall: shortfall || 0,
 		};
 	}
 

@@ -4491,7 +4491,7 @@
 			fta: T(p.stats.fta.toFixed(1)), ftp: T(Math.round(100 * p.stats.ftp) + "%"),
 		}),
 		headlines: [
-			"{player} lives at the free-throw line",
+			"{player} has turned contact into an offence",
 			"{fta} attempts a game: {player} draws everything",
 			"{team}'s {player} has turned fouls into an offence",
 		],
@@ -4685,7 +4685,7 @@
 		}),
 		headlines: [
 			"{team} gets {opp} back",
-			"{margin} points down in January, and even in February",
+			"{margin} points down in the first meeting, and level in the second",
 			"{team} returns the favour to {opp}",
 		],
 		bodies: [
@@ -5412,7 +5412,7 @@
 		}),
 		headlines: [
 			"{team} passes its first real test",
-			"{team} beats {opp} in November",
+			"{team} beats {opp} before the leagues start",
 			"{score} in the season's first serious game",
 		],
 		bodies: [
@@ -5661,6 +5661,7 @@
 			return {
 				team: TM(c.school), coach: T(c.coach || c.name || "the head coach"),
 				conf: T(t ? t.conf : "his league"),
+				aConf: T(global.Text.withArticle((t ? t.conf : "high-major") + " programme")),
 				record: T(t ? t.w + "-" + t.l : "a good season"),
 			};
 		},
@@ -5670,7 +5671,7 @@
 			"The price of a good season at {team}",
 		],
 		bodies: [
-			"{coach} has left {team} after a {record} season. This is what happens to a {conf} programme that hires well: it hires well once and then does it again three years later.",
+			"{coach} has left {team} after a {record} season. This is what happens to {aConf} that hires well: it hires well once and then does it again three years later.",
 			"{record} was always going to cost {team} its coach. {coach} is gone and the search has been open for about four hours.",
 			"There is no version of this that {team} could have prevented. {coach} won, and winning at that level is an application form.",
 		],
@@ -5755,7 +5756,7 @@
 		headlines: [
 			"The move has not worked for {player}",
 			"{mpg} minutes a night at {team}",
-			"{player} left {from} for this",
+			"{player} moved from {from} for this",
 		],
 		bodies: [
 			"{player} came from {from} to start and is playing {mpg} minutes for {ppg} points. Half of the portal's transactions look like this and none of them are announced that way.",
@@ -5813,6 +5814,7 @@
 		slots: (t) => ({
 			team: TM(t.name), rank: T(String(t.recruitClass.natRank)),
 			conf: T(t.conf), coach: T(t.coach ? t.coach.name : "the staff"),
+			aConfRace: T(global.Text.withArticle(String(t.conf) + " race")),
 			n: T(String(t.recruitClass.signees || 4)),
 		}),
 		headlines: [
@@ -5822,7 +5824,7 @@
 		],
 		bodies: [
 			"{team} has signed the No. {rank} class in the country, {n} players. Recruiting rankings are a prediction and a self-fulfilling one: these players will be given the minutes to justify the ranking.",
-			"{coach} has done it again. No. {rank} nationally, {n} signatures, and a {conf} race that looks settled a year in advance.",
+			"{coach} has done it again. No. {rank} nationally, {n} signatures, and {aConfRace} that looks settled a year in advance.",
 			"A top-five class does not win anything by itself and it does raise the floor for three years. {team} has the No. {rank} one.",
 		],
 	});
@@ -5899,8 +5901,8 @@
 		},
 		headlines: [
 			"{years} years of {player}",
-			"The last home game for {player}",
-			"{team} says goodbye to {player}",
+			"A last walk to the middle of the floor for {player}",
+			"{team} loses {years} years of {player}",
 		],
 		bodies: [
 			"{player} played his last home game for {team} after {years} seasons, averaging {ppg} in this one. A player who stays four years in this era has usually turned down money to do it.",
@@ -5975,7 +5977,7 @@
 			trait: T((p.traitNames || [])[0] || "a year out"),
 		}),
 		headlines: [
-			"{player} is back",
+			"{player} has his season back",
 			"{gp} games after a year lost",
 			"{team} has {player} again",
 		],
