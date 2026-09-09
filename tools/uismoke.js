@@ -1135,6 +1135,24 @@ async function gotoProspects(page) {
 			await page.locator("#modalCancel, #modalOk").first().click();
 			await page.waitForTimeout(200);
 		}
+		/* The season almanac: the dialog opens, the sections are tickable and
+		   the Markdown button writes a file with the season in it. */
+		await page.locator("#btnExportMenu").click();
+		await page.waitForTimeout(300);
+		await page.locator("#modal button", { hasText: "Season almanac" }).first().click();
+		await page.waitForTimeout(300);
+		const sections = await page.locator("#modal .checks label.check input").count();
+		ok("the almanac dialog lists its sections", sections >= 10, String(sections));
+		await page.locator("#modalOk").click();
+		await page.waitForTimeout(900);
+		ok("the almanac writes a markdown file",
+			/Wrote almanac_\d+_.+\.md/.test(await page.locator("#status").innerText()),
+			(await page.locator("#status").innerText()).slice(0, 80));
+		if (!(await page.locator("#modal").isHidden())) {
+			await page.locator("#modalCancel, #modalOk").first().click();
+			await page.waitForTimeout(200);
+		}
+
 		await page.locator("#tabs button", { hasText: "Draft board" }).first().click();
 		await page.waitForTimeout(250);
 	}

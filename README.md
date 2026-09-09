@@ -1438,6 +1438,32 @@ defines — no players and no schedule, so it is a fragment to merge rather than
 league to load), the note text alone for a spreadsheet, and imports locks back
 in from a CSV so a round trip through a spreadsheet works.
 
+### The season almanac
+
+*Export → **Season almanac*** writes the whole season as one document, for a
+reader rather than for a machine: the front page (champion, runner-up, the
+final AP No. 1, the player and coach of the year, the top of the board), the
+final poll, every conference's standings with its regular-season and tournament
+champions marked, March Madness round by round with the upsets flagged, the
+player-of-the-year ballots and every honor in the class, the offensive and
+defensive leader boards with each man's national rank, every professional and
+non-NCAA league's table, the draft board, a capsule for every prospect (header
+line, full season line, honors, the scouting note), the news feed in date
+order, the season's events, the coaching carousel, and a colophon carrying the
+seed and the settings that produced it.
+
+The dialog ticks the sections — the news feed alone is eighty to a hundred and
+twenty articles, and it can be capped or dropped — and offers two buttons.
+**Download Markdown** writes `almanac_<season>_<seed>.md`, which pastes into a
+forum post or a wiki. **Open printable** opens the same document with a print
+stylesheet (letter, a page break before each section, tables that never split a
+row) in a new tab, where the browser's own *Save as PDF* writes the PDF; a
+blocked pop-up falls back to downloading the HTML, which prints identically. It
+is one document rendered twice — `js/almanac.js` writes the markdown and
+renders that markdown to HTML — so the PDF and the `.md` cannot disagree, and
+the same seed always writes the same almanac. `tools/tests/almanac.js` covers
+the sections, the escaping and both renderings.
+
 If you load several seasons at once, `Export all` writes each of them.
 
 ## The interface
