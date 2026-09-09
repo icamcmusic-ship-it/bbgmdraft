@@ -1749,9 +1749,16 @@ console.log("\nArchetype table and solver audit");
 	ok("potFromRole still falls back to the class center",
 		Math.abs(RB.potFromRole(stats, "Freshman") - againstClass) < 1e-9);
 	// And the build-driven part of the term is gone from a real class.
+	/* THE SAMPLE SCALES WITH THE TABLE, for the reason the coverage sweep
+	   above scales: a class draws a pool of about nineteen builds, so the
+	   number of classes it takes for a build to accumulate ten qualifying
+	   players rises with the table. Six classes was fitted at 60 builds; at
+	   355 it leaves almost nothing above the ten-player bar and the spread
+	   collapses to noise. */
 	const byArch = {};
-	for (let s = 0; s < 6; s++) {
-		const res = global.Engine.run(V.realisticClass(s, 70),
+	const POT_CLASSES = Math.max(6, Math.ceil(RB.ARCHETYPES.length * 0.12));
+	for (let s = 0; s < POT_CLASSES; s++) {
+		const res = global.Engine.run(V.realisticClass(s % 8, 70),
 			global.Config.make({ seed: "potref" + s }));
 		for (const p of res.players) {
 			if (p.nonNcaa || !p.stats || !p.potFactors) continue;
@@ -3222,8 +3229,23 @@ console.log("\nAudit regressions");
 	}
 	ok("no two archetypes share a shape AND a height band (max cosine < 0.93)",
 		maxCos < 0.93, maxPair + " at " + maxCos.toFixed(3));
-	ok("near-duplicate pairs (cosine x height overlap > 0.85) stay under 30",
-		above85 <= 30, String(above85));
+	/* THE BOUND IS A DENSITY, NOT A COUNT.
+
+	   "Under 30" was fitted when the table had 204 specialist builds, which is
+	   20,706 pairs — a rate of about 0.07% of pairs above the line. The pair
+	   count grows with the SQUARE of the table, so at 354 builds the identical
+	   table (same shapes, same gates, same density of near-duplication) scores
+	   about 45 and the row goes red on arithmetic rather than on anything
+	   being wrong. That is the same fault the coverage sweep above was fixed
+	   for, and it is fixed the same way: the claim worth testing is that
+	   near-duplicate pairs stay RARE, so the threshold is stated as a share of
+	   the pairs actually compared. 0.1% of pairs is comfortably tighter than
+	   the table has ever run and still scales. */
+	const pairCount = (specs.length * (specs.length - 1)) / 2;
+	const dupBudget = Math.max(30, Math.round(pairCount * 0.001));
+	ok("near-duplicate pairs (cosine x height overlap > 0.85) stay rare",
+		above85 <= dupBudget,
+		above85 + " of " + pairCount + " pairs, budget " + dupBudget);
 	/* The raw figure is still reported, because a pair at 0.99 in offset space
 	   is worth a comment in the table even when the gates keep them apart —
 	   and every such pair in the table carries one. */
