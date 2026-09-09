@@ -2816,13 +2816,19 @@
 		   NCAA program (see Universe.summarize); a prospect abroad shows
 		   his club instead, since that is where the season happened. */
 		const where = (m) => m.nonNcaa && m.club ? m.club : (m.school || m.club || "?");
+		const guessedSeasons = new Set(u.rows.filter((r) => r && r.extrapolated)
+			.map((r) => r.season));
 		for (const r of u.rows) {
 			/* A GAP IS A ROW. The status line named the seasons that were
 			   not played and the table did not, so 2030 followed 2027 as if
 			   nothing had happened. One greyed row per missing season says
 			   what the world did in the dark. */
+			/* An EXTRAPOLATED season already occupies its own row (see
+			   Universe.extrapolateGap), so the placeholder is only drawn for
+			   the missing years nothing was inferred for. */
 			if (r.gap > 0 && Number.isFinite(r.season)) {
 				for (let g = r.gap; g >= 1; g--) {
+					if (guessedSeasons.has(r.season - g)) continue;
 					const gtr = el("tr", "gaprow");
 					gtr.appendChild(el("td", null, String(r.season - g)));
 					const td = el("td", "hint", "no class file loaded — the world " +
@@ -2832,8 +2838,17 @@
 					tb.appendChild(gtr);
 				}
 			}
-			const tr = el("tr");
-			tr.appendChild(el("td", null, String(r.season || "?")));
+			/* An extrapolated season is drawn like a played one and marked,
+			   because the whole point is that it is NOT one: the champion and
+			   the player of the year are inferred from the world either side
+			   of the gap. */
+			const tr = el("tr", r.extrapolated ? "gaprow" : null);
+			/* “*” is an extrapolated season (no class file); “†” is a season
+			   restored from an imported universe because the replay of it
+			   diverged. Both are rows the tool is telling you it did not
+			   simulate on this machine. */
+			tr.appendChild(el("td", null, String(r.season || "?") +
+				(r.extrapolated ? " *" : "") + (r.restored ? " †" : "")));
 			if (r.error) {
 				const td = el("td", null, "failed: " + r.error);
 				td.colSpan = 7;
@@ -2841,7 +2856,9 @@
 				tb.appendChild(tr);
 				continue;
 			}
-			tr.appendChild(el("td", null, r.flavor || "—"));
+			tr.appendChild(el("td", null, (r.flavor || "—") +
+				(r.partial ? " · partial class, honours topped up" : "") +
+				(r.restored ? " · restored from the imported universe" : "")));
 			tr.appendChild(el("td", null, r.apOne || "—"));
 			tr.appendChild(el("td", null, (r.champion || "—") +
 				(r.champSeed ? " (No. " + r.champSeed + ")" : "")));

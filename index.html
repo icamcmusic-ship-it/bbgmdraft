@@ -18,10 +18,16 @@
 	<button id="btnSettings" class="iconbtn" aria-expanded="true"
 		aria-controls="settings" title="Show or hide the settings panel"><span aria-hidden="true">☰</span> Settings</button>
 	<input type="file" id="file" accept=".json,.gz,.json.gz" multiple hidden>
+	<input type="file" id="addFile" accept=".json,.gz,.json.gz" multiple hidden>
 	<input type="file" id="csvFile" accept=".csv" hidden>
 	<input type="file" id="leagueMergeFile" accept=".json,.gz,.json.gz" hidden>
 	<div class="btngroup">
 		<button id="btnLoad">Load file…</button>
+		<!-- Adding classes to a session rather than starting a new one. Load
+		     replaces everything; this keeps every class already loaded, and a
+		     universe whose new classes are all later than its last season is
+		     extended rather than redrawn. See appendFiles. -->
+		<button id="btnAddFiles" hidden title="Add more draft classes, keeping the ones already loaded">Add classes…</button>
 		<select id="fileSelect" hidden aria-label="Loaded file"></select>
 	</div>
 	<span class="spacer"></span>
@@ -132,7 +138,7 @@
 		<div class="ctl"><label for="specialization">Specialization <b></b></label><input type="range" id="specialization" min="0" max="2.5" step="0.05"></div>
 		<div class="ctl"><label for="archetypeDiversity">Archetype diversity <b></b></label><input type="range" id="archetypeDiversity" min="0" max="100" step="1"></div>
 		<div class="ctl"><label for="classFlavor">Flavor strength <b></b></label><input type="range" id="classFlavor" min="0" max="2" step="0.05"></div>
-		<div class="ctl"><label for="archetypePool">Builds per class <b></b></label><input type="range" id="archetypePool" min="0" max="205" step="1"></div>
+		<div class="ctl"><label for="archetypePool">Builds per class <b></b></label><input type="range" id="archetypePool" min="0" max="355" step="1"></div>
 		<div class="ctl"><label for="surpriseBudget">Anomalies per class <b></b></label><input type="range" id="surpriseBudget" min="0" max="6" step="1"></div>
 		<div class="ctl"><label for="traitCount">Scouting traits per prospect <b></b></label><input type="range" id="traitCount" min="0" max="6" step="1"></div>
 		<div class="ctl"><label for="anomalyMemory">Avoid repeating recent anomalies <b></b></label><input type="range" id="anomalyMemory" min="0" max="3" step="0.1"></div>

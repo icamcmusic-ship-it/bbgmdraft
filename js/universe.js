@@ -13,7 +13,11 @@
 (function (global) {
 	"use strict";
 
-	const VERSION = 2;
+	/* 3: the export carries the timeline itself — the rows, the threads, the
+	   records book, the alumni index and the chain's tail — beside the seeds
+	   that produced it. A version 1 or 2 file still imports; it simply has
+	   nothing to restore a diverged season from. See exportUniverse. */
+	const VERSION = 3;
 
 	/* WHICH ENGINE BUILT IT.
 
@@ -461,7 +465,7 @@
 		const poySet = nationalPOYSet();
 		const poy = (res.players || []).filter((p) => isNationalPOY(p, poySet))[0];
 		const no1 = (res.players || []).filter((p) => p.boardRank === 1)[0];
-		return {
+		return Object.assign({
 			season: res.leagueFile ? res.leagueFile.startingSeason : null,
 			fileName,
 			seed,
@@ -494,6 +498,85 @@
 			futureOnRosters: (res.futurePlayers || []).length,
 			futureHonors: (res.futurePlayers || [])
 				.reduce((a, p) => a + ((p.awards || []).length), 0),
+		}, extraTracking(res, poy, no1));
+	}
+
+	/* WHAT ELSE A ROW HAS TO CARRY.
+
+	   threads() can only say what a row records, and the row recorded eleven
+	   facts: champion, runner-up, POY, No. 1 pick, AP No. 1, realignment and
+	   four coaching counts. Six thread kinds is what eleven facts supports,
+	   and every one of them is a repeat-count over one field — which is why a
+	   twenty-season timeline's Threads panel read as the same two sentences
+	   with bigger numbers.
+
+	   Everything below is derived from a season the chain has ALREADY
+	   simulated and then thrown away, so none of it costs a re-run. It is
+	   deliberately small and scalar-or-short-list: a row is persisted, and a
+	   forty-season universe carrying a full bracket per season is not a
+	   localStorage payload. The rule applied to each field is the one the
+	   archetype table uses for a build — a fact nothing can be said about is
+	   not tracked. */
+	function extraTracking(res, poy, no1) {
+		const t = res.tourney;
+		const teamList = Object.values(res.teams || {}).filter((x) => x && x.name);
+		const confOf = (name) => {
+			const x = res.teams && res.teams[name];
+			return x ? x.conf || null : null;
+		};
+		const byRecord = teamList.slice().sort((a, b) =>
+			(b.w || 0) - (a.w || 0) || (a.l || 0) - (b.l || 0) ||
+			String(a.name).localeCompare(String(b.name)));
+		const best = byRecord[0] || null;
+		/* An undefeated regular season is the rarest fact a college season
+		   produces and the timeline could not see one. */
+		const unbeaten = teamList.filter((x) => (x.regL || x.l || 0) === 0 &&
+			(x.regW || x.w || 0) >= 20).map((x) => x.name).sort();
+		const ff = (t && t.finalFour ? t.finalFour : []).map(
+			(x) => (x && x.team ? x.team.name : x && x.name) || null).filter(Boolean);
+		/* The deepest run by a seed nobody picked. `finalFour` carries seeds
+		   where the bracket built it; the champion and runner-up always do. */
+		const seeded = [];
+		if (t && t.champion) seeded.push({ name: t.champion.team.name, seed: t.champion.seed, round: "champion" });
+		if (t && t.runnerUp) seeded.push({ name: t.runnerUp.team.name, seed: t.runnerUp.seed, round: "runner-up" });
+		for (const x of (t && t.finalFour) || []) {
+			if (x && x.team && Number.isFinite(x.seed)) {
+				seeded.push({ name: x.team.name, seed: x.seed, round: "Final Four" });
+			}
+		}
+		const cinder = seeded.filter((x) => Number.isFinite(x.seed) && x.seed >= 8)
+			.sort((a, b) => b.seed - a.seed)[0] || null;
+		const preseason = (res.pollHistory && res.pollHistory[0] &&
+			res.pollHistory[0].ranks && res.pollHistory[0].ranks[0]) || null;
+		return {
+			champConf: t && t.champion ? confOf(t.champion.team.name) : null,
+			runnerUpConf: t && t.runnerUp ? confOf(t.runnerUp.team.name) : null,
+			finalFour: ff.slice(0, 4),
+			nitChampion: t && t.nit && t.nit.champion
+				? (t.nit.champion.team ? t.nit.champion.team.name : t.nit.champion.name) || null
+				: null,
+			apPreseasonOne: preseason
+				? (preseason.team || preseason.name || null) : null,
+			bestRecord: best ? { team: best.name, w: best.w || 0, l: best.l || 0 } : null,
+			unbeaten,
+			cinderella: cinder,
+			poyConf: poy && poy.newCollege ? confOf(poy.newCollege) : null,
+			no1Conf: no1 && no1.newCollege ? confOf(no1.newCollege) : null,
+			/* The class's own character, as a name rather than as a label, so
+			   two seasons drawing the same flavor can be counted. */
+			flavorName: res.flavor ? res.flavor.name : null,
+			/* The narrative layer returns a LIST of drawn narratives; the
+			   first is the one the season is named for. */
+			narrative: Array.isArray(res.narrative) && res.narrative[0]
+				? res.narrative[0].name
+				: (res.narrative && res.narrative.name) || null,
+			anomalies: (res.surprises || []).map((x) => x.name).slice(0, 6),
+			/* One number for how good the class was and one for how old it
+			   was: a chain can then say which year was the strong one. */
+			topOvr: (res.players || []).reduce((a, p) => Math.max(a, p.newOvr || 0), 0),
+			freshmen: (res.players || []).filter((p) => p.isFreshman).length,
+			transfers: (res.players || []).filter((p) => p.transfer).length,
+			classSize: (res.players || []).length,
 		};
 	}
 
@@ -568,6 +651,732 @@
 						" before " + r.season + " were not played — the world was " +
 						"aged across the gap" });
 			}
+		}
+		out.push.apply(out, moreThreads(rows));
+		return out;
+	}
+
+	/* FIFTY MORE THREADS.
+
+	   The six above are the connections a row's eleven original fields could
+	   support, and every one of them counts a repeat: this program won N, that
+	   one produced N. A history is not only a tally — it is droughts, first
+	   times, streaks that ended, a conference that owned a decade, the year
+	   the bracket came apart, the man who won it twice. Those are all facts
+	   about the ORDERED timeline, which is exactly what a thread is for and
+	   exactly what a count cannot say.
+
+	   Everything here reads the fields extraTracking added and the alumni
+	   index the chain already builds; nothing re-simulates. Each row follows
+	   the shape threads() established — {kind, team, seasons, count, text} —
+	   so the view keeps linking programs and seasons without knowing which
+	   kinds exist.
+
+	   The gates are deliberately not "did this ever happen": a thread that
+	   fires every season is a column, not a thread. Each one states a
+	   threshold that makes it worth a sentence. */
+	function moreThreads(rows, alumni) {
+		const out = [];
+		const played = (rows || []).filter((r) => r && !r.error && !r.extrapolated);
+		const all = (rows || []).filter((r) => r && !r.error);
+		if (!played.length) return out;
+		const add = (kind, team, seasons, count, text) => {
+			out.push({ kind, team: team || null, seasons: seasons || [], count, text });
+		};
+		const push = (map, key, season) => {
+			if (!key) return;
+			(map[key] = map[key] || []).push(season);
+		};
+		const byName = (a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: "base" });
+		const keys = (map) => Object.keys(map).sort(byName);
+		const list = (names) => names.length === 1 ? names[0]
+			: names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
+
+		const titles = {};
+		const finals = {};
+		const ffs = {};
+		const apOnes = {};
+		const poys = {};
+		const no1s = {};
+		const confTitles = {};
+		const confFinals = {};
+		const poyConf = {};
+		const no1Conf = {};
+		const flavors = {};
+		const anomalies = {};
+		const moved = {};
+		for (const r of played) {
+			push(titles, r.champion, r.season);
+			push(finals, r.champion, r.season);
+			push(finals, r.runnerUp, r.season);
+			for (const f of r.finalFour || []) push(ffs, f, r.season);
+			push(apOnes, r.apOne, r.season);
+			if (r.poy && r.poy.school && !r.poy.nonNcaa) push(poys, r.poy.school, r.season);
+			if (r.no1 && r.no1.school && !r.no1.nonNcaa) push(no1s, r.no1.school, r.season);
+			push(confTitles, r.champConf, r.season);
+			push(confFinals, r.champConf, r.season);
+			push(confFinals, r.runnerUpConf, r.season);
+			push(poyConf, r.poyConf, r.season);
+			push(no1Conf, r.no1Conf, r.season);
+			push(flavors, r.flavorName, r.season);
+			for (const a of r.anomalies || []) push(anomalies, a, r.season);
+			for (const m of r.realignment || []) {
+				push(moved, String(m).split(" → ")[0], r.season);
+			}
+		}
+
+		// --- titles, finals and the shape of a dynasty ----------------------
+		for (const name of keys(titles)) {
+			const ss = titles[name].slice().sort((a, b) => a - b);
+			let run = 1;
+			let best = 1;
+			let bestEnd = ss[0];
+			for (let i = 1; i < ss.length; i++) {
+				run = ss[i] === ss[i - 1] + 1 ? run + 1 : 1;
+				if (run > best) { best = run; bestEnd = ss[i]; }
+			}
+			if (best >= 3) {
+				add("threepeat", name, ss.filter((x) => x > bestEnd - best && x <= bestEnd),
+					best, name + " won " + best + " in a row, through " + bestEnd);
+			}
+			for (let i = 1; i < ss.length; i++) {
+				const gap = ss[i] - ss[i - 1];
+				if (gap >= 6) {
+					add("titleDrought", name, [ss[i - 1], ss[i]], gap,
+						name + " went " + (gap - 1) + " years between titles, " +
+						ss[i - 1] + " to " + ss[i]);
+				}
+			}
+		}
+		{
+			const first = {};
+			for (const r of played) {
+				if (r.champion && first[r.champion] === undefined) first[r.champion] = r.season;
+			}
+			const late = keys(first).filter((n) => first[n] >= (played[0].season || 0) + 4);
+			if (late.length) {
+				add("firstTitle", late.length === 1 ? late[0] : null,
+					late.map((n) => first[n]).sort((a, b) => a - b), late.length,
+					late.length + " programme" + (late.length === 1 ? "" : "s") +
+					" won a first title inside this timeline: " +
+					list(late.slice(0, 4).map((n) => n + " (" + first[n] + ")")));
+			}
+		}
+		for (const name of keys(finals)) {
+			const won = (titles[name] || []).length;
+			const lost = finals[name].length - won;
+			if (lost >= 2 && won === 0) {
+				add("bridesmaid", name, finals[name].slice(), lost,
+					name + " lost " + lost + " finals without winning one");
+			}
+			if (lost >= 2 && won >= 2) {
+				add("finalsRegular", name, finals[name].slice(), finals[name].length,
+					name + " played in " + finals[name].length + " finals, winning " + won);
+			}
+		}
+		for (const name of keys(ffs)) {
+			const n = ffs[name].length;
+			if (n >= 4 && !(titles[name] || []).length) {
+				add("finalFourNoTitle", name, ffs[name].slice(), n,
+					name + " reached " + n + " Final Fours without winning one");
+			}
+			if (n >= 5) {
+				add("finalFourRegular", name, ffs[name].slice(), n,
+					name + " reached " + n + " Final Fours");
+			}
+		}
+		{
+			const pairs = {};
+			for (const r of played) {
+				if (!r.champion || !r.runnerUp) continue;
+				const k = [r.champion, r.runnerUp].sort(byName).join(" — ");
+				push(pairs, k, r.season);
+			}
+			for (const k of keys(pairs)) {
+				if (pairs[k].length >= 2) {
+					add("finalsRematch", null, pairs[k].slice(), pairs[k].length,
+						k + " met in " + pairs[k].length + " finals");
+				}
+			}
+		}
+		{
+			const lostThenWon = [];
+			for (const name of keys(titles)) {
+				const lostFirst = played.filter((r) => r.runnerUp === name)
+					.map((r) => r.season).sort((a, b) => a - b)[0];
+				const won = titles[name].slice().sort((a, b) => a - b)[0];
+				if (Number.isFinite(lostFirst) && lostFirst < won) {
+					lostThenWon.push({ name, lostFirst, won });
+				}
+			}
+			for (const x of lostThenWon.slice(0, 6)) {
+				add("cameBack", x.name, [x.lostFirst, x.won], x.won - x.lostFirst,
+					x.name + " lost the final in " + x.lostFirst + " and won it in " + x.won);
+			}
+		}
+
+		// --- seeds, upsets and the bracket ----------------------------------
+		{
+			const wild = played.filter((r) => Number.isFinite(r.champSeed) && r.champSeed >= 4);
+			if (wild.length >= 2) {
+				add("unseededChampions", null, wild.map((r) => r.season), wild.length,
+					wild.length + " champions were seeded fourth or worse: " +
+					list(wild.slice(0, 4).map((r) => r.champion + " (" + r.champSeed + ", " + r.season + ")")));
+			}
+			const chalk = played.filter((r) => r.champSeed === 1);
+			if (chalk.length >= 4) {
+				add("chalkEra", null, chalk.map((r) => r.season), chalk.length,
+					chalk.length + " of " + played.length + " titles went to a one seed");
+			}
+		}
+		{
+			const cind = played.filter((r) => r.cinderella && r.cinderella.seed >= 10);
+			if (cind.length >= 2) {
+				const deepest = cind.slice().sort((a, b) => b.cinderella.seed - a.cinderella.seed)[0];
+				add("cinderellaEra", deepest.cinderella.name, cind.map((r) => r.season), cind.length,
+					cind.length + " double-digit seeds reached a Final Four, the deepest " +
+					deepest.cinderella.name + " as a " + deepest.cinderella.seed +
+					" seed in " + deepest.season);
+			}
+		}
+		{
+			const wire = played.filter((r) => r.apPreseasonOne && r.champion &&
+				r.apPreseasonOne === r.champion);
+			if (wire.length) {
+				add("wireToWire", wire.length === 1 ? wire[0].champion : null,
+					wire.map((r) => r.season), wire.length,
+					wire.length === 1
+						? wire[0].champion + " was preseason No. 1 and champion in " + wire[0].season
+						: wire.length + " teams went from preseason No. 1 to champion");
+			}
+		}
+		{
+			const never = keys(apOnes).filter((n) => apOnes[n].length >= 3 && !(titles[n] || []).length);
+			for (const n of never.slice(0, 6)) {
+				add("apOneNoTitle", n, apOnes[n].slice(), apOnes[n].length,
+					n + " finished No. 1 in the poll " + apOnes[n].length + " times without a title");
+			}
+			const apMost = keys(apOnes).sort((a, b) => apOnes[b].length - apOnes[a].length)[0];
+			if (apMost && apOnes[apMost].length >= 4) {
+				add("apOneEra", apMost, apOnes[apMost].slice(), apOnes[apMost].length,
+					apMost + " ended " + apOnes[apMost].length + " seasons ranked No. 1");
+			}
+		}
+
+		// --- records the season sheet now carries ---------------------------
+		{
+			const unbeaten = played.filter((r) => (r.unbeaten || []).length);
+			for (const r of unbeaten.slice(0, 5)) {
+				add("unbeaten", r.unbeaten[0], [r.season], r.unbeaten.length,
+					list(r.unbeaten) + " went unbeaten in the regular season of " + r.season);
+			}
+			const bests = played.filter((r) => r.bestRecord).slice()
+				.sort((a, b) => b.bestRecord.w - a.bestRecord.w);
+			if (bests.length && bests[0].bestRecord.w >= 30) {
+				const b = bests[0];
+				add("bestRecord", b.bestRecord.team, [b.season], b.bestRecord.w,
+					b.bestRecord.team + " won " + b.bestRecord.w + " games in " + b.season +
+					", the most in the timeline");
+			}
+			const nits = {};
+			for (const r of played) push(nits, r.nitChampion, r.season);
+			for (const n of keys(nits)) {
+				if (nits[n].length >= 2) {
+					add("nitRegular", n, nits[n].slice(), nits[n].length,
+						n + " won " + nits[n].length + " NITs");
+				}
+			}
+		}
+
+		// --- conferences ----------------------------------------------------
+		for (const c of keys(confTitles)) {
+			if (confTitles[c].length >= 3) {
+				add("confDynasty", null, confTitles[c].slice(), confTitles[c].length,
+					"the " + c + " produced " + confTitles[c].length + " national champions");
+			}
+		}
+		for (const c of keys(confFinals)) {
+			if (confFinals[c].length >= 5) {
+				add("confFinals", null, confFinals[c].slice(), confFinals[c].length,
+					"the " + c + " put a team in " + confFinals[c].length + " title games");
+			}
+		}
+		{
+			const allSame = played.filter((r) => r.champConf && r.champConf === r.runnerUpConf);
+			if (allSame.length >= 2) {
+				add("allConfFinal", null, allSame.map((r) => r.season), allSame.length,
+					allSame.length + " title games were played between two teams from the same conference");
+			}
+		}
+		for (const c of keys(poyConf)) {
+			if (poyConf[c].length >= 4) {
+				add("confPOY", null, poyConf[c].slice(), poyConf[c].length,
+					"the " + c + " produced " + poyConf[c].length + " players of the year");
+			}
+		}
+		for (const c of keys(no1Conf)) {
+			if (no1Conf[c].length >= 4) {
+				add("confNo1", null, no1Conf[c].slice(), no1Conf[c].length,
+					"the " + c + " produced " + no1Conf[c].length + " No. 1 picks");
+			}
+		}
+
+		// --- the men --------------------------------------------------------
+		{
+			const poyNames = {};
+			const no1Names = {};
+			for (const r of played) {
+				if (r.poy && r.poy.name) push(poyNames, r.poy.name, r.season);
+				if (r.no1 && r.no1.name) push(no1Names, r.no1.name, r.season);
+			}
+			for (const n of keys(poyNames)) {
+				if (poyNames[n].length >= 2) {
+					add("poyTwice", null, poyNames[n].slice(), poyNames[n].length,
+						n + " was named player of the year " + poyNames[n].length + " times");
+				}
+			}
+			for (const n of keys(no1Names)) {
+				if (no1Names[n].length >= 2) {
+					add("no1Twice", null, no1Names[n].slice(), no1Names[n].length,
+						n + " went No. 1 in " + no1Names[n].length + " different classes — " +
+						"two files describe the same man");
+				}
+			}
+			const sweep = played.filter((r) => r.poy && r.no1 && r.poy.name === r.no1.name);
+			if (sweep.length >= 2) {
+				add("poyAndNo1", null, sweep.map((r) => r.season), sweep.length,
+					sweep.length + " men were player of the year and the No. 1 pick in the same season");
+			}
+			const double = played.filter((r) => r.champion && r.poy &&
+				r.poy.school === r.champion);
+			if (double.length >= 2) {
+				add("poyOnAChampion", null, double.map((r) => r.season), double.length,
+					double.length + " players of the year also won the title that season");
+			}
+			const no1Champ = played.filter((r) => r.champion && r.no1 &&
+				r.no1.school === r.champion);
+			if (no1Champ.length >= 2) {
+				add("no1OnAChampion", null, no1Champ.map((r) => r.season), no1Champ.length,
+					no1Champ.length + " No. 1 picks came out of that season's champion");
+			}
+			const abroad = played.filter((r) => r.no1 && r.no1.nonNcaa);
+			if (abroad.length >= 2) {
+				add("no1Abroad", null, abroad.map((r) => r.season), abroad.length,
+					abroad.length + " No. 1 picks never played college basketball");
+			}
+			const poyAbroad = played.filter((r) => r.poy && r.poy.nonNcaa);
+			if (poyAbroad.length >= 2) {
+				add("poyAbroad", null, poyAbroad.map((r) => r.season), poyAbroad.length,
+					poyAbroad.length + " players of the year were playing professionally");
+			}
+		}
+		{
+			/* Surnames that turn up in two different classes far enough apart
+			   to be a father and a son rather than two brothers. */
+			const surnames = {};
+			for (const r of played) {
+				for (const p of [r.poy, r.no1]) {
+					if (!p || !p.name) continue;
+					const last = String(p.name).trim().split(/\s+/).pop();
+					if (last && last.length > 2) push(surnames, last, r.season);
+				}
+			}
+			const fams = keys(surnames).filter((n) => {
+				const ss = surnames[n].slice().sort((a, b) => a - b);
+				return ss.length >= 2 && ss[ss.length - 1] - ss[0] >= 8;
+			});
+			for (const n of fams.slice(0, 4)) {
+				const ss = surnames[n].slice().sort((a, b) => a - b);
+				add("bloodline", null, ss, ss.length,
+					"a second " + n + " was at the top of the board in " +
+					ss[ss.length - 1] + ", " + (ss[ss.length - 1] - ss[0]) +
+					" years after the first");
+			}
+		}
+
+		// --- the sideline ---------------------------------------------------
+		{
+			const busiest = played.slice().sort((a, b) =>
+				(b.coachChanges || 0) - (a.coachChanges || 0))[0];
+			if (busiest && busiest.coachChanges >= 40) {
+				add("carouselPeak", null, [busiest.season], busiest.coachChanges,
+					busiest.coachChanges + " head-coaching jobs changed hands in " +
+					busiest.season + ", the busiest April in the timeline");
+			}
+			const quiet = played.filter((r) => (r.coachChanges || 0) <= 8);
+			for (const r of quiet.slice(0, 3)) {
+				add("carouselQuiet", null, [r.season], r.coachChanges || 0,
+					"only " + (r.coachChanges || 0) + " jobs changed hands after " +
+					r.season + " — the sport stood still");
+			}
+			const retire = played.filter((r) => (r.coachRetired || 0) >= 6);
+			for (const r of retire.slice(0, 3)) {
+				add("retirementWave", null, [r.season], r.coachRetired,
+					r.coachRetired + " coaches retired at the end of " + r.season);
+			}
+			const poached = played.reduce((a, r) => a + (r.coachHiredAway || 0), 0);
+			if (poached >= 12) {
+				add("poachingEra", null, played.map((r) => r.season), poached,
+					poached + " coaches were hired away by another programme across the timeline");
+			}
+			const fired = played.reduce((a, r) => a + (r.coachFired || 0), 0);
+			if (fired >= 40) {
+				add("firingEra", null, [], fired,
+					fired + " coaches were fired or not retained across " +
+					played.length + " seasons");
+			}
+		}
+
+		// --- realignment ------------------------------------------------------
+		{
+			const total = played.reduce((a, r) => a + (r.realignment || []).length, 0);
+			if (total >= 6) {
+				add("realignmentEra", null,
+					played.filter((r) => (r.realignment || []).length).map((r) => r.season),
+					total, total + " programmes changed conference across the timeline");
+			}
+			const waves = played.filter((r) => (r.realignment || []).length >= 4);
+			for (const r of waves.slice(0, 3)) {
+				add("realignmentWave", null, [r.season], r.realignment.length,
+					r.realignment.length + " programmes moved conference in " + r.season);
+			}
+			for (const n of keys(moved)) {
+				if (moved[n].length >= 2) {
+					add("serialMover", n, moved[n].slice(), moved[n].length,
+						n + " changed conference " + moved[n].length + " times");
+				}
+			}
+		}
+
+		// --- the character of the classes --------------------------------------
+		for (const f of keys(flavors)) {
+			if (flavors[f].length >= 3) {
+				add("flavorRepeat", null, flavors[f].slice(), flavors[f].length,
+					flavors[f].length + " classes came out " + f);
+			}
+			const ss = flavors[f].slice().sort((a, b) => a - b);
+			for (let i = 1; i < ss.length; i++) {
+				if (ss[i] === ss[i - 1] + 1) {
+					add("flavorRun", null, [ss[i - 1], ss[i]], 2,
+						"back-to-back " + f + " classes in " + ss[i - 1] + " and " + ss[i]);
+					break;
+				}
+			}
+		}
+		for (const a of keys(anomalies)) {
+			if (anomalies[a].length >= 4) {
+				add("anomalyEra", null, anomalies[a].slice(), anomalies[a].length,
+					"“" + a + "” happened to somebody in " +
+					anomalies[a].length + " different seasons");
+			}
+		}
+		{
+			const strong = played.filter((r) => Number.isFinite(r.topOvr)).slice()
+				.sort((a, b) => b.topOvr - a.topOvr);
+			if (strong.length >= 3 && strong[0].topOvr - strong[strong.length - 1].topOvr >= 8) {
+				add("bestClass", null, [strong[0].season], strong[0].topOvr,
+					"the strongest class in the timeline was " + strong[0].season +
+					", and the weakest " + strong[strong.length - 1].season);
+			}
+			const young = played.filter((r) => r.classSize &&
+				(r.freshmen || 0) / r.classSize >= 0.5);
+			if (young.length >= 2) {
+				add("freshmanEra", null, young.map((r) => r.season), young.length,
+					young.length + " classes were more than half freshmen");
+			}
+			const portal = played.filter((r) => r.classSize &&
+				(r.transfers || 0) / r.classSize >= 0.5);
+			if (portal.length >= 2) {
+				add("portalEra", null, portal.map((r) => r.season), portal.length,
+					portal.length + " classes were more than half transfers");
+			}
+		}
+
+		// --- the shape of the timeline itself -----------------------------------
+		{
+			const seasons = played.map((r) => r.season).filter(Number.isFinite)
+				.sort((a, b) => a - b);
+			if (seasons.length >= 2) {
+				let run = 1;
+				let best = 1;
+				let end = seasons[0];
+				for (let i = 1; i < seasons.length; i++) {
+					run = seasons[i] === seasons[i - 1] + 1 ? run + 1 : 1;
+					if (run > best) { best = run; end = seasons[i]; }
+				}
+				if (best >= 4) {
+					add("unbrokenRun", null, [end - best + 1, end], best,
+						best + " consecutive seasons were played, " + (end - best + 1) +
+						" to " + end);
+				}
+				add("span", null, [seasons[0], seasons[seasons.length - 1]], seasons.length,
+					seasons.length + " seasons played across " +
+					(seasons[seasons.length - 1] - seasons[0] + 1) + " years, " +
+					seasons[0] + " to " + seasons[seasons.length - 1]);
+			}
+			const broken = all.filter((r) => r.error);
+			if (broken.length) {
+				add("brokenSeasons", null, broken.map((r) => r.season).filter(Number.isFinite),
+					broken.length, broken.length + " season" +
+					(broken.length === 1 ? "" : "s") + " failed to simulate and " +
+					"the world was aged across " + (broken.length === 1 ? "it" : "them"));
+			}
+			const guessed = (rows || []).filter((r) => r && r.extrapolated);
+			if (guessed.length) {
+				add("extrapolated", null, guessed.map((r) => r.season), guessed.length,
+					guessed.length + " season" + (guessed.length === 1 ? "" : "s") +
+					" had no class file and were extrapolated from the world either side");
+			}
+			const honors = played.reduce((a, r) => a + (r.futureHonors || 0), 0);
+			if (honors >= 5) {
+				add("underclassHonors", null, [], honors,
+					honors + " honours across the timeline were won by players from a " +
+					"later draft class");
+			}
+		}
+		return out;
+	}
+
+
+	/* ------------------------------------------------- extrapolated seasons
+
+	   THE YEARS NOBODY PLAYED.
+
+	   A universe built from 2025, 2026 and 2031 is a six-year world with three
+	   seasons in it, and until now the four missing years were a hole: the
+	   carry-over was aged across them (see ageCarry) so the world on the far
+	   side was older, and that was all. The timeline skipped from 2026 to
+	   2031, the records book counted three champions in six years, and a
+	   player's page said he was a junior in a season the world has no account
+	   of. The gap warning said "the world was aged across it", which is true
+	   and is not a history.
+
+	   Extrapolation fills those years with the one thing a season is
+	   remembered by — its awards: a champion, a runner-up, a poll No. 1 and a
+	   player of the year, plus a five-man All-America. It is NOT a simulation
+	   and does not pretend to be, and every row it produces is flagged
+	   `extrapolated: true` so the view, the records book and the export can
+	   say which seasons were played and which were inferred. Nothing derived
+	   from an extrapolated season is fed back into the chain: the carry that
+	   crosses the gap is still ageCarry's, so turning this off changes what is
+	   DISPLAYED and not what is simulated.
+
+	   What it reads is what the carry already holds: program levels (which
+	   ageCarry regresses year by year, so a gap year's favourites drift the
+	   way they should) and the named star returners each program is carrying,
+	   which is where a player of the year with an actual name comes from. The
+	   draw is seeded off the universe seed and the season, so a replay
+	   produces the same missing years — the same contract every other part of
+	   the chain keeps.
+
+	   HOW FAR IT REACHES. The names come from the star returners the carry is
+	   holding, and ageCarry graduates them out one class year at a time — so
+	   the first missing year after a played one has a player of the year the
+	   world has met, and the fifth has a champion and a poll and nobody left
+	   to name. That is the right shape for the guess: a world five years past
+	   the last file it was given genuinely does not know who is playing.
+
+	   `partial` is the other case this exists for, and it is the commoner one:
+	   a class file that covers only part of a season's field — a league export
+	   whose draft class is forty men rather than seventy — produces a season
+	   whose awards are drawn from a thin field. The caller marks such a row
+	   `partial: true` and the same machinery tops up the honours that field
+	   could not fill, rather than leaving a season with three All-Americans in
+	   it. */
+
+	/* How much of a full class a file has to carry before its season's awards
+	   are taken at face value. Below this the field is thin enough that the
+	   honours it produced are topped up from the carry. */
+	const PARTIAL_CLASS_SHARE = 0.55;
+
+	function weightedPick(rng, entries) {
+		let total = 0;
+		for (const e of entries) total += Math.max(0, e.w);
+		if (!(total > 0)) return entries.length ? entries[0] : null;
+		let x = rng.random() * total;
+		for (const e of entries) {
+			x -= Math.max(0, e.w);
+			if (x <= 0) return e;
+		}
+		return entries[entries.length - 1];
+	}
+
+	/* The programs a missing season would have been about, strongest first,
+	   with a weight that is steep enough that a 90-level blue blood is a real
+	   favourite and flat enough that the same four teams do not win every
+	   unplayed year in a decade. */
+	function contendersOf(carry) {
+		const levels = (carry && carry.levels) || {};
+		return Object.keys(levels)
+			.map((name) => ({ name, level: levels[name] }))
+			.filter((x) => Number.isFinite(x.level))
+			.sort((a, b) => b.level - a.level ||
+				String(a.name).localeCompare(String(b.name)))
+			.slice(0, 40)
+			.map((x) => ({ name: x.name, level: x.level, w: Math.pow(Math.max(1, x.level - 40), 2.2) }));
+	}
+
+	/* The named men the carry says are still on a roster, best first. These
+	   are star returners harvested from the season before the gap (see
+	   returnersOf), so an extrapolated player of the year is somebody the
+	   world has already met rather than a generated name. */
+	function returnerPool(carry) {
+		const out = [];
+		const levels = (carry && carry.levels) || {};
+		for (const school of Object.keys((carry && carry.returners) || {})) {
+			for (const r of carry.returners[school] || []) {
+				if (!r || !r.name) continue;
+				out.push({
+					name: r.name, school, classYear: r.classYear || null,
+					talent: Number.isFinite(r.talent) ? r.talent : 50,
+					level: Number.isFinite(levels[school]) ? levels[school] : 55,
+				});
+			}
+		}
+		return out.sort((a, b) => (b.talent + b.level * 0.35) - (a.talent + a.level * 0.35) ||
+			String(a.name).localeCompare(String(b.name)));
+	}
+
+	/* One extrapolated season. `carry` is the world as it stood going into it,
+	   already aged to that year by ageCarry. */
+	function extrapolateSeason(carry, season, baseSeed, opts) {
+		const rng = new global.BBGMRng.Rng(
+			String(baseSeed) + "|gap|" + season);
+		const field = contendersOf(carry);
+		if (!field.length) return null;
+		const champ = weightedPick(rng, field);
+		const rest = field.filter((x) => x.name !== (champ && champ.name));
+		const runnerUp = rest.length ? weightedPick(rng, rest) : null;
+		/* The poll No. 1 is the best programme most years and the champion
+		   sometimes, which is what a poll is. */
+		const apOne = rng.random() < 0.42 && champ ? champ
+			: (field[Math.min(field.length - 1, Math.floor(Math.pow(rng.random(), 2) * 6))] || champ);
+		const pool = returnerPool(carry);
+		/* A player of the year comes from the top of the returner pool,
+		   weighted so the best man usually wins it and not always. */
+		const poy = pool.length
+			? weightedPick(rng, pool.slice(0, 12).map((p, i) => ({ p, w: Math.pow(0.78, i) }))).p
+			: null;
+		const allAmerica = [];
+		const used = new Set(poy ? [poy.name] : []);
+		for (const p of pool) {
+			if (allAmerica.length >= 5) break;
+			if (used.has(p.name)) continue;
+			used.add(p.name);
+			allAmerica.push(p);
+		}
+		const awards = [];
+		if (poy) {
+			awards.push({ season, name: poy.name, school: poy.school,
+				award: "Consensus National Player of the Year", extrapolated: true });
+		}
+		for (const p of allAmerica) {
+			awards.push({ season, name: p.name, school: p.school,
+				award: "First Team All-American", extrapolated: true });
+		}
+		if (champ) {
+			awards.push({ season, name: null, school: champ.name,
+				award: "National Champion", extrapolated: true });
+		}
+		return {
+			season,
+			fileName: null,
+			seed: null,
+			extrapolated: true,
+			flavor: "extrapolated — no class file for this season",
+			flavorName: null,
+			champion: champ ? champ.name : null,
+			champSeed: null,
+			runnerUp: runnerUp ? runnerUp.name : null,
+			champConf: (carry.confOf || {})[champ ? champ.name : ""] || null,
+			runnerUpConf: (carry.confOf || {})[runnerUp ? runnerUp.name : ""] || null,
+			finalFour: [champ, runnerUp].filter(Boolean).map((x) => x.name),
+			apOne: apOne ? apOne.name : null,
+			poy: poy ? { name: poy.name, school: poy.school, club: null, nonNcaa: false } : null,
+			poyConf: poy ? (carry.confOf || {})[poy.school] || null : null,
+			no1: null,
+			no1Conf: null,
+			realignment: [],
+			coachChanges: 0, coachFired: 0, coachRetired: 0, coachHiredAway: 0,
+			futureOnRosters: 0, futureHonors: 0,
+			awards,
+			allAmerica: allAmerica.map((p) => ({ name: p.name, school: p.school })),
+			gap: 0,
+		};
+	}
+
+	/* Every season between two played ones, extrapolated. `carry` is the world
+	   as the earlier season left it; it is aged one year per step so the
+	   fourth missing year is drawn against a world that has drifted four years
+	   rather than against the one the gap started from. */
+	function extrapolateGap(carry, fromSeason, toSeason, baseSeed) {
+		const out = [];
+		if (!carry || !Number.isFinite(fromSeason) || !Number.isFinite(toSeason)) return out;
+		let world = carry;
+		for (let y = fromSeason + 1; y < toSeason; y++) {
+			world = ageCarry(world, 1);
+			const row = extrapolateSeason(world, y, baseSeed);
+			if (row) out.push(row);
+		}
+		return out;
+	}
+
+	/* THE TOP-UP FOR A PARTIAL CLASS.
+
+	   A season run from a file that carries half a class produces half a
+	   season's honours: the awards module hands out what the field it was
+	   given can support, so a forty-man class file yields an All-America team
+	   with three men on it and a conference honours list with holes. The
+	   season is real and its honours are real; what is missing is everything
+	   the men who are not in the file would have won.
+
+	   `share` is how much of a full class the file carried. The honours added
+	   are drawn from the same returner pool an extrapolated season uses and
+	   are flagged the same way, so nothing that reads a universe can mistake
+	   an inferred All-American for a simulated one. */
+	function topUpPartialSeason(row, carry, baseSeed, share) {
+		if (!row || row.error || !carry) return row;
+		if (!(share >= 0) || share >= PARTIAL_CLASS_SHARE) return row;
+		const pool = returnerPool(carry)
+			.filter((p) => !row.poy || p.name !== row.poy.name);
+		if (!pool.length) return row;
+		const rng = new global.BBGMRng.Rng(String(baseSeed) + "|partial|" + row.season);
+		const want = Math.max(0, Math.round(5 * (1 - share)));
+		const added = [];
+		for (const p of pool) {
+			if (added.length >= want) break;
+			added.push(p);
+		}
+		if (!added.length) return row;
+		/* One shuffle so the top-up is not always the same five names in the
+		   same order across a chain of partial files. */
+		for (let i = added.length - 1; i > 0; i--) {
+			const j = Math.floor(rng.random() * (i + 1));
+			const tmp = added[i]; added[i] = added[j]; added[j] = tmp;
+		}
+		row.partial = true;
+		row.partialShare = share;
+		row.awards = (row.awards || []).concat(added.map((p) => ({
+			season: row.season, name: p.name, school: p.school,
+			award: "First Team All-American", extrapolated: true,
+		})));
+		row.allAmerica = (row.allAmerica || []).concat(
+			added.map((p) => ({ name: p.name, school: p.school })));
+		return row;
+	}
+
+	/* The extrapolated seasons as alumni rows, so the news desk and a player
+	   page can refer to a man who was player of the year in a year nobody
+	   played. Flagged, for the reason everything else here is. */
+	function extrapolatedAlumni(rows) {
+		const out = [];
+		for (const r of rows || []) {
+			if (!r || !r.extrapolated || !r.poy) continue;
+			out.push({
+				season: r.season, name: r.poy.name, key: null,
+				school: r.poy.school, club: null, nonNcaa: false,
+				boardRank: null, why: "player of the year", extrapolated: true,
+			});
 		}
 		return out;
 	}
@@ -696,7 +1505,7 @@
 	     - `files`, optional, so a universe can be one file you hand somebody
 	       instead of a file plus a folder of class exports.
 
-	   `version` goes to 2. Version 1 files still import — see importUniverse,
+	   `version` goes to 3. Older files still import — see importUniverse,
 	   which reads what is present and says what is missing. */
 	function exportUniverse(u, opts) {
 		opts = opts || {};
@@ -720,6 +1529,34 @@
 				gap: r.gap || 0,
 				error: r.error || null,
 			})),
+			/* THE WORLD ITSELF, NOT ONLY ITS SEEDS.
+
+			   The export carried seeds, fingerprints and settings, which is
+			   everything needed to REPRODUCE the universe and nothing at all
+			   about what it was. So a shared universe whose replay diverged —
+			   a newer engine, a class file the recipient had a different copy
+			   of, a locked setting — arrived as a different world with the
+			   right name, and the file it came from could not even say who had
+			   won. Divergence was detected and then had nothing to show.
+
+			   The rows are the timeline as it was played: champion, runner-up,
+			   player of the year, No. 1 pick, the poll, the Final Four, the
+			   coaching carousel counts. They are small — a season is a few
+			   hundred bytes — and they are the whole of what a person means
+			   when they say they want to keep somebody's universe. Threads,
+			   the records book and the alumni index travel with them because
+			   all three are derived from the rows and re-deriving them on
+			   import would produce a book that disagreed with its own
+			   timeline.
+
+			   `tail` is what step() carried out of the last season, so an
+			   imported universe can be EXTENDED with a later class file
+			   instead of only replayed (see canExtendUniverse in js/app.js). */
+			timeline: (u.rows || []).map((r) => Object.assign({}, r)),
+			threads: (u.threads || []).slice(0, 400),
+			records: u.records || null,
+			alumni: (u.alumni || []).slice(-400),
+			tail: u.tail || null,
 		};
 		if (u.broken) out.broken = u.broken;
 		if (u.biography && Object.keys(u.biography).length) out.biography = u.biography;
@@ -828,7 +1665,9 @@
 
 	global.Universe = {
 		VERSION, ENGINE_REV, validate, harvest, returnersOf, alumniOf, summarize,
-		threads, records, exportUniverse, biographyOf, seedFor, resultFingerprint,
+		threads, moreThreads, records, exportUniverse, biographyOf, seedFor, resultFingerprint,
+		extrapolateGap, extrapolateSeason, topUpPartialSeason, extrapolatedAlumni,
+		PARTIAL_CLASS_SHARE,
 		ageCarry, coachTreeStep, nationalPOYSet, recruitingCohorts,
 	};
 })(typeof window !== "undefined" ? window : self);

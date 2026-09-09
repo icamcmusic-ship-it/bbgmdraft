@@ -2595,18 +2595,43 @@
 	   picker lists them, universe mode runs them as one continuous world
 	   oldest first, and "Merge into a league file" writes all of them back
 	   into the league they came from. */
+	/* IS THIS A LEAGUE OR IS IT A CLASS?
+
+	   The split used to be decided by size alone: a file above the class cap
+	   was a league and everything else was a class. That is right about a
+	   fifty-megabyte export and wrong about the common case it was written
+	   for — a BBGM league in its first season, or a small custom league, is
+	   under the cap and is still a league carrying three future draft classes
+	   that the user wants split out. Dropping one loaded a single "class" of
+	   two thousand men, which the tool then tried to simulate.
+
+	   A league says so in its own structure: it carries teams, a schedule,
+	   gameAttributes or draft picks, none of which a draft-class export has.
+	   Size stays as a fallback for a file that carries only players. */
+	function looksLikeLeague(data) {
+		if (!data || typeof data !== "object") return false;
+		for (const key of ["teams", "games", "schedule", "draftPicks",
+			"gameAttributes", "trade", "playoffSeries"]) {
+			const v = data[key];
+			if (Array.isArray(v) ? v.length > 0 : (v && typeof v === "object")) return true;
+		}
+		return false;
+	}
+
 	function classesFromFile(name, data, check) {
 		const base = name.replace(/\.json(\.gz)?$|\.gz$/i, "");
 		const found = global.Engine.draftClassesIn(data);
 		/* Not a league export: an ordinary draft-class file, loaded as
-		   itself. The size check is what tells the two apart — a class is
-		   sixty to eighty players and a league is thousands — because a
-		   class file's own players carry UNDRAFTED tids too. */
-		if (!check.oversized || found.length === 0) {
+		   itself. Either the file says it is a league (teams, schedule,
+		   gameAttributes) or it is over the class cap; a class file's own
+		   players carry UNDRAFTED tids too, so the tids alone cannot tell
+		   the two apart. */
+		const isLeague = looksLikeLeague(data) || check.oversized;
+		if (!isLeague || found.length === 0) {
 			/* The old fallback, for a big file whose prospects carry no tid
 			   this tool recognizes: take the players drafted in the file's
 			   own season rather than simulating five thousand men. */
-			if (check.oversized && check.classPids) {
+			if (isLeague && check.classPids) {
 				const keep = new Set(check.classPids);
 				const players = data.players.filter((p, i) =>
 					keep.has(Number.isFinite(Number(p.pid)) ? Number(p.pid) : -1 - i));
@@ -2618,7 +2643,10 @@
 			return [{ name, data, warnings: check.warnings }];
 		}
 		const years = found.map((c) => c.year);
-		const note = "This is a full league export. " +
+		const note = "This is a full league export (" +
+			((data.players || []).length) + " players" +
+			(Array.isArray(data.teams) && data.teams.length
+				? ", " + data.teams.length + " teams" : "") + "). " +
 			(found.length === 1
 				? "The " + years[0] + " draft class inside it (" + found[0].count +
 					" players) was loaded; the rest of the league was left alone."
@@ -2642,7 +2670,7 @@
 		});
 	}
 
-	function readFiles(fileList) {
+	function readFiles(fileList, opts) {
 		const problems = [];
 		// A five-file drop used to just sit there with nothing on screen.
 		$("empty").classList.add("busy");
@@ -2667,7 +2695,7 @@
 			}),
 		);
 		Promise.all(jobs).then((loaded) => installFiles(
-			loaded.filter(Boolean).reduce((a, b) => a.concat(b), []), problems));
+			loaded.filter(Boolean).reduce((a, b) => a.concat(b), []), problems, opts));
 	}
 
 	/* A synthetic class for a visitor with nothing to drop. It goes through
@@ -2682,7 +2710,54 @@
 		installFiles([{ name: "sample-class-" + seed + ".json", data, warnings: check.warnings }], []);
 	}
 
-	function installFiles(loaded, problems) {
+	/* ADDING FILES TO A SESSION RATHER THAN REPLACING IT.
+
+	   installFiles replaced state.files outright, which is right for a drop
+	   that starts a session and wrong for every drop after it: a user who has
+	   built a twenty-season universe and wants to add 2046 to it had exactly
+	   one route, which was to drop all twenty-one files again and watch the
+	   whole world be redrawn. Everything keyed by file index — results,
+	   runners, per-file config patches, the universe's own cfgs and order —
+	   made appending look harder than it is, so it was never done.
+
+	   The index is the problem and the file object is the answer: the merged
+	   list is sorted by season like any other, and every index-keyed map is
+	   rebuilt through an old-index → new-index mapping taken from the file
+	   objects themselves. A file already loaded (same fingerprint) is not
+	   loaded twice. */
+	function mergeFiles(existing, added) {
+		const have = new Set(existing.map((f) => f.fingerprint).filter(Boolean));
+		const fresh = [];
+		const dupes = [];
+		for (const f of added) {
+			if (!f.fingerprint) f.fingerprint = fingerprint(f);
+			if (have.has(f.fingerprint)) { dupes.push(f.name); continue; }
+			have.add(f.fingerprint);
+			fresh.push(f);
+		}
+		const merged = existing.concat(fresh).sort((a, b) =>
+			(a.data.startingSeason || 0) - (b.data.startingSeason || 0));
+		const oldIndex = new Map();
+		existing.forEach((f, i) => oldIndex.set(f, i));
+		const remap = {};
+		merged.forEach((f, i) => {
+			if (oldIndex.has(f)) remap[oldIndex.get(f)] = i;
+		});
+		return { merged, fresh, dupes, remap };
+	}
+
+	function remapByIndex(map, remap) {
+		const out = {};
+		for (const k of Object.keys(map || {})) {
+			const to = remap[Number(k)];
+			if (to !== undefined) out[to] = map[k];
+		}
+		return out;
+	}
+
+	function installFiles(loaded, problems, opts) {
+		const append = !!(opts && opts.append) && state.files.length > 0;
+		if (append) { appendFiles(loaded, problems); return; }
 		{
 			$("empty").classList.remove("busy");
 			const ok = loaded.filter(Boolean);
@@ -2712,6 +2787,7 @@
 					(f.data.startingSeason || "?") + " — " + f.name, String(i)));
 			});
 			sel.hidden = state.files.length < 2;
+			if ($("btnAddFiles")) $("btnAddFiles").hidden = false;
 			$("btnExportAll").hidden = state.files.length < 2;
 			$("empty").hidden = true;
 			$("app").hidden = false;
@@ -2727,6 +2803,104 @@
 			setStatus("");
 			run();
 		}
+	}
+
+	/* Add classes to the session, keeping everything already loaded.
+
+	   The universe is the reason this exists, so it is the case handled most
+	   carefully: if every added class is later than the last season the chain
+	   played, the chain is EXTENDED (see canExtendUniverse) and the seasons
+	   already simulated are untouched — same seeds, same men, same results,
+	   same player pages. If one of them lands in the middle of the timeline
+	   the chain has to be rebuilt, because a class inserted at 2031 changes
+	   the pool memory and the carry for every season after it, and that is
+	   said out loud rather than done silently. */
+	function appendFiles(loaded, problems) {
+		$("empty").classList.remove("busy");
+		const ok = loaded.filter(Boolean);
+		if (problems && problems.length) showError(new Error(problems.join("\n")));
+		else clearError();
+		if (!ok.length) { setStatus(""); return; }
+		for (const f of ok) if (!f.fingerprint) f.fingerprint = fingerprint(f);
+		const before = state.files.slice();
+		const { merged, fresh, dupes, remap } = mergeFiles(before, ok);
+		if (!fresh.length) {
+			setStatus(dupes.length
+				? "Already loaded: " + dupes.join(", ") + ". Nothing was added."
+				: "Nothing was added.");
+			return;
+		}
+		const activeFileObj = before[state.active] || null;
+		/* Every index-keyed map moves with its file. */
+		const results = [];
+		const runners = [];
+		merged.forEach((f, i) => {
+			const from = before.indexOf(f);
+			results[i] = from === -1 ? null : (state.results[from] || null);
+			runners[i] = from === -1
+				? global.Engine.createRunner(f.data)
+				: state.runners[from];
+		});
+		state.files = merged;
+		state.results = results;
+		state.runners = runners;
+		state.fileCfgs = remapByIndex(state.fileCfgs, remap);
+		if (state.universe) {
+			state.universe.cfgs = remapByIndex(state.universe.cfgs || {}, remap);
+			state.universe.order = (state.universe.order || []).map((d) =>
+				Object.assign({}, d, { index: remap[d.index] })).filter(
+				(d) => d.index !== undefined);
+			state.universe.careers = null;
+		}
+		state.active = activeFileObj ? merged.indexOf(activeFileObj) : 0;
+		if (state.active < 0) state.active = 0;
+		state.leagueSource = (ok.filter((f) => f.league)[0] || {}).league ||
+			state.leagueSource || null;
+		paintRandomPerFile();
+		const sel = $("fileSelect");
+		sel.innerHTML = "";
+		state.files.forEach((f, i) => {
+			sel.appendChild(new Option(
+				(f.data.startingSeason || "?") + " — " + f.name, String(i)));
+		});
+		sel.value = String(state.active);
+		sel.hidden = state.files.length < 2;
+		if ($("btnAddFiles")) $("btnAddFiles").hidden = false;
+		$("btnExportAll").hidden = state.files.length < 2;
+		$("empty").hidden = true;
+		$("app").hidden = false;
+		$("fileSummary").textContent = state.files.map(
+			(f) => f.name + ": " + summarize(f.data)).join("  ·  ");
+		$("fileSummary").hidden = false;
+		for (const id of ["btnReroll", "btnRerollUntil", "btnRerun", "btnExport", "btnExportMenu",
+			"btnExportAll", "btnPin"]) $(id).disabled = false;
+		const warns = fresh.flatMap((f) => (f.warnings || []).map((w) => f.name + ": " + w));
+		if (dupes.length) {
+			warns.push(dupes.length + " file" + (dupes.length === 1 ? " was" : "s were") +
+				" already loaded and " + (dupes.length === 1 ? "was" : "were") +
+				" skipped: " + dupes.join(", "));
+		}
+		if (warns.length) showWarning(warns.join("\n"));
+		const added = fresh.length + " class" + (fresh.length === 1 ? "" : "es") + " added";
+		if (state.universe.rows.length && canExtendUniverse()) {
+			setStatus(added + " — extending the universe from " +
+				state.universe.tail.lastSeason + "…", true);
+			runUniverse(null, { extend: true });
+			return;
+		}
+		if (state.universe.rows.length) {
+			const tail = universeTail();
+			setStatus(added + ". " + (tail
+				? "One of them is not later than " + tail.lastSeason +
+					", so the chain cannot be extended — re-run the universe to " +
+					"fold them in, which redraws every season."
+				: "Re-run the universe to fold them in."));
+			render();
+			return;
+		}
+		if (state.cfg.universe && state.files.length > 1) { runUniverse(); return; }
+		setStatus(added + ".");
+		run();
 	}
 
 	/* Locks belong to the class they were made against. */
@@ -2795,6 +2969,15 @@
 		$("btnLoad").addEventListener("click", () => $("file").click());
 		if ($("btnSample")) $("btnSample").addEventListener("click", loadSample);
 		$("file").addEventListener("change", (e) => readFiles(e.target.files));
+		if ($("btnAddFiles")) {
+			$("btnAddFiles").addEventListener("click", () => $("addFile").click());
+		}
+		if ($("addFile")) {
+			$("addFile").addEventListener("change", (e) => {
+				readFiles(e.target.files, { append: true });
+				e.target.value = "";
+			});
+		}
 		$("fileSelect").addEventListener("change", (e) => {
 			state.active = Number(e.target.value);
 			checkLockFingerprint();
@@ -2817,7 +3000,17 @@
 			e.preventDefault();
 			depth = 0;
 			$("empty").classList.remove("over");
-			if (e.dataTransfer.files.length) readFiles(e.dataTransfer.files);
+			/* A DROP ONTO A LIVE SESSION ADDS.
+
+			   Dropping a file used to discard everything already loaded,
+			   including a finished universe, with no warning and no undo. A
+			   drop with nothing loaded still starts a session; a drop on top
+			   of one adds to it, which is what the gesture means once there is
+			   something on screen. "Load file…" is still the replace. */
+			if (e.dataTransfer.files.length) {
+				readFiles(e.dataTransfer.files,
+					state.files.length ? { append: true } : null);
+			}
 		});
 	}
 
@@ -3658,6 +3851,12 @@
 	   and the files linkCareers still needs are never evicted. */
 	const UNIVERSE_LIVE_RESULTS = 15;
 
+	/* What a whole draft class is, for the purpose of deciding whether a file
+	   carried one. A BBGM class is sixty to eighty men; a league export's
+	   future class is often half that, and the season it produces has honours
+	   drawn from a field that thin. See Universe.topUpPartialSeason. */
+	const UNIVERSE_FULL_CLASS = 65;
+
 	function evictUniverseResults(keepIndices) {
 		const keep = new Set(keepIndices || []);
 		keep.add(state.active);
@@ -3674,17 +3873,71 @@
 	   pool memory) from each season to the next. Asynchronous in slices so
 	   the page stays alive; ~330ms a season means 50 classes is a progress
 	   bar, not a click. */
-	function runUniverse(after) {
+	/* EXTENDING A UNIVERSE RATHER THAN REBUILDING IT.
+
+	   Loading more classes into a finished chain used to mean one thing:
+	   every season re-ran from season one. That is correct — a class file
+	   inserted anywhere changes the pool memory, the future rosters and the
+	   carry from that point on — and it is also the reason nobody added a
+	   file to a forty-season universe: twenty minutes of simulation, a new
+	   world, and every player page the user had open now describes somebody
+	   else.
+
+	   A chain can be EXTENDED instead when the new files are all strictly
+	   later than every season already played. Then nothing before them
+	   changes: the carry, the pool memory, the anomaly memory and the coach
+	   tree are exactly what the last played season handed forward, and the new
+	   seasons are the next links on the same chain. What is given up is stated
+	   rather than hidden — the underclassmen in an appended 2038 class do not
+	   retro-appear on the 2035 rosters that were already played, because those
+	   seasons are not being re-simulated. `Re-run the whole universe` does
+	   that and says so.
+
+	   The tail is what makes it possible: everything step() carries from one
+	   season to the next, saved when the chain finishes. */
+	function universeTail() {
+		return state.universe && state.universe.tail ? state.universe.tail : null;
+	}
+
+	/* Whether the loaded files can extend the chain rather than replace it:
+	   there is a finished chain with a tail, and every file that is not
+	   already part of it is later than the last season it played. */
+	function canExtendUniverse() {
+		const tail = universeTail();
+		if (!tail || !state.universe.rows.length || state.universe.running) return false;
+		if (state.universe.broken) return false;
+		const known = new Set(tail.fingerprints || []);
+		const fresh = state.files.filter((f) => !known.has(f.fingerprint));
+		if (!fresh.length) return false;
+		return fresh.every((f) => Number.isFinite(f.data && f.data.startingSeason) &&
+			f.data.startingSeason > tail.lastSeason);
+	}
+
+	function runUniverse(after, opts) {
 		const U = global.Universe;
 		if (!state.files.length) {
 			setStatus("Load two or more class files to run a universe.");
 			return;
 		}
 		if (state.universe.running) return;
+		const tail = (opts && opts.extend) ? universeTail() : null;
+		const extend = !!tail && canExtendUniverse();
 		const diags = U.validate(state.files);
 		state.universe.diags = diags;
-		const runnable = diags.filter((d) => d.ok)
+		let runnable = diags.filter((d) => d.ok)
 			.sort((a, b) => (a.season || 0) - (b.season || 0) || a.index - b.index);
+		if (extend) {
+			const known = new Set(tail.fingerprints || []);
+			runnable = runnable.filter((d) => {
+				const f = state.files[d.index];
+				return f && !known.has(f.fingerprint) &&
+					Number.isFinite(d.season) && d.season > tail.lastSeason;
+			});
+			if (!runnable.length) {
+				setStatus("Nothing to add — every loaded class is already in this universe.");
+				return;
+			}
+		}
 		/* THE "LOAD JUST THE CLASS" OFFER, HONOURED.
 
 		   Universe.validate hands back `classPids` for a whole-league file the
@@ -3713,9 +3966,13 @@
 			render();
 			return;
 		}
-		const baseSeed = state.cfg.seed && state.cfg.seed.trim()
-			? state.cfg.seed.trim()
-			: "universe-" + Math.floor(Math.random() * 1e9);
+		/* An extension keeps the seed the chain was built on, whatever the
+		   panel says now: the seed is part of the world's identity and a
+		   season appended under a different one is a different world. */
+		const baseSeed = extend ? tail.baseSeed
+			: (state.cfg.seed && state.cfg.seed.trim()
+				? state.cfg.seed.trim()
+				: "universe-" + Math.floor(Math.random() * 1e9));
 		/* THE CONFIG IS FROZEN BEFORE SEASON ONE.
 
 		   step(k) used to call CFG.make(state.cfg) fresh for every season, so
@@ -3724,20 +3981,32 @@
 		   happened. One config object is built here and handed down; a change
 		   made mid-run re-invalidates and restarts the chain, which is what
 		   the user meant, rather than splicing two worlds together. */
-		const frozen = CFG.make(state.cfg);
+		/* And an extension runs under the settings the chain was FROZEN with,
+		   for the same reason: appending a season at a different coachTurnover
+		   splices two worlds together under one name. */
+		const frozen = extend && state.universe.settings
+			? CFG.make(state.universe.settings)
+			: CFG.make(state.cfg);
 		/* An imported universe's own biographies, so the replay produces the
 		   same men and not merely the same seeds. See importUniverse. */
 		frozen.biography = state.universeBiography || null;
 		universeCancel = false;
-		state.universe = {
-			rows: [], threads: [], alumni: [], baseSeed, cfgs: {},
-			/* The chain's own order, so a result evicted to bound memory can
-			   be rebuilt AND relinked on demand — see ensureResult. */
-			order: runnable,
-			running: true, diags, total: runnable.length, done: 0,
-			settings: frozen, coachTree: null, records: null,
-			engineRev: U.ENGINE_REV, cancelled: false, broken: null,
-		};
+		state.universe = extend
+			? Object.assign(state.universe, {
+				order: (state.universe.order || []).concat(runnable),
+				running: true, diags, total: runnable.length, done: 0,
+				cancelled: false, records: null, careers: null,
+			})
+			: {
+				rows: [], threads: [], alumni: [], baseSeed, cfgs: {},
+				/* The chain's own order, so a result evicted to bound memory
+				   can be rebuilt AND relinked on demand — see ensureResult. */
+				order: runnable,
+				running: true, diags, total: runnable.length, done: 0,
+				settings: frozen, coachTree: null, records: null,
+				engineRev: U.ENGINE_REV, cancelled: false, broken: null,
+				tail: null,
+			};
 		/* Only jump to the Timeline when the user asked for a universe
 		   explicitly. With universe mode on as a SETTING the chain re-runs
 		   whenever anything invalidates it, and stealing the tab every time
@@ -3754,10 +4023,13 @@
 		   it exactly as the full run will), and each earlier season is then
 		   handed the underclassmen the later classes say were there. See
 		   Engine.previewClass and Engine.futureRosterFor. */
-		const seedAt = (k) => U.seedFor(baseSeed, k, runnable[k].season,
+		/* The seed index continues past the seasons already played, so an
+		   appended season is a new link and not a re-draw of season one. */
+		const seedBase = extend ? (tail.count || 0) : 0;
+		const seedAt = (k) => U.seedFor(baseSeed, seedBase + k, runnable[k].season,
 			state.files[runnable[k].index].fingerprint);
 		const previews = [];
-		let previewPools = [];
+		let previewPools = extend ? (tail.recentPools || []).map((a) => a.slice()) : [];
 		for (let k = 0; k < runnable.length; k++) {
 			const d = runnable[k];
 			let prev = null;
@@ -3797,19 +4069,34 @@
 			}
 			return out;
 		};
-		let carry = null;
-		let recentPools = [];
+		let carry = extend ? tail.carry : null;
+		let recentPools = extend ? (tail.recentPools || []).map((a) => a.slice()) : [];
 		/* The anomaly memory is universe-scoped, like the pool memory: a
 		   ten-season chain used to re-use the same six anomalies because
 		   each season was handed the standalone session's history rather
 		   than the chain's own. */
-		let recentAnomalies = [];
-		let coachTree = null;
-		let lastSeason = null;
+		let recentAnomalies = extend
+			? (tail.recentAnomalies || []).map((a) => a.slice()) : [];
+		let coachTree = extend ? state.universe.coachTree : null;
+		let lastSeason = extend ? tail.lastSeason : null;
 		const finish = () => {
 			state.universe.running = false;
 			state.universe.threads = U.threads(state.universe.rows);
 			state.universe.coachTree = coachTree;
+			/* THE TAIL. Everything step() carried from one season to the next,
+			   kept so that loading a later class file extends this chain
+			   instead of replacing it. See canExtendUniverse. */
+			state.universe.tail = {
+				baseSeed,
+				carry,
+				lastSeason,
+				count: seedBase + runnable.length,
+				recentPools: recentPools.map((a) => a.slice()),
+				recentAnomalies: recentAnomalies.map((a) => a.slice()),
+				fingerprints: (state.universe.order || [])
+					.map((d) => state.files[d.index] && state.files[d.index].fingerprint)
+					.filter(Boolean),
+			};
 			state.universe.records = U.records(
 				state.universe.rows, state.universe.alumni);
 			/* PASS THREE: the seasons a player actually played, on his
@@ -3823,7 +4110,10 @@
 			persist();
 			const diverged = checkUniverseDivergence();
 			if (diverged) showError(new Error(diverged));
-			setStatus((state.universe.cancelled ? "Universe stopped: " : "Universe complete: ") +
+			setStatus((state.universe.cancelled ? "Universe stopped: "
+				: extend ? "Universe extended by " + runnable.length + " season" +
+					(runnable.length === 1 ? "" : "s") + ": "
+				: "Universe complete: ") +
 				state.universe.rows.length + " seasons, " +
 				state.universe.threads.length + " threads." +
 				(state.universe.broken
@@ -3854,6 +4144,23 @@
 			   class year and graduate out. */
 			const gap = (carry && Number.isFinite(lastSeason) && Number.isFinite(d.season))
 				? Math.max(0, d.season - lastSeason - 1) : 0;
+			/* THE YEARS NOBODY PLAYED GET AN ACCOUNT OF THEMSELVES.
+
+			   Aging the carry across a gap keeps the world moving and leaves
+			   the timeline with a hole where four seasons should be. The
+			   extrapolated rows are drawn from the carry as it stood going in
+			   — champions off program level, a player of the year off the
+			   named star returners — and are flagged so nothing mistakes them
+			   for a simulated season. They are pushed onto the timeline and
+			   NOT fed back into the chain: `carry` below is still ageCarry's,
+			   so this changes what the world remembers and not what it does.
+			   See Universe.extrapolateGap. */
+			if (gap > 0 && state.cfg.extrapolateGaps !== false) {
+				const guessed = U.extrapolateGap(carry, lastSeason, d.season, baseSeed);
+				for (const row of guessed) state.universe.rows.push(row);
+				state.universe.alumni = state.universe.alumni
+					.concat(U.extrapolatedAlumni(guessed));
+			}
 			if (gap > 0) carry = U.ageCarry(carry, gap);
 			try {
 				const cfg = CFG.make(frozen);
@@ -3891,7 +4198,17 @@
 					universeTitles: cfg.universeTitles,
 				};
 				coachTree = U.coachTreeStep(coachTree, prevCarry, res, d.season, baseSeed);
-				state.universe.rows.push(Object.assign(
+				/* A FILE THAT CARRIES PART OF A CLASS.
+
+				   A league export whose draft class is forty men produces a
+				   real season whose honours were drawn from a thin field.
+				   `share` is how much of a full class the file carried, and
+				   the top-up adds the All-America places that field could not
+				   fill, flagged as inferred. See
+				   Universe.topUpPartialSeason. */
+				const share = Math.min(1, (res.players || []).length /
+					Math.max(1, UNIVERSE_FULL_CLASS));
+				state.universe.rows.push(U.topUpPartialSeason(Object.assign(
 					U.summarize(res, cfg.seed, d.name),
 					{
 						fingerprint: state.files[d.index].fingerprint || null,
@@ -3902,7 +4219,7 @@
 						   different world with the same name. */
 						result: U.resultFingerprint(res),
 						gap,
-					}));
+					}), prevCarry, baseSeed, share));
 				state.universe.alumni = state.universe.alumni
 					.concat(U.alumniOf(res, d.season));
 				carry = U.harvest(res, prevCarry);
@@ -4221,6 +4538,27 @@
 		for (const sn of json.seasons || []) {
 			if (sn && sn.result) state.universeExpect.bySeason[sn.season] = sn.result;
 		}
+		/* THE WORLD THE FILE DESCRIBES, KEPT.
+
+		   A version 3 export carries the timeline itself and not only the
+		   seeds that produced it (see Universe.exportUniverse). Divergence
+		   used to be detected and then reported as a sentence, which left the
+		   user holding a universe that is not the one they were given and no
+		   way to see the one they were. The file's own rows are held here and
+		   any season whose replay diverged is RESTORED from them once the
+		   chain finishes — so the timeline, the threads and the records book
+		   are the ones that were shared, flagged season by season, while the
+		   simulated detail on the other tabs stays honestly labelled as this
+		   machine's replay. */
+		state.universeImported = json.timeline && json.timeline.length
+			? {
+				rows: json.timeline,
+				threads: json.threads || null,
+				records: json.records || null,
+				alumni: json.alumni || null,
+				tail: json.tail || null,
+			}
+			: null;
 		state.cfg.universe = true;
 		state.cfg.seed = json.baseSeed || state.cfg.seed;
 		$("seed").value = state.cfg.seed;
@@ -4248,6 +4586,7 @@
 			if (expected !== r.result) diverged.push(r.season);
 		}
 		state.universeExpect = null;
+		const kept = restoreImportedWorld(diverged);
 		if (!diverged.length) return null;
 		const revNote = want.engineRev !== null && want.engineRev !== global.Universe.ENGINE_REV
 			? " This universe was built on engine revision " + want.engineRev +
@@ -4256,8 +4595,59 @@
 		return "Season" + (diverged.length > 1 ? "s " : " ") +
 			diverged.slice(0, 6).join(", ") +
 			(diverged.length > 6 ? " (+" + (diverged.length - 6) + " more)" : "") +
-			(diverged.length > 1 ? " diverged from the imported universe." :
-				" diverged from the imported universe.") + revNote;
+			" diverged from the imported universe." + revNote +
+			(kept
+				? " The timeline, the threads and the records book have been " +
+					"restored from the file, so the world you were given is the " +
+					"one on the Universe tab; the other tabs show this machine's " +
+					"replay of it."
+				: " This export predates timeline capture, so there is nothing " +
+					"to restore it from.");
+	}
+
+	/* Put the imported universe's own rows back where the replay disagreed.
+
+	   Only the diverged seasons are replaced: a season that replayed
+	   identically is better represented by the row the chain just built, which
+	   carries the same facts plus the result fingerprint and the live links.
+	   The threads and the records book are rebuilt from the merged rows rather
+	   than copied, so they cannot disagree with the timeline above them —
+	   except where the file carries its own and the whole timeline came from
+	   it, in which case the file's are used verbatim. */
+	function restoreImportedWorld(diverged) {
+		const imported = state.universeImported;
+		state.universeImported = null;
+		if (!imported || !imported.rows || !imported.rows.length) return false;
+		if (!diverged.length) return false;
+		const bySeason = {};
+		for (const r of imported.rows) if (r && Number.isFinite(r.season)) bySeason[r.season] = r;
+		let n = 0;
+		state.universe.rows = state.universe.rows.map((r) => {
+			if (diverged.indexOf(r.season) === -1) return r;
+			const src = bySeason[r.season];
+			if (!src) return r;
+			n++;
+			/* `restored` is the flag every consumer needs: this row is what
+			   the file said happened, not what this machine simulated. */
+			return Object.assign({}, src, {
+				restored: true,
+				replayResult: r.result || null,
+				seed: r.seed || src.seed || null,
+			});
+		});
+		if (!n) return false;
+		state.universe.threads = global.Universe.threads(state.universe.rows);
+		state.universe.records = global.Universe.records(
+			state.universe.rows, imported.alumni && imported.alumni.length
+				? imported.alumni : state.universe.alumni);
+		if (imported.alumni && imported.alumni.length) {
+			state.universe.alumni = imported.alumni.slice();
+		}
+		/* And the tail, so an imported world can be extended with a later
+		   class rather than only replayed. The replay's own tail is kept when
+		   nothing diverged, because it matches the loaded files exactly. */
+		if (imported.tail) state.universe.tail = imported.tail;
+		return true;
 	}
 
 	/* ------------------------------------------------------------ routing */

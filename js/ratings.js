@@ -504,6 +504,179 @@
 		{ name: "Positional Question Mark", min: 40, max: 78, w: 1.2, t: ["raw", "rebounding", "defense"], o: { reb: 12, diq: 10, stre: 8, jmp: 8, tp: -12, pss: -10, drb: -10, oiq: -6 } },
 		{ name: "Body-Type Outlier", min: 0, max: 100, w: 0.9, inj: 1.2, t: ["raw", "athletic", "rebounding"], o: { stre: 16, reb: 12, dnk: 8, ins: 6, spd: -18, endu: -12, tp: -8, drb: -4 } },
 		{ name: "Two-Way Contract Body", min: 0, max: 100, w: 1.0, pot: -5, inj: 0.9, t: ["durability", "shooting"], o: { tp: 14, endu: 12, ft: 10, diq: 8, jmp: -14, ins: -12, drb: -10, pss: -8 } },
+		/* --- a hundred and fifty more, and what a bigger table buys ----------
+
+		   Two hundred and five builds already covered every SHAPE a college
+		   prospect comes in. What they did not cover is the density a long
+		   universe needs: a twenty-season chain draws about four hundred pool
+		   slots, and at 205 builds with a 19-build pool the same names recur
+		   across seasons often enough that the fifth class in a chain reads
+		   like the first. A table this size is not more kinds of player, it is
+		   a longer memory — the reason a 2044 class does not feel like the
+		   2027 one is that it is genuinely made of different builds.
+
+		   Every row below is written against the table rather than for it, on
+		   the two tests the audit rows enforce: a shape must not duplicate an
+		   existing one inside a height band a prospect could choose between,
+		   and it must say something the note, flavor or stats layers can
+		   express. Where a row is close to an existing one in offset space it
+		   is separated by its GATE, which is the distinction the redundancy
+		   sweep measures and the one that matters to a player: a post-up guard
+		   and a post-up center are not alternatives for the same prospect. */
+		// --- guards ---------------------------------------------------------
+		{ name: "Snake-Dribble Operator", min: 0, max: 46, w: 1.2, t: ["guard", "playmaking", "scoring"], o: { drb: 20, oiq: 12, fg: 10, pss: 8, reb: -14, stre: -12, diq: -10, jmp: -8 } },
+		{ name: "Reject-the-Screen Guard", min: 0, max: 48, w: 1.0, t: ["guard", "scoring", "athletic"], o: { spd: 18, drb: 12, ins: 10, ft: 6, tp: -16, reb: -12, diq: -10, stre: -6 } },
+		{ name: "Wrong-Foot Finisher", min: 0, max: 50, w: 0.85, t: ["guard", "scoring", "raw"], o: { ins: 18, drb: 10, jmp: 8, spd: 8, tp: -18, ft: -10, diq: -8, reb: -6 } },
+		{ name: "Two-Ball-Handler Backcourt", min: 0, max: 46, w: 1.1, t: ["guard", "playmaking", "shooting"], o: { pss: 16, tp: 14, drb: 10, oiq: 8, stre: -14, reb: -12, ins: -12, jmp: -6 } },
+		{ name: "Nail-Help Guard", min: 0, max: 50, w: 1.0, t: ["guard", "defense", "playmaking"], o: { diq: 18, oiq: 12, pss: 8, endu: 8, ins: -16, dnk: -12, stre: -10, jmp: -6 } },
+		{ name: "Ninety-Four-Feet Presser", min: 0, max: 48, w: 1.1, t: ["guard", "defense", "durability"], o: { endu: 18, diq: 14, spd: 12, stre: 4, ins: -16, tp: -12, reb: -10, oiq: -8 } },
+		{ name: "Trailing-Three Guard", min: 0, max: 52, w: 0.95, t: ["guard", "shooting", "durability"], o: { tp: 18, endu: 12, ft: 10, oiq: 4, ins: -16, drb: -10, stre: -10, reb: -8 } },
+		{ name: "Ball-Screen Rejector", min: 0, max: 46, w: 0.8, t: ["guard", "scoring"], o: { fg: 18, spd: 12, drb: 8, oiq: 6, pss: -12, diq: -12, reb: -10, ins: -8 } },
+		{ name: "Change-Speed Creator", min: 0, max: 48, w: 1.15, t: ["guard", "playmaking", "athletic"], o: { spd: 18, endu: 12, drb: 10, dnk: 6, tp: -16, stre: -12, reb: -10, oiq: -6 } },
+		{ name: "Sprint-Ahead Point", min: 0, max: 46, w: 1.0, t: ["guard", "playmaking", "athletic"], o: { spd: 18, pss: 16, endu: 8, drb: 6, ins: -16, stre: -12, reb: -12, dnk: -6 } },
+		{ name: "One-Dribble Pull-Up", min: 0, max: 52, w: 1.0, t: ["guard", "shooting", "scoring"], o: { fg: 16, ft: 12, spd: 10, oiq: 4, tp: -16, reb: -12, ins: -10, pss: -4 } },
+		{ name: "Weak-Side Cutter Guard", min: 0, max: 52, w: 0.9, t: ["guard", "athletic", "scoring"], o: { oiq: 14, dnk: 12, jmp: 10, spd: 8, tp: -16, pss: -12, drb: -10, stre: -6 } },
+		{ name: "Under-Six-Foot Starter", min: 0, max: 34, w: 0.8, t: ["guard", "playmaking", "durability"], o: { pss: 18, spd: 14, endu: 10, drb: 8, ins: -18, reb: -14, dnk: -12, stre: -6 } },
+		{ name: "Sixth-Year Point Guard", min: 0, max: 46, w: 0.7, pot: -8, bio: { years: ["Graduate"] }, t: ["guard", "playmaking", "durability"], o: { oiq: 18, diq: 12, ft: 8, stre: 6, jmp: -18, spd: -14, dnk: -10, tp: -2 } },
+		{ name: "Two-Point-Only Scorer", min: 0, max: 50, w: 0.9, t: ["guard", "scoring"], o: { fg: 16, ins: 14, drb: 8, ft: 6, tp: -20, pss: -8, diq: -8, reb: -4 } },
+		{ name: "Deny-the-Wing Defender", min: 0, max: 52, w: 1.05, t: ["guard", "defense", "athletic"], o: { diq: 16, spd: 14, endu: 10, jmp: 6, ins: -16, tp: -12, oiq: -8, reb: -6 } },
+		{ name: "Rhythm Shooter", min: 0, max: 54, w: 1.1, vol: 1.25, t: ["guard", "shooting"], o: { tp: 20, ft: 12, fg: 8, oiq: 4, ins: -16, diq: -12, drb: -8, reb: -8 } },
+		{ name: "Blow-By Only Guard", min: 0, max: 48, w: 0.9, t: ["guard", "athletic", "raw"], o: { spd: 20, drb: 10, dnk: 6, jmp: 6, tp: -16, oiq: -12, ft: -8, reb: -6 } },
+		{ name: "Baseline-Out-of-Bounds Specialist", min: 0, max: 54, w: 0.6, t: ["guard", "shooting", "playmaking"], o: { oiq: 16, tp: 12, pss: 10, ft: 8, stre: -16, jmp: -12, ins: -10, spd: -8 } },
+		{ name: "Two-Sport Guard", min: 0, max: 52, w: 0.75, pot: 5, t: ["guard", "athletic", "raw"], o: { jmp: 16, stre: 14, spd: 10, dnk: 6, oiq: -16, tp: -14, pss: -10, ft: -6 } },
+		{ name: "Runs-the-Team-Cold Guard", min: 0, max: 46, w: 0.85, vol: 1.3, t: ["guard", "playmaking", "raw"], o: { pss: 18, drb: 12, spd: 8, oiq: 6, fg: -16, tp: -12, ins: -10, diq: -6 } },
+		{ name: "Screen-and-Slip Guard", min: 0, max: 50, w: 0.8, t: ["guard", "scoring", "playmaking"], o: { oiq: 16, ins: 12, pss: 10, dnk: 6, tp: -16, stre: -12, reb: -10, diq: -6 } },
+		{ name: "Full-Court Outlet Guard", min: 0, max: 48, w: 0.85, t: ["guard", "playmaking", "rebounding"], o: { pss: 18, reb: 12, oiq: 8, endu: 6, ins: -16, dnk: -12, tp: -10, stre: -6 } },
+		{ name: "Skinny Combo Guard", min: 0, max: 50, w: 1.0, pot: 4, t: ["guard", "raw", "shooting"], o: { tp: 16, drb: 12, spd: 8, oiq: 6, stre: -20, reb: -10, ins: -8, dnk: -2 } },
+		{ name: "Bulldozing Lead Guard", min: 24, max: 48, w: 0.9, t: ["guard", "scoring", "durability"], o: { stre: 18, ins: 12, ft: 10, endu: 6, tp: -16, spd: -12, drb: -10, jmp: -8 } },
+		{ name: "Playmaking Two", min: 0, max: 52, w: 1.2, t: ["guard", "playmaking", "scoring"], o: { pss: 14, fg: 12, drb: 10, oiq: 8, ins: -14, reb: -12, diq: -10, stre: -8 } },
+		{ name: "Anchor-Down Guard Defender", min: 0, max: 50, w: 0.95, t: ["guard", "defense", "durability"], o: { stre: 16, diq: 14, endu: 10, reb: 6, tp: -16, ins: -12, jmp: -10, drb: -8 } },
+		{ name: "Clock-Killing Guard", min: 0, max: 48, w: 0.8, t: ["guard", "playmaking", "durability"], o: { drb: 18, ft: 12, oiq: 10, endu: 6, jmp: -16, reb: -12, ins: -10, tp: -8 } },
+		{ name: "Second-Unit Organizer", min: 0, max: 48, w: 1.1, pot: -4, t: ["guard", "playmaking"], o: { pss: 16, oiq: 12, ft: 8, drb: 8, ins: -14, dnk: -12, reb: -10, jmp: -8 } },
+		{ name: "Cold-Blooded Free-Throw Guard", min: 0, max: 52, w: 0.8, t: ["guard", "shooting", "durability"], o: { ft: 20, oiq: 8, endu: 6, drb: 4, ins: -14, reb: -12, jmp: -10, stre: -8 } },
+		{ name: "Perimeter Rebounding Guard", min: 24, max: 48, w: 0.85, t: ["guard", "rebounding", "durability"], o: { reb: 18, endu: 12, stre: 10, diq: 6, tp: -16, ins: -12, dnk: -10, drb: -6 } },
+		{ name: "Read-and-React Backup", min: 0, max: 50, w: 1.0, pot: -3, t: ["guard", "playmaking", "defense"], o: { oiq: 16, ft: 12, pss: 8, drb: 6, jmp: -16, stre: -12, ins: -10, spd: -4 } },
+		{ name: "Two-Foot-in-the-Paint Guard", min: 0, max: 46, w: 0.75, t: ["guard", "scoring", "raw"], o: { ins: 20, ft: 10, stre: 8, drb: 6, tp: -20, diq: -10, reb: -8, pss: -6 } },
+		{ name: "Screen-Setting Guard", min: 20, max: 50, w: 0.7, t: ["guard", "durability", "playmaking"], o: { stre: 16, endu: 14, oiq: 10, pss: 6, tp: -16, ins: -12, jmp: -10, spd: -8 } },
+		{ name: "Injured-Wrist Shooter", min: 0, max: 54, w: 0.6, inj: 1.6, pot: 4, t: ["guard", "shooting", "durability"], o: { tp: 16, ft: 12, oiq: 8, drb: 6, stre: -16, endu: -12, ins: -8, jmp: -6 } },
+		{ name: "Downhill Bulldog Two", min: 0, max: 52, w: 1.0, t: ["guard", "scoring", "athletic"], o: { dnk: 16, stre: 12, spd: 10, ft: 8, tp: -18, pss: -12, oiq: -10, reb: -6 } },
+		{ name: "Never-Passes-Up-a-Three Guard", min: 0, max: 54, w: 0.9, vol: 1.35, t: ["guard", "shooting", "scoring"], o: { tp: 20, fg: 8, ft: 6, spd: 4, ins: -16, diq: -14, pss: -10, reb: -6 } },
+		{ name: "Backup-Point Insurance", min: 0, max: 46, w: 1.15, pot: -6, inj: 0.8, t: ["guard", "durability", "playmaking"], o: { endu: 16, diq: 12, reb: 8, ft: 6, ins: -16, dnk: -12, tp: -10, jmp: -4 } },
+		{ name: "Track-Star Guard", min: 0, max: 52, w: 0.8, pot: 6, t: ["guard", "athletic", "raw"], o: { spd: 20, jmp: 12, endu: 8, dnk: 6, oiq: -18, tp: -14, pss: -10, ft: -6 } },
+		{ name: "Point Guard Who Cannot Finish", min: 0, max: 46, w: 1.0, t: ["guard", "playmaking", "raw"], o: { pss: 18, tp: 12, oiq: 8, drb: 6, ins: -20, dnk: -14, stre: -6, jmp: -2 } },
+		// --- wings ----------------------------------------------------------
+		{ name: "Ghost-Screen Wing", min: 36, max: 66, w: 1.1, t: ["wing", "shooting", "playmaking"], o: { tp: 16, pss: 12, oiq: 10, drb: 6, ins: -16, stre: -12, reb: -10, jmp: -6 } },
+		{ name: "Dunker-Spot Wing", min: 38, max: 68, w: 1.2, t: ["wing", "athletic", "rebounding"], o: { dnk: 16, reb: 12, jmp: 10, ins: 6, tp: -18, pss: -12, drb: -10, ft: -4 } },
+		{ name: "Top-Lock Wing Defender", min: 36, max: 66, w: 1.15, t: ["wing", "defense", "athletic"], o: { diq: 16, spd: 14, endu: 10, jmp: 6, ins: -16, fg: -12, pss: -10, tp: -8 } },
+		{ name: "Weak-Side Relocation Shooter", min: 34, max: 64, w: 1.3, t: ["wing", "shooting"], o: { tp: 20, ft: 12, oiq: 6, fg: 4, drb: -16, ins: -12, pss: -10, stre: -6 } },
+		{ name: "Bump-Cutter Forward", min: 40, max: 70, w: 1.0, t: ["wing", "durability", "scoring"], o: { stre: 16, ins: 12, endu: 10, oiq: 8, tp: -18, drb: -12, spd: -10, pss: -6 } },
+		{ name: "Grab-and-Go Wing", min: 38, max: 68, w: 1.2, t: ["wing", "rebounding", "athletic"], o: { reb: 16, spd: 14, dnk: 8, endu: 6, tp: -16, ft: -12, pss: -10, oiq: -6 } },
+		{ name: "Mismatch Post-Up Wing", min: 40, max: 68, w: 0.9, t: ["wing", "scoring", "durability"], o: { ins: 16, pss: 12, reb: 10, stre: 6, tp: -18, spd: -12, drb: -10, jmp: -4 } },
+		{ name: "Wing With a Post Game and No Jumper", min: 38, max: 68, w: 0.8, t: ["wing", "scoring", "raw"], o: { ins: 16, stre: 12, dnk: 10, reb: 6, tp: -20, ft: -12, pss: -6, oiq: -4 } },
+		{ name: "Face-Guarded Scorer", min: 34, max: 64, w: 0.85, vol: 1.2, t: ["wing", "scoring", "shooting"], o: { fg: 16, tp: 12, ft: 10, drb: 6, diq: -16, reb: -12, pss: -10, endu: -6 } },
+		{ name: "Second-Jump Wing", min: 36, max: 66, w: 1.05, t: ["wing", "rebounding", "athletic"], o: { jmp: 16, reb: 14, dnk: 8, endu: 6, tp: -16, pss: -12, drb: -10, ft: -6 } },
+		{ name: "Low-Usage Connector Wing", min: 36, max: 68, w: 1.4, pot: -3, t: ["wing", "playmaking", "defense"], o: { oiq: 12, pss: 12, diq: 10, ft: 6, fg: -14, ins: -12, drb: -8, tp: -6 } },
+		{ name: "Small-Forward-Sized Center", min: 44, max: 62, w: 0.85, t: ["wing", "rebounding", "durability"], o: { reb: 18, stre: 14, endu: 8, diq: 6, tp: -18, drb: -12, pss: -10, spd: -6 } },
+		{ name: "Elite Closeout Shooter", min: 34, max: 64, w: 1.1, t: ["wing", "shooting", "scoring"], o: { tp: 18, fg: 12, ft: 8, oiq: 6, ins: -16, diq: -12, reb: -10, stre: -6 } },
+		{ name: "Bulldozer Three", min: 40, max: 70, w: 0.9, t: ["wing", "scoring", "athletic"], o: { stre: 18, dnk: 12, ins: 8, ft: 6, tp: -18, drb: -12, pss: -10, spd: -4 } },
+		{ name: "Handoff Hub Wing", min: 40, max: 70, w: 0.85, t: ["wing", "playmaking", "durability"], o: { pss: 16, stre: 12, oiq: 10, endu: 8, spd: -16, tp: -12, dnk: -10, drb: -8 } },
+		{ name: "Rotational Three-and-Nothing", min: 34, max: 66, w: 1.5, pot: -5, t: ["wing", "shooting"], o: { tp: 20, ft: 10, oiq: 4, diq: 4, drb: -14, ins: -12, pss: -10, jmp: -6 } },
+		{ name: "Chase-Down Shot-Blocking Wing", min: 38, max: 70, w: 0.95, t: ["wing", "defense", "athletic"], o: { jmp: 18, diq: 14, spd: 8, endu: 4, tp: -16, ft: -12, pss: -10, oiq: -6 } },
+		{ name: "Wing Who Fouls Out", min: 36, max: 68, w: 0.8, t: ["wing", "defense", "raw"], o: { diq: 18, stre: 12, jmp: 8, reb: 6, endu: -18, oiq: -14, ft: -8, tp: -4 } },
+		{ name: "Slasher Without a Right Hand", min: 36, max: 66, w: 0.85, t: ["wing", "athletic", "raw"], o: { spd: 16, dnk: 12, jmp: 10, ins: 6, drb: -18, tp: -14, pss: -8, ft: -4 } },
+		{ name: "Junior-Year Breakout Wing", min: 34, max: 68, w: 1.0, pot: 3, bio: { years: ["Junior", "Senior"] }, t: ["wing", "scoring", "shooting"], o: { fg: 14, tp: 12, ft: 10, oiq: 6, diq: -14, reb: -12, pss: -10, stre: -6 } },
+		{ name: "Wing Who Guards Fives", min: 42, max: 70, w: 1.0, t: ["wing", "defense", "rebounding"], o: { stre: 16, diq: 12, reb: 12, endu: 6, tp: -16, drb: -12, pss: -10, spd: -8 } },
+		{ name: "Cut-and-Cut-Again Forward", min: 38, max: 68, w: 1.1, t: ["wing", "athletic", "durability"], o: { endu: 16, oiq: 12, dnk: 10, jmp: 6, tp: -16, drb: -12, pss: -10, stre: -6 } },
+		{ name: "Perimeter-Shy Wing", min: 38, max: 68, w: 1.0, t: ["wing", "scoring", "raw"], o: { fg: 16, ins: 12, ft: 8, stre: 6, tp: -20, pss: -10, diq: -6, drb: -4 } },
+		{ name: "Guard-Sized Four", min: 44, max: 64, w: 0.9, t: ["wing", "rebounding", "scoring"], o: { reb: 14, ins: 12, stre: 10, fg: 8, tp: -18, drb: -12, pss: -8, spd: -6 } },
+		{ name: "Three-Level Wing", min: 36, max: 66, w: 0.7, pot: 5, t: ["wing", "scoring", "shooting"], o: { fg: 14, tp: 12, ins: 10, ft: 8, diq: -16, reb: -14, pss: -10, endu: -4 } },
+		{ name: "Wing Off the Bench for Defense", min: 34, max: 66, w: 1.25, pot: -5, t: ["wing", "defense", "durability"], o: { diq: 16, reb: 12, jmp: 8, stre: 6, tp: -16, drb: -12, pss: -10, ft: -4 } },
+		{ name: "Second-Chance Wing", min: 38, max: 68, w: 1.0, t: ["wing", "rebounding", "scoring"], o: { reb: 16, ins: 12, jmp: 8, endu: 6, tp: -16, pss: -12, drb: -10, ft: -4 } },
+		{ name: "Wing Who Cannot Be Screened", min: 34, max: 64, w: 0.95, t: ["wing", "defense", "durability"], o: { endu: 16, diq: 14, spd: 10, oiq: 6, ins: -16, dnk: -12, tp: -10, stre: -8 } },
+		{ name: "Late-Growth Wing", min: 40, max: 70, w: 0.9, pot: 7, bio: { notYears: ["Senior", "Graduate"] }, t: ["wing", "raw", "athletic"], o: { jmp: 14, spd: 12, reb: 8, dnk: 8, oiq: -16, ft: -12, tp: -10, drb: -4 } },
+		{ name: "Wing With a Pro Body Already", min: 38, max: 68, w: 0.85, inj: 0.75, t: ["wing", "durability", "scoring"], o: { stre: 16, endu: 12, fg: 10, ins: 6, tp: -16, drb: -12, pss: -10, jmp: -6 } },
+		{ name: "Zone-Buster Wing", min: 36, max: 66, w: 1.0, t: ["wing", "shooting", "playmaking"], o: { fg: 16, oiq: 12, ins: 8, ft: 6, stre: -16, drb: -12, spd: -10, reb: -4 } },
+		{ name: "Wing With Hands of Stone", min: 36, max: 68, w: 0.75, t: ["wing", "defense", "raw"], o: { diq: 16, spd: 12, endu: 10, reb: 6, fg: -18, drb: -14, ft: -8, tp: -4 } },
+		{ name: "Big-Game Wing", min: 34, max: 66, w: 0.8, vol: 1.28, t: ["wing", "scoring", "athletic"], o: { fg: 14, dnk: 12, jmp: 10, drb: 6, diq: -16, pss: -12, tp: -8, endu: -6 } },
+		{ name: "Wing Who Sets the Defense", min: 36, max: 68, w: 0.9, t: ["wing", "defense", "playmaking"], o: { diq: 14, oiq: 14, pss: 8, endu: 6, ins: -16, dnk: -12, tp: -8, jmp: -6 } },
+		{ name: "Left-Corner Specialist", min: 34, max: 64, w: 0.85, t: ["wing", "shooting", "raw"], o: { tp: 18, jmp: 10, diq: 8, dnk: 6, drb: -16, pss: -14, ins: -8, stre: -4 } },
+		{ name: "Wing Who Rebounds Out of Area", min: 40, max: 70, w: 0.95, t: ["wing", "rebounding", "playmaking"], o: { reb: 16, pss: 10, oiq: 10, jmp: 6, tp: -16, ins: -12, ft: -10, spd: -6 } },
+		{ name: "Slow-Handed Shooter Wing", min: 36, max: 68, w: 0.9, t: ["wing", "shooting", "durability"], o: { tp: 16, ft: 14, endu: 8, oiq: 4, spd: -16, drb: -12, ins: -10, diq: -6 } },
+		{ name: "One-Way Athletic Wing", min: 36, max: 68, w: 1.1, inj: 1.1, t: ["wing", "athletic", "raw"], o: { jmp: 16, spd: 12, dnk: 10, stre: 6, diq: -18, oiq: -12, ft: -8, tp: -6 } },
+		{ name: "Off-Ball Screening Wing", min: 38, max: 68, w: 0.8, t: ["wing", "durability", "shooting"], o: { endu: 16, stre: 12, tp: 10, oiq: 6, drb: -16, ins: -12, pss: -10, jmp: -6 } },
+		{ name: "Wing Playing Out of Position", min: 40, max: 70, w: 1.0, t: ["wing", "raw", "rebounding"], o: { reb: 14, stre: 10, endu: 8, jmp: 8, drb: -14, tp: -12, pss: -10, oiq: -4 } },
+		// --- bigs -----------------------------------------------------------
+		{ name: "Nail-Catch Big", min: 56, max: 96, w: 1.0, t: ["big", "playmaking", "shooting"], o: { oiq: 14, pss: 12, ft: 10, tp: 8, spd: -16, dnk: -12, diq: -10, reb: -6 } },
+		{ name: "Vertical-Spacing Five", min: 60, max: 100, w: 1.3, t: ["big", "athletic", "rebounding"], o: { dnk: 20, jmp: 12, oiq: 6, spd: 6, tp: -18, ft: -12, pss: -10, drb: -4 } },
+		{ name: "Drop-and-Recover Center", min: 62, max: 100, w: 1.1, t: ["big", "defense", "durability"], o: { diq: 16, endu: 12, reb: 10, jmp: 6, tp: -16, drb: -12, pss: -10, spd: -8 } },
+		{ name: "Left-Shoulder Post", min: 58, max: 100, w: 0.9, t: ["big", "scoring", "raw"], o: { ins: 20, stre: 10, ft: 6, oiq: 6, tp: -18, spd: -12, drb: -10, pss: -6 } },
+		{ name: "Five-Out Center", min: 56, max: 96, w: 1.2, t: ["big", "shooting", "playmaking"], o: { tp: 18, pss: 12, ft: 8, oiq: 6, ins: -16, reb: -12, dnk: -10, stre: -8 } },
+		{ name: "Rebound-Only Five", min: 60, max: 100, w: 1.35, pot: -5, t: ["big", "rebounding"], o: { reb: 20, dnk: 10, jmp: 8, stre: 6, oiq: -16, ft: -12, tp: -10, pss: -6 } },
+		{ name: "Hard-Hedge Big", min: 58, max: 100, w: 1.0, t: ["big", "defense", "athletic"], o: { spd: 16, diq: 14, endu: 8, jmp: 6, tp: -18, ins: -12, pss: -8, ft: -6 } },
+		{ name: "Two-Handed Rebounder", min: 62, max: 100, w: 1.15, inj: 0.85, t: ["big", "rebounding", "durability"], o: { reb: 18, stre: 12, endu: 10, oiq: 4, tp: -18, drb: -12, spd: -8, ft: -6 } },
+		{ name: "Center Who Cannot Catch", min: 62, max: 100, w: 0.7, t: ["big", "raw", "defense"], o: { diq: 16, reb: 12, jmp: 10, stre: 6, fg: -18, drb: -14, ft: -8, pss: -4 } },
+		{ name: "Skilled Four With No Position", min: 52, max: 78, w: 1.1, t: ["big", "playmaking", "raw"], o: { pss: 14, oiq: 12, drb: 10, ft: 6, diq: -16, reb: -12, stre: -8, dnk: -6 } },
+		{ name: "Old-Man Post Scorer", min: 58, max: 100, w: 0.8, pot: -7, bio: { years: ["Senior", "Graduate"] }, t: ["big", "scoring", "durability"], o: { ins: 16, oiq: 12, ft: 10, endu: 6, jmp: -18, spd: -12, dnk: -8, tp: -6 } },
+		{ name: "Rim-Running Freshman Five", min: 60, max: 100, w: 1.2, pot: 6, bio: { years: ["Freshman"] }, t: ["big", "athletic", "raw"], o: { dnk: 18, jmp: 12, spd: 8, reb: 6, oiq: -18, ft: -12, tp: -10, pss: -4 } },
+		{ name: "Stretch Five Who Cannot Rebound", min: 58, max: 100, w: 0.9, t: ["big", "shooting", "raw"], o: { tp: 20, ft: 12, oiq: 6, fg: 6, reb: -20, stre: -12, spd: -8, diq: -4 } },
+		{ name: "Two-Big Lineup Four", min: 54, max: 84, w: 1.2, t: ["big", "rebounding", "defense"], o: { reb: 14, diq: 12, stre: 10, endu: 8, tp: -18, drb: -12, pss: -8, spd: -6 } },
+		{ name: "High-Post Elbow Big", min: 56, max: 96, w: 1.0, t: ["big", "playmaking", "scoring"], o: { pss: 16, fg: 12, oiq: 8, ft: 6, spd: -16, dnk: -12, reb: -8, diq: -6 } },
+		{ name: "Center Who Blocks Everything and Fouls", min: 62, max: 100, w: 0.85, t: ["big", "defense", "athletic"], o: { jmp: 18, diq: 16, reb: 6, dnk: 4, endu: -18, oiq: -12, ft: -8, tp: -6 } },
+		{ name: "Post-Entry Magnet", min: 60, max: 100, w: 0.9, t: ["big", "scoring", "rebounding"], o: { ins: 16, reb: 12, ft: 8, stre: 8, tp: -18, spd: -12, drb: -10, pss: -4 } },
+		{ name: "Second-Unit Five", min: 58, max: 100, w: 1.3, pot: -6, inj: 0.85, t: ["big", "durability", "rebounding"], o: { endu: 16, reb: 12, diq: 8, stre: 8, tp: -18, drb: -12, pss: -8, fg: -6 } },
+		{ name: "Center With Guard Feet", min: 60, max: 100, w: 0.75, pot: 5, t: ["big", "athletic", "defense"], o: { spd: 18, diq: 12, jmp: 8, drb: 6, ins: -16, stre: -12, ft: -10, tp: -6 } },
+		{ name: "Non-Jumping Five", min: 62, max: 100, w: 1.0, t: ["big", "scoring", "durability"], o: { ins: 14, oiq: 12, stre: 12, endu: 6, jmp: -20, spd: -12, tp: -6, drb: -4 } },
+		{ name: "Big Who Shoots Only in Practice", min: 56, max: 96, w: 0.8, pot: 4, t: ["big", "raw", "shooting"], o: { ft: 16, tp: 10, oiq: 8, fg: 6, ins: -16, reb: -12, dnk: -8, spd: -4 } },
+		{ name: "Wide-Body Wall", min: 60, max: 100, w: 1.1, inj: 0.8, t: ["big", "defense", "durability"], o: { stre: 20, diq: 12, reb: 8, endu: 6, spd: -18, jmp: -12, tp: -10, drb: -6 } },
+		{ name: "Trailing Big", min: 58, max: 100, w: 0.85, t: ["big", "shooting", "athletic"], o: { tp: 16, spd: 12, endu: 10, ft: 6, ins: -16, reb: -12, drb: -10, stre: -6 } },
+		{ name: "Big Who Passes Out of Doubles", min: 60, max: 100, w: 1.05, t: ["big", "playmaking", "scoring"], o: { pss: 18, ins: 10, oiq: 8, ft: 6, spd: -16, jmp: -12, drb: -8, diq: -6 } },
+		{ name: "Center in a Guard's League", min: 64, max: 100, w: 0.9, pot: -4, t: ["big", "rebounding", "scoring"], o: { ins: 14, reb: 14, stre: 10, oiq: 6, spd: -18, tp: -14, drb: -8, jmp: -4 } },
+		{ name: "Face-Up Five", min: 58, max: 100, w: 1.0, t: ["big", "scoring", "shooting"], o: { fg: 16, tp: 12, drb: 8, ft: 6, reb: -16, stre: -12, diq: -8, endu: -6 } },
+		{ name: "Center With One Move", min: 60, max: 100, w: 1.1, pot: -3, t: ["big", "scoring", "raw"], o: { ins: 18, dnk: 10, stre: 8, reb: 6, pss: -18, drb: -12, tp: -8, oiq: -4 } },
+		{ name: "Under-Recruited Big", min: 56, max: 96, w: 1.0, pot: 4, t: ["big", "rebounding", "raw"], o: { reb: 16, stre: 10, jmp: 8, endu: 6, oiq: -16, ft: -12, tp: -8, drb: -4 } },
+		{ name: "Big With a Motor and No Hands", min: 58, max: 100, w: 1.15, t: ["big", "durability", "rebounding"], o: { endu: 18, reb: 12, jmp: 8, stre: 6, fg: -18, ft: -12, tp: -8, drb: -6 } },
+		{ name: "Shot-Blocking Four", min: 52, max: 80, w: 1.0, t: ["big", "defense", "athletic"], o: { jmp: 16, diq: 14, spd: 8, reb: 6, ins: -16, ft: -12, pss: -10, tp: -6 } },
+		{ name: "Big Who Is Always in Foul Trouble", min: 58, max: 100, w: 0.8, vol: 1.25, t: ["big", "defense", "raw"], o: { diq: 16, stre: 14, reb: 8, jmp: 6, endu: -20, oiq: -12, ft: -8, tp: -4 } },
+		{ name: "Skywalking Freshman Four", min: 52, max: 80, w: 0.85, pot: 7, bio: { years: ["Freshman", "Sophomore"] }, t: ["big", "athletic", "raw"], o: { jmp: 18, dnk: 12, spd: 8, reb: 6, oiq: -18, ft: -12, tp: -8, drb: -6 } },
+		{ name: "Center Who Never Sits", min: 60, max: 100, w: 0.95, inj: 0.6, t: ["big", "durability", "defense"], o: { endu: 20, diq: 10, reb: 8, oiq: 6, tp: -18, drb: -12, jmp: -8, spd: -6 } },
+		{ name: "Big Who Shoots Free Throws Badly and Lives at the Line", min: 58, max: 100, w: 0.75, t: ["big", "scoring", "raw"], o: { ins: 16, dnk: 12, stre: 10, jmp: 6, ft: -20, tp: -10, pss: -6, oiq: -4 } },
+		{ name: "Four Who Guards Guards", min: 52, max: 78, w: 1.0, t: ["big", "defense", "durability"], o: { spd: 14, diq: 14, endu: 10, stre: 6, ins: -16, tp: -12, pss: -10, jmp: -6 } },
+		{ name: "Junk-Minutes Big", min: 58, max: 100, w: 1.25, pot: -8, t: ["big", "rebounding", "durability"], o: { stre: 16, reb: 12, ins: 8, ft: 6, spd: -18, tp: -12, pss: -10, drb: -2 } },
+		{ name: "Seven-Foot Shooter", min: 78, max: 100, w: 0.7, t: ["big", "shooting", "scoring"], o: { tp: 20, ft: 14, oiq: 6, fg: 4, spd: -18, drb: -12, reb: -8, diq: -6 } },
+		{ name: "Roll-and-Kick Five", min: 58, max: 100, w: 1.0, t: ["big", "playmaking", "athletic"], o: { dnk: 14, pss: 14, jmp: 8, oiq: 6, tp: -18, ft: -12, drb: -8, diq: -4 } },
+		{ name: "Post Defender Who Cannot Switch", min: 62, max: 100, w: 1.05, t: ["big", "defense", "rebounding"], o: { stre: 16, diq: 12, reb: 12, oiq: 4, spd: -20, drb: -12, tp: -8, ft: -4 } },
+		{ name: "Big Who Was a Guard Two Years Ago", min: 54, max: 88, w: 0.8, pot: 6, t: ["big", "raw", "playmaking"], o: { drb: 16, pss: 12, oiq: 8, spd: 6, stre: -18, reb: -12, ins: -8, diq: -4 } },
+		// --- everyone ---------------------------------------------------------
+		{ name: "Season-Long Slump", min: 0, max: 100, w: 0.8, vol: 1.4, pot: 5, t: ["raw", "scoring"], o: { fg: 12, drb: 10, spd: 8, jmp: 6, tp: -18, oiq: -10, ft: -8, diq: -4 } },
+		{ name: "Academic Casualty", min: 0, max: 100, w: 0.6, pot: 4, t: ["raw", "athletic"], o: { reb: 16, stre: 12, ins: 8, dnk: 6, oiq: -16, ft: -14, tp: -8, pss: -4 } },
+		{ name: "Suspended for Six Games", min: 0, max: 100, w: 0.65, vol: 1.2, t: ["raw", "scoring", "athletic"], o: { fg: 14, jmp: 10, dnk: 8, spd: 6, endu: -16, diq: -12, oiq: -8, ft: -4 } },
+		{ name: "Third Transfer in Four Years", min: 0, max: 100, w: 0.85, pot: -3, t: ["raw", "scoring", "shooting"], o: { tp: 14, drb: 12, spd: 8, ft: 6, diq: -16, reb: -12, stre: -8, oiq: -4 } },
+		{ name: "Homecoming Transfer", min: 0, max: 100, w: 0.95, t: ["durability", "shooting", "rebounding"], o: { tp: 14, reb: 12, endu: 10, ft: 6, ins: -16, drb: -12, spd: -8, dnk: -6 } },
+		{ name: "Captain Who Cannot Play", min: 0, max: 100, w: 0.7, pot: -9, inj: 0.8, t: ["durability", "defense", "playmaking"], o: { oiq: 16, diq: 12, endu: 10, pss: 8, fg: -18, tp: -12, ins: -10, jmp: -6 } },
+		{ name: "Preseason All-American Who Regressed", min: 0, max: 100, w: 0.7, vol: 1.3, pot: -6, t: ["scoring", "shooting"], o: { ins: 14, reb: 12, stre: 10, ft: 6, tp: -16, spd: -12, pss: -10, diq: -4 } },
+		{ name: "Combine Riser", min: 0, max: 100, w: 0.9, pot: 6, t: ["athletic", "raw"], o: { stre: 16, endu: 12, jmp: 10, reb: 8, oiq: -16, tp: -14, pss: -10, drb: -6 } },
+		{ name: "Measured Shorter Than Listed", min: 0, max: 100, w: 0.85, pot: -4, t: ["raw", "playmaking"], o: { pss: 14, drb: 12, oiq: 8, spd: 6, reb: -18, ins: -12, dnk: -8, stre: -2 } },
+		{ name: "Two-Way Player Nobody Scouted", min: 0, max: 100, w: 1.0, pot: 3, t: ["defense", "playmaking", "durability"], o: { diq: 16, reb: 12, spd: 8, endu: 6, tp: -16, ins: -12, drb: -10, ft: -4 } },
+		{ name: "Grew Four Inches in a Year", min: 0, max: 100, w: 0.7, pot: 8, bio: { notYears: ["Senior", "Graduate"] }, t: ["raw", "athletic", "rebounding"], o: { reb: 14, jmp: 10, dnk: 8, stre: 6, drb: -16, oiq: -12, ft: -8, tp: -2 } },
+		{ name: "Overseas Professional Coming Back", min: 0, max: 100, w: 0.8, pot: -5, bio: { proOrReturned: true }, t: ["scoring", "durability", "playmaking"], o: { ins: 16, stre: 12, oiq: 8, ft: 6, spd: -16, jmp: -12, drb: -10, endu: -4 } },
+		{ name: "Eligibility-Waiver Case", min: 0, max: 100, w: 0.6, pot: -2, t: ["durability", "defense"], o: { fg: 14, ins: 12, ft: 10, drb: 6, diq: -16, reb: -12, endu: -8, tp: -6 } },
+		{ name: "Shooter Who Lost His Stroke", min: 0, max: 100, w: 0.75, vol: 1.35, pot: 4, t: ["shooting", "raw"], o: { ft: 14, oiq: 10, pss: 8, drb: 8, tp: -20, fg: -10, ins: -6, jmp: -4 } },
+		{ name: "Defensive Specialist Who Learned to Shoot", min: 0, max: 100, w: 0.85, pot: 4, t: ["defense", "shooting"], o: { diq: 14, tp: 14, endu: 8, ft: 6, ins: -16, dnk: -12, pss: -8, reb: -6 } },
+		{ name: "Bench Voice", min: 0, max: 100, w: 0.9, pot: -7, inj: 0.85, t: ["durability", "playmaking"], o: { oiq: 16, ft: 12, pss: 8, endu: 6, jmp: -16, spd: -12, ins: -10, dnk: -4 } },
+		{ name: "All-Conference at Two Schools", min: 0, max: 100, w: 0.8, t: ["scoring", "durability", "playmaking"], o: { fg: 12, pss: 12, oiq: 10, endu: 6, jmp: -16, dnk: -12, reb: -8, diq: -4 } },
+		{ name: "Prep-to-Pro Reroute", min: 0, max: 100, w: 0.7, pot: 7, bio: { years: ["Freshman"] }, t: ["raw", "playmaking", "scoring"], o: { drb: 16, tp: 10, pss: 8, spd: 6, stre: -16, reb: -12, diq: -10, ins: -2 } },
+		{ name: "Back-Injury Question", min: 0, max: 100, w: 0.7, inj: 1.9, t: ["durability", "scoring"], o: { pss: 16, tp: 10, ft: 8, oiq: 6, jmp: -20, endu: -12, stre: -8, dnk: -4 } },
+		{ name: "Played Every Position in One Season", min: 0, max: 100, w: 1.0, t: ["playmaking", "rebounding", "defense"], o: { reb: 10, pss: 10, diq: 10, oiq: 8, tp: -14, ins: -12, ft: -8, dnk: -4 } },
+        { name: "Redshirt Who Never Left", min: 0, max: 100, w: 0.85, pot: -6, inj: 0.75, bio: { years: ["Senior", "Graduate"] }, t: ["durability", "defense", "rebounding"], o: { endu: 16, reb: 10, diq: 10, stre: 8, jmp: -16, spd: -12, tp: -10, drb: -6 } },
+		{ name: "Nobody's Recruit", min: 0, max: 100, w: 1.05, pot: 3, t: ["raw", "durability"], o: { endu: 12, stre: 10, oiq: 8, diq: 8, tp: -14, fg: -12, dnk: -8, drb: -4 } },
+		{ name: "Statistical Outlier", min: 0, max: 100, w: 0.7, vol: 1.3, t: ["scoring", "raw", "playmaking"], o: { pss: 14, fg: 12, drb: 8, oiq: 6, diq: -16, reb: -12, endu: -8, tp: -4 } },
+		{ name: "Second-Generation Prospect", min: 0, max: 100, w: 0.9, pot: 2, t: ["playmaking", "shooting", "durability"], o: { oiq: 16, diq: 10, drb: 8, fg: 6, jmp: -16, stre: -12, reb: -10, dnk: -4 } },
+		{ name: "Transfer Who Sat a Year", min: 0, max: 100, w: 1.0, pot: 3, t: ["durability", "shooting", "defense"], o: { tp: 12, diq: 12, endu: 10, ft: 6, ins: -16, dnk: -12, drb: -8, spd: -4 } },
+		{ name: "Mid-Major Star Playing Up", min: 0, max: 100, w: 0.95, pot: -3, t: ["scoring", "shooting", "durability"], o: { fg: 14, tp: 12, endu: 8, ft: 6, diq: -16, reb: -12, stre: -8, jmp: -4 } },
+		{ name: "Late-Season Ankle", min: 0, max: 100, w: 0.7, inj: 1.7, vol: 1.15, t: ["durability", "athletic"], o: { spd: 14, jmp: 12, dnk: 8, drb: 6, endu: -18, stre: -12, ft: -6, oiq: -4 } },
+		{ name: "Practice-Gym Legend", min: 0, max: 100, w: 0.7, pot: 5, vol: 1.3, t: ["raw", "scoring", "shooting"], o: { tp: 16, fg: 12, jmp: 8, drb: 6, endu: -18, diq: -12, reb: -8, stre: -4 } },
+		{ name: "Position-Change Project", min: 0, max: 100, w: 0.95, pot: 6, t: ["raw", "rebounding", "playmaking"], o: { pss: 12, reb: 12, oiq: 6, stre: 6, tp: -14, ft: -12, diq: -8, spd: -2 } },
+		{ name: "Draft-and-Stash Candidate", min: 0, max: 100, w: 0.75, pot: 6, bio: { proOrReturned: true }, t: ["raw", "shooting", "athletic"], o: { tp: 12, jmp: 12, spd: 8, ft: 8, oiq: -16, diq: -12, drb: -8, stre: -4 } },
 		{ name: "Balanced", min: 0, max: 100, w: 1.0, t: [], o: {} },
 	];
 
@@ -1584,6 +1757,117 @@
 			m: { raw: 1.2, defense: 0.9 },
 			traits: { background: 2.2, character: 0.45 },
 			c: { transferShare: 64, bluebloodDownYears: 4, coachTurnover: 165 } },
+
+		/* --- twenty-five more, for a chain rather than for a class -----------
+
+		   Forty-one flavors is already past the point where a fortieth has to
+		   justify itself against the table, and the justification here is the
+		   same one the archetype table just grew for: a universe is long. In a
+		   forty-season chain a flavor is drawn forty times, and at forty-one
+		   rows the same six labels come back four or five times each — the
+		   history reads as a loop rather than as forty different years.
+
+		   Each of these carries a config bend or a trait tilt no existing row
+		   carries, which is the standing test: a flavor whose archetype tilt
+		   is another flavor's is one flavor with two names. */
+		{ name: "foul-plagued year", w: 0.6, label: "the year the whistles never stopped",
+			m: { defense: 1.5, durability: 1.3, athletic: 0.85 },
+			traits: { motor: 1.4, medical: 1.2 },
+			c: { efficiencyEnv: 0.6, pace: 66, injuryRate: 1.2 } },
+		{ name: "grinder year", w: 0.7, label: "a grind-it-out season",
+			m: { defense: 1.8, rebounding: 1.5, scoring: 0.6, athletic: 0.75 },
+			traits: { motor: 1.6, rebounding: 1.3, shooting: 0.7 },
+			c: { pace: 58, efficiencyEnv: -0.9 } },
+		{ name: "small-ball year", w: 0.7, label: "nobody played a center",
+			m: { guard: 1.8, wing: 1.6, big: 0.3, shooting: 1.3 },
+			traits: { athleticism: 1.3, frame: 0.7 },
+			c: { pace: 74, archetypeDiversity: 88 } },
+		{ name: "twin-towers year", w: 0.6, label: "everybody played two bigs",
+			m: { big: 2.6, rebounding: 1.7, guard: 0.55, shooting: 0.7 },
+			traits: { frame: 1.6, rebounding: 1.5 },
+			c: { pace: 61, efficiencyEnv: -0.4, archetypeDiversity: 74 } },
+		{ name: "sophomore year", w: 0.75, label: "a sophomore class",
+			m: { scoring: 1.3, playmaking: 1.2, raw: 0.8 },
+			traits: { character: 1.3, background: 1.2 },
+			c: { freshmanShare: 26, transferShare: 22, potBias: 0.5 } },
+		{ name: "reclassified", w: 0.55, label: "the year everybody reclassified up",
+			m: { raw: 2.0, athletic: 1.5, playmaking: 0.7, shooting: 0.7 },
+			traits: { frame: 2.0, background: 1.4, character: 0.8 },
+			c: { freshmanShare: 78, potBias: 1.6, potSpread: 3.0, buildNoise: 10 } },
+		{ name: "nobody left early", w: 0.7, label: "nobody left early",
+			m: { durability: 1.6, defense: 1.3, shooting: 1.2, raw: 0.5 },
+			traits: { character: 1.4, role: 1.5 },
+			c: { freshmanShare: 14, potSpread: 0.5, classQuality: 0.5, classDepth: 1.5 } },
+		{ name: "everybody left early", w: 0.7, label: "everybody left early",
+			m: { raw: 1.8, athletic: 1.5, scoring: 1.3, durability: 0.5 },
+			traits: { frame: 1.6, medical: 1.2, character: 0.7 },
+			c: { freshmanShare: 74, potBias: 1.3, classDepth: -1.8 } },
+		{ name: "wide-open bracket", w: 0.8, label: "a bracket nobody could pick",
+			m: { defense: 1.2, shooting: 1.2 },
+			c: { upsetFactor: 1.8, bluebloodDownYears: 2, midMajorLift: 4 } },
+		{ name: "chalk year", w: 0.75, label: "the year chalk held",
+			m: { scoring: 1.1, playmaking: 1.1, raw: 0.8 },
+			c: { upsetFactor: 0.55, midMajorLift: -6, eliteCount: 4 } },
+		{ name: "expansion year", w: 0.6, label: "a year of new leagues",
+			m: {},
+			c: { realignmentRate: 2, midMajorLift: 5, transferShare: 48 } },
+		{ name: "one-league dominance", w: 0.6, label: "one conference ran the sport",
+			m: { scoring: 1.2, defense: 1.2 },
+			c: { midMajorLift: -10, upsetFactor: 0.7, eliteCount: 5, classQuality: 0.4 } },
+		{ name: "shooting drought", w: 0.65, label: "the coldest year on record",
+			m: { shooting: 0.4, defense: 1.5, rebounding: 1.4 },
+			traits: { shooting: 0.35, defense: 1.5 },
+			c: { efficiencyEnv: -1.6, pace: 62, upsetFactor: 1.25 } },
+		{ name: "everything went in", w: 0.65, label: "everything went in that year",
+			m: { shooting: 2.0, scoring: 1.5, defense: 0.6 },
+			traits: { shooting: 1.9, defense: 0.6 },
+			c: { efficiencyEnv: 1.5, pace: 73 } },
+		{ name: "walk-on year", w: 0.5, label: "a year of walk-ons and role players",
+			m: { durability: 1.7, defense: 1.4, raw: 0.4, athletic: 0.55 },
+			traits: { character: 1.8, background: 1.7, athleticism: 0.5 },
+			c: { classQuality: -1.0, potSpread: 0.5, classDepth: 1.4, buildNoise: 4 } },
+		{ name: "one-man class", w: 0.55, label: "one man and forty others",
+			m: { scoring: 1.4, athletic: 1.2, defense: 0.85 },
+			c: { classDepth: -3.5, eliteCount: 1, classQuality: 0.2, potSpread: 5 } },
+		{ name: "medical red flags", w: 0.6, label: "a class full of medical questions",
+			m: { durability: 2.2, raw: 1.3, athletic: 1.1 },
+			traits: { medical: 2.4, frame: 1.3, motor: 0.7 },
+			c: { injuryRate: 1.7, potSpread: 3.2, buildNoise: 7 } },
+		{ name: "clean files", w: 0.65, label: "not a red flag in the class",
+			m: { durability: 1.9, defense: 1.2, raw: 0.6 },
+			traits: { medical: 0.3, character: 1.5, motor: 1.3 },
+			c: { injuryRate: 0.45, potSpread: 0.7, classQuality: 0.3 } },
+		{ name: "second-generation year", w: 0.5, label: "the sons of the last era",
+			m: { playmaking: 1.7, shooting: 1.5, durability: 1.2, raw: 0.45 },
+			traits: { background: 2.0, character: 1.6, athleticism: 0.65 },
+			c: { freshmanShare: 40, buildNoise: 3, potSpread: 0.9, classQuality: 0.2 } },
+		{ name: "junior-heavy", w: 0.7, label: "a junior-heavy class",
+			m: { defense: 1.3, shooting: 1.3, playmaking: 1.2, raw: 0.6 },
+			traits: { role: 1.5, character: 1.2 },
+			c: { freshmanShare: 20, transferShare: 34, potSpread: 0.8 } },
+		{ name: "long-armed year", w: 0.6, label: "the year everybody had a wingspan",
+			m: { defense: 1.8, athletic: 1.5, rebounding: 1.4, shooting: 0.7 },
+			traits: { frame: 2.2, defense: 1.4, shooting: 0.7 },
+			c: { efficiencyEnv: -0.7, archetypeDiversity: 82 } },
+		{ name: "overseas year", w: 0.55, label: "the year the good ones went abroad",
+			m: { shooting: 1.6, playmaking: 1.5, athletic: 0.6, raw: 0.6 },
+			c: { pDII: 0.05, wEuroLeague: 60, wNBL: 26, classQuality: -0.6 } },
+		{ name: "no-transfers year", w: 0.6, label: "the portal was quiet",
+			m: { durability: 1.4, defense: 1.2, raw: 0.8 },
+			traits: { role: 1.5, background: 0.5 },
+			c: { transferShare: 6, freshmanShare: 40, coachTurnover: 70 } },
+		{ name: "stability year", w: 0.6, label: "nobody was fired",
+			m: {},
+			traits: { character: 1.3, role: 1.2 },
+			c: { coachTurnover: 45, realignmentRate: 0, bluebloodDownYears: 0 } },
+		{ name: "everything at once", w: 0.45, label: "the year everything happened at once",
+			/* Deliberately the one row with an opinion about everything, and
+			   the weight says so: at 0.45 it is the rarest flavor in the table
+			   and it is the year a history remembers by name. */
+			m: { raw: 1.4, athletic: 1.3, durability: 1.6, shooting: 0.8 },
+			traits: { medical: 1.6, background: 1.6, character: 0.7 },
+			c: { injuryRate: 1.6, upsetFactor: 1.5, realignmentRate: 1,
+				coachTurnover: 175, transferShare: 60, bluebloodDownYears: 4 } },
 	];
 
 	/* The config bend a flavor applies to the whole class. Returned separately
@@ -2158,15 +2442,35 @@
 	function resolveTo(base, targetOvr, archName, fuzz, pinned, cleanBase) {
 		const arch = ARCHETYPES.filter((a) => a.name === archName)[0] ||
 			ARCHETYPES[ARCHETYPES.length - 1];
-		const solved = solveToOvr(base, targetOvr, arch, pinned);
+		/* THE TARGET HAS TO BE REACHABLE AT THE NEW HEIGHT.
+
+		   This is the re-solve a size surprise runs (see js/engine.js): a
+		   prospect who measures 6'10" instead of 6'2" keeps his overall and is
+		   rebuilt around the new hgt rating. Handed an overall the new height
+		   cannot produce — the hgt rating alone puts a seven-footer's floor in
+		   the thirties, which ovrRange has always been able to say and nothing
+		   asked — solveToOvr walks its shift to the end of the search and
+		   returns the closest it got, with every other rating on its clamp.
+
+		   Solving to the nearest overall the height ALLOWS is the same answer
+		   without the ruined vector, and it makes the miss explicit rather
+		   than leaving the caller to notice that ovr and the ratings beside it
+		   disagree. `ovrShortfall` is the signed gap, so an editor can report
+		   an impossible request instead of appearing to grant it. */
+		const range = ovrRange(cleanBase || base, arch, pinned);
+		const reachable = Number.isFinite(range.min) && Number.isFinite(range.max)
+			? clamp(targetOvr, range.min, range.max) : targetOvr;
+		const solved = solveToOvr(base, reachable, arch, pinned);
+		const ovr = BB.ovr(solved);
 		return {
 			base,
 			cleanBase: cleanBase || base,
 			ratings: solved,
-			ovr: BB.ovr(solved),
+			ovr: Number.isFinite(ovr) ? ovr : reachable,
 			pos: BB.pos(solved),
 			skills: BB.skills(Object.assign({ fuzz }, solved)),
-			ovrRange: ovrRange(cleanBase || base, arch, pinned),
+			ovrRange: range,
+			ovrShortfall: (reachable - targetOvr) || 0,
 		};
 	}
 
@@ -2307,14 +2611,43 @@
 			let off = arch.o[key] || 0;
 			if (off < 0 && key !== "hgt") {
 				const room = Math.max(0, orig[key] - lo);
-				off *= room / (room + Math.abs(spec * off));
+				/* ZERO OVER ZERO.
+
+				   A rating that is already on the floor has no room, and at
+				   specialization 0 the cut is zero too, so the scaling
+				   computed 0/0 — NaN — and wrote it into the base. The solver
+				   then produced a whole vector of NaN, BBGM's ovr formula
+				   returned NaN for the player, and the engine's finite-check
+				   clamped the rating to 0 while the overall stayed NaN.
+				   Measured on six classes at specialization 0, eleven players
+				   in 420 came out with an overall of NaN and a rating vector
+				   of ones: the flooring the guard exists to prevent, produced
+				   by the guard.
+
+				   There is nothing to take off a rating with no room, so the
+				   offset is zero — which is what the scaling says everywhere
+				   the denominator is not also zero. */
+				const denom = room + Math.abs(spec * off);
+				off = denom > 0 ? off * (room / denom) : 0;
 			}
 			base[key] = clamp(orig[key] + spec * off + jitter, lo, hi);
 			cleanBase[key] = clamp(orig[key] + spec * off, lo, hi);
 		}
 
 		const range = ovrRange(cleanBase, arch, pinned);
-		let solved = solveToOvr(base, targetOvr, arch, pinned);
+		/* AN UNREACHABLE TARGET IS SOLVED TO THE NEAREST REACHABLE ONE.
+
+		   `ovrRange` is the honest answer to "what overall can this player be
+		   built to" and the solver was not being told: handed a target below
+		   range.min — a seven-footer whose file says overall 25 — it walked the
+		   shift to the end of its search and returned a vector on its clamps,
+		   with nothing anywhere recording that the target had been impossible.
+		   Solving to the nearest reachable overall keeps the build's shape and
+		   misses by exactly the amount the request was impossible by;
+		   `ovrShortfall` is that amount. */
+		const reachable = clamp(targetOvr, range.min, range.max);
+		const shortfall = reachable - targetOvr;
+		let solved = solveToOvr(base, reachable, arch, pinned);
 		let finalOvr = BB.ovr(solved);
 		/* The reported range describes the jitter-free build, so it has to be
 		   a promise the solver keeps. Per-rating jitter can push a rating onto
@@ -2322,9 +2655,9 @@
 		   ends of the scale, which would leave the editor offering a lock it
 		   then silently missed. In that rare case the jitter is dropped for
 		   this player rather than the promise. */
-		if (finalOvr !== targetOvr && targetOvr >= range.min && targetOvr <= range.max) {
-			const retry = solveToOvr(cleanBase, targetOvr, arch, pinned);
-			if (Math.abs(BB.ovr(retry) - targetOvr) < Math.abs(finalOvr - targetOvr)) {
+		if (finalOvr !== reachable && reachable >= range.min && reachable <= range.max) {
+			const retry = solveToOvr(cleanBase, reachable, arch, pinned);
+			if (Math.abs(BB.ovr(retry) - reachable) < Math.abs(finalOvr - reachable)) {
 				solved = retry;
 				finalOvr = BB.ovr(retry);
 			}
@@ -2348,6 +2681,10 @@
 			// What this player's height actually allows, so an impossible lock
 			// can be reported instead of quietly ignored.
 			ovrRange: range,
+			// Non-zero when the file asked for an overall this player cannot
+			// be built to: the signed distance from the asked-for overall to
+			// the one he was actually solved to.
+			ovrShortfall: shortfall || 0,
 		};
 	}
 
