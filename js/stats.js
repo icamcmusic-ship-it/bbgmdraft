@@ -2985,7 +2985,10 @@
 				tpmT += d; fgmT = feasible(tpmT); break;
 			}
 		}
-		let ftmT = fgmT === null ? 0 : ptsT - 2 * fgmT - tpmT;
+		/* The free-throw total needs no search of its own: points are already
+		   fixed and pts = 2*fgm + tpm + ftm, so driving the two make totals
+		   below to fgmT and tpmT lands ftm on ptsT - 2*fgmT - tpmT by
+		   arithmetic. */
 
 		/* Per-game makes: the fewest moves from the expected makes that
 		   satisfy the points identity within the game's attempts. A game

@@ -676,8 +676,16 @@
 		   for a class two or three years out — was a hard REFUSAL of the
 		   entire file.
 
-		   So the reference year is the player's own draft year when he has
-		   one later than the file's season, and the file's season otherwise.
+		   So the reference year is the player's own draft year whenever he
+		   carries one, and the file's season otherwise. Not only a draft year
+		   LATER than the season: a league is mostly men who were already
+		   drafted, and measuring those against the league's season asks how
+		   old they are now rather than how old they were at their draft — so
+		   every ordinary thirty-four-year-old on a roster came back as an
+		   implausible age, and a real league export opened with a warning
+		   about a couple of hundred players who were nineteen when they were
+		   picked. The warning says "at their own draft year"; this is what
+		   makes that true of every row rather than of the future ones.
 
 		   And the refusal only stands for a draft-class file. A league is not
 		   rejected over one row: it is a file whose interesting part is the
@@ -690,7 +698,7 @@
 			const future = [];
 			for (const p of leagueFile.players) {
 				const own = p && p.draft && Number(p.draft.year);
-				const ref = Number.isFinite(own) && own > Number(season) ? own : Number(season);
+				const ref = Number.isFinite(own) ? own : Number(season);
 				const age = ref - Number(p && p.born && p.born.year);
 				if (!Number.isFinite(age)) continue;
 				if (age < 0) {

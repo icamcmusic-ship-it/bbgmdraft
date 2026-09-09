@@ -1610,16 +1610,6 @@
 
 		/* Color, which changes nothing and is the point: a season with only
 		   consequential events in it reads like a summary. */
-		/* Two DIFFERENT programs. r.pick(all) twice can return the same one,
-		   and at 364 teams that is about one flavor event in every 364 — which
-		   is often enough to be seen and is "Duke's trip to Duke was postponed
-		   by a snowstorm". */
-		const twoTeams = (r) => {
-			const a = r.pick(all);
-			let b = a;
-			for (let i = 0; i < 8 && b === a; i++) b = r.pick(all);
-			return [a, b];
-		};
 		/* A game that was actually played, so "the last call in A's win over
 		   B" names a game the log holds. The old draw took two random
 		   programs, and 21 of 22 such stories were about a meeting that
@@ -2182,7 +2172,7 @@
 		assignFillerSlots, slotTypeOf, SLOT_HGT, SLOT_TARGET,
 		PROGRAM_VOL, DOWN_YEAR_RATE, BREAKOUT_RATE, STAR_RETURNER_RATE,
 		rotationWeights, pairUp, record, recordPostseason, finalizeSchedule,
-		REGULAR_NOISE, momentumArc, arcAt, ARC_KNOTS,
+		momentumArc, arcAt, ARC_KNOTS,
 		midSeasonEvents, longestRun, coachingCarousel, RETIRE_AGE,
 		label, adoptConference, conferencePools, PROGRAM_STYLES,
 		CONF_GAMES, NON_CONF_GAMES,
