@@ -1320,7 +1320,40 @@ async function gotoProspects(page) {
 		const gameLinks = page.locator("#view table tbody td.num button.linky");
 		ok("every schedule row opens a box score",
 			(await gameLinks.count()) >= 25, String(await gameLinks.count()));
-		await gameLinks.first().click();
+		/* WHICH GAME, AND WHY NOT SIMPLY THE FIRST ONE.
+
+		   A box score renders a table per SIDE, and only for a side that has
+		   a prospect line in that game: a roster whose prospects all missed
+		   it, or a filler program carrying no prospects at all, gets a hint
+		   paragraph instead (see `side` in js/views.js). That is deliberate,
+		   and it is not a state the checks below can read — they want a real
+		   header and a real shooting cell.
+
+		   Clicking the schedule's opener blind therefore failed whenever the
+		   class put an absence on it, and the failure looked like a hang: ten
+		   seconds waiting for a `thead` that was never going to appear. The
+		   sample class is drawn afresh on every run, so it failed a few runs
+		   in a hundred and passed the rest — which is the worst way for a
+		   check to be wrong, because the run that catches it looks like the
+		   broken one.
+
+		   The row number IS the log index (the schedule renders `t.log` in
+		   order and labels each button `i + 1`), and the home side is
+		   rendered first, so the first game with a home line in it is the
+		   link whose box score these checks can actually read. */
+		const gameIdx = await page.evaluate(() => {
+			const st = window.App.state;
+			const res = st.results[st.active];
+			const t = res.teams[st.team];
+			const has = (i) => (t.prospects || []).some((p) => {
+				const gl = p.gameLog && p.gameLog.games;
+				return gl && gl.some((x) => x.i === i);
+			});
+			return t.log.findIndex((g, i) => has(i));
+		});
+		ok("a game one of this roster's prospects played in", gameIdx >= 0,
+			"log index " + gameIdx);
+		await gameLinks.nth(Math.max(0, gameIdx)).click();
 		await page.waitForFunction(
 			() => window.App && window.App.state && window.App.state.game,
 			null, { timeout: 10000 });
