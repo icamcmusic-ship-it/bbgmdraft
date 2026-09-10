@@ -5947,6 +5947,35 @@
 			"“Save as PDF” in the print dialog.");
 	}
 
+	/* ------------------------------------------------------ the season site */
+
+	/* The same season, as a small website instead of a document: one HTML
+	   file carrying the season as JSON and the reader for it, so the tables
+	   sort, the board filters and a name in a headline opens that prospect's
+	   capsule. What goes in it is js/site.js, which knows nothing about the
+	   DOM either — the file a user downloads is the file CI reads.
+
+	   It is a download rather than a new tab on purpose: the point of the
+	   thing is that it survives being emailed to somebody. */
+	function siteName(res, ext) {
+		return "season_site_" + res.season + "_" + res.seed + "." + ext;
+	}
+
+	function exportSeasonSite(res) {
+		download(siteName(res, "html"),
+			global.SeasonSite.html(res, almanacOpts()), "text/html");
+		exported("open it in any browser \u2014 nothing is fetched, so it works " +
+			"from a thumb drive, and its own button hands the reader the JSON back");
+	}
+
+	function exportSeasonSiteJson(res) {
+		download(siteName(res, "json"),
+			JSON.stringify(global.SeasonSite.data(res, almanacOpts()), null, 2),
+			"application/json");
+		exported("the season the website draws itself from \u2014 the standings, " +
+			"the bracket, the board, every capsule and the news feed, as data");
+	}
+
 	function almanacDialog() {
 		const res = state.results[state.active];
 		if (!res) return;
@@ -5955,7 +5984,9 @@
 			"The season as one document: the poll, every conference's standings, " +
 			"the bracket round by round, the honors, the leader boards, the pro " +
 			"leagues, the board, a capsule for every prospect and the news feed. " +
-			"Download it as Markdown, or open it printable and save it as a PDF."));
+			"Download it as Markdown, open it printable and save it as a PDF, or " +
+			"write it as an interactive website \u2014 one HTML file with the " +
+			"whole season in it as JSON, sortable and searchable, no server."));
 		const list = el("div", "checks");
 		const boxes = {};
 		const remembered = state.almanacSections || null;
@@ -6000,6 +6031,20 @@
 			printAlmanac(res);
 		});
 		box.appendChild(pdf);
+		const site = el("button", "tiny", "Download the interactive website (HTML + JSON)");
+		site.addEventListener("click", () => {
+			state.almanacSections = read();
+			closeModal();
+			exportSeasonSite(res);
+		});
+		box.appendChild(site);
+		const siteJson = el("button", "tiny", "Download the website's JSON on its own");
+		siteJson.addEventListener("click", () => {
+			state.almanacSections = read();
+			closeModal();
+			exportSeasonSiteJson(res);
+		});
+		box.appendChild(siteJson);
 		modal("Season almanac", box, () => {
 			state.almanacSections = read();
 			exportAlmanacMarkdown(res);
@@ -6413,6 +6458,8 @@
 		item("Season as JSON — records, bracket, awards, board", () => exportSeasonJson(res));
 		item("Season as CSV", () => exportSeasonCsv(res));
 		item("Season almanac — the whole season as Markdown or a PDF\u2026",
+			() => almanacDialog());
+		item("Season as an interactive website — one HTML file with the JSON in it\u2026",
 			() => almanacDialog());
 		item("Season as a BBGM league fragment — teams, records, coaches", () => exportLeagueFragment(res));
 		item("Note text only, for a spreadsheet", () => exportNotes(res));

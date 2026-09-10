@@ -15,6 +15,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 
 const ROOT = path.join(__dirname, "..");
 const PORT = 8791;
@@ -1151,6 +1152,75 @@ async function gotoProspects(page) {
 		if (!(await page.locator("#modal").isHidden())) {
 			await page.locator("#modalCancel, #modalOk").first().click();
 			await page.waitForTimeout(200);
+		}
+
+		/* The interactive website. The unit tests read the HTML as a string;
+		   the only check that the FILE works is opening the file — so this
+		   downloads it, opens it in its own tab and drives it. A page that
+		   throws on load, or a table that stopped sorting, fails here. */
+		await page.locator("#btnExportMenu").click();
+		await page.waitForTimeout(300);
+		await page.locator("#modal button", { hasText: "interactive website" })
+			.first().click();
+		await page.waitForTimeout(300);
+		const [site] = await Promise.all([
+			page.waitForEvent("download"),
+			page.locator("#modal button", { hasText: "Download the interactive website" })
+				.first().click(),
+		]);
+		ok("the website export names the file it wrote",
+			/Wrote season_site_\d+_.+\.html/.test(await page.locator("#status").innerText()),
+			(await page.locator("#status").innerText()).slice(0, 80));
+		if (!(await page.locator("#modal").isHidden())) {
+			await page.locator("#modalCancel, #modalOk").first().click();
+			await page.waitForTimeout(200);
+		}
+		/* Saved with its extension: Chromium sniffs a file:// URL by
+		   extension, and the download's own temp name has none — the page
+		   arrives as plain text and every check below fails on an empty
+		   document rather than on anything real. */
+		const sitePath = path.join(os.tmpdir(),
+			"bbgmdraft-smoke-" + process.pid + ".html");
+		await site.saveAs(sitePath);
+		{
+			const view = await browser.newPage({ viewport: { width: 1200, height: 900 } });
+			const broke = [];
+			view.on("pageerror", (err) => broke.push(String(err.message)));
+			view.on("console", (m) => { if (m.type() === "error") broke.push(m.text()); });
+			await view.goto("file://" + sitePath);
+			await view.waitForTimeout(400);
+			const tabs = await view.locator("#tabs button").count();
+			ok("the exported site builds a tab per section", tabs >= 10, String(tabs));
+			await view.locator("#tabs button", { hasText: "The draft board" }).first().click();
+			await view.waitForTimeout(300);
+			await view.locator("#section-board th", { hasText: "Ovr" }).first().click();
+			await view.waitForTimeout(200);
+			const ovrs = await view.$$eval("#section-board tbody tr",
+				(rows) => rows.slice(0, 8).map((r) => Number(r.children[3].textContent)));
+			ok("a column header sorts the board",
+				ovrs.length > 1 && ovrs.every((v, i) => i === 0 || ovrs[i - 1] >= v),
+				ovrs.join(", "));
+			const all = await view.locator("#section-board tbody tr").count();
+			await view.locator("#section-board input[type=search]").fill("Freshman");
+			await view.waitForTimeout(250);
+			const some = await view.locator("#section-board tbody tr").count();
+			ok("and the filter box narrows it", some > 0 && some < all,
+				some + " of " + all);
+			await view.locator("#jump").fill("a");
+			await view.waitForTimeout(250);
+			await view.locator("#hits button").first().click();
+			await view.waitForTimeout(300);
+			ok("a name in the header search opens that prospect's capsule",
+				(await view.locator("#section-capsules .card h3").first().innerText()).length > 2,
+				await view.locator("#section-capsules .card h3").first().innerText());
+			await view.locator("#tabs button", { hasText: "news" }).first().click();
+			await view.waitForTimeout(300);
+			const arts = await view.locator("#section-news .article").count();
+			ok("the news feed draws a page of articles", arts > 5, String(arts));
+			ok("the exported site throws nothing", broke.length === 0,
+				broke.slice(0, 3).join(" | "));
+			await view.close();
+			fs.unlinkSync(sitePath);
 		}
 
 		await page.locator("#tabs button", { hasText: "Draft board" }).first().click();

@@ -1589,6 +1589,63 @@ renders that markdown to HTML — so the PDF and the `.md` cannot disagree, and
 the same seed always writes the same almanac. `tools/tests/almanac.js` covers
 the sections, the escaping and both renderings.
 
+### The season as an interactive website
+
+The same dialog — or *Export → **Season as an interactive website*** — writes
+the season as a small **website** instead of a document: **Download the
+interactive website** writes `season_site_<season>_<seed>.html`, one
+self-contained file carrying the whole season as JSON and the reader for that
+JSON beside it. Nothing is fetched — no CDN, no stylesheet, no font, no
+server — so it opens off a thumb drive, out of an email attachment or from
+`file://`, and it is the one export you can hand to somebody who does not run
+this tool.
+
+A document answers "sort the board by potential", "show me every prospect out
+of one conference", "read only the injury stories" and "what did this team do
+in March" with Ctrl-F. The site answers them by clicking:
+
+- a tab per section, drawn from whatever the JSON actually contains — a run
+  with no pro leagues gets no pro-leagues tab rather than an empty one;
+- every table sorts on any column (click the header, click again to reverse; a
+  blank cell sorts last either way, because an empty cell is not a small one)
+  and filters as you type;
+- the draft board also filters by position and by conference, and carries the
+  season line, the honors count, the preseason rank and the stock move beside
+  the ratings;
+- a prospect's name is a link **everywhere** it appears — in a standings row,
+  on a leader board, in a ballot, in a pro league's table, inside a news
+  headline — and it opens his capsule: header line, full season line, ratings,
+  honors and the scouting note;
+- the header search jumps to any prospect by name or school;
+- the news feed filters by kind of story and searches its own text, a page of
+  articles at a time;
+- light and dark, one button, and Ctrl-P still prints the section you are on.
+
+The page is a reader, not the data. **Download season.json** on the page hands
+whoever received the `.html` the same JSON the page is drawing — every
+standings row, the bracket game by game, every capsule and the whole feed —
+so a season can be re-analysed without asking the sender for a second export.
+The dialog's third button, **Download the website's JSON on its own**, writes
+that same file (`season_site_<season>_<seed>.json`) directly.
+
+The JSON is data, not markup: numbers are numbers (the page sorts on them, and
+a column of pre-formatted strings would sort `9.5` above `12.1` forever),
+there is no HTML anywhere in it, it carries its own `format` and `version`,
+and the section order and labels travel with it so the reader builds its nav
+off the file rather than off a hard-coded list. Prospects are referenced by a
+stable id — two Jordan Smiths in one class is a normal draw, so a name is not
+an identity.
+
+Section ticks and the news limit are the almanac's, deliberately: one dialog,
+and a user who turned the capsules off does not get them back by asking for
+the website. `js/site.js` builds both halves and touches no DOM, so the file a
+browser downloads is the file CI reads; the same seed writes the same site,
+byte for byte, and nothing in it reads a clock. `tools/tests/site.js` covers
+the sections, the seam between the data and the page, and the one way a
+self-contained page breaks quietly — a `</script>` in a scouting note ending
+the payload early — while `tools/uismoke.js` downloads the file, opens it and
+sorts, filters and searches it in a real browser.
+
 If you load several seasons at once, `Export all` writes each of them.
 
 ## The interface
