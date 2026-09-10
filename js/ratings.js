@@ -1389,11 +1389,9 @@
 			const strength = USAGE_PROTECT *
 				clamp(1 - du / USAGE_SELF_REF, 0, 1);
 			const scale = {};
-			let w = 0;
 			for (const k of BB.RATING_KEYS) {
 				const protect = push > 0 ? 1 - strength * (USAGE_W[k] / USAGE_PROTECT_MAX) : 1;
 				scale[k] = Math.max(0, SHIFT_SCALE[k] * clamp(protect, 0.1, 1));
-				w += OVR_W[k] * scale[k];
 			}
 			/* An authored sign is an authored intent, and the normalizer used
 			   to reverse it: Matchup-Zone Defender's stre +4 came out -2.25,

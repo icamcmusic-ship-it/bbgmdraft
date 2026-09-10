@@ -4790,6 +4790,31 @@ console.log("\nExport: stats rows, the class's own year, the envelope and the me
 		for (const p of old.players) p.born.year = 1990;
 		ok("an implausible age is warned about",
 			global.Engine.validateLeagueFile(old).warnings.some((w) => /older than 30/.test(w)));
+		/* AND A LEAGUE'S ROSTERED VETERANS ARE NOT.
+
+		   The warning says "at their own draft year", and the reference year
+		   only WAS the player's own draft year when that year was later than
+		   the file's season — so everybody already drafted was measured
+		   against the league's current season instead, and a thirty-four-year-
+		   old who was nineteen at his draft came back as an implausible age.
+		   A real league export opened on a warning about a couple of hundred
+		   perfectly ordinary rows. */
+		const league = S.makeClass(2, 8, 2027);
+		league.teams = [{ tid: 0, region: "R", name: "N" }];
+		league.players.forEach((p, i) => {
+			// Eight to fifteen years into a career, so measured against the
+			// league's season every one of them is past thirty, and measured
+			// against his own draft — which is what the warning claims — every
+			// one of them is a perfectly ordinary twenty.
+			const yearsIn = i + 8;
+			p.tid = 0;
+			p.draft.year = 2027 - yearsIn;
+			p.born.year = p.draft.year - 20;
+		});
+		const lv = global.Engine.validateLeagueFile(league);
+		ok("a league's rostered veterans are aged from their own draft year",
+			!lv.warnings.some((w) => /older than 30/.test(w)),
+			lv.warnings.filter((w) => /older than 30/.test(w)).join(" "));
 	}
 }
 

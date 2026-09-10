@@ -1461,6 +1461,13 @@ each player is measured against his own draft year now, and a league is never
 rejected over one impossible row: the row is named in a warning and the
 classes inside the file load as they should.
 
+Every player, not only the ones drafted after the file's season. Most of a
+league is men who were already drafted, and measuring those against the
+league's season asks how old they are today rather than how old they were at
+their draft: a thirty-four-year-old who was nineteen when he was picked came
+back as an implausible age, and a real league export opened on a warning about
+a couple of hundred rows that were entirely ordinary.
+
 ### The college statline
 
 The **More ▾** dialog's *college statline*, *prior seasons* and *season highs* options

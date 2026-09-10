@@ -1385,7 +1385,6 @@
 		const noValue = res.players.filter((p) => p.rangeNoValue).length;
 		const mode = st.statMode;
 		const rows = shown.map((p) => {
-			const s = p.stats || {};
 			const team = res.teams[p.newCollege];
 			const tr = el("tr");
 			const cls = [];
