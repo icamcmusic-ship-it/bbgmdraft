@@ -79,8 +79,40 @@
 		   raw distribution above it is widened (see ROLE_DRAW_SD) so that far
 		   fewer players reach it at all. */
 		USG_FLOOR: 0.178,
-		USG_FLOOR_TALENT: 0.075,   // span of the floor across the talent range
+		/* Span of the floor across the talent range. Down from 0.075, and the
+		   ceiling's talent term with it (CEIL_TALENT, 0.030 -> 0.018): these
+		   two and USG_FLOOR_COMP are the same dial read off two different
+		   inputs, and the talent half is the ovr ramp the whole usage model
+		   has been trying not to be. What they were for — spreading the floor
+		   so it is not a wall — the composite term now does, off a rating
+		   rather than off a draft slot. */
+		USG_FLOOR_TALENT: 0.050,
 		USG_FLOOR_ROLE: 0.050,     // and across the college-role latent
+		/* And across BBGM's OWN usage composite, which reached the envelope
+		   almost not at all: the floor did not read it and the ceiling read it
+		   at 0.20 against a composite whose class spread is 0.082, so a
+		   standard deviation of shot-making moved a prospect's usage ceiling by
+		   1.6 tenths of a point. Since the envelope is what realized usage
+		   actually is — the raw share is squeezed into it and USG_EXP was
+		   measured to be worth 0.002 of correlation between 1.85 and 2.60 —
+		   that is the whole reason the composite BBGM's game sim picks its
+		   shooters by barely showed up in a box score. */
+		USG_FLOOR_COMP: 0.26,
+		/* How far BELOW the reference that term may reach, against 0.16 above.
+		   The floor is a floor: its job is to spread the bottom of a class,
+		   not to build a second wall underneath it, and the players who reach
+		   the bottom of this term are the ones already sitting on the other
+		   two. Symmetric, it widened the class's realized usage spread to 0.056
+		   against an empirical 0.046; clipped, the spread is back on the
+		   0.053 it was before any of this and the correlation it was bought
+		   for is unchanged. */
+		USG_FLOOR_COMP_DOWN: 0.09,
+		/* Both envelope terms are read against this, the usage composite a
+		   realistically shaped class actually averages, rather than against
+		   two different numbers. Being the class's own mean is what makes both
+		   terms mean-zero, so their strengths can be tuned without moving the
+		   class's usage LEVEL off the empirical anchor. */
+		USG_COMP_REF: 0.384,
 		USG_FLOOR_FILLER: 0.10,
 		// How far below the floor the softened curve may reach, as a fraction
 		// of it. The floor becomes an asymptote instead of a clamp.
@@ -93,6 +125,11 @@
 		   ceiling approaches USG_CEIL_MIN asymptotically and no two players
 		   share it. */
 		USG_CEIL_MIN: 0.150,
+		/* The intercept of the personal ceiling. 0.253 when the composite term
+		   was centred on 0.42; re-centring it on USG_COMP_REF moved the term's
+		   mean by 0.20 * (0.384 - 0.42), so the intercept absorbs that and the
+		   mean ceiling is exactly where it was. */
+		USG_CEIL_BASE: 0.2458,
 		USG_CAP_BAND: 0.022,
 		USG_CEIL_BAND: 0.038,
 		/* Steepness of the usage composite -> volume curve. Came down from
@@ -125,14 +162,98 @@
 			Freshman: 0.90, Sophomore: 1.04, Junior: 1.12,
 			Senior: 1.20, Graduate: 1.24,
 		},
-		/* The independent half of the role. Log-normal, so the multiplier is
+		/* The unpredictable half of the role. Log-normal, so the multiplier is
 		   centered on 1 and right-skewed the way "how big a role did he get"
-		   actually is. This is what widens the raw usage distribution enough
-		   that the bounds above stop binding for most of the class, and it is
-		   the term that breaks college production loose from NBA overall. */
-		ROLE_DRAW_SD: 0.44,
-		CEIL_COMP: 0.20,
-		CEIL_TALENT: 0.030,
+		   actually is. Together with ROLE_SKILL below it widens the raw usage
+		   distribution enough that the bounds above stop binding for most of
+		   the class, and it is what keeps college production from being a
+		   function of NBA overall. */
+		/* Down from 0.44, and the spread it gave up is handed to ROLE_SKILL
+		   below rather than dropped. At 0.44 the pure draw was 35% of the
+		   variance of raw usage on its own and the whole role latent was 55%
+		   of it, against 31% for BBGM's usage composite and 1.8% for talent —
+		   so realized usage correlated 0.90 with a number no rating predicts
+		   and 0.25 with the composite BBGM's own game sim picks shooters by.
+		   That is the "stat lines don't follow the ratings" complaint measured:
+		   the single largest term in a stat line was a coin flip. */
+		ROLE_DRAW_SD: 0.26,
+		/* The half of the role a scout CAN see, and the reason cutting the
+		   draw does not just flatten the class.
+
+		   A coach's role decision is not a dice roll and it is not an NBA
+		   overall rating either — it is who can handle and deliver the ball.
+		   BBGM has two composites for exactly that (`dribbling` = drb + spd,
+		   `passing` = 0.4*drb + pss + 0.5*oiq) and neither reached usage at
+		   all. Both are read against what a player of his size, shot-making
+		   and overall rating typically scores on them (ROLE_ONBALL below), so
+		   this says "a ball-handler for what he is" — a point guard against a
+		   shooting guard, a point forward against a rim runner — and not "a
+		   guard", which USG_SIZE_TILT already says, nor "a good player", which
+		   is the ramp this file exists to avoid.
+
+		   The exponent is on a term whose spread is 0.119, so a standard
+		   deviation of on-ball skill is worth about a 35% role. */
+		ROLE_SKILL: 2.5,
+		/* The reference the two composites are read against: what a player of
+		   this SIZE, this SHOT-MAKING level and this OVERALL typically scores
+		   on `dribbling + passW * passing`. It is a least-squares fit on a
+		   realistically shaped class SUBJECT TO ONE CONSTRAINT, and the
+		   constraint is the interesting part.
+
+		   Take a player and add four points to every rating but height — which
+		   is exactly the transformation the prior-season model applies in
+		   reverse (resolveTo shifts a build to a lower target overall). The
+		   left-hand side moves by 0.0160 a point, size by 0.0080, the usage
+		   composite by 0.0092 and overall rating by 1.410. An unconstrained
+		   fit does not reproduce that ratio, so the residual is not invariant
+		   shift: a talent-referenced fit made every prior season come out
+		   systematically LESS on-ball than the same build's draft year, and
+		   its lowest-rated seasons scored half a point further below their
+		   draft year than the harness allows. A freshman is not playing out of
+		   position; he is just worse. So the coefficients are constrained to
+		   satisfy that identity exactly and fitted for the best cross-sectional
+		   de-trending among the references that do.
+
+		   What the three terms buy, beyond the constraint:
+
+		   Size, because USG_SIZE_TILT already says "a guard gets the ball" and
+		   saying it twice would move the class's guard/big scoring balance as
+		   a side effect of a role fix.
+
+		   Shot-making (BBGM's `usage` composite), because that is what the
+		   envelope above now reads — USG_FLOOR_COMP and CEIL_COMP — and a role
+		   that tracked it too would be one rating counted twice.
+
+		   Overall rating, because a term that still tracked it would put the
+		   ovr ramp back: with a size-only reference the measured
+		   corr(ovr, PPG) went from 0.36 to 0.63, against a real draft class's
+		   0.25-0.35 and this repository's own band. It is `ovr` and not the
+		   college-talent scalar for the same reason the constraint exists:
+		   prospectTalent folds in POTENTIAL, and an earlier season of the same
+		   player carries the same potential against a lower overall, so a
+		   talent-referenced term reads a freshman as less on-ball than the
+		   senior he becomes purely because the gap to his ceiling was wider.
+
+		   What is left correlates -0.07 with overall rating: it is entirely
+		   "what kind of player is he" and not at all "how good is he", which is
+		   what a coach's role decision actually is. It makes a Floor General's
+		   line read like a Floor General's without making the draft board
+		   readable off the scoring column. */
+		ROLE_ONBALL: {
+			passW: 0.60,
+			base: 0.29295, size: -0.43499, usage: 0.23307, ovr: 0.01229,
+			/* The spread of the residual, used to keep this MEDIAN-1 term from
+			   also moving the class's usage LEVEL: exp() of a mean-zero draw
+			   has mean exp(k^2 s^2 / 2), and the level of a class is
+			   FILLER_USAGE's job alone. */
+			sd: 0.119,
+			/* A cap, in units of that spread. A pathological build three
+			   standard deviations out gets a large role, not an unbounded
+			   one. */
+			z: 3.0,
+		},
+		CEIL_COMP: 0.55,
+		CEIL_TALENT: 0.018,
 		CEIL_ROLE: 0.110,
 		/* How much of the role latent reaches MINUTES. Minutes are far flatter
 		   than usage — the gap between a 20-minute man and a 33-minute one is
@@ -343,6 +464,17 @@
 		},
 		PROSPECT_COMP_SCALE: 1.32,
 		PROSPECT_COMP_SCALE_EFF: 0.82,
+		/* Turnovers. Positive because BBGM's `turnovers` composite is a
+		   PROPENSITY, not a skill — see tovRate in statLine. At a composite
+		   spread of 0.167 for a class of prospects this is worth about 1.9
+		   points of turnover rate per standard deviation, against an empirical
+		   draft-year spread of 4.1. */
+		TOV_COMP: 0.115,
+		/* The reference for the synthesized field, which sits well below the
+		   class's own (PROSPECT_COMP_BASES.turnovers). Measured off the filler
+		   composites in simulateTeamStats; change a filler base and this moves
+		   with it. */
+		TOV_COMP_FIELD: 0.380,
 	};
 
 	/* The shape of a college rotation's minutes, by slot. Measured off D-I
@@ -453,11 +585,32 @@
 	   college scoring a near-deterministic ramp on NBA overall. What decides a
 	   college role instead is how long he has been here, what kind of player
 	   he is, and a large amount of nothing anyone can predict. */
-	function collegeRole(m, cfg, rng) {
+	function collegeRole(m, comps, cfg, rng) {
 		if (m.filler) return 1;
 		const p = m.player;
 		const RB = global.RatingsBuilder;
 		const arch = RB && p ? RB.roleUsage(p.archetype) : 1;
+		/* The half of the role that IS a rating. See ROLE_SKILL: BBGM's own
+		   ball-handling and passing composites, read against what a player of
+		   this size, this shot-making level and this overall rating scores on
+		   them — so the term carries no size tilt and no ovr ramp of its
+		   own. */
+		const R = TUNING.ROLE_ONBALL;
+		let skill = 1;
+		if (comps) {
+			const big = clamp((comps.blocking - 0.18) / 0.55, 0, 1);
+			const onBall = clamp(
+				comps.dribbling + R.passW * comps.passing -
+					(R.base + R.size * big + R.usage * comps.usage +
+						R.ovr * (p && Number.isFinite(p.newOvr) ? p.newOvr : 35)),
+				-R.z * R.sd, R.z * R.sd,
+			);
+			/* Median 1 AND mean 1: the lognormal correction keeps a term that
+			   is mean-zero in the exponent from raising the class's usage
+			   level as a side effect of widening it. */
+			skill = Math.exp(TUNING.ROLE_SKILL * onBall -
+				0.5 * TUNING.ROLE_SKILL * TUNING.ROLE_SKILL * R.sd * R.sd);
+		}
 		/* The independent draw. Scaled by the stat-noise slider, but floored:
 		   a college role is a latent fact about a player and his program,
 		   not a rounding error, so "deterministic from ratings" still leaves
@@ -468,7 +621,8 @@
 		   right-skewed. The level it implies for the class as a whole is set
 		   by FILLER_USAGE, which is the only place a class's scoring level can
 		   come from at all (usage renormalizes to 1 inside a roster). */
-		return experienceUsage(p && p.classYear) * arch * Math.exp(rng.normal(0, sd));
+		return experienceUsage(p && p.classYear) * arch * skill *
+			Math.exp(rng.normal(0, sd));
 	}
 
 	function shareFromWeights(vals, exp) {
@@ -1175,8 +1329,35 @@
 		const tovAnchor = CAL.byHeight("tov", bigness) * (me.filler ? 1.06 : 1) *
 			(me.filler || !Number.isFinite(me.year)
 				? 1 : 1 - TUNING.EXP_TOV * clamp(me.year - 1, -1.2, 3.2));
+		/* WHICH WAY BBGM'S TURNOVER COMPOSITE POINTS.
+
+		   `turnovers` is (50*0.5 + ins + pss - oiq) normalized — it RISES with
+		   the ratings that put the ball in a player's hands and FALLS with
+		   offensive IQ, and BBGM's own game sim reads it as a propensity: the
+		   higher it is, the more often that player coughs the ball up. This
+		   file read it as a skill and subtracted it, so the model paid a
+		   high-IQ, low-usage big the turnover discount and charged the smart
+		   playmaker for it. Measured on a realistic class, offensive IQ
+		   correlated +0.23 with turnovers per game — the sign of the single
+		   most-cited "he doesn't turn it over" rating was backwards.
+
+		   Two references, not one, and neither is 0.467. The term has to be
+		   MEAN-ZERO over the population it is applied to or it moves that
+		   population's turnover level off the empirical anchor rather than
+		   redistributing it: a class of prospects averages 0.4393 on this
+		   composite (PROSPECT_COMP_BASES) and the synthesized field averages
+		   0.380, so one shared reference of 0.467 was quietly handing the
+		   whole of Division I nearly a point of extra turnover rate. And the
+		   class-level correction is the composite's OWN multiplier
+		   (classRefMult), not classRefVolume — that number is the gap on the
+		   USAGE composite, which is the fault the multiplier table was
+		   introduced to fix, still in place at this one site. */
+		const tovComp = me.filler
+			? comps.turnovers - TUNING.TOV_COMP_FIELD
+			: comps.turnovers * ((refMult && refMult.turnovers) || 1) -
+				TUNING.PROSPECT_COMP_BASES.turnovers;
 		const tovRate = clamp(
-			tovAnchor - 0.10 * (comps.turnovers - 0.467 + refVol) +
+			tovAnchor + TUNING.TOV_COMP * tovComp +
 				/* Opponent ball pressure. PROGRAM_STYLES gives a full-court
 				   press team press: 0.06, and it was added straight onto a rate
 				   — so a conference stacked with pressing teams could add six
@@ -1730,7 +1911,7 @@
 		   same latent decides minutes and usage, because it is one fact about
 		   the player and not two. */
 		const roleMult = members.map((m, i) =>
-			collegeRole(m, cfg, rng.child("role|" + team.name + "|" + i)));
+			collegeRole(m, comps[i], cfg, rng.child("role|" + team.name + "|" + i)));
 		const mins = allocateMinutes(members, rng, comps, env, roleMult);
 		/* A 19-year-old at Real Madrid does not play 30 minutes, whatever his
 		   talent says. Cap the prospects, hand the freed minutes back to the
@@ -1834,7 +2015,10 @@
 				? TUNING.USG_FLOOR_FILLER
 				: TUNING.USG_FLOOR +
 					TUNING.USG_FLOOR_TALENT * clamp((m.talent - 55) / 40, -0.5, 0.9) +
-					TUNING.USG_FLOOR_ROLE * clamp(Math.log(Math.max(0.15, roleMult[i])), -1, 1);
+					TUNING.USG_FLOOR_ROLE * clamp(Math.log(Math.max(0.15, roleMult[i])), -1, 1) +
+					TUNING.USG_FLOOR_COMP *
+						clamp(comps[i].usage - TUNING.USG_COMP_REF,
+							-TUNING.USG_FLOOR_COMP_DOWN, 0.16);
 			const floor = floorRate * ms;
 			/* The ceiling is the player's, not the league's. A universal cap made
 			   every good prospect converge on the same number.
@@ -1851,7 +2035,8 @@
 			   then pushed them all towards it: 12.5% of a class landed in
 			   [18.5, 20.0] on that one bound. Softplus has the same asymptote
 			   and no two players on it. */
-			const raw = 0.253 + TUNING.CEIL_COMP * (comps[i].usage - 0.42) +
+			const raw = TUNING.USG_CEIL_BASE +
+				TUNING.CEIL_COMP * clamp(comps[i].usage - TUNING.USG_COMP_REF, -0.16, 0.16) +
 				TUNING.CEIL_TALENT * ((m.talent - 55) / 45) + 0.105 * (0.42 - bignessOf(i)) +
 				TUNING.CEIL_ROLE * Math.log(Math.max(0.15, roleMult[i]));
 			const band = TUNING.USG_CEIL_BAND;
