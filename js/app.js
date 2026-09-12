@@ -3455,6 +3455,22 @@
 					? res.phasesRun.join(" → ") : "nothing to redo") + ")" : "");
 	}
 
+	/* Whether the config changed since the universe's last full run is
+	   nothing but a new note template — the one setting that changes
+	   nothing pass one reads (no build, no roster, no honors) and is
+	   handled entirely inside each file's own cached runner. See
+	   phaseNotes/PHASES in js/engine.js: its only dep is noteLines. */
+	function universeNotesOnlyChange() {
+		const u = state.universe;
+		if (!u || !u.settings || !u.rows || !u.rows.length || u.running) return false;
+		if (!Array.isArray(u.order) || u.order.length !== state.files.length) return false;
+		const a = Object.assign({}, u.settings);
+		const b = CFG.make(state.cfg);
+		delete a.noteLines; delete b.noteLines;
+		delete a.biography; delete b.biography;
+		return JSON.stringify(a) === JSON.stringify(b);
+	}
+
 	function runNow() {
 		if (!state.files.length) return;
 		/* Universe mode is a setting, not a tab. With it on, one file is one
@@ -3463,6 +3479,22 @@
 		   season is ~330ms and fifty of them is a progress bar, not a click),
 		   so this returns and the chain finishes the job. */
 		if (state.cfg.universe && state.files.length && !state.universe.running) {
+			/* EXCEPT for a note-template change. Rebuilding the whole chain
+			   for that used to mean replaying every season in the universe —
+			   pass one's cross-file previews, every program, every game —
+			   to change a handful of sentences nothing else reads. Evicting
+			   the cached results instead lets ensureResult rebuild each one
+			   lazily, through the same per-file runner whose phase cache
+			   already knows only "notes" needs rerunning (universeCfgFor
+			   reads the live noteLines, not the frozen settings). */
+			if (universeNotesOnlyChange()) {
+				state.universe.settings = Object.assign({}, state.universe.settings,
+					{ noteLines: (state.cfg.noteLines || []).slice() });
+				state.results = new Array(state.files.length).fill(null);
+				persist();
+				render();
+				return;
+			}
 			state.results = new Array(state.files.length).fill(null);
 			runUniverse();
 			return;
@@ -6365,6 +6397,16 @@
 			"twenties, bigs the thirties and up — unique within the class, " +
 			"because a class becomes a roster. Skipped for a player who already " +
 			"has a number."));
+		/* Notes are generated every run whether or not this box is on — see
+		   phaseNotes in js/engine.js — so unchecking it costs nothing to
+		   recompute. It only decides whether the file written out carries
+		   them: a scout who doesn't want the prose in the export (a league
+		   file kept clean of spoilers, say) can still see it on the Notes
+		   tab and flip this only when exporting. */
+		const oIncludeNotes = opt("includeNotes", "Include scouting notes in the export", true);
+		optBox.appendChild(el("p", "unit",
+			"Off writes the file with no note field at all. The note itself is " +
+			"still built and still shown on the Notes tab either way."));
 		const oNoteAppend = opt("noteAppend", "Keep any note already in the file");
 		optBox.appendChild(el("p", "unit",
 			"The generated note replaces whatever the file carried. Tick this to " +
@@ -6373,7 +6415,7 @@
 		paintScope();
 		const exportOpts = () => ({
 			stats: oStats(), prior: oPrior(), highs: oHighs(), awards: oAwards(),
-			ages: oAges(), noteAppend: oNoteAppend(),
+			ages: oAges(), noteAppend: oNoteAppend(), includeNotes: oIncludeNotes(),
 			injuries: oInjuries(), jerseys: oJerseys(),
 			awardsScope: scopeSel.value,
 			majorConferences: confInput.value.split(",")
