@@ -5995,6 +5995,16 @@
 			   empty note made BBGM flag a note the player doesn't have. */
 			if (out.note && String(out.note).trim()) out.noteBool = 1;
 			else delete out.noteBool;
+			/* The note is generated every run regardless (see phaseNotes) —
+			   this only decides whether the exported file carries it. A
+			   scout who wants the class simulated with notes on for the
+			   Notes tab, but a clean file with no scouting prose written
+			   into it, unchecks this at export time rather than clearing
+			   noteLines and losing the notes altogether. */
+			if (opts.includeNotes === false) {
+				delete out.note;
+				delete out.noteBool;
+			}
 			if (opts.stats && p.stats) {
 				const built = collegeSeasonStats(result);
 				const rows = [];
