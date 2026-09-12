@@ -343,9 +343,27 @@
 		   equal talent is 2-3 points of true shooting; 0.0045 over the
 		   4.4-year span the clamp allows is 2.0 points BEFORE the usage
 		   gradient (which runs the other way, seniors carrying more load)
-		   eats it. 0.008 clears it. Centered on a sophomore, so the class mean
-		   does not move off the empirical anchor. */
-		EXP_EFF: 0.013,
+		   eats it. 0.008 clears it.
+
+		   CENTERED ON A FRESHMAN, NOT A SOPHOMORE — and that, not the size of
+		   the coefficient, was the thing worth fixing. Raising this to 0.013
+		   on a sophomore-centered clamp bought the right GRADIENT and paid for
+		   it by making the young end worse in absolute terms: measured
+		   true shooting by class year went .543/.545/.551/.558 to
+		   .535/.530/.540/.550, so freshmen and sophomores each lost about a
+		   point and a half. A draft class is mostly freshmen, and its best
+		   prospects are almost all freshmen, so a penalty centered above them
+		   lands squarely on the players who are supposed to be able to score:
+		   20+ PPG scorers per class fell from 5.9 to 3.9 in the 2009-2021 era
+		   and 8.2 to 5.8 in the modern one, and the row that watches for the
+		   class's possessions leaking away to its synthesized teammates failed.
+
+		   A gradient is a statement about DIFFERENCES, so it can be centered
+		   anywhere, and centering it at the bottom gets the same senior-over-
+		   freshman gap without moving anybody down: 0.0083 over the 3.2-year
+		   clamp is 2.7 points of true shooting, inside the 2-3 the sport
+		   shows, with the freshman term at exactly zero. */
+		EXP_EFF: 0.0083,
 		EXP_TOV: 0.030,
 		/* Assists. At 4.1 the exponent produced a physically impossible floor:
 		   a center's 10th-percentile line was 0.15 assists per game and the Rim
@@ -595,20 +613,37 @@
 		PROSPECT_PREMIUM: 1.12,
 		/* How often a drafted player spends his draft year as a reserve. */
 		RESERVE_RATE: 0.17,
-		/* 0.55 -> 0.34. This is the largest of the three multiplicative
-		   channels through which overall rating reaches college scoring, and
-		   together they had put corr(ovr, PPG) at 0.50 against this file's own
-		   stated target of 0.25-0.35 (a real draft class runs 0.25-0.35
-		   because a draft board ranks NBA projection and a box score measures
-		   a college role, and the two agree only loosely). It is the honest
-		   lever of the three: the other two (USG_EXP, USG_TALENT_EXP) are
-		   inside the usage solve, where changing them moves the class's whole
-		   volume level as a side effect, and talentEffAdj is a documented
-		   empirical gradient rather than a tuning dial. Minutes are where a
-		   ramp on overall rating is least defensible anyway — a coach's
-		   rotation answers to what a player does in November, not to what an
-		   NBA team will think of him in June. */
-		MINUTES_TILT_ABS: 0.22,
+		/* This is the largest of the three multiplicative channels through
+		   which overall rating reaches college scoring, and together they put
+		   corr(ovr, PPG) at about 0.50 against this file's stated target of
+		   0.25-0.35 (a real draft class runs 0.25-0.35 because a draft board
+		   ranks NBA projection and a box score measures a college role, and
+		   the two agree only loosely). It is the honest lever of the three:
+		   the other two (USG_EXP, USG_TALENT_EXP) sit inside the usage solve,
+		   where changing them moves the class's whole volume level as a side
+		   effect, and talentEffAdj is a documented empirical gradient rather
+		   than a tuning dial. Minutes are also where a ramp on overall rating
+		   is least defensible — a coach's rotation answers to what a player
+		   does in November, not to what an NBA team will think of him in June.
+
+		   IT WENT TO 0.34 ON THAT REASONING AND IS BACK AT 0.55, because the
+		   target it was chasing could not be reached and the attempt cost
+		   something real. Flattening every available channel got corr(ovr,
+		   PPG) to 0.455, not 0.35 — past about 0.42 what remains is not a ramp
+		   but the composites themselves, since a better rating genuinely does
+		   produce a better usage composite and better shooting, and flattening
+		   further means deliberately breaking the model. Meanwhile the class
+		   stopped containing scorers: 20+ PPG men per class fell from 5.9 to
+		   3.9 in the 2009-2021 era, under the floor of the row that exists to
+		   catch exactly that. Measured at 10 seeds with the class-year
+		   gradient re-centered, 0.40 still reads 4.2 against a 4.34 floor and
+		   0.55 reads 4.6, so the tilt is doing work no other channel replaces.
+
+		   A correlation target that cannot be met is not worth a distribution
+		   that can be. The aspiration stays written down here because it is
+		   the right aspiration; what changed is the admission that this dial
+		   is not what gets there. */
+		MINUTES_TILT_ABS: 0.55,
 		MINUTES_TILT_REL: 0.22,
 		MINUTES_TILT_ANCHOR: 62,
 		MINUTES_TILT_REF: 14,
@@ -1633,7 +1668,7 @@
 		   probability. Centered on a sophomore so the class mean does not move
 		   off the empirical anchor. */
 		const expAdj = me.filler || !Number.isFinite(me.year)
-			? 0 : TUNING.EXP_EFF * clamp(me.year - 1, -1.2, 3.2);
+			? 0 : TUNING.EXP_EFF * clamp(me.year, 0, 3.2);
 		/* The efficiency dial, which did not exist: pace and scoringEnv are
 		   both possession dials, and moving either left true shooting at 0.572
 		   in every configuration. */
