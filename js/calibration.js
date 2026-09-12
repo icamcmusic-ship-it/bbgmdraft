@@ -397,8 +397,17 @@
 
 	/* Better prospects use a few more possessions and finish them slightly
 	   better (lottery vs pick-41+ gradient above). talent is 0-100. */
+	/* 0.0022 -> 0.0013, for the reason talentEffAdj came down below: this is
+	   the third of four multiplicative overall-rating channels into a college
+	   box score. It is also the most redundant of them — js/stats.js already
+	   raises (0.35 + 1.3 * talent/100) to USG_TALENT_EXP in the same product,
+	   so the talent gradient in raw usage was being applied twice. Over the
+	   55-90 span a realistic class occupies this is now 4.6% of extra volume
+	   for a lottery pick over a late second-rounder, against the 1.9 points of
+	   USG (24.3 vs 22.4) the 2009-21 draft data shows — which the exponent
+	   beside it already more than covers. */
 	function talentUsageMult(talent) {
-		return 1 + 0.0022 * (clamp(talent, 0, 100) - 55);
+		return 1 + 0.0013 * (clamp(talent, 0, 100) - 55);
 	}
 	/* The efficiency half of the same gradient. This was written, documented
 	   and exported — and never called by anything, so "skilled players finish
@@ -416,9 +425,19 @@
 	   class without moving the class mean off the empirical anchor, and without
 	   moving the whole-D-I baseline at all (that comes from the filler
 	   composites and from the era's fieldEff shift). */
+	/* 0.0009 -> 0.00062. The gradient itself is right and the comment above
+	   is the reason to keep it, but it is one of four multiplicative channels
+	   through which NBA overall rating reaches a college box score, and
+	   together they had put corr(ovr, PPG) at 0.50 against the 0.25-0.35 a
+	   real draft class runs (see MINUTES_TILT_ABS in js/stats.js, which
+	   carried the larger share of the same correction). At 0.00062 the
+	   realistic 55-90 prospect talent span is a 2.2-point swing in true
+	   shooting rather than 3.2 — still the direction and most of the size a
+	   draft board shows, and no longer stacked on top of three other terms
+	   saying the same thing. */
 	const PROSPECT_TALENT_MEAN = 72;
 	function talentEffAdj(talent) {
-		return 0.0009 * (clamp(talent, 0, 100) - PROSPECT_TALENT_MEAN);
+		return 0.00062 * (clamp(talent, 0, 100) - PROSPECT_TALENT_MEAN);
 	}
 
 	/* Expected 3PA share of FGA given size and shooting talent. Anchored to

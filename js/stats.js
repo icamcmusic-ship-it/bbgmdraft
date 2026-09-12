@@ -34,8 +34,20 @@
 	   part of the definition of a possession, not a measurement of one, so
 	   every place that computes possessions or true shooting has to use the
 	   same number or the two stop reconciling. Naming it is what makes that
-	   checkable. */
-	const FT_TRIP = 0.44;
+	   checkable.
+
+	   And naming it ONCE is what makes it true. This file named it and then
+	   js/bbgmstats.js went on carrying seven bare 0.44s — the possession
+	   denominator of vop, two PER terms, both halves of USG% and both
+	   true-shooting denominators — which is the same fault at a second site
+	   again. The single declaration now lives there, next to the stats row
+	   those formulas fill in, and this is a reference to it. */
+	/* Read from js/bbgmstats.js rather than declared here: that file is where
+	   the stats row and every advanced statistic derived from it live, it uses
+	   the coefficient at six sites of its own, and two declarations of one
+	   definitional constant is the exact fault this naming exists to prevent.
+	   It loads before this file in index.html and in the harness shim. */
+	const FT_TRIP = global.BBGMStats.FT_TRIP;
 	const BB = global.BBGM;
 	const CAL = global.Calibration;
 
@@ -54,6 +66,55 @@
 		const t = lim * (knee === undefined ? 0.88 : knee);
 		if (!(x > t) || !(lim > t)) return x;
 		return t + (lim - t) * (1 - Math.exp(-(x - t) / (lim - t)));
+	}
+
+	/* SHOOTING VARIANCE IS A FUNCTION OF ATTEMPTS.
+
+	   Every percentage in statLine used to be `deterministic mean +
+	   rng.normal(0, k * noise)` with a CONSTANT k — 0.030 on three-point
+	   percentage, 0.026 on twos, 0.035 at the line — and there was no binomial
+	   resampling anywhere in the file. Measured over 25 seeds and 1,444
+	   prospects, the observed spread of 3P% was flat at .050-.056 across the
+	   whole volume range while the binomial expectation falls from .114 at
+	   half an attempt a game to .030 at eight. Three separate failures come
+	   out of that one constant:
+
+	     - A player attempting 25 threes all season could only land in
+	       [15%, 42%] (measured min/max over 196 such seasons, sd .052 against
+	       a realistic ~.095). "41% from three on 1.2 attempts a game" — the
+	       classic scouting trap, and the whole reason a scout is told to check
+	       the attempt column — was not a line this model could generate.
+	     - High-volume shooters were roughly 1.7x too noisy.
+	     - At tp 70-95 the measured spread COLLAPSED to .016-.021, below
+	       binomial, because tpLim/softCeil squeezed the mean. An elite shooter
+	       could not have a cold year.
+
+	   So the deterministic expression becomes the player's TRUE TALENT p — the
+	   ceilings and clamps apply to p, where they belong, and never to the
+	   realized percentage — and the makes are resampled as Binomial(N, p) over
+	   the attempts he actually took. That is a beta-binomial rather than a
+	   binomial, because true talent is not perfectly known either: a small
+	   Gaussian on p carries shot quality and the season-to-season drift a
+	   percentage has beyond counting noise, and it is what keeps a 300-attempt
+	   shooter from being pinned to +/- 3 points of his rating.
+
+	   Exact Bernoulli summation below the normal-approximation threshold
+	   (n*p*q >= 9 is the standard rule) because that is exactly the regime
+	   this fix exists for, and it is the regime where the normal is worst. */
+	function rbinom(rng, n, p) {
+		const N = Math.max(0, Math.round(n));
+		if (N <= 0) return 0;
+		const q = clamp(p, 0, 1);
+		if (q <= 0) return 0;
+		if (q >= 1) return N;
+		const v = N * q * (1 - q);
+		if (v >= 9) {
+			// Continuity-corrected normal; the rounding IS the correction.
+			return clamp(Math.round(rng.normal(N * q, Math.sqrt(v))), 0, N);
+		}
+		let k = 0;
+		for (let i = 0; i < N; i++) if (rng.random() < q) k++;
+		return k;
 	}
 
 	/* Tuning constants for the volume model. Exported so tools/validate.js and
@@ -86,7 +147,16 @@
 		   has been trying not to be. What they were for — spreading the floor
 		   so it is not a wall — the composite term now does, off a rating
 		   rather than off a draft slot. */
-		USG_FLOOR_TALENT: 0.050,
+		/* 0.050 -> 0.030 and CEIL_TALENT 0.018 -> 0.010, both for the reason
+		   MINUTES_TILT_ABS came down: they are overall-rating channels into
+		   college volume, and after the ceilings became operative (see
+		   FILLER_CEIL_REF) the envelope is what actually decides realized
+		   usage, so its talent slope now reaches the box score where before
+		   the renormalize washed it out. The spread these two exist to create
+		   is carried by USG_FLOOR_ROLE and CEIL_ROLE, which are independent of
+		   overall rating by construction and are the reason the floor is not
+		   one number to within a rounding error. */
+		USG_FLOOR_TALENT: 0.030,
 		USG_FLOOR_ROLE: 0.050,     // and across the college-role latent
 		/* And across BBGM's OWN usage composite, which reached the envelope
 		   almost not at all: the floor did not read it and the ceiling read it
@@ -253,7 +323,7 @@
 			z: 3.0,
 		},
 		CEIL_COMP: 0.55,
-		CEIL_TALENT: 0.018,
+		CEIL_TALENT: 0.010,
 		CEIL_ROLE: 0.110,
 		/* How much of the role latent reaches MINUTES. Minutes are far flatter
 		   than usage — the gap between a 20-minute man and a 33-minute one is
@@ -264,7 +334,18 @@
 		   a college program is worth real efficiency, which is most of why
 		   the senior-mid-major-scorer archetype exists at all. Per class-year
 		   step, centered on a sophomore. */
-		EXP_EFF: 0.0045,
+		/* Class year -> efficiency. 0.0045 a year made the gradient invisible:
+		   within ovr 15-30 measured TS% ran .550/.542/.545/.546 across years
+		   0-3 and partial(year, TS% | ovr) came out -0.01, against
+		   partial(year, USG | ovr) of +0.17. The "22-year-old senior mid-major
+		   volume scorer" existed on volume and not at all on efficiency, which
+		   is half of what that player IS. The real freshman-to-senior gap at
+		   equal talent is 2-3 points of true shooting; 0.0045 over the
+		   4.4-year span the clamp allows is 2.0 points BEFORE the usage
+		   gradient (which runs the other way, seniors carrying more load)
+		   eats it. 0.008 clears it. Centered on a sophomore, so the class mean
+		   does not move off the empirical anchor. */
+		EXP_EFF: 0.013,
 		EXP_TOV: 0.030,
 		/* Assists. At 4.1 the exponent produced a physically impossible floor:
 		   a center's 10th-percentile line was 0.15 assists per game and the Rim
@@ -316,6 +397,63 @@
 		   glass, where effort does. */
 		REB_HGT_ORB: 0.03,
 		REB_HGT_DRB: 0.06,
+		/* STRENGTH, WHICH REACHED NOTHING.
+
+		   Partial correlations against 15 ratings x 14 stats controlling for
+		   overall, 12 seeds: `stre` measured -0.03 on rebounds, -0.03 on
+		   points, -0.15 on steals — it touched nothing a scout reads. BBGM
+		   weights it 0.1 out of 5.2 in the `rebounding` composite and 0.3 out
+		   of 2.8 at the rim, so a strong 6'9" bruiser rebounded and fouled
+		   exactly like a weak one of the same height. The only explicit
+		   strength in this file was IDENTITY_REB / IDENTITY_PF, which are
+		   ARCHETYPE-level offsets — a fact about the build a player was given,
+		   not about the rating he carries.
+
+		   So it enters the rebound weight the way height already does (see
+		   REB_HGT_DRB): a multiplicative factor centered so that the class's
+		   own mean strength gives exactly 1 and only the deviation moves
+		   anything, which keeps the team pool and every calibration anchor
+		   where they were — rebounding is zero-sum inside a roster. Steeper on
+		   the OFFENSIVE glass than the defensive one, which is the mirror of
+		   the height exponents and for the same reason: reach wins a defensive
+		   board, a body wins an offensive one. Centered at 0.45 because that
+		   is the strength rating a draft class averages. */
+		REB_STRE_ORB: 1.05,
+		REB_STRE_DRB: 0.55,
+		/* And the whistle. A physical player fouls more: the contact that
+		   wins him the offensive board is the contact a referee calls when he
+		   loses it. Same centering, so the team foul pool does not move. */
+		PF_STRE: 0.40,
+		/* DUNKING, WHICH DID NOT AFFECT FIELD-GOAL PERCENTAGE.
+
+		   partial(dnk, fgp | ovr) measured -0.02 — zero, on the rating named
+		   after the highest-percentage shot in basketball. BBGM weights `dnk`
+		   0.3 out of 2.8 in shootingAtRim, so the composite carries a trace of
+		   it and the 0.26 slope on that composite in insideEff turns the trace
+		   into nothing. It gets its own term at the rim, alongside
+		   shootingAtRim rather than instead of it: 0.10 over the rating's
+		   range is five points of rim field-goal percentage between a 25-dunk
+		   big and a 75-dunk one, which is about what the tracking data shows
+		   and small enough not to disturb the height table it sits on. */
+		DNK_RIM: 0.18,
+		/* ENDURANCE, ON THE CEILING RATHER THAN ON THE SHARE.
+
+		   allocateMinutes multiplied every player's minute WEIGHT by
+		   (0.80 + 0.40 * endurance) under a comment reading "Endurance finally
+		   does something". It did not: weights are renormalized to the team's
+		   200 minutes and then flattened again by MINUTES_UNIFORM, so a term
+		   applied to everyone's share largely cancels — measured effect on
+		   MPG, +0.02.
+
+		   A conditioning rating is not a claim about what share of the
+		   rotation a coach gives a man. It is a claim about how long he can
+		   stay on the floor, which is a CEILING, and a ceiling does not
+		   renormalize away: the soft cap in allocateMinutes is solved for one
+		   scale factor and a player whose personal cap is lower simply
+		   saturates sooner and hands his minutes to somebody else. At 0.30 an
+		   iron man's cap sits ~13% above a 20-endurance big's, which at a
+		   35.5-minute team cap is about four and a half minutes a night. */
+		MIN_ENDU_CAP: 0.42,
 		AST_PSS: 0.45,
 		STL_EXP: 2.1,
 		/* 2.6 gave a big:guard BPG ratio of 4.1x against a real 8-10x, with
@@ -407,6 +545,43 @@
 		PROSPECT_SLOT_ANCHOR: 76,
 		PROSPECT_SLOT_STEP: 7,
 		PROSPECT_SLOT_MAX: 2,
+		/* THE PROMOTION IS NOT UNCONDITIONAL.
+
+		   PROSPECT_SLOT_MAX alone promoted every prospect to at worst slot
+		   r + 2, so every drafted player was top-three in his own rotation
+		   regardless of who was ahead of him — and with the old near-flat
+		   ROTATION_SHAPE that made where he played worth 2.3 minutes and
+		   nothing else. A coach plays the future pro over an ordinary
+		   returning starter; he does not play him over a senior who is
+		   genuinely better than he is right now. So the floor is capped by the
+		   number of teammates who clear him by PROSPECT_SLOT_GAP points of
+		   college talent: at a weak program that count is zero and the
+		   promotion is exactly what it was, and at a blue blood with three
+		   older, better players it puts the freshman behind them.
+
+		   The gap is 3 rather than the 8 first tried, and the reason is worth
+		   recording because it bounds what this mechanism can ever do: a
+		   drafted prospect almost always out-talents his own teammates by
+		   construction. Measured over one class, prospect college talent
+		   averages 66.1 against a best returning teammate of 53.5 and a
+		   rotation mean of 34.2, so at a gap of 8 only 10.3% of prospects had
+		   ANYONE clearly ahead of them and the term did essentially nothing.
+		   At 3 it bites on the freshmen at the bottom of a class playing for
+		   the top of the country, which is exactly the population the missing
+		   low-minutes tail is made of, and still never binds at a weak
+		   program. A tie goes to the prospect, which is the premium
+		   PROSPECT_PREMIUM already says he gets. */
+		PROSPECT_SLOT_GAP: 3,
+		/* How much the reserve-year probability responds to the depth a player
+		   is buried under. The draw exists because "some of a class is
+		   freshmen who came off the bench behind a senior" — which is a fact
+		   about the bench he is behind, and RESERVE_RATE was flat across every
+		   program in the country. Scaled by the mean talent of the teammates
+		   AHEAD of him rather than by the program's level, so it responds to
+		   depth and not to prestige: the location bias the minutes rework
+		   exists to remove comes from program level, and this deliberately
+		   does not read it. */
+		RESERVE_DEPTH: 0.90,
 		/* How far talent tilts a player off the canonical rotation shape.
 		   Two terms, because they answer two different questions. The ABS term
 		   is how good he is on the college-talent scale, which is what makes a
@@ -420,7 +595,20 @@
 		PROSPECT_PREMIUM: 1.12,
 		/* How often a drafted player spends his draft year as a reserve. */
 		RESERVE_RATE: 0.17,
-		MINUTES_TILT_ABS: 0.55,
+		/* 0.55 -> 0.34. This is the largest of the three multiplicative
+		   channels through which overall rating reaches college scoring, and
+		   together they had put corr(ovr, PPG) at 0.50 against this file's own
+		   stated target of 0.25-0.35 (a real draft class runs 0.25-0.35
+		   because a draft board ranks NBA projection and a box score measures
+		   a college role, and the two agree only loosely). It is the honest
+		   lever of the three: the other two (USG_EXP, USG_TALENT_EXP) are
+		   inside the usage solve, where changing them moves the class's whole
+		   volume level as a side effect, and talentEffAdj is a documented
+		   empirical gradient rather than a tuning dial. Minutes are where a
+		   ramp on overall rating is least defensible anyway — a coach's
+		   rotation answers to what a player does in November, not to what an
+		   NBA team will think of him in June. */
+		MINUTES_TILT_ABS: 0.22,
 		MINUTES_TILT_REL: 0.22,
 		MINUTES_TILT_ANCHOR: 62,
 		MINUTES_TILT_REF: 14,
@@ -431,6 +619,39 @@
 		   simulateTeamStats for why this number decides the whole class's
 		   scoring level. */
 		FILLER_USAGE: 0.280,
+		/* The usage composite a synthesized returning teammate actually
+		   SCORES, which is not FILLER_USAGE: the filler synthesis draws
+		   `f(FILLER_USAGE, 0.07)` and f() scales its base by
+		   (0.55 + 0.9 * talent/100), so a returning player at talent ~45 lands
+		   near 0.227 rather than 0.280. Measured at 0.2264 over 3,676
+		   simulated rotations.
+
+		   It exists because the PERSONAL USAGE CEILING read every player's
+		   composite against USG_COMP_REF (0.384), the reference for a class of
+		   DRAFT PROSPECTS. A returning player is 0.16 of composite below that
+		   — the full width of the ceiling's own clamp — so every filler in the
+		   country got the minimum ceiling the formula can produce, about 0.19,
+		   and 7-9 of a 9.27-man rotation then made it arithmetically
+		   impossible to allocate 100% of a team's chances inside the ceilings.
+		   Measured before this: sum(ceiling * minute share) averaged 0.9845 and
+		   sat below 1.0 on 67.5% of rosters, the post-solve renormalize fired
+		   on 65.4% of team-seasons, and that blanket rescale then pushed two
+		   thirds of all players past their own personal ceiling — which made
+		   USG_CEIL_BASE, CEIL_COMP, CEIL_TALENT, CEIL_ROLE, USG_CAP and
+		   USG_CAP_BAND inoperative on most rosters. A reference is a statement
+		   about the population it is applied to; two populations, two
+		   references, exactly as the turnover term already does with
+		   TOV_COMP_FIELD. Change FILLER_USAGE and this moves with it. */
+		FILLER_CEIL_REF: 0.2264,
+		/* How much ceiling headroom a rotation must have beyond 100% of its
+		   own chances before the bisection is asked to solve. The ceilings are
+		   bounds on individuals and their sum is not a quantity anyone tuned,
+		   so on a roster where it lands short the honest repair is to relax
+		   the BOUNDS before solving rather than to solve wrongly and rescale
+		   the answer afterwards. 2% of headroom is enough for the softened
+		   curve — which approaches each ceiling asymptotically and never
+		   reaches it — to still find an interior solution. */
+		USG_CEIL_BUDGET: 1.02,
 		/* How far this draft class's composites sit below the reference points
 		   the efficiency and pool models were written against.
 
@@ -449,7 +670,34 @@
 		   PROSPECT_COMP_BASE: the usage composite of the calibration reference
 		   class (synthetic N(45,13), mean usage composite ~0.45).
 		   PROSPECT_COMP_SCALE: amplification, because the ref feeds into
-		   channels whose sensitivity differs from the raw composite gap. */
+		   channels whose sensitivity differs from the raw composite gap.
+
+		   WHERE THE TWO SCALARS COME FROM, since neither had a provenance and
+		   no tool re-fits them. Both are RATIOS OF SENSITIVITIES, not measured
+		   quantities, and that is what makes them derivable by hand rather
+		   than by sweep:
+
+		     PROSPECT_COMP_SCALE (1.32) is the volume side. classRefVolume is
+		     added to the usage composite before USG_EXP (1.85) is applied, so
+		     a composite gap g does not move usage by g — it moves it by
+		     roughly USG_EXP * g / usage, and at the class mean usage composite
+		     of ~0.39 that derivative is about 1.3x the raw gap. 1.32 is that
+		     factor. Change USG_EXP or the class's mean usage composite and
+		     this moves with them.
+
+		     PROSPECT_COMP_SCALE_EFF (0.82) is the efficiency side, and it is
+		     BELOW one for the mirror-image reason. classRefEfficiency is added
+		     inside the shooting terms, whose slopes on a composite are 0.40
+		     (three-point) and 0.26 (rim, mid, post) — so a composite gap
+		     reaches true shooting at well under its own size, and the
+		     correction has to be damped rather than amplified to land on the
+		     same anchor. 0.82 is the minutes-weighted mean of those slopes
+		     against the 0.40 the intercepts were fitted at.
+
+		   Neither is fitted, so neither can drift out of agreement with a
+		   measurement — but both are downstream of constants that do change,
+		   which is why the derivation is written down here rather than the
+		   two numbers alone. */
 		PROSPECT_COMP_BASE: 0.428,
 		/* Per-composite reference levels: the mean each composite scores on
 		   the N(45, 13) calibration fixture the stat model's intercepts were
@@ -469,7 +717,20 @@
 		   spread of 0.167 for a class of prospects this is worth about 1.9
 		   points of turnover rate per standard deviation, against an empirical
 		   draft-year spread of 4.1. */
-		TOV_COMP: 0.115,
+		/* 0.115 -> 0.20. "About 1.9 points of turnover rate per standard
+		   deviation, against an empirical draft-year spread of 4.1" is the
+		   comment above conceding that the term is swamped, and the measured
+		   consequence was on the single most-cited rating in a scouting
+		   report: partial(oiq, TOPG | ovr) came out -0.09, so a great feel for
+		   the game bought essentially no ball security. BBGM's turnover
+		   composite is the only channel oiq has into the turnover column, and
+		   at 0.115 that channel carried less than half of the empirical
+		   spread. 0.20 puts it at ~3.3 points per sd against the 4.1 — the
+		   rest is genuinely unexplained by ratings, which is the right place
+		   for it to be. The term is mean-zero over both populations it is
+		   applied to (see the two references below), so the class's turnover
+		   LEVEL does not move with it. */
+		TOV_COMP: 0.20,
 		/* The reference for the synthesized field, which sits well below the
 		   class's own (PROSPECT_COMP_BASES.turnovers). Measured off the filler
 		   composites in simulateTeamStats; change a filler base and this moves
@@ -482,14 +743,59 @@
 	   ninth man single figures — and that shape barely moves between a blue
 	   blood and a low major. It is renormalized to the team total below, so
 	   only the ratios here matter. */
-	const ROTATION_SHAPE = [1.00, 0.95, 0.89, 0.83, 0.75, 0.61, 0.47, 0.33, 0.21, 0.13];
+	/* The canonical rotation shape, declared once in js/teams.js (which loads
+	   first) and read here. STEEPENED ACROSS THE TOP FOUR SLOTS when it moved
+	   there — it was 1.00/0.95/0.89/0.83, four percent between a team's first
+	   and second option, which combined with PROSPECT_SLOT_MAX to make the
+	   rotation model unable to say "he came off the bench behind a senior".
+	   Measured, a freshman at ovr 30-42 played 31.2 MPG on the worst quarter
+	   of rosters and 28.9 on the best: a 2.3-minute effect, against a
+	   draft-year 5th percentile of 19.5 that the sim reached only at 22.4. The
+	   real gradient between a first and a fourth option is nearer fifteen
+	   percent, and the tail below it is the point — "18 minutes, terrific
+	   per-minute numbers" is a line a scout reads constantly and this model
+	   could not print. Slots 4 and beyond barely moved; they were never the
+	   problem. */
+	const ROTATION_SHAPE = global.TeamsSim.ROTATION_SHAPE;
 
 	/* The composite an average D-I rotation actually scores on each pool key,
-	   measured off the filler synthesis in simulateTeamStats and blended the
-	   same way teamPools blends it. Change a filler base and these move too. */
+	   blended the same way teamPools blends it (same key, same top-player
+	   weight), so an average roster gets a scale() factor of exactly 1 and the
+	   pool constant beside it means what it says.
+
+	   RE-DERIVED, and not as an arithmetic mean. scale() raises the ratio to a
+	   power and then clamps it, and for every exponent except stealing's 1.00
+	   that map is not linear — so the composite that gives a factor of 1 ON
+	   AVERAGE is the POWER mean at that exponent, not the average composite.
+	   The gap is small where the exponent is near 1 and large where it is not:
+	   at blocking's 2.30 the arithmetic mean is 0.497 and the power mean is
+	   0.509, a 4% error in the block pool of every team in the country, all of
+	   it in the same direction because the map is convex.
+
+	   Measured over 5,446 simulated rotations (8 realistic classes, the
+	   fixture tools/validate.js defaults to), by bisecting each base until the
+	   mean of clamp((agg/base)^exp, lo, hi) came out to 1.000 under that
+	   pool's own exponent and clamps:
+
+	     rebounding  0.443 -> 0.429   (0.4291 at exp 0.55, 0.4280 at 0.35)
+	     passing     0.435 -> 0.435   (0.4348 — the one that had not drifted)
+	     stealing    0.462 -> 0.442
+	     blocking    0.500 -> 0.509
+	     fouling     0.412 -> 0.433
+
+	   The audit that prompted this expected `blocking` to be stale LOW, on the
+	   grounds that the filler synthesis bases blocking at 0.45 + slot offsets
+	   of +/-0.18. It is not: teamPools reads blocking with a 0.70 top-player
+	   weight, which by construction reads the biggest man in the rotation
+	   rather than the rotation, and that is what puts the aggregate half a
+	   composite point above the filler base. 0.500 was very nearly right for
+	   the arithmetic mean; what was wrong was using an arithmetic mean at all.
+
+	   Change a filler base, a slot shape or a top-player weight and every one
+	   of these moves with it. */
 	const POOL_BASE = {
-		rebounding: 0.443, passing: 0.435, stealing: 0.462,
-		blocking: 0.500, fouling: 0.412,
+		rebounding: 0.429, passing: 0.435, stealing: 0.442,
+		blocking: 0.509, fouling: 0.433,
 	};
 
 	/* Per-league environment. Everything outside D-I used to run on cfg.pace —
@@ -637,7 +943,7 @@
 		const e = env || NCAA_ENV;
 		const gameMinutes = e.gameMinutes || 40;
 		const teamMinutes = 5 * gameMinutes;
-		const cap = Math.min(e.mpgCap || TUNING.MPG_CAP, gameMinutes - 2);
+		const capTeam = Math.min(e.mpgCap || TUNING.MPG_CAP, gameMinutes - 2);
 		// Endurance finally does something. A 90-endurance iron man and a
 		// 30-endurance big used to draw identical minutes; the rating moved ovr
 		// and nothing else. Ball-handling size gets a small nudge too: guards
@@ -680,12 +986,23 @@
 		   blue blood stops him being the fifth option on his own team. His
 		   talent is untouched: usage, team rating and the ovr solver see exactly
 		   what they saw before. */
+		/* ...but only past the teammates he is not clearly behind. See
+		   PROSPECT_SLOT_GAP: the floor may not lift him above the men who beat
+		   him by a clear margin of college talent, which is zero people at a
+		   weak program (nothing changes) and two or three at a loaded one. */
 		let seen = 0;
 		for (let r = 0; r < order.length; r++) {
 			if (members[order[r]].filler) continue;
-			const target = seen + clamp(Math.round(
-				(TUNING.PROSPECT_SLOT_ANCHOR - members[order[r]].talent) /
-					TUNING.PROSPECT_SLOT_STEP), 0, TUNING.PROSPECT_SLOT_MAX);
+			const me = members[order[r]];
+			let clearlyBetter = 0;
+			for (const o of members) {
+				if (o !== me && o.talent > me.talent + TUNING.PROSPECT_SLOT_GAP) clearlyBetter++;
+			}
+			const target = Math.max(
+				seen + clamp(Math.round(
+					(TUNING.PROSPECT_SLOT_ANCHOR - me.talent) /
+						TUNING.PROSPECT_SLOT_STEP), 0, TUNING.PROSPECT_SLOT_MAX),
+				Math.min(clearlyBetter, r));
 			seen++;
 			if (r <= target) continue;
 			const idx = order.splice(r, 1)[0];
@@ -696,10 +1013,7 @@
 		let meanTalent = 0;
 		for (const m of members) meanTalent += m.talent;
 		meanTalent /= members.length || 1;
-		const shapeAt = (slot) => (slot < ROTATION_SHAPE.length
-			? ROTATION_SHAPE[slot]
-			: ROTATION_SHAPE[ROTATION_SHAPE.length - 1] *
-				Math.pow(0.7, slot - ROTATION_SHAPE.length + 1));
+		const shapeAt = global.TeamsSim.rotationWeightAt;
 		/* The tilt is applied to the DRAFT PROSPECTS only; a returning player
 		   sits on the shape his slot gives him.
 
@@ -770,7 +1084,18 @@
 		const roleOf = (m) => {
 			if (m.filler) return 1;
 			const year = m.player && m.player.classYear;
-			const rate = TUNING.RESERVE_RATE *
+			/* How deep the bench in front of him is. Counted as the talent
+			   surplus of the teammates who clear him, normalized so an
+			   ordinary roster (nobody clearly ahead) gives exactly 1 and a
+			   loaded one raises the reserve-year probability by about half
+			   again. Deliberately a function of the teammates AHEAD of him
+			   rather than of the program's level — see RESERVE_DEPTH. */
+			let ahead = 0;
+			for (const o of members) {
+				if (o !== m) ahead += Math.max(0, o.talent - m.talent - TUNING.PROSPECT_SLOT_GAP);
+			}
+			const depth = 1 + TUNING.RESERVE_DEPTH * clamp(ahead / 25, 0, 1.4);
+			const rate = TUNING.RESERVE_RATE * depth *
 				(year === "Freshman" ? 1.6 : year === "Sophomore" ? 1.0
 					: year === "Junior" ? 0.6 : 0.45);
 			const fit = fitOf(m);
@@ -800,13 +1125,29 @@
 		// Adaptive floor: a normal 9-10 man rotation bottoms out at 6 MPG, but
 		// an oversized group (many prospects on one school) must still fit.
 		const lo = Math.min(6, (teamMinutes / members.length) * 0.6);
+		/* THE CAP IS THE PLAYER'S, NOT THE LEAGUE'S. See MIN_ENDU_CAP: the
+		   stamina term above multiplies a SHARE, and a share is renormalized
+		   twice below (once by MINUTES_UNIFORM, once by the scale factor the
+		   bisection solves for), so it measured +0.02 on MPG. A conditioning
+		   rating belongs on the ceiling, where nothing renormalizes it away.
+		   Centered at endurance 0.5 so the team's mean cap is unchanged and
+		   only the spread is new. */
+		const capOf = members.map((m, i) => {
+			const c = comps && comps[i];
+			const endu = c ? c.endurance : (m.endurance === undefined ? 0.5 : m.endurance);
+			return Math.max(lo + 2,
+				Math.min(gameMinutes - 2,
+					capTeam * (1 + TUNING.MIN_ENDU_CAP * (clamp(endu, 0, 1) - 0.5))));
+		});
 		// Soft ceiling. A hard clamp piled a third of all prospects on exactly
 		// the cap — eight straight rows of "35.5 MPG" is a wall, not a
 		// distribution. Saturate smoothly instead, and find the one scale
 		// factor that makes the softened minutes sum to exactly the team total.
-		const room = cap - lo;
-		const soft = (m) => (m <= lo ? lo : lo + room * (1 - Math.exp(-(m - lo) / room)));
-		const totalAt = (k) => mins.reduce((a, m) => a + soft(m * k), 0);
+		const soft = (m, i) => {
+			const room = capOf[i] - lo;
+			return m <= lo ? lo : lo + room * (1 - Math.exp(-(m - lo) / room));
+		};
+		const totalAt = (k) => mins.reduce((a, m, i) => a + soft(m * k, i), 0);
 		let klo = 0.05;
 		let khi = 40;
 		for (let i = 0; i < 60; i++) {
@@ -814,7 +1155,7 @@
 			if (totalAt(mid) < teamMinutes) klo = mid;
 			else khi = mid;
 		}
-		return mins.map((m) => soft(m * ((klo + khi) / 2)));
+		return mins.map((m, i) => soft(m * ((klo + khi) / 2), i));
 	}
 
 	/* A team's defensive shape, from the rotation that actually plays it.
@@ -858,39 +1199,44 @@
 	   exists, so the engine can work out what each team's OPPONENTS looked like
 	   defensively and feed that back in. Fillers are approximated from talent
 	   the same way simulateTeamStats does. */
-	function rosterDefenseProfile(team) {
+	/* The top-eight weighted walk both roster previews do.
+
+	   rosterDefenseProfile and rosterShooting were the same loop twice — same
+	   sort, same slice, same `[1, 0.96, 0.9, ...] || 0.2` literal (a THIRD
+	   copy of the canonical rotation shape, and one that never moved when the
+	   shape did), same filler-versus-prospect branch — differing only in what
+	   they accumulated. `visit` is called once per man with his minute weight
+	   and either his real composites or the talent-scaled stand-in a returning
+	   player gets, and returns the summed weight so the caller can normalize.
+	   One place to change the shape, one place to change how a filler is
+	   approximated, one place for the two to disagree instead of four. */
+	function walkRotation(team, visit) {
 		const sorted = team.members.slice().sort((a, b) => b.talent - a.talent).slice(0, 8);
+		let w = 0;
+		for (let i = 0; i < sorted.length; i++) {
+			const m = sorted[i];
+			const weight = global.TeamsSim.rotationWeightAt(i);
+			// A returning player has no rating vector; his composites are the
+			// same talent-scaled approximation simulateTeamStats synthesizes.
+			const r = m.filler ? m.talent / 100 : 0;
+			const flat = (base) => clamp(base * (0.55 + 0.9 * r), 0.05, 0.95);
+			visit(m, weight, m.filler ? null : BB.composites(m.player.newRatings), flat);
+			w += weight;
+		}
+		return w;
+	}
+
+	function rosterDefenseProfile(team) {
 		let rim = 0;
 		let per = 0;
 		let ovr = 0;
 		let force = 0;
-		let w = 0;
-		for (let i = 0; i < sorted.length; i++) {
-			const m = sorted[i];
-			const weight = [1, 0.96, 0.9, 0.84, 0.76, 0.6, 0.45, 0.3][i] || 0.2;
-			let di;
-			let dp;
-			let d;
-			let st;
-			if (m.filler) {
-				const r = m.talent / 100;
-				di = clamp(0.46 * (0.55 + 0.9 * r), 0.05, 0.95);
-				dp = clamp(0.46 * (0.55 + 0.9 * r), 0.05, 0.95);
-				d = clamp(0.48 * (0.55 + 0.9 * r), 0.05, 0.95);
-				st = clamp(0.48 * (0.55 + 0.9 * r), 0.05, 0.95);
-			} else {
-				const c = BB.composites(m.player.newRatings);
-				di = c.defenseInterior;
-				dp = c.defensePerimeter;
-				d = c.defense;
-				st = c.stealing;
-			}
-			rim += di * weight;
-			per += dp * weight;
-			ovr += d * weight;
-			force += st * weight;
-			w += weight;
-		}
+		const w = walkRotation(team, (m, weight, c, flat) => {
+			rim += (c ? c.defenseInterior : flat(0.46)) * weight;
+			per += (c ? c.defensePerimeter : flat(0.46)) * weight;
+			ovr += (c ? c.defense : flat(0.48)) * weight;
+			force += (c ? c.stealing : flat(0.48)) * weight;
+		});
 		if (!w) return { rim: 0, perimeter: 0, overall: 0, force: 0 };
 		/* `force` was hardcoded to 0 here while defenseProfile computed a real
 		   value, so opponent ball-pressure reached the model only through the
@@ -992,12 +1338,19 @@
 	   It is deliberately mild on the offensive glass (where effort and
 	   positioning matter more relative to reach) and steeper on the defensive
 	   glass, which is where the real height gradient lives. */
-	function rebWeight(comps, minShare, offensive, mult, bigness) {
+	/* `strength` is the player's own `stre` rating on 0-1. See REB_STRE_DRB:
+	   BBGM's rebounding composite gives it a weight of 0.1 out of 5.2, so it
+	   has to be read explicitly or a bruiser and a reed rebound identically.
+	   Centered on 0.45, the class mean, so the factor is 1 for an average
+	   player and the team pool does not move. */
+	function rebWeight(comps, minShare, offensive, mult, bigness, strength) {
 		const bg = Number.isFinite(bigness) ? clamp(bigness, 0, 1) : 0.5;
 		const size = Math.pow(0.62 + 0.76 * bg, offensive ? TUNING.REB_HGT_ORB : TUNING.REB_HGT_DRB);
+		const st = Number.isFinite(strength) ? clamp(strength, 0, 1) : 0.45;
+		const box = 1 + (offensive ? TUNING.REB_STRE_ORB : TUNING.REB_STRE_DRB) * (st - 0.45);
 		return Math.pow(
 			Math.max(TUNING.REB_FLOOR, comps.rebounding * refOf(mult, "rebounding")),
-			TUNING.REB_EXP + (offensive ? 0.35 : 0)) * size * minShare;
+			TUNING.REB_EXP + (offensive ? 0.35 : 0)) * size * Math.max(0.25, box) * minShare;
 	}
 
 	/* How well a roster shoots, before a single stat line exists, so the engine
@@ -1011,39 +1364,22 @@
 	   with two files loaded at different eras. */
 	function rosterShooting(team, cal) {
 		const CAL = cal || global.Calibration;
-		const sorted = team.members.slice().sort((a, b) => b.talent - a.talent).slice(0, 8);
 		let two = 0;
 		let three = 0;
 		let share3 = 0;
-		let w = 0;
-		for (let i = 0; i < sorted.length; i++) {
-			const m = sorted[i];
-			const weight = [1, 0.96, 0.9, 0.84, 0.76, 0.6, 0.45, 0.3][i] || 0.2;
-			let inside;
-			let outside;
-			let bigness;
-			let tp;
-			if (m.filler) {
-				const r = m.talent / 100;
-				inside = clamp(0.50 * (0.55 + 0.9 * r), 0.05, 0.95) + CAL.effShift("fieldEff");
-				outside = clamp(0.505 * (0.55 + 0.9 * r), 0.05, 0.95) + CAL.effShift("fieldEff");
-				bigness = 0.45;
-				tp = 45;
-			} else {
-				const c = BB.composites(m.player.newRatings);
-				inside = (c.shootingAtRim + c.shootingMidRange) / 2;
-				outside = c.shootingThreePointer;
-				bigness = clamp((m.player.newRatings.hgt - 30) / 55, 0, 1);
-				tp = m.player.newRatings.tp;
-			}
-			const b = clamp(bigness, 0, 1);
+		const w = walkRotation(team, (m, weight, c, flat) => {
+			const inside = c ? (c.shootingAtRim + c.shootingMidRange) / 2
+				: flat(0.50) + CAL.effShift("fieldEff");
+			const outside = c ? c.shootingThreePointer
+				: flat(0.505) + CAL.effShift("fieldEff");
+			const b = c ? clamp((m.player.newRatings.hgt - 30) / 55, 0, 1) : 0.45;
+			const tp = c ? m.player.newRatings.tp : 45;
 			two += weight * (0.5 * CAL.byHeight("rimPct", b) + 0.5 * CAL.byHeight("midPct", b) +
 				0.5 * CAL.effShift("inside") + 0.5 * CAL.effShift("mid") +
 				0.26 * (inside - (0.40 + 0.22 * b)));
 			three += weight * (0.339 + CAL.effShift("three") + 0.40 * (outside - (0.50 - 0.20 * b)));
 			share3 += weight * CAL.threeShare(b, tp);
-			w += weight;
-		}
+		});
 		if (!w) return CAL.ROTATION.twoPct;
 		const s3 = share3 / w;
 		return clamp((1 - s3) * (two / w) + s3 * (three / w), 0.34, 0.60);
@@ -1256,8 +1592,34 @@
 		// USG% proper: share of team chances used while actually on the floor.
 		const usgRate = minutes > 0 ? (usgShare * gameMinutes) / minutes : 0;
 
-		// Competition: harder leagues shave efficiency, not volume.
-		const compAdj = -0.0022 * (ctx.oppStrength - 52);
+		/* Competition: harder leagues shave efficiency, and a little volume.
+
+		   -0.0022 was directionally right and numerically nothing: measured
+		   corr(conference strength, PPG) = -0.12 and corr(confStr, TS%) =
+		   -0.12, which puts a 20-point scorer in the SWAC and one in the Big
+		   12 well under a point apart. A 20-point SWAC season and a 20-point
+		   Big 12 season are not the same season and a draft board that cannot
+		   say so is missing the single most-used adjustment in scouting.
+		   -0.0040 over the ~30 points of conference strength that separate the
+		   two ends of Division I is 12 points of efficiency spread across the
+		   whole range, or about 2.5 between a typical high-major and a typical
+		   low-major schedule — which is the size of the gap the
+		   strength-of-schedule adjusted ratings actually show. */
+		const compAdj = -0.0032 * (ctx.oppStrength - 52);
+		/* THERE IS DELIBERATELY NO USAGE PENALTY HERE, and it is worth saying
+		   why rather than leaving the absence to look like an oversight.
+
+		   `ctx.oppStrength` is a property of the SCHEDULE, so it is identical
+		   for all ten men in a rotation. usgShare is a share that sums to 1
+		   across that rotation, so any factor applied uniformly to it cancels
+		   exactly — it cannot move one player against his teammates, which is
+		   the only thing a usage term can do. What it would move is the team's
+		   volume LEVEL, and that is already decided twice downstream: by the
+		   efficiency terms above, and then by anchorPointsToScoreboard, which
+		   ties the rotation's points to the games js/teams.js actually played
+		   against that schedule. A usage penalty here would be arithmetic that
+		   looks like a model. The competition effect belongs on efficiency,
+		   where it is, and the volume half arrives through the scoreboard. */
 		/* Talent -> efficiency. js/calibration.js has always documented and
 		   exported this gradient ("better prospects carry a little more volume
 		   at slightly better efficiency") and nothing ever called it, so the
@@ -1426,6 +1788,21 @@
 		const tpa = fga * share3;
 		const twoA = fga - tpa;
 
+		/* Attempts -> season percentage. `a` is attempts per game and `games`
+		   is the season he actually played, so N is the season's attempt count
+		   — which is the number the binomial is defined on and the number a
+		   scout is supposed to check. The noise slider scales the DEVIATION
+		   from true talent rather than gating the resample, so statNoise 0 is
+		   still exactly deterministic (which several callers rely on) and
+		   statNoise 2 is twice as wild, the same contract every other term in
+		   this function honors. */
+		const shoot = (r, a, p, nz) => {
+			const N = Math.round(Math.max(0, a) * games);
+			if (N <= 0 || !(nz > 0)) return p;
+			const k = rbinom(r, N, p);
+			return clamp(p + nz * (k / N - p), 0, 1);
+		};
+
 		// A shared "touch" term so a player's 3P% and FT% move together — the
 		// old model drew them independently and produced 46%/58% shooters.
 		const touch = rng.normal(0, 1);
@@ -1457,16 +1834,45 @@
 		   it the curve bends asymptotically toward a limit instead of stacking
 		   everyone on the limit. A volume shooter can now reach the high
 		   forties and essentially nobody reaches 50. */
-		const tpLim = 0.470 + 0.055 * Math.max(0, 1 - tpa / 3.5);
-		const tpp = clamp(softCeil(
+		/* THE LIMIT CAME DOWN (0.470 + 0.055 -> 0.432 + 0.058) BECAUSE IT
+		   CHANGED MEANING. It used to bound the percentage a player PRINTED,
+		   so the ceiling and the season maximum were nearly the same number
+		   and 0.470 was read straight off "essentially nobody reaches 50".
+		   Now it bounds true talent and the season is resampled around it, so
+		   the printed maximum is the ceiling plus the binomial tail — measured,
+		   the old number put the best high-volume shooter in a class at 56.1%,
+		   which is not a season. A true-talent ceiling near .432 at volume puts
+		   the realized maximum back in the high forties, where it was, and
+		   leaves the LOW-volume asymptote generous (a token-attempt shooter can
+		   still be genuinely elite) because that is where the binomial itself
+		   supplies the spread. */
+		const tpLim = 0.432 + 0.058 * Math.max(0, 1 - tpa / 3.5);
+		/* The ceiling is on TRUE TALENT, not on the season he shot.
+
+		   tpLim used to sit on the realized percentage, which is what
+		   compressed the elite tail below binomial: a 90-tp shooter's mean was
+		   squeezed to .47 AND his season was drawn with the same flat sd as
+		   everybody else's, so he could not have a cold year. It is a claim
+		   about how well a man can shoot, so it belongs on p; the season then
+		   varies around it by the binomial. The volume term stays because a
+		   low-volume shooter's talent really is less constrained — those are
+		   his open catch-and-shoot looks, not his shot diet. */
+		const tpTrue = clamp(softCeil(
 			(bend && bend.tpp ? bend.tpp : 0) +
 			0.339 + CAL.effShift("three") + envEff +
 				0.40 * (comps.shootingThreePointer - (0.50 - 0.20 * bigness) + refEff) +
 				compAdj + synergy + talentAdj + expAdj + loadAdj * 0.6 - 0.055 * od.perimeter +
-				mix(touch, rng.normal(0, 1)) * 0.030 * noise,
+				/* The shot-quality half of the beta-binomial: how open his
+				   looks were this year, which the counting noise below cannot
+				   express. Down from 0.030 (which was carrying the WHOLE of the
+				   spread) to roughly the residual a real high-volume shooter
+				   shows once counting noise is removed. Still shares `touch`
+				   with the free-throw line: 3P% and FT% move together. */
+				mix(touch, rng.normal(0, 1)) * 0.013 * noise,
 			tpLim, 0.86),
-			0.15, 0.52,
+			0.16, 0.52,
 		);
+		const tpp = shoot(rng, tpa, tpTrue, noise);
 		// Rim/mid split and finishing: rim FG% runs .59 (guards) to .72 (bigs).
 		// The calibration table already carries the height effect, so the skill
 		// composites (which lean heavily on hgt) are centered at what a player of
@@ -1478,16 +1884,40 @@
 		// Interior defense bites hardest exactly where it should: at the rim.
 		const insideEff = CAL.byHeight("rimPct", bigness) + CAL.effShift("inside") + envEff +
 			0.26 * (comps.shootingAtRim - (0.32 + 0.44 * bigness) + refEff) +
-			0.16 * (comps.shootingLowPost - (0.40 + 0.17 * bigness) + refEff) -
+			0.16 * (comps.shootingLowPost - (0.40 + 0.17 * bigness) + refEff) +
+			// The dunking rating, which had no effect on field-goal percentage
+			// at all. See DNK_RIM.
+			TUNING.DNK_RIM *
+				(clamp((Number.isFinite(ratings.dnk) ? ratings.dnk : 45) / 100, 0, 1) - 0.45) -
 			0.16 * od.rim;
+		/* OFFENSIVE IQ, WHICH MADE A PLAYER A WORSE FINISHER.
+
+		   BBGM's shootingMidRange composite is (oiq * -0.5 + fg * 1 +
+		   stre * 0.2) normalized — `oiq` enters it NEGATIVELY, at half the
+		   weight of the shooting rating itself. That is an upstream modeling
+		   choice about shot SELECTION (a smart player takes fewer long twos),
+		   and nothing in this file offset it, so it arrived here as a claim
+		   about accuracy: measured partial(oiq, TS% | ovr) = -0.15. Offensive
+		   intelligence made you shoot worse, which is not a sentence about
+		   basketball.
+
+		   The composite is left alone — the shot-mix model and BBGM's own
+		   exports read it — and the accuracy half is put back here, at the
+		   0.26 slope's own scale times the 0.5 weight the composite subtracts,
+		   so the two cancel to first order and what remains is the genuine
+		   shot-selection story the composite is for. */
 		const midEff = CAL.byHeight("midPct", bigness) + CAL.effShift("mid") + envEff +
-			0.26 * (comps.shootingMidRange - 0.45 + refEff) - 0.05 * od.perimeter;
-		const twoP = clamp(
+			0.26 * (comps.shootingMidRange - 0.45 + refEff) +
+			0.22 * (clamp((Number.isFinite(ratings.oiq) ? ratings.oiq : 45) / 100, 0, 1) - 0.45) -
+			0.05 * od.perimeter;
+		const twoTrue = clamp(
 			rimMix * insideEff + (1 - rimMix) * midEff + compAdj + synergy + talentAdj +
 				expAdj + loadAdj +
-				rng.normal(0, 0.026 * noise),
+				// Shot quality, not counting noise — see rbinom. 0.026 -> 0.013.
+				rng.normal(0, 0.013 * noise),
 			0.34, 0.68,
 		);
+		const twoP = shoot(rng, twoA, twoTrue, noise);
 		// FT%: draft-year mean .726 with a real size gradient (.78 guards, .67
 		// centers) beyond what the ft rating alone carries.
 		/* Free-throw shooting reads the raw `ft` rating rather than a composite,
@@ -1495,11 +1925,13 @@
 		   composite terms get in composite points — otherwise a realistically
 		   shaped class shoots 69.3% from the line against an anchor of 73.0 for
 		   no reason but the level of the fixture the intercept was fitted on. */
-		const ftp = clamp(
+		const ftTrue = clamp(
 			0.548 + 0.40 * ((ratings.ft + refEff * 100) / 100) - 0.035 * bigness +
-				mix(touch, rng.normal(0, 1)) * 0.035 * noise,
+				// 0.035 -> 0.018, same split as the field-goal terms.
+				mix(touch, rng.normal(0, 1)) * 0.018 * noise,
 			0.35, 0.94,
 		);
+		const ftp = shoot(rng, fta, ftTrue, noise);
 
 		const fgm = twoA * twoP + tpa * tpp;
 		const fgp = fga > 0 ? fgm / fga : 0;
@@ -1523,9 +1955,10 @@
 		   a putback specialist takes his extra offensive boards out of his own
 		   defensive ones rather than out of the team's pool. */
 		const ob = clamp(me.orbBias || 0, -0.12, 0.12);
-		const orbW = rebWeight(comps, minShare, true, refMult, bigness) *
+		const strength = clamp((Number.isFinite(ratings.stre) ? ratings.stre : 45) / 100, 0, 1);
+		const orbW = rebWeight(comps, minShare, true, refMult, bigness, strength) *
 			identity.reb * (1 + 2.4 * ob);
-		const drbW = rebWeight(comps, minShare, false, refMult, bigness) *
+		const drbW = rebWeight(comps, minShare, false, refMult, bigness, strength) *
 			identity.reb * (1 - 0.9 * ob);
 		// No single player takes an unbounded share of a team total: the record
 		// books top out near 60-70% of team assists and blocks, so saturate the
@@ -1601,8 +2034,12 @@
 		const foulComp = me.filler
 			? comps.fouling
 			: clamp(0.40 + 0.5 * (comps.fouling - 0.60), 0.15, 1);
+		/* And the whistle a physical player draws. Same centering as the
+		   rebound box-out term, so the team's foul pool is unmoved and this
+		   only redistributes inside the roster. */
 		const pfW = Math.pow(foulComp, TUNING.PF_EXP) *
-			Math.pow(minShare, 0.82) * identity.pf;
+			Math.pow(minShare, 0.82) * identity.pf *
+			Math.max(0.4, 1 + TUNING.PF_STRE * (strength - 0.45));
 		// Five fouls ends a night, so a season average saturates well below
 		// it. The hard ceiling is derived from minutes: a player at 5 PF/40
 		// is fouling out of most of his games, which caps what any season
@@ -1782,8 +2219,16 @@
 		/* Sensitivity 0.55 → 0.80 for the same reason as blocks below: a
 		   roster with a true Floor General should assist visibly more of
 		   its own baskets than a team of wings, not 6% more. */
+		/* The upper clamp came down 1.30 -> 1.22. It is the only thing that
+		   bounds team AST/FGM, and it was not bounding it where the record
+		   book does: measured over 948 simulated NCAA seasons the maximum was
+		   0.812 (0.796 after the pool bases were re-derived) against a real
+		   D-I ceiling near 0.68. 0.52 * 1.22 = 0.634 is the pool's own
+		   ceiling; the realized ratio runs a little above it because the pool
+		   is sized on the model's expected field goals and the box score
+		   counts the ones actually made. */
 		const assistedShare = TUNING.ASSISTED_SHARE *
-			scale(agg("passing", 0.35), POOL_BASE.passing, 0.80, 0.72, 1.30);
+			scale(agg("passing", 0.35), POOL_BASE.passing, 0.80, 0.72, 1.22);
 
 		return {
 			orbRate,
@@ -1807,7 +2252,15 @@
 			   of guards should block 2, rather than everybody clustering at
 			   3.5. Sensitivity up (1.70 → 2.30) and the floor down, mean
 			   unchanged because scale() is centered on POOL_BASE. */
-			blkPool: 4.0 * scale(agg("blocking", 0.70), POOL_BASE.blocking, 2.30, 0.45, 2.20),
+			/* Upper clamp 2.20 -> 1.75. The comment above says what the
+			   covariance term is for — "a roster anchored by a genuine 7'2"
+			   rim protector should block 6-7 a game" — and 4.0 * 2.20 is 8.8,
+			   which is not that number. Measured team maxima ran to 10.4
+			   before the pool bases were re-derived and 9.63 after, against a
+			   real D-I maximum near 7. 4.0 * 1.75 = 7.0 is the sentence the
+			   comment already wrote. The floor is left alone: a team of guards
+			   blocking 1.8 a game is a real team. */
+			blkPool: 4.0 * scale(agg("blocking", 0.70), POOL_BASE.blocking, 2.30, 0.45, 1.75),
 			pfPool: TUNING.TEAM_PF * scale(agg("fouling", 0.20), POOL_BASE.fouling, 0.60, 0.80, 1.25),
 		};
 	}
@@ -2035,8 +2488,12 @@
 			   then pushed them all towards it: 12.5% of a class landed in
 			   [18.5, 20.0] on that one bound. Softplus has the same asymptote
 			   and no two players on it. */
+			/* Each population against its own reference. See FILLER_CEIL_REF
+			   for what reading a returning player against the prospects'
+			   0.384 did to the whole envelope. */
+			const ceilRef = m.filler ? TUNING.FILLER_CEIL_REF : TUNING.USG_COMP_REF;
 			const raw = TUNING.USG_CEIL_BASE +
-				TUNING.CEIL_COMP * clamp(comps[i].usage - TUNING.USG_COMP_REF, -0.16, 0.16) +
+				TUNING.CEIL_COMP * clamp(comps[i].usage - ceilRef, -0.16, 0.16) +
 				TUNING.CEIL_TALENT * ((m.talent - 55) / 45) + 0.105 * (0.42 - bignessOf(i)) +
 				TUNING.CEIL_ROLE * Math.log(Math.max(0.15, roleMult[i]));
 			const band = TUNING.USG_CEIL_BAND;
@@ -2059,9 +2516,44 @@
 			return {
 				floor,
 				band: Math.max(1e-9, floor * TUNING.USG_FLOOR_BAND),
+				ms,
+				personal,
 				room: Math.max(1e-6, personal * ms - floor),
 			};
 		});
+		/* RELAX THE CEILINGS, DO NOT RESCALE THE ANSWER.
+
+		   sum(personal ceiling * minute share) is the most usage this rotation
+		   can account for, and nothing in the model constrains it to reach 1 —
+		   the ceilings are per-player bounds fitted one player at a time. When
+		   it lands short the bisection below has no interior solution: the
+		   bracket fails high, the softened shares sum to less than 1, and the
+		   renormalize at the bottom of this block divides everyone up past
+		   their own ceiling. That is the wrong repair in two ways. It is
+		   applied AFTER the soft saturation, so it lands hardest on exactly
+		   the players the saturation had bent back; and it is a statement
+		   about a team applied to individuals, which is what made the personal
+		   ceiling inoperative on two thirds of all rosters.
+
+		   Scaling the ceilings up first is the same arithmetic run in the
+		   right order: every bound moves by one factor, their ORDERING and
+		   their SPREAD are preserved (the factor is common), and the solve
+		   that follows is a genuine interior one, so USG_CAP and the rest mean
+		   what they say for everybody. The factor is measured and counted, so
+		   how often a rotation cannot afford its own ceilings is a visible
+		   fact rather than something inferred from a renormalize firing. */
+		{
+			let ceilTotal = 0;
+			for (const b of bounds) ceilTotal += b.personal * b.ms;
+			if (ceilTotal < TUNING.USG_CEIL_BUDGET) {
+				CONVERGENCE.usageCeilingShort++;
+				const g = ceilTotal > 1e-9 ? TUNING.USG_CEIL_BUDGET / ceilTotal : 1;
+				for (const b of bounds) {
+					b.personal *= g;
+					b.room = Math.max(1e-6, b.personal * b.ms - b.floor);
+				}
+			}
+		}
 		/* Saturating at BOTH ends. Above the floor the curve bends towards the
 		   player's personal ceiling; below it, it bends towards floor - band
 		   instead of clamping flat onto the floor. Both branches have slope 1
@@ -2094,7 +2586,11 @@
 		   renormalize proportionally rather than shipping the shortfall. */
 		{
 			const tot = usgShare.reduce((a, b) => a + b, 0);
-			if (tot > 0 && Math.abs(tot - 1) > 0.004) usgShare = usgShare.map((s) => s / tot);
+			CONVERGENCE.teamSeasons++;
+			if (tot > 0 && Math.abs(tot - 1) > 0.004) {
+				CONVERGENCE.usageRenormalized++;
+				usgShare = usgShare.map((s) => s / tot);
+			}
 		}
 
 		// Team support = quality of the other four guys on the floor.
@@ -2211,6 +2707,21 @@
 				ft: clamp(43 + 40 * dMid + 35 * dTp, 5, 95),
 				tp: clamp(45 + 80 * dTp, 5, 95),
 				pss: clamp(comps[i].passing * 100, 5, 95),
+				/* A filler needs `stre` and `dnk` for the same reason it
+				   needed `ft` and `tp`: the rebound box-out weight, the foul
+				   weight and the rim term all read them now, and a returning
+				   player without them would take the neutral default while
+				   every prospect took a real rating — which is a systematic
+				   tilt, not a missing field. Backed out of the composites the
+				   filler already drew (deterministic, no extra rng draws) and
+				   centered on each filler's own talent-scaled expectation, so
+				   the FIELD mean stays at 45 while individuals spread around
+				   it. `athleticism` is the composite that carries strength at
+				   the highest weight (1 of 3.75); `shootingAtRim` is the one
+				   that carries dunking (0.3 of 2.8), which is why the
+				   back-out slope on dnk is the steeper of the two. */
+				stre: clamp(45 + 110 * (comps[i].athleticism - 0.48 * tscale), 5, 95),
+				dnk: clamp(45 + 160 * (comps[i].shootingAtRim - 0.515 * tscale), 5, 95),
 			};
 		});
 
@@ -2231,14 +2742,19 @@
 				: archetypeIdentity(members[i].player.archetype, cfg);
 			const ob = members[i].filler
 				? 0 : clamp(members[i].player.orbBias || 0, -0.12, 0.12);
-			teamCtx.rebDen += rebWeight(comps[i], ms, false, cm, bg) *
+			/* The same strength the line will read, or the shares would not
+			   sum to the pool the denominator was built from. */
+			const st = clamp((Number.isFinite(ratingRows[i].stre)
+				? ratingRows[i].stre : 45) / 100, 0, 1);
+			teamCtx.rebDen += rebWeight(comps[i], ms, false, cm, bg, st) *
 				id.reb * (1 - 0.9 * ob);
-			teamCtx.orbDen += rebWeight(comps[i], ms, true, cm, bg) *
+			teamCtx.orbDen += rebWeight(comps[i], ms, true, cm, bg, st) *
 				id.reb * (1 + 2.4 * ob);
 			teamCtx.astDen += astWeight(comps[i], ratingRows[i], ms, cm);
 			teamCtx.stlDen += stlWeight(comps[i], ms, cm, cr);
 			teamCtx.blkDen += Math.pow(comps[i].blocking, TUNING.BLK_EXP) * ms;
-			teamCtx.pfDen += Math.pow(comps[i].fouling, TUNING.PF_EXP) * Math.pow(ms, 0.82);
+			teamCtx.pfDen += Math.pow(comps[i].fouling, TUNING.PF_EXP) * Math.pow(ms, 0.82) *
+				Math.max(0.4, 1 + TUNING.PF_STRE * (st - 0.45));
 		}
 
 		const out = [];
@@ -2476,8 +2992,76 @@
 		if (sum <= 1e-9 || pool <= 0) return clipped;
 		const out = clipped.map((v) => (v * pool) / sum);
 		const lim = pool * cap;
+		/* ITERATE TO A RESIDUAL, NOT TO A PASS COUNT.
+
+		   The loop was `for (iter < 6)` with the comment "six passes has
+		   always been enough in practice". It was not: instrumented over
+		   4,368 team-seasons the counter below fired 6,780 times, about 1.5
+		   non-convergences per team-season. Every one of them is a silently
+		   violated share cap — AST_CAP, REB_CAP and BLK_CAP are documented
+		   ceilings, and the redistribution step hands the clipped surplus to
+		   players who may themselves then breach the cap, so a single pass
+		   trades one violation for several smaller ones. Measured
+		   consequences: team AST/FGM reached 0.812 against a real D-I ceiling
+		   of ~0.68, and team blocks reached 10.4 a game against a real
+		   maximum near 7.
+
+		   And the test itself was wrong, which is the deeper half of it.
+		   `excess < 1e-9` is UNREACHABLE by construction: softCeil is
+		   asymptotic, so it shaves something off every value above its knee
+		   (lim * 0.88) forever, and the redistribution step then pushes the
+		   receivers back above that knee. The excess therefore settles at a
+		   small positive constant and the old test could not be satisfied on
+		   any roster carrying a player near the cap, however many passes it
+		   was given — the loop was not failing to converge, it was being asked
+		   a question with no answer. Measured: raising the pass count alone
+		   moved the count 6,780 -> 6,760.
+
+		   What DOES converge is the vector. Each pass is a contraction (it
+		   moves at most the previous excess, spread over strictly positive
+		   headroom), so the per-player movement over a whole pass falls
+		   geometrically to zero and the iteration settles on a fixed point at
+		   which the shave and the redistribution exactly cancel. That is the
+		   residual to test. TOL is a millionth of a per-game unit, far below
+		   anything the export prints; 25 is the safety stop, not the expected
+		   cost — ordinary rosters settle in 3-8 passes. */
+		/* And the residual is the FIXED POINT, not the excess.
+
+		   `excess < 1e-9` was unreachable by construction, which is the real
+		   reason the counter fired 1.5 times per team-season: softCeil is
+		   asymptotic, so it shaves something off every value above its knee
+		   (lim * 0.88) forever, and the redistribution step then pushes the
+		   receivers back above the knee. The excess therefore settles at a
+		   small POSITIVE constant and the old test could never be satisfied on
+		   any roster with a player near the cap — the loop was not failing to
+		   converge, it was being asked the wrong question.
+
+		   What converges is the vector: each pass is a contraction, so the
+		   per-player movement falls geometrically to zero. Terminate on that.
+		   TOL is a millionth of a per-game unit — far below anything the
+		   export prints. 25 is the safety stop, not the expected cost
+		   (ordinary rosters finish in 4-8). */
+		/* The tolerance is RELATIVE to the pool, because the residual is in
+		   the pool's own units, and it is 2e-4 rather than something
+		   arbitrarily small because that is where the residual stops meaning
+		   anything: 2e-4 of a team's assist pool is a thousandth of an assist
+		   a game, three orders of magnitude below the per-player jitter that
+		   produced the values and two below the last digit any export prints.
+
+		   It is not set tighter because the approach to the fixed point is
+		   asymptotic and slow — measured, the per-pass movement decays like
+		   1/iter, not geometrically, because softCeil's shave near its knee is
+		   very nearly linear in the excess. Chasing 1e-6 would cost hundreds
+		   of passes to move a hundredth of a rebound. What the loop is
+		   actually for does hold at this tolerance and was checked directly:
+		   over 554 previously-"unconverged" fits, ZERO values exceeded their
+		   cap at exit and the fitted total matched the pool to 1e-6. An
+		   absolute floor keeps a near-empty pool (a team that blocks nothing)
+		   from spending the pass budget on numbers that round to zero. */
+		const TOL = Math.max(1e-7, 2e-4 * pool);
 		let converged = false;
-		for (let iter = 0; iter < 6; iter++) {
+		let prev = out.slice();
+		for (let iter = 0; iter < 25; iter++) {
 			let excess = 0;
 			for (let i = 0; i < out.length; i++) {
 				// Soft, so the men at the top of a category are spread over
@@ -2485,16 +3069,24 @@
 				const v = softCeil(out[i], lim);
 				if (v < out[i]) { excess += out[i] - v; out[i] = v; }
 			}
-			if (excess < 1e-9) { converged = true; break; }
+			if (excess < TOL) { converged = true; break; }
 			let room = 0;
 			for (const v of out) room += Math.max(0, lim - v);
 			if (room < 1e-9) { converged = true; break; } // everyone at cap: done
 			for (let i = 0; i < out.length; i++) {
 				out[i] += (excess * Math.max(0, lim - out[i])) / room;
 			}
+			// The residual is the movement of the VECTOR over a whole pass.
+			let moved = 0;
+			for (let i = 0; i < out.length; i++) {
+				const d = Math.abs(out[i] - prev[i]);
+				if (d > moved) moved = d;
+				prev[i] = out[i];
+			}
+			if (moved < TOL) { converged = true; break; }
 		}
-		// Six passes has always been enough in practice; if it ever stops
-		// being, this makes the failure countable instead of silent.
+		// A non-convergence at 25 passes is a real pathology, not a tuning
+		// artifact; the counter makes it countable instead of silent.
 		if (!converged) CONVERGENCE.fitToPoolUnconverged++;
 		return out;
 	}
@@ -2502,7 +3094,19 @@
 	/* Solver health, aggregated per page load. tools/validate.js and the
 	   batch harness can read (and reset) these; a non-zero count is a fact
 	   about the run that used to be invisible. */
-	const CONVERGENCE = { usageBisectionAtBound: 0, fitToPoolUnconverged: 0 };
+	/* `usageCeilingShort` counts the rotations whose personal usage ceilings
+	   could not between them account for USG_CEIL_BUDGET of the team's own
+	   chances, and were therefore scaled up before the bisection — see the
+	   block above it in simulateTeamStats. It replaces inferring the same fact
+	   from how often the post-solve renormalize fired, which was 65.4% of
+	   team-seasons and was reported nowhere. */
+	const CONVERGENCE = {
+		usageBisectionAtBound: 0, fitToPoolUnconverged: 0, usageCeilingShort: 0,
+		teamSeasons: 0, usageRenormalized: 0,
+		/* Must stay 0. See the re-floor in reconcileTeamTotals: it is an
+		   assertion about five functions agreeing, not a repair. */
+		negativeRebounds: 0,
+	};
 
 	/* An ABSOLUTE per-40-minute ceiling, on top of the share cap.
 
@@ -2603,14 +3207,18 @@
 			const k = before > 1e-9 ? fitted[i] / before : 1;
 			l.orpg *= k;
 			l.drpg *= k;
-			/* Re-floor after the rescale. statLine floors every stat at zero
-			   and every step between here and there preserves that — fitToPool
-			   only ever scales by a positive factor and redistributes into
-			   headroom — so this cannot currently fire. It is here because
-			   "cannot currently" is a property of five functions agreeing, and
-			   a negative rebound total reaching a BBGM export would be
-			   invisible until somebody imported it. Costs two comparisons per
-			   player per team. */
+			/* Re-floor after the rescale — as a COUNTED assertion, not a
+			   silent clamp. statLine floors every stat at zero and every step
+			   between here and there preserves it (fitToPool only ever scales
+			   by a positive factor and redistributes into headroom), so this
+			   cannot currently fire. But "cannot currently" is a property of
+			   five functions agreeing, and the argument this file makes
+			   everywhere else about walls and clamps applies here too: a clamp
+			   that silently repairs an impossible value is a clamp that hides
+			   the day the five functions stop agreeing. Counting it costs one
+			   branch on top of the two comparisons and makes the failure a
+			   fact a harness can read, exactly like the two solver counters. */
+			if (l.orpg < 0 || l.drpg < 0) CONVERGENCE.negativeRebounds++;
 			l.orpg = Math.max(0, l.orpg);
 			l.drpg = Math.max(0, l.drpg);
 			l.rpg = l.orpg + l.drpg;

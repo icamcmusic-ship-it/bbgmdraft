@@ -293,9 +293,40 @@
 		}
 	}
 
+	/* THE ONE CANONICAL ROTATION SHAPE.
+
+	   How a college rotation's minutes fall away by slot: a starter plays
+	   30-34, the sixth man low twenties, the ninth man single figures, and
+	   that shape barely moves between a blue blood and a low major. It is used
+	   as a weighting wherever a roster has to be summarized by the men who
+	   actually play — team rating here, and the defensive-profile and
+	   shooting previews in js/stats.js.
+
+	   It lives in this file because this file loads first. There were FOUR
+	   copies of it: this one, js/stats.js's ROTATION_SHAPE, and the literal
+	   [1, 0.96, 0.9, 0.84, 0.76, 0.6, 0.45, 0.3] written out verbatim twice
+	   more inside js/stats.js (rosterDefenseProfile and rosterShooting, which
+	   are otherwise the same top-eight weighted loop copy-pasted). Four copies
+	   of a shape that is supposed to be canonical is four things to forget
+	   when the shape changes — and it has changed: the minutes model steepened
+	   the top four slots and none of the copies moved with it.
+
+	   Consumers renormalize (every one of them divides by the weights it
+	   summed), so only the ratios matter. */
+	const ROTATION_SHAPE = [1.00, 0.93, 0.855, 0.78, 0.71, 0.59, 0.46, 0.33, 0.21, 0.13];
 	function rotationWeights(n) {
-		const w = [1, 0.96, 0.9, 0.84, 0.76, 0.6, 0.45, 0.3, 0.18, 0.1];
-		return w.slice(0, n);
+		return ROTATION_SHAPE.slice(0, n);
+	}
+	/* The weight at any slot, including past the end of the table: beyond the
+	   tenth man the shape decays geometrically rather than stopping, because a
+	   rotation with fourteen men in it is a real thing (a school with a dozen
+	   prospects on it) and a flat tail would hand its walk-ons a starter's
+	   share. */
+	function rotationWeightAt(slot) {
+		return slot < ROTATION_SHAPE.length
+			? ROTATION_SHAPE[slot]
+			: ROTATION_SHAPE[ROTATION_SHAPE.length - 1] *
+				Math.pow(0.7, slot - ROTATION_SHAPE.length + 1);
 	}
 
 	function teamRating(members) {
@@ -2171,7 +2202,7 @@
 		driftStyle, seasonOf,
 		assignFillerSlots, slotTypeOf, SLOT_HGT, SLOT_TARGET,
 		PROGRAM_VOL, DOWN_YEAR_RATE, BREAKOUT_RATE, STAR_RETURNER_RATE,
-		rotationWeights, pairUp, record, recordPostseason, finalizeSchedule,
+		rotationWeights, rotationWeightAt, ROTATION_SHAPE, pairUp, record, recordPostseason, finalizeSchedule,
 		momentumArc, arcAt, ARC_KNOTS,
 		midSeasonEvents, longestRun, coachingCarousel, RETIRE_AGE,
 		label, adoptConference, conferencePools, PROGRAM_STYLES,
