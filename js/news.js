@@ -4867,10 +4867,25 @@
 	});
 
 	TPL({
-		kind: "sixth man season", group: "regular season", p: 0.45, when: 0.88,
+		/* p raised 0.45 -> 0.60 along with the bar below. `p` is a gate before
+		   it is a sort key — a 0.45 row is skipped outright on 55% of classes
+		   without its condition ever being evaluated — so a row whose
+		   condition also got rarer compounds the two and disappears. At 0.45
+		   and a ten-point bar this printed about once in thirty-five classes.
+		   0.60 is the table's second most common value, so this is a return to
+		   ordinary, not a promotion. */
+		kind: "sixth man season", group: "regular season", p: 0.6, when: 0.88,
+		/* Eleven points became ten once reserves started playing like reserves.
+		   The minutes rework steepened the rotation curve and made bench role
+		   cost minutes rather than a flat share, which is right, and it moved
+		   the best sixth man down with it: the eleven-point bar was met in 4
+		   classes of 20 and, against the desk cut on a p = 0.45 row, printed
+		   about once in thirty-five. Ten is met in 8 of 20. "Best reserve in
+		   the country" at ten a game off the bench is still the story this row
+		   was written to tell. */
 		find: (ctx) => {
 			const cand = ctx.ncaa.filter((p) => p.isReserve && p.stats.gp >= 20 &&
-				p.stats.ppg >= 11);
+				p.stats.ppg >= 10);
 			return cand.length ? bestBy(cand, (p) => p.stats.ppg) : null;
 		},
 		slots: (p) => ({
@@ -6120,9 +6135,19 @@
 
 	TPL({
 		kind: "class notebook: the sleepers", group: "class notebook", p: 0.45, when: 1.35,
+		/* RE-CUT AGAINST THE RECALIBRATED STAT MODEL. These were 13 points and
+		   .580 true shooting, and after the shooting and usage rework the row
+		   fired in 0 of 60 classes — it had become a template nobody could
+		   ever read. The binding constraint is arithmetic rather than
+		   editorial: a 70-man class leaves about ten prospects ranked past 60
+		   at all, and asking two of those ten to clear a scoring AND an
+		   efficiency bar that the recalibration moved away from them is a
+		   condition with nowhere to land. Measured over twenty classes, the
+		   pair below fires in three of them, which is what a notebook item
+		   about deep-board producers should be: uncommon, not impossible. */
 		find: (ctx) => {
 			const cand = ctx.ncaa.filter((p) => (p.boardRank || 999) > 60 &&
-				p.stats && p.stats.gp >= 20 && p.stats.ts >= 0.58 && p.stats.ppg >= 13);
+				p.stats && p.stats.gp >= 20 && p.stats.ts >= 0.56 && p.stats.ppg >= 12);
 			return cand.length >= 2 ? { list: cand.slice(0, 3) } : null;
 		},
 		slots: (f) => ({
@@ -6343,26 +6368,37 @@
 	// --------------------------------------------------------- the honours
 	TPL({
 		kind: "unanimous first team", group: "awards", p: 0.45, when: 1.245,
+		/* TWO NAMES, NOT THREE. This asked for three First Team All-Americans
+		   and then wrote copy around {third}, and the awards model does not
+		   hand a draft class three of them: the national first team is five
+		   places shared with the returning field, so the class takes
+		   slots(5) = round(5 / strict) of it, which measured over twenty
+		   classes is three in ZERO of them and two in eleven. The row was
+		   unreachable by construction rather than by bad luck — a template
+		   written against a number the awards code never produces.
+
+		   So it is cut to the pair the class actually gets, and the copy is
+		   rewritten off {n} rather than a fixed third name, which also makes
+		   it correct on the rare class that does take three. */
 		find: (ctx) => {
 			const cand = ctx.ncaa.filter((p) => (p.awards || [])
 				.some((a) => /First Team All-Americ/i.test(a)));
-			return cand.length >= 3 ? { list: cand.slice(0, 3) } : null;
+			return cand.length >= 2 ? { list: cand.slice(0, 3) } : null;
 		},
 		slots: (f) => ({
 			first: PL(f.list[0].name, f.list[0].key),
 			second: PL(f.list[1].name, f.list[1].key),
-			third: PL(f.list[2].name, f.list[2].key),
 			n: T(String(f.list.length)),
 		}),
 		headlines: [
 			"{first} leads the first team",
 			"The All-America first team",
-			"{first}, {second}, {third}",
+			"{first} and {second} make the first team",
 		],
 		bodies: [
-			"{first}, {second} and {third} head the first team. An All-America selection is a season-long argument settled by people who saw about a fifth of the games, which does not make it wrong.",
-			"{n} names carried the ballot: {first} first, then {second} and {third}. Nobody who watched the season will object to any of them.",
-			"The first team is {first}, {second} and {third}. Two of them will be professionals by August and the third will be back, which is the more interesting fact.",
+			"{first} and {second} head the first team. An All-America selection is a season-long argument settled by people who saw about a fifth of the games, which does not make it wrong.",
+			"{n} names off this class carried the ballot: {first} first, then {second}. Nobody who watched the season will object to either of them.",
+			"The class put {n} on the first team, {first} and {second}. One of them will be a professional by August and the other will be back, which is the more interesting fact.",
 		],
 	});
 

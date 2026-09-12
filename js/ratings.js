@@ -1024,16 +1024,32 @@
 		   the raw ones, so 97 builds ran on multipliers the fit never saw).
 		   compExp comes down to 0.71: the normalizer already undoes part of
 		   what the composite over-reads. */
-		createW: 0.07,
-		compExp: 0.71,
+		/* AND RE-FITTED AGAIN, because the whole table moved under it. The
+		   build-time re-neutralization, the mean-centred usage protection, the
+		   sign floor and the raised flat-tail vectors each changed every
+		   build's normalized offsets, and this fit is measured ON those
+		   offsets — so it was reading an input that no longer existed. The row
+		   that bands it went to 2.65 points against a 2.00 limit.
+
+		   Worth recording how nearly that was missed: at 12 seeds the same
+		   tool reported a worst bias of 0.00 and a clean all-1.00 fit, because
+		   a pool of 46 out of 361 builds leaves only 3 of them with enough
+		   draws to measure. The number was not reassuring, it was empty. Fit
+		   over 184 builds at 80 seeds instead. createW turns negative (-0.20)
+		   and compExp returns to 1.00: with the protection no longer
+		   subsidising ins/dnk/fg/tp across the table, the usage composite
+		   over-reads by its full amount again, and creation now needs damping
+		   rather than boosting. */
+		createW: -0.20,
+		compExp: 1.00,
 		base: 0.89,
 		/* What a coach hands each kind of player, over and above what his
 		   shot-making says. Offensive roles (scoring) use more possessions;
 		   defensive and rebounding roles defer on offense. */
 		tags: {
-			guard: 1.04, wing: 1.10, big: 1.22,
-			scoring: 1.30, shooting: 0.86, playmaking: 0.90,
-			defense: 0.94, athletic: 1.09, rebounding: 0.79, raw: 1.04,
+			guard: 0.93, wing: 1.02, big: 1.17,
+			scoring: 1.25, shooting: 1.01, playmaking: 1.00,
+			defense: 0.93, athletic: 0.98, rebounding: 0.91, raw: 0.98,
 		},
 		/* Softly bounded rather than clamped, so a build can never land
 		   exactly on a limit the way twelve of the old table's entries did.
@@ -3131,9 +3147,20 @@
 		}
 		const a = shift(lo);
 		const b = shift(hi);
-		const near = Math.abs(BB.ovr(a) - targetOvr) <= Math.abs(BB.ovr(b) - targetOvr) ? a : b;
-		if (BB.ovr(near) === targetOvr) return near;
-		return touchUp(near, targetOvr, pinned);
+		const useLo = Math.abs(BB.ovr(a) - targetOvr) <= Math.abs(BB.ovr(b) - targetOvr);
+		const near = useLo ? a : b;
+		/* HOW FAR THE SOLVE HAD TO MOVE, so the size of the correction is
+		   measurable and not just its success. An exactness count cannot see a
+		   badly posed problem — the solver hits the target either way — and
+		   the damping bug that cost a fifth of the specialization budget lived
+		   in exactly that blind spot for as long as it did because of it.
+		   tools/validate.js bands the median. Non-enumerable, same contract as
+		   ovrShortfall above: callers still see fourteen ratings. */
+		const out = BB.ovr(near) === targetOvr ? near : touchUp(near, targetOvr, pinned);
+		Object.defineProperty(out, "solveShift", {
+			value: useLo ? lo : hi, enumerable: false, configurable: true,
+		});
+		return out;
 	}
 
 	// Target ovr/pot curve for the whole class ("curve" mode).
@@ -3405,6 +3432,12 @@
 			// be built to: the signed distance from the asked-for overall to
 			// the one he was actually solved to.
 			ovrShortfall: shortfall || 0,
+			// How far the bisection had to shift the vector to land on target.
+			// A diagnostic, not an output: tools/validate.js bands its median
+			// per specialization, which is the check that sees a distorted
+			// problem rather than a failed solve. See solveToOvr.
+			solveShift: Number.isFinite(solved && solved.solveShift)
+				? solved.solveShift : 0,
 		};
 	}
 

@@ -3823,15 +3823,33 @@
 				/* AGE. There was no age term at all, so a 22-year-old senior
 				   and a 19-year-old freshman with the same ovr and the same pot
 				   tied, and every scout in the sport would break that tie the
-				   same way. Small — a year is worth a little over half a point
-				   on a board whose ovr term is 1.25 a point — because the
-				   ceiling term already carries most of what youth is worth.
+				   same way.
+
+				   RAISED 0.6 -> 1.8, tracking the class-year efficiency
+				   gradient it has to offset. EXP_EFF went 0.0045 -> 0.013 when
+				   the senior/freshman true-shooting gap was corrected from
+				   about 1.2 points to the 2-3 the sport actually shows, and
+				   production reaches this score at 0.30 a point — so
+				   upperclassmen got better box scores and walked back up a
+				   board that reads them. Measured over the six award-test
+				   classes, near-identical pairs three years apart went from 35
+				   younger ahead against 44 older (the younger man losing the
+				   tie, which is the opposite of how it is broken in every
+				   draft room) to 47 against 32. Tripling the offset to match
+				   the tripled gradient is the whole of the reasoning.
+
+				   It is not free to raise further, but it is close: at 1.2 the
+				   pairs still came out 39-40, and the top of the board does not
+				   move between 1.6 and 2.0 at all — the lottery is 43 freshmen
+				   and 25 sophomores of 84 either way — because the ceiling term
+				   already carries most of what youth is worth up there. This
+				   term decides ties further down, which is what it is for.
 
 				   The DRAFT age, not the file's: most source files carry 19 for
 				   everybody (that is what state.ageIsInformative measures), and
 				   the class year is then the only thing that says how old a man
 				   is — which is the same rule exportFile uses to write born.year. */
-				(21 - draftAge(p, state)) * 0.6 +
+				(21 - draftAge(p, state)) * 1.8 +
 				march +
 				(p.nonNcaa ? -1.2 : 0) +
 				rng.child("stock:" + p.key).normal(0, 1.8);
