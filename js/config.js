@@ -41,8 +41,15 @@
 
 		   Raised from 19 when pickClassPool stopped adding its guaranteed
 		   slots on TOP of this number: 19 realized 20-23 before, so 21 is the
-		   size the class always had — the label just now says it. */
-		archetypePool: 21,
+		   size the class always had — the label just now says it.
+
+		   AND RAISED AGAIN, for the reason this comment exists to prevent. The
+		   table is 355 builds now, so 21 is 5.9% of it — per-class coverage
+		   fell from the 13% this paragraph sets as the target to less than
+		   half of it, by exactly the mechanism described two paragraphs up
+		   (the table grew, the pool did not) and while a comment saying not to
+		   do that sat directly above the number. 13% of 355 is 46. */
+		archetypePool: 46,
 		/* How many forced anomalies a class gets: a five-star bust, an
 		   unranked recruit who turns into a lottery pick, a 24-year-old JUCO,
 		   a 7'4" project, the coach's son, the man whose season ended in

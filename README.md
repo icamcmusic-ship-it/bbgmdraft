@@ -31,7 +31,7 @@ its own pace, game length and youth minutes cap, its own clubs and league table,
 and its own honors.
 
 **2. Rebuilds ratings into varied, specialized builds — without inflating anyone.**
-Each player is assigned one of 355 archetypes (Floor General, Heliocentric
+Each player is assigned one of 361 archetypes (Floor General, Heliocentric
 Guard, Movement Shooter, 3&D Wing, Point Center, Rim Protector, Stretch Big,
 Lob Threat, Athletic Freak, Drop-Coverage Anchor, Boom-or-Bust Tools, …), gated by
 their height so a 7-footer never becomes a point guard. The archetype pushes some ratings up and others down, then the whole
@@ -51,7 +51,7 @@ compressed in log space (down from a measured 281×), and pool slots are drawn o
 the *authored* weights rather than the exposure-divided ones, which had quietly
 inverted the table (the three center builds gated at the top of the height range
 each made a quarter of all pools while Iron Man almost never did). A class then
-draws a **pool** of about nineteen of the 355 builds and takes its players from the pool — which is what makes a
+draws a **pool** of about forty-six of the 361 builds and takes its players from the pool — which is what makes a
 class "the year of the stretch bigs" rather than one of everything, every time.
 It also draws a **flavor** (guard-heavy, defense-first, a weak year,
 one-and-done heavy, a transfer-portal year, …) that tilts which builds enter the

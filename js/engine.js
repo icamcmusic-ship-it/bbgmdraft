@@ -13,6 +13,11 @@
 	const BB = global.BBGM;
 	const C = global.Colleges;
 	const RB = global.RatingsBuilder;
+	/* How wide the soft floor under the ovr-to-pot gap is, in gap points. Two:
+	   wide enough to turn the 10.9% pile-up on gap = 1 into a tail (the
+	   neighbouring buckets ran 3-4%), narrow enough that a prospect whose
+	   factors say +15 is unaffected. See phase 5. */
+	const POT_GAP_BAND = 2;
 	const Text = global.Text;
 	const T = global.TeamsSim;
 	const S = global.StatsSim;
@@ -3462,10 +3467,31 @@
 			factors.role = RB.potFromRole(p.stats, p.classYear, usageRefFor(usageRef, p));
 			factors.bias = bias;
 			factors.noise = prng.normal(0, spread * 0.35);
-			factors.total = factors.arch + factors.age + factors.ageClass +
-				factors.touch + factors.frame + factors.role;
+			/* Summed by the function that owns the breakdown. This used to be
+			   re-added here, field by field, from a list that had to be kept
+			   in sync with potFactors() by hand — a split that goes wrong
+			   quietly, since a factor left out of the sum still shows in the
+			   editor's breakdown. */
+			factors.total = RB.sumFactors(factors);
 			p.potFactors = factors;
-			const gap = Math.max(1, p.baseGap + bias + factors.total * 0.55 + factors.noise);
+			/* A SOFT FLOOR, NOT A HARD ONE.
+
+			   `Math.max(1, ...)` piled every prospect whose additive terms came
+			   out negative onto exactly the same gap. Measured over a class:
+			   gap = 1 at 10.9%, against 3.8% at 2, 3.6% at 3 and 3.3% at 4 —
+			   roughly three times the density of its neighbours, and a spike
+			   in "potential minus overall" is visible on a draft board as a
+			   block of prospects with identical upside. (The top is fine: `pot`
+			   reaches the 100 cap 0.00% of the time, so there is no matching
+			   compression there. The problem was purely the floor.)
+
+			   softBound eases onto the floor over a band of two gap points
+			   instead of stacking on it, which turns the spike into a tail and
+			   never returns a gap below 1. Same function the role-usage table
+			   uses; see js/ratings.js. */
+			const gap = RB.softBound(
+				p.baseGap + bias + factors.total * 0.55 + factors.noise,
+				1, 100, POT_GAP_BAND);
 			p.newPot = clamp(Math.round(p.newOvr + gap), Math.min(p.newOvr + 1, 100), 100);
 		}
 		return state;
