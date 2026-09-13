@@ -4430,7 +4430,15 @@
 
 	// ----------------------------------------------------- the shot chart
 	TPL({
-		kind: "rim rate", group: "analytics", p: 0.4, when: 0.71,
+		/* p raised 0.40 -> 0.55. Its condition is not the problem — a shooter
+		   taking half his shots at the rim exists in 20 classes of 20 — but p
+		   gates admission before it sorts, so a 0.40 row is skipped outright
+		   on 60% of classes and then has to beat sixty others for one of the
+		   desk's slots. Making three previously unreachable rows reachable
+		   (sixth man, the sleepers, the first team) added competition for
+		   those slots and squeezed this one out entirely. 0.55 is mid-table
+		   for this file and puts it back in the paper. */
+		kind: "rim rate", group: "analytics", p: 0.55, when: 0.71,
 		find: (ctx) => {
 			const cand = ctx.ncaa.filter((p) => p.stats.gp >= 18 && p.stats.fga >= 8 &&
 				(p.stats.rimMix || 0) >= 0.5);

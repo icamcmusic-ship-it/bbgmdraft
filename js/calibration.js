@@ -216,7 +216,7 @@
 			   one, so it is not even consistent — and fixing it needs a term
 			   that reaches prospects and not the field, which is a larger
 			   change than rebalancing a shared shift. */
-			shift: { ftr: 1, tov: 1.09, inside: 0, mid: 0, three: 0.011, fieldEff: -0.005, ppgBoost: 0.02 },
+			shift: { ftr: 1, tov: 1.09, inside: 0, mid: 0, three: 0.011, fieldEff: -0.026, ppgBoost: 0.02 },
 		},
 		modern: {
 			label: "2023-2026 (the modern game)",
@@ -251,7 +251,7 @@
 			   stays inside its own (56.91 against a 57.20 ceiling), which is
 			   the constraint that decides how far these can move: the two
 			   bands are 0.3 apart and a shift here moves both. */
-			shift: { ftr: 0.845, tov: 0.96, inside: 0.024, mid: 0.020, three: 0.011, fieldEff: 0.012, ppgBoost: 0.02 },
+			shift: { ftr: 0.845, tov: 0.96, inside: 0.024, mid: 0.020, three: 0.011, fieldEff: -0.004, ppgBoost: 0.02 },
 		},
 	};
 	/* PPG, DERIVED.

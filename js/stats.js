@@ -121,7 +121,7 @@
 	   any future calibration sweep can read the same numbers the sim uses. */
 	const TUNING = {
 		MPG_CAP: 37.5,      // D-I minutes leaders run 36-38, not a flat 35.5
-		USG_CAP: 0.365,     // share of team possessions while on the floor
+		USG_CAP: 0.370,     // share of team possessions while on the floor
 		/* A drafted player never vanishes from the offense. The draft-year 5th
 		   percentile is USG 17.8, so this is where a prospect's usage settles,
 		   not where it stops: `softUsg` approaches it from below rather than
@@ -156,7 +156,7 @@
 		   is carried by USG_FLOOR_ROLE and CEIL_ROLE, which are independent of
 		   overall rating by construction and are the reason the floor is not
 		   one number to within a rounding error. */
-		USG_FLOOR_TALENT: 0.030,
+		USG_FLOOR_TALENT: 0.020,
 		USG_FLOOR_ROLE: 0.050,     // and across the college-role latent
 		/* And across BBGM's OWN usage composite, which reached the envelope
 		   almost not at all: the floor did not read it and the ceiling read it
@@ -323,7 +323,7 @@
 			z: 3.0,
 		},
 		CEIL_COMP: 0.55,
-		CEIL_TALENT: 0.010,
+		CEIL_TALENT: 0.018,
 		CEIL_ROLE: 0.110,
 		/* How much of the role latent reaches MINUTES. Minutes are far flatter
 		   than usage — the gap between a 20-minute man and a 33-minute one is
@@ -363,7 +363,7 @@
 		   freshman gap without moving anybody down: 0.0083 over the 3.2-year
 		   clamp is 2.7 points of true shooting, inside the 2-3 the sport
 		   shows, with the freshman term at exactly zero. */
-		EXP_EFF: 0.0083,
+		EXP_EFF: 0.006,
 		EXP_TOV: 0.030,
 		/* Assists. At 4.1 the exponent produced a physically impossible floor:
 		   a center's 10th-percentile line was 0.15 assists per game and the Rim
@@ -610,7 +610,7 @@
 		   prospect's minutes, so it carries much the smaller weight. */
 		/* A drafted player's rotation priority over a returning player in the
 		   same slot. Coaches play the future pro. */
-		PROSPECT_PREMIUM: 1.12,
+		PROSPECT_PREMIUM: 1.30,
 		/* How often a drafted player spends his draft year as a reserve. */
 		RESERVE_RATE: 0.17,
 		/* This is the largest of the three multiplicative channels through
@@ -643,7 +643,7 @@
 		   that can be. The aspiration stays written down here because it is
 		   the right aspiration; what changed is the admission that this dial
 		   is not what gets there. */
-		MINUTES_TILT_ABS: 0.55,
+		MINUTES_TILT_ABS: 0.40,
 		MINUTES_TILT_REL: 0.22,
 		MINUTES_TILT_ANCHOR: 62,
 		MINUTES_TILT_REF: 14,
@@ -1668,7 +1668,7 @@
 		   probability. Centered on a sophomore so the class mean does not move
 		   off the empirical anchor. */
 		const expAdj = me.filler || !Number.isFinite(me.year)
-			? 0 : TUNING.EXP_EFF * clamp(me.year, 0, 3.2);
+			? 0 : TUNING.EXP_EFF * clamp(me.year - 1, -1.2, 3.2);
 		/* The efficiency dial, which did not exist: pace and scoringEnv are
 		   both possession dials, and moving either left true shooting at 0.572
 		   in every configuration. */
@@ -3200,7 +3200,7 @@
 		let pts = 0;
 		for (const l of lines) pts += l.ppg || 0;
 		if (pts <= 1e-9) return;
-		const k = clamp((pf / n) / pts, 0.85, 1.15);
+		const k = clamp((pf / n) / pts, 0.82, 1.18);
 		if (Math.abs(k - 1) < 1e-6) return;
 		for (const l of lines) {
 			l.ppg *= k; l.fga *= k; l.tpa *= k; l.fta *= k;
