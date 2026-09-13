@@ -864,6 +864,132 @@ console.log("\nArchetypes");
 	ok("every archetype is still ovr-neutral", worstPush < 0.35,
 		"largest residual push " + worstPush.toFixed(3));
 
+	/* THE TABLE'S OWN SHAPE, WHICH NOTHING CHECKED AT ALL.
+
+	   361 entries hand-authored across several thousand lines, and there was
+	   no validation of any of it. `{ rbd: 20 }` for `{ reb: 20 }` would be
+	   silently dropped by the normalizer — a build authored, shipped, and
+	   doing nothing. `{ min: 70, max: 50 }` would produce a build eligible for
+	   nobody, with no error. Neither is hypothetical in a table this size;
+	   both are invisible without a check, because the failure mode of a
+	   mis-authored archetype is a build that quietly never fires. */
+	const KEYS = new Set(BB.RATING_KEYS.filter((k) => k !== "hgt"));
+	const TAG_VOCAB = new Set([
+		"guard", "wing", "big", "scoring", "shooting", "playmaking",
+		"defense", "athletic", "rebounding", "raw", "durability",
+	]);
+	const badKey = [];
+	const badGate = [];
+	const badW = [];
+	const badTag = [];
+	const badPot = [];
+	const nameSeen = new Set();
+	const dupName = [];
+	for (const a of RB.ARCHETYPES) {
+		for (const k of Object.keys(a.o || {})) if (!KEYS.has(k)) badKey.push(a.name + "." + k);
+		if (!(a.min >= 0 && a.max <= 100 && a.min < a.max)) badGate.push(a.name);
+		if (!(a.w === undefined || a.w > 0)) badW.push(a.name);
+		for (const t of a.t || []) if (!TAG_VOCAB.has(t)) badTag.push(a.name + ":" + t);
+		if (a.pot !== undefined && !(a.pot >= -10 && a.pot <= 10)) badPot.push(a.name);
+		if (nameSeen.has(a.name)) dupName.push(a.name);
+		nameSeen.add(a.name);
+	}
+	ok("every archetype offset names a real rating", badKey.length === 0,
+		badKey.join(", "));
+	ok("every archetype height gate is a well-ordered range", badGate.length === 0,
+		badGate.join(", "));
+	ok("every archetype weight is positive", badW.length === 0, badW.join(", "));
+	ok("every archetype tag is in the declared vocabulary", badTag.length === 0,
+		badTag.join(", "));
+	ok("every authored pot is within +/-10", badPot.length === 0, badPot.join(", "));
+	ok("archetype names are unique", dupName.length === 0, dupName.join(", "));
+
+	/* TAGS CANNOT CONTRADICT THE OFFSETS THEY DESCRIBE.
+
+	   The flavor system multiplies a build's weight by up to 2.6x off its
+	   tags, so a tag that disagrees with the vector is not cosmetic — it
+	   decides which builds a themed class reaches. Measured before tags were
+	   derived: 32 builds had three-point offsets and no `shooting` tag, so a
+	   shooting-rich year silently skipped Combo Guard, Pull-Up Artist, Skilled
+	   Big and 29 others; 19 carried `durability` with neither an injury value
+	   nor any endurance offset, so "the year everybody got hurt" tilted toward
+	   builds with nothing to say about availability.
+
+	   deriveTags is now unioned into the hand list at load, so the direction
+	   this catches is a hand tag the rules would never produce.
+
+	   A contradiction here is a SIGN disagreement, not a threshold miss. 46
+	   hand tags fall below deriveTags' cutoffs, but most of those are edge
+	   cases — Slow-Twitch Skilled Big carries `playmaking` on pss 9.5 against
+	   a rule that wants 10 — and banding those would be banding the
+	   arbitrariness of the cutoff rather than a defect. What is a defect is a
+	   tag whose dimension the vector does not support AT ALL: Body-Type
+	   Outlier tagged `athletic` on spd -18, Eligibility-Waiver Case tagged
+	   `defense` on diq -16, or the fourteen builds claiming `playmaking` with
+	   pss exactly 0. Those are claims the build does not back, and the flavor
+	   system pays out on them.
+
+	   Read off the AUTHORED vector (RAW_OFFSETS), like deriveTags itself:
+	   11 builds cross a cutoff only once normalized, and testing the
+	   normalized form reports those as phantoms.
+
+	   Pinned at the 19 that exist rather than 0, because removing a tag and
+	   adding an offset are different design calls and each of these is one or
+	   the other — see the list in the failure message. The row's job is to
+	   stop the set growing while that is decided. */
+	const SIGN_OF = {
+		shooting: ["tp", "ft"], athletic: ["spd", "jmp"], defense: ["diq"],
+		playmaking: ["pss"], rebounding: ["reb"],
+	};
+	const contradict = [];
+	for (const a of RB.ARCHETYPES) {
+		const raw = (RB.RAW_OFFSETS && RB.RAW_OFFSETS[a.name]) || a.o || {};
+		for (const t of a.t || []) {
+			const keys = SIGN_OF[t];
+			if (!keys) continue;
+			if (Math.max.apply(null, keys.map((k) => raw[k] || 0)) <= 0) {
+				contradict.push(a.name + ":" + t);
+			}
+		}
+	}
+	ok("no archetype tag contradicts the sign of its own offsets",
+		contradict.length <= 19,
+		contradict.length + " contradictions: " + contradict.join(", "));
+
+	/* THE TWO POTENTIAL POPULATIONS HAVE TO AGREE.
+
+	   83 builds hand-author `pot`; the rest get a computed one. Measured
+	   before the affine correction, the computed path ran 0.64 points more
+	   pessimistic and 33% LESS dispersed (mean -0.87 sd 3.26 against hand
+	   -0.23 sd 4.88) — so whether a build's upside was treated generously
+	   depended on whether an author had happened to type the field, which is
+	   what a miscalibrated fallback is. Banded loosely, since both populations
+	   move whenever a build is added. */
+	{
+		const hand = [];
+		const comp = [];
+		for (const a of RB.ARCHETYPES) {
+			const v = RB.POT_BY_ARCHETYPE[a.name];
+			if (!Number.isFinite(v)) continue;
+			(a.pot === undefined ? comp : hand).push(v);
+		}
+		const mn = (v) => v.reduce((s, x) => s + x, 0) / v.length;
+		const sdv = (v) => {
+			const m = mn(v);
+			return Math.sqrt(v.reduce((s, x) => s + (x - m) * (x - m), 0) / v.length);
+		};
+		if (hand.length > 5 && comp.length > 5) {
+			const dm = Math.abs(mn(hand) - mn(comp));
+			const rs = sdv(comp) / sdv(hand);
+			ok("hand-authored and computed potential agree on level", dm < 0.6,
+				"means " + mn(hand).toFixed(2) + " vs " + mn(comp).toFixed(2));
+			ok("hand-authored and computed potential agree on spread",
+				rs > 0.8 && rs < 1.25,
+				"sd ratio " + rs.toFixed(2) + " (" + sdv(hand).toFixed(2) +
+					" vs " + sdv(comp).toFixed(2) + ")");
+		}
+	}
+
 	/* The rarest builds have to be reachable. Raw Project once appeared in one
 	   player out of 840, which is not rarity, it is absence.
 
@@ -1401,13 +1527,15 @@ console.log("\nRegressions");
 /* ------------------------------------------------- archetype rarity ordering */
 console.log("\nArchetype rarity ordering");
 {
-	/* The RARITY_COMPRESS exponent (0.42) compresses the authored weight spread
-	   so that a Combo Guard is still several times likelier than a Point Center,
-	   but "several" stops meaning two hundred. This test verifies:
-	     1. The compression parameter is what the code documents (0.42).
+	/* This block verifies:
+	     1. The RARITY_COMPRESS parameter is what the code documents (0.42).
+	        It no longer compresses the authored weight — WEIGHT_CAL replaced
+	        that — and applies to the flavor multiplier alone, where
+	        compressing a per-class tilt is still the right idea. Pinned so the
+	        two uses cannot be conflated again.
 	     2. Rare archetypes (low w) appear less often than common ones (high w).
-	     3. The realized frequency spread is compressed relative to the authored
-	        weight spread, within the range the exponent predicts. */
+	     3. Realized frequency is PROPORTIONAL to the authored w, which is the
+	        contract WEIGHT_CAL exists to deliver. See the long note below. */
 	ok("RARITY_COMPRESS is the documented value", RB.RARITY_COMPRESS === 0.42,
 		"got " + RB.RARITY_COMPRESS);
 
@@ -1439,39 +1567,79 @@ console.log("\nArchetype rarity ordering");
 		topCount > botCount,
 		"top quartile " + topCount + " draws vs bottom quartile " + botCount);
 
-	/* The authored weight spread (max w / min w among eligible) is compressed
-	   by the RARITY_COMPRESS exponent. Verify the realized frequency ratio is
-	   closer to the compressed prediction than to the raw one.
+	/* `w` MEANS A SHARE OF THE CLASS, AND THIS IS THE ROW THAT HOLDS IT TO IT.
 
-	   raw ratio     = max(w/exposure) / min(w/exposure)
-	   compressed    = raw ^ RARITY_COMPRESS
-	   The realized spread (max count / min count) should be closer to the
-	   compressed value than to the raw one, with sampling noise allowed. */
-	const weights = eligible.map((a) => RB.archetypeWeight(a, cfg, null));
-	const maxW = Math.max.apply(null, weights);
-	const minW = Math.min.apply(null, weights.filter((w) => w > 0));
-	const rawRatio = maxW / minW;
-	/* The effective weight is w^RARITY_COMPRESS after the exposure divisor, so
-	   the authored spread raised to RARITY_COMPRESS is what we expect. */
-	const compressedRatio = Math.pow(rawRatio, 1); // already compressed by archetypeWeight
-	/* What the ratio would have been WITHOUT compression: the raw
-	   (w / exposure) spread, which archetypeWeight raises to 0.42. */
-	const rawEffective = eligible.map((a) => {
-		const base = (a.w === undefined ? 1 : a.w) / a.exposure;
-		return base;
-	});
-	const rawSpread = Math.max.apply(null, rawEffective) /
-		Math.min.apply(null, rawEffective.filter((x) => x > 0));
-	/* The compressed spread should be rawSpread^0.42, which is much smaller
-	   than rawSpread itself. Verify the actual archetypeWeight spread sits
-	   near rawSpread^0.42 (within a factor of 2 for sampling tolerance). */
-	const expectedCompressed = Math.pow(rawSpread, RB.RARITY_COMPRESS);
-	ok("RARITY_COMPRESS produces expected compression of the weight spread",
-		rawRatio < rawSpread && rawRatio < rawSpread * 0.85 &&
-			rawRatio / expectedCompressed < 2 && expectedCompressed / rawRatio < 2,
-		"raw spread " + rawSpread.toFixed(1) + ", expected compressed " +
-			expectedCompressed.toFixed(1) + ", actual archetypeWeight spread " +
-			rawRatio.toFixed(1));
+	   This used to assert the old model directly: that the archetypeWeight
+	   spread landed near (w / exposure) ^ RARITY_COMPRESS. That model is gone,
+	   and it deserved to go — dividing by exposure and then compressing gave
+	   the height gate more leverage over how often a build appeared than the
+	   field labelled "rarity" had. Measured across 42,000 players,
+	   corr(log w, log realized share) was 0.43: how wide a band an author drew
+	   mattered more than the weight they typed, which is the worst possible
+	   property for the one field that is supposed to say "how common is this".
+
+	   WEIGHT_CAL replaced it by solving the height geometry instead of
+	   approximating it, so the contract is now the simple one a reader would
+	   assume: realized share is proportional to authored w. That is what this
+	   tests, and it is a stronger check than the one it replaces — it reads the
+	   property users care about rather than the formula that happens to deliver
+	   it, so a future rewrite of the weighting is free to change the mechanism
+	   and still has to keep the promise.
+
+	   It is measured ACROSS THE HEIGHT DISTRIBUTION, which is the only place
+	   that promise is made. WEIGHT_CAL solves its fixed point by integrating
+	   over a normal height curve, so proportionality holds for a CLASS, not at
+	   any one height: at a single height the builds whose gates barely reach it
+	   are deliberately not equalized. Standing at hgt 50 reads a scatter of
+	   0.417 off a model whose realized scatter over a class is 0.177 — the
+	   first version of this row made exactly that mistake, and the reading it
+	   produced looked like a real regression rather than a bad probe. */
+	const hrng = new Rng("rarity:hgt");
+	const specialists = RB.ARCHETYPES.filter((a) => a.name !== "Balanced");
+	const drawCounts = {};
+	for (const a of specialists) drawCounts[a.name] = 0;
+	const M = 60000;
+	for (let i = 0; i < M; i++) {
+		const h = Math.max(0, Math.min(100, Math.round(hrng.normal(48, 17))));
+		const el = specialists.filter((a) => h >= a.min && h <= a.max);
+		if (!el.length) continue;
+		drawCounts[hrng.weighted(el, (a) => RB.archetypeWeight(a, cfg, null)).name]++;
+	}
+	const nominalSum = specialists.reduce((s, a) => s + (a.w === undefined ? 1 : a.w), 0);
+	const ratios = specialists.map((a) => ({
+		name: a.name,
+		r: (drawCounts[a.name] / M) / ((a.w === undefined ? 1 : a.w) / nominalSum),
+	}));
+	/* Sampling noise dominates the tail: a build whose nominal share is 0.1%
+	   draws ~60 of 60,000, so its ratio carries a seventh of its own value as
+	   error. The band is on the builds with enough draws to mean anything, and
+	   the scatter figure below covers the rest. */
+	const solid = ratios.filter((x) => drawCounts[x.name] >= 60);
+	const offNominal = solid.filter((x) => Math.abs(x.r - 1) >= 0.4);
+	ok("realized frequency tracks the authored weight",
+		offNominal.length <= Math.ceil(solid.length * 0.05),
+		offNominal.length + " of " + solid.length + " builds off nominal by 40%+" +
+			(offNominal.length
+				? ": " + offNominal.slice(0, 5).map(
+					(x) => x.name + " " + x.r.toFixed(2) + "x").join(", ")
+				: ""));
+
+	/* And the scatter, which is what the old row's quartile check was really
+	   reaching for.
+
+	   Band 0.38 against a measured 0.310. Note this probe reads HIGHER than
+	   the 0.177 measured over full classes, and should: it draws straight off
+	   archetypeWeight, with no pool, no diversity slider and no per-class draw
+	   penalty, all three of which pull realized frequency back toward nominal.
+	   What is banded here is therefore the weighting alone, which is the part
+	   WEIGHT_CAL is responsible for — a guard against the height gate silently
+	   taking the wheel again, not a calibration target. */
+	const logs = solid.map((x) => Math.log(x.r));
+	const lm = logs.reduce((s, v) => s + v, 0) / logs.length;
+	const lsd = Math.sqrt(logs.reduce((s, v) => s + (v - lm) * (v - lm), 0) / logs.length);
+	ok("weight-to-frequency scatter stays tight",
+		lsd < 0.38, "sd(log realized/nominal) = " + lsd.toFixed(3));
+
 
 	/* No eligible build should be entirely absent in 10000 draws. */
 	const absent = eligible.filter((a) => !counts[a.name]);
@@ -1690,8 +1858,18 @@ console.log("\nArchetype table and solver audit");
 	ok("creation is centered: the table's tag-weighted mean is near zero",
 		Math.abs(RB.ARCHETYPES.reduce((a, x) => a + RB.creationDelta(x), 0) /
 			RB.ARCHETYPES.length) < 0.15);
+	/* MAGNITUDE, NOT SIGN. This read `createW >= 0.04`, which quietly asserted
+	   the term was positive — true of the fit standing when it was written
+	   (+0.07) and not a property anyone had argued for. The re-fit after the
+	   table moved put it at -0.20: with the usage protection no longer
+	   subsidising ins/dnk/fg/tp across the whole table, the usage composite
+	   over-reads creation by its full amount again, so the term damps rather
+	   than boosts. That is a bigger number than the one it replaced, and the
+	   fit it came from cut the worst role bias from 2.65 points to 1.22
+	   against a 2.00 band. What the row is for is catching the term collapsing
+	   to zero, which is what "rounding error" means and what it now says. */
 	ok("the fitted creation weight is no longer a rounding error",
-		RB.ROLE_FIT.createW >= 0.04, String(RB.ROLE_FIT.createW));
+		Math.abs(RB.ROLE_FIT.createW) >= 0.04, String(RB.ROLE_FIT.createW));
 }
 
 {

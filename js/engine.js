@@ -13,6 +13,11 @@
 	const BB = global.BBGM;
 	const C = global.Colleges;
 	const RB = global.RatingsBuilder;
+	/* How wide the soft floor under the ovr-to-pot gap is, in gap points. Two:
+	   wide enough to turn the 10.9% pile-up on gap = 1 into a tail (the
+	   neighbouring buckets ran 3-4%), narrow enough that a prospect whose
+	   factors say +15 is unaffected. See phase 5. */
+	const POT_GAP_BAND = 2;
 	const Text = global.Text;
 	const T = global.TeamsSim;
 	const S = global.StatsSim;
@@ -3462,10 +3467,31 @@
 			factors.role = RB.potFromRole(p.stats, p.classYear, usageRefFor(usageRef, p));
 			factors.bias = bias;
 			factors.noise = prng.normal(0, spread * 0.35);
-			factors.total = factors.arch + factors.age + factors.ageClass +
-				factors.touch + factors.frame + factors.role;
+			/* Summed by the function that owns the breakdown. This used to be
+			   re-added here, field by field, from a list that had to be kept
+			   in sync with potFactors() by hand — a split that goes wrong
+			   quietly, since a factor left out of the sum still shows in the
+			   editor's breakdown. */
+			factors.total = RB.sumFactors(factors);
 			p.potFactors = factors;
-			const gap = Math.max(1, p.baseGap + bias + factors.total * 0.55 + factors.noise);
+			/* A SOFT FLOOR, NOT A HARD ONE.
+
+			   `Math.max(1, ...)` piled every prospect whose additive terms came
+			   out negative onto exactly the same gap. Measured over a class:
+			   gap = 1 at 10.9%, against 3.8% at 2, 3.6% at 3 and 3.3% at 4 —
+			   roughly three times the density of its neighbours, and a spike
+			   in "potential minus overall" is visible on a draft board as a
+			   block of prospects with identical upside. (The top is fine: `pot`
+			   reaches the 100 cap 0.00% of the time, so there is no matching
+			   compression there. The problem was purely the floor.)
+
+			   softBound eases onto the floor over a band of two gap points
+			   instead of stacking on it, which turns the spike into a tail and
+			   never returns a gap below 1. Same function the role-usage table
+			   uses; see js/ratings.js. */
+			const gap = RB.softBound(
+				p.baseGap + bias + factors.total * 0.55 + factors.noise,
+				1, 100, POT_GAP_BAND);
 			p.newPot = clamp(Math.round(p.newOvr + gap), Math.min(p.newOvr + 1, 100), 100);
 		}
 		return state;
@@ -3797,15 +3823,33 @@
 				/* AGE. There was no age term at all, so a 22-year-old senior
 				   and a 19-year-old freshman with the same ovr and the same pot
 				   tied, and every scout in the sport would break that tie the
-				   same way. Small — a year is worth a little over half a point
-				   on a board whose ovr term is 1.25 a point — because the
-				   ceiling term already carries most of what youth is worth.
+				   same way.
+
+				   RAISED 0.6 -> 1.8, tracking the class-year efficiency
+				   gradient it has to offset. EXP_EFF went 0.0045 -> 0.013 when
+				   the senior/freshman true-shooting gap was corrected from
+				   about 1.2 points to the 2-3 the sport actually shows, and
+				   production reaches this score at 0.30 a point — so
+				   upperclassmen got better box scores and walked back up a
+				   board that reads them. Measured over the six award-test
+				   classes, near-identical pairs three years apart went from 35
+				   younger ahead against 44 older (the younger man losing the
+				   tie, which is the opposite of how it is broken in every
+				   draft room) to 47 against 32. Tripling the offset to match
+				   the tripled gradient is the whole of the reasoning.
+
+				   It is not free to raise further, but it is close: at 1.2 the
+				   pairs still came out 39-40, and the top of the board does not
+				   move between 1.6 and 2.0 at all — the lottery is 43 freshmen
+				   and 25 sophomores of 84 either way — because the ceiling term
+				   already carries most of what youth is worth up there. This
+				   term decides ties further down, which is what it is for.
 
 				   The DRAFT age, not the file's: most source files carry 19 for
 				   everybody (that is what state.ageIsInformative measures), and
 				   the class year is then the only thing that says how old a man
 				   is — which is the same rule exportFile uses to write born.year. */
-				(21 - draftAge(p, state)) * 0.6 +
+				(21 - draftAge(p, state)) * 1.8 +
 				march +
 				(p.nonNcaa ? -1.2 : 0) +
 				rng.child("stock:" + p.key).normal(0, 1.8);

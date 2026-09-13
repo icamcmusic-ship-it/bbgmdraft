@@ -29,6 +29,29 @@
 (function (global) {
 	"use strict";
 
+	/* THE FREE-THROW-TRIP COEFFICIENT OF THE POSSESSION IDENTITY.
+
+	       Possessions = FGA - ORB + TOV + FT_TRIP * FTA
+
+	   0.44 is part of the DEFINITION of a possession, not a measurement of
+	   one: every place that computes possessions, usage or true shooting has
+	   to use the same number or the two stop reconciling, and a constant
+	   written twice is a constant that can drift. js/stats.js named it for
+	   exactly that reason and then noted "it was a bare 0.44 at five sites
+	   across three files" — while leaving seven of them bare in THIS file
+	   (the possession denominator of vop, the PER free-throw and personal-foul
+	   terms, both halves of USG%, the team and player true-shooting
+	   denominators). Naming it here, where the stats row is defined, and
+	   having js/stats.js read it from here is what makes the agreement
+	   checkable rather than coincidental.
+
+	   Note what is deliberately NOT folded in: the `(0.44 + 0.56 * drbp)` in
+	   the PER free-throw term below is a different constant that happens to
+	   share the digits — it is Oliver's split of an individual defensive
+	   rebound's credit, not a free-throw trip, and unifying the two because
+	   they look alike would be the drift this constant exists to prevent. */
+	const FT_TRIP = 0.44;
+
 	/* src/worker/core/player/stats.basketball.ts, verbatim. `derived` is
 	   everything advStats computes, `raw` everything the game sim records,
 	   `max` the per-game highs. */
@@ -246,7 +269,7 @@
 		/* --- PER and EWA ---------------------------------------------- */
 		{
 			const factor = 2 / 3 - (0.5 * (league.ast / league.fg)) / (2 * (league.fg / league.ft));
-			const vop = league.pts / (league.fga - league.orb + league.tov + 0.44 * league.fta);
+			const vop = league.pts / (league.fga - league.orb + league.tov + FT_TRIP * league.fta);
 			const drbp = (league.trb - league.orb) / league.trb;
 			const aPER = [];
 			let leagueAPER = 0;
@@ -263,12 +286,12 @@
 							ps.ft * 0.5 * (1 + (1 - t.ast / t.fg) + (2 / 3) * (t.ast / t.fg)) -
 							vop * ps.tov -
 							vop * drbp * (ps.fga - ps.fg) -
-							vop * 0.44 * (0.44 + 0.56 * drbp) * (ps.fta - ps.ft) +
+							vop * FT_TRIP * (0.44 + 0.56 * drbp) * (ps.fta - ps.ft) +
 							vop * (1 - drbp) * (ps.trb - ps.orb) +
 							vop * drbp * ps.orb +
 							vop * ps.stl +
 							vop * drbp * ps.blk -
-							ps.pf * (league.ft / league.pf - 0.44 * (league.fta / league.pf) * vop));
+							ps.pf * (league.ft / league.pf - FT_TRIP * (league.fta / league.pf) * vop));
 				}
 				aPER[i] = fix(paceAdj * uPER);
 				leagueAPER += aPER[i] * ps.min;
@@ -303,8 +326,8 @@
 			out[i].orbp = fix((100 * (ps.orb * tmin)) / (ps.min * (t.orb + t.oppDrb)));
 			out[i].stlp = fix((100 * (ps.stl * tmin)) / (ps.min * t.poss));
 			out[i].trbp = fix((100 * (ps.trb * tmin)) / (ps.min * (t.trb + t.oppTrb)));
-			out[i].usgp = fix((100 * ((ps.fga + 0.44 * ps.fta + ps.tov) * tmin)) /
-				(ps.min * (t.fga + 0.44 * t.fta + t.tov)));
+			out[i].usgp = fix((100 * ((ps.fga + FT_TRIP * ps.fta + ps.tov) * tmin)) /
+				(ps.min * (t.fga + FT_TRIP * t.fta + t.tov)));
 		}
 
 		/* --- offensive and defensive ratings, and win shares ---------- */
@@ -389,7 +412,7 @@
 				return {
 					tmRate: teamRate + leadBonus,
 					ofRate: offRate + leadBonus,
-					ptsTSA: t.stats.pts / (t.stats.fga + 0.44 * t.stats.fta),
+					ptsTSA: t.stats.pts / (t.stats.fga + FT_TRIP * t.stats.fta),
 					teamThresh: 0, trim1t: 0, trim1c: 0, trim2t: 0, trim2c: 0,
 					teamBPM: 0, teamOBPM: 0, teamAdjBPM: 0, teamAdjOBPM: 0,
 				};
@@ -408,7 +431,7 @@
 				const ps = players[i].p.stats;
 				const t = players[i].t.stats;
 				const ta = teamAvg[teamIndex.get(players[i].t)];
-				const tsa = ps.fga + ps.fta * 0.44;
+				const tsa = ps.fga + ps.fta * FT_TRIP;
 				const ptsTsa = ps.pts / (tsa + 1e-6);
 				adjPts[i] = (ptsTsa - ta.ptsTSA + 1) * tsa;
 				playerPoss[i] = 1e-6 + (ps.min * t.pace) / gmOf(players[i].t);
@@ -527,5 +550,8 @@
 	global.BBGMStats = {
 		STATS, KEYS, TID_DOES_NOT_EXIST, blankRow, gameScore, seasonHighs, doubleCounts,
 		leagueAdvanced, getEWA,
+		/* Exported so js/stats.js reads the same number rather than declaring
+		   a second copy of it. */
+		FT_TRIP,
 	};
 })(typeof window !== "undefined" ? window : self);

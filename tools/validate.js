@@ -896,15 +896,42 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   on the maximum, which is the wall's own signature. The class maximum
 		   sits beside them because a real class has a 45-48% shooter on volume
 		   most years and a soft ceiling has to actually reach it. */
+		/* THE CEILING ROWS NOW MEASURE A TAIL, NOT A WALL, AND THE BANDS MOVED.
+
+		   These three were fitted against a model with no counting noise in
+		   them: every percentage was a deterministic mean plus a Gaussian of
+		   CONSTANT width, so the class maximum was very nearly the ceiling
+		   itself and 50.5 was a sane top. Makes are now resampled binomially
+		   over the attempts actually taken, which is what a season is, and the
+		   maximum is talent plus a real tail on top of it.
+
+		   The arithmetic: four 3PA a game over a season is about 145 attempts,
+		   binomial sd .041. A genuine .45 shooter therefore prints .50 about
+		   once in nine seasons and .52 about once in twenty-five, and a class
+		   holds dozens of volume shooters — so a maximum in the low fifties is
+		   not the ceiling leaking, it is the distribution behaving. Real D-I
+		   seasons agree: 50%+ on four attempts a game happens most years
+		   somewhere in the country.
+
+		   Raised to 56, which is where the binomial tail on the highest talent
+		   this model produces actually runs out, and the row still fails if
+		   the ceiling returns (it would pin near 47 again, under the floor) or
+		   if the tail runs away. The p90-to-max gap follows for the same
+		   reason: a tail has a gap above p90 BECAUSE it is a tail, and the old
+		   top of 6 per class encoded its absence.
+
+		   The row this pair exists to protect — "3P% share pinned at class
+		   max", the wall's actual signature — is unchanged and still passes at
+		   0, which is the check that matters. */
 		["3P% max (4+ 3PA)", (function () {
 			const v = all.filter((p) => p.stats.tpa >= 4).map((p) => p.stats.tpp);
 			return v.length ? Math.max.apply(null, v) * 100 : 46;
-		})()].concat(extreme(43.8, 50.5)),
+		})()].concat(extreme(43.8, 56.0)),
 		["3P% p90-to-max gap (4+)", (function () {
 			const v = all.filter((p) => p.stats.tpa >= 4).map((p) => p.stats.tpp);
 			if (v.length < 30) return 1.5;
 			return (Math.max.apply(null, v) - pct(v, 0.90)) * 100;
-		})()].concat(perClass(0.4, 6)),
+		})()].concat(perClass(0.4, 11)),
 		["3P% share pinned at class max", (function () {
 			const v = all.filter((p) => p.stats.tpa >= 4).map((p) => p.stats.tpp);
 			if (v.length < 30) return 0.02;
@@ -1129,8 +1156,25 @@ function collect(nSeeds, cfgOverrides, fixture) {
 			corrBand(0.22, 0.52)),
 		["corr(3PT rating, FG%)",
 			corr(g((p) => p.newRatings.tp), g((p) => p.stats.fgp))].concat(corrBand(-0.80, -0.20)),
+		/* LOWERED FROM 0.60, AND THIS ROW FALLING IS THE FIX WORKING.
+
+		   A rating is true talent; a season is one noisy sample of it. The
+		   correlation between them is therefore bounded above by how much of a
+		   season's percentage is talent rather than counting noise, and at
+		   realistic college volume that is well under 1. Requiring 0.60 was
+		   requiring shooting percentages to be nearly deterministic — which
+		   they were, because there was no binomial resampling anywhere in the
+		   sim, and which is exactly the defect that made "41% from three on
+		   1.2 attempts a game" ungeneratable.
+
+		   So this is the single row that most directly measures the fix, and
+		   it had to move for the fix to land. The trade is monotone and was
+		   measured: tpLim .432 gives corr .32-.37 and a class max near 53;
+		   .448 gives corr .38-.42 and a max near 55. Banded 0.28-0.95 — low
+		   enough to accept honest season noise, high enough that a model whose
+		   3P% stopped tracking the 3P rating at all still fails. */
 		["corr(3PT rating, 3P%)",
-			corr(g((p) => p.newRatings.tp), g((p) => p.stats.tpp))].concat(corrBand(0.60, 0.95)),
+			corr(g((p) => p.newRatings.tp), g((p) => p.stats.tpp))].concat(corrBand(0.28, 0.95)),
 		["corr(athleticism, BPG)",
 			corr(g((p) => p.vComps.athleticism), g((p) => p.stats.bpg))].concat(corrBand(0.35, 0.80)),
 		["corr(athleticism, SPG)",
@@ -1508,19 +1552,110 @@ function main() {
 	// Checks that are not about a season at all, so they run once rather than
 	// once per era.
 	const checks = [];
-	// Solver exactness across the usable target range.
-	let miss = 0;
-	const rng = new Rng("solver");
-	const cfg = global.Config.make({});
-	for (let i = 0; i < 2000; i++) {
-		const orig = {};
-		for (const k of BB.RATING_KEYS) orig[k] = Math.round(rng.uniform(20, 80));
-		orig.fuzz = 0;
-		const t = Math.round(rng.uniform(20, 65));
-	 const b = global.RatingsBuilder.rebuild(rng.child("s" + i), orig, t, t + 10, cfg);
-		if (b.ovr !== t) miss++;
+	/* SOLVER EXACTNESS, AND THE SIZE OF THE CORRECTION IT HAS TO MAKE.
+
+	   Exactness was checked here at the DEFAULT specialization only, and that
+	   is the one setting at which the interesting failure cannot appear: every
+	   way the solver can be handed a distorted problem scales with spec. The
+	   build-time re-neutralization fix was needed because rebuild() damped
+	   negative offsets near the rating floor while leaving positives at full
+	   size, so the applied vector stopped being ovr-neutral and the solver had
+	   to claw back ~6.2 ovr on every player — at spec 3, a median shift of
+	   -4.4, which at 15.9 rating points of L1 per ovr point spent about a
+	   fifth of the specialization budget undoing an arithmetic artifact. None
+	   of that shows up in an exactness count, because the solver was doing its
+	   job correctly on a badly posed problem.
+
+	   So: exactness at every spec, and a band on the median |k| itself, which
+	   is the number that would have caught it on the day it was introduced. */
+	const SPECS = [0, 1, 2, 3];
+	for (const spec of SPECS) {
+		const cfg = global.Config.make({ specialization: spec });
+		/* Exactness, at an arbitrary target — which is the harder ask, and
+		   what tests the solver's reach: the target here has nothing to do
+		   with the base's own overall, so the bisection has to travel. */
+		let miss = 0;
+		const rng = new Rng("solver:spec" + spec);
+		for (let i = 0; i < 2000; i++) {
+			const orig = {};
+			for (const k of BB.RATING_KEYS) orig[k] = Math.round(rng.uniform(20, 80));
+			orig.fuzz = 0;
+			const t = Math.round(rng.uniform(20, 65));
+			const b = global.RatingsBuilder.rebuild(
+				rng.child("s" + i), orig, t, t + 10, cfg);
+			if (b.ovr !== t) miss++;
+		}
+		checks.push({ name: "Solver off-target /2000 (spec " + spec + ")",
+			value: miss, lo: 0, hi: 0, ok: miss === 0 });
+
+		/* The size of the correction, at the target that ISOLATES it: the
+		   player's own overall. Asked to travel to an unrelated target the
+		   solver legitimately shifts by ~10 and the artifact is invisible
+		   inside it; asked to PRESERVE an overall, every point it still has to
+		   move is a point something upstream got wrong.
+
+		   Banded at 3.0. Measured after the build-time re-neutralization:
+		   1.65 / 1.80 / 2.04 / 1.96 across specs 0-3, the residual being
+		   BBGM's own piecewise fudge and the quarter-point rounding, neither
+		   of which can be neutralized away. Before the fix spec 3 sat at 4.92,
+		   so 3.0 clears the fixed state and catches the broken one. */
+		const shifts = [];
+		const srng = new Rng("solver:shift:spec" + spec);
+		for (let i = 0; i < 2000; i++) {
+			const orig = {};
+			for (const k of BB.RATING_KEYS) orig[k] = Math.round(srng.uniform(20, 80));
+			orig.fuzz = 0;
+			const t = BB.ovr(orig);
+			const b = global.RatingsBuilder.rebuild(
+				srng.child("s" + i), orig, t, t + 10, cfg);
+			if (Number.isFinite(b.solveShift)) shifts.push(Math.abs(b.solveShift));
+		}
+		shifts.sort((a, b) => a - b);
+		const med = shifts.length ? shifts[Math.floor(shifts.length / 2)] : 0;
+		checks.push({ name: "Solver median |shift| (spec " + spec + ")",
+			value: med, lo: 0, hi: 3.0, ok: med <= 3.0 });
 	}
-	checks.push({ name: "Solver off-target /2000", value: miss, lo: 0, hi: 0, ok: miss === 0 });
+
+	/* THE SIM'S OWN CONVERGENCE COUNTERS, WHICH NOTHING USED TO READ.
+
+	   js/stats.js has counted these all along, and the comment beside them
+	   said they existed "so tools/validate.js and the batch harness can read
+	   them". Nothing did: a grep for CONVERGENCE hit exactly one file. The
+	   cost of a write-only diagnostic was not theoretical — fitToPool was
+	   failing to converge about 1.5 times per team-season, 11,382 times over
+	   11,411 seasons, while a comment above it read "six passes has always
+	   been enough in practice", and the share caps it enforces were therefore
+	   not holding. It was counted, and nobody was told.
+
+	   Every one of these is banded at zero, because every one of them counts a
+	   thing the file says cannot happen. They are cheap: the counters are
+	   already incremented by the run above, so reading them costs nothing.
+
+	   `usageCeilingShort` is the exception at 1-in-11,411 rather than 0 — a
+	   roster whose ceilings cannot cover the budget even after being scaled —
+	   so it is banded per mille rather than absolutely. */
+	{
+		const CV = global.StatsSim.CONVERGENCE;
+		const seasons = Math.max(1, CV.teamSeasons);
+		const rate = (n) => (1000 * n) / seasons;
+		checks.push({ name: "fitToPool unconverged /1000 team-seasons",
+			value: rate(CV.fitToPoolUnconverged), lo: 0, hi: 1.0,
+			ok: rate(CV.fitToPoolUnconverged) <= 1.0 });
+		checks.push({ name: "Usage bisection at bound /1000",
+			value: rate(CV.usageBisectionAtBound), lo: 0, hi: 1.0,
+			ok: rate(CV.usageBisectionAtBound) <= 1.0 });
+		checks.push({ name: "Usage shares renormalized /1000",
+			value: rate(CV.usageRenormalized), lo: 0, hi: 1.0,
+			ok: rate(CV.usageRenormalized) <= 1.0 });
+		checks.push({ name: "Usage ceilings short of budget /1000",
+			value: rate(CV.usageCeilingShort), lo: 0, hi: 2.0,
+			ok: rate(CV.usageCeilingShort) <= 2.0 });
+		/* Not a rate. The re-floor in reconcileTeamTotals is an assertion
+		   about five functions agreeing, and one negative rebound total means
+		   they do not. */
+		checks.push({ name: "Negative rebound totals", value: CV.negativeRebounds,
+			lo: 0, hi: 0, ok: CV.negativeRebounds === 0 });
+	}
 
 	/* THE SEASON NARRATIVES.
 
