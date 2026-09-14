@@ -807,11 +807,11 @@
 		   or both. The redundancy sweep in tools/test.js is what decides that,
 		   not the author's opinion of how different two names sound. */
 		// --- guards ---------------------------------------------------------
-		{ name: "Floor-Spacing Backup Point", min: 0, max: 46, w: 1.0, pot: -4, t: ["guard", "shooting", "playmaking"], o: { tp: 16, pss: 14, oiq: 8, ft: 6, ins: -16, dnk: -12, reb: -10, jmp: -6 } },
+		{ name: "Stretch Backup Point", min: 0, max: 46, w: 1.0, pot: -4, t: ["guard", "shooting", "playmaking"], o: { tp: 16, pss: 14, oiq: 8, ft: 6, ins: -16, dnk: -12, reb: -10, jmp: -6 } },
 		{ name: "Hesitation-Dribble Scorer", min: 0, max: 48, w: 1.1, t: ["guard", "scoring"], o: { drb: 16, fg: 14, spd: 8, ft: 6, reb: -14, diq: -12, stre: -10, oiq: -8 } },
 		{ name: "Charge-Taking Guard", min: 0, max: 50, w: 0.85, t: ["guard", "defense", "durability"], o: { diq: 16, oiq: 12, endu: 10, stre: 8, jmp: -16, dnk: -14, ins: -10, spd: -6 } },
 		{ name: "Line-Drive Three-Point Bomber", min: 0, max: 54, w: 0.9, vol: 1.3, t: ["guard", "shooting"], o: { tp: 22, oiq: 8, pss: 6, ft: 6, drb: -16, ins: -14, stre: -10, jmp: -4 } },
-		{ name: "Foul-Drawing Pull-Up Guard", min: 0, max: 50, w: 0.95, t: ["guard", "scoring", "shooting"], o: { ft: 18, fg: 14, drb: 8, ins: 6, reb: -16, diq: -12, endu: -10, jmp: -6 } },
+		{ name: "Foul-Drawing Pull-Up Guard", min: 0, max: 50, w: 0.95, t: ["guard", "scoring"], o: { fg: 16, stre: 12, ft: 10, ins: 8, tp: -16, diq: -12, reb: -10, jmp: -6 } },
 		{ name: "Walk-It-Up Game Manager", min: 0, max: 46, w: 0.85, pot: -5, t: ["guard"], o: { oiq: 16, drb: 12, ft: 10, diq: 6, tp: -16, dnk: -12, jmp: -10, reb: -6 } },
 		// --- wings ----------------------------------------------------------
 		{ name: "Switch-Everything Forward", min: 42, max: 71, w: 1.2, t: ["wing", "defense", "durability"], o: { diq: 16, stre: 12, endu: 10, reb: 8, tp: -16, drb: -12, pss: -10, ft: -6 } },
@@ -822,7 +822,7 @@
 		{ name: "Forty-Minute Forward", min: 40, max: 70, w: 1.0, inj: 0.75, t: ["wing", "durability", "rebounding"], o: { endu: 18, reb: 12, stre: 8, diq: 6, tp: -16, drb: -12, spd: -10, dnk: -6 } },
 		// --- bigs -----------------------------------------------------------
 		{ name: "Chase-Down Shot Blocker", min: 58, max: 100, w: 1.05, t: ["big", "defense", "athletic"], o: { jmp: 16, spd: 12, diq: 10, endu: 6, ins: -16, ft: -12, pss: -10, stre: -6 } },
-		{ name: "Zone-Buster Big", min: 56, max: 92, w: 0.85, t: ["big", "shooting", "playmaking"], o: { ft: 16, oiq: 12, pss: 8, fg: 8, spd: -16, dnk: -12, reb: -10, endu: -6 } },
+		{ name: "Zone-Buster Big", min: 56, max: 92, w: 0.85, t: ["big", "playmaking"], o: { oiq: 16, fg: 12, pss: 10, ft: 10, spd: -16, dnk: -12, reb: -10, endu: -6 } },
 		{ name: "Foul-Prone Rim Protector", min: 62, max: 100, w: 1.1, t: ["big", "defense", "raw"], o: { jmp: 16, diq: 14, reb: 8, stre: 6, oiq: -16, ft: -12, pss: -10, drb: -6 } },
 		{ name: "Jump-Hook Specialist", min: 60, max: 100, w: 0.95, t: ["big", "scoring"], o: { ins: 18, ft: 10, oiq: 8, stre: 6, spd: -16, drb: -12, pss: -10, jmp: -4 } },
 		{ name: "Immobile Stretch Five", min: 60, max: 100, w: 0.9, pot: -4, t: ["big", "shooting"], o: { tp: 20, ft: 10, oiq: 6, stre: 6, spd: -18, endu: -12, diq: -8, drb: -4 } },
