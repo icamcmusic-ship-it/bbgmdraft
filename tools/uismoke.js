@@ -533,9 +533,14 @@ async function gotoProspects(page) {
 		   engine hands back — so there is no single control with that id, and
 		   there is nothing for a user to set until a shortlist exists. The
 		   dial they turn is anomalyChoices, which does have one. */
+		/* `recentFlavors` is on it for precisely the reason `recentPools` is,
+		   one layer up: it is the list of class flavors the last few classes
+		   drew, maintained by the UI and read by pickFlavor to push a
+		   repeated flavor toward the back of the queue. The dial the user
+		   turns is flavorMemory, which does have a control. */
 		const EXEMPT = ["seed", "overrides", "leagueWeights", "archetypeWeights",
 			"noteLines", "wEuroLeague", "wGLeague", "wNBL", "recentPools",
-			"biography", "anomalyPicks"];
+			"biography", "anomalyPicks", "recentFlavors"];
 		const missing = await page.evaluate((exempt) =>
 			Object.keys(window.Config.DEFAULTS)
 				.filter((k) => exempt.indexOf(k) === -1)

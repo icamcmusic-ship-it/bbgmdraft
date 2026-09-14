@@ -53,6 +53,10 @@
 		/* The anomaly kinds the last few classes used, newest first. Same
 		   mechanism as poolHistory, one layer down. */
 		anomalyHistory: [],
+		/* And the class FLAVORS, newest first — the same mechanism one layer
+		   UP, and the one axis of the three that never had it. See
+		   rememberPool and flavorMemoryFactor in js/ratings.js. */
+		flavorHistory: [],
 		presetName: "default",
 		presetDirty: false,
 		customPresets: {},
@@ -293,6 +297,7 @@
 			history: state.history.slice(0, 12),
 			poolHistory: state.poolHistory,
 			anomalyHistory: state.anomalyHistory,
+			flavorHistory: state.flavorHistory,
 			presetName: state.presetName,
 			presetDirty: state.presetDirty,
 			customPresets: state.customPresets,
@@ -427,6 +432,11 @@
 			state.anomalyHistory = saved.anomalyHistory
 				.filter(Array.isArray)
 				.map((a) => a.filter((n) => typeof n === "string"));
+		}
+		// A flat list of names rather than a list of lists — one flavor a class.
+		if (Array.isArray(saved.flavorHistory)) {
+			state.flavorHistory = saved.flavorHistory
+				.filter((n) => typeof n === "string");
 		}
 		if (validString(saved.presetName)) state.presetName = saved.presetName;
 		state.presetDirty = !!saved.presetDirty;
@@ -572,6 +582,8 @@
 			// the reason stated above: a restored class rebuilt against a
 			// memory it was never drawn with comes back as somebody else.
 			anomalyHistory: (state.anomalyHistory || []).map((a) => a.slice()),
+			// And the flavor memory, for the same reason.
+			flavorHistory: (state.flavorHistory || []).slice(),
 			/* Per-file randomized-settings patches (see randomizeSettings'
 			   "draw separately for each loaded class"), for the same reason
 			   lastSeed is here: it is an input that lives outside cfg, and an
@@ -597,6 +609,7 @@
 		if (snap.lastSeed !== undefined) state.lastSeed = snap.lastSeed;
 		if (Array.isArray(snap.poolHistory)) state.poolHistory = snap.poolHistory;
 		if (Array.isArray(snap.anomalyHistory)) state.anomalyHistory = snap.anomalyHistory;
+		if (Array.isArray(snap.flavorHistory)) state.flavorHistory = snap.flavorHistory;
 		state.fileCfgs = snap.fileCfgs && typeof snap.fileCfgs === "object"
 			? snap.fileCfgs : {};
 		// A restored class is a different class, so an editor open on somebody
@@ -665,7 +678,7 @@
 		"coachTurnover", "realignmentMemory", "starReturners", "portalRate",
 		"recruitMomentum",
 		"awardStrictness", "confAwardStrictness", "proAwardStrictness",
-		"variation", "poolMemory", "teamMomentum", "awardNoise",
+		"variation", "poolMemory", "flavorMemory", "teamMomentum", "awardNoise",
 		"seasonEvents", "draftEvents",
 		/* The meta-dial, the anomaly shortlist and the flavor blend. See
 		   applyWeirdness and assignSurprises in js/engine.js, and blendFlavor
@@ -692,6 +705,7 @@
 		proAwardStrictness: (v) => v.toFixed(2) + "x",
 		archetypeDiversity: (v) => v + "%",
 		poolMemory: (v) => v.toFixed(2) + "x",
+		flavorMemory: (v) => v.toFixed(2) + "x",
 		teamMomentum: (v) => v.toFixed(2) + "x",
 		awardNoise: (v) => v.toFixed(2) + "x",
 		freshmanShare: (v) => v + "%",
@@ -829,6 +843,10 @@
 		poolMemory: (v) => (v <= 0
 			? "each class draws its builds with no memory of the last"
 			: "a build in the last three classes is " +
+				Math.round(Math.pow(3, v)) + "x less likely to return"),
+		flavorMemory: (v) => (v <= 0
+			? "each class draws its flavor with no memory of the last"
+			: "a flavor drawn in the last three classes is " +
 				Math.round(Math.pow(3, v)) + "x less likely to return"),
 		teamMomentum: (v) => (v <= 0
 			? "every game is an independent draw around the team's rating"
@@ -1136,6 +1154,19 @@
 	}
 
 	function paintConfig() {
+		/* WHAT THE SEASON WAS ACTUALLY PLAYED AT, beside the dial that says
+		   otherwise.
+
+		   `effectiveDiff` already exists and already feeds a panel (see
+		   paintEffective) — but that panel is a collapsed <details> in another
+		   fieldset, so the one place a user is certainly looking when the
+		   number is wrong, the control itself, still read 1.00x while the
+		   season had been simulated at 1.45x. The panel keeps the whole story;
+		   this puts the one fact next to the thing it contradicts. Computed
+		   once for the whole repaint rather than per slider. */
+		const bent = {};
+		const ed = effectiveDiff();
+		for (const r of (ed && ed.rows) || []) bent[r.key] = r.to;
 		for (const key of SLIDERS) {
 			const input = $(key);
 			if (!input) continue;
@@ -1144,8 +1175,20 @@
 			const num = $(key + "Num");
 			if (num) num.value = state.cfg[key];
 			const ctl = input.closest(".ctl");
+			const shown = (FORMAT[key] || ((v) => String(v)))(Number(input.value));
 			const b = ctl.querySelector("label b");
-			if (b) b.textContent = (FORMAT[key] || ((v) => String(v)))(Number(input.value));
+			if (b) b.textContent = shown;
+			/* THE FORMATTED VALUE IS THE VALUE, for a screen reader too.
+
+			   The readout above lives in a <b> inside the control's <label>,
+			   so it is part of the accessible NAME — which means a slider
+			   announced its formatted value and then its raw one, the same
+			   quantity twice in two units: "Conference realignment 35%, 0.35".
+			   On a dial whose units are not a number at all ("21 builds",
+			   "2.60x") the raw figure is simply noise. aria-valuetext replaces
+			   the raw value outright, which is exactly what it is for, and the
+			   <b> stays as the visual readout it always was. */
+			input.setAttribute("aria-valuetext", shown);
 			let hint = ctl.querySelector(".unit");
 			if (SLIDER_HINT[key]) {
 				if (!hint) {
@@ -1180,6 +1223,26 @@
 				caveat.textContent = text;
 			} else if (caveat) {
 				caveat.remove();
+			}
+			/* The ghost value: what the flavor, the storylines and the class
+			   jitter actually ran this setting at. Its own element so it can
+			   be styled apart from the value the user set and removed cleanly
+			   the moment the two agree again. */
+			let ghost = ctl.querySelector(".effghost");
+			if (bent[key] !== undefined) {
+				if (!ghost) {
+					ghost = el("span", "effghost");
+					const lbl = ctl.querySelector("label");
+					if (lbl) lbl.appendChild(ghost);
+					else ctl.appendChild(ghost);
+				}
+				const fmt = FORMAT[key] || ((v) => String(Math.round(v * 100) / 100));
+				ghost.textContent = " played at " + fmt(bent[key]);
+				ghost.title = "The class flavor, the season's storylines or the " +
+					"class-environment jitter moved this setting. See “What this " +
+					"season was actually played at”.";
+			} else if (ghost) {
+				ghost.remove();
 			}
 			// Per-setting modified marker + revert (Part 5C)
 			paintModifiedMarker(ctl, key, Number(input.value));
@@ -1700,6 +1763,26 @@
 				}
 				persist();
 			});
+			/* DOUBLE-CLICK A SLIDER TO PUT IT BACK.
+
+			   "Reset to defaults" is all-or-nothing and asks for confirmation,
+			   because it throws away a session. Undoing ONE exploratory drag
+			   had no gesture at all: the panel prints "· default 21 builds"
+			   beside the hint, so the number you want is on screen, and the
+			   only way to act on it was to drag back to it by hand. One undo
+			   entry, so Ctrl+Z takes it back. */
+			range.addEventListener("dblclick", () => {
+				const def = Number(CFG.DEFAULTS[key]);
+				if (!Number.isFinite(def) || Number(range.value) === def) return;
+				pushUndo("reset " + key);
+				range.value = def;
+				num.value = def;
+				state.cfg[key] = def;
+				markDirty();
+				paintConfig();
+				scheduleRun();
+				persist();
+			});
 		}
 	}
 
@@ -1719,7 +1802,8 @@
 	const RANDOM_GROUPS = {
 		quality: ["classQuality", "classDepth", "eliteCount", "potBias", "potSpread"],
 		builds: ["specialization", "archetypeDiversity", "classFlavor",
-			"archetypePool", "surpriseBudget", "buildNoise", "poolMemory"],
+			"archetypePool", "surpriseBudget", "buildNoise", "poolMemory",
+			"flavorMemory"],
 		years: ["freshmanShare", "transferShare", "redshirtShare", "reclassShare"],
 		destinations: ["pDII", "talentCoupling", "birthplaceWeight"],
 		season: ["pace", "scoringEnv", "efficiencyEnv", "statNoise", "injuryRate",
@@ -3483,6 +3567,10 @@
 		// The same memory one layer down: the anomalies the last few classes
 		// were given, so this one is unlikely to repeat them.
 		cfg.recentAnomalies = (state.anomalyHistory || []).slice(0, ANOMALY_HISTORY);
+		// And one layer up: the flavors the last few classes drew. Sixty-six
+		// flavors and one draw a class repeats sooner than a pool of
+		// forty-six builds does; this is the same memory on that axis.
+		cfg.recentFlavors = (state.flavorHistory || []).slice(0, POOL_HISTORY);
 		return cfg;
 	}
 
@@ -3535,6 +3623,16 @@
 			if (!hist.length || hist[0].join("|") !== names.join("|")) {
 				hist.unshift(names);
 				state.anomalyHistory = hist.slice(0, ANOMALY_HISTORY);
+			}
+		}
+		/* And the flavor, on exactly the same terms. It is recorded by NAME
+		   rather than by label because the name is what pickFlavor draws on
+		   and what a shareable link carries; the label is prose. */
+		if (res.flavor && res.flavor.name) {
+			const hist = (state.flavorHistory || []).slice();
+			if (hist[0] !== res.flavor.name) {
+				hist.unshift(res.flavor.name);
+				state.flavorHistory = hist.slice(0, POOL_HISTORY);
 			}
 		}
 	}
@@ -5338,8 +5436,12 @@
 						result: U.resultFingerprint(res),
 						gap,
 					}), prevCarry, baseSeed, share));
+				/* The file's fingerprint, so every alumni row carries an
+				   identity that survives a file boundary — a pid does not.
+				   See Universe.alumniOf and Universe.records. */
 				state.universe.alumni = state.universe.alumni
-					.concat(U.alumniOf(res, d.season));
+					.concat(U.alumniOf(res, d.season,
+						state.files[d.index].fingerprint || null));
 				carry = U.harvest(res, prevCarry);
 				lastSeason = d.season;
 				if (res.archetypePool) {

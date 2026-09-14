@@ -410,7 +410,23 @@
 
 	/* The names a later season can drop: award winners, the top of the board,
 	   the champion's best prospect. Compact on purpose — it persists. */
-	function alumniOf(res, season) {
+	/* AND EACH ONE CARRIES A CROSS-FILE IDENTITY.
+
+	   `key` is a BBGM pid, which is unique inside one export and meaningless
+	   between two of them — the same fact playerId() was written for, and the
+	   same fault biographyOf was fixed for. The alumni index never adopted it,
+	   and records() groups the index with byMan[a.key] to build the Hall of
+	   Fame and the player of the decade: so in a chain of real exports, pid 7
+	   in 2025 and pid 7 in 2026 are two different men whose scores were summed
+	   together under whichever name arrived first.
+
+	   `id` is the scoped identity and is what everything cross-season should
+	   group on; `key` stays beside it unchanged, because a caller matching a
+	   row against the players of ONE result still wants the file-local pid.
+	   The fingerprint is optional so that a caller without one (and every
+	   version 1 or 2 export already in the wild) degrades to exactly the
+	   behavior it has today rather than failing. */
+	function alumniOf(res, season, fingerprint) {
 		const out = [];
 		const seen = new Set();
 		const add = (p, why) => {
@@ -418,6 +434,7 @@
 			seen.add(p.key);
 			out.push({
 				season, name: p.name, key: p.key,
+				id: fingerprint ? playerId(fingerprint, p.key) : null,
 				/* The NCAA program, always — `proClub || newCollege` put a
 				   EuroLeague club name here and the alumni link then pointed
 				   at a team page that does not exist. The club is kept beside
@@ -529,9 +546,26 @@
 			String(a.name).localeCompare(String(b.name)));
 		const best = byRecord[0] || null;
 		/* An undefeated regular season is the rarest fact a college season
-		   produces and the timeline could not see one. */
-		const unbeaten = teamList.filter((x) => (x.regL || x.l || 0) === 0 &&
-			(x.regW || x.w || 0) >= 20).map((x) => x.name).sort();
+		   produces and the timeline could not see one.
+
+		   IT STILL COULD NOT, because the fallback was written with `||`.
+		   `regW`/`regL` are the records frozen at the end of the regular
+		   season (see js/teams.js) and `w`/`l` keep growing through March, so
+		   the fallback exists for a team that has no frozen snapshot. But a
+		   team that really went unbeaten has regL === 0, which is falsy — so
+		   `x.regL || x.l` skipped the 0 and read the loss that ended the run
+		   in the tournament instead. The one input the guard exists to catch
+		   was the one input it threw away, and the thread has never fired for
+		   a team that lost in March, which is almost all of them. Measured on
+		   seed "audit1": Georgetown finished 31-0 and the list came back
+		   empty.
+
+		   `num` falls back on PRESENCE rather than on truthiness, which is
+		   what was meant and is the idiom tools/test.js already uses. */
+		const num = (a, b) => (Number.isFinite(a) ? a
+			: (Number.isFinite(b) ? b : 0));
+		const unbeaten = teamList.filter((x) => num(x.regL, x.l) === 0 &&
+			num(x.regW, x.w) >= 20).map((x) => x.name).sort();
 		const ff = (t && t.finalFour ? t.finalFour : []).map(
 			(x) => (x && x.team ? x.team.name : x && x.name) || null).filter(Boolean);
 		/* The deepest run by a seed nobody picked. `finalFour` carries seeds
@@ -960,10 +994,28 @@
 				add("no1OnAChampion", null, no1Champ.map((r) => r.season), no1Champ.length,
 					no1Champ.length + " No. 1 picks came out of that season's champion");
 			}
+			/* THE ONE no1Abroad THREAD.
+
+			   There were two, on the same fact: this one over the rows at a
+			   threshold of two, and a second over the alumni index at a
+			   threshold of one, which named the men. So any timeline with
+			   two or more of them printed both sentences — which is exactly
+			   what the note beside the sweep thread forty lines above warns
+			   against ("a second thread saying the same thing with different
+			   words is how a Threads panel becomes unreadable").
+
+			   The rows won because they are complete: the alumni index is
+			   trimmed to its last 400 entries on export and in the app's
+			   persisted state, so on a long universe the alumni version
+			   would quietly stop counting the early seasons. The naming
+			   moved here, where the rows already carry it. */
 			const abroad = played.filter((r) => r.no1 && r.no1.nonNcaa);
-			if (abroad.length >= 2) {
+			if (abroad.length) {
 				add("no1Abroad", null, abroad.map((r) => r.season), abroad.length,
-					abroad.length + " No. 1 picks never played college basketball");
+					abroad.length + " No. 1 pick" + (abroad.length === 1 ? "" : "s") +
+					" never played college basketball (" +
+					abroad.slice(0, 4).map((r) => r.no1.name + ", " +
+						(r.no1.club || r.no1.school || "abroad")).join("; ") + ")");
 			}
 			const poyAbroad = played.filter((r) => r.poy && r.poy.nonNcaa);
 			if (poyAbroad.length >= 2) {
@@ -1167,16 +1219,11 @@
 					"the men who were both: " + both
 						.map((a) => a.name + " (" + a.season + ")").join(", "));
 			}
-			/* A prospect abroad at the very top of a board is the seam between
-			   the two populations this tool simulates, and nothing said when
-			   it happened. */
-			const abroad = list.filter((a) => a.nonNcaa && a.boardRank === 1);
-			if (abroad.length) {
-				add("no1Abroad", null, abroad.map((a) => a.season), abroad.length,
-					abroad.length + " No. 1 pick" + (abroad.length === 1 ? "" : "s") +
-					" never played college basketball (" +
-					abroad.map((a) => a.name + ", " + (a.club || a.school)).join("; ") + ")");
-			}
+			/* A prospect abroad at the very top of a board used to be said
+			   TWICE — once here off the index and once over the rows — for
+			   the same fact and in different words. The rows keep it, and
+			   carry the names this version added; see the no1Abroad thread
+			   above for why the complete source won. */
 			/* How many people this world remembers at all: a twenty-season
 			   universe with eleven names in it had a very different history
 			   from one with sixty. */
@@ -1485,8 +1532,21 @@
 		const out = [];
 		for (const r of rows || []) {
 			if (!r || !r.extrapolated || !r.poy) continue;
+			/* A KEY THAT IS NOT null.
+
+			   These used to carry `key: null`, and records() groups the
+			   index with byMan[a.key] — so a universe with a five-year gap
+			   collapsed all five extrapolated winners into ONE row keyed
+			   null, scoring five times a real player of the year, carrying
+			   whichever name came first, and outranking every man who
+			   actually played in the Hall of Fame and in
+			   playersOfTheDecade. There is no pid to scope here because
+			   there is no file; the season and the name are the two facts
+			   that identify the row and both are drawn deterministically
+			   off the universe seed, so this replays. */
+			const id = "extrap:" + r.season + ":" + r.poy.name;
 			out.push({
-				season: r.season, name: r.poy.name, key: null,
+				season: r.season, name: r.poy.name, key: id, id,
 				school: r.poy.school, club: null, nonNcaa: false,
 				boardRank: null, why: "player of the year", extrapolated: true,
 			});
@@ -1565,13 +1625,25 @@
 		/* Player of the decade, and a Hall of Fame class a season at a time.
 		   The alumni index is already the list of men this world remembers and
 		   why; weighting the reasons turns it into a ranking. */
+		/* GROUPED ON THE SCOPED IDENTITY, not on the pid.
+
+		   `a.key` is a BBGM pid, which every export numbers from zero, so
+		   this map used to sum two different men in two different files into
+		   one Hall of Fame row. `a.id` is fingerprint-scoped (see alumniOf),
+		   and the fallback chain keeps a version 1 or 2 export — whose rows
+		   have no id — behaving exactly as it does today rather than
+		   throwing. The season is the last resort so that a row with neither
+		   is still its own man rather than joining a bucket keyed
+		   `undefined`. */
 		const WEIGHT = { "player of the year": 5, "top of the board": 2 };
 		const byMan = {};
 		for (const a of alumni) {
 			const w = WEIGHT[a.why] !== undefined ? WEIGHT[a.why]
 				: /won the title/.test(a.why || "") ? 3 : 1;
-			const m = byMan[a.key] || (byMan[a.key] = {
-				key: a.key, name: a.name, school: a.school, seasons: [], score: 0,
+			const id = a.id || (a.key !== null && a.key !== undefined
+				? "pid:" + a.key : "anon:" + a.season + ":" + a.name);
+			const m = byMan[id] || (byMan[id] = {
+				id, key: a.key, name: a.name, school: a.school, seasons: [], score: 0,
 				reasons: [],
 			});
 			m.score += w;

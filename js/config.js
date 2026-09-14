@@ -160,6 +160,16 @@
 		   the caller (the UI keeps it across rerolls and persists it); the
 		   engine never writes it. */
 		recentPools: null,
+		/* The same memory for the class FLAVOR, which had none — see
+		   flavorMemoryFactor in js/ratings.js. Sixty-six flavors and one draw
+		   a class repeats far sooner than a pool of forty-six builds does,
+		   and the pool is the one that had a dial. Null `recentFlavors` is an
+		   exact no-op, so the default here changes nothing until the caller
+		   starts supplying the ring. */
+		flavorMemory: 0.6,
+		/* The last few classes' flavor names, newest first. Supplied by the
+		   caller exactly as `recentPools` is; the engine never writes it. */
+		recentFlavors: null,
 		/* The class year, transfer path and college a SHARED universe already
 		   drew for each player key, so replaying it reproduces the same men
 		   rather than the same seeds. Supplied by the caller (importUniverse);
@@ -521,6 +531,39 @@
 			if (Number.isFinite(cfg[key])) lw[legacy[key]] = cfg[key];
 		}
 		cfg.leagueWeights = lw;
+		/* AND THE BANDS ARE ENFORCED HERE, at the front door.
+
+		   CLAMP was a table the engine consulted at a dozen read sites and
+		   the review test read against index.html; nothing applied it to a
+		   whole config. The sliders cannot produce an illegal value, so the
+		   panel never needed it — but a shareable link, a saved preset, an
+		   imported settings JSON and a hand-edited URL all arrive here, and
+		   they can carry anything. Clamping once, in the one function every
+		   one of those paths goes through, is the difference between the
+		   panel describing the class you are looking at and merely describing
+		   the class you asked for.
+
+		   To the band the CONTROL offers (sliderRange), not the wider band
+		   behind it, for the same reason: a value the interface cannot show
+		   is a value the interface cannot honestly display. Non-finite values
+		   fall back to the default rather than to a bound — NaN is a broken
+		   file, not a big number — and a key with no declared band is left
+		   exactly as it arrived. */
+		for (const key of Object.keys(CLAMP)) {
+			if (cfg[key] === undefined) continue;
+			/* `null` is NOT missing. Object.assign treats an explicit null as
+			   a value and writes it straight over the default, so a preset or
+			   a settings JSON carrying `"pace": null` used to hand the engine
+			   a null pace — and every arithmetic on it produced NaN quietly,
+			   which is the failure this whole block exists to make impossible.
+			   It is a broken value like any other and goes back to the
+			   default. */
+			if (cfg[key] === null) { cfg[key] = DEFAULTS[key]; continue; }
+			const band = sliderRange(key);
+			const v = Number(cfg[key]);
+			if (!Number.isFinite(v)) { cfg[key] = DEFAULTS[key]; continue; }
+			cfg[key] = v < band.min ? band.min : v > band.max ? band.max : v;
+		}
 		return cfg;
 	}
 
@@ -587,6 +630,67 @@
 				"clamp is only a nonsense guard" },
 		flavorReach: { lo: 0, hi: 100 },
 		recruitMomentum: { lo: 0, hi: 100 },
+		flavorMemory: { lo: 0, hi: 1 },
+
+		/* THE OTHER THIRTY-EIGHT.
+
+		   The eleven above are the ones the engine happened to clamp at a
+		   read site, and the table was written to make those read sites agree
+		   with their sliders. That left a gap at the OTHER entrance: a
+		   shareable link, a saved preset and an imported settings JSON all go
+		   through `make` below, and nothing between them and the engine said
+		   what a legal value was. A link carrying `specialization: 50` ran at
+		   50 while the panel displayed 2.5, which is the tool lying about the
+		   class in front of you — the one thing a shareable link exists not
+		   to do. (Nothing corrupts: eight such values were run and all of
+		   them produced finite ratings and finite box scores. The fault is
+		   silence, not damage.)
+
+		   Every band here is the band its own control already offers, so
+		   declaring them changes nothing a user can reach from the interface
+		   and tools/tests/review.js — which reads every slider's min and max
+		   off index.html and fails on a disagreement — now covers the whole
+		   panel instead of a fifth of it. A deliberate difference between a
+		   control and its band still goes in `floor`/`ceil` with a reason,
+		   the way `pace` and `pDII` do. */
+		classQuality: { lo: -3, hi: 3 },
+		classDepth: { lo: -3, hi: 3 },
+		eliteCount: { lo: 0, hi: 8 },
+		potBias: { lo: -3, hi: 3 },
+		potSpread: { lo: 0, hi: 16 },
+		specialization: { lo: 0, hi: 2.5 },
+		archetypeDiversity: { lo: 0, hi: 100 },
+		buildNoise: { lo: 0, hi: 14 },
+		classFlavor: { lo: 0, hi: 2 },
+		flavorBlend: { lo: 0, hi: 1 },
+		archetypePool: { lo: 0, hi: 385 },
+		weirdness: { lo: -2, hi: 3 },
+		anomalyChoices: { lo: 0, hi: 8 },
+		traitCount: { lo: 0, hi: 6 },
+		variation: { lo: 0, hi: 12 },
+		poolMemory: { lo: 0, hi: 1 },
+		freshmanShare: { lo: 0, hi: 100 },
+		transferShare: { lo: 0, hi: 90 },
+		redshirtShare: { lo: 0, hi: 30 },
+		reclassShare: { lo: 0, hi: 30 },
+		coachTurnover: { lo: 0, hi: 200 },
+		realignmentMemory: { lo: 0, hi: 100 },
+		starReturners: { lo: 0, hi: 300 },
+		portalRate: { lo: 0, hi: 300 },
+		extrapolateYears: { lo: 0, hi: 20 },
+		scoringEnv: { lo: -3, hi: 3 },
+		statNoise: { lo: 0, hi: 2.5 },
+		upsetFactor: { lo: 0, hi: 2 },
+		realignmentRate: { lo: 0, hi: 1 },
+		bluebloodDownYears: { lo: 0, hi: 6 },
+		midMajorLift: { lo: 0, hi: 12 },
+		teamMomentum: { lo: 0, hi: 2.5 },
+		styleDrift: { lo: 0, hi: 3 },
+		seasonEvents: { lo: 0, hi: 14 },
+		awardStrictness: { lo: 0.4, hi: 2 },
+		confAwardStrictness: { lo: 0.4, hi: 2 },
+		proAwardStrictness: { lo: 0.4, hi: 2 },
+		awardNoise: { lo: 0, hi: 3 },
 	};
 	/* The value a slider is allowed to reach, which is the clamp unless a
 	   deliberate floor or ceiling narrows it. */

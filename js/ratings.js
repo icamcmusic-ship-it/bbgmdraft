@@ -2320,7 +2320,15 @@
 		let strength = clamp(cfg && cfg.classFlavor !== undefined ? cfg.classFlavor : 1, 0, 3);
 		if (asked && strength < ASKED_STRENGTH_FLOOR) strength = ASKED_STRENGTH_FLOOR;
 		if (strength <= 0) return null;
-		const f = asked || rng.weighted(CLASS_FLAVORS);
+		/* The draw remembers the last few classes — see flavorMemoryFactor.
+		   One random() either way, so a memory that is off costs the stream
+		   nothing and every seed drawn before this existed is unmoved. */
+		const fMem = clamp(
+			cfg && Number.isFinite(cfg.flavorMemory) ? cfg.flavorMemory : 0, 0, 1);
+		const recentF = (cfg && Array.isArray(cfg.recentFlavors))
+			? cfg.recentFlavors : null;
+		const f = asked || rng.weighted(CLASS_FLAVORS,
+			(x) => x.w * flavorMemoryFactor(x.name, recentF, fMem));
 		if (f.name === "balanced") {
 			return { name: f.name, label: f.label, mult: {}, traits: null, cfg: null,
 				strength, asked: !!asked };
@@ -2731,6 +2739,29 @@
 		   both were clipped to 1, so "in every class lately" and "in the last
 		   one" were penalized identically. */
 		return 1 / Math.pow(POOL_MEMORY_PENALTY, strength * (penalty / most));
+	}
+
+	/* THE SAME MEMORY, ONE LAYER UP.
+
+	   `poolMemory` keeps a build from turning up in class after class, and
+	   `anomalyMemory` does it for the surprises on the stated grounds that
+	   "thirty-two kinds and four draws a class is not enough separation on
+	   its own". There are SIXTY-SIX flavors and exactly ONE draw a class, and
+	   the flavor had no memory at all — so a session generating a dozen
+	   classes handed back a repeat more often than not, on the one axis whose
+	   entire job is to make this year feel unlike last year. The argument for
+	   the other two applies here harder, not more weakly; the asymmetry was
+	   the order the three were written in.
+
+	   `recentFlavors` is a list of names, newest first, where `recentPools`
+	   is a list of name ARRAYS — so the decay, the depth and the
+	   normalization are borrowed rather than re-derived, and the two dials
+	   mean the same thing at the same setting. Null or 0 is an exact no-op,
+	   which is what keeps every shareable link ever made resolving to the
+	   flavor it always drew. */
+	function flavorMemoryFactor(name, recent, strength) {
+		if (!strength || !recent || !recent.length) return 1;
+		return poolMemoryFactor(name, recent.map((n) => (n ? [n] : [])), strength);
 	}
 
 	function pickClassPool(rng, cfg, flavor) {
@@ -3568,7 +3599,7 @@
 		archetypeByName,
 		TAG_RULES, deriveTags,
 		CLASS_FLAVORS, pickFlavor, flavorMultiplier, flavorConfig, pickClassPool,
-		poolMemoryFactor, POOL_MEMORY_DEPTH,
+		poolMemoryFactor, flavorMemoryFactor, POOL_MEMORY_DEPTH,
 		archetypeWeight, poolWeight, RARITY_COMPRESS, CENTER_MIN, CENTER_IN_POOL,
 		centersInPool, CENTER_POOL_SHARE, POOL_PROBES, MIN_PER_BAND, minPerBand,
 		WEIGHT_CAL, bioShare, bioFits, CLASS_YEAR_MIX, PRO_OR_RETURNED_SHARE,

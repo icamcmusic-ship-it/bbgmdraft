@@ -112,7 +112,7 @@ function chain(fileList, over, runners) {
 		rows.push(Object.assign(U.summarize(res, cfg.seed, f.name), {
 			fingerprint: f.fingerprint, result: U.resultFingerprint(res), gap,
 		}));
-		alumni = alumni.concat(U.alumniOf(res, season));
+		alumni = alumni.concat(U.alumniOf(res, season, f.fingerprint));
 		if (E.pastRosterFor(res, season + 1, k).length) {
 			returners.push({ season, index: k, res });
 		}
@@ -567,13 +567,93 @@ ok("the records book finds the longest run at AP No. 1",
 ok("the hall of fame is drawn from the alumni index",
 	a.records.hall.every((m) => a.alumni.some((x) => x.key === m.key)));
 
+/* THE FOUR THAT THE CHAIN DID NOT CATCH.
+
+   Each of these guards a defect that shipped and that nothing here could
+   see: three of them are about a value that is legitimately zero or a key
+   that is legitimately absent, which is precisely the class of fault an
+   end-to-end chain test walks past because the chain still runs. */
+console.log("\nRegressions this harness used to walk past");
+{
+	/* An unbeaten regular season was detected with `(regL || l || 0) === 0`,
+	   which discards the 0 it exists to find and reads the tournament loss
+	   instead. Asserted against the rows the chain actually produced: every
+	   team whose frozen regular-season record is spotless has to be named. */
+	/* The predicate itself, on a hand-built season, because a chain of
+	   fixtures may simply contain no unbeaten team — and a check that can
+	   pass by never meeting its own case is not a check. This is the exact
+	   shape the bug had: a team that went 31-0 in the regular season and
+	   then lost once in March, so regL is 0 and l is 1. */
+	{
+		const fake = {
+			teams: {
+				Georgetown: { name: "Georgetown", conf: "Big East", log: [{}],
+					regW: 31, regL: 0, w: 33, l: 1 },
+				Rutgers: { name: "Rutgers", conf: "Big Ten", log: [{}],
+					regW: 14, regL: 17, w: 14, l: 18 },
+				/* No frozen snapshot at all — the case the fallback exists
+				   for — and beaten, so it must NOT be named either. */
+				Hofstra: { name: "Hofstra", conf: "CAA", log: [{}], w: 22, l: 9 },
+			},
+			players: [], leagueFile: { startingSeason: 2031 },
+		};
+		const row = U.summarize(fake, "seed", "fake.json");
+		ok("a 31-0 team that lost in March is still unbeaten in the regular season",
+			(row.unbeaten || []).length === 1 && row.unbeaten[0] === "Georgetown",
+			JSON.stringify(row.unbeaten));
+	}
+	let missed = 0;
+	let found = 0;
+	a.results.forEach((res, i) => {
+		const row = a.rows[i];
+		if (!row || row.extrapolated) return;
+		const named = new Set(row.unbeaten || []);
+		for (const t of Object.values(res.teams || {})) {
+			if (!t || !t.name || !t.log) continue;
+			const rl = Number.isFinite(t.regL) ? t.regL : t.l;
+			const rw = Number.isFinite(t.regW) ? t.regW : t.w;
+			if (rl === 0 && rw >= 20) { found++; if (!named.has(t.name)) missed++; }
+		}
+	});
+	ok("an unbeaten regular season reaches the timeline row", missed === 0,
+		missed + " of " + found + " unbeaten teams were not named");
+
+	/* One fact, one thread. no1Abroad was emitted from the rows AND from the
+	   alumni index, so any timeline with two of them printed both. */
+	const kinds = {};
+	for (const t of a.threads) kinds[t.kind] = (kinds[t.kind] || 0) + 1;
+	ok("no thread kind that describes a whole timeline is emitted twice",
+		(kinds.no1Abroad || 0) <= 1,
+		"no1Abroad x" + (kinds.no1Abroad || 0));
+
+	/* Alumni rows carry a fingerprint-scoped identity, because a BBGM pid is
+	   unique inside one file and meaningless between two. Without it the
+	   records book sums two different men into one Hall of Fame row. */
+	ok("every alumni row carries a cross-file identity",
+		a.alumni.every((x) => typeof x.id === "string" && x.id.indexOf("/") > 0));
+	const ids = new Set(a.alumni.map((x) => x.id));
+	const keys = new Set(a.alumni.map((x) => x.key));
+	ok("the scoped identity separates men the bare pid collided",
+		ids.size >= keys.size,
+		ids.size + " identities against " + keys.size + " pids");
+
+	/* A man in the Hall of Fame is ONE man: his seasons must all come from
+	   entries that share his identity, not merely his pid. */
+	ok("no hall-of-fame row is two different people",
+		a.records.hall.every((m) => {
+			const mine = a.alumni.filter((x) => (x.id || x.key) === m.id);
+			return mine.length > 0 &&
+				mine.every((x) => x.name === m.name);
+		}));
+}
+
 console.log("\nOne definition of player of the year");
 {
 	const set = U.nationalPOYSet();
 	let disagree = 0;
 	a.results.forEach((res, i) => {
 		const row = a.rows[i];
-		const fromAlumni = U.alumniOf(res, row.season)
+		const fromAlumni = U.alumniOf(res, row.season, row.fingerprint)
 			.filter((x) => x.why === "player of the year")[0];
 		if (!row.poy && !fromAlumni) return;
 		if (!row.poy || !fromAlumni || row.poy.name !== fromAlumni.name) disagree++;

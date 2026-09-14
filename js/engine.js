@@ -4039,12 +4039,62 @@
 	function phaseStock(state) {
 		const players = state.players;
 		const rng = state.rng.child("stock" + variationSalt(state.cfg));
-		// Preseason board: what he was thought to be before a game was played.
-		const pre = players.slice().sort((a, b) => {
-			const sa = a.newOvr * 1.0 + (a.talentPot - a.newOvr) * 0.55;
-			const sb = b.newOvr * 1.0 + (b.talentPot - b.newOvr) * 0.55;
-			return sb - sa;
-		});
+		/* Preseason board: what he was thought to be before a game was played.
+
+		   THE AGE TERM BELONGS ON BOTH BOARDS.
+
+		   The postseason score below carries (21 - draftAge) * 1.8 on the
+		   argument that every scout in the sport breaks a tie between a
+		   19-year-old and a 22-year-old the same way. That argument is not
+		   about the season — it is about the man — so it was true in October
+		   too, and leaving the term off this board did not model a scouting
+		   opinion that changed. It put a 5.4-point age gradient into
+		   `stockMove`, which is the DIFFERENCE of the two boards, where the
+		   noise term's own sd is 1.8: a three-sigma bias that no game
+		   produced.
+
+		   Measured over eight classes and 480 prospects at default settings,
+		   before this line existed: freshmen moved +3.12 places on average
+		   (96 risers against 47 fallers) and seniors and graduates -3.74 (34
+		   against 76). So 62% of freshmen were risers and 63% of seniors were
+		   fallers before anybody played, and the Risers and Fallers panels —
+		   and every news line reading "has climbed N spots from his preseason
+		   ranking" — were reporting the age term rather than the year. With
+		   the term on both boards it cancels out of the difference and
+		   stockMove is once again what the season did.
+
+		   `nonNcaa` rides along for the same reason: where a man plays is
+		   known in the preseason, not discovered in March.
+
+		   AND THE COEFFICIENT IS NOT 1.8, WHICH IS THE INTERESTING PART.
+
+		   Copying the postseason term across verbatim was the obvious fix and
+		   it is wrong: measured the same way, it does not remove the bias, it
+		   REVERSES it — freshmen -1.73 and seniors +2.40, a gap of -4.12
+		   against the +6.86 it started at. The reason is in the comment below,
+		   which says the postseason term was tripled to 1.8 to track the
+		   class-year efficiency gradient: upperclassmen genuinely produce more
+		   (EXP_EFF, and `prod` enters the score at 0.30 a point), so part of
+		   that 1.8 is not a prior about youth at all — it is an offset against
+		   production the board is about to read.
+
+		   Only the PRIOR belongs on a board with no production in it. Swept
+		   over the same eight classes and 480 prospects, the gap between the
+		   two class years runs +1.32 at 0.9, +0.66 at 1.0, -0.01 at 1.1, -0.54
+		   at 1.2 and -1.14 at 1.3 — so the prior is 1.1 and the remaining 0.7
+		   is the production offset, which is exactly the split the postseason
+		   comment describes without separating. tools/tests/board.js bands the
+		   residual on both class years and on the gap.
+
+		   Read plainly: scouts liked the nineteen-year-old in October by about
+		   1.1 points of board score, and the other 0.7 is what they give back
+		   in March for a senior's better box score. */
+		const PRE_AGE_PRIOR = 1.1;
+		const preScore = (p) => p.newOvr * 1.0 +
+			(p.talentPot - p.newOvr) * 0.55 +
+			(21 - draftAge(p, state)) * PRE_AGE_PRIOR +
+			(p.nonNcaa ? -1.2 : 0);
+		const pre = players.slice().sort((a, b) => preScore(b) - preScore(a));
 		pre.forEach((p, i) => { p.preseasonRank = i + 1; });
 
 		// Post-season board: what the year actually showed. Production and
@@ -4236,6 +4286,9 @@
 				// See variationSalt / pickClassPool: both reshape the class
 				// from the build phase down.
 				"variation", "flavorHint", "flavorBlend", "poolMemory", "recentPools",
+				/* The flavor's own memory, drawn in pickFlavor — same pair
+				   and same contract as poolMemory/recentPools above. */
+				"flavorMemory", "recentFlavors",
 				"anomalyMemory", "recentAnomalies", "flavorReach", "narrative",
 				/* The anomaly shortlist, and the meta-dial that moves half of
 				   the settings above. Both reshape the class from here down. */

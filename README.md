@@ -589,6 +589,7 @@ pixels the table becomes one card per prospect.
 | **Flavor strength** | How strongly the flavor leans (guard-heavy, defense-first, a weak year, one-and-done heavy, a transfer-portal year, European in style, a post-up renaissance, feast or famine, a coaching carousel year, …). Some flavors also bend the class itself — how old it is, how good the top of it is — but only settings you have left at their default. |
 | **Variation** | The neighborhood of a seed. 0 is the class that seed has always produced. 1, 2, 3… keep its flavor, its build pool and its curve and re-roll every individual player, so the year is still "the year of the stretch bigs, weak at the top" and the sixty-eight men in it are different. Every shareable link ever made is variation 0, so none of them moved. |
 | **Avoid repeating recent builds** | How hard a build that was in one of the last three classes is pushed out of this one. Measured, the four heaviest builds returned in 14% of pools with this off and 6% with it at full strength — the ordering the weights describe survives, the repetition does not. |
+| **Avoid repeating recent flavors** | The same memory one layer up, and the axis that never had one. Sixty-six flavors drawn one a class repeat far sooner than forty-six builds drawn out of 385 do, so a session generating a dozen classes kept handing back a year it had already had. A null history is an exact no-op, so every shareable link ever made still resolves to the flavor it drew. |
 | **Builds per class** | How many of the 385 archetypes one class is drawn from. Lower is more distinctive ("the year of the stretch bigs"); 0 makes every build eligible in every class, which is one of everything, every time. |
 | **Anomalies per class** | How many forced surprises a class gets, drawn from thirty-two kinds: a five-star bust, an unranked riser, a 24-year-old JUCO, a 7'4" project, the coach's son, a man who never played a high school game, a season that ended in February — and six that change the numbers rather than the note: a suspension, an eligibility hold that costs the first ten games, a mid-season transfer, a double-double machine, a defensive breakout, and a year-long shooting slump that costs about seven points of 3P% off what his jumper says. |
 | **Realignment** | How often the map of college basketball changes. A realignment moves two to five good programs one rung up into a league whose footprint overlaps theirs — the database carries no state per school, so geography is a fact about the conference, and Tennessee State no longer lands in a New England league — and every conference stays schedulable. |
@@ -2994,6 +2995,231 @@ commits twenty fouls, not sixteen, and a model that cannot say so produces that
 era's free-throw volume with the modern game's whistle behind it — which shows
 up as free throws per foul, a ratio this harness bands precisely because the
 two are the same event seen from two sides. The pool reads the era now.
+
+## The full-search audit of September 2026
+
+A read of all 67,452 lines against seven questions, with every claim either
+read in the source or measured by running it. The 918-check suite passed
+throughout, which is the point worth starting with: none of what follows was
+catchable by it, and all of it had shipped.
+
+Four of the eight defects share one shape. A value that is legitimately zero,
+or a key that is legitimately absent, met a guard written with `||` — and `||`
+cannot tell "absent" from "zero", so each guard discarded exactly the input it
+existed to catch. That is not a typo repeated four times; it is an idiom that
+reads correctly in English ("the frozen record, or the running one, or nothing")
+and is wrong in JavaScript, and it will come back unless the fallbacks are
+written on presence.
+
+### The thread that had never once fired
+
+An undefeated regular season is the rarest thing a college season produces, and
+the timeline detected one with `(x.regL || x.l || 0) === 0`. `regL` is the loss
+count frozen at the end of the regular season; `l` keeps growing through March.
+A team that really went unbeaten has `regL === 0` — falsy — so the expression
+fell through and read the loss that ended its tournament. Every team the check
+was written for failed it, and the only teams that could pass were teams that
+also won the national title.
+
+Measured on seed `audit1`: Georgetown finished 31-0 and the list came back
+empty. `tools/universe.js` now asserts the predicate directly, on a hand-built
+season with a 31-0 team that lost once in March, because the fixture chain
+happens to contain no unbeaten team at all — and a check that can pass by never
+meeting its own case is not a check. The same `||` guard on the quality-win bar
+in `js/teams.js` went with it.
+
+### Two men, one row in the Hall of Fame
+
+`playerId(fingerprint, key)` exists in `js/universe.js` with a comment
+explaining that a BBGM pid is unique inside one export and meaningless between
+two, and that walking the files in order and taking the first occurrence of each
+key hands the 2025 class's biography to the 2026 class's man with the same pid.
+`biographyOf` was fixed. `alumniOf` was not, and `records()` groups the alumni
+index with `byMan[a.key]` to build the player of the decade and the annual Hall
+of Fame class — so in a chain of real exports it summed the scores of different
+men under whichever name arrived first. On the harness fixtures, seven pids
+resolved to one identity.
+
+Alumni rows now carry `id`, the fingerprint-scoped identity, beside the
+file-local `key` that callers matching against one result still want; `records()`
+groups on it and degrades to the old behavior for a version 1 or 2 export, which
+has no ids to read. The extrapolated seasons were a second, independent casualty
+of the same key design: they emitted `key: null`, so a five-year gap elected one
+imaginary man five times and put him above everyone who actually played.
+
+This is also the half-landed structural change three earlier passes recorded as
+the enabling one. `registryOf` is built on `playerId` and is already exported;
+routing `records()` through it rather than through the alumni list is the next
+edit, and the thread the file declines to write — "he was one of the names of
+the year in 2026 and 2029, he came back" — becomes writable behind it.
+
+### A draft board that was sorted by age before anybody played
+
+`stockMove` is `preseasonRank - boardRank`: the difference between two scores.
+The postseason score carries `(21 - draftAge) * 1.8`, on the stated argument
+that every scout in the sport breaks a tie between a nineteen-year-old and a
+twenty-two-year-old the same way. The preseason score carried no age term at
+all. That argument is about the man rather than about the season, so the
+asymmetry did not model a scouting opinion that changed — it put a 5.4-point age
+gradient into the difference, against a noise term whose own sd is 1.8.
+
+Measured over eight classes and 480 prospects: freshmen moved +3.12 places on
+average, 96 risers against 47 fallers; seniors and graduates -3.74, 34 against
+76. Sixty-two per cent of freshmen were risers and 63% of seniors were fallers
+before a game was played, and the Risers and Fallers panels — and every news
+line reading "has climbed N spots from his preseason ranking" — were reporting
+the class year.
+
+**The obvious fix was wrong, which is the part worth recording.** Copying the
+term across at 1.8 does not remove the bias, it reverses it: -1.73 and +2.40, a
+gap of -4.12 against the +6.86 it started at. Part of that 1.8 was never a prior
+about youth — it is an offset against the class-year efficiency gradient the
+postseason board is about to read through `productionScore`, which is what the
+comment beside it means when it says the figure was tripled to track EXP_EFF.
+Only the prior belongs on a board with no production in it. Swept over the same
+classes, the gap runs +1.32 at 0.9, +0.66 at 1.0, **-0.01 at 1.1**, -0.54 at 1.2
+and -1.14 at 1.3. So the prior is 1.1 and the remaining 0.7 is the production
+offset, and `PRE_AGE_PRIOR` says so on its own line. Scouts liked the
+nineteen-year-old in October by about a point of board score, and gave back the
+rest in March for a senior's better box score.
+
+### A ballot drawn inside its own sort
+
+The three national coaching trophies shared one `noise` map, drawn per coach and
+added to the Naismith, the AP, the Iba, the Hugh Durham and every conference
+award alike — so the panels were not disagreeing, they were reading one
+perturbed ranking through different weights, and the player-of-the-year
+electorates had been given exactly this treatment years earlier while the
+coaching side never was. Each award now draws its own swing off `crng.child(award)`,
+over a smaller shared component; the two variances sum to the old one, so this
+redistributes the disagreement rather than adding any.
+
+Underneath it was something worse. Two of the trophies called `crng.normal(0, 2)`
+*inside the function handed to `sort`*, which calls it twice per comparison. The
+comparator was therefore inconsistent — `pick(a)` returned a different number
+each time it was asked, so the winner depended on the engine's comparison order
+— and it consumed a number of draws that depended on how many comparisons the
+sort happened to make, which puts a shared RNG stream at a position no replay
+can be relied on to reproduce. Every score is drawn once, into a map, before
+anything is sorted.
+
+### The front door had no lock
+
+`Config.CLAMP` declared eleven bands; `Config.make` applied none of them. The
+clamps were consumed at individual engine read sites and by
+`tools/tests/review.js`, which reads every slider's min and max off `index.html`
+and fails when a control cannot reach the band behind it — a genuinely valuable
+check, and one that only covers the entrance a slider uses. The other entrance
+is `make` itself, which is where a shareable link, a saved preset, an imported
+settings JSON and a hand-edited URL all arrive. A link carrying
+`specialization: 50` ran at 50 while the panel displayed 2.5.
+
+Nothing corrupted: eight deliberately out-of-range settings were run and all
+produced finite ratings and finite box scores. The fault was silence — the tool
+describing a class other than the one on screen, which is the one thing a
+shareable link exists not to do. Every slider on the page now declares a band,
+`make` enforces it, and a value that is not a number (or is an explicit `null`,
+which `Object.assign` writes straight over the default and which used to reach
+the engine as a null pace) goes back to its default rather than to a bound,
+because a bound would be the tool inventing a decision nobody made.
+
+A harness is not a link, and one place says so out loud: the solver sweep in
+`tools/validate.js` asks for specialization 3, outside the 0–2.5 the slider
+reaches, precisely so the solver is posed a question harder than any user can.
+It sets the value after `make` rather than through it, so the intent is visible
+instead of the clamp quietly turning it into a second measurement at 2.5.
+
+### The flavor had no memory
+
+`poolMemory` keeps a build from turning up in class after class. `anomalyMemory`
+does the same one layer down, on the stated grounds that thirty-two kinds and
+four draws a class is not enough separation on its own. There are sixty-six
+flavors and exactly **one** draw a class, and the flavor — the single most
+visible thing about a class, the thing a year is remembered as — had no memory
+at all. The argument for the other two applies here harder, not more weakly; the
+asymmetry was the order the three were written in.
+
+`flavorMemory` and `recentFlavors` mirror `poolMemory` and `recentPools` exactly,
+borrowing the same decay, depth and normalization rather than re-deriving them,
+so the two dials mean the same thing at the same setting. A null history is an
+exact no-op down to the RNG stream, which is what keeps every shareable link ever
+made resolving to the flavor it always drew.
+
+### Interface
+
+The formatted value of every slider lives in a `<b>` inside the control's own
+`<label>`, so it is part of the accessible **name** — which meant a screen reader
+announced the formatted value and then the raw one, the same quantity twice in
+two units: "Conference realignment 35%, 0.35". On a dial whose units are not a
+number at all ("21 builds", "2.60x") the raw figure is simply noise.
+`aria-valuetext` replaces it, which is exactly what it is for, and the `<b>` stays
+the visual readout it always was.
+
+`effectiveDiff` already existed and already fed a panel, and that panel is a
+collapsed `<details>` in another fieldset — so the one place a user is certainly
+looking when a number is wrong, the control itself, still read `1.00x` while the
+season had been simulated at `1.45x`. The panel keeps the whole story; a ghost
+value beside each affected slider puts the one fact next to the thing it
+contradicts.
+
+Double-clicking a slider puts it back to its default, in one undo entry. "Reset
+to defaults" is all-or-nothing and asks for confirmation because it throws away a
+session; undoing one exploratory drag had no gesture at all, even though the
+panel already prints "· default 21 builds" beside the hint, so the number you
+want is on screen and the only way to act on it was to drag back to it by hand.
+
+And the board's sort comparator called a bare `localeCompare` while `byName`
+forty lines above it — added, per its own comment, because byte order put
+"St. John's (NY)" in the wrong place — passes `{ sensitivity: "base" }`. The
+biggest list of names in the tool was the one that never got the fix.
+
+### What the harness learned to see
+
+`tools/tests/board.js` is new and every check in it is a claim about a
+**relationship** between two things the engine already computed — the two boards,
+two electorates, the panel and the config — rather than about either on its own.
+That is the class of fault an output-hash suite cannot see: a golden hash proves
+the output did not change, not that it was ever right, and 918 checks proved
+exactly that about all eight of these.
+
+The CI workflow gained `timeout-minutes` and a `concurrency` group. Six jobs run
+on every push, the regression suite alone is tens of minutes, and nothing
+cancelled a superseded run — so a branch pushed three times in ten minutes had
+three full matrices racing and two of them were answering a question nobody was
+asking any more. Runs on the default branch are never cancelled, because there
+the answer is the record rather than feedback.
+
+### Checked, and not faults
+
+The scoreboard anchor scales points and the attempts behind them by one factor
+and leaves turnovers alone, so a line's usage, recomputed from its own printed
+attempts, drifts from the printed `usg` — mean error 0.0000 over 12,494 rotation
+lines, worst single line 3.8 percentage points. It is left alone deliberately and
+the reasoning is now written where a reader checking the arithmetic will find it:
+`usg` is not a derived box-score figure, it is the usage the solver *allocated*,
+and the efficiency model consumed it before any of these numbers existed.
+Recomputing it after the anchor would make the printed usage disagree with the
+curve that produced the printed efficiency — a worse inconsistency, to correct a
+mean error of zero. The comment beside the clamp said ±15% while the clamp said
+0.82/1.18 for as long as both existed; the clamp is the one that ran.
+
+No `innerHTML` is used for anything but clearing a node in any of the 24 modules.
+Every `Math.random()` in the codebase mints a seed and none of them is in a draw.
+There are no TODO, FIXME or HACK markers. All 69 settings are declared in a phase
+dependency list except the two that are timeline display rather than simulation
+input, so the staged cache is complete — which is the property the warm-versus-cold
+guarantee rests on. And the ovr solver is correct for the reason it claims: the
+floor ease is C1 at a knee clamped to `base - 1`, so `k = 0` is the identity for
+every rating and every base, and the bisection's monotonicity holds.
+
+### Left for the next pass
+
+Per-game logs for the returning rotation, a simulated season for the professional
+leagues abroad, and a per-position block model are all named in *Known limits*
+and none of them moved here. Nor did the rest of the interface list: column
+presets on the board, a pinned-baseline delta column, a "why is he here?" popover
+and an optional concatenation step for the 27 script tags are all still
+proposals. The registry work above is the one of them that started.
 
 ## Known limits
 
