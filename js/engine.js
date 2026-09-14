@@ -935,6 +935,22 @@
 		return v > 0 ? "/v" + v : "";
 	}
 
+	/* WHETHER THE IMPORTED HEIGHTS ARE PINNED.
+
+	   Read in the two places a draw could move a player's hgt rating — the
+	   size drift in the build phase and the "physical outlier" anomaly — so
+	   the answer lives in one function rather than in two conditions that
+	   have to be kept saying the same thing. Defaults to ON for a cfg that
+	   predates the setting (an old shareable link, a saved preset): a link
+	   made before the option existed was made by somebody who had never been
+	   offered the choice, and the choice the tool now makes for them is the
+	   one that leaves the file's own numbers alone.
+
+	   See Config.DEFAULTS.lockHeights for what the setting is FOR. */
+	function heightsLocked(cfg) {
+		return !cfg || cfg.lockHeights === undefined || !!cfg.lockHeights;
+	}
+
 	function rerollSalt(p, axis) {
 		const ov = (p && p.override) || {};
 		/* Axis-wise rerolls. "Reroll just him" redraws everything about a
@@ -1578,7 +1594,7 @@
 					hgt: clamp(Math.round(p.origRatings.hgt +
 						(p.newHgtInches - p.hgtInches) * HGT_PER_INCH), 0, 100),
 				});
-			} else if (cfg.varySize) {
+			} else if (cfg.varySize && !heightsLocked(cfg)) {
 				p.newHgtInches = clamp(
 					Math.round(p.hgtInches + prng.normal(0, 1.1)), 64, 92,
 				);
@@ -1749,7 +1765,13 @@
 		{
 			name: "physical outlier", w: 1.6,
 			label: "a physical outlier",
-			pick: (p) => true,
+			/* The one anomaly that rewrites a man's height. With heights
+			   locked (see Config.lockHeights) that is the one thing it is not
+			   allowed to do, so it is not eligible at all rather than applied
+			   with its point removed: an anomaly whose whole content is the
+			   height is not an anomaly once the height stays put, and the
+			   budget spends the slot on one that still says something. */
+			pick: (p, ctx) => !heightsLocked(ctx && ctx.cfg),
 			apply: (p, r, ctx) => {
 				const tall = r.random() < 0.66;
 				const inches = tall ? r.int(87, 89) : r.int(66, 68);
@@ -2369,7 +2391,7 @@
 			for (let i = 0; i < n + extra && kinds.length; i++) {
 				const kind = rng.weighted(kinds, weightOf);
 				kinds.splice(kinds.indexOf(kind), 1);
-				const options = players.filter((p) => !claimed.has(p.key) && kind.pick(p));
+				const options = players.filter((p) => !claimed.has(p.key) && kind.pick(p, ctx));
 				if (!options.length) { i--; continue; }
 				const who = options[Math.floor(rng.random() * options.length)];
 				claimed.add(who.key);
@@ -2405,7 +2427,7 @@
 		for (let i = 0; i < n && kinds.length; i++) {
 			const kind = rng.weighted(kinds, weightOf);
 			kinds.splice(kinds.indexOf(kind), 1);
-			const options = players.filter((p) => !used.has(p.key) && kind.pick(p));
+			const options = players.filter((p) => !used.has(p.key) && kind.pick(p, ctx));
 			// A kind nobody in this class fits does not spend one of the
 			// class's slots; the next kind in line does.
 			if (!options.length) { i--; continue; }
@@ -4204,6 +4226,7 @@
 			deps: [
 				"seed", "ovrMode", "classQuality", "classDepth", "eliteCount",
 				"specialization", "archetypeDiversity", "buildNoise", "varySize",
+				"lockHeights",
 				"archetypeWeights", "classFlavor", "freshmanShare", "transferShare",
 				"redshirtShare", "reclassShare", "leagueWeights", "wEuroLeague",
 				"wGLeague", "wNBL", "pDII", "overrides",
@@ -7347,6 +7370,7 @@
 		buildNote, classYear, rankCohort, hsClassOf, destinationPool, talentTerm,
 		assignClassYears, inchesFromHgtRating, validateLeagueFile, findSeason, playerKey,
 		SIZE_OVERRIDE_KEYS, SURPRISES, DRAFT_EVENTS, PACE_MIN, PACE_MAX,
+		heightsLocked,
 		draftClassesIn, extractDraftClass, MIN_CLASS, PROSPECT_TIDS,
 		MAX_CLASS, ANOMALY_MEMORY_DEPTH, NARRATIVES, isLeagueFile,
 		rerollSalt,

@@ -18,6 +18,29 @@
 		archetypeDiversity: 85,// 0-100, how often a non-balanced archetype is used
 		buildNoise: 5,         // per-rating random jitter (rating points)
 		varySize: false,       // let hgt/weight drift with the archetype
+		/* THE IMPORTED HEIGHT IS THE PLAYER'S HEIGHT.
+
+		   A prospect's hgt rating comes from the file he was imported from, and
+		   it is the one number in his vector a user can check against something
+		   outside the tool: the man is listed at 6'7" and the rating says 6'7".
+		   Two draws could move it anyway — the size drift above, and the
+		   "physical outlier" anomaly, which grows or shrinks somebody by half a
+		   foot — and both are keyed off the RNG, so every reroll redrew them.
+		   The cost is specific rather than aesthetic: a reroll is for looking at
+		   a class again, and a class whose heights move underneath it is a class
+		   whose archetype gates, positions and rebounding all moved too, so
+		   "reroll until I like the top five" kept handing back a different five
+		   men rather than the same five drawn again.
+
+		   On (the default), the hgt rating and the listed height are pinned to
+		   what the file said for EVERY player, and no reroll, variation, size
+		   drift or anomaly can move either. A height the user sets BY HAND on a
+		   player still moves it, because that is not a draw — it is the user
+		   saying how tall the man is.
+
+		   Off restores the old behavior, for anyone who wants the heights to be
+		   part of what a reroll redraws. */
+		lockHeights: true,
 		// How strongly each class picks up a flavor of its own (guard-heavy,
 		// big-heavy, defensive, shooting-rich, …). 0 = every class has the same
 		// archetype mix, 2 = a class is unmistakably one thing.
@@ -56,7 +79,7 @@
 		   against a table of 361, in the very comment written to stop exactly
 		   that. A sentence nothing reads is a sentence that goes stale.
 
-		   the table is 361 builds today */
+		   the table is 385 builds today */
 		archetypePool: 46,
 		/* How many forced anomalies a class gets: a five-star bust, an
 		   unranked recruit who turns into a lottery pick, a 24-year-old JUCO,

@@ -142,7 +142,7 @@
 		     a class drew exactly one flavor. See blendFlavor in js/ratings.js:
 		     0 is a complete no-op, down to the RNG stream. -->
 		<div class="ctl"><label for="flavorBlend">Two flavors at once <b></b></label><input type="range" id="flavorBlend" min="0" max="1" step="0.05"></div>
-		<div class="ctl"><label for="archetypePool">Builds per class <b></b></label><input type="range" id="archetypePool" min="0" max="361" step="1"></div>
+		<div class="ctl"><label for="archetypePool">Builds per class <b></b></label><input type="range" id="archetypePool" min="0" max="385" step="1"></div>
 		<!-- One dial over the five that all answer "how far from the middle
 		     should this world sit". It moves a setting only while that setting
 		     is still at its default, so it never overrules a decision anybody
@@ -163,6 +163,8 @@
 		<div class="ctl"><label for="variation">Variation <b></b></label><input type="range" id="variation" min="0" max="12" step="1"></div>
 		<div class="ctl"><label for="poolMemory">Avoid repeating recent builds <b></b></label><input type="range" id="poolMemory" min="0" max="1" step="0.05"></div>
 		<div class="ctl"><label><input type="checkbox" id="varySize"> Let height &amp; weight drift with the build</label></div>
+		<div class="ctl"><label><input type="checkbox" id="lockHeights"> Keep every imported height exactly as the file listed it</label></div>
+		<p class="hint">On, nothing the tool draws can move a player's height rating — not a reroll, not the size drift, not the 7'4" anomaly. A height you set by hand still moves it.</p>
 		<p class="hint">Every rebuilt player is re-solved against BBGM's own ovr formula, so specializing a build never changes his overall.</p>
 	</details>
 

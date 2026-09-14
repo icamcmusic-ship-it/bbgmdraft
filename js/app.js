@@ -1209,6 +1209,7 @@
 		$("ovrMode").value = state.cfg.ovrMode;
 		$("priorSeasons").value = state.cfg.priorSeasons;
 		$("varySize").checked = !!state.cfg.varySize;
+		$("lockHeights").checked = state.cfg.lockHeights !== false;
 		$("universe").checked = !!state.cfg.universe;
 		$("narrative").checked = !!state.cfg.narrative;
 		$("extrapolateGaps").checked = state.cfg.extrapolateGaps !== false;
@@ -1312,7 +1313,7 @@
 	}
 	function paintPhaseCosts() {
 		for (const key of SLIDERS.concat(
-			["era", "ovrMode", "varySize", "priorSeasons", "universe", "narrative",
+			["era", "ovrMode", "varySize", "lockHeights", "priorSeasons", "universe", "narrative",
 				"collegeSource"])) {
 			const input = $(key);
 			if (!input) continue;
@@ -2108,7 +2109,7 @@
 	const TIER_SHAPE = new Set([
 		"preset", "seed", "ovrMode", "classQuality", "classDepth", "eliteCount",
 		"specialization", "classFlavor", "flavorHint", "archetypePool",
-		"freshmanShare", "transferShare", "varySize", "universe", "era",
+		"freshmanShare", "transferShare", "varySize", "lockHeights", "universe", "era",
 		"pDII", "collegeSource", "talentCoupling", "birthplaceWeight",
 	]);
 	const TIER_SEASON = new Set([
@@ -2335,6 +2336,12 @@
 		$("varySize").addEventListener("change", () => {
 			pushUndo("toggled Vary size");
 			state.cfg.varySize = $("varySize").checked;
+			markDirty();
+			scheduleRun();
+		});
+		$("lockHeights").addEventListener("change", () => {
+			pushUndo("toggled locked heights");
+			state.cfg.lockHeights = $("lockHeights").checked;
 			markDirty();
 			scheduleRun();
 		});
