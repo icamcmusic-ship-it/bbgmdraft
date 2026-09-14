@@ -74,8 +74,16 @@
 		/* "1 triple-doubles", "1 teams in the field": a count of one with a
 		   plural noun after it. "No. 1 seeds" and "1 of 60 first-place
 		   votes" are legal, which is what the lookbehind and the stop list
-		   below are for. */
-		["number agreement", /(?<![\d.]|No\. )\b1 ([a-z][a-z-]*[b-df-hj-np-tv-ze]s)\b/],
+		   below are for.
+
+		   `\d-` is the third exception: a RECORD ends in the loss count, and a
+		   team that lost one game reads "Michigan's 40-1 understates what the
+		   Big Ten schedule asked of it" — where the "1" is not a count of
+		   anything and the word after it is a verb. Every record in the file
+		   is rendered this way, so without it the rule fails on any article
+		   about a one-loss team, which is exactly the team articles get
+		   written about. */
+		["number agreement", /(?<![\d.]|\d-|No\. )\b1 ([a-z][a-z-]*[b-df-hj-np-tv-ze]s)\b/],
 		/* "his 1th season", "a 2th-round pick": an ordinal written as n+"th"
 		   by a template that did not have ordinal(). 11th/12th/13th are the
 		   legal exceptions the lookbehind protects. */

@@ -17,7 +17,12 @@ module.exports = function (ok, V) {
 	{
 		let outliers = 0, offBand = 0, worst = "";
 		for (let s = 0; s < 24; s++) {
-			const res = E.run(V.realisticClass(500 + s, 70), C.make({ seed: "o" + s }));
+			/* The anomaly only draws with heights unlocked — the default
+			   pins every imported height, and the outlier's whole content is
+			   the height. See Config.lockHeights and the "Locked heights"
+			   block in tools/test.js. */
+			const res = E.run(V.realisticClass(500 + s, 70),
+				C.make({ seed: "o" + s, lockHeights: false }));
 			for (const p of res.players) {
 				if (!p.sizeOutlier) continue;
 				outliers++;

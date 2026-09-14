@@ -794,6 +794,46 @@
 		{ name: "Practice-Gym Legend", min: 0, max: 100, w: 0.7, pot: 5, vol: 1.3, t: ["raw", "scoring", "shooting"], o: { tp: 16, fg: 12, jmp: 8, drb: 6, endu: -18, diq: -12, reb: -8, stre: -4 } },
 		{ name: "Position-Change Project", min: 0, max: 100, w: 0.95, pot: 6, t: ["raw", "rebounding", "playmaking"], o: { pss: 12, reb: 12, oiq: 6, stre: 6, tp: -14, ft: -12, diq: -8, spd: -2 } },
 		{ name: "Draft-and-Stash Candidate", min: 0, max: 100, w: 0.75, pot: 6, bio: { proOrReturned: true }, t: ["raw", "shooting", "athletic"], o: { tp: 12, jmp: 12, spd: 8, ft: 8, oiq: -16, diq: -12, drb: -8, stre: -4 } },
+		/* THE 2026 ADDITIONS.
+
+		   Written for the same reason the block above it was: the table is a
+		   MEMORY, not a taxonomy. A twenty-season universe draws four hundred
+		   pool slots, and every build the table does not hold is a season that
+		   reads like the last one. Each row below answers something the table
+		   could not already say — a guard whose whole offense is the free
+		   throw line and the pull-up, a big whose passing is the reason he
+		   plays, a wing who is a defensive scheme rather than a scorer — and
+		   each is separated from its nearest neighbour by its shape, its gate,
+		   or both. The redundancy sweep in tools/test.js is what decides that,
+		   not the author's opinion of how different two names sound. */
+		// --- guards ---------------------------------------------------------
+		{ name: "Stretch Backup Point", min: 0, max: 46, w: 1.0, pot: -4, t: ["guard", "shooting", "playmaking"], o: { tp: 16, pss: 14, oiq: 8, ft: 6, ins: -16, dnk: -12, reb: -10, jmp: -6 } },
+		{ name: "Hesitation-Dribble Scorer", min: 0, max: 48, w: 1.1, t: ["guard", "scoring"], o: { drb: 16, fg: 14, spd: 8, ft: 6, reb: -14, diq: -12, stre: -10, oiq: -8 } },
+		{ name: "Charge-Taking Guard", min: 0, max: 50, w: 0.85, t: ["guard", "defense", "durability"], o: { diq: 16, oiq: 12, endu: 10, stre: 8, jmp: -16, dnk: -14, ins: -10, spd: -6 } },
+		{ name: "Line-Drive Three-Point Bomber", min: 0, max: 54, w: 0.9, vol: 1.3, t: ["guard", "shooting"], o: { tp: 22, oiq: 8, pss: 6, ft: 6, drb: -16, ins: -14, stre: -10, jmp: -4 } },
+		{ name: "Foul-Drawing Pull-Up Guard", min: 0, max: 50, w: 0.95, t: ["guard", "scoring"], o: { fg: 16, stre: 12, ft: 10, ins: 8, tp: -16, diq: -12, reb: -10, jmp: -6 } },
+		{ name: "Walk-It-Up Game Manager", min: 0, max: 46, w: 0.85, pot: -5, t: ["guard"], o: { oiq: 16, drb: 12, ft: 10, diq: 6, tp: -16, dnk: -12, jmp: -10, reb: -6 } },
+		// --- wings ----------------------------------------------------------
+		{ name: "Switch-Everything Forward", min: 42, max: 71, w: 1.2, t: ["wing", "defense", "durability"], o: { diq: 16, stre: 12, endu: 10, reb: 8, tp: -16, drb: -12, pss: -10, ft: -6 } },
+		{ name: "Handoff-Hub Forward", min: 42, max: 70, w: 0.9, t: ["wing", "playmaking", "shooting"], o: { pss: 16, oiq: 12, tp: 10, stre: 6, spd: -16, drb: -12, dnk: -10, reb: -6 } },
+		{ name: "Second-Side Creator", min: 38, max: 68, w: 1.05, pot: 2, t: ["wing", "scoring", "playmaking"], o: { fg: 14, pss: 12, drb: 10, oiq: 6, reb: -14, diq: -12, stre: -10, endu: -6 } },
+		{ name: "Wing Who Posts Smaller Guards", min: 38, max: 68, w: 1.05, t: ["wing", "scoring"], o: { ins: 16, stre: 12, ft: 8, oiq: 6, tp: -16, spd: -12, pss: -10, jmp: -6 } },
+		{ name: "Transition-Defense Wing", min: 36, max: 66, w: 0.95, t: ["wing", "defense", "athletic"], o: { spd: 16, endu: 14, diq: 10, oiq: 6, ins: -16, fg: -12, reb: -10, ft: -8 } },
+		{ name: "Forty-Minute Forward", min: 40, max: 70, w: 1.0, inj: 0.75, t: ["wing", "durability", "rebounding"], o: { endu: 18, reb: 12, stre: 8, diq: 6, tp: -16, drb: -12, spd: -10, dnk: -6 } },
+		// --- bigs -----------------------------------------------------------
+		{ name: "Chase-Down Shot Blocker", min: 58, max: 100, w: 1.05, t: ["big", "defense", "athletic"], o: { jmp: 16, spd: 12, diq: 10, endu: 6, ins: -16, ft: -12, pss: -10, stre: -6 } },
+		{ name: "Zone-Buster Big", min: 56, max: 92, w: 0.85, t: ["big", "playmaking"], o: { oiq: 16, fg: 12, pss: 10, ft: 10, spd: -16, dnk: -12, reb: -10, endu: -6 } },
+		{ name: "Foul-Prone Rim Protector", min: 62, max: 100, w: 1.1, t: ["big", "defense", "raw"], o: { jmp: 16, diq: 14, reb: 8, stre: 6, oiq: -16, ft: -12, pss: -10, drb: -6 } },
+		{ name: "Jump-Hook Specialist", min: 60, max: 100, w: 0.95, t: ["big", "scoring"], o: { ins: 18, ft: 10, oiq: 8, stre: 6, spd: -16, drb: -12, pss: -10, jmp: -4 } },
+		{ name: "Immobile Stretch Five", min: 60, max: 100, w: 0.9, pot: -4, t: ["big", "shooting"], o: { tp: 20, ft: 10, oiq: 6, stre: 6, spd: -18, endu: -12, diq: -8, drb: -4 } },
+		{ name: "Second-Chance Finisher", min: 58, max: 100, w: 1.2, t: ["big", "rebounding", "scoring"], o: { reb: 16, ins: 12, dnk: 8, stre: 8, oiq: -16, pss: -12, tp: -10, ft: -6 } },
+		// --- everyone ---------------------------------------------------------
+		{ name: "Summer National-Team Riser", min: 0, max: 100, w: 0.8, pot: 5, t: ["raw", "athletic", "defense"], o: { diq: 12, spd: 12, jmp: 8, endu: 6, ft: -16, tp: -12, pss: -8, ins: -4 } },
+		{ name: "Reclassified a Year Early", min: 0, max: 100, w: 0.75, pot: 8, bio: { years: ["Freshman"] }, t: ["raw", "scoring", "athletic"], o: { spd: 14, fg: 10, dnk: 8, drb: 6, stre: -18, diq: -12, endu: -8, oiq: -2 } },
+		{ name: "Walk-On Turned Starter", min: 0, max: 100, w: 0.65, pot: -8, t: ["durability", "shooting", "defense"], o: { ft: 16, tp: 12, diq: 8, endu: 8, dnk: -18, jmp: -12, ins: -8, drb: -4 } },
+		{ name: "Rehabbed Knee, Full Clearance", min: 0, max: 100, w: 0.8, inj: 1.5, pot: 2, t: ["durability", "scoring", "playmaking"], o: { oiq: 14, fg: 10, pss: 8, ins: 8, spd: -18, jmp: -12, endu: -8, dnk: -4 } },
+		{ name: "Sat Behind an All-American", min: 0, max: 100, w: 0.9, pot: 6, t: ["raw", "shooting", "durability"], o: { tp: 14, endu: 12, ft: 8, jmp: 6, oiq: -16, pss: -12, diq: -8, reb: -4 } },
+		{ name: "Fifth Year at a Fourth School", min: 0, max: 100, w: 0.85, pot: -7, t: ["durability", "rebounding", "scoring"], o: { reb: 14, ins: 12, stre: 10, endu: 6, tp: -16, spd: -12, drb: -10, oiq: -4 } },
 		{ name: "Balanced", min: 0, max: 100, w: 1.0, t: [], o: {} },
 	];
 	/* TAGS DERIVED FROM THE VECTOR, UNIONED WITH THE HAND LIST.
@@ -1033,7 +1073,7 @@
 
 		   Worth recording how nearly that was missed: at 12 seeds the same
 		   tool reported a worst bias of 0.00 and a clean all-1.00 fit, because
-		   a pool of 46 out of 361 builds leaves only 3 of them with enough
+		   a pool of 46 out of 385 builds leaves only 3 of them with enough
 		   draws to measure. The number was not reassuring, it was empty. Fit
 		   over 184 builds at 80 seeds instead. createW turns negative (-0.20)
 		   and compExp returns to 1.00: with the protection no longer

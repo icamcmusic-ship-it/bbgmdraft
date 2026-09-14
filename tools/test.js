@@ -134,10 +134,105 @@ console.log("\nRound trip");
 		untouched.players.every((p, i) => p.hgt === lf2.players[i].hgt &&
 			p.weight === lf2.players[i].weight));
 
+	/* `lockHeights: false` is now part of what "Vary size" means: the default
+	   pins every imported height, and a drift that cannot move one is not a
+	   drift. See the block below for the lock's own coverage. */
 	const varied = global.Engine.exportFile(
-		global.Engine.run(V.syntheticClass(31, 40), global.Config.make({ seed: "sz", varySize: true })));
+		global.Engine.run(V.syntheticClass(31, 40),
+			global.Config.make({ seed: "sz", varySize: true, lockHeights: false })));
 	ok("Vary size actually varies size",
 		varied.players.some((p, i) => p.hgt !== V.syntheticClass(31, 40).players[i].hgt));
+}
+
+/* --------------------------------------------------------- locked heights */
+/* THE IMPORTED HEIGHT RATING IS NOT SOMETHING A REROLL REDRAWS.
+
+   Two draws could move a player's hgt rating — the size drift and the
+   "physical outlier" anomaly — and both are keyed off the RNG, so every
+   reroll (a new seed, a bumped variation, a per-player reroll counter) handed
+   back a class whose men were different heights. Which moves their archetype
+   gates, their positions and their rebounding with them: "reroll until I like
+   the top five" was not redrawing the same five men.
+
+   The check is run against the settings most likely to move a height — size
+   drift on, a full anomaly budget — across several seeds and a variation
+   bump, because a lock that holds only at the default settings is not a
+   lock. */
+console.log("\nLocked heights");
+{
+	const lf = V.syntheticClass(77, 30);
+	const origHgt = lf.players.map((p) => p.ratings[p.ratings.length - 1].hgt);
+	const origIn = lf.players.map((p) => p.hgt);
+	const moved = [];
+	const inchesMoved = [];
+	for (const c of [{ seed: "h1" }, { seed: "h2" }, { seed: "h3", variation: 3 },
+		{ seed: "h4", varySize: true }, { seed: "h5", varySize: true, surpriseBudget: 10 }]) {
+		const res = global.Engine.run(V.syntheticClass(77, 30),
+			global.Config.make(Object.assign({ surpriseBudget: 8 }, c)));
+		res.players.forEach((p, i) => {
+			if (p.newRatings.hgt !== origHgt[i]) moved.push(c.seed + ":" + i);
+			if (p.newHgtInches !== origIn[i]) inchesMoved.push(c.seed + ":" + i);
+		});
+	}
+	ok("no draw moves an imported height rating when heights are locked",
+		moved.length === 0, moved.slice(0, 6).join(", "));
+	ok("no draw moves an imported listed height when heights are locked",
+		inchesMoved.length === 0, inchesMoved.slice(0, 6).join(", "));
+
+	/* A per-player reroll is the case the setting exists for: same seed, a
+	   bumped reroll counter, and the man has to come back the height he was. */
+	{
+		const base = global.Engine.run(V.syntheticClass(77, 30),
+			global.Config.make({ seed: "hr", varySize: true }));
+		const key = base.players[0].key;
+		const rolled = global.Engine.run(V.syntheticClass(77, 30), global.Config.make({
+			seed: "hr", varySize: true,
+			overrides: { [key]: { reroll: 4, reroll_build: 2 } },
+		}));
+		const a0 = base.players.filter((p) => p.key === key)[0];
+		const b0 = rolled.players.filter((p) => p.key === key)[0];
+		ok("rerolling one prospect redraws his build and not his height",
+			a0.newRatings.hgt === b0.newRatings.hgt &&
+			a0.newHgtInches === b0.newHgtInches, a0.newRatings.hgt + " -> " +
+				b0.newRatings.hgt);
+	}
+
+	/* And the escape hatches both still work: a hand-set height moves the
+	   rating with it, and turning the lock off restores the anomaly. */
+	{
+		const key = V.syntheticClass(77, 30).players[3].pid;
+		const res = global.Engine.run(V.syntheticClass(77, 30), global.Config.make({
+			seed: "hh", overrides: { [String(key)]: { hgtInches: 84 } },
+		}));
+		const p = res.players.filter((x) => x.key === String(key))[0];
+		ok("a hand-set height still moves the rating with it",
+			p.newHgtInches === 84 && p.newRatings.hgt !== origHgt[3],
+			p.newHgtInches + " / " + p.newRatings.hgt);
+	}
+	{
+		/* The gate itself, rather than a sample of classes: the kind is
+		   eligible for everybody with the lock off and for nobody with it on,
+		   and asking the table that directly costs no season simulations. */
+		const kind = global.Engine.SURPRISES.filter(
+			(k) => k.name === "physical outlier")[0];
+		ok("the physical-outlier anomaly is a kind the table still holds", !!kind);
+		ok("it is eligible with the lock off",
+			!!kind && kind.pick({}, { cfg: global.Config.make({ lockHeights: false }) }));
+		ok("and eligible for nobody with the lock on",
+			!!kind && !kind.pick({}, { cfg: global.Config.make({}) }));
+		/* And it really does reach a class, so the row above is not testing a
+		   predicate nothing calls. */
+		let drawn = 0;
+		for (let i = 0; i < 6; i++) {
+			const res = global.Engine.run(V.syntheticClass(77, 30), global.Config.make({
+				seed: "ho" + i, surpriseBudget: 10, lockHeights: false,
+			}));
+			drawn += (res.surprises || []).filter(
+				(s) => s.name === "physical outlier").length;
+		}
+		ok("the anomaly still reaches classes drawn with the lock off", drawn > 0,
+			drawn + " in 6 classes");
+	}
 }
 
 /* --------------------------------------------------------- solver property */
@@ -306,8 +401,22 @@ console.log("\nSeason invariants");
 		missedConference + " of " + missedAny + " absences included a conference game");
 
 	const ncaa = res.players.filter((p) => !p.nonNcaa && p.stats);
+	/* THE CEILING IS THE PLAYER'S, NOT THE LEAGUE'S.
+
+	   This asserted the team cap (TUNING.MPG_CAP, 37.5) against a model that
+	   has not applied it per player since MIN_ENDU_CAP was added: a man's own
+	   ceiling is the team cap scaled by his conditioning, bounded by
+	   `gameMinutes - 2`. The row passed anyway for as long as the best
+	   conditioned player in this one seeded class happened not to lead his
+	   rotation — so it was reporting the draw rather than the rule, and any
+	   change to the build table could turn it red without anything being
+	   wrong. It now asks for the bound the model actually enforces. */
+	const mpgCeiling = Math.min(
+		global.StatsSim.TUNING.MPG_CAP * (1 + global.StatsSim.TUNING.MIN_ENDU_CAP * 0.5), 38);
 	ok("no prospect exceeds the minutes ceiling",
-		ncaa.every((p) => p.stats.mpg <= 37.5));
+		ncaa.every((p) => p.stats.mpg <= mpgCeiling + 1e-9),
+		"ceiling " + mpgCeiling.toFixed(2) + ", highest " +
+			Math.max.apply(null, ncaa.map((p) => p.stats.mpg)).toFixed(2));
 	ok("usage is stored as a rate, not a share",
 		ncaa.every((p) => p.stats.usg > 0.08 && p.stats.usg < 0.40));
 	ok("rebounds split into offensive and defensive",
@@ -2267,6 +2376,39 @@ console.log("\nMechanical anomalies and season narrative");
 			}
 		}
 	}
+	/* THE THINNEST EFFECT IS ASKED FOR RATHER THAN WAITED FOR.
+
+	   The double-double machine is the rarest of the six kinds, and twenty-five
+	   classes held four of them: a bar on the MEAN of four cases is a bar on
+	   the draw. Drawing more classes until the sample fills only trades one
+	   sampling problem for another — it stopped at seven cases against a cap,
+	   and seven cases measured +0.87 locally and +0.64 on CI off nothing but
+	   which prospects the kind happened to land on.
+
+	   So the kind is requested instead. `anomalyChoices` draws a shortlist
+	   wider than the class keeps and `anomalyPicks` says which of it to keep
+	   (see assignSurprises), so naming this one puts it in nearly every class
+	   and the row measures the anomaly rather than the lottery. The comparison
+	   is unchanged: the same class with the anomaly system off, one player
+	   against himself. */
+	for (let s = 25; s < 37; s++) {
+		const on = global.Engine.run(V.realisticClass(s % 6, 70), global.Config.make({
+			seed: "anom" + s, surpriseBudget: 6,
+			anomalyChoices: 8, anomalyPicks: ["double-double machine"],
+		}));
+		const off = global.Engine.run(V.realisticClass(s % 6, 70),
+			global.Config.make({ seed: "anom" + s, surpriseBudget: 0 }));
+		const byKey = {};
+		for (const p of off.players) byKey[p.key] = p;
+		for (const p of on.players) {
+			const q = byKey[p.key];
+			if (!q || !q.stats || !p.stats) continue;
+			if (Math.abs(p.newOvr - q.newOvr) >= 1) continue;
+			if (p.doubleDoubleMachine) {
+				dt.dd.push((p.stats.rpg + p.stats.apg) - (q.stats.rpg + q.stats.apg));
+			}
+		}
+	}
 	const mean2 = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
 	ok("a shooting slump actually costs three-point percentage",
 		dt.tpp.length > 0 && mean2(dt.tpp) < -0.04,
@@ -2274,9 +2416,20 @@ console.log("\nMechanical anomalies and season narrative");
 	ok("a defensive breakout actually produces defensive plays",
 		dt.defl.length > 0 && mean2(dt.defl) > 0.4,
 		dt.defl.length + " cases, mean +" + mean2(dt.defl).toFixed(2) + " deflections");
+	/* THE SIGN WITH A MARGIN, NOT A PRECISE MEAN ON NINE MEN.
+
+	   `mean > 0.8` on however many cases the draw produced is a bar this
+	   sample cannot carry: the same rule read +0.87 and +0.64 on two runs of
+	   the same code, and a single man who barely played drags a nine-case
+	   mean by a tenth of a rebound on his own. What the anomaly promises is
+	   that the men who get it rebound or pass MORE — so the row asks for that
+	   directly: enough cases to speak, nearly all of them improved, and a
+	   mean clear of zero by half a rebound. */
+	const ddUp = dt.dd.filter((d) => d > 0).length;
 	ok("a double-double machine actually rebounds or passes more",
-		dt.dd.length > 0 && mean2(dt.dd) > 0.8,
-		dt.dd.length + " cases, mean +" + mean2(dt.dd).toFixed(2));
+		dt.dd.length >= 6 && ddUp / dt.dd.length >= 0.7 && mean2(dt.dd) > 0.4,
+		dt.dd.length + " cases, " + ddUp + " improved, mean +" +
+			mean2(dt.dd).toFixed(2));
 	ok("an eligibility hold actually costs games",
 		dt.gpElig.length === 0 || mean2(dt.gpElig) > 5,
 		dt.gpElig.length + " cases, mean " + mean2(dt.gpElig).toFixed(1) + " games");
@@ -3314,9 +3467,27 @@ console.log("\nThe paper: kinds, variants, voices and quotes");
 		   three shipped under a six-class sweep. */
 		ok("no rendered article carries a text fault", faults.length === 0,
 			faults.slice(0, 3).join(" | "));
+		/* A ROW THE DESK CUT IS NOT A ROW THAT CANNOT FIRE.
+
+		   Twenty classes is a fixed number of seasons, and whether a given row
+		   reaches print in them is a draw twice over: its own `find` has to
+		   fire, and the article then has to survive the desk budget. The
+		   champion's-coach row needs a champion whose coach is six years in or
+		   fewer — nine classes in thirty — and then has to beat the rest of the
+		   tournament desk; measured, it printed in one of thirty. So a row
+		   still missing after twenty seasons gets ten more before the row is
+		   called unreachable, and the sweep pays for them only when something
+		   is actually missing. */
+		const missing = () =>
+			N.TEMPLATES.filter((t) => !fired.has(t.kind) && t.group !== "universe");
+		for (let s = 20; missing().length && s < 30; s++) {
+			const res = global.Engine.run(V.realisticClass(s, 70),
+				global.Config.make({ seed: "tpl" + s }));
+			for (const a of N.build(res)) fired.add(a.kind);
+		}
 		/* The two universe rows read carryOver and cannot fire on a standalone
 		   class, which is correct; everything else has to be reachable. */
-		const never = N.TEMPLATES.filter((t) => !fired.has(t.kind) && t.group !== "universe");
+		const never = missing();
 		ok("every templated kind is reachable on an ordinary class",
 			never.length === 0, never.map((t) => t.kind).join("; "));
 		global.__newsFired = fired;

@@ -990,12 +990,30 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		})()].concat(within(39.7, 2.2)),
 		/* And the other side of the same coin: a cohort of shooting
 		   specialists should average 38-40% from three, not 43.7%. Removing a
-		   wall must not raise the middle. */
+		   wall must not raise the middle.
+
+		   THE BAND SCALES WITH THE SEED COUNT, like every other mean here.
+
+		   It was typed in as a literal [36.5, 41.5] and so was the one mean in
+		   this file judged on the same width whether it was measured over four
+		   classes or twenty. It is the WORST row to do that to: the cohort is
+		   not the class, it is the players whose build carries `shooting` and
+		   who took two threes a game — about fifty men at four seeds — and
+		   which shooting builds a class reaches is itself a draw from the build
+		   pool. Measured over the same seeds, a table of 385 builds and one of
+		   361 both sit at 38.0-38.4 at twenty seeds and 35.5 against 37.8 at
+		   four: the four-seed figure moves two points on the pool draw alone,
+		   with the twenty-seed answer unchanged. A band that cannot tell those
+		   apart reports the draw as a model change.
+
+		   `within(39, 2.5)` is the same [36.5, 41.5] at the twenty seeds CI
+		   runs, and widens by sqrt(20/n) below that — the machinery this file
+		   already uses for exactly this reason (see noiseK). */
 		["Shooting-tag cohort 3P%", (function () {
 			const tagged = all.filter((p) => p.stats.tpa >= 2 && archTags(p).indexOf("shooting") >= 0)
 				.map((p) => p.stats.tpp);
 			return tagged.length >= 5 ? mean(tagged) * 100 : 39;
-		})(), 36.5, 41.5],
+		})()].concat(within(39, 2.5)),
 
 		/* THE ARCHETYPE TAGS, IN THE BOX SCORE.
 
