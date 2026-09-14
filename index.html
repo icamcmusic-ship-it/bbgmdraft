@@ -206,6 +206,12 @@
 		     season invented this way is flagged everywhere it appears and is
 		     never fed back into the chain. See extrapolateForward in js/app.js. -->
 		<div class="ctl"><label for="extrapolateYears">Years past the last class <b></b></label><input type="range" id="extrapolateYears" min="0" max="20" step="1"></div>
+		<!-- The years INSIDE a chain that no file covers. A hole in the file
+		     list is time passing either way — the carry-over is aged across it
+		     regardless — and this decides whether those years also get a
+		     timeline row drawn from the carry, flagged the same way the years
+		     past the last file are. -->
+		<div class="ctl"><label class="check"><input type="checkbox" id="extrapolateGaps" checked> Fill in unplayed years inside the chain</label></div>
 	</details>
 
 	<details class="grp" id="grp-season">

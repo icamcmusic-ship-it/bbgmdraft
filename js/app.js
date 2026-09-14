@@ -1211,6 +1211,7 @@
 		$("varySize").checked = !!state.cfg.varySize;
 		$("universe").checked = !!state.cfg.universe;
 		$("narrative").checked = !!state.cfg.narrative;
+		$("extrapolateGaps").checked = state.cfg.extrapolateGaps !== false;
 		paintUniverseHint();
 		$("seed").value = state.cfg.seed;
 		const curve = state.cfg.ovrMode === "curve";
@@ -2340,6 +2341,12 @@
 		$("narrative").addEventListener("change", () => {
 			pushUndo("toggled season storylines");
 			state.cfg.narrative = $("narrative").checked;
+			markDirty();
+			scheduleRun();
+		});
+		$("extrapolateGaps").addEventListener("change", () => {
+			pushUndo("toggled filling in unplayed years");
+			state.cfg.extrapolateGaps = $("extrapolateGaps").checked;
 			markDirty();
 			scheduleRun();
 		});
