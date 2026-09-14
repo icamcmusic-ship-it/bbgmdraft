@@ -49,7 +49,13 @@ function files(seasons) {
 
 /* The chain, exactly as js/app.js runs it: one frozen config, a seed keyed on
    file identity, carry-over handed forward, and the carry aged across a gap. */
-function chain(fileList, over) {
+/* `runners`, when given, is a persistent runner per file — which is what
+   js/app.js keeps (state.runners) and what the plain E.run() path below does
+   NOT exercise. See the warm-runner section at the bottom of this file: the
+   phase cache is only consulted when a runner is reused, so every chain built
+   with E.run() is a COLD chain and a whole class of staleness bug was
+   invisible to this harness. */
+function chain(fileList, over, runners) {
 	const frozen = CFG.make(Object.assign({ seed: "harness" }, over || {}));
 	const rows = [];
 	const results = [];
@@ -71,7 +77,7 @@ function chain(fileList, over) {
 		cfg.universeAlumni = alumni.slice(-120);
 		cfg.universeTitles = (carry && carry.titles) || {};
 		const prevCarry = carry;
-		const res = E.run(f.data, cfg);
+		const res = runners ? runners[k].run(cfg) : E.run(f.data, cfg);
 		results.push(res);
 		tree = U.coachTreeStep(tree, prevCarry, res, season, "harness");
 		rows.push(Object.assign(U.summarize(res, cfg.seed, f.name), {
@@ -107,6 +113,56 @@ const dup = files([2031, 2031]);
 const dupRun = chain(dup);
 ok("two files claiming the same season are still two different worlds",
 	dupRun.rows[0].result !== dupRun.rows[1].result);
+
+/* THE WARM CHAIN HAS TO BE THE COLD CHAIN.
+
+   Everything above builds its chain with E.run(), which creates a fresh
+   runner per season — so the staged phase cache is never consulted, and this
+   harness could not see the defect it exists to catch. js/app.js keeps one
+   runner per file (state.runners) for the life of the session and re-runs the
+   whole chain whenever a setting invalidates it.
+
+   The phase cache skips a phase whose declared dependency key is unchanged,
+   and the carry-over is a phase input: assignCollege reads it for recruiting
+   momentum and buildPrograms reads it for the conference map, the program
+   levels, the coaches and the returners. With `carryOver` undeclared, moving
+   a setting that only invalidates a LATE phase — March upsets — changed
+   season 1's champion while leaving season 2's build and regular keys
+   identical, so season 2 was served from cache and replayed against a world
+   that no longer existed. Measured, seasons 1 and 2 of a three-file chain both
+   came back with different fingerprints from the cold run of the same
+   settings.
+
+   So: run a chain warm, change one late-phase setting, run it warm again, and
+   assert it equals the cold run of those same settings — season for season. */
+{
+	const warmRunners = fl.map((f) => E.createRunner(f.data));
+	chain(fl, { upsetFactor: 1.0 }, warmRunners);
+	const warm = chain(fl, { upsetFactor: 1.8 }, warmRunners);
+	const cold = chain(fl, { upsetFactor: 1.8 });
+	const same = warm.rows.every((r, i) => r.result === cold.rows[i].result);
+	ok("a warm chain reproduces the cold chain after a late-phase change", same,
+		JSON.stringify(warm.rows.map((r) => r.result)) + " vs " +
+		JSON.stringify(cold.rows.map((r) => r.result)));
+	/* And the same for a setting the REGULAR phase owns via the roster, so
+	   `universeRoster` is covered too rather than only `carryOver`. */
+	const warm2Runners = fl.map((f) => E.createRunner(f.data));
+	chain(fl, { coachTurnover: 100 }, warm2Runners);
+	const warm2 = chain(fl, { coachTurnover: 175 }, warm2Runners);
+	const cold2 = chain(fl, { coachTurnover: 175 });
+	ok("a warm chain reproduces the cold chain after a postseason change",
+		warm2.rows.every((r, i) => r.result === cold2.rows[i].result),
+		JSON.stringify(warm2.rows.map((r) => r.result)) + " vs " +
+		JSON.stringify(cold2.rows.map((r) => r.result)));
+	/* The dependency lists are the mechanism; name them, so that deleting a
+	   key fails here rather than three seasons downstream. */
+	const deps = (name) => (E.PHASES || []).filter((p) => p.name === name)[0];
+	ok("the build phase declares the carry-over it reads",
+		!!deps("build") && deps("build").deps.indexOf("carryOver") !== -1);
+	ok("the regular phase declares the carry-over and the roster it reads",
+		!!deps("regular") && deps("regular").deps.indexOf("carryOver") !== -1 &&
+		deps("regular").deps.indexOf("universeRoster") !== -1);
+}
 
 console.log("\nIdempotency");
 const exp1 = U.exportUniverse({ rows: a.rows, baseSeed: "harness",
@@ -301,6 +357,59 @@ console.log("\nGaps, failures and the carry");
 		ok("a gap does not move the field's mean", Math.abs(agedMean - mean) < 1e-6,
 			mean.toFixed(3) + " -> " + agedMean.toFixed(3));
 	}
+}
+
+console.log("\nThe partial-class top-up");
+{
+	/* The top-up fills the All-America places a thin class file could not.
+	   Its shuffle used to run on the already-chosen subset, so a chain of
+	   partial files was topped up with the same names every season in a
+	   different order — and a comment saying "not always the same five names"
+	   sat directly above it. */
+	const carry = chain(files([2025])).rows.length
+		? U.harvest(chain(files([2025])).results[0], null) : null;
+	const mk = (season) => U.topUpPartialSeason(
+		{ season, poy: null }, carry, "harness", 0.4);
+	const a2 = mk(2031);
+	const b2 = mk(2032);
+	const names = (row) => (row.allAmerica || []).map((x) => x.name).sort().join("|");
+	ok("a partial season is topped up at all",
+		(a2.allAmerica || []).length > 0,
+		String((a2.allAmerica || []).length) + " added");
+	ok("two partial seasons are not topped up with the same men",
+		names(a2) !== names(b2), names(a2) + " vs " + names(b2));
+	ok("a full class file is not topped up",
+		!U.topUpPartialSeason({ season: 2033, poy: null }, carry, "harness", 1).partial);
+	/* It replays, like everything else keyed off the universe seed. */
+	ok("the top-up replays from the same seed", names(mk(2031)) === names(a2));
+}
+
+console.log("\nThreads read the alumni index");
+{
+	/* moreThreads took an `alumni` parameter, threads() passed one argument,
+	   and the parameter appeared nowhere else in the file — so every thread
+	   the index was meant to support was absent and nothing failed. */
+	const long = files([2025, 2026, 2027, 2028, 2029, 2030]);
+	const world = chain(long);
+	const withIndex = U.threads(world.rows, world.alumni);
+	const without = U.threads(world.rows);
+	ok("the alumni index adds threads the rows alone cannot support",
+		withIndex.length > without.length,
+		withIndex.length + " with the index against " + without.length + " without");
+	ok("every thread still has the shape the view reads",
+		withIndex.every((t) => t && typeof t.kind === "string" &&
+			typeof t.text === "string" && Array.isArray(t.seasons)));
+	/* The one that is deliberately absent: "he came back" needs an identity
+	   that survives a file boundary, and a class file's key is a pid that
+	   collides across exports. Asserted so that adding it later is a decision
+	   rather than an accident. */
+	ok("no thread claims a player returned in a later class",
+		!withIndex.some((t) => t.kind === "returned"));
+	/* And it must not fire on a world with no index, which is what every
+	   caller that has not been updated will hand it. */
+	ok("threads() is still callable with no alumni index at all",
+		Array.isArray(U.threads(world.rows)) &&
+		Array.isArray(U.moreThreads(world.rows)));
 }
 
 console.log("\nThreads and the records book");

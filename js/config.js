@@ -43,12 +43,20 @@
 		   slots on TOP of this number: 19 realized 20-23 before, so 21 is the
 		   size the class always had — the label just now says it.
 
-		   AND RAISED AGAIN, for the reason this comment exists to prevent. The
-		   table is 355 builds now, so 21 is 5.9% of it — per-class coverage
-		   fell from the 13% this paragraph sets as the target to less than
-		   half of it, by exactly the mechanism described two paragraphs up
-		   (the table grew, the pool did not) and while a comment saying not to
-		   do that sat directly above the number. 13% of 355 is 46. */
+		   AND RAISED AGAIN, for the reason this comment exists to prevent: the
+		   table grew, the pool did not, and per-class coverage fell from the
+		   13% this paragraph sets as the target to less than half of it —
+		   while a comment saying not to do that sat directly above the number.
+
+		   THE NUMBER BELOW IS CHECKED AGAINST THE TABLE. Every figure in the
+		   paragraphs above is history and is allowed to be stale; this one
+		   line is the live claim, and tools/test.js reads it, divides by
+		   ARCHETYPES.length and fails when the share drifts outside 11-15%.
+		   Which is the point — the prose had already drifted once, saying 355
+		   against a table of 361, in the very comment written to stop exactly
+		   that. A sentence nothing reads is a sentence that goes stale.
+
+		   the table is 361 builds today */
 		archetypePool: 46,
 		/* How many forced anomalies a class gets: a five-star bust, an
 		   unranked recruit who turns into a lottery pick, a 24-year-old JUCO,
@@ -208,6 +216,38 @@
 		// Destination weights for players whose college is blank. Each is
 		// further scaled by where the player was born (see Colleges.regions).
 		leagueWeights: null,   // null = each league's built-in default weight
+
+		/* HOW MANY ANOMALIES ARE DRAWN BEYOND THE ONES THE CLASS KEEPS.
+
+		   The anomalies are the single most rerolled-for thing in the tool and
+		   they were the one decision the user had no say in at all: four kinds
+		   were drawn and applied, and the only way to influence the result was
+		   to throw the whole class away. Above zero this draws that many EXTRA
+		   candidates and `anomalyPicks` says which of them the class gets, so
+		   "a five-star bust and a February injury, not the walk-on" is
+		   expressible. 0 is exactly the behaviour that was always here, down
+		   to the order the kinds are applied in. See assignSurprises. */
+		anomalyChoices: 0,
+		/* Which of the shortlist to keep, by kind name. Written by the UI;
+		   the engine reads it and never writes it. Empty or unset means the
+		   first `surpriseBudget` of them, which is what an unanswered
+		   shortlist should do. */
+		anomalyPicks: null,
+
+		/* HOW FAR FROM THE MIDDLE THIS WORLD SITS.
+
+		   Five separate controls answer one underlying question — anomalies
+		   per class, flavor strength, whether the season draws storylines,
+		   March upsets, build noise — and a user who wants "give me a strange
+		   year" had to find all five and agree with themselves about what
+		   strange means. This is that question as one dial.
+
+		   It follows the same rule a flavor does: it moves a setting only
+		   while that setting is still at its default, so it never overrules a
+		   decision somebody made. 0 is the default and a complete no-op, which
+		   is what keeps every existing seed and every shareable link resolving
+		   to the class it always did. */
+		weirdness: 0,
 
 		/* How hard a class avoids the anomalies the last few classes used.
 		   Thirty-two kinds and four draws a class is not enough separation on
@@ -441,12 +481,57 @@
 		/* buildNoise is NOT here: its slider runs in steps of 0.5, so
 		   rounding it to a whole number was the injuryRate mistake again
 		   (a flavor bending 5 toward 7 landed on 6 rather than 5.5). */
-		"archetypeDiversity", "pace", "variation",
+		"archetypeDiversity", "pace", "variation", "anomalyChoices",
 		"coachTurnover", "realignmentMemory", "starReturners", "portalRate",
 		"recruitMomentum",
 		"flavorReach", "wEuroLeague", "wGLeague", "wNBL",
 	]);
 	function isCount(key) { return COUNTS.has(key); }
 
-	global.Config = { DEFAULTS, PRESETS, make, defaultLeagueWeights, COUNTS, isCount };
+	/* WHAT THE ENGINE WILL ACCEPT, AND WHAT THE PANEL OFFERS.
+
+	   These had drifted apart, quietly and in both directions. The engine
+	   names its pace band once — PACE_MIN 55, PACE_MAX 82 — expressly so that
+	   the two halves of a run cannot describe different games, and the slider
+	   offered 58 to 80, so the top of the declared band was unreachable from
+	   the interface at all. `injuryRate` clamps to 3 and stopped at 2;
+	   `surpriseBudget` clamps to 10 and stopped at 6. Each was defensible
+	   alone, and together they are how the build-pool slider came to be unable
+	   to reach its own off switch the last time somebody looked.
+
+	   So the clamp is declared HERE, the engine reads it instead of writing
+	   its own literals, and tools/tests/review.js reads every slider's min and
+	   max off index.html and fails when a control cannot reach the range
+	   behind it. `floor`/`ceil` record a deliberate difference with the reason
+	   for it — the pace slider's floor is three points above the band's,
+	   because the class-environment jitter is meant to be able to produce a
+	   season slower than the slowest thing a user can dial. */
+	const CLAMP = {
+		pace: { lo: 55, hi: 82, floor: 58,
+			floorWhy: "the class jitter floors at 55 so a slow season can be " +
+				"slower than the slowest thing a user can ask for" },
+		injuryRate: { lo: 0, hi: 3 },
+		surpriseBudget: { lo: 0, hi: 10 },
+		draftEvents: { lo: 0, hi: 8 },
+		anomalyMemory: { lo: 0, hi: 3 },
+		talentCoupling: { lo: 0, hi: 2 },
+		birthplaceWeight: { lo: 0, hi: 2 },
+		efficiencyEnv: { lo: -3, hi: 3 },
+		pDII: { lo: 0, hi: 1, ceil: 0.15,
+			ceilWhy: "a DII conversion is meant to be rare; the engine's own " +
+				"clamp is only a nonsense guard" },
+		flavorReach: { lo: 0, hi: 100 },
+		recruitMomentum: { lo: 0, hi: 100 },
+	};
+	/* The value a slider is allowed to reach, which is the clamp unless a
+	   deliberate floor or ceiling narrows it. */
+	function sliderRange(key) {
+		const c = CLAMP[key];
+		if (!c) return null;
+		return { min: Number.isFinite(c.floor) ? c.floor : c.lo,
+			max: Number.isFinite(c.ceil) ? c.ceil : c.hi };
+	}
+
+	global.Config = { DEFAULTS, PRESETS, make, defaultLeagueWeights, COUNTS, isCount,
+		CLAMP, sliderRange };
 })(typeof window !== "undefined" ? window : self);

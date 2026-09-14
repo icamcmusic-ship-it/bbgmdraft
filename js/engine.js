@@ -33,8 +33,15 @@
 	   truncated: at the slider's floor the prior-season scoreboard could not
 	   express a slow year at all, and the two halves of one run described
 	   different games. One band, read by both. */
-	const PACE_MIN = 55;
-	const PACE_MAX = 82;
+	/* Read from js/config.js, not written twice. The band was named once here
+	   for exactly this reason and the SLIDER then disagreed with it, which is
+	   the same class of drift one level up: the constant is now declared
+	   beside every other clamp, the panel is checked against it, and this is
+	   the one consumer. */
+	const PACE_BAND = (global.Config && global.Config.CLAMP &&
+		global.Config.CLAMP.pace) || { lo: 55, hi: 82 };
+	const PACE_MIN = PACE_BAND.lo;
+	const PACE_MAX = PACE_BAND.hi;
 	const RK = global.Rankings;
 	const AW = global.Awards;
 	const CAL = global.Calibration;
@@ -1066,8 +1073,27 @@
 		wEuroLeague: "EuroLeague", wGLeague: "NBA G League", wNBL: "NBL",
 	};
 
+	/* Has the user edited the DESTINATION TABLE itself?
+
+	   The question this asks is "may a flavor fold its legacy bend into
+	   leagueWeights", and it used to compare the table against the built-in
+	   defaults alone — which gets the answer wrong for the one config where it
+	   matters. Config.make folds wEuroLeague / wGLeague / wNBL into the table
+	   at make() time, so a user (or an old shareable link) who sets the legacy
+	   slider and nothing else produces a table that differs from the built-ins
+	   BY THAT FOLD, and this reported it as hand-edited. The flavor's bend then
+	   moved wEuroLeague and stopped there, writing a number assignCollege does
+	   not read: a flavor whose whole purpose is to send the class abroad did
+	   nothing at all.
+
+	   So the comparison is against the built-ins WITH this config's own legacy
+	   values folded in. A table that differs from that is one somebody edited
+	   entry by entry, which is the decision this guard exists to respect. */
 	function untouchedLeagueWeights(cfg) {
 		const built = global.Config.defaultLeagueWeights();
+		for (const key of Object.keys(LEGACY_LEAGUE)) {
+			if (Number.isFinite(cfg[key])) built[LEGACY_LEAGUE[key]] = cfg[key];
+		}
 		const have = cfg.leagueWeights || {};
 		const keys = Object.keys(built);
 		if (Object.keys(have).length !== keys.length) return false;
@@ -1203,6 +1229,55 @@
 		};
 	}
 
+	/* HOW FAR FROM THE MIDDLE THIS WORLD SITS.
+
+	   Five controls answer one question — how many anomalies, how hard the
+	   flavor leans, whether the season draws storylines, how much March
+	   misbehaves, how noisy the builds are — and a user who wants "give me a
+	   strange year" had to find all five and agree with themselves about what
+	   strange means. `weirdness` is that question as one dial.
+
+	   It is applied BEFORE the flavor and the narrative, on purpose: those two
+	   are statements about a particular class and a particular season, and
+	   this is a statement about the kind of world they happen in, so they get
+	   the last word. And it follows the flavor's own rule — a setting the user
+	   has moved is theirs — which is what lets the dial and the five controls
+	   underneath it coexist rather than fight.
+
+	   At 0 it returns the config it was handed, unchanged and by identity, so
+	   every seed and every shareable link made before it existed still
+	   resolves to the class it always did. */
+	const WEIRDNESS = [
+		// [setting, value at weirdness -2, at 0 (the default), at +3]
+		["surpriseBudget", 1, 4, 9],
+		["classFlavor", 0.35, 1.0, 2.0],
+		["buildNoise", 2.5, 5, 11],
+		["upsetFactor", 0.55, 1.0, 1.8],
+		["anomalyMemory", 0.4, 1, 2.6],
+		["variation", 0, 0, 0],
+		["bluebloodDownYears", 0, 0, 3],
+		["midMajorLift", 0, 0, 6],
+		["realignmentRate", 0.1, 0.35, 0.9],
+		["styleDrift", 0.4, 1, 2.4],
+	];
+	function applyWeirdness(cfg) {
+		const w = clamp(Number(cfg && cfg.weirdness) || 0, -2, 3);
+		if (!w) return cfg;
+		const D = global.Config.DEFAULTS;
+		const out = Object.assign({}, cfg);
+		for (const [key, lo, mid, hi] of WEIRDNESS) {
+			// A setting the user has moved is the user's. Same rule as a flavor.
+			if (cfg[key] !== D[key]) continue;
+			const v = w < 0 ? mid + (mid - lo) * (w / 2) : mid + (hi - mid) * (w / 3);
+			out[key] = global.Config.isCount(key) ? Math.round(v) : v;
+		}
+		/* Storylines are a yes/no rather than a dial, and a world dialled all
+		   the way down should not be drawing three of them. Only from the
+		   default, like everything else here. */
+		if (cfg.narrative === D.narrative && w <= -1.5) out.narrative = false;
+		return out;
+	}
+
 	function applyFlavorConfig(cfg, flavor) {
 		const bend = RB.flavorConfig(flavor);
 		if (!bend) return cfg;
@@ -1248,7 +1323,14 @@
 					out[k] = cfg[k] + (bend[k] - cfg[k]) * (0.5 * reach * t);
 					if (global.Config.isCount(k)) out[k] = Math.round(out[k]);
 					moved = true;
-					if (k === "leagueWeights") league = true;
+					/* LEGACY_LEAGUE, not `leagueWeights`. This branch is
+					   gated on `typeof bend[k] === "number"` and
+					   `leagueWeights` is an object, so the old test could
+					   never be true — which meant a flavor that bent
+					   wEuroLeague on a config the user had touched wrote a
+					   number nothing reads, the exact fault the fold-in below
+					   exists to fix, surviving in one of the two branches. */
+					if (LEGACY_LEAGUE[k]) league = true;
 				}
 				continue;
 			}
@@ -1296,14 +1378,17 @@
 		   pool, classEnv) deliberately do NOT take it: that is what makes
 		   variation "the same class, different men" rather than a second seed. */
 		const vsalt = variationSalt(state.cfg);
-		const flavor = RB.pickFlavor(rng.child("flavor"), state.cfg);
+		/* The flavor is drawn against the weirdness-bent config, because
+		   `classFlavor` is one of the settings the dial moves and a flavor
+		   drawn at the un-bent strength would then be applied at the bent one. */
+		const flavor = RB.pickFlavor(rng.child("flavor"), applyWeirdness(state.cfg));
 		state.flavor = flavor;
 		/* The class's flavor, then the season's storylines on top of it. The
 		   order matters: a flavor is a statement about the players and a
 		   narrative about the season they played, so the narrative gets the
 		   last word on the season dials. */
 		const narr = applyNarrative(
-			applyFlavorConfig(state.cfg, flavor), rng.child("narrative"));
+			applyFlavorConfig(applyWeirdness(state.cfg), flavor), rng.child("narrative"));
 		state.narrative = narr.narrative;
 		const cfg = narr.cfg;
 
@@ -1944,7 +2029,15 @@
 			label: "turned pro abroad, then came back to college",
 			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman",
 			apply: (p, r) => {
-				p.age = Math.max(p.age || 21, 21);
+				/* At least twenty-one, and older when his class year already
+				   says so. `p.age` here is still the file's age — which is 19
+				   for everybody in a BBGM class, because that is what BBGM
+				   writes — so reading it made a graduate transfer who had
+				   spent a year abroad come out YOUNGER than the same man
+				   without the anomaly. The class-year map is what the export
+				   would otherwise have used (see AGE_FOR_CLASS); taking the
+				   larger of the two means this anomaly only ever ages a man. */
+				p.age = Math.max(ageForClassYear(p.classYear, p.transfer), 21);
 				p.transfer = {
 					kind: "returned from a professional contract",
 					from: r.pick(["Australia's NBL", "the Spanish second division",
@@ -2200,6 +2293,26 @@
 	   and the penalty is smaller than the draw's own noise. */
 	const ANOMALY_MEMORY_DEPTH = 3;
 
+	/* DRAWING MORE ANOMALIES THAN THE CLASS KEEPS.
+
+	   The anomalies are the single most rerolled-for thing in the tool and the
+	   user had no say in them at all: four of thirty-two kinds were drawn and
+	   applied, and the only way to influence the result was to throw the whole
+	   class away and draw again. Every other decision in the generator can be
+	   locked, nudged or overruled; this one could only be re-rolled.
+
+	   With `anomalyChoices` above zero the draw produces that many EXTRA
+	   candidates, and `anomalyPicks` — a list of kind names the UI writes —
+	   says which of them the class actually gets. Nothing else changes: the
+	   weights, the memory penalty and the eligibility tests are the same, and
+	   the candidates are drawn from the same stream in the same order, so the
+	   shortlist replays with the seed like everything else.
+
+	   At `anomalyChoices` 0 with no picks the loop below is the one that was
+	   always here, applying each kind the moment it is drawn — which matters,
+	   because an anomaly can change whether a player is eligible for the next
+	   one, and re-ordering that would change every existing seed's class. The
+	   two-pass path is entered only when the user has asked for a shortlist. */
 	function assignSurprises(players, rng, cfg, ctx) {
 		const budget = clamp(
 			cfg && cfg.surpriseBudget !== undefined ? cfg.surpriseBudget : 4, 0, 10);
@@ -2240,6 +2353,55 @@
 		}
 		const weightOf = (k) => compressed(k) *
 			Math.pow(3, -memory * (penalty[k.name] || 0));
+		/* The shortlist path. Draws n + extra candidates WITHOUT applying
+		   them, then applies the ones the user kept (or the first n, which is
+		   what an unanswered shortlist means). A candidate's eligibility is
+		   tested against the class as it stands before any of them are
+		   applied, which is the price of offering a choice at all: the
+		   alternative is a shortlist whose later entries are only valid if you
+		   accept the earlier ones. Stated here rather than discovered. */
+		const extra = clamp(Math.round(
+			cfg && cfg.anomalyChoices !== undefined ? cfg.anomalyChoices : 0), 0, 8);
+		const picks = Array.isArray(cfg && cfg.anomalyPicks) ? cfg.anomalyPicks : null;
+		if (extra > 0) {
+			const shortlist = [];
+			const claimed = new Set();
+			for (let i = 0; i < n + extra && kinds.length; i++) {
+				const kind = rng.weighted(kinds, weightOf);
+				kinds.splice(kinds.indexOf(kind), 1);
+				const options = players.filter((p) => !claimed.has(p.key) && kind.pick(p));
+				if (!options.length) { i--; continue; }
+				const who = options[Math.floor(rng.random() * options.length)];
+				claimed.add(who.key);
+				shortlist.push({ kind, who });
+			}
+			let keep = shortlist;
+			if (picks && picks.length) {
+				const want = new Set(picks);
+				keep = shortlist.filter((c) => want.has(c.kind.name)).slice(0, n);
+			}
+			if (!keep.length) keep = shortlist.slice(0, n);
+			const kept = new Set(keep.map((c) => c.kind.name));
+			for (const c of keep) {
+				c.who.surprise = { name: c.kind.name, label: c.kind.label };
+				const ageBefore = c.who.age;
+				c.kind.apply(c.who, rng.child("sp:" + c.kind.name), ctx);
+				// Same rule as the immediate path above: `ageFromAnomaly`
+				// is generated biography and answers to `ages: false`.
+				if (Number.isFinite(c.who.age) && c.who.age !== ageBefore) {
+					c.who.ageFromAnomaly = true;
+				}
+				out.push({ name: c.kind.name, label: c.kind.label,
+					player: c.who.name, key: c.who.key });
+			}
+			/* The whole shortlist travels with the result, so the panel can
+			   offer the ones that were not taken without re-running anything. */
+			out.shortlist = shortlist.map((c) => ({
+				name: c.kind.name, label: c.kind.label,
+				player: c.who.name, key: c.who.key, chosen: kept.has(c.kind.name),
+			}));
+			return out;
+		}
 		for (let i = 0; i < n && kinds.length; i++) {
 			const kind = rng.weighted(kinds, weightOf);
 			kinds.splice(kinds.indexOf(kind), 1);
@@ -2249,7 +2411,37 @@
 			if (!options.length) { i--; continue; }
 			const who = options[Math.floor(rng.random() * options.length)];
 			used.add(who.key);
+			/* THE AGE AN ANOMALY WRITES HAS TO REACH THE FILE.
+
+			   Four kinds set `p.age` outright — the reclassified prodigy at
+			   17, "reclassified back a year" at 20, the man who went pro and
+			   came back at 21, the 24-year-old JUCO — and the export derives
+			   born.year from the CLASS YEAR (see AGE_FOR_CLASS), with
+			   `ageFloored` as the one escape hatch that writes a player's
+			   literal age instead. That flag is stamped in the build phase,
+			   which runs before this one, so three of the four anomalies
+			   exported at the age their class year implies: the note and the
+			   board called a man the youngest player in the class at
+			   seventeen and BBGM imported him at nineteen, then developed him
+			   on a nineteen-year-old's curve.
+
+			   The age before and after is compared here rather than inside
+			   each `apply`, so a kind added later is covered without its
+			   author having to remember this. */
+			const ageBefore = who.age;
 			kind.apply(who, rng.child("sp:" + kind.name), ctx);
+			/* `ageFromAnomaly` and NOT `ageFloored`. The two flags answer
+			   different questions and only one of them may ignore the user.
+			   `ageFloored` means realisticAge corrected an age the file
+			   could not have (a sixteen-year-old), and its export branch
+			   deliberately runs even under `ages: false`, because shipping an
+			   age the class never simulated is worse than the coarse map that
+			   flag exists to avoid. An anomaly's age is generated biography —
+			   exactly the thing `ages: false` opts out of — so it gets its own
+			   flag and its own gate. */
+			if (Number.isFinite(who.age) && who.age !== ageBefore) {
+				who.ageFromAnomaly = true;
+			}
 			who.surprise = { name: kind.name, label: kind.label };
 			out.push({ name: kind.name, label: kind.label, player: who.name, key: who.key });
 		}
@@ -3899,6 +4091,77 @@
 		return state;
 	}
 
+	/* ------------------------------------------------- reroll predicates
+
+	   WHAT A CLASS CAN BE ASKED FOR.
+
+	   These used to live in js/app.js, which meant the only thing that could
+	   run a search was the main thread — and a search is up to sixty full
+	   simulations that need one boolean each, which is the shape a worker
+	   exists for. Moving them here gives the worker, the main-thread fallback
+	   and the challenge scorer one definition instead of three, and puts them
+	   somewhere CI can reach: every predicate is now checked against a
+	   degenerate result, because a search whose predicate throws is a search
+	   that silently skips candidates.
+
+	   A class is a structured thing and "the champion is a mid-major" is not a
+	   number, so these are named rather than typed. */
+	const REROLL_PREDICATES = [
+		{ key: "tallTop5", label: "a 7'2\" or taller top-five pick",
+			test: (res) => ((res && res.board) || []).slice(0, 5)
+				.some((p) => (p.newHgtInches || 0) >= 86) },
+		{ key: "midMajorChamp", label: "the national champion is a mid-major",
+			test: (res) => {
+				const t = res && res.tourney && res.tourney.champion &&
+					res.tourney.champion.team;
+				if (!t || !t.conf) return false;
+				const conf = C.CONFERENCES[t.conf];
+				return !conf || conf.tier !== "high";
+			} },
+		{ key: "freshmanNo1", label: "the No. 1 pick is a freshman",
+			test: (res) => !!(res && res.board && res.board[0] &&
+				res.board[0].classYear === "Freshman") },
+		{ key: "abroadNo1", label: "the No. 1 pick played abroad",
+			test: (res) => !!(res && res.board && res.board[0] && res.board[0].nonNcaa) },
+		{ key: "seniorTop3", label: "a senior in the top three",
+			test: (res) => ((res && res.board) || []).slice(0, 3)
+				.some((p) => p.classYear === "Senior") },
+		{ key: "deepClass", label: "at least ten prospects at 50+ overall",
+			test: (res) => ((res && res.players) || [])
+				.filter((p) => p.newOvr >= 50).length >= 10 },
+		{ key: "cinderella", label: "a No. 11 seed or worse in the Final Four",
+			test: (res) => !!(res && res.tourney && res.tourney.finalFour &&
+				res.tourney.finalFour.some((x) => x && x.seed >= 11)) },
+		{ key: "poyIsNo1", label: "the player of the year is the No. 1 pick",
+			test: (res) => {
+				const set = global.Universe && global.Universe.nationalPOYSet
+					? global.Universe.nationalPOYSet() : new Set();
+				const no1 = res && res.board && res.board[0];
+				return !!no1 && (no1.awards || []).some((a) => set.has(a));
+			} },
+	];
+
+	/* A CLAUSE IS A PREDICATE AND A SENSE.
+
+	   Every condition was a tick box meaning "must be true", so half of the
+	   interesting searches were inexpressible: a class with no seven-footer at
+	   the top, a year where the champion is NOT a mid-major, a top three with
+	   no seniors in it. A key prefixed with "!" is the negation, which keeps
+	   the stored shape a list of strings — it goes through the undo stack, a
+	   worker message and the status line unchanged. */
+	function parseRerollClause(key) {
+		const raw = String(key || "");
+		const negated = raw.charAt(0) === "!";
+		const bare = negated ? raw.slice(1) : raw;
+		const pred = REROLL_PREDICATES.filter((p) => p.key === bare)[0];
+		if (!pred) return null;
+		return {
+			key: raw, pred, negated,
+			label: (negated ? "NOT " : "") + pred.label,
+			test: (res) => (negated ? !pred.test(res) : pred.test(res)),
+		};
+	}
+
 	/* ------------------------------------------------------------- staging */
 
 	/* Which settings each phase reads. The UI uses this to re-run only what a
@@ -3920,6 +4183,9 @@
 				// from the build phase down.
 				"variation", "flavorHint", "poolMemory", "recentPools",
 				"anomalyMemory", "recentAnomalies", "flavorReach", "narrative",
+				/* The anomaly shortlist, and the meta-dial that moves half of
+				   the settings above. Both reshape the class from here down. */
+				"anomalyChoices", "anomalyPicks", "weirdness",
 				/* Universe mode is a whole-chain fact, not a phase input: the
 				   runner is handed a different seed and a carryOver when it is
 				   on. Declared here so that turning it on invalidates
@@ -3934,6 +4200,28 @@
 				   file (see Universe.recruitingCohorts) — read by
 				   assignRecruiting, which runs here. */
 				"universeRecruiting",
+				/* THE CARRY-OVER IS A PHASE INPUT, and leaving it off this
+				   list broke the one property a universe rests on.
+
+				   assignCollege reads `cfg.carryOver` for the recruiting
+				   momentum draw: last season's program levels, its champion
+				   and its banner counts decide where a blank-college prospect
+				   is recruited. The key was not declared, so the phase cache
+				   could not see it change — and every file keeps its runner
+				   across chain runs (see runUniverse in js/app.js).
+
+				   The consequence: move a setting that only invalidates a LATE
+				   phase — March upsets, say — and season 1 crowns a different
+				   champion, while season 2's build and regular keys are
+				   unchanged, both phases are skipped, and the season replays
+				   against the carry-over of a world that no longer exists. A
+				   warm chain stopped matching a cold one, which is precisely
+				   the guarantee the seeds-and-fingerprints export rests on.
+
+				   tools/universe.js could not catch it, because it builds its
+				   chain with Engine.run — a fresh runner per season, so the
+				   cache is never consulted. It runs a warm-runner check now. */
+				"carryOver",
 			],
 			run: phaseBuild,
 		},
@@ -3951,10 +4239,23 @@
 			deps: ["era", "pace", "scoringEnv", "injuryRate", "realignmentRate",
 				"bluebloodDownYears", "midMajorLift", "teamMomentum", "seasonEvents",
 				// The world dials: all three are read by buildPrograms.
-				"realignmentMemory", "starReturners", "portalRate", "styleDrift"],
+				"realignmentMemory", "starReturners", "portalRate", "styleDrift",
+				// weirdness bends realignmentRate, styleDrift and the down-year
+				// count, all of which this phase reads. See applyWeirdness.
+				"weirdness",
+				/* The other half of the carry-over fix above. buildPrograms
+				   reads `cfg.carryOver` for the conference map, the program
+				   levels, the coaches and the star returners, and phaseRegular
+				   reads `cfg.universeRoster` for the later classes'
+				   underclassmen who fill this season's rosters. Neither was
+				   declared, so a chain re-run could serve a season built on
+				   the previous run's world. */
+				"carryOver", "universeRoster"],
 			run: phaseRegular,
 		},
-		{ name: "postseason", deps: ["upsetFactor", "coachTurnover"], run: phasePostseason },
+		// weirdness bends upsetFactor, which this phase owns.
+		{ name: "postseason", deps: ["upsetFactor", "coachTurnover", "weirdness"],
+			run: phasePostseason },
 		{
 			name: "stats",
 			deps: ["era", "pace", "scoringEnv", "efficiencyEnv", "statNoise",
@@ -3971,6 +4272,72 @@
 		{ name: "stock", deps: ["draftEvents"], run: phaseStock },
 		{ name: "notes", deps: ["noteLines"], run: phaseNotes },
 	];
+
+	/* HOW WEIRD THIS WORLD ACTUALLY CAME OUT.
+
+	   `weirdness` is what was ASKED for; this is what happened. A dial with no
+	   readout is a dial you turn and then have to go looking for the effect
+	   of — and the things that make a class memorable are exactly the ones
+	   that do not show up in any aggregate: a mid-major champion, a
+	   seven-footer at the top, a No. 1 pick nobody had in the preseason top
+	   twenty, a season with three storylines in it.
+
+	   Each term is a fact about THIS result, scored against how often it
+	   happens, and the reasons are returned beside the number so the score is
+	   never just a number. Deliberately not calibrated to a percentile — that
+	   would need a batch, and a score whose meaning depends on a hidden
+	   distribution is worse than one whose ingredients are listed. */
+	function strangeness(res) {
+		if (!res) return null;
+		const reasons = [];
+		let score = 0;
+		const add = (n, why) => { score += n; reasons.push(why); };
+		const board = res.board || [];
+		const top = board.slice(0, 5);
+		if (top.some((p) => (p.newHgtInches || 0) >= 86)) {
+			add(12, "a 7'2\" or taller prospect in the top five");
+		}
+		if (top.some((p) => (p.newHgtInches || 0) <= 73)) {
+			add(10, "a six-foot-one prospect in the top five");
+		}
+		const champ = res.tourney && res.tourney.champion;
+		if (champ && Number.isFinite(champ.seed) && champ.seed >= 6) {
+			add(champ.seed >= 10 ? 18 : 11, "a No. " + champ.seed + " seed won the title");
+		}
+		const ff = (res.tourney && res.tourney.finalFour) || [];
+		const wild = ff.filter((x) => x && Number.isFinite(x.seed) && x.seed >= 11);
+		if (wild.length) {
+			add(9 * wild.length, Text.plural(wild.length, "double-digit seed") +
+				" in the Final Four");
+		}
+		const no1 = board[0];
+		if (no1 && Number.isFinite(no1.preseasonRank) && no1.preseasonRank > 20) {
+			add(14, "the No. 1 pick was No. " + no1.preseasonRank + " in the preseason");
+		}
+		if (no1 && no1.nonNcaa) add(8, "the No. 1 pick never played college basketball");
+		if (no1 && /Senior|Graduate/.test(no1.classYear || "")) {
+			add(7, "the No. 1 pick was a " + no1.classYear.toLowerCase());
+		}
+		const narrative = res.narrative || [];
+		if (narrative.length >= 3) add(6, "three storylines in one season");
+		const anomalies = (res.surprises || []).length;
+		if (anomalies >= 6) add(8, anomalies + " anomalies in one class");
+		else if (anomalies >= 5) add(4, anomalies + " anomalies in one class");
+		const unbeaten = Object.values(res.teams || {})
+			.filter((t) => t && t.l === 0 && t.w >= 20);
+		if (unbeaten.length) add(20, unbeaten[0].name + " went unbeaten");
+		/* The class's own shape, against what a draft class usually looks
+		   like: a top-heavy year and a year with no stars in it are both
+		   strange, in opposite directions. */
+		const elite = (res.players || []).filter((p) => p.newOvr >= 55).length;
+		if (elite >= 6) add(9, elite + " prospects at 55+ overall");
+		if (elite === 0) add(9, "nobody in the class reached 55 overall");
+		return {
+			score: Math.min(100, score),
+			reasons,
+			asked: Number(res.cfg && res.cfg.weirdness) || 0,
+		};
+	}
 
 	/* JSON.stringify with object keys sorted at every level, so two configs
 	   that differ only in key INSERTION order hash identically. Without this,
@@ -4123,7 +4490,7 @@
 				   settings and a deterministic stream, so recomputing is
 				   cheap and exact. */
 				const bent = applyNarrative(
-					applyFlavorConfig(effective, state.flavor),
+					applyFlavorConfig(applyWeirdness(effective), state.flavor),
 					new Rng(seed).child("narrative")).cfg;
 				/* Re-apply class-level environment jitter (same deterministic
 				   stream the build phase used). Without this a warm re-run that
@@ -5831,7 +6198,29 @@
 			   already vary (ageIsInformative) — there the class years were READ
 			   from those ages and rewriting them would be a round trip through
 			   a coarser map — and skipped when the flag is off. */
-			if (opts.ages !== false && !result.ageIsInformative &&
+			if (opts.ages !== false && p.ageFromAnomaly && Number.isFinite(p.age) &&
+				out.born && Number.isFinite(Number(out.born.year))) {
+				/* AN ANOMALY'S AGE BEATS THE CLASS-YEAR MAP.
+
+				   AGE_FOR_CLASS reads a biography back — a graduate transfer
+				   is 23 — and it is the right answer for every player whose
+				   age was never stated. Four anomalies state one: the
+				   reclassified prodigy is seventeen, "reclassified back a
+				   year" is twenty, the man who came back from a professional
+				   contract is at least twenty-one. Those are the whole point
+				   of the anomaly, they are what the note and the draft board
+				   print, and the class-year map cannot express any of them —
+				   a seventeen-year-old freshman and an ordinary one have the
+				   same class year, which is exactly what makes him rare.
+
+				   So this branch runs FIRST, and only for a player an anomaly
+				   actually aged (see assignSurprises). Everyone else falls
+				   through to the map below, unchanged — and `ages: false`
+				   still switches the whole thing off, because that flag is
+				   the user saying "do not touch the birth years in my file"
+				   and an anomaly is not an exception to that. */
+				out.born = Object.assign({}, out.born, { year: exportSeason - p.age });
+			} else if (opts.ages !== false && !result.ageIsInformative &&
 				out.born && Number.isFinite(Number(out.born.year))) {
 				out.born = Object.assign({}, out.born, {
 					year: exportSeason - ageForClassYear(p.classYear, p.transfer),
@@ -6860,7 +7249,8 @@
 		MAX_CLASS, ANOMALY_MEMORY_DEPTH, NARRATIVES, isLeagueFile,
 		rerollSalt,
 		signatureGame, simulateProLeagues, assignRecruiting,
-		NOTE_LINES, DEFAULT_NOTE_LINES, PHASES, PRO_GAMES,
+		NOTE_LINES, DEFAULT_NOTE_LINES, PHASES, PRO_GAMES, strangeness,
+		REROLL_PREDICATES, parseRerollClause,
 		previewClass, futureRosterFor, priorYears, ovrYearsAgo, CLASS_YEARS,
 	};
 })(typeof window !== "undefined" ? window : self);

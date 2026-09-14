@@ -27,6 +27,17 @@ jobs:
         run: node tools/universe.js
       - name: Staged-pipeline timings
         run: node tools/bench.js 5
+      # The uploaded artifact existed so a human could diff two runs by hand,
+      # which is a comparison nobody performs. The committed baseline makes
+      # the harness do it: every row that has moved by more than 5% of its own
+      # band is printed, which is what catches a slow drift INSIDE a band —
+      # the failure mode a pass/fail check cannot see, and the one that let a
+      # re-fitted efficiency anchor slide back onto its floor unremarked.
+      # Regenerate deliberately with `node tools/validate.js 20 --write-baseline`;
+      # the diff in that commit is then the record of what a re-fit cost.
+      - name: Calibration drift against the committed baseline
+        if: always()
+        run: node tools/validate.js 20 --baseline
       - name: Calibration report (JSON, for diffing across runs)
         if: always()
         run: node tools/validate.js 20 --json > calibration.json || true

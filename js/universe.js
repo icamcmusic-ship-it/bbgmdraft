@@ -591,7 +591,7 @@
 	   {kind, team, seasons, count, text}: `text` is the same sentence, built
 	   here so there is still one place that words it, and everything the view
 	   wants to make clickable is beside it. */
-	function threads(rows) {
+	function threads(rows, alumni) {
 		const out = [];
 		const titleSeasons = {};
 		const no1Seasons = {};
@@ -652,7 +652,7 @@
 						"aged across the gap" });
 			}
 		}
-		out.push.apply(out, moreThreads(rows));
+		out.push.apply(out, moreThreads(rows, alumni));
 		return out;
 	}
 
@@ -691,6 +691,7 @@
 		const keys = (map) => Object.keys(map).sort(byName);
 		const list = (names) => names.length === 1 ? names[0]
 			: names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
+
 
 		const titles = {};
 		const finals = {};
@@ -1092,6 +1093,104 @@
 			}
 		}
 
+		/* --- THE PEOPLE ------------------------------------------------------
+
+		   Every thread above counts a PROGRAMME's repeats: this school won N,
+		   that conference owned a decade. The alumni index — a compact
+		   per-season record of every national player of the year, the top
+		   three of every board, and the champion's best prospect — has been
+		   built, persisted and handed to the news desk since universe mode
+		   existed, and the thread generator never read it. The parameter was
+		   in the signature and in the comment above this function, and in
+		   nothing else.
+
+		   These are the sentences a timeline is actually read for, and every
+		   one of them is a fact about the ORDERED index rather than a tally
+		   over it — which is the whole distinction between a thread and a
+		   column. */
+		{
+			const list = (alumni || []).filter((a) => a && Number.isFinite(a.season));
+			const poys = list.filter((a) => a.why === "player of the year");
+			const bySchool = {};
+			for (const a of list) {
+				if (a.school && !a.nonNcaa) push(bySchool, a.school, a.season);
+			}
+			/* THE ONE THREAD THAT IS NOT HERE, and why.
+
+			   "He was one of the names of the year in 2026 and 2029 — he came
+			   back" is the most human sentence this index could produce, and
+			   it cannot be written yet. A class file's player key is its pid,
+			   which is unique within one BBGM export and collides across
+			   them, so two entries a season apart carrying the same name or
+			   the same key are not evidence of the same person: on the test
+			   fixtures, where every file names its players the same way, a
+			   name match fired on seven different men. Saying it anyway would
+			   put a confident false claim in a history whose whole value is
+			   that it is consistent.
+
+			   It needs the persistent player registry — an identity that
+			   survives a file boundary — and when that exists this is the
+			   first thing to build on it. Recorded here rather than shipped
+			   wrong. */
+			/* The drought: a programme that produced somebody the world
+			   remembers, then went years without. A tally cannot say this and
+			   it is the thing every fanbase actually talks about. */
+			for (const school of keys(bySchool)) {
+				const ss = bySchool[school].slice().sort((a, b) => a - b);
+				if (ss.length < 2) continue;
+				let worst = 0;
+				let from = ss[0];
+				for (let i = 1; i < ss.length; i++) {
+					if (ss[i] - ss[i - 1] > worst) { worst = ss[i] - ss[i - 1]; from = ss[i - 1]; }
+				}
+				if (worst >= 5) {
+					add("drought", school, [from, from + worst], worst,
+						school + " went " + (worst - 1) + " years between men the " +
+						"world remembers, from " + from + " to " + (from + worst));
+				}
+			}
+			/* A player of the year who was not the No. 1 pick, season after
+			   season, is a statement about how this world values players. */
+			const poyNotNo1 = poys.filter((a) => Number.isFinite(a.boardRank) && a.boardRank > 1);
+			if (poys.length >= 4 && poyNotNo1.length >= Math.ceil(poys.length * 0.6)) {
+				add("poyNotNo1", null, poyNotNo1.map((a) => a.season), poyNotNo1.length,
+					poyNotNo1.length + " of " + poys.length + " players of the year " +
+					"were not the No. 1 pick in their own class");
+			}
+			/* The man who was both is already a thread (see the sweep above,
+			   which reads the rows rather than the index); naming him is what
+			   the index adds. A second thread saying the same thing with
+			   different words is how a Threads panel becomes unreadable. */
+			const both = poys.filter((a) => a.boardRank === 1);
+			if (both.length) {
+				add("sweepNamed", null, both.map((a) => a.season), both.length,
+					"the men who were both: " + both
+						.map((a) => a.name + " (" + a.season + ")").join(", "));
+			}
+			/* A prospect abroad at the very top of a board is the seam between
+			   the two populations this tool simulates, and nothing said when
+			   it happened. */
+			const abroad = list.filter((a) => a.nonNcaa && a.boardRank === 1);
+			if (abroad.length) {
+				add("no1Abroad", null, abroad.map((a) => a.season), abroad.length,
+					abroad.length + " No. 1 pick" + (abroad.length === 1 ? "" : "s") +
+					" never played college basketball (" +
+					abroad.map((a) => a.name + ", " + (a.club || a.school)).join("; ") + ")");
+			}
+			/* How many people this world remembers at all: a twenty-season
+			   universe with eleven names in it had a very different history
+			   from one with sixty. */
+			if (list.length >= 12) {
+				/* Counted by ENTRY, not by name: without a cross-file identity
+				   (see the note above) two names that match are not known to
+				   be one person, and a count that silently merges them would
+				   understate the world's memory rather than describe it. */
+				add("remembered", null, [], list.length,
+					list.length + " player-seasons are in this world's memory " +
+					"across " + played.length + " seasons");
+			}
+		}
+
 		// --- the shape of the timeline itself -----------------------------------
 		{
 			const seasons = played.map((r) => r.season).filter(Number.isFinite)
@@ -1342,18 +1441,32 @@
 		if (!pool.length) return row;
 		const rng = new global.BBGMRng.Rng(String(baseSeed) + "|partial|" + row.season);
 		const want = Math.max(0, Math.round(5 * (1 - share)));
+		/* SHUFFLE BEFORE THE TAKE, not after it.
+
+		   The shuffle used to run on the already-chosen subset, so it
+		   permuted the order of the same five men and the comment beside it
+		   ("not always the same five names") was describing something the
+		   code did not do: a chain of partial files topped up with the
+		   identical names every season, in a different order each time.
+
+		   The draw is weighted by talent so the best returners are still the
+		   likely All-Americans — a top-up is meant to be the men the thin
+		   field could not supply, not a lottery — and it is drawn without
+		   replacement off the season's own stream, so it replays. */
+		const bag = pool.slice();
 		const added = [];
-		for (const p of pool) {
-			if (added.length >= want) break;
-			added.push(p);
+		while (added.length < want && bag.length) {
+			let total = 0;
+			for (const c of bag) total += Math.max(1, c.talent || 50);
+			let x = rng.random() * total;
+			let idx = bag.length - 1;
+			for (let i = 0; i < bag.length; i++) {
+				x -= Math.max(1, bag[i].talent || 50);
+				if (x <= 0) { idx = i; break; }
+			}
+			added.push(bag.splice(idx, 1)[0]);
 		}
 		if (!added.length) return row;
-		/* One shuffle so the top-up is not always the same five names in the
-		   same order across a chain of partial files. */
-		for (let i = added.length - 1; i > 0; i--) {
-			const j = Math.floor(rng.random() * (i + 1));
-			const tmp = added[i]; added[i] = added[j]; added[j] = tmp;
-		}
 		row.partial = true;
 		row.partialShare = share;
 		row.awards = (row.awards || []).concat(added.map((p) => ({

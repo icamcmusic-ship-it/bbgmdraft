@@ -2553,6 +2553,320 @@ ledger, compound reroll-until predicates, a "how weird is this world" dial,
 and a full recalibration of the earlier seasons, which this round only
 begins to band.
 
+## The full audit of September 2026, and what was done about it
+
+A third reader read the whole tree — every file in `js/` and `tools/`, the
+stylesheet and the page — ran both harnesses green, fuzzed the engine across
+sixty randomised configurations and twelve deliberately hostile files, and
+probed the rating solver four thousand times. Then went looking for what a
+green harness does not prove. Everything below is what changed.
+
+### The one that mattered: a warm universe did not replay
+
+**The phase cache could not see the carry-over.** The staged runner skips a
+phase whose declared dependency key has not changed, and two of the things a
+universe hands from one season to the next were not declared: `carryOver`
+(read by `assignCollege` for recruiting momentum, and by `buildPrograms` for
+the conference map, the program levels, the coaches and the returners) and
+`universeRoster` (the later classes' underclassmen who fill a season's
+rosters). Every file keeps its runner for the life of the session, so this is
+the ordinary path and not an edge case.
+
+The consequence: move a setting that only invalidates a LATE phase — March
+upsets — and season one crowns a different champion, while season two's build
+and regular keys are unchanged, both phases are skipped, and the season replays
+against the carry-over of a world that no longer exists. Measured on a
+three-file chain, seasons two and three came back with different fingerprints
+from a cold run of the same settings. That is the exact property the
+seeds-and-fingerprints export is built on.
+
+`tools/universe.js` could not catch it, because it builds its chain with
+`Engine.run` — a fresh runner per season, so the phase cache is never
+consulted. It runs a warm-runner check now: a chain run warm, a late-phase
+setting changed, and the result asserted equal to the cold run season for
+season. Both halves of the fix are guarded, and the dependency lists are
+asserted by name so deleting one fails there rather than three seasons
+downstream.
+
+### Other bugs, fixed
+
+- **An anomaly that aged a prospect never reached the file.** Four kinds set
+  `p.age` outright — the reclassified prodigy at 17, "reclassified back a
+  year" at 20, the man who came back from a professional contract, the
+  24-year-old JUCO — and the export derives `born.year` from the class year,
+  which cannot express any of them: a seventeen-year-old freshman and an
+  ordinary one have the same class year, which is exactly what makes him rare.
+  So the board called a man the youngest player in the class and BBGM imported
+  him at nineteen, then developed him on a nineteen-year-old's curve. The age
+  now reaches the file, through its own flag and its own gate, and `ages:
+  false` still switches the whole thing off — that flag is the user saying not
+  to touch their birth years and an anomaly is not an exception to it. "Went
+  pro and came back" also read `p.age` to set its floor, which is 19 for
+  everybody in a BBGM class, so it made a graduate transfer *younger*; it
+  reads the class-year map now and only ever ages a man.
+- **A flavour's legacy destination bend did not fold in on one of two
+  branches.** `applyFlavorConfig` tested `k === "leagueWeights"` inside a
+  branch gated on `typeof bend[k] === "number"`, which an object can never
+  satisfy — a line that could not be true. And `untouchedLeagueWeights`
+  compared the destination table against the built-in defaults alone, so a
+  user who set the legacy EuroLeague slider and nothing else produced a table
+  that differed from the built-ins *by that fold* and was reported as
+  hand-edited: the flavour whose whole purpose is to send a class abroad then
+  did nothing. Both fixed; a hand-edited table is still respected.
+- **The partial-season top-up shuffled the wrong thing.** Its comment promised
+  "not always the same five names"; the shuffle ran on the already-chosen
+  subset, so a chain of partial files got the identical names every season in a
+  different order. It draws weighted and without replacement now.
+- **The thread generator never received the alumni index.** `moreThreads(rows,
+  alumni)` had the parameter in its signature, a comment saying it read the
+  index, and no caller that passed one. See *Threads about people* below.
+- **`forEra().threeShare` was not era-bound.** `forEra` exists so a caller
+  outside a run can ask a named era a question without touching the mutable
+  module-level era; it bound three methods and passed the fourth through
+  unbound. Inert only because no era defines a `share3` shift — the first one
+  that did would have made it silently wrong.
+- **The build-pool comment argued from a stale table size.** It reasons at
+  length that the pool must stay near 13% of the archetype table, because
+  holding the pool fixed while the table grows is how per-class coverage
+  quietly halved once already — and then said "the table is 355 builds" against
+  a table of 361, inside the comment written to prevent exactly that. The
+  number is now a single checked claim: `tools/test.js` reads it out of the
+  file and fails when it drifts, the way the program count already was.
+- `DRAFT_YEAR_MODERN` was missing the `twoPct` its sibling anchor carries, so
+  the two blocks that exist to be compared had different shapes.
+
+### The harness was wrong about minimums
+
+`node tools/validate.js 4` — the low-seed invocation CI runs on every push,
+with a comment above it saying the documented invocation has to pass too,
+"which is how a developer learns to ignore the harness" — **was red on main**,
+on a row nothing about the model had moved.
+
+`extreme(lo, hi)` scales an extreme-value band with the sample size, and
+everything its comment says is about a MAXIMUM: `lo` is the inner bound (how
+far into the tail a sample of this size is expected to reach) and `hi` is the
+outer one (the model's own ceiling, which does not depend on the sample). A
+minimum has those the other way round. So `extreme(-24, -10)` moved the inner
+bound in the wrong direction and, at four seeds, demanded that a quarter of the
+usual sample still contain somebody at -10 box plus/minus or worse. A minimum
+now gets its own helper, stated in the order it is thought about, and the four-,
+eight- and twenty-seed runs are all green.
+
+### The harness can now see a drift inside a band
+
+A green tick says a row passed. It does not say the row passed by a
+hundredth — and this repository's own audit note records re-fitting an
+efficiency shift for precisely that reason ("a draft-year TS% of 56.71 against
+a band that starts at 56.70 is a check that passes by a hundredth and reports
+nothing about the model"). That row had since slid back onto its floor and
+nothing said so.
+
+Two additions:
+
+- **A margin column.** Every row's distance to its nearer band edge, as a share
+  of the band's width, printed beside any row inside 10% of an edge and listed
+  again at the end. It does not fail the run: a tight margin is a thing to look
+  at, not a regression, and a harness that cried wolf would be turned off.
+- **A committed baseline.** `tools/calibration-baseline.json` holds every row's
+  value at twenty seeds, and `--baseline` prints what has moved by more than 5%
+  of its own band. CI runs it. Regenerate deliberately with
+  `--write-baseline`; the diff in that commit is then the record of what a
+  re-fit cost.
+
+The baseline caught its own first bug: three checks shared a name inside one
+era block, so the diff compared two different rows against one stored value.
+They are renamed, and a duplicate name is now reported rather than silently
+collapsing.
+
+`corr(ovr, PPG)` was measuring 0.51 against a band ceiling of 0.52 — 2% of the
+band's width, with every tick green. The band is re-centred: the floor goes UP
+(0.22 to 0.34, so a model that lost the link between how good a prospect is and
+how much he scores now fails, where anything above 0.22 used to pass) and the
+ceiling to 0.58, which is real headroom. What catches a slow drift inside it is
+the margin column and the baseline, not the band.
+
+### The prospect premium, fitted and then not shipped
+
+Both anchor sets say a draft prospect finishes better than the ordinary D-I
+rotation player — in the modern era 58.5 true shooting against 55.2, a gap of
+3.3 points. The model produced 0.33, and `js/calibration.js` has named this as a
+separate model fault through two audits: "fixing it needs a term that reaches
+prospects and not the field".
+
+That term now exists. `prospectEff` is the mirror of `fieldEff`, applied to
+prospects only, and it was swept as a pair against both anchors:
+
+| prospectEff | fieldEff | draft TS | field TS | ORtg | result |
+| --- | --- | --- | --- | --- | --- |
+| 0.000 | -0.004 | 56.86 | 56.45 | 108.78 | — |
+| 0.008 | -0.004 | 57.61 | 56.45 | 108.82 | fails at 20 and 4 seeds |
+| 0.016 | -0.010 | 58.30 | 55.87 | 107.86 | fails at 20 seeds |
+| 0.024 | -0.016 | 58.97 | 55.29 | 106.88 | fails at 8 seeds |
+
+**It ships at zero.** Every value that closes any real part of the gap breaks a
+row somewhere, and both of the failures at 0.008 say the same thing: a flat
+lift moves two populations the anchors say nothing about — the earlier seasons,
+which are not draft years, and the bottom of the class, where lifting
+efficiency means nobody in a draft class is genuinely bad any more. The gap
+does not close with a scalar; it closes when the prior-season model moves with
+the draft year and the lift is shaped rather than flat.
+
+So the mechanism is wired, asserted by `tools/test.js` (give an era a premium
+and the class moves while the field does not), and the sweep above is the
+fitted starting point for whoever does the prior-season half. This repository's
+rule for the unfitted third era applies to its own eras too: shipping a shift
+nobody has fitted makes the model less trustworthy, not more.
+
+### The panel can reach the engine's own bands
+
+Three sliders stopped short of the clamp behind them. The engine names its pace
+band once — `PACE_MIN` 55, `PACE_MAX` 82 — expressly so that the two halves of
+a run cannot describe different games, and the slider offered 58 to 80, so the
+top of that constant was unreachable from the interface at all. `injuryRate`
+clamped to 3 and stopped at 2; `surpriseBudget` clamped to 10 and stopped at 6.
+
+The clamp is declared once in `js/config.js` now, the engine reads it instead of
+writing its own literals, and `tools/tests/review.js` reads every slider's `min`
+and `max` off the page and fails when a control cannot reach the range behind
+it. A deliberate narrowing — the pace floor of 58, because the class jitter is
+meant to be able to produce a season slower than the slowest thing a user can
+dial — is declared with its reason, and a narrowing without a reason fails too.
+
+### Interface
+
+- **A control that cannot act on this class says so.** "Draft-day events"
+  returns early below twenty prospects, so a user who lifted a sixteen-man class
+  out of a league export could drag the slider from 0 to 8 and watch the board
+  not move. It now carries a caveat naming the floor and this class's size.
+  Recruiting momentum and the universe dials do the same outside universe mode.
+- **Ten tabs, ten number keys.** The Universe tab — furthest along a grouped bar
+  and so the most expensive to reach with a mouse — was the only one without a
+  shortcut, while the sheet advertised "1 – 9". `0` is the tenth.
+- **High contrast and forced colours.** In Windows' forced-colours mode every
+  state this tool carried with a fill alone — a locked row, a changed setting, a
+  good/bad delta — became indistinguishable from its neighbour. Those states now
+  also carry a border, an outline or a glyph, and `prefers-contrast: more`
+  darkens the lines and stops the dim text being dim.
+- **What the staging actually saved.** The engine's whole shape is that a slider
+  re-runs only the phases it invalidates, and the only place that was visible was
+  a tooltip nobody hovers. A warm run now says "Re-ran awards → stock → notes".
+  A universe chain says how many seasons it re-simulated against how many it
+  served from the cache — which is a sentence worth printing only now that the
+  cache is trustworthy.
+- **What the season was actually played at.** `result.effectiveCfg` is the panel
+  plus the flavour's bend, the storylines' bends and the environment jitter —
+  the config the season was genuinely simulated under — and nothing showed it.
+  A collapsible block under the storyline hint diffs it against the settings as
+  sent, so the most atmospheric system in the tool stops being the only
+  invisible one.
+- A long chain says how long it will take before it starts, rather than after
+  the user has already committed.
+
+### Replayability
+
+- **Challenges.** "Reroll until…" searches for a class that satisfies a
+  predicate. A challenge inverts it: the seed is fixed, so rerolling is not
+  available, and the only way to hit the target is to work out which settings
+  produce it — inside a budget of how many you may move. Four to start with,
+  scored live in the panel.
+- **Compound and negated reroll conditions.** Every condition was a tick box
+  meaning "must be true", so half the interesting searches — a class with no
+  seven-footer at the top, a year the mid-majors did not win — were
+  inexpressible. Each condition is now off / must / must not. And a failed
+  search reports how often each condition matched **on its own**, so a dead end
+  becomes a fact about the settings ("the 7'2" clause matched 2 of 40") rather
+  than a shrug.
+- **The run history is a lineage.** Twenty-four restorable snapshots in the
+  order they happened, with nothing relating any of them to any other. Each
+  entry now records the one it branched from and the settings that were moved
+  to get there, and the list is indented as a tree — so "go back to where it
+  was still good, then try the other thing" is one click.
+- **One dial for how strange a world is**, over the five that all answer that
+  question — anomalies per class, flavour strength, storylines, March upsets,
+  build noise. It moves a setting only while that setting is still at its
+  default, so it never overrules a decision anybody made, and 0 is a complete
+  no-op: every seed and every shareable link made before it existed still
+  resolves to the class it always did. Beside it, a **strangeness score** on the
+  class that came out, with its reasons listed — a mid-major champion, a No. 1
+  pick nobody had in the preseason top twenty, an unbeaten team.
+- **An anomaly shortlist.** The anomalies are the single most rerolled-for thing
+  in the tool and they were the one decision the user had no say in: four kinds
+  drawn and applied, and the only way to influence the result was to throw the
+  class away. Above zero, "Extra anomalies to choose from" draws that many more
+  candidates and lets you pick which ones the class gets. At zero the draw is
+  byte-identical to what it always was, down to the order the kinds are applied
+  in, because an anomaly can change who is eligible for the next one.
+- **A name, not a hash.** "The 2027 class — the year of the stretch bigs, a
+  wide-open year" in the tab title, the run history and the exported picture.
+
+### Universe
+
+- **Threads about people.** Every thread counted a programme's repeats. The
+  alumni index — every national player of the year, the top three of every
+  board, the champion's best prospect, per season — was built, persisted, handed
+  to the news desk, and never read by the thread generator. It is now: droughts
+  between the men a programme is remembered for, players of the year who were
+  not the No. 1 pick, a No. 1 who never played college basketball.
+  One thread is deliberately **absent**: "he came back" needs an identity that
+  survives a file boundary, and a class file's key is a pid that collides across
+  exports — on the test fixtures a name match fired on seven different men. It
+  is the first thing to build on the persistent registry.
+- **The state of the world, inspectable.** `carryOver` is the universe's entire
+  state — every program's level, its conference, its coach and his tenure, its
+  banners, its named returners — and the only window onto it was the timeline's
+  one-line summaries. A dynasty forming over six seasons was visible as a
+  repeated champion and in no other way. The Universe tab now shows it, at any
+  season the chain recorded, read back rather than reconstructed.
+- **Re-running part of a chain.** A chain re-runs from season one whenever
+  anything invalidates it, which is correct and is also why nobody iterates on
+  the end of a long universe. "Re-run from a season…" holds the seasons before
+  the one you pick and starts again from exactly the state that season was
+  handed. What it does not do — re-run the cross-file passes over the held
+  seasons — is stated in the control rather than discovered.
+
+### The search moved off the main thread
+
+`js/worker.js` has existed since the batch runner needed it, and the comment
+beside the busy indicator is honest about why the interactive path cannot
+follow: the staged runner keeps its state between calls as a graph of live
+objects, and that is not a message. What CAN move is a SEARCH. "Reroll until…"
+runs up to sixty full simulations and needs one boolean per candidate and one
+seed at the end — all cost, no payload, which is exactly the shape a worker is
+for. Sliced on a timer it kept the tab technically alive and made it useless
+for twenty seconds.
+
+The worker hands back the SEED, not the class: the main thread re-runs it
+through its own runner, which is what puts it in the pill, the history and the
+undo stack, and means nothing about the result graph has to survive a
+structured clone. The inline path stays for the same reason the batch
+runner's does — opening index.html straight off the disk blocks workers in
+most browsers, and that is the documented way to use this tool.
+
+The predicates moved into `js/engine.js` to make it possible, and that is worth
+more than the thread: the worker, the main-thread fallback and the challenge
+scorer now share one definition instead of three, and CI can reach them. Every
+predicate is checked against a degenerate result, because a search whose
+predicate throws is a search that silently skips candidates.
+
+### Quick wins
+
+- Seven facts the model already carried and never showed: handedness, draft
+  age, recruiting rank, stars, the 247-style composite, a prospect abroad's
+  national-team caps and his club's continental run. All sortable columns, all
+  in the CSV — which the rule this file follows says must never disagree with
+  the screen.
+- **The CSV is in board order.** It walked the source file's row order, so an
+  export from a tool whose front page is a draft board arrived in an order that
+  means nothing.
+- **"Did not play" is filterable.** Those rows were dimmed, labelled and
+  explained, which was right; on a class with fifteen of them the only way to
+  compare the men who played was to read past the blanks.
+- **The mock first round as a PNG.** Every other export needs the reader to own
+  Basketball GM. This one does not, and the draft-night events are what make it
+  a draft rather than a list.
+- **Surprise me.** The loop a new user wants — wide settings, reroll, look at
+  the anomalies — was four actions spread across the panel and the header.
+
 ## Known limits
 
 * A draft class is one season, but the seasons before it are **simulated** for

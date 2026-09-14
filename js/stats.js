@@ -1672,8 +1672,32 @@
 		/* The efficiency dial, which did not exist: pace and scoringEnv are
 		   both possession dials, and moving either left true shooting at 0.572
 		   in every configuration. */
+		/* THE PROSPECT PREMIUM, which needed a term that reaches prospects
+		   and not the field.
+
+		   The anchor sets say a draft prospect finishes better than the
+		   ordinary D-I rotation player: in the modern era 58.5 true shooting
+		   against 55.2, a premium of 3.3 points. The model had no way to say
+		   it. `fieldEff` beside this moves the FIELD only, `talentEffAdj` is
+		   prospect-only but centred on the mean prospect and therefore
+		   mean-zero by construction — it redistributes efficiency inside a
+		   class and cannot move the class's level — and everything else
+		   reaches both populations at once. So the premium was whatever fell
+		   out: measured at 20 seeds it was +0.33 points in the modern era and
+		   +2.54 in 2009-2021, which is not even consistent, and the draft-year
+		   true-shooting row sat 2% inside the floor of its own band while the
+		   field sat comfortably mid-band.
+
+		   js/calibration.js has named this as a separate model fault for two
+		   audits ("fixing it needs a term that reaches prospects and not the
+		   field, which is a larger change than rebalancing a shared shift").
+		   This is that term. It is the mirror of fieldEff, fitted the same way
+		   — by sweeping it alone against the draft-year anchor with the field
+		   rows held inside their bands — and it is zero for 2009-2021, which
+		   is the era the model was originally fitted to and whose premium is
+		   already where the anchors put it. */
 		const envEff = 0.010 * clamp(cfg.efficiencyEnv || 0, -3, 3) +
-			(me.filler ? CAL.effShift("fieldEff") : 0);
+			(me.filler ? CAL.effShift("fieldEff") : CAL.effShift("prospectEff"));
 		// The defenses actually faced. `oppDefense` is the minute-weighted
 		// average defensive profile of this team's schedule, so a prospect in a
 		// conference full of shot-blockers finishes worse at the rim than the

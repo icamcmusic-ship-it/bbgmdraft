@@ -1164,3 +1164,144 @@ tr.dnp > td.sticky, tr.dnp > td.num { font-style: normal; }
 @media print {
 	.scroll > table > tbody > tr { content-visibility: visible; }
 }
+
+/* ---- high contrast and forced colours -----------------------------------
+
+   Two modes the stylesheet did not answer, and in both of them the colours
+   that carry MEANING were the ones that went first.
+
+   In Windows' forced-colours mode the system replaces every colour on the
+   page with its own small palette. Everything that survives is what the
+   browser can map: text, borders, link colour. So anything this tool says
+   with a fill alone — a locked row, a changed setting, a good/bad delta, a
+   seed higher than its opponent in a bracket — becomes indistinguishable
+   from its neighbour, and the table that is most of the interface stops
+   encoding anything. The fix is not to fight the mode: it is to make sure
+   every one of those states ALSO has a border, an outline or a glyph, and to
+   let the system own the colours.
+
+   `prefers-contrast: more` is the milder case — the palette is ours, the
+   user has asked for more separation between it — so the lines go darker and
+   the dim text stops being dim. */
+@media (prefers-contrast: more) {
+	:root {
+		--line: #94a3b1;
+		--dim: #3a444e;
+		--chip: rgba(127, 127, 127, .22);
+		--surface-hover: rgba(127, 127, 127, .18);
+	}
+	@media (prefers-color-scheme: dark) {
+		:root:not([data-theme="light"]) {
+			--line: #5d6b79;
+			--dim: #c3ccd5;
+		}
+	}
+	th, td { border-bottom-color: var(--line); }
+	.card, .chip, .pill, .tag { border: 1px solid var(--line); }
+}
+
+@media (forced-colors: active) {
+	/* Let the system paint, and keep the structure it can still see. */
+	* { forced-color-adjust: auto; }
+	.card, .chip, .pill, .tag, .whypop, .rowmenu, .modalbox, .banner {
+		border: 1px solid CanvasText;
+	}
+	/* State that was carried by a fill alone. A border and an outline survive
+	   the mode; a background does not. */
+	tr.locked td, td.locked, .lockbadge, .chip.on, .modified {
+		outline: 1px solid Highlight;
+		outline-offset: -1px;
+	}
+	/* Good and bad are the two colours in this tool that are genuinely
+	   semantic rather than decorative, and forced colours flattens them into
+	   one. A glyph says it instead, in the content layer where the mode
+	   cannot reach. */
+	.up::before { content: "\2191\FE0E "; }
+	.down::before { content: "\2193\FE0E "; }
+	/* The focus ring is the one thing that must never be optimised away. */
+	:focus-visible { outline: 3px solid Highlight; outline-offset: 2px; }
+	tbody tr:focus-visible td { outline: 2px solid Highlight; outline-offset: -2px; }
+	/* A sparkline or a poll trace is decoration the system cannot recolour
+	   usefully; give it an explicit stroke rather than an invisible one. */
+	svg .spark, svg .trace { stroke: CanvasText; }
+}
+
+/* The caveat under a control that cannot act on the class in front of the
+   user — see SLIDER_CAVEAT in js/app.js. Deliberately not styled as an
+   error: nothing is wrong, the setting simply has nothing to act on. */
+.ctl .caveat {
+	margin: 4px 0 0;
+	font-size: 11.5px;
+	line-height: 1.45;
+	color: var(--accent-2);
+	border-left: 2px solid var(--accent-2);
+	padding-left: 7px;
+}
+@media (forced-colors: active) {
+	.ctl .caveat { border-left-color: CanvasText; }
+}
+
+/* ---- what the season was actually played at ------------------------------
+   The flavor's bend, the storylines' bends and the class-environment jitter,
+   diffed against the settings as sent. See paintEffective in js/app.js. */
+#effectiveBox { margin: 8px 0 4px; }
+#effectiveBox > summary { font-size: 12px; }
+.efflist {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	margin: 6px 0;
+}
+.effrow {
+	display: flex;
+	justify-content: space-between;
+	gap: 10px;
+	font-size: 11.5px;
+	line-height: 1.5;
+	padding: 2px 0;
+	border-bottom: 1px solid var(--line);
+}
+.effrow:last-child { border-bottom: none; }
+.effkey { color: var(--dim); }
+.effval { font-family: var(--mono); color: var(--text); white-space: nowrap; }
+
+/* ---- reroll until ------------------------------------------------------
+   One row per condition: a three-state sense control (off / must / must not)
+   and the condition it applies to. Two checkboxes per row would have doubled
+   the height of a dialog that is already a list. */
+.untilrow {
+	display: grid;
+	grid-template-columns: 92px 1fr;
+	gap: 10px;
+	align-items: center;
+	padding: 3px 0;
+}
+.untilsense { font-size: 12px; }
+.untillabel { font-size: 13px; line-height: 1.4; }
+@media (max-width: 520px) {
+	.untilrow { grid-template-columns: 84px 1fr; gap: 8px; }
+}
+
+/* ---- challenges --------------------------------------------------------
+   A fixed seed, a target and a budget of settings to reach it with. The bar
+   sits under the preset row, where the settings the challenge is played with
+   are. See CHALLENGES in js/app.js. */
+.challengebar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 6px 10px;
+	margin: 6px 0 2px;
+	padding: 7px 9px;
+	border: 1px solid var(--line);
+	border-left: 3px solid var(--accent);
+	background: var(--panel-2);
+	font-size: 12px;
+}
+.challengebar b { font-size: 12.5px; }
+p.goal { margin: 2px 0; font-size: 12.5px; color: var(--dim); }
+p.goal.met, .goal.met { color: var(--good); font-weight: 600; }
+@media (forced-colors: active) {
+	.challengebar { border-left-color: CanvasText; }
+	p.goal.met::after { content: " \2713\FE0E"; }
+}

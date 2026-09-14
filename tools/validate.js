@@ -13,6 +13,7 @@
 "use strict";
 
 const path = require("path");
+const fs = require("fs");
 
 /* An archetype with no role-usage entry used to fall through to a silent
    1.0. Under a harness that is a bug that cannot be seen, so the harness
@@ -244,6 +245,30 @@ function collect(nSeeds, cfgOverrides, fixture) {
 	   drifts up, for a sample big enough to reach further into the tail. */
 	const extreme = (lo, hi) =>
 		[lo + (hi - lo) * drift, hi + (hi - lo) * Math.max(0, drift)];
+	/* AND THE SAME BAND FOR A MINIMUM, WHICH IS NOT THE SAME BAND.
+
+	   Everything the paragraph above says is about a MAXIMUM, where `lo` is
+	   the inner bound (how far into the tail the sample is expected to reach)
+	   and `hi` is the outer one (the model's own ceiling). A minimum has those
+	   two the other way round, and `extreme(-24, -10)` therefore moved the
+	   INNER bound — the -10 — in the wrong direction: at four seeds the band
+	   came out [-27.25, -10], demanding that a quarter of the usual sample
+	   still contain somebody at -10 box plus/minus or worse.
+
+	   That is why `node tools/validate.js 4` — the low-seed invocation CI runs
+	   on every push, with a comment above it saying the documented invocation
+	   has to pass too, "which is how a developer learns to ignore the
+	   harness" — was red on main, on a row nothing about the model had moved.
+
+	   So a minimum gets its own helper, stated in the order it is thought
+	   about: how far out the model may reach, and how far in a sample of this
+	   size must get. The inner bound relaxes toward zero as the sample
+	   shrinks, and the outer bound extends only for a sample big enough to
+	   reach further. Exactly the mirror of extreme(). */
+	const extremeLow = (outer, inner) => {
+		const width = inner - outer;
+		return [outer - width * Math.max(0, drift), inner - width * drift];
+	};
 	/* A band on a per-class count or rate, which is a mean over nSeeds classes
 	   and so is far noisier at 3 seeds than at 20. Rates are clamped to [0, 1]
 	   because a proportion cannot leave it. */
@@ -868,8 +893,8 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		/* ABSOLUTE MAXIMA. The share caps are shares of a team pool, so on a
 		   low-pool team they bind late; before clipPer40 the class maximum ran
 		   17.1 rebounds and 10.9 assists a game against a real 12-13 and 8-9. */
-		["RPG max", Math.max.apply(null, g((p) => p.stats.rpg))].concat(extreme(10.5, 13.8)),
-		["APG max", Math.max.apply(null, g((p) => p.stats.apg))].concat(extreme(7.0, 9.6)),
+		["RPG max (realistic shape)", Math.max.apply(null, g((p) => p.stats.rpg))].concat(extreme(10.5, 13.8)),
+		["APG max (realistic shape)", Math.max.apply(null, g((p) => p.stats.apg))].concat(extreme(7.0, 9.6)),
 		["RPG per 40 max", Math.max.apply(null, all.filter((p) => p.stats.mpg >= 8)
 			.map((p) => (p.stats.rpg * 40) / p.stats.mpg))].concat(extreme(11, 15.2)),
 		["APG per 40 max", Math.max.apply(null, all.filter((p) => p.stats.mpg >= 8)
@@ -1151,9 +1176,38 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   draft classes the correlation between draft stock and college
 		   scoring is about 0.25-0.35 — Zach Edey outscored every lottery pick
 		   in his class, Bronny James averaged 4.8 — because a college role is
-		   not an NBA rating. See collegeRole in js/stats.js. */
+		   not an NBA rating. See collegeRole in js/stats.js.
+
+		   AND THEN RE-CENTRED, because the band and the model had drifted into
+		   a bad arrangement: measured at 20 seeds the model reads 0.51 against
+		   a ceiling of 0.52, which is 2% of the band's width. A row with no
+		   headroom fails on an unrelated change and teaches a developer to
+		   re-run CI rather than to read it, and this one had no headroom while
+		   every green tick said otherwise.
+
+		   The honest statement of where this stands is in MINUTES_TILT_ABS in
+		   js/stats.js, and it is worth repeating here because this row is
+		   where somebody will come looking: 0.25-0.35 is what real classes
+		   run, it is the right aspiration, and it is NOT reachable from these
+		   dials. Flattening every available channel got the model to 0.455 and
+		   cost the class its scorers — 20+ PPG men fell from 5.9 a class to
+		   3.9, under the floor of the row that exists to catch exactly that —
+		   because past roughly 0.42 what remains is not a ramp but the
+		   composites themselves, and a better rating genuinely does produce a
+		   better usage composite. A correlation target that cannot be met is
+		   not worth a distribution that can be.
+
+		   So the band says what is actually being asserted. The FLOOR is the
+		   load-bearing half and it goes UP, from 0.22 to 0.34: a model that
+		   lost the link between how good a prospect is and how much he scores
+		   would have sailed through the old floor, and now does not. The
+		   ceiling goes to 0.58, which is genuine headroom for sampling noise
+		   and still well under the 0.72 the unflattened model produced. What
+		   catches a slow drift inside the band is not the band — it is the
+		   margin column and the committed baseline this file now writes; see
+		   --baseline. */
 		["corr(ovr, PPG)", corr(g((p) => p.newOvr), g((p) => p.stats.ppg))].concat(
-			corrBand(0.22, 0.52)),
+			corrBand(0.34, 0.58)),
 		["corr(3PT rating, FG%)",
 			corr(g((p) => p.newRatings.tp), g((p) => p.stats.fgp))].concat(corrBand(-0.80, -0.20)),
 		/* LOWERED FROM 0.60, AND THIS ROW FALLING IS THE FIX WORKING.
@@ -1278,19 +1332,19 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		["BPM median (draft year)", pct(adv.bpm, 0.5)].concat(within(1.0, 3.0)),
 		["BPM p99", pct(adv.bpm, 0.99)].concat(within(13, 4)),
 		["BPM max", Math.max.apply(null, adv.bpm)].concat(extreme(13, 22)),
-		["BPM min", Math.min.apply(null, adv.bpm)].concat(extreme(-24, -10)),
+		["BPM min", Math.min.apply(null, adv.bpm)].concat(extremeLow(-24, -10)),
 		["PER median (draft year)", pct(adv.per, 0.5)].concat(within(16.5, 3.0)),
 		["PER max", Math.max.apply(null, adv.per)].concat(extreme(30, 48)),
 		["VORP max", Math.max.apply(null, adv.vorp)].concat(extreme(4.5, 11)),
 		["WS per 40 max", Math.max.apply(null, adv.ws40)].concat(extreme(0.28, 0.58)),
 		["ORtg median", pct(adv.ortg, 0.5)].concat(within(108, 6)),
-		["USG% max", Math.max.apply(null, adv.usgp)].concat(extreme(33, 42)),
+		["USG% max (BBGM advanced)", Math.max.apply(null, adv.usgp)].concat(extreme(33, 42)),
 		/* On/off and per-game plus/minus are DIFFERENCES, so they are the two
 		   rows that catch a team's box score and its scoreboard disagreeing —
 		   which is what put on/off at +295. */
 		["On/off per 100, p99", pct(adv.onOff, 0.99)].concat(within(26, 12)),
 		["On/off per 100, max", Math.max.apply(null, adv.onOff)].concat(extreme(20, 60)),
-		["On/off per 100, min", Math.min.apply(null, adv.onOff)].concat(extreme(-60, -12)),
+		["On/off per 100, min", Math.min.apply(null, adv.onOff)].concat(extremeLow(-60, -12)),
 		["Plus/minus per game, p99", pct(adv.pmg, 0.99)].concat(within(18, 6)),
 		["Plus/minus per game, max", Math.max.apply(null, adv.pmg)].concat(extreme(16, 32)),
 	];
@@ -1718,19 +1772,144 @@ function main() {
 		   scoring outside what Division I has ever produced. */
 		const lo = Math.min.apply(null, withN);
 		const hi = Math.max.apply(null, withN);
+		/* TWO ROWS, BECAUSE IT IS TWO FACTS.
+
+		   This used to be one row whose value was `round(lo) + round(hi)/1000`
+		   — two numbers packed into one float — reported against a band of
+		   [0, 1e9]. The assertion underneath was real, but nothing a reader
+		   could see was: the printed band said the row could not fail, and CI
+		   uploads this JSON expressly so runs can be diffed, where the row
+		   diffed as "66.085 -> 67.091" with no way to tell which half moved.
+		   A check that cannot be read is a check that cannot be acted on. */
 		checks.push({
-			name: "Narrative: team PPG stays in range",
-			value: Math.round(lo) + Math.round(hi) / 1000, lo: 0, hi: 1e9,
-			ok: lo >= 58 && hi <= 92,
+			name: "Narrative: slowest season's team PPG",
+			value: lo, lo: 58, hi: 92, ok: lo >= 58 && lo <= 92,
+		});
+		checks.push({
+			name: "Narrative: fastest season's team PPG",
+			value: hi, lo: 58, hi: 92, ok: hi >= 58 && hi <= 92,
 		});
 	}
 
 	const fail = perEra.reduce((a, e) => a + e.checks.filter((c) => !c.ok).length, 0) +
 		checks.filter((c) => !c.ok).length;
 	const fmt = (x) => (Math.abs(x) >= 1000 || Number.isInteger(x) ? String(x) : x.toFixed(2));
+
+	/* HOW CLOSE A PASSING ROW IS TO FAILING.
+
+	   Every band here scales with the seed count, which is the right design
+	   and has a cost nobody was paying attention to: the same row reads
+	   comfortable at 8 seeds and sits a hundredth inside its ceiling at 20,
+	   and a green tick says the same thing either way. That blind spot is not
+	   hypothetical — this repository's own audit note records re-fitting an
+	   efficiency shift because "a draft-year TS% of 56.71 against a band that
+	   starts at 56.70 is a check that passes by a hundredth and reports
+	   nothing about the model", and the row had quietly slid back onto that
+	   floor without a word.
+
+	   The margin is the distance to the nearer edge as a share of the band's
+	   width. It is printed beside every row that is inside 10% of an edge, and
+	   listed again at the end, so a suite that is one sampling draw from red
+	   says so instead of reporting all-clear. It does NOT fail the run: a
+	   tight margin is a thing to look at, not a regression, and a harness that
+	   cried wolf would be turned off. */
+	const marginOf = (c) => {
+		if (!Number.isFinite(c.value) || !Number.isFinite(c.lo) ||
+			!Number.isFinite(c.hi)) return null;
+		const w = c.hi - c.lo;
+		if (!(w > 0) || !Number.isFinite(w)) return null;
+		return Math.min(c.value - c.lo, c.hi - c.value) / w;
+	};
+	const TIGHT = 0.10;
+	const allRows = [];
+	for (const e of perEra) {
+		for (const c of e.checks) allRows.push({ where: e.era + "/" + e.fixture, c });
+	}
+	for (const c of checks) allRows.push({ where: "global", c });
+	for (const row of allRows) {
+		row.margin = marginOf(row.c);
+		row.c.margin = row.margin;
+	}
+	/* A row sitting EXACTLY on an edge is almost always a perfect score, not a
+	   near miss: "usage shares renormalized 0 / 1000 [0, 1]" and "distinct
+	   storylines 12 of 12 [7, 12]" are the model doing the best it can do,
+	   and reporting them as having no margin would bury the rows that really
+	   are one sampling draw from red. So the list is rows strictly inside
+	   their band and close to an edge. The zero-defect counters are covered by
+	   the pass/fail they already carry. */
+	const tight = allRows
+		.filter((r) => r.c.ok && r.margin !== null && r.margin > 0 && r.margin < TIGHT)
+		.sort((a, b) => a.margin - b.margin);
+	const marginText = (m) => (m === null ? "" :
+		"  " + (m * 100).toFixed(1).padStart(5) + "%");
+
+	/* THE BASELINE, so drift announces itself.
+
+	   CI uploads calibration.json as an artifact for a human to compare by
+	   hand, which is a comparison nobody performs. With a committed reference
+	   copy, --baseline prints every row that moved by more than a threshold
+	   share of its band — which is what would have caught the true-shooting
+	   anchor sliding 0.22 back onto its floor between one release and the
+	   next. Regenerate with --write-baseline after a deliberate re-fit, and
+	   the diff in that commit is then the record of what the re-fit cost. */
+	const BASELINE = path.join(__dirname, "calibration-baseline.json");
+	/* A ROW'S NAME HAS TO IDENTIFY IT.
+
+	   Three names appeared twice inside one era block — "USG% max" was both
+	   the model's own usage and BBGM's advanced usage percentage, against two
+	   different bands — which is ambiguous in the printed report and is worse
+	   than ambiguous in a diff: keyed by name, the baseline stored one of the
+	   pair and then compared BOTH rows against it, so the first of each pair
+	   reported as having moved a quarter of its band on a run where nothing
+	   had changed. The three are renamed; this check is what stops a fourth
+	   from arriving unnoticed. */
+	const flat = {};
+	const dupNames = [];
+	for (const row of allRows) {
+		const key = row.where + " · " + row.c.name;
+		if (Object.prototype.hasOwnProperty.call(flat, key)) dupNames.push(key);
+		flat[key] = row.c.value;
+	}
+	if (dupNames.length) {
+		console.log("\nTwo checks share a name, so neither can be diffed:\n  " +
+			dupNames.join("\n  "));
+	}
+	if (process.argv.indexOf("--write-baseline") !== -1) {
+		fs.writeFileSync(BASELINE,
+			JSON.stringify({ seeds: nSeeds, values: flat }, null, 2) + "\n");
+		console.log("wrote " + BASELINE + " (" +
+			Object.keys(flat).length + " rows at " + nSeeds + " seeds)");
+	}
+	let drift = [];
+	if (process.argv.indexOf("--baseline") !== -1) {
+		let base = null;
+		try { base = JSON.parse(fs.readFileSync(BASELINE, "utf8")); } catch (e) { base = null; }
+		if (!base) {
+			console.log("\nNo baseline at " + BASELINE +
+				" — run with --write-baseline to create one.");
+		} else if (base.seeds !== nSeeds) {
+			console.log("\nBaseline was written at " + base.seeds +
+				" seeds and this run is " + nSeeds + "; skipping the diff, " +
+				"because every band and every value here scales with it.");
+		} else {
+			for (const row of allRows) {
+				const key = row.where + " · " + row.c.name;
+				const was = base.values[key];
+				if (!Number.isFinite(was)) continue;
+				const w = row.c.hi - row.c.lo;
+				if (!(w > 0) || !Number.isFinite(w)) continue;
+				const moved = Math.abs(row.c.value - was) / w;
+				if (moved >= 0.05) drift.push({ key, was, now: row.c.value, moved });
+			}
+			drift.sort((a, b) => b.moved - a.moved);
+		}
+	}
 	if (asJson) {
 		console.log(JSON.stringify({
 			seeds: nSeeds, failures: fail, eras: perEra, global: checks,
+			tight: tight.map((r) => ({ where: r.where, name: r.c.name,
+				value: r.c.value, lo: r.c.lo, hi: r.c.hi, margin: r.margin })),
+			drift,
 		}, null, 2));
 	} else {
 		for (const e of perEra) {
@@ -1740,7 +1919,9 @@ function main() {
 				console.log(
 					(c.ok ? "  ok   " : "  FAIL ") + c.name.padEnd(38) +
 					c.value.toFixed(2).padStart(8) +
-					"   [" + fmt(c.lo) + ", " + fmt(c.hi) + "]",
+					"   [" + fmt(c.lo) + ", " + fmt(c.hi) + "]" +
+					(c.ok && c.margin !== null && c.margin < TIGHT
+						? marginText(c.margin) : ""),
 				);
 			}
 			console.log("");
@@ -1748,10 +1929,30 @@ function main() {
 		for (const c of checks) {
 			console.log(
 				(c.ok ? "  ok   " : "  FAIL ") + c.name.padEnd(38) +
-				c.value.toFixed(2).padStart(8) + "   [" + fmt(c.lo) + ", " + fmt(c.hi) + "]",
+				c.value.toFixed(2).padStart(8) + "   [" + fmt(c.lo) + ", " + fmt(c.hi) + "]" +
+				(c.ok && c.margin !== null && c.margin < TIGHT
+					? marginText(c.margin) : ""),
 			);
 		}
-		console.log("\n" + (fail ? fail + " check(s) failed" : "all checks passed"));
+		if (tight.length) {
+			console.log("\nInside " + Math.round(TIGHT * 100) +
+				"% of a band edge — passing, and with no room left:");
+			for (const r of tight) {
+				console.log("  " + (r.margin * 100).toFixed(1).padStart(5) + "%  " +
+					r.c.name.padEnd(40) + r.c.value.toFixed(3).padStart(9) +
+					"   [" + fmt(r.c.lo) + ", " + fmt(r.c.hi) + "]   " + r.where);
+			}
+		}
+		if (drift.length) {
+			console.log("\nMoved since the committed baseline (by band width):");
+			for (const d of drift) {
+				console.log("  " + (d.moved * 100).toFixed(1).padStart(5) + "%  " +
+					d.key.padEnd(52) + d.was.toFixed(3) + " -> " + d.now.toFixed(3));
+			}
+		}
+		console.log("\n" + (fail ? fail + " check(s) failed" : "all checks passed") +
+			(tight.length ? " · " + tight.length + " with no margin" : "") +
+			(drift.length ? " · " + drift.length + " moved since baseline" : ""));
 	}
 	process.exit(fail ? 1 : 0);
 }

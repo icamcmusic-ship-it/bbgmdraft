@@ -18,8 +18,65 @@ self.importScripts(
 	"engine.js", "batch.js", "news.js", "universe.js",
 );
 
+/* THE SEARCH, WHICH IS THE OTHER THING WORTH SENDING HERE.
+
+   The interactive path cannot move off the main thread: the staged runner
+   keeps its state between calls as a graph of live objects, and that is not a
+   message. A SEARCH is the opposite shape — "Reroll until…" runs up to sixty
+   full simulations and needs one boolean per candidate and one seed at the
+   end — so it is all cost and no payload, which is exactly what a worker is
+   for. It used to run on the main thread, sliced with setTimeout(0), which
+   keeps the tab technically alive and makes it useless for twenty seconds.
+
+   The predicates come from Engine.REROLL_PREDICATES rather than from the UI,
+   so the worker and the main-thread fallback cannot drift apart and CI can
+   test them. */
+function runSearch(msg) {
+	const runner = self.Engine.createRunner(msg.leagueFile);
+	const clauses = (msg.keys || [])
+		.map((k) => self.Engine.parseRerollClause(k))
+		.filter(Boolean);
+	if (!clauses.length) {
+		self.postMessage({ type: "searchDone", found: null, tries: 0, hits: [] });
+		return;
+	}
+	const rng = new self.BBGMRng.Rng(msg.base);
+	const hits = clauses.map(() => 0);
+	let found = null;
+	let k = 0;
+	for (; k < msg.maxTries && !found; k++) {
+		const seed = "u" + Math.floor(rng.random() * 1e9).toString(36);
+		const cfg = self.Config.make(msg.cfg);
+		cfg.seed = seed;
+		cfg.overrides = msg.cfg.overrides || {};
+		try {
+			const res = runner.run(cfg);
+			let all = true;
+			clauses.forEach((c, i) => {
+				let hit = false;
+				try { hit = !!c.test(res); } catch (err) { hit = false; }
+				if (hit) hits[i]++; else all = false;
+			});
+			if (all) found = seed;
+		} catch (err) { /* a failed candidate is just not the one */ }
+		self.postMessage({ type: "searchProgress", done: k + 1, total: msg.maxTries });
+	}
+	/* The SEED, not the result. The main thread re-runs it through its own
+	   runner, which is what puts the class in the pill, the history and the
+	   undo stack — and means nothing about the result graph has to survive a
+	   structured clone. */
+	self.postMessage({ type: "searchDone", found, tries: k, hits });
+}
+
 self.onmessage = function (e) {
 	const msg = e.data || {};
+	if (msg.type === "search") {
+		try { runSearch(msg); } catch (err) {
+			self.postMessage({ type: "error",
+				message: err && err.message ? err.message : String(err) });
+		}
+		return;
+	}
 	if (msg.type !== "batch") return;
 	try {
 		const runner = self.Engine.createRunner(msg.leagueFile);

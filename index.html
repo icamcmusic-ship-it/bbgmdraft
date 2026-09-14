@@ -139,7 +139,14 @@
 		<div class="ctl"><label for="archetypeDiversity">Archetype diversity <b></b></label><input type="range" id="archetypeDiversity" min="0" max="100" step="1"></div>
 		<div class="ctl"><label for="classFlavor">Flavor strength <b></b></label><input type="range" id="classFlavor" min="0" max="2" step="0.05"></div>
 		<div class="ctl"><label for="archetypePool">Builds per class <b></b></label><input type="range" id="archetypePool" min="0" max="361" step="1"></div>
-		<div class="ctl"><label for="surpriseBudget">Anomalies per class <b></b></label><input type="range" id="surpriseBudget" min="0" max="6" step="1"></div>
+		<!-- One dial over the five that all answer "how far from the middle
+		     should this world sit". It moves a setting only while that setting
+		     is still at its default, so it never overrules a decision anybody
+		     made, and 0 is a complete no-op. See applyWeirdness in js/engine.js. -->
+		<div class="ctl"><label for="weirdness">How strange a world <b></b></label><input type="range" id="weirdness" min="-2" max="3" step="0.5"></div>
+		<div class="ctl"><label for="surpriseBudget">Anomalies per class <b></b></label><input type="range" id="surpriseBudget" min="0" max="10" step="1"></div>
+		<div class="ctl"><label for="anomalyChoices">Extra anomalies to choose from <b></b></label><input type="range" id="anomalyChoices" min="0" max="8" step="1"></div>
+		<div class="ctl" id="anomalyPickRow" hidden></div>
 		<div class="ctl"><label for="traitCount">Scouting traits per prospect <b></b></label><input type="range" id="traitCount" min="0" max="6" step="1"></div>
 		<div class="ctl"><label for="anomalyMemory">Avoid repeating recent anomalies <b></b></label><input type="range" id="anomalyMemory" min="0" max="3" step="0.1"></div>
 		<div class="ctl"><label for="flavorReach">Flavor reaches settings you changed <b></b></label><input type="range" id="flavorReach" min="0" max="100" step="5"></div>
@@ -200,11 +207,16 @@
 			<select id="era"></select>
 			<p class="unit" id="eraNote"></p>
 		</div>
-		<div class="ctl"><label for="pace">Pace (poss / 40) <b></b></label><input type="range" id="pace" min="58" max="80" step="1"></div>
+		<!-- Every range on this page is checked against the engine's own clamp
+		     (Config.CLAMP, read by tools/tests/review.js): a control that
+		     cannot reach the band behind it is how the build-pool slider once
+		     ended up unable to reach its own off switch. The pace floor of 58
+		     is the one deliberate exception and Config.CLAMP records why. -->
+		<div class="ctl"><label for="pace">Pace (poss / 40) <b></b></label><input type="range" id="pace" min="58" max="82" step="1"></div>
 		<div class="ctl"><label for="scoringEnv">Scoring environment <b></b></label><input type="range" id="scoringEnv" min="-3" max="3" step="0.5"></div>
 		<div class="ctl"><label for="efficiencyEnv">Shooting efficiency <b></b></label><input type="range" id="efficiencyEnv" min="-3" max="3" step="0.5"></div>
 		<div class="ctl"><label for="statNoise">Stat randomness <b></b></label><input type="range" id="statNoise" min="0" max="2.5" step="0.05"></div>
-		<div class="ctl"><label for="injuryRate">Injuries <b></b></label><input type="range" id="injuryRate" min="0" max="2" step="0.05"></div>
+		<div class="ctl"><label for="injuryRate">Injuries <b></b></label><input type="range" id="injuryRate" min="0" max="3" step="0.05"></div>
 		<div class="ctl"><label for="upsetFactor">March upsets <b></b></label><input type="range" id="upsetFactor" min="0" max="2" step="0.05"></div>
 		<div class="ctl"><label for="realignmentRate">Conference realignment <b></b></label><input type="range" id="realignmentRate" min="0" max="1" step="0.05"></div>
 		<div class="ctl"><label for="bluebloodDownYears">Blue bloods having a down year <b></b></label><input type="range" id="bluebloodDownYears" min="0" max="6" step="1"></div>

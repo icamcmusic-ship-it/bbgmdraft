@@ -137,6 +137,15 @@
 		ftr: { mean: 0.366, sd: 0.138, p5: 0.173, p95: 0.617 },
 		ftPct: { mean: 0.730, sd: 0.105, p5: 0.534, p95: 0.872 },
 		tpPct: { median: 0.352 },
+		/* The 2009-2021 draft-year block carries a twoPct and this one did
+		   not, so the two anchor sets — which exist to be compared — had
+		   different shapes. Shifted by the same measured league-level delta
+		   the rest of this block is (+3 points of two-point percentage), so
+		   it states the modern figure rather than repeating the old one.
+		   Nothing reads it today (the two-point anchor js/stats.js consumes
+		   comes off ROTATION); it is here so the anchor table is complete and
+		   a reader comparing the eras is comparing like with like. */
+		twoPct: { mean: 0.553, sd: 0.070, p5: 0.447, p95: 0.668 },
 		/* PPG is DERIVED, not typed in. See impliedPpg() below. */
 	};
 
@@ -216,7 +225,12 @@
 			   one, so it is not even consistent — and fixing it needs a term
 			   that reaches prospects and not the field, which is a larger
 			   change than rebalancing a shared shift. */
-			shift: { ftr: 1, tov: 1.09, inside: 0, mid: 0, three: 0.011, fieldEff: -0.026, ppgBoost: 0.02 },
+			/* `prospectEff` is 0 here on purpose: this era IS the anchor the
+			   model was fitted to, and its measured prospect premium (+2.5
+			   points of true shooting over the field) is already close to
+			   what its own anchors state. See the modern era below. */
+			shift: { ftr: 1, tov: 1.09, inside: 0, mid: 0, three: 0.011, fieldEff: -0.026,
+				prospectEff: 0, ppgBoost: 0.02 },
 		},
 		modern: {
 			label: "2023-2026 (the modern game)",
@@ -251,7 +265,57 @@
 			   stays inside its own (56.91 against a 57.20 ceiling), which is
 			   the constraint that decides how far these can move: the two
 			   bands are 0.3 apart and a shift here moves both. */
-			shift: { ftr: 0.845, tov: 0.96, inside: 0.024, mid: 0.020, three: 0.011, fieldEff: -0.004, ppgBoost: 0.02 },
+			/* `prospectEff` and `fieldEff`, RE-FITTED AS A PAIR.
+
+			   These two are the only handles that reach one population without
+			   the other — fieldEff moves the synthesized rotation players,
+			   prospectEff the draft class — and until prospectEff existed
+			   there was no way to state the thing both anchor sets agree on:
+			   a draft prospect finishes better than the ordinary D-I rotation
+			   player. This era's anchors put the gap at 3.3 points of true
+			   shooting (58.5 against 55.2). The model produced 0.33.
+
+			   Swept as a pair against both anchors at eight seeds, every other
+			   row held inside its band:
+
+			     prospectEff  fieldEff   draft TS   field TS   ORtg    3P% med
+			       0.000       -0.004      56.86      56.45   108.78   ok
+			       0.008       -0.004      57.61      56.45   108.82   ok
+			       0.016       -0.010      58.30      55.87   107.86   ok
+			       0.024       -0.016      58.97      55.29   106.88   FAILS
+
+			   AND THEN RE-MEASURED AT THE SEED COUNTS CI ACTUALLY RUNS, which
+			   is the whole reason a sweep at eight seeds is a starting point
+			   and not an answer. Every value that closes any real part of the
+			   gap breaks a row somewhere:
+
+			     0.024 / -0.016   field 3P% median out of band (8 seeds)
+			     0.016 / -0.010   class 3P% median out of band, and the
+			                      earlier-vs-draft-year scoring row (20 seeds)
+			     0.008 / -0.004   the earlier-vs-draft-year row at 20 seeds
+			                      (-2.52 against a -2.50 floor), and BPM min at
+			                      4 seeds (-8.84 against a -10 floor)
+
+			   Both of the 0.008 failures say the same thing, and it is not
+			   that the term is wrong. A flat lift applied to every prospect
+			   moves two populations the anchors say nothing about: the
+			   earlier seasons, which are not draft years and whose anchor is
+			   the pooled ALL_SEASONS set rather than DRAFT_YEAR, and the
+			   bottom of the class, where lifting efficiency means nobody in a
+			   draft class is genuinely bad any more (that is the BPM floor
+			   failing). The gap does not close with a scalar; it closes when
+			   the prior-season model moves with the draft year and the lift is
+			   shaped rather than flat.
+
+			   SO THE VALUE SHIPPED IS 0. The mechanism is here, it is checked
+			   by tools/test.js, and the sweep above is the fitted starting
+			   point for whoever does the prior-season half — which is a better
+			   thing to leave behind than a number that passes one invocation
+			   of the harness. This repository's own rule for the unfitted
+			   third era applies to its own eras too: shipping a shift nobody
+			   has fitted makes the model less trustworthy, not more. */
+			shift: { ftr: 0.845, tov: 0.96, inside: 0.024, mid: 0.020, three: 0.011, fieldEff: -0.004,
+				prospectEff: 0, ppgBoost: 0.02 },
 		},
 	};
 	/* PPG, DERIVED.
@@ -335,7 +399,15 @@
 			byHeight: (key, b) => byHeightIn(e, key, b),
 			effShift: (key) => effShiftIn(e, key),
 			chanceShape: () => chanceShapeIn(e),
-			threeShare,
+			/* BOUND, like the three above it. `threeShare` calls byHeight,
+			   which reads the module-level `era` — so the one method on this
+			   object that was passed through unbound answered for whatever
+			   setEra() last left behind, through the API written expressly so
+			   a caller outside a run would not have to. It was inert only
+			   because no era defines a `share3` shift and the lookup fell
+			   through to a multiplier of 1; the first era that defines one
+			   would have made it silently wrong. */
+			threeShare: (b, tp, ownTp) => threeShareIn(e, b, tp, ownTp),
 			talentUsageMult,
 			talentEffAdj,
 		};
@@ -454,8 +526,8 @@
 	   35 and took a sixth of his shots from three. The correction exists to
 	   align a class's VOLUME with the level the model was fitted at; it is not
 	   a claim that anybody can shoot. */
-	function threeShare(bigness, tpRating, ownTp) {
-		const base = byHeight("share3", bigness);
+	function threeShareIn(e, bigness, tpRating, ownTp) {
+		const base = byHeightIn(e, "share3", bigness);
 		const typicalTp = 58 - 26 * clamp(bigness, 0, 1);
 		// The slope decides how far a specialist departs from his size's norm.
 		// At 0.0062 a Stretch Big with a 75 three still only got to a third of
@@ -470,6 +542,9 @@
 		const gate = ownTp === undefined ? tpRating : ownTp;
 		if (gate < 30) share *= Math.max(0, gate) / 30;
 		return clamp(share, 0, 0.72);
+	}
+	function threeShare(bigness, tpRating, ownTp) {
+		return threeShareIn(era, bigness, tpRating, ownTp);
 	}
 
 	global.Calibration = {
