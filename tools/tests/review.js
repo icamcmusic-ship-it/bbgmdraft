@@ -31,6 +31,79 @@ module.exports = function (ok, V) {
 			bad.length === 0 && !CFG.COUNTS.has("buildNoise"), bad.join(", "));
 	}
 
+	/* EVERY SLIDER ON THE PAGE IS A SLIDER THE PANEL PAINTS.
+
+	   `SLIDERS` in js/app.js is the list paintConfig walks: a range input that
+	   is not on it is a control that never shows its value, never shows its
+	   hint, never gets a modified marker and never gets its ↺. A name on the
+	   list with no input on the page is the reverse — a dead entry. Both
+	   happened while this pass was being written, in both directions, and
+	   neither is visible from either file alone.
+
+	   Read off the two files rather than asserted, because the list is the
+	   thing that goes stale. */
+	{
+		const app = fs.readFileSync(path.join(ROOT, "js", "app.js"), "utf8");
+		const m3 = /const SLIDERS = \[([\s\S]*?)\];/.exec(app);
+		const declared = m3
+			? (m3[1].match(/"[A-Za-z]+"/g) || []).map((x) => x.slice(1, -1)) : [];
+		const onPage = (HTML.match(/type="range" id="[A-Za-z]+"/g) || [])
+			.map((x) => x.replace(/.*id="/, "").replace(/"$/, ""));
+		const missing = onPage.filter((k) => declared.indexOf(k) === -1);
+		const dead = declared.filter((k) => onPage.indexOf(k) === -1);
+		ok("every range input on the page is painted by the settings panel",
+			missing.length === 0, missing.join(", "));
+		ok("every slider the panel paints exists on the page",
+			dead.length === 0, dead.join(", "));
+		/* And every one of them is a real setting, or paintConfig writes
+		   `undefined` into a control and the user sees a blank slider. */
+		const unknown = declared.filter((k) => !(k in CFG.DEFAULTS));
+		ok("every slider names a setting that exists",
+			unknown.length === 0, unknown.join(", "));
+	}
+
+	/* THE PANEL CAN REACH THE ENGINE'S OWN BAND.
+
+	   Read every slider's min and max off the page and compare them against
+	   the clamp the engine actually applies (Config.CLAMP). Three had drifted:
+	   the pace slider stopped at 80 against a declared band of 55-82, so the
+	   top of a constant named once expressly to stop the two halves of a run
+	   disagreeing was unreachable from the interface; injuryRate stopped at 2
+	   against a clamp of 3; surpriseBudget at 6 against 10. A deliberate
+	   narrowing is declared as `floor`/`ceil` with a reason beside it, and is
+	   allowed here; anything else is drift. */
+	{
+		const bounds = {};
+		const re = /id="([A-Za-z]+)"[^>]*min="([^"]+)"[^>]*max="([^"]+)"/g;
+		let m2;
+		while ((m2 = re.exec(HTML))) {
+			bounds[m2[1]] = { min: Number(m2[2]), max: Number(m2[3]) };
+		}
+		const drift = [];
+		for (const key of Object.keys(CFG.CLAMP)) {
+			const want = CFG.sliderRange(key);
+			const got = bounds[key];
+			if (!got) continue;
+			if (got.min !== want.min || got.max !== want.max) {
+				drift.push(key + " offers [" + got.min + ", " + got.max +
+					"] against a declared [" + want.min + ", " + want.max + "]");
+			}
+		}
+		ok("every slider reaches the band the engine declares for it",
+			drift.length === 0, drift.join("; "));
+		/* And a narrowing has to say why, or it is indistinguishable from the
+		   drift this check exists to catch. */
+		const unexplained = Object.keys(CFG.CLAMP).filter((k) => {
+			const c = CFG.CLAMP[k];
+			return (Number.isFinite(c.floor) && !c.floorWhy) ||
+				(Number.isFinite(c.ceil) && !c.ceilWhy);
+		});
+		ok("a deliberately narrowed slider records its reason",
+			unexplained.length === 0, unexplained.join(", "));
+		ok("the engine's pace band is the declared one",
+			CFG.CLAMP.pace.lo === 55 && CFG.CLAMP.pace.hi === 82);
+	}
+
 	/* B1: the blank-last rule is not multiplied by the direction. A static
 	   check, since sortRows lives in the DOM module; the browser smoke test
 	   drives the real table. */

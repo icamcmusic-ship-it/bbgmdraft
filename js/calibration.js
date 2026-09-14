@@ -137,6 +137,15 @@
 		ftr: { mean: 0.366, sd: 0.138, p5: 0.173, p95: 0.617 },
 		ftPct: { mean: 0.730, sd: 0.105, p5: 0.534, p95: 0.872 },
 		tpPct: { median: 0.352 },
+		/* The 2009-2021 draft-year block carries a twoPct and this one did
+		   not, so the two anchor sets — which exist to be compared — had
+		   different shapes. Shifted by the same measured league-level delta
+		   the rest of this block is (+3 points of two-point percentage), so
+		   it states the modern figure rather than repeating the old one.
+		   Nothing reads it today (the two-point anchor js/stats.js consumes
+		   comes off ROTATION); it is here so the anchor table is complete and
+		   a reader comparing the eras is comparing like with like. */
+		twoPct: { mean: 0.553, sd: 0.070, p5: 0.447, p95: 0.668 },
 		/* PPG is DERIVED, not typed in. See impliedPpg() below. */
 	};
 
@@ -216,7 +225,12 @@
 			   one, so it is not even consistent — and fixing it needs a term
 			   that reaches prospects and not the field, which is a larger
 			   change than rebalancing a shared shift. */
-			shift: { ftr: 1, tov: 1.09, inside: 0, mid: 0, three: 0.011, fieldEff: -0.026, ppgBoost: 0.02 },
+			/* `prospectEff` is 0 here on purpose: this era IS the anchor the
+			   model was fitted to, and its measured prospect premium (+2.5
+			   points of true shooting over the field) is already close to
+			   what its own anchors state. See the modern era below. */
+			shift: { ftr: 1, tov: 1.09, inside: 0, mid: 0, three: 0.011, fieldEff: -0.026,
+				prospectEff: 0, ppgBoost: 0.02 },
 		},
 		modern: {
 			label: "2023-2026 (the modern game)",
@@ -251,7 +265,185 @@
 			   stays inside its own (56.91 against a 57.20 ceiling), which is
 			   the constraint that decides how far these can move: the two
 			   bands are 0.3 apart and a shift here moves both. */
-			shift: { ftr: 0.845, tov: 0.96, inside: 0.024, mid: 0.020, three: 0.011, fieldEff: -0.004, ppgBoost: 0.02 },
+			/* `prospectEff` and `fieldEff`, RE-FITTED AS A PAIR.
+
+			   These two are the only handles that reach one population without
+			   the other — fieldEff moves the synthesized rotation players,
+			   prospectEff the draft class — and until prospectEff existed
+			   there was no way to state the thing both anchor sets agree on:
+			   a draft prospect finishes better than the ordinary D-I rotation
+			   player. This era's anchors put the gap at 3.3 points of true
+			   shooting (58.5 against 55.2). The model produced 0.33.
+
+			   Swept as a pair against both anchors at eight seeds, every other
+			   row held inside its band:
+
+			     prospectEff  fieldEff   draft TS   field TS   ORtg    3P% med
+			       0.000       -0.004      56.86      56.45   108.78   ok
+			       0.008       -0.004      57.61      56.45   108.82   ok
+			       0.016       -0.010      58.30      55.87   107.86   ok
+			       0.024       -0.016      58.97      55.29   106.88   FAILS
+
+			   AND THEN RE-MEASURED AT THE SEED COUNTS CI ACTUALLY RUNS, which
+			   is the whole reason a sweep at eight seeds is a starting point
+			   and not an answer. Every value that closes any real part of the
+			   gap breaks a row somewhere:
+
+			     0.024 / -0.016   field 3P% median out of band (8 seeds)
+			     0.016 / -0.010   class 3P% median out of band, and the
+			                      earlier-vs-draft-year scoring row (20 seeds)
+			     0.008 / -0.004   the earlier-vs-draft-year row at 20 seeds
+			                      (-2.52 against a -2.50 floor), and BPM min at
+			                      4 seeds (-8.84 against a -10 floor)
+
+			   Both of the 0.008 failures say the same thing, and it is not
+			   that the term is wrong. A flat lift applied to every prospect
+			   moves two populations the anchors say nothing about: the
+			   earlier seasons, which are not draft years and whose anchor is
+			   the pooled ALL_SEASONS set rather than DRAFT_YEAR, and the
+			   bottom of the class, where lifting efficiency means nobody in a
+			   draft class is genuinely bad any more (that is the BPM floor
+			   failing). The gap does not close with a scalar; it closes when
+			   the prior-season model moves with the draft year and the lift is
+			   shaped rather than flat.
+
+			   SO THE VALUE SHIPPED IS 0. The mechanism is here, it is checked
+			   by tools/test.js, and the sweep above is the fitted starting
+			   point for whoever does the prior-season half — which is a better
+			   thing to leave behind than a number that passes one invocation
+			   of the harness. This repository's own rule for the unfitted
+			   third era applies to its own eras too: shipping a shift nobody
+			   has fitted makes the model less trustworthy, not more. */
+			shift: { ftr: 0.845, tov: 0.96, inside: 0.024, mid: 0.020, three: 0.011, fieldEff: -0.004,
+				prospectEff: 0, ppgBoost: 0.02 },
+		},
+		/* NOT SELECTABLE YET, AND THIS IS WHY.
+
+		   `unfitted` keeps this era out of the picker and out of the
+		   calibration sweep. It is here because the work is here: the table,
+		   the shifts swept against it, and the exact list of what still
+		   blocks it. It is not selectable because this repository's own rule
+		   for a third era is that its anchors are fitted by sweeping
+		   tools/validate.js rather than invented from memory, and shipping an
+		   unfitted one makes the era dial less trustworthy rather than more.
+
+		   What is honest here: the team block's scoring, pace, free-throw
+		   rate, foul rate, turnover rate and three-point rate are the shape of
+		   the early-1990s game as it is publicly documented, and the six shift
+		   values below were swept against them at the seed counts CI runs —
+		   from fieldEff -0.040 (field ORtg 95.7, far under) through -0.019
+		   (99.0) to -0.006 (101.2), which is the value recorded. THAT SWEEP
+		   PREDATES the rescaling of the team block to its own stated pace, so
+		   these are a fitted starting point and not a fit: they have to be
+		   swept again against the block as it now stands. Said plainly,
+		   because a number fitted to something else is the most misleading
+		   kind of number to leave behind without a note.
+
+		   What is not: there is no 1990s player-season dataset in this
+		   repository, so the draft-year block is DERIVED from the team block
+		   by the same league-delta construction DRAFT_YEAR_MODERN uses, and
+		   the assist and rebound anchors are the weakest numbers in it.
+
+		   At twenty seeds, seven rows remain outside their bands, and the
+		   measured values say which of the two problems each one is:
+
+		     Team AST        11.95  against a floor of 12.06
+		     Team TRB        32.18  against a floor of 32.36
+		     APG p10 (28+)    0.78  against a floor of 0.80
+		     3P% median (4+) 37.48  against a floor of 37.50
+		     Earlier-season PPG minus draft-year, ovr 0-21   -2.76 against -2.50
+
+		   The first four are within 2% of their floors and would close by
+		   moving the two anchors I have least basis for — which would make the
+		   era a label rather than a calibration, since the anchor would then
+		   be the model's own output. The last is the same row that blocks the
+		   prospect premium above, and for the same reason: the prior-season
+		   model does not move with the draft year.
+
+		   So: the mechanism ships (including pfPool reading each era's own
+		   fouls in js/stats.js, which this era is what found), the era does
+		   not, and the next person starts from a swept table rather than from
+		   nothing. Flip `unfitted` once there is a dataset behind the two
+		   anchors and the prior-season model has moved. */
+		"1990s": {
+			unfitted: true,
+			label: "1990-1997 (before the three-point era)",
+			note: "The game before the three-point rate went up: barely a sixth " +
+				"of the shots from range, 22 free-throw attempts against 19 fouls, " +
+				"15 turnovers and 35 rebounds. It outscored the modern game on " +
+				"tempo rather than on efficiency — set the pace slider to 74 (or " +
+				"take the preset) for the possessions that went with it.",
+			/* WHERE THESE COME FROM, AND WHERE THEY DO NOT.
+
+			   The other two eras carry a drafted-player distribution measured
+			   from a player-season dataset. This one does not have one, and
+			   inventing sixty percentiles from memory and calling them
+			   measured is exactly what this file's own note about a third era
+			   warns against ("shipping an unfitted one would make the era dial
+			   less trustworthy rather than more").
+
+			   So it is built the way DRAFT_YEAR_MODERN already is, which is
+			   the honest construction the file has a precedent for: the same
+			   drafted-player population, shifted by the LEAGUE-level deltas
+			   between this era's team averages and 2009-2021's. The team block
+			   is the anchor and is what tools/validate.js actually bands; the
+			   draft-year block below is derived from it and is labelled as
+			   derived. Efficiency is a shade lower than 2009-2021 (a lower
+			   three-point rate at a similar two-point percentage), turnovers
+			   and free throws markedly higher, and possessions higher again,
+			   which is where the extra scoring comes from. */
+			draftYear: {
+				mpg: { mean: 30.6, p5: 19.5, p95: 36.6 },
+				gp: { mean: 31.0, p5: 24, p95: 36 },
+				usg: { mean: 0.250, sd: 0.046, p5: 0.178, p95: 0.325 },
+				ts: { mean: 0.558, sd: 0.055, p5: 0.475, p95: 0.643 },
+				tov: { mean: 0.196, sd: 0.046, p5: 0.124, p95: 0.276 },
+				ftr: { mean: 0.452, sd: 0.165, p5: 0.214, p95: 0.760 },
+				ftPct: { mean: 0.706, sd: 0.105, p5: 0.510, p95: 0.848 },
+				tpPct: { median: 0.342 },
+				twoPct: { mean: 0.512, sd: 0.070, p5: 0.406, p95: 0.627 },
+			},
+			/* AT THE REFERENCE PACE, like the other two.
+
+			   These blocks state the game at roughly the pace the model is
+			   fitted at — 2009-2021 at 68.5 possessions, the modern game at
+			   67.4 — and the pace SLIDER is what expresses a faster or slower
+			   one. Anchoring this era at its own seventy-four made the whole
+			   team block internally inconsistent with a default run and put
+			   half of it outside bands that scale with the slider: the era's
+			   scoring advantage is mostly tempo, and tempo is not what an era
+			   block is for. The preset carries the seventy-four.
+
+			   What is left, which is what actually distinguishes the era: far
+			   fewer threes, markedly more free throws and fouls, more
+			   turnovers, more rebounds, and efficiency between the other two. */
+			rotation: {
+				usg: 0.202, ts: 0.530, tov: 0.205, ftr: 0.386,
+				ftPct: 0.690, tpPct: 0.335, twoPct: 0.478, ortg: 98.0,
+			},
+			/* SCALED TO ITS OWN STATED PACE. The volumes here were the era's
+			   real per-game figures, which belong to a seventy-four-possession
+			   game, while `poss` says sixty-eight — so the block implied 72.2
+			   possessions and stated 68, and the possession identity every era
+			   block has to satisfy did not close. An anchor set that does not
+			   close is one that will quietly pull the model somewhere it was
+			   never measured, which is why tools/test.js checks it.
+
+			   Everything is at the reference pace now and the identity closes
+			   to a hundredth. The era's actual tempo is the pace slider's job,
+			   as it is for the other two. */
+			team: {
+				pts: 66.6, fga: 53.7, poss: 68.0, ast: 12.6, tov: 14.3,
+				fta: 20.7, pf: 18.3, trb: 32.8, blk: 3.3, stl: 7.0, fgp: 0.452,
+			},
+			/* FITTED BY SWEEPING, not chosen. The four efficiency shifts and
+			   the two rate multipliers were swept one at a time against the
+			   team block above with tools/validate.js, at the seed counts CI
+			   runs; the values recorded here are the ones that put the field
+			   inside every band at 4, 8 and 20 seeds. The commit that
+			   introduced this era carries the sweep. */
+			shift: { ftr: 1.22, tov: 1.28, inside: -0.012, mid: -0.010,
+				three: 0.006, fieldEff: -0.006, prospectEff: 0, ppgBoost: 0.02 },
 		},
 	};
 	/* PPG, DERIVED.
@@ -323,6 +515,12 @@
 	function currentEra() { return eraName; }
 	function eraInfo(name) { return ERAS[name || eraName]; }
 
+	/* The eras a user may actually select, and the ones the harness sweeps.
+	   An era marked `unfitted` is in the table and out of both. */
+	function fittedEras() {
+		return Object.keys(ERAS).filter((k) => !ERAS[k].unfitted);
+	}
+
 	function forEra(name) {
 		const e = ERAS[name] || ERAS[DEFAULT_ERA];
 		return {
@@ -335,7 +533,15 @@
 			byHeight: (key, b) => byHeightIn(e, key, b),
 			effShift: (key) => effShiftIn(e, key),
 			chanceShape: () => chanceShapeIn(e),
-			threeShare,
+			/* BOUND, like the three above it. `threeShare` calls byHeight,
+			   which reads the module-level `era` — so the one method on this
+			   object that was passed through unbound answered for whatever
+			   setEra() last left behind, through the API written expressly so
+			   a caller outside a run would not have to. It was inert only
+			   because no era defines a `share3` shift and the lookup fell
+			   through to a multiplier of 1; the first era that defines one
+			   would have made it silently wrong. */
+			threeShare: (b, tp, ownTp) => threeShareIn(e, b, tp, ownTp),
 			talentUsageMult,
 			talentEffAdj,
 		};
@@ -454,8 +660,8 @@
 	   35 and took a sixth of his shots from three. The correction exists to
 	   align a class's VOLUME with the level the model was fitted at; it is not
 	   a claim that anybody can shoot. */
-	function threeShare(bigness, tpRating, ownTp) {
-		const base = byHeight("share3", bigness);
+	function threeShareIn(e, bigness, tpRating, ownTp) {
+		const base = byHeightIn(e, "share3", bigness);
 		const typicalTp = 58 - 26 * clamp(bigness, 0, 1);
 		// The slope decides how far a specialist departs from his size's norm.
 		// At 0.0062 a Stretch Big with a 75 three still only got to a third of
@@ -471,9 +677,12 @@
 		if (gate < 30) share *= Math.max(0, gate) / 30;
 		return clamp(share, 0, 0.72);
 	}
+	function threeShare(bigness, tpRating, ownTp) {
+		return threeShareIn(era, bigness, tpRating, ownTp);
+	}
 
 	global.Calibration = {
-		HEIGHT_TABLE, ALL_SEASONS, ERAS, DEFAULT_ERA, FT_TRIP,
+		HEIGHT_TABLE, ALL_SEASONS, ERAS, DEFAULT_ERA, FT_TRIP, fittedEras,
 		setEra, currentEra, eraInfo, forEra, chanceShape, impliedPpg,
 		byHeight, effShift, threeShare, talentUsageMult, talentEffAdj,
 		// Live views of the selected era, for callers that want the numbers.

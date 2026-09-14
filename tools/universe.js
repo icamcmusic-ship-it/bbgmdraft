@@ -35,9 +35,9 @@ function ok(what, pass, detail) {
 }
 
 /* Three class files, one per season, in the shape a BBGM export has. */
-function files(seasons) {
+function files(seasons, size) {
 	return seasons.map((season, i) => {
-		const lf = V.realisticClass("chain" + i, 46);
+		const lf = V.realisticClass("chain" + i, size || 46);
 		lf.startingSeason = season;
 		for (const p of lf.players) {
 			p.draft = Object.assign({}, p.draft, { year: season });
@@ -49,7 +49,13 @@ function files(seasons) {
 
 /* The chain, exactly as js/app.js runs it: one frozen config, a seed keyed on
    file identity, carry-over handed forward, and the carry aged across a gap. */
-function chain(fileList, over) {
+/* `runners`, when given, is a persistent runner per file — which is what
+   js/app.js keeps (state.runners) and what the plain E.run() path below does
+   NOT exercise. See the warm-runner section at the bottom of this file: the
+   phase cache is only consulted when a runner is reused, so every chain built
+   with E.run() is a COLD chain and a whole class of staleness bug was
+   invisible to this harness. */
+function chain(fileList, over, runners) {
 	const frozen = CFG.make(Object.assign({ seed: "harness" }, over || {}));
 	const rows = [];
 	const results = [];
@@ -58,6 +64,23 @@ function chain(fileList, over) {
 	let recentPools = [];
 	let lastSeason = null;
 	let tree = null;
+	/* BOTH ROSTER LINKS, the way js/app.js runs them — this used to run a bare
+	   chain, so the two features that make a universe one WORLD rather than N
+	   seasons in a row (a later class's underclassmen on an earlier roster,
+	   and an earlier class's undrafted men on a later one) were never
+	   exercised by the harness that exists to guard it.
+
+	   Pass one is the previews: a later class's men have to be on an earlier
+	   roster before that season is played, and a preview is the only thing
+	   that exists yet. The reverse link needs no preview, because the season
+	   it reads has already been simulated. */
+	const previews = fileList.map((f, k) => {
+		const pcfg = CFG.make(frozen);
+		pcfg.seed = U.seedFor("harness", k, f.data.startingSeason, f.fingerprint);
+		pcfg.overrides = {};
+		try { return E.previewClass(f.data, pcfg); } catch (e) { return null; }
+	});
+	const returners = [];
 	fileList.forEach((f, k) => {
 		const season = f.data.startingSeason;
 		const gap = (carry && Number.isFinite(lastSeason))
@@ -70,14 +93,29 @@ function chain(fileList, over) {
 		cfg.carryOver = carry;
 		cfg.universeAlumni = alumni.slice(-120);
 		cfg.universeTitles = (carry && carry.titles) || {};
+		let future = [];
+		for (let j = k + 1; j < fileList.length; j++) {
+			if (!previews[j] || !(fileList[j].data.startingSeason > season)) continue;
+			future = future.concat(E.futureRosterFor(previews[j], season, j));
+		}
+		cfg.universeRoster = future;
+		let past = [];
+		for (const src of returners) {
+			if (!(season > src.season)) continue;
+			past = past.concat(E.pastRosterFor(src.res, season, src.index));
+		}
+		cfg.pastRoster = past;
 		const prevCarry = carry;
-		const res = E.run(f.data, cfg);
+		const res = runners ? runners[k].run(cfg) : E.run(f.data, cfg);
 		results.push(res);
 		tree = U.coachTreeStep(tree, prevCarry, res, season, "harness");
 		rows.push(Object.assign(U.summarize(res, cfg.seed, f.name), {
 			fingerprint: f.fingerprint, result: U.resultFingerprint(res), gap,
 		}));
 		alumni = alumni.concat(U.alumniOf(res, season));
+		if (E.pastRosterFor(res, season + 1, k).length) {
+			returners.push({ season, index: k, res });
+		}
 		carry = U.harvest(res, prevCarry);
 		lastSeason = season;
 		if (res.archetypePool) {
@@ -86,7 +124,7 @@ function chain(fileList, over) {
 		}
 	});
 	return { rows, results, alumni, tree, settings: frozen,
-		threads: U.threads(rows), records: U.records(rows, alumni) };
+		threads: U.threads(rows, alumni), records: U.records(rows, alumni) };
 }
 
 console.log("\nDeterminism");
@@ -108,12 +146,62 @@ const dupRun = chain(dup);
 ok("two files claiming the same season are still two different worlds",
 	dupRun.rows[0].result !== dupRun.rows[1].result);
 
+/* THE WARM CHAIN HAS TO BE THE COLD CHAIN.
+
+   Everything above builds its chain with E.run(), which creates a fresh
+   runner per season — so the staged phase cache is never consulted, and this
+   harness could not see the defect it exists to catch. js/app.js keeps one
+   runner per file (state.runners) for the life of the session and re-runs the
+   whole chain whenever a setting invalidates it.
+
+   The phase cache skips a phase whose declared dependency key is unchanged,
+   and the carry-over is a phase input: assignCollege reads it for recruiting
+   momentum and buildPrograms reads it for the conference map, the program
+   levels, the coaches and the returners. With `carryOver` undeclared, moving
+   a setting that only invalidates a LATE phase — March upsets — changed
+   season 1's champion while leaving season 2's build and regular keys
+   identical, so season 2 was served from cache and replayed against a world
+   that no longer existed. Measured, seasons 1 and 2 of a three-file chain both
+   came back with different fingerprints from the cold run of the same
+   settings.
+
+   So: run a chain warm, change one late-phase setting, run it warm again, and
+   assert it equals the cold run of those same settings — season for season. */
+{
+	const warmRunners = fl.map((f) => E.createRunner(f.data));
+	chain(fl, { upsetFactor: 1.0 }, warmRunners);
+	const warm = chain(fl, { upsetFactor: 1.8 }, warmRunners);
+	const cold = chain(fl, { upsetFactor: 1.8 });
+	const same = warm.rows.every((r, i) => r.result === cold.rows[i].result);
+	ok("a warm chain reproduces the cold chain after a late-phase change", same,
+		JSON.stringify(warm.rows.map((r) => r.result)) + " vs " +
+		JSON.stringify(cold.rows.map((r) => r.result)));
+	/* And the same for a setting the REGULAR phase owns via the roster, so
+	   `universeRoster` is covered too rather than only `carryOver`. */
+	const warm2Runners = fl.map((f) => E.createRunner(f.data));
+	chain(fl, { coachTurnover: 100 }, warm2Runners);
+	const warm2 = chain(fl, { coachTurnover: 175 }, warm2Runners);
+	const cold2 = chain(fl, { coachTurnover: 175 });
+	ok("a warm chain reproduces the cold chain after a postseason change",
+		warm2.rows.every((r, i) => r.result === cold2.rows[i].result),
+		JSON.stringify(warm2.rows.map((r) => r.result)) + " vs " +
+		JSON.stringify(cold2.rows.map((r) => r.result)));
+	/* The dependency lists are the mechanism; name them, so that deleting a
+	   key fails here rather than three seasons downstream. */
+	const deps = (name) => (E.PHASES || []).filter((p) => p.name === name)[0];
+	ok("the build phase declares the carry-over it reads",
+		!!deps("build") && deps("build").deps.indexOf("carryOver") !== -1);
+	ok("the regular phase declares the carry-over and the roster it reads",
+		!!deps("regular") && deps("regular").deps.indexOf("carryOver") !== -1 &&
+		deps("regular").deps.indexOf("universeRoster") !== -1);
+}
+
 console.log("\nIdempotency");
 const exp1 = U.exportUniverse({ rows: a.rows, baseSeed: "harness",
-	settings: a.settings, biography: U.biographyOf(a.results),
+	settings: a.settings, biography: U.biographyOf(a.results, fl),
 	createdAt: "fixed" });
 const exp2 = U.exportUniverse({ rows: chain(fl).rows, baseSeed: "harness",
-	settings: a.settings, biography: U.biographyOf(chain(fl).results),
+	settings: a.settings, biography: U.biographyOf(chain(fl).results, fl),
 	createdAt: "fixed" });
 ok("exporting the same universe twice is byte-identical",
 	JSON.stringify(exp1) === JSON.stringify(exp2));
@@ -126,9 +214,11 @@ console.log("\nBiographies are read back");
 /* The property the biography field exists for: replaying a universe under a
    biography reproduces the same men, not merely the same seeds. */
 {
-	const bio = U.biographyOf(a.results);
+	const bio = U.biographyOf(a.results, fl);
+	/* Projected to the file it is about — the map is keyed on a cross-file
+	   identity and the engine reads a file's own pids. See biographyForFile. */
 	const cfg = CFG.make({ seed: U.seedFor("harness", 0, 2025, fl[0].fingerprint),
-		biography: bio });
+		biography: U.biographyForFile(bio, fl[0].fingerprint) });
 	const again = E.run(fl[0].data, cfg);
 	const before = {};
 	for (const p of a.results[0].players) before[p.key] = p.classYear;
@@ -138,8 +228,9 @@ console.log("\nBiographies are read back");
 	/* And it is load-bearing: a DIFFERENT biography changes them, or the
 	   field is being ignored again the way it was before it was read. */
 	const twisted = {};
-	for (const key of Object.keys(bio)) {
-		twisted[key] = Object.assign({}, bio[key], { classYear: "Senior" });
+	const local = U.biographyForFile(bio, fl[0].fingerprint);
+	for (const key of Object.keys(local)) {
+		twisted[key] = Object.assign({}, local[key], { classYear: "Senior" });
 	}
 	const forced = E.run(fl[0].data,
 		CFG.make({ seed: cfg.seed, biography: twisted }));
@@ -301,6 +392,169 @@ console.log("\nGaps, failures and the carry");
 		ok("a gap does not move the field's mean", Math.abs(agedMean - mean) < 1e-6,
 			mean.toFixed(3) + " -> " + agedMean.toFixed(3));
 	}
+}
+
+console.log("\nThe partial-class top-up");
+{
+	/* The top-up fills the All-America places a thin class file could not.
+	   Its shuffle used to run on the already-chosen subset, so a chain of
+	   partial files was topped up with the same names every season in a
+	   different order — and a comment saying "not always the same five names"
+	   sat directly above it. */
+	const carry = chain(files([2025])).rows.length
+		? U.harvest(chain(files([2025])).results[0], null) : null;
+	const mk = (season) => U.topUpPartialSeason(
+		{ season, poy: null }, carry, "harness", 0.4);
+	const a2 = mk(2031);
+	const b2 = mk(2032);
+	const names = (row) => (row.allAmerica || []).map((x) => x.name).sort().join("|");
+	ok("a partial season is topped up at all",
+		(a2.allAmerica || []).length > 0,
+		String((a2.allAmerica || []).length) + " added");
+	ok("two partial seasons are not topped up with the same men",
+		names(a2) !== names(b2), names(a2) + " vs " + names(b2));
+	ok("a full class file is not topped up",
+		!U.topUpPartialSeason({ season: 2033, poy: null }, carry, "harness", 1).partial);
+	/* It replays, like everything else keyed off the universe seed. */
+	ok("the top-up replays from the same seed", names(mk(2031)) === names(a2));
+}
+
+console.log("\nThe persistent player registry");
+{
+	/* A class file's key is its pid, which BBGM numbers from zero inside each
+	   export — so pid 7 exists in every file and means a different man in
+	   each. Every cross-file structure was keyed on it, and biographyOf took
+	   the FIRST occurrence: in a chain of real exports that hands one class's
+	   biography to another class's player with the same number, inside the map
+	   whose whole purpose is to make a replay reproduce the same men. */
+	const fl3 = files([2025, 2026, 2027], 74);
+	const pids = fl3.map((f) => new Set(f.data.players.map((p) => p.pid)));
+	let overlap = 0;
+	for (const pid of pids[0]) if (pids[1].has(pid)) overlap++;
+	ok("the fixtures really do collide on pid across files, as real exports do",
+		overlap > 0, overlap + " shared pids between two files");
+
+	const world = chain(fl3);
+	const bio = U.biographyOf(world.results, fl3);
+	ok("the biography map is keyed on a cross-file identity",
+		bio.__scoped === true);
+	ok("...and holds every player of every file, not the first of each pid",
+		Object.keys(bio).length - 1 ===
+			fl3.reduce((a, f) => a + f.data.players.length, 0),
+		(Object.keys(bio).length - 1) + " entries");
+	/* And it projects back down to exactly one file's own keys. */
+	for (let i = 0; i < fl3.length; i++) {
+		const local = U.biographyForFile(bio, fl3[i].fingerprint);
+		if (i === 0) {
+			ok("a file's slice is that file's own players",
+				Object.keys(local).length === fl3[i].data.players.length,
+				Object.keys(local).length + " of " + fl3[i].data.players.length);
+		}
+	}
+	ok("a file that is not in the universe gets nothing rather than somebody else's",
+		Object.keys(U.biographyForFile(bio, "not-a-file")).length === 0);
+	/* A version 1 or 2 export's map is unscoped and has to keep working. */
+	ok("an unscoped legacy biography is passed through unchanged",
+		U.biographyForFile({ 7: { classYear: "Junior" } }, "fp2025")["7"].classYear ===
+			"Junior");
+
+	const reg = U.registryOf(world.results, fl3, world.rows);
+	const people = Object.values(reg);
+	ok("the registry holds one row per person across every file",
+		people.length === fl3.reduce((a, f) => a + f.data.players.length, 0),
+		people.length + " people");
+	ok("every row has an identity, a name and the seasons it appears in",
+		people.every((x) => x.id && x.name && Array.isArray(x.seasons)));
+	ok("a row's seasons are in order and its span agrees with them",
+		people.every((x) => {
+			for (let i = 1; i < x.seasons.length; i++) {
+				if (x.seasons[i].season < x.seasons[i - 1].season) return false;
+			}
+			return !x.seasons.length || x.span ===
+				x.seasons[x.seasons.length - 1].season - x.seasons[0].season + 1;
+		}));
+	/* THE POINT OF IT: a career is more than one season, which is a sentence
+	   this tool could not previously say about anybody. */
+	const careers = people.filter((x) => x.span >= 2);
+	ok("some people appear in more than one season of the world",
+		careers.length > 0, careers.length + " multi-season careers");
+	ok("every one of those names the season he was drafted out of",
+		careers.every((x) => x.draft && Number.isFinite(x.draft.season)));
+}
+
+console.log("\nThe reverse roster link");
+{
+	/* The largest hole in universe mode through three audits: a class file is
+	   the men drafted that year, the ones at the back of its board were not
+	   drafted at all, and the next season was played without them.
+
+	   SEVENTY MEN, not the forty-six the other fixtures use: a draft is sixty
+	   picks, so a forty-six-man class has nobody at the back of its board to
+	   go undrafted, and a chain of them correctly produces no returners at
+	   all. Which is worth knowing, and is the next check. */
+	const small = chain(files([2025, 2026]));
+	ok("a class smaller than the draft produces no returners",
+		small.results.every((res) =>
+			(res.futurePlayers || []).every((p) => !p.past)));
+	const fl3 = files([2025, 2026, 2027], 74);
+	const world = chain(fl3);
+	const back = world.results.map((res) =>
+		(res.futurePlayers || []).filter((p) => p.past));
+	ok("the first season of a chain has nobody to return to it",
+		back[0].length === 0);
+	ok("a later season is played with men an earlier class did not get drafted",
+		back[1].length > 0 || back[2].length > 0,
+		back.map((b) => b.length).join(", ") + " returners by season");
+	const all = back[1].concat(back[2]);
+	ok("every returner went undrafted", all.every((p) => !p.undraftedFrom ||
+		Number.isFinite(p.undraftedFrom)));
+	ok("...and came from a season before the one he is playing",
+		all.every((p) => p.classSeason < 2028));
+	ok("...and plays at a real programme",
+		all.every((p) => !!global.Colleges.COLLEGES[p.newCollege]));
+	ok("...and has a stat line, like anybody else on a roster",
+		all.every((p) => !p.stats || Number.isFinite(p.stats.ppg)));
+	/* He is NOT in this file's draft class: he already had his draft. */
+	ok("a returner never reaches the draft board of the class he is playing in",
+		world.results.every((res, i) =>
+			(res.board || []).every((p) => !p.past)));
+	/* The arithmetic that builds him has to work in both directions: it used
+	   to be Math.pow of a negative base, which is NaN. */
+	const E2 = global.Engine;
+	const man = { newOvr: 42, talentPot: 56 };
+	ok("ovrYearsAgo runs forward as well as backward",
+		E2.ovrYearsAgo(man, 0) === 42 &&
+		E2.ovrYearsAgo(man, -1) > 42 && Number.isFinite(E2.ovrYearsAgo(man, -2)));
+	ok("...and a man does not develop past his own ceiling",
+		E2.ovrYearsAgo(man, -6) <= 56);
+}
+
+console.log("\nThreads read the alumni index");
+{
+	/* moreThreads took an `alumni` parameter, threads() passed one argument,
+	   and the parameter appeared nowhere else in the file — so every thread
+	   the index was meant to support was absent and nothing failed. */
+	const long = files([2025, 2026, 2027, 2028, 2029, 2030]);
+	const world = chain(long);
+	const withIndex = U.threads(world.rows, world.alumni);
+	const without = U.threads(world.rows);
+	ok("the alumni index adds threads the rows alone cannot support",
+		withIndex.length > without.length,
+		withIndex.length + " with the index against " + without.length + " without");
+	ok("every thread still has the shape the view reads",
+		withIndex.every((t) => t && typeof t.kind === "string" &&
+			typeof t.text === "string" && Array.isArray(t.seasons)));
+	/* The one that is deliberately absent: "he came back" needs an identity
+	   that survives a file boundary, and a class file's key is a pid that
+	   collides across exports. Asserted so that adding it later is a decision
+	   rather than an accident. */
+	ok("no thread claims a player returned in a later class",
+		!withIndex.some((t) => t.kind === "returned"));
+	/* And it must not fire on a world with no index, which is what every
+	   caller that has not been updated will hand it. */
+	ok("threads() is still callable with no alumni index at all",
+		Array.isArray(U.threads(world.rows)) &&
+		Array.isArray(U.moreThreads(world.rows)));
 }
 
 console.log("\nThreads and the records book");

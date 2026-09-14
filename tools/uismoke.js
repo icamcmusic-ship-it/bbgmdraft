@@ -526,9 +526,16 @@ async function gotoProspects(page) {
 		   importUniverse and read by the build phase so that replaying
 		   somebody's world reproduces the same men. There is nothing for a
 		   user to set. */
+		/* `anomalyPicks` joins them for the same reason `overrides` and
+		   `recentPools` are on it: it is state the UI MAINTAINS, not a dial.
+		   It is which of a drawn anomaly shortlist the class keeps, written by
+		   the tick boxes paintAnomalyPicks builds out of the shortlist the
+		   engine hands back — so there is no single control with that id, and
+		   there is nothing for a user to set until a shortlist exists. The
+		   dial they turn is anomalyChoices, which does have one. */
 		const EXEMPT = ["seed", "overrides", "leagueWeights", "archetypeWeights",
 			"noteLines", "wEuroLeague", "wGLeague", "wNBL", "recentPools",
-			"biography"];
+			"biography", "anomalyPicks"];
 		const missing = await page.evaluate((exempt) =>
 			Object.keys(window.Config.DEFAULTS)
 				.filter((k) => exempt.indexOf(k) === -1)

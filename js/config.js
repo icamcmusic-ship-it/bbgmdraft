@@ -43,12 +43,20 @@
 		   slots on TOP of this number: 19 realized 20-23 before, so 21 is the
 		   size the class always had — the label just now says it.
 
-		   AND RAISED AGAIN, for the reason this comment exists to prevent. The
-		   table is 355 builds now, so 21 is 5.9% of it — per-class coverage
-		   fell from the 13% this paragraph sets as the target to less than
-		   half of it, by exactly the mechanism described two paragraphs up
-		   (the table grew, the pool did not) and while a comment saying not to
-		   do that sat directly above the number. 13% of 355 is 46. */
+		   AND RAISED AGAIN, for the reason this comment exists to prevent: the
+		   table grew, the pool did not, and per-class coverage fell from the
+		   13% this paragraph sets as the target to less than half of it —
+		   while a comment saying not to do that sat directly above the number.
+
+		   THE NUMBER BELOW IS CHECKED AGAINST THE TABLE. Every figure in the
+		   paragraphs above is history and is allowed to be stale; this one
+		   line is the live claim, and tools/test.js reads it, divides by
+		   ARCHETYPES.length and fails when the share drifts outside 11-15%.
+		   Which is the point — the prose had already drifted once, saying 355
+		   against a table of 361, in the very comment written to stop exactly
+		   that. A sentence nothing reads is a sentence that goes stale.
+
+		   the table is 361 builds today */
 		archetypePool: 46,
 		/* How many forced anomalies a class gets: a five-star bust, an
 		   unranked recruit who turns into a lottery pick, a 24-year-old JUCO,
@@ -81,6 +89,23 @@
 		   build, school, class year, recruiting and potential are drawn afresh.
 		   Same shape, different sixty-eight men. */
 		variation: 0,
+
+		/* HOW OFTEN A CLASS DRAWS TWO FLAVORS INSTEAD OF ONE.
+
+		   The season already draws two or three storylines and stacks them;
+		   the flavor layer, which is older, drew exactly one. The asymmetry
+		   is an accident of the order they were written in, and it costs the
+		   whole point of a flavor — "guard-heavy" and "the year everybody got
+		   hurt" are both things a class is remembered as, and a class can
+		   obviously be both. Sixty-six flavors drawn one at a time is
+		   sixty-six kinds of year; drawn two at a time it is thousands.
+
+		   0 is the default and a complete no-op, down to the RNG stream: the
+		   second draw is on its own child, so a seed that never blends is the
+		   class it always was. A flavor asked for by name is never blended —
+		   naming one is a decision, and mixing something else into it quietly
+		   is the opposite of honouring it. See blendFlavor in js/ratings.js. */
+		flavorBlend: 0,
 
 		/* Ask for a particular class flavor instead of drawing one.
 
@@ -209,6 +234,38 @@
 		// further scaled by where the player was born (see Colleges.regions).
 		leagueWeights: null,   // null = each league's built-in default weight
 
+		/* HOW MANY ANOMALIES ARE DRAWN BEYOND THE ONES THE CLASS KEEPS.
+
+		   The anomalies are the single most rerolled-for thing in the tool and
+		   they were the one decision the user had no say in at all: four kinds
+		   were drawn and applied, and the only way to influence the result was
+		   to throw the whole class away. Above zero this draws that many EXTRA
+		   candidates and `anomalyPicks` says which of them the class gets, so
+		   "a five-star bust and a February injury, not the walk-on" is
+		   expressible. 0 is exactly the behaviour that was always here, down
+		   to the order the kinds are applied in. See assignSurprises. */
+		anomalyChoices: 0,
+		/* Which of the shortlist to keep, by kind name. Written by the UI;
+		   the engine reads it and never writes it. Empty or unset means the
+		   first `surpriseBudget` of them, which is what an unanswered
+		   shortlist should do. */
+		anomalyPicks: null,
+
+		/* HOW FAR FROM THE MIDDLE THIS WORLD SITS.
+
+		   Five separate controls answer one underlying question — anomalies
+		   per class, flavor strength, whether the season draws storylines,
+		   March upsets, build noise — and a user who wants "give me a strange
+		   year" had to find all five and agree with themselves about what
+		   strange means. This is that question as one dial.
+
+		   It follows the same rule a flavor does: it moves a setting only
+		   while that setting is still at its default, so it never overrules a
+		   decision somebody made. 0 is the default and a complete no-op, which
+		   is what keeps every existing seed and every shareable link resolving
+		   to the class it always did. */
+		weirdness: 0,
+
 		/* How hard a class avoids the anomalies the last few classes used.
 		   Thirty-two kinds and four draws a class is not enough separation on
 		   its own: the same eight or ten turned up in most classes. 0 draws
@@ -227,6 +284,28 @@
 		   random subset, and only partway, so an injury-year flavor can still
 		   be an injury year on a config somebody has been playing with. */
 		flavorReach: 0,
+		/* HOW MANY YEARS TO RUN PAST THE LAST CLASS FILE.
+
+		   A universe stops at its newest file, which is where the carry-over
+		   gets interesting: program levels have drifted, realignment has
+		   accumulated, banners have piled up, and none of that has had time to
+		   become a history. `extrapolateGap` already invents a whole season
+		   out of the carry alone — a champion off program level, an AP No. 1,
+		   a player of the year off the named returners — and flags every row,
+		   and the only way to reach it was to leave a hole in your file list.
+
+		   0 keeps the chain ending where the files do. Above that, the rows are
+		   pushed onto the timeline, feed the records book and the news desk,
+		   and are never fed back into the chain's tail: loading a real class
+		   file later still extends the world from the last season that was
+		   actually played. See runUniverse in js/app.js. */
+		extrapolateYears: 0,
+		/* Whether the unplayed years INSIDE a chain — a hole in the file list —
+		   are extrapolated the same way. On by default, and separate, because a
+		   gap is a fact about the files and the years past the end are a
+		   choice. */
+		extrapolateGaps: true,
+
 		/* Whether a class draws two or three macro STORYLINES for its season
 		   on top of the class flavor — a dominant No. 1, a wide-open year, a
 		   mid-major surge, a scandal, a superteam that flops. The flavor
@@ -371,6 +450,9 @@
 		"Blue-blood freshman wave": { freshmanShare: 46, eliteCount: 3 },
 		"Veteran-heavy class": { freshmanShare: 16 },
 		"2015 scoring drought": { era: "2009-2021", pace: 64, efficiencyEnv: -1 },
+		/* Two flavors and a louder world, for somebody who wants the tool to
+		   surprise them rather than to reproduce something. */
+		"A strange year": { weirdness: 2, flavorBlend: 0.8, anomalyChoices: 4 },
 		"Chalk March": { upsetFactor: 0.35 },
 		"Total madness": { upsetFactor: 1.9 },
 	};
@@ -441,12 +523,57 @@
 		/* buildNoise is NOT here: its slider runs in steps of 0.5, so
 		   rounding it to a whole number was the injuryRate mistake again
 		   (a flavor bending 5 toward 7 landed on 6 rather than 5.5). */
-		"archetypeDiversity", "pace", "variation",
+		"archetypeDiversity", "pace", "variation", "anomalyChoices",
 		"coachTurnover", "realignmentMemory", "starReturners", "portalRate",
 		"recruitMomentum",
 		"flavorReach", "wEuroLeague", "wGLeague", "wNBL",
 	]);
 	function isCount(key) { return COUNTS.has(key); }
 
-	global.Config = { DEFAULTS, PRESETS, make, defaultLeagueWeights, COUNTS, isCount };
+	/* WHAT THE ENGINE WILL ACCEPT, AND WHAT THE PANEL OFFERS.
+
+	   These had drifted apart, quietly and in both directions. The engine
+	   names its pace band once — PACE_MIN 55, PACE_MAX 82 — expressly so that
+	   the two halves of a run cannot describe different games, and the slider
+	   offered 58 to 80, so the top of the declared band was unreachable from
+	   the interface at all. `injuryRate` clamps to 3 and stopped at 2;
+	   `surpriseBudget` clamps to 10 and stopped at 6. Each was defensible
+	   alone, and together they are how the build-pool slider came to be unable
+	   to reach its own off switch the last time somebody looked.
+
+	   So the clamp is declared HERE, the engine reads it instead of writing
+	   its own literals, and tools/tests/review.js reads every slider's min and
+	   max off index.html and fails when a control cannot reach the range
+	   behind it. `floor`/`ceil` record a deliberate difference with the reason
+	   for it — the pace slider's floor is three points above the band's,
+	   because the class-environment jitter is meant to be able to produce a
+	   season slower than the slowest thing a user can dial. */
+	const CLAMP = {
+		pace: { lo: 55, hi: 82, floor: 58,
+			floorWhy: "the class jitter floors at 55 so a slow season can be " +
+				"slower than the slowest thing a user can ask for" },
+		injuryRate: { lo: 0, hi: 3 },
+		surpriseBudget: { lo: 0, hi: 10 },
+		draftEvents: { lo: 0, hi: 8 },
+		anomalyMemory: { lo: 0, hi: 3 },
+		talentCoupling: { lo: 0, hi: 2 },
+		birthplaceWeight: { lo: 0, hi: 2 },
+		efficiencyEnv: { lo: -3, hi: 3 },
+		pDII: { lo: 0, hi: 1, ceil: 0.15,
+			ceilWhy: "a DII conversion is meant to be rare; the engine's own " +
+				"clamp is only a nonsense guard" },
+		flavorReach: { lo: 0, hi: 100 },
+		recruitMomentum: { lo: 0, hi: 100 },
+	};
+	/* The value a slider is allowed to reach, which is the clamp unless a
+	   deliberate floor or ceiling narrows it. */
+	function sliderRange(key) {
+		const c = CLAMP[key];
+		if (!c) return null;
+		return { min: Number.isFinite(c.floor) ? c.floor : c.lo,
+			max: Number.isFinite(c.ceil) ? c.ceil : c.hi };
+	}
+
+	global.Config = { DEFAULTS, PRESETS, make, defaultLeagueWeights, COUNTS, isCount,
+		CLAMP, sliderRange };
 })(typeof window !== "undefined" ? window : self);

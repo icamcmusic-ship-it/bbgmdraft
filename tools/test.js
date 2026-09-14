@@ -598,6 +598,87 @@ console.log("\nEras");
 			"implied " + ortg.toFixed(1) + " against a stated " + CAL.ERAS[name].rotation.ortg);
 	}
 
+	/* THE ERA-BOUND SURFACE HAS TO BE ERA-BOUND, ALL OF IT.
+
+	   `forEra(name)` exists so a caller outside a run can ask a named era a
+	   question without touching the module-level `era` that setEra() moves.
+	   It bound byHeight, effShift and chanceShape and passed threeShare
+	   through unbound — and threeShare calls byHeight, so the one method on
+	   the object that most looks like a pure function answered for whichever
+	   era ran last. It was inert only because no era defines a `share3`
+	   shift; the first one that does would have made it silently wrong.
+
+	   Tested by giving an era a share3 shift for the length of this block,
+	   which is the condition under which the hole is observable at all. */
+	{
+		const era2009 = CAL.ERAS["2009-2021"];
+		const saved = era2009.shift.share3;
+		era2009.shift.share3 = 0.5;
+		try {
+			CAL.setEra("modern");
+			const bound = CAL.forEra("2009-2021").threeShare(0.3, 55, 55);
+			CAL.setEra("2009-2021");
+			const direct = CAL.threeShare(0.3, 55, 55);
+			ok("forEra().threeShare answers for the era it names",
+				Math.abs(bound - direct) < 1e-9,
+				bound.toFixed(4) + " vs " + direct.toFixed(4));
+			CAL.setEra("modern");
+			ok("...and the module-level threeShare still answers for the current era",
+				Math.abs(CAL.threeShare(0.3, 55, 55) -
+					CAL.forEra("modern").threeShare(0.3, 55, 55)) < 1e-9);
+			ok("...and the two eras genuinely differ under that shift",
+				Math.abs(CAL.forEra("modern").threeShare(0.3, 55, 55) - bound) > 1e-6);
+		} finally {
+			if (saved === undefined) delete era2009.shift.share3;
+			else era2009.shift.share3 = saved;
+		}
+	}
+
+	/* THE PROSPECT PREMIUM TERM EXISTS AND IS WIRED UP.
+
+	   `prospectEff` is the mirror of `fieldEff`: the only two handles in the
+	   model that reach one population without the other. It ships at 0 (see
+	   the fitted sweep recorded beside it in js/calibration.js — every value
+	   that closes any real part of the premium gap breaks a row that the
+	   prior-season model has to move for first), and a term sitting at zero
+	   is precisely the kind of thing that gets deleted as dead code by
+	   somebody who does not read the comment. So the wiring is asserted
+	   rather than the value: give the era a premium for the length of this
+	   block and the class's efficiency has to move while the field's does
+	   not. */
+	{
+		const era = CAL.ERAS.modern;
+		const saved = era.shift.prospectEff;
+		const measure = () => {
+			const res = global.Engine.run(V.realisticClass(2, 60),
+				global.Config.make({ seed: "premium", era: "modern" }));
+			const cls = res.players.filter((p) => p.stats && !p.nonNcaa);
+			const field = [];
+			for (const t of Object.values(res.teams)) {
+				for (const l of t.lines || []) if (l.filler) field.push(l);
+			}
+			const mean = (xs, f) => xs.reduce((a, x) => a + f(x), 0) / Math.max(1, xs.length);
+			return { cls: mean(cls, (p) => p.stats.ts), field: mean(field, (l) => l.ts) };
+		};
+		try {
+			era.shift.prospectEff = 0;
+			const off = measure();
+			era.shift.prospectEff = 0.02;
+			const on = measure();
+			ok("prospectEff lifts the draft class's true shooting",
+				on.cls - off.cls > 0.005,
+				((on.cls - off.cls) * 100).toFixed(2) + " points");
+			ok("...and leaves the synthesized field exactly alone",
+				Math.abs(on.field - off.field) < 1e-9,
+				((on.field - off.field) * 100).toFixed(4) + " points");
+			ok("every era declares a prospectEff, even at zero",
+				Object.keys(CAL.ERAS).every((k) =>
+					Number.isFinite(CAL.ERAS[k].shift.prospectEff)));
+		} finally {
+			era.shift.prospectEff = saved;
+		}
+	}
+
 	CAL.setEra("modern");
 	const modern = global.Engine.run(V.syntheticClass(7, 60), global.Config.make({
 		seed: "era", era: "modern",
@@ -1177,6 +1258,14 @@ console.log("\nStaged pipeline coverage");
 	const EXEMPT = {
 		seed: "declared by build",
 		era: "declared by stats",
+		/* Chain-level settings, read by runUniverse in js/app.js rather than
+		   by the engine: they decide how many seasons are extrapolated past
+		   the last class file and whether the unplayed years inside a chain
+		   are filled in. The engine simulates one season and has no opinion
+		   about either, so declaring them on a phase would be declaring a
+		   dependency that does not exist. */
+		extrapolateYears: "read by the universe chain, not by a phase",
+		extrapolateGaps: "read by the universe chain, not by a phase",
 	};
 	const missing = Object.keys(global.Config.DEFAULTS)
 		.filter((k) => !declared.has(k) && !EXEMPT[k]);
@@ -2213,6 +2302,51 @@ console.log("\nMechanical anomalies and season narrative");
 	}
 	ok("the double-double anomaly never lands on a player who could not do it",
 		implausible === 0, implausible + " implausible cases");
+
+	/* THE AGE AN ANOMALY WRITES HAS TO REACH THE EXPORTED FILE.
+
+	   Four kinds set `p.age` outright, and the export derives born.year from
+	   the CLASS YEAR (AGE_FOR_CLASS) — which cannot express any of them,
+	   because a seventeen-year-old freshman and an ordinary one have the same
+	   class year. So the tool called a man the youngest player in the class at
+	   seventeen, on the board and in his note, and wrote nineteen into the
+	   file BBGM imports; BBGM then developed him on a nineteen-year-old's
+	   curve, which is the opposite of what the anomaly says about him.
+
+	   Checked on the file rather than on the flag, because the flag is the
+	   mechanism and the exported birth year is the promise. */
+	let aged = 0;
+	let mismatched = 0;
+	for (let s = 0; s < 30; s++) {
+		const res = global.Engine.run(V.realisticClass(s % 5, 60),
+			global.Config.make({ seed: "age" + s, surpriseBudget: 6 }));
+		const out = global.Engine.exportFile(res, {});
+		const bySrc = new Map();
+		out.players.forEach((row, i) => bySrc.set(i, row));
+		res.players.forEach((p) => {
+			if (!p.ageFromAnomaly) return;
+			const row = bySrc.get(p.idx);
+			if (!row || !row.born || !Number.isFinite(Number(row.born.year))) return;
+			aged++;
+			if (out.startingSeason - Number(row.born.year) !== p.age) mismatched++;
+		});
+	}
+	ok("an anomaly that ages a prospect exports that age",
+		aged > 0 && mismatched === 0,
+		aged + " aged prospects, " + mismatched + " exported at another age");
+	/* And the anomaly only ever ages a man. "Went pro and came back" read
+	   `p.age`, which is 19 for everybody in a BBGM class, so it made a
+	   graduate transfer who had spent a year abroad YOUNGER than the same man
+	   without it. */
+	{
+		const kind = global.Engine.SURPRISES
+			.filter((k) => k.name === "went pro and came back")[0];
+		const grad = { age: 19, classYear: "Graduate", nonNcaa: false,
+			transfer: { kind: "grad transfer", from: "Duke", fifthYear: true } };
+		kind.apply(grad, new global.BBGMRng.Rng("pro"));
+		ok("the pro-return anomaly never makes a graduate younger",
+			grad.age >= 23, "age " + grad.age);
+	}
 }
 
 {
@@ -2845,6 +2979,37 @@ console.log("\nStaying fresh: anomaly memory, narratives, style drift, flavor re
 			at100.effectiveCfg.injuryRate > 1.15 &&
 			at100.effectiveCfg.injuryRate < 2,
 			String(at100.effectiveCfg.injuryRate));
+
+		/* THE LEGACY DESTINATION SLIDERS FOLD IN ON BOTH BRANCHES.
+
+		   Config.make folds wEuroLeague / wGLeague / wNBL into leagueWeights —
+		   which is what assignCollege actually reads — and it does so BEFORE a
+		   flavor bend runs, so applyFlavorConfig has to fold them again. It
+		   did, on the branch for settings the user had left alone, and on the
+		   reach branch it tested `k === "leagueWeights"` — a test gated behind
+		   `typeof bend[k] === "number"`, which an object can never satisfy. So
+		   a flavor that bends wEuroLeague on a config the user had touched
+		   wrote a number nothing reads: the exact fault the fold exists to
+		   fix, surviving in one of the two branches. */
+		const euroCfg = (reach) => global.Config.make({
+			seed: "reach2", flavorHint: "overseas year",
+			classFlavor: 1, wEuroLeague: 20, flavorReach: reach, narrative: false,
+		});
+		const eu0 = global.Engine.run(V.realisticClass(3, 70), euroCfg(0));
+		const eu100 = global.Engine.run(V.realisticClass(3, 70), euroCfg(100));
+		const bendsEuro = global.RatingsBuilder
+			.flavorConfig(eu0.flavor) &&
+			Number.isFinite(global.RatingsBuilder.flavorConfig(eu0.flavor).wEuroLeague);
+		ok("the overseas flavor still bends the legacy EuroLeague weight",
+			!!bendsEuro);
+		ok("at reach 0 a touched legacy slider reaches the destination table",
+			eu0.effectiveCfg.leagueWeights.EuroLeague === 20,
+			String(eu0.effectiveCfg.leagueWeights.EuroLeague));
+		ok("at reach 100 the bend reaches the table the engine actually reads",
+			eu100.effectiveCfg.wEuroLeague > 20 &&
+			eu100.effectiveCfg.leagueWeights.EuroLeague === eu100.effectiveCfg.wEuroLeague,
+			eu100.effectiveCfg.wEuroLeague + " vs table " +
+				eu100.effectiveCfg.leagueWeights.EuroLeague);
 	}
 
 	/* STYLE DRIFT. */
@@ -4682,6 +4847,29 @@ console.log("\nEarlier seasons: nights, highs and honors; statlines abroad; the 
 		ok("every alias resolves to a program in the table",
 			Object.keys(C.ALIASES).every((k) => C.COLLEGES[C.ALIASES[k]]));
 		ok("the table is the 364 programs of Division I", C.names.length === 364);
+		/* THE SAME CHECK FOR THE BUILD TABLE.
+
+		   js/config.js argues at length that the build pool must stay near
+		   13% of the archetype table, because holding the pool fixed while the
+		   table grows is how per-class coverage quietly halved once already.
+		   The prose then went stale in exactly that way — "the table is 355
+		   builds now" against a table of 361 — inside the comment written to
+		   prevent it. The program count was asserted against the table and the
+		   build count was not, so this is the missing half. */
+		{
+			const RBt = global.RatingsBuilder;
+			const src = require("fs").readFileSync(
+				require("path").join(__dirname, "..", "js", "config.js"), "utf8");
+			const m = /the table is (\d+) builds today/.exec(src);
+			ok("js/config.js states the build table's size",
+				!!m && Number(m[1]) === RBt.ARCHETYPES.length,
+				(m ? m[1] : "no claim") + " claimed against " +
+					RBt.ARCHETYPES.length + " builds");
+			const share = global.Config.DEFAULTS.archetypePool / RBt.ARCHETYPES.length;
+			ok("the default build pool is still about 13% of the table",
+				share >= 0.11 && share <= 0.15,
+				(share * 100).toFixed(1) + "% of " + RBt.ARCHETYPES.length);
+		}
 		ok("the Tim Duncan Award replaced the Karl Malone Award",
 			global.Awards.POSITION_AWARDS.some((a) => a.name === "Tim Duncan Award") &&
 			!global.Awards.POSITION_AWARDS.some((a) => /Malone/.test(a.name)) &&

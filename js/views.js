@@ -51,6 +51,26 @@
 		{ key: "newOvr", label: "Ovr", num: true },
 		{ key: "newPot", label: "Pot", num: true },
 		{ key: "archetype", label: "Archetype", num: false },
+		/* FACTS THE MODEL ALREADY CARRIED AND NEVER SHOWED.
+
+		   Each of these is drawn per player, survives a reroll, reaches the
+		   note and appears in no column and no CSV field — which for a
+		   tool whose job is a sortable table is the same as not existing.
+		   Handedness is the first thing a scout writes after the height; the
+		   composite is the number a recruiting service is actually quoted by;
+		   the age is what every draft room breaks a tie on (see the age term
+		   in phaseStock); and for a prospect abroad his age-group caps and his
+		   club's continental run are the only two facts that place him against
+		   anybody else. All off by default — the table is wide enough — and
+		   all sortable, which is the point of being a column rather than a
+		   sentence in a note. */
+		{ key: "hand", label: "Hand", num: false, off: true, title: "Shooting hand" },
+		{ key: "age", label: "Age", num: true, off: true, title: "Age at the draft, from his class year" },
+		{ key: "recRank", label: "Rec", num: true, off: true, title: "National recruiting rank out of high school" },
+		{ key: "stars", label: "★", num: true, off: true, title: "Recruiting stars" },
+		{ key: "composite", label: "Comp", num: true, off: true, title: "247-style recruiting composite" },
+		{ key: "caps", label: "Caps", num: false, off: true, title: "Age-group or senior national-team caps, for a prospect abroad" },
+		{ key: "continental", label: "Cont", num: false, off: true, title: "His club's continental competition and how far it went" },
 		{ key: "college", label: "College / League", num: false },
 		{ key: "conf", label: "Conf", num: false },
 		/* Team context. All three are on res.teams and none of them was shown,
@@ -191,6 +211,10 @@
 		case "move": return p.stockMove || 0;
 		case "hgtInches": return p.newHgtInches;
 		case "weight": return p.newWeight;
+		case "age": return Number.isFinite(p.age) ? p.age : undefined;
+		case "recRank": return p.recruiting ? p.recruiting.rank : undefined;
+		case "stars": return p.recruiting ? p.recruiting.stars : undefined;
+		case "composite": return p.recruiting ? p.recruiting.composite : undefined;
 		case "apRank": return team ? team.apRank : undefined;
 		case "seed": return team ? team.ncaaSeed : undefined;
 		// Sorted and filtered on games above .500, which is what the cell shows.
@@ -857,6 +881,23 @@
 		}
 		if (f.changedOnly && !p.collegeChanged) return false;
 		if (f.lockedOnly && !A().state.overrides[p.key]) return false;
+		/* DID NOT PLAY.
+
+		   A prospect with no season — a club that was never simulated, an
+		   idle year abroad, a man the file gave no college and "Respect file"
+		   left blank — is dimmed, labelled and explained in his row, which was
+		   the right fix for "a blank PPG cell reads as a bug". What he was not
+		   is FILTERABLE, so on a class with fifteen of them the only way to
+		   compare the men who actually played was to read past the blanks, and
+		   the only way to look at the fifteen was to hunt for grey rows.
+
+		   Two flags rather than a tri-state select, because they are what the
+		   other filters on this bar look like and because "played only" and
+		   "did not play only" are two different questions. Ticking both is a
+		   contradiction that returns nothing, which is the honest answer. */
+		const played = !!(p.stats && p.stats.gp > 0);
+		if (f.playedOnly && !played) return false;
+		if (f.didNotPlayOnly && played) return false;
 		/* Numeric range filters. For a 70-man class across forty columns,
 		   "show me everyone over 18 points a game" and "overall 45 to 55" are
 		   the two verbs the table did not have: you could search text and pick
@@ -1035,7 +1076,9 @@
 		bar.appendChild(confSel);
 
 		for (const [key, label] of [["changedOnly", "reassigned colleges only"],
-			["lockedOnly", "locked players only"]]) {
+			["lockedOnly", "locked players only"],
+			["playedOnly", "played a season"],
+			["didNotPlayOnly", "did not play"]]) {
 			const lab = el("label", "check");
 			const cb = el("input");
 			cb.type = "checkbox";
@@ -1559,6 +1602,51 @@
 					sortVals.archetype = p.archetype;
 					break;
 				}
+				case "hand":
+					td = el("td", null, p.hand === "left" ? "L" : p.hand ? "R" : "");
+					td.title = p.hand === "left" ? "Left-handed" : "Right-handed";
+					// Left sorts first, because left is the one you are looking for.
+					sortVals.hand = p.hand === "left" ? 0 : 1;
+					break;
+				case "age":
+					td = el("td", "num", Number.isFinite(p.age) ? String(p.age) : "");
+					sortVals.age = p.age;
+					break;
+				case "recRank":
+					td = el("td", "num", p.recruiting && Number.isFinite(p.recruiting.rank)
+						? String(p.recruiting.rank) : "");
+					sortVals.recRank = p.recruiting ? p.recruiting.rank : undefined;
+					break;
+				case "stars":
+					td = el("td", "num", p.recruiting && p.recruiting.stars
+						? "\u2605".repeat(p.recruiting.stars) : "");
+					td.title = p.recruiting && p.recruiting.stars
+						? p.recruiting.stars + "-star recruit" : "";
+					sortVals.stars = p.recruiting ? p.recruiting.stars : undefined;
+					break;
+				case "composite":
+					td = el("td", "num", p.recruiting && Number.isFinite(p.recruiting.composite)
+						? p.recruiting.composite.toFixed(4) : "");
+					sortVals.composite = p.recruiting ? p.recruiting.composite : undefined;
+					break;
+				case "caps": {
+					const caps = p.proPath && p.proPath.caps;
+					td = el("td", null, caps
+						? caps.n + " " + caps.country +
+							(caps.level === "senior" ? "" : " " + caps.level) : "");
+					if (caps) {
+						td.title = caps.n + " cap" + (caps.n === 1 ? "" : "s") + " for " +
+							(caps.level === "senior" ? "the senior " + caps.country + " side"
+								: caps.country + " at " + caps.level);
+					}
+					sortVals.caps = caps ? caps.n : undefined;
+					break;
+				}
+				case "continental":
+					td = el("td", null, p.continental
+						? p.continental.competition + " — " + p.continental.result : "");
+					sortVals.continental = p.continental ? p.continental.competition : "";
+					break;
 				case "college":
 					td = el("td");
 					if (p.nonNcaa) {
@@ -1840,6 +1928,8 @@
 		if (f.conf) on.push("conference " + f.conf);
 		if (f.changedOnly) on.push("reassigned colleges only");
 		if (f.lockedOnly) on.push("locked players only");
+		if (f.playedOnly) on.push("played a season");
+		if (f.didNotPlayOnly) on.push("did not play");
 		for (const r of f.ranges || []) {
 			if (!r.key) continue;
 			const col = COLUMNS.filter((c) => c.key === r.key)[0];
@@ -1854,7 +1944,8 @@
 		const clear = el("button", "tiny", "Clear all filters");
 		clear.addEventListener("click", () => {
 			st.filter = { q: "", pos: "", conf: "", changedOnly: false,
-				lockedOnly: false, ranges: [] };
+				lockedOnly: false, playedOnly: false, didNotPlayOnly: false,
+				ranges: [] };
 			A().persist();
 			A().render();
 		});
@@ -2488,6 +2579,182 @@
 		return box;
 	}
 
+	/* THE WORLD, AS THE CHAIN ACTUALLY HOLDS IT.
+
+	   `carryOver` is the universe's entire state — every program's level, the
+	   conference each one is in, its coach and his tenure, its banner count,
+	   and the named star returners on its roster — and the only window onto
+	   any of it was the timeline's one-line summaries. So a dynasty forming
+	   over six seasons was visible as a repeated champion and in no other way:
+	   the numbers that MADE it a dynasty were carried from season to season,
+	   handed to the recruiting model, and never shown to anybody.
+
+	   Read-only, and deliberately a table of the top of the field rather than
+	   all 364 rows: the question this answers is "who is strong right now and
+	   why", and 364 rows answers it worse than 25 do. The season selector is
+	   the point — it is the same state at two different times, which is what
+	   makes drift legible. Everything here is already in state.universe.cfgs;
+	   nothing is re-simulated to draw it. */
+	const WORLD_ROWS = 25;
+	function worldSection(view, u) {
+		const st = A().state;
+		const seasons = Object.keys(u.cfgs || {})
+			.map(Number)
+			.filter((i) => u.cfgs[i] && u.cfgs[i].carryOver)
+			.map((i) => ({ i, season: (u.rows.filter((r) => r.fileName ===
+				(st.files[i] ? st.files[i].name : null))[0] || {}).season || null }))
+			.filter((x) => Number.isFinite(x.season))
+			.sort((a, b) => a.season - b.season);
+		if (!seasons.length) return;
+		view.appendChild(el("h4", null, "The state of the world"));
+		view.appendChild(el("p", "legendline",
+			"What one season handed the next: program strength, the conference " +
+			"map, the sideline and the banners. This is the state the recruiting " +
+			"model reads, and it is why a program that wins keeps winning."));
+		const bar = el("div", "filters");
+		const sel = el("select");
+		sel.setAttribute("aria-label", "Season");
+		for (const x of seasons) {
+			sel.appendChild(new Option("going into " + x.season, String(x.i)));
+		}
+		const chosen = Number.isFinite(st.worldSeason) &&
+			seasons.some((x) => x.i === st.worldSeason)
+			? st.worldSeason : seasons[seasons.length - 1].i;
+		sel.value = String(chosen);
+		sel.addEventListener("change", () => {
+			st.worldSeason = Number(sel.value);
+			A().persist();
+			A().render();
+		});
+		bar.appendChild(sel);
+		view.appendChild(bar);
+		const carry = u.cfgs[chosen].carryOver;
+		if (!carry || !carry.levels) {
+			view.appendChild(el("p", "hint",
+				"The first season of a chain is handed nothing — there is no " +
+				"previous world for it to inherit."));
+			return;
+		}
+		const names = Object.keys(carry.levels)
+			.sort((a, b) => carry.levels[b] - carry.levels[a])
+			.slice(0, WORLD_ROWS);
+		const wrap = el("div", "scroll");
+		const table = el("table");
+		const thead = el("thead");
+		const hr = el("tr");
+		for (const h of ["Program", "Conference", "Level", "Banners", "Coach", "Yr",
+			"Returning stars"]) {
+			hr.appendChild(el("th", ["Level", "Banners", "Yr"].indexOf(h) >= 0 ? "num" : "", h));
+		}
+		thead.appendChild(hr);
+		table.appendChild(thead);
+		const tb = el("tbody");
+		for (const name of names) {
+			const tr = el("tr");
+			const td = el("td");
+			td.appendChild(programLink(name));
+			tr.appendChild(td);
+			tr.appendChild(el("td", null, (carry.confOf || {})[name] || ""));
+			tr.appendChild(el("td", "num", carry.levels[name].toFixed(1)));
+			const titles = (carry.titles || {})[name] || 0;
+			tr.appendChild(el("td", "num", titles ? String(titles) : ""));
+			const c = (carry.coaches || {})[name];
+			const coach = c && c.coach ? c.coach : null;
+			const td2 = el("td");
+			td2.appendChild(document.createTextNode(coach ? coach.name : "—"));
+			/* A vacancy is the single most consequential thing in this table
+			   and it was not on the timeline at all. */
+			if (c && c.fired) {
+				td2.appendChild(el("span", "tag", c.reason || "leaving"));
+			}
+			tr.appendChild(td2);
+			tr.appendChild(el("td", "num", coach && coach.tenure ? String(coach.tenure) : ""));
+			const ret = (carry.returners || {})[name] || [];
+			tr.appendChild(wrapCell(ret.map((r) => r.name + " (" +
+				(r.classYear || "?") + ")").join("; ")));
+			tb.appendChild(tr);
+		}
+		table.appendChild(tb);
+		wrap.appendChild(table);
+		view.appendChild(wrap);
+		view.appendChild(el("p", "hint",
+			"The top " + WORLD_ROWS + " programs by level, out of " +
+			Object.keys(carry.levels).length + " the chain carries." +
+			(carry.champion ? " Defending champion: " + carry.champion + "." : "") +
+			(carry.stale ? " " + carry.stale + " season" +
+				(carry.stale === 1 ? " was" : "s were") +
+				" aged across without being played." : "")));
+	}
+
+	/* CAREERS, WHICH ARE WHAT THE REGISTRY IS FOR.
+
+	   Every other section of this tab is about a programme or a season. This
+	   one is about people: the men who appear in more than one season of the
+	   world, and how. Three ways that happens and they are genuinely
+	   different — a later class's underclassman playing the seasons he was
+	   actually on, a man who went undrafted and came back, and his own draft
+	   year — so the row says which, rather than merging them into a count.
+
+	   Read off Universe.registryOf, which is derived from results the chain
+	   already has; nothing here re-simulates. */
+	const REGISTRY_ROWS = 40;
+	function registrySection(view, u) {
+		const reg = u.registry;
+		if (!reg) return;
+		const people = Object.keys(reg).map((id) => reg[id])
+			.filter((x) => x.span >= 2)
+			.sort((a, b) => b.span - a.span ||
+				(b.honors ? b.honors.length : 0) - (a.honors ? a.honors.length : 0) ||
+				String(a.name).localeCompare(String(b.name)));
+		if (!people.length) return;
+		view.appendChild(el("h4", null, "Careers"));
+		view.appendChild(el("p", "legendline",
+			"The men this world saw more than once. A universe used to be a " +
+			"list of seasons and a tally per programme; this is the same world " +
+			"indexed by person, which is what makes " +
+			"“he went undrafted and came back” a thing the tool can say."));
+		const wrap = el("div", "scroll");
+		const table = el("table");
+		const thead = el("thead");
+		const hr = el("tr");
+		for (const h of ["Player", "Seasons", "Span", "Drafted", "Honors", "What happened"]) {
+			hr.appendChild(el("th", ["Seasons", "Span", "Drafted", "Honors"].indexOf(h) >= 0
+				? "num" : "", h));
+		}
+		thead.appendChild(hr);
+		table.appendChild(thead);
+		const tb = el("tbody");
+		for (const x of people.slice(0, REGISTRY_ROWS)) {
+			const tr = el("tr");
+			const nameTd = el("td");
+			if (Number.isFinite(x.fileIndex) && x.draft) {
+				const go = el("button", "linky", x.name);
+				go.title = "Open his page in the " + x.draft.season + " class";
+				go.addEventListener("click", () => {
+					A().showPlayerInFile(x.fileIndex, String(x.id).split("/").pop());
+				});
+				nameTd.appendChild(go);
+			} else nameTd.appendChild(document.createTextNode(x.name));
+			tr.appendChild(nameTd);
+			tr.appendChild(el("td", "num", String(x.seasons.length)));
+			tr.appendChild(el("td", "num", String(x.span)));
+			tr.appendChild(el("td", "num", x.draft && Number.isFinite(x.draft.boardRank)
+				? "No. " + x.draft.boardRank : "—"));
+			tr.appendChild(el("td", "num", String(x.honors.length)));
+			tr.appendChild(wrapCell(x.seasons
+				.map((s) => s.season + " " + s.as).join(" · ")));
+			tb.appendChild(tr);
+		}
+		table.appendChild(tb);
+		wrap.appendChild(table);
+		view.appendChild(wrap);
+		if (people.length > REGISTRY_ROWS) {
+			view.appendChild(el("p", "hint",
+				"The " + REGISTRY_ROWS + " longest of " + people.length +
+				" careers in this world."));
+		}
+	}
+
 	/* COACHES AND CONFERENCES OVER TIME.
 
 	   Read-only views over data the chain already carries — see
@@ -2709,6 +2976,16 @@
 				"world” in the settings panel to make it the world.";
 		run.addEventListener("click", () => { A().runUniverse(); });
 		bar.appendChild(run);
+		/* Iterating on the END of a long chain. A rebuild is correct and
+		   expensive; holding the seasons that are already right is what makes
+		   a forty-season universe something you can actually tune. */
+		if (!u.running && Array.isArray(u.order) && u.order.length >= 3 && u.rows.length) {
+			const part = el("button", null, "Re-run from a season\u2026");
+			part.title = "Hold the seasons before a chosen one and re-run the " +
+				"rest under the current settings.";
+			part.addEventListener("click", () => { A().resumeUniverseDialog(); });
+			bar.appendChild(part);
+		}
 		/* A way out. Fifty seasons is close to a minute of work and the chain
 		   had `running` and no stop — the batch runner has had one since it
 		   existed. The seasons already finished are kept, exactly as a
@@ -2950,6 +3227,8 @@
 			view.appendChild(tl);
 		}
 		if (u.records) recordsSection(view, u.records);
+		if (!u.running && u.cfgs && Object.keys(u.cfgs).length) worldSection(view, u);
+		if (!u.running) registrySection(view, u);
 		if (!u.running && u.cfgs && Object.keys(u.cfgs).length) careersSection(view, u);
 		if (u.coachTree && u.coachTree.hires && u.coachTree.hires.length) {
 			coachTreeSection(view, u.coachTree);
@@ -4445,8 +4724,14 @@
 		}
 		box.appendChild(dl);
 
-		// Earlier seasons, when they were simulated.
-		if (p.priorSeasons && p.priorSeasons.length) {
+		/* Earlier seasons, when they were simulated — and the later ones, when
+		   the world played them. `laterSeasons` is a returner's career after
+		   the draft he was not picked in (see linkCareers): the same table,
+		   because a career is one table, and a separate field because
+		   exportFile writes priorSeasons as BBGM stats rows dated before the
+		   draft and a season after it is not that. */
+		if ((p.priorSeasons && p.priorSeasons.length) ||
+			(p.laterSeasons && p.laterSeasons.length)) {
 			box.appendChild(el("h4", null, "Career"));
 			const wrap = el("div", "scroll");
 			const table = el("table");
@@ -4460,15 +4745,26 @@
 			thead.appendChild(hr);
 			table.appendChild(thead);
 			const tb = el("tbody");
-			const rows = p.priorSeasons.slice();
+			/* Split around his draft year, because the draft-year row is
+			   appended after this loop and a career table that runs
+			   2024, 2025, 2027, 2026 is worse than no career table. */
+			const own = Number(res.season);
+			const all = (p.priorSeasons || []).slice()
+				.concat((p.laterSeasons || []).slice())
+				.sort((a, b) => (a.season || 0) - (b.season || 0));
+			const rows = all.filter((r) => !Number.isFinite(own) || r.season <= own);
+			const afterRows = all.filter((r) => Number.isFinite(own) && r.season > own);
 			const highsText = (h) => (h ? h.pts + "p / " + h.reb + "r / " + h.ast + "a" : "—");
 			for (const r of rows) {
-				const tr = el("tr", r.universe ? "now" : "");
+				const tr = el("tr", r.universe || r.after ? "now" : "");
 				const seasonTd = el("td", null, String(r.season || ""));
-				if (r.universe) {
+				if (r.universe || r.after) {
 					seasonTd.textContent = "";
-					const go = el("button", "linky", String(r.season) + " ★");
-					go.title = "Played in this universe's " + r.season + " season — open it";
+					const go = el("button", "linky", String(r.season) + " \u2605");
+					go.title = r.after
+						? "He went undrafted and played this universe's " + r.season +
+							" season — open it"
+						: "Played in this universe's " + r.season + " season — open it";
 					go.addEventListener("click", () => {
 						A().showPlayerInFile(r.universeFileIndex, r.universeKey);
 					});
@@ -4523,14 +4819,23 @@
 					((p.awards || []).length > 3 ? " (+" + (p.awards.length - 3) + ")" : "")));
 				tb.appendChild(tr);
 			}
+			/* The seasons after his draft year, which only a returner has:
+			   rendered through the same builder as the ones before it, because
+			   they are the same kind of row and the only thing that differs is
+			   which side of the draft they sit on. */
+			for (const r of afterRows) tb.appendChild(careerRow(r, HEAD, highsText));
 			table.appendChild(tb);
 			wrap.appendChild(table);
 			box.appendChild(wrap);
-			if (rows.some((r) => r.universe)) {
+			if (rows.concat(afterRows).some((r) => r.universe || r.after)) {
 				box.appendChild(el("p", "legendline",
-					"★ a season this universe actually played, on that year's " +
+					"\u2605 a season this universe actually played, on that year's " +
 					"roster, against that year's field — not a season simulated " +
-					"for him alone. Click it to open it."));
+					"for him alone. Click it to open it." +
+					(afterRows.length
+						? " The seasons below his draft year are the ones he played " +
+							"after going undrafted."
+						: "")));
 			}
 		}
 
@@ -4563,6 +4868,53 @@
 	   In a universe the 2027 file's junior was a freshman on a 2025 roster,
 	   and this is his 2025: the line, the nights, the honors, and a link to
 	   the man he became — his own page, in his own file. */
+	/* ONE CAREER ROW.
+
+	   The player page builds these in two loops now — the seasons before his
+	   draft year and, for a man who went undrafted and came back, the ones
+	   after it — and two copies of a twelve-column row is how the two halves
+	   of a table come to disagree about what a column means. */
+	function careerRow(r, HEAD, highsText) {
+		const tr = el("tr", r.universe || r.after ? "now" : "");
+		const seasonTd = el("td", null, String(r.season || ""));
+		if (r.universe || r.after) {
+			seasonTd.textContent = "";
+			const go = el("button", "linky", String(r.season) + "\u2605");
+			go.title = r.after
+				? "He went undrafted and played this universe's " + r.season +
+					" season — open it"
+				: "Played in this universe's " + r.season + " season — open it";
+			go.addEventListener("click", () => {
+				A().showPlayerInFile(r.universeFileIndex, r.universeKey);
+			});
+			seasonTd.appendChild(go);
+		}
+		tr.appendChild(seasonTd);
+		tr.appendChild(el("td", null, r.team || ""));
+		tr.appendChild(el("td", null, r.redshirt ? "Redshirt" : (r.classYear || "")));
+		if (r.redshirt) {
+			const td = el("td", null, r.reason || "did not play");
+			td.colSpan = HEAD.length - 3;
+			tr.appendChild(td);
+			return tr;
+		}
+		tr.appendChild(el("td", null, r.record ? r.record.w + "-" + r.record.l : "—"));
+		tr.appendChild(el("td", "num", String(r.gp || "")));
+		tr.appendChild(el("td", "num", n1(r.mpg)));
+		tr.appendChild(el("td", "num", n1(r.ppg)));
+		tr.appendChild(el("td", "num", n1(r.rpg)));
+		tr.appendChild(el("td", "num", n1(r.apg)));
+		tr.appendChild(el("td", "num", r.ts ? pc(r.ts) : ""));
+		const hi = el("td", null, highsText(r.highs));
+		if (r.best && r.best.opp) {
+			hi.title = "Best game: " + r.best.pts + " points against " + r.best.opp +
+				(r.twentyPointGames ? " · " + r.twentyPointGames + " 20-point games" : "");
+		}
+		tr.appendChild(hi);
+		tr.appendChild(el("td", null, (r.awards || []).join("; ")));
+		return tr;
+	}
+
 	function futurePlayerPage(box, res, key) {
 		const fp = (res.futurePlayers || []).filter((f) => f.key === key)[0];
 		if (!fp) {
@@ -4580,9 +4932,22 @@
 			" · ovr " + fp.newOvr + " that year"));
 		idbox.appendChild(line);
 		const pills = el("div", "rowflex");
-		pills.appendChild(el("span", "pill", "In the " + fp.classSeason + " draft class, not this one"));
-		const own = el("button", "linky", "His own page, in the " + fp.classSeason + " class →");
-		own.addEventListener("click", () => { A().showPlayerInFile(fp.fileIndex, fp.homeKey); });
+		/* TWO DIRECTIONS, and they are opposite stories about the same kind of
+		   row. A man from a LATER class on this roster is an underclassman who
+		   has not been drafted yet; a man from an EARLIER one is somebody who
+		   went undrafted and came back, which is a fact about a career and
+		   used to be inexpressible at all. */
+		pills.appendChild(el("span", "pill", fp.past
+			? "Went undrafted in " + fp.undraftedFrom + " and came back"
+			: "In the " + fp.classSeason + " draft class, not this one"));
+		const own = el("button", "linky", fp.past
+			? "His draft class, " + fp.classSeason + " \u2192"
+			: "His own page, in the " + fp.classSeason + " class \u2192");
+		// `homeKey` is the key in his OWN file, set for both directions by
+		// phaseRegular, so one call covers the underclassman and the returner.
+		own.addEventListener("click", () => {
+			A().showPlayerInFile(fp.fileIndex, fp.homeKey);
+		});
 		pills.appendChild(own);
 		idbox.appendChild(pills);
 		head.appendChild(idbox);
