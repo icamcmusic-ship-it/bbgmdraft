@@ -90,6 +90,23 @@
 		   Same shape, different sixty-eight men. */
 		variation: 0,
 
+		/* HOW OFTEN A CLASS DRAWS TWO FLAVORS INSTEAD OF ONE.
+
+		   The season already draws two or three storylines and stacks them;
+		   the flavor layer, which is older, drew exactly one. The asymmetry
+		   is an accident of the order they were written in, and it costs the
+		   whole point of a flavor — "guard-heavy" and "the year everybody got
+		   hurt" are both things a class is remembered as, and a class can
+		   obviously be both. Sixty-six flavors drawn one at a time is
+		   sixty-six kinds of year; drawn two at a time it is thousands.
+
+		   0 is the default and a complete no-op, down to the RNG stream: the
+		   second draw is on its own child, so a seed that never blends is the
+		   class it always was. A flavor asked for by name is never blended —
+		   naming one is a decision, and mixing something else into it quietly
+		   is the opposite of honouring it. See blendFlavor in js/ratings.js. */
+		flavorBlend: 0,
+
 		/* Ask for a particular class flavor instead of drawing one.
 
 		   pickFlavor drew from a weighted table and applied the result, and the
@@ -267,6 +284,28 @@
 		   random subset, and only partway, so an injury-year flavor can still
 		   be an injury year on a config somebody has been playing with. */
 		flavorReach: 0,
+		/* HOW MANY YEARS TO RUN PAST THE LAST CLASS FILE.
+
+		   A universe stops at its newest file, which is where the carry-over
+		   gets interesting: program levels have drifted, realignment has
+		   accumulated, banners have piled up, and none of that has had time to
+		   become a history. `extrapolateGap` already invents a whole season
+		   out of the carry alone — a champion off program level, an AP No. 1,
+		   a player of the year off the named returners — and flags every row,
+		   and the only way to reach it was to leave a hole in your file list.
+
+		   0 keeps the chain ending where the files do. Above that, the rows are
+		   pushed onto the timeline, feed the records book and the news desk,
+		   and are never fed back into the chain's tail: loading a real class
+		   file later still extends the world from the last season that was
+		   actually played. See runUniverse in js/app.js. */
+		extrapolateYears: 0,
+		/* Whether the unplayed years INSIDE a chain — a hole in the file list —
+		   are extrapolated the same way. On by default, and separate, because a
+		   gap is a fact about the files and the years past the end are a
+		   choice. */
+		extrapolateGaps: true,
+
 		/* Whether a class draws two or three macro STORYLINES for its season
 		   on top of the class flavor — a dominant No. 1, a wide-open year, a
 		   mid-major surge, a scandal, a superteam that flops. The flavor
@@ -411,6 +450,9 @@
 		"Blue-blood freshman wave": { freshmanShare: 46, eliteCount: 3 },
 		"Veteran-heavy class": { freshmanShare: 16 },
 		"2015 scoring drought": { era: "2009-2021", pace: 64, efficiencyEnv: -1 },
+		/* Two flavors and a louder world, for somebody who wants the tool to
+		   surprise them rather than to reproduce something. */
+		"A strange year": { weirdness: 2, flavorBlend: 0.8, anomalyChoices: 4 },
 		"Chalk March": { upsetFactor: 0.35 },
 		"Total madness": { upsetFactor: 1.9 },
 	};

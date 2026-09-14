@@ -2300,10 +2300,81 @@
 				traits[g] = Math.pow(f.traits[g], strength);
 			}
 		}
-		return { name: f.name, label: f.label, mult, traits, cfg: f.c || null,
+		const one = { name: f.name, label: f.label, mult, traits, cfg: f.c || null,
 			strength, asked: !!asked };
+		return blendFlavor(one, f, rng, cfg, strength, asked);
 	}
 
+	/* TWO FLAVORS, THE WAY A SEASON ALREADY GETS TWO STORYLINES.
+
+	   The narrative layer draws two or three storylines and stacks them, and
+	   the flavor layer — which is older — draws exactly one. There is no
+	   reason for the asymmetry beyond the order they were written in, and the
+	   cost of it is the whole point of a flavor: "guard-heavy" and "the year
+	   everybody got hurt" are both things a draft class is remembered as, and
+	   a class can obviously be both. Sixty-six flavors drawn one at a time is
+	   sixty-six kinds of year; drawn two at a time it is a couple of thousand.
+
+	   `flavorBlend` is the chance of a second one, and at 0 — the default —
+	   this returns the flavor it was handed, by identity, so every seed and
+	   every shareable link made before it existed resolves to exactly the
+	   class it always did. The draw is on its own child stream, which by
+	   construction (see Rng.child) costs the parent stream nothing whether it
+	   happens or not, so turning the dial up does not reshuffle the class it
+	   is layered onto — it adds to it.
+
+	   The two combine the way the layer's own machinery already says they
+	   should: archetype multipliers and trait tilts MULTIPLY, because they are
+	   log-space weights and that is what stacking means for a weight; and
+	   where both bend the same SETTING the second wins outright rather than
+	   being averaged, for the reason applyNarrative gives — averaging two
+	   contradictions gives an ordinary class, which is the outcome the whole
+	   system exists to avoid.
+
+	   A named flavor is never blended. Asking for one is a decision, and
+	   quietly mixing something else into it is the opposite of honouring it. */
+	const FLAVOR_BLEND_FLOOR = 0.25;
+	function blendFlavor(one, first, rng, cfg, strength, asked) {
+		const chance = clamp(
+			cfg && Number.isFinite(cfg.flavorBlend) ? cfg.flavorBlend : 0, 0, 1);
+		if (!chance || asked || first.name === "balanced") return one;
+		const brng = rng.child("blend");
+		if (brng.random() >= chance) return one;
+		const pool = CLASS_FLAVORS.filter((x) =>
+			x.name !== first.name && x.name !== "balanced");
+		if (!pool.length) return one;
+		const second = brng.weighted(pool);
+		/* The second leans less than the first, so a blend reads as "a
+		   guard-heavy year that was also injury-hit" rather than as two
+		   half-flavors. Floored, because a second flavor nobody can see is a
+		   second flavor that is not worth drawing. */
+		const s2 = Math.max(FLAVOR_BLEND_FLOOR, strength * 0.6);
+		const mult = Object.assign({}, one.mult);
+		for (const tag of Object.keys(second.m || {})) {
+			mult[tag] = (mult[tag] === undefined ? 1 : mult[tag]) *
+				Math.pow(second.m[tag], s2);
+		}
+		let traits = one.traits ? Object.assign({}, one.traits) : null;
+		if (second.traits) {
+			traits = traits || {};
+			for (const g of Object.keys(second.traits)) {
+				traits[g] = (traits[g] === undefined ? 1 : traits[g]) *
+					Math.pow(second.traits[g], s2);
+			}
+		}
+		const bend = one.cfg || second.c
+			? Object.assign({}, one.cfg || {}, second.c || {})
+			: null;
+		return {
+			name: one.name + "+" + second.name,
+			label: one.label + ", and " + second.label,
+			mult, traits, cfg: bend, strength, asked: false,
+			blended: [one.name, second.name],
+		};
+	}
+
+	/* A flavor's config bend, which may now come from two of them. Unchanged
+	   for a single flavor: `cfg` is the authored bend either way. */
 	function flavorMultiplier(arch, flavor) {
 		if (!flavor || !flavor.mult) return 1;
 		let m = 1;

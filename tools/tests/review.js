@@ -31,6 +31,37 @@ module.exports = function (ok, V) {
 			bad.length === 0 && !CFG.COUNTS.has("buildNoise"), bad.join(", "));
 	}
 
+	/* EVERY SLIDER ON THE PAGE IS A SLIDER THE PANEL PAINTS.
+
+	   `SLIDERS` in js/app.js is the list paintConfig walks: a range input that
+	   is not on it is a control that never shows its value, never shows its
+	   hint, never gets a modified marker and never gets its ↺. A name on the
+	   list with no input on the page is the reverse — a dead entry. Both
+	   happened while this pass was being written, in both directions, and
+	   neither is visible from either file alone.
+
+	   Read off the two files rather than asserted, because the list is the
+	   thing that goes stale. */
+	{
+		const app = fs.readFileSync(path.join(ROOT, "js", "app.js"), "utf8");
+		const m3 = /const SLIDERS = \[([\s\S]*?)\];/.exec(app);
+		const declared = m3
+			? (m3[1].match(/"[A-Za-z]+"/g) || []).map((x) => x.slice(1, -1)) : [];
+		const onPage = (HTML.match(/type="range" id="[A-Za-z]+"/g) || [])
+			.map((x) => x.replace(/.*id="/, "").replace(/"$/, ""));
+		const missing = onPage.filter((k) => declared.indexOf(k) === -1);
+		const dead = declared.filter((k) => onPage.indexOf(k) === -1);
+		ok("every range input on the page is painted by the settings panel",
+			missing.length === 0, missing.join(", "));
+		ok("every slider the panel paints exists on the page",
+			dead.length === 0, dead.join(", "));
+		/* And every one of them is a real setting, or paintConfig writes
+		   `undefined` into a control and the user sees a blank slider. */
+		const unknown = declared.filter((k) => !(k in CFG.DEFAULTS));
+		ok("every slider names a setting that exists",
+			unknown.length === 0, unknown.join(", "));
+	}
+
 	/* THE PANEL CAN REACH THE ENGINE'S OWN BAND.
 
 	   Read every slider's min and max off the page and compare them against

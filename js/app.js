@@ -220,6 +220,11 @@
 
 	   If it still does not fit, the second attempt drops the universe payload
 	   entirely rather than losing everything else with it. */
+	/* The registry is one row per person across every loaded file, which for a
+	   forty-season universe is a few thousand small objects. Bounded like the
+	   alumni index and for the same reason: this is a localStorage payload, and
+	   the rows that matter are the careers rather than the one-season men. */
+	const PERSIST_REGISTRY = 300;
 	const PERSIST_ALUMNI = 400;
 	const PERSIST_ROWS = 200;
 	const PERSIST_THREADS = 120;
@@ -231,9 +236,27 @@
 			alumni: (state.universe.alumni || []).slice(-PERSIST_ALUMNI),
 			baseSeed: state.universe.baseSeed,
 			records: state.universe.records || null,
+			/* The careers, longest first, and only the multi-season ones: a
+			   person who appears once is a draft prospect and his page already
+			   says so. See PERSIST_REGISTRY. */
+			registry: registryForStorage(),
 			coachTree: state.universe.coachTree || null,
 			broken: state.universe.broken || null,
 		};
+	}
+
+	function registryForStorage() {
+		const reg = state.universe.registry;
+		if (!reg) return null;
+		const keep = Object.keys(reg)
+			.map((id) => reg[id])
+			.filter((x) => x && x.span >= 2)
+			.sort((a, b) => b.span - a.span)
+			.slice(0, PERSIST_REGISTRY);
+		if (!keep.length) return null;
+		const out = {};
+		for (const x of keep) out[x.id] = x;
+		return out;
 	}
 
 	function persist() {
@@ -644,6 +667,10 @@
 		"awardStrictness", "confAwardStrictness", "proAwardStrictness",
 		"variation", "poolMemory", "teamMomentum", "awardNoise",
 		"seasonEvents", "draftEvents",
+		/* The meta-dial, the anomaly shortlist and the flavor blend. See
+		   applyWeirdness and assignSurprises in js/engine.js, and blendFlavor
+		   in js/ratings.js. */
+		"weirdness", "anomalyChoices", "flavorBlend", "extrapolateYears",
 	];
 
 	// The build table is the authority on how many builds there are; every
@@ -734,6 +761,25 @@
 				archetypeTableSize() + " builds — " +
 				"lower is more distinctive, higher is one of everything"
 			: "off: every build is eligible in every class"),
+		weirdness: (v) => (v === 0
+			? "the ordinary world — every setting below is where you left it"
+			: v < 0
+			? "a quieter world: fewer anomalies, a flatter flavor, chalk in March"
+			: "a stranger world: more anomalies, a louder flavor, more March, " +
+				"a map that moves"),
+		anomalyChoices: (v) => (v
+			? "draws " + v + " more anomalies than the class keeps, and lets you " +
+				"pick which ones it gets"
+			: "off: the class takes the anomalies it drew"),
+		extrapolateYears: (v) => (v <= 0
+			? "the world ends with the last class file"
+			: v + " more season" + (v === 1 ? "" : "s") + " drawn from the " +
+				"carry-over alone — flagged as extrapolated, and never fed back " +
+				"into the chain (universe mode only)"),
+		flavorBlend: (v) => (v <= 0
+			? "one flavor a class, as it always was"
+			: Math.round(v * 100) + "% of classes draw a second flavor and stack " +
+				"it — the second leans less than the first"),
 		surpriseBudget: (v) => (v
 			? "drawn from " +
 				(global.Engine && global.Engine.SURPRISES
@@ -1210,7 +1256,9 @@
 		if (!sel) return;
 		const eras = global.Calibration.ERAS;
 		if (!sel.options.length) {
-			for (const name of Object.keys(eras)) {
+			// An era the model is not calibrated to is not a choice: see
+			// `unfitted` in js/calibration.js.
+			for (const name of global.Calibration.fittedEras()) {
 				sel.appendChild(new Option(eras[name].label, name));
 			}
 		}
@@ -3502,10 +3550,12 @@
 		cfg.recentPools = (saved.recentPools || []).map((a) => a.slice());
 		cfg.recentAnomalies = (saved.recentAnomalies || []).map((a) => a.slice());
 		cfg.universeRoster = saved.universeRoster || null;
+		cfg.pastRoster = saved.pastRoster || null;
 		cfg.universeRecruiting = saved.universeRecruiting || null;
 		cfg.universeAlumni = saved.universeAlumni || null;
 		cfg.universeTitles = saved.universeTitles || null;
-		cfg.biography = state.universeBiography || null;
+		cfg.biography = global.Universe.biographyForFile(state.universeBiography,
+			state.files[i] && state.files[i].fingerprint);
 		return cfg;
 	}
 
@@ -3563,6 +3613,42 @@
 				const resK = ensureResult(dk.index);
 				if (!resK || !resK.futurePlayers) continue;
 				for (const fp of resK.futurePlayers) {
+					/* THE SEASONS AFTER HIS DRAFT YEAR.
+
+					   A returner is a man from an EARLIER class playing a
+					   LATER season — the opposite direction from the
+					   underclassman rows below, and the opposite thing to say
+					   about him: not "this is the freshman year his own file
+					   guessed at" but "he went undrafted and came back, and
+					   here is what he did". It belongs on his career table and
+					   NOT in his priorSeasons, because exportFile writes those
+					   as BBGM stats rows dated before the draft, and a season
+					   after it is not that. */
+					if (fp.past && fp.stats && fp.fileIndex === dj.index) {
+						const owner = resJ.players.filter((x) => x.key === fp.homeKey)[0];
+						if (owner) {
+							if (!Array.isArray(owner.laterSeasons)) owner.laterSeasons = [];
+							if (!owner.laterSeasons.some((r) => r.season === resK.season)) {
+								const teamL = resK.teams[fp.newCollege];
+								owner.laterSeasons.push({
+									season: resK.season, team: fp.newCollege,
+									classYear: fp.classYear, ovr: fp.newOvr,
+									gp: Math.round(fp.stats.gp), mpg: fp.stats.mpg,
+									ppg: fp.stats.ppg, rpg: fp.stats.rpg, apg: fp.stats.apg,
+									ts: fp.stats.ts,
+									record: teamL ? { w: teamL.w, l: teamL.l } : null,
+									awards: (fp.awards || []).slice(),
+									universeFileIndex: dk.index, universeKey: fp.key,
+									after: true,
+								});
+								owner.laterSeasons.sort((a, b) => a.season - b.season);
+							}
+							fp.laterKey = owner.key;
+							fp.laterFileIndex = dj.index;
+							touched.add(owner);
+						}
+						continue;
+					}
 					if (fp.fileIndex !== dj.index || !fp.stats) continue;
 					const p = resJ.players.filter((x) => x.key === fp.homeKey)[0];
 					if (!p) continue;
@@ -4862,8 +4948,13 @@
 			? CFG.make(state.universe.settings)
 			: CFG.make(state.cfg);
 		/* An imported universe's own biographies, so the replay produces the
-		   same men and not merely the same seeds. See importUniverse. */
-		frozen.biography = state.universeBiography || null;
+		   same men and not merely the same seeds. See importUniverse.
+
+		   Held universe-wide and projected per file at the point of use (see
+		   the step below), because the engine's `cfg.biography` is keyed on a
+		   file's own pids and the map is keyed on an identity that survives a
+		   file boundary. */
+		frozen.biography = null;
 		universeCancel = false;
 		state.universe = extend
 			? Object.assign(state.universe, {
@@ -4955,6 +5046,34 @@
 			}
 			return out;
 		};
+		/* THE OTHER DIRECTION.
+
+		   rosterFor reads the PREVIEWS, because a later class's men have to be
+		   on an earlier roster before that season is played and a preview is
+		   the only thing that exists yet. The reverse link needs no preview at
+		   all: an earlier season has already been SIMULATED by the time a
+		   later one runs, so the men it did not get drafted — with their board
+		   ranks, their class years and their programs — are simply there to be
+		   read. See Engine.pastRosterFor.
+
+		   Accumulated as the chain goes rather than gathered up front, for
+		   exactly that reason: season k's returners are a fact about season
+		   k's result, which does not exist until season k has run. */
+		const returners = [];
+		const pastRosterFor = (k) => {
+			const season = runnable[k].season;
+			if (!Number.isFinite(season)) return [];
+			let out = [];
+			for (const src of returners) {
+				if (!(season > src.season)) continue;
+				/* Once per earlier season, not once per candidate: the whole
+				   population is one call, and a returner's overall is computed
+				   against the season that is asking rather than against
+				   whichever one asked first. */
+				out = out.concat(global.Engine.pastRosterFor(src.res, season, src.index));
+			}
+			return out;
+		};
 		/* Three ways in, and all three read the state back rather than
 		   reconstructing it: a cold chain starts from nothing, an extension
 		   from the tail the last run saved, and a resume from what
@@ -4974,6 +5093,10 @@
 			: resume ? resume.lastSeason : null;
 		const finish = () => {
 			state.universe.running = false;
+			/* The years past the last file, if the user asked for any. Done
+			   before the threads and the records book are derived, because
+			   both read the rows. */
+			const guessedYears = extrapolateForward(state.cfg.extrapolateYears || 0);
 			/* WITH the alumni index: threads about people, not only about
 			   programmes. See moreThreads in js/universe.js — the parameter
 			   was in the signature and no caller passed it. */
@@ -4995,6 +5118,14 @@
 			};
 			state.universe.records = U.records(
 				state.universe.rows, state.universe.alumni);
+			/* THE REGISTRY: the world indexed by person rather than by season.
+			   Built once a chain finishes, from results it already has, and
+			   kept small enough to persist — one row per person with the
+			   seasons he appears in, not a career's worth of box scores. */
+			try {
+				state.universe.registry = U.registryOf(
+					liveResults(), state.files, state.universe.rows);
+			} catch (e) { state.universe.registry = null; }
 			/* PASS THREE: the seasons a player actually played, on his
 			   own page. See linkCareers. */
 			linking = true;
@@ -5008,6 +5139,11 @@
 			if (diverged) showError(new Error(diverged));
 			/* Only worth saying when the staging saved something: on a cold
 			   chain every season is re-simulated and the sentence is noise. */
+			const forwardNote = guessedYears
+				? " " + guessedYears + " further season" +
+					(guessedYears === 1 ? " was" : "s were") +
+					" extrapolated past the last file, and are flagged as such."
+				: "";
 			const saved = touched > resimulated
 				? " Re-simulated " + resimulated + " of " + touched +
 					" season" + (touched === 1 ? "" : "s") +
@@ -5017,7 +5153,7 @@
 					(runnable.length === 1 ? "" : "s") + ": "
 				: "Universe complete: ") +
 				state.universe.rows.length + " seasons, " +
-				state.universe.threads.length + " threads." + saved +
+				state.universe.threads.length + " threads." + forwardNote + saved +
 				(state.universe.broken
 					? " Season " + state.universe.broken + " failed; the world was aged " +
 						"across it rather than frozen."
@@ -5029,6 +5165,33 @@
 			paintEffective();
 			render();
 			if (typeof after === "function") after();
+		};
+		/* RUNNING FORWARD PAST THE LAST FILE.
+
+		   `extrapolateGap` already invents a whole season from the carry-over
+		   alone — a champion off program level, an AP No. 1, a player of the
+		   year and a five-man All-America team off the named returners — and
+		   flags every row so nothing can mistake it for a simulated one. It
+		   was reachable in exactly one way: leave a hole in your file list.
+
+		   That is a season for almost nothing, and the reason to want it is
+		   the reason the carry-over exists at all. Program levels drift,
+		   realignment accumulates, coaches age out and banners pile up, and
+		   none of it is visible over the three or four files anybody actually
+		   has. Ten years past the end of the chain is where a dynasty becomes
+		   a dynasty. The rows are flagged, they feed the records book and the
+		   news desk exactly as a gap's rows do, and they are NOT fed back into
+		   anything that would let them masquerade as played: the chain's tail
+		   is untouched, so loading a real class file later extends the world
+		   from the last season that was actually simulated. */
+		const extrapolateForward = (years) => {
+			const n = Math.max(0, Math.round(years));
+			if (!n || !carry || !Number.isFinite(lastSeason)) return 0;
+			const guessed = U.extrapolateGap(carry, lastSeason, lastSeason + n + 1, baseSeed);
+			for (const row of guessed) state.universe.rows.push(row);
+			state.universe.alumni = state.universe.alumni
+				.concat(U.extrapolatedAlumni(guessed));
+			return guessed.length;
 		};
 		let resimulated = 0;
 		let touched = 0;
@@ -5075,6 +5238,12 @@
 				cfg.recentAnomalies = recentAnomalies.map((a) => a.slice());
 				cfg.carryOver = carry;
 				cfg.universeRoster = rosterFor(k);
+				cfg.pastRoster = pastRosterFor(k);
+				/* The slice of the imported biography that belongs to THIS
+				   file. A version 1 or 2 export's map is unscoped and is
+				   passed through unchanged; see Universe.biographyForFile. */
+				cfg.biography = U.biographyForFile(state.universeBiography,
+					state.files[d.index] && state.files[d.index].fingerprint);
 				cfg.universeRecruiting = universeRecruiting
 					? { byKey: universeRecruiting.byFile[k] || {} } : null;
 				/* What the world remembers, for the news desk. The alumni
@@ -5112,10 +5281,26 @@
 					recentPools: (cfg.recentPools || []).map((a) => a.slice()),
 					recentAnomalies: (cfg.recentAnomalies || []).map((a) => a.slice()),
 					universeRoster: cfg.universeRoster,
+					pastRoster: cfg.pastRoster,
 					universeRecruiting: cfg.universeRecruiting,
 					universeAlumni: cfg.universeAlumni,
 					universeTitles: cfg.universeTitles,
 				};
+				/* THE MEN THIS SEASON DID NOT GET DRAFTED.
+
+				   Held as a builder per season rather than as finished rows:
+				   a returner's overall in 2028 has to be computed against 2028
+				   and not against whichever later season happened to ask
+				   first. Engine.pastRosterFor owns every rule about who counts
+				   — undrafted, eligibility left, at a program rather than a
+				   club — so this closes over the finished result and asks it,
+				   which keeps one definition of "came back" rather than two. */
+				/* Kept only while it can still contribute anybody: a season
+				   whose undrafted men have all run out of eligibility is dead
+				   weight on every later season's pass. */
+				if (global.Engine.pastRosterFor(res, d.season + 1, d.index).length) {
+					returners.push({ season: d.season, index: d.index, res });
+				}
 				coachTree = U.coachTreeStep(coachTree, prevCarry, res, d.season, baseSeed);
 				/* A FILE THAT CARRIES PART OF A CLASS.
 
@@ -5235,7 +5420,16 @@
 		   would otherwise be exported as the world's own settings. */
 		const payload = U.exportUniverse(Object.assign({}, state.universe, {
 			settings: state.universe.settings || CFG.make(state.cfg),
-			biography: U.biographyOf(liveResults()),
+			/* Keyed by a cross-file identity now (see Universe.playerId): a
+			   class file's pid is unique inside its own export and means a
+			   different man in every other one, so a universe-wide map keyed
+			   on it handed one class's biography to another class's player
+			   with the same number. The files travel with the results so each
+			   entry can be scoped to the file it came out of. */
+			biography: U.biographyOf(liveResults(), state.files),
+			/* THE REGISTRY: one row per person rather than per season, which
+			   is what makes a career across files expressible at all. */
+			registry: U.registryOf(liveResults(), state.files, state.universe.rows),
 		}), { embedFiles: !!embedFiles, files: state.files });
 		/* SIZE.
 
@@ -5608,6 +5802,13 @@
 		   class rather than only replayed. The replay's own tail is kept when
 		   nothing diverged, because it matches the loaded files exactly. */
 		if (imported.tail) state.universe.tail = imported.tail;
+		/* The careers the exported world knew about. Rebuilt from the replay
+		   when the chain re-runs, so this is what the tab shows in the window
+		   before that finishes — and what an import of a world whose class
+		   files are not to hand can still say. */
+		if (imported.registry && typeof imported.registry === "object") {
+			state.universe.registry = imported.registry;
+		}
 		return true;
 	}
 

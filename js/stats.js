@@ -2320,7 +2320,23 @@
 			   comment already wrote. The floor is left alone: a team of guards
 			   blocking 1.8 a game is a real team. */
 			blkPool: 4.0 * scale(agg("blocking", 0.70), POOL_BASE.blocking, 2.30, 0.45, 1.75),
-			pfPool: TUNING.TEAM_PF * scale(agg("fouling", 0.20), POOL_BASE.fouling, 0.60, 0.80, 1.25),
+			/* THE ERA'S OWN FOULS, not one number for every era.
+
+			   TEAM_PF was a literal 16.6 — the modern game — and the era table
+			   has carried a `pf` per era all along, the way it carries FGA,
+			   FTA and turnovers that chanceShape() already reads. It went
+			   unnoticed while the only two eras were 16.8 and 16.6, which
+			   differ by less than the model's own noise. They do not all: a
+			   game played at seventy-four possessions with a hand-check rule
+			   commits twenty fouls, not sixteen, and a model that cannot say
+			   so produces that era's free-throw volume with the modern game's
+			   whistle behind it — which shows up as free throws per foul, a
+			   ratio this file bands precisely because the two are the same
+			   event seen from two sides.
+
+			   The literal stays as the fallback for a caller with no era set. */
+			pfPool: (CAL.TEAM && Number.isFinite(CAL.TEAM.pf) ? CAL.TEAM.pf : TUNING.TEAM_PF) *
+				scale(agg("fouling", 0.20), POOL_BASE.fouling, 0.60, 0.80, 1.25),
 		};
 	}
 

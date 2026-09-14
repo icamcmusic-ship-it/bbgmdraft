@@ -1572,7 +1572,11 @@ function main() {
 	   anchors move together, so an era whose bands nobody runs is an era that
 	   quietly rots. */
 	const eraArg = (args.filter((a) => a.startsWith("--era="))[0] || "").slice(6);
-	const eras = eraArg ? [eraArg] : Object.keys(global.Calibration.ERAS);
+	/* An era marked `unfitted` is in the table and not in the sweep — see the
+	   1990s block in js/calibration.js, which records what was measured and
+	   exactly which rows still block it. Naming one explicitly still runs it,
+	   which is how the next person fits it. */
+	const eras = eraArg ? [eraArg] : global.Calibration.fittedEras();
 	/* Which class shapes to check. The realistic one is the default and the
 	   only one prospect-facing rows are meaningful on; the synthetic one is
 	   run as a second fixture for the whole-field and structural rows, where a

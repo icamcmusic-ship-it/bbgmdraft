@@ -2867,6 +2867,128 @@ predicate throws is a search that silently skips candidates.
 - **Surprise me.** The loop a new user wants — wide settings, reroll, look at
   the anomalies — was four actions spread across the panel and the header.
 
+## The persistent registry, the reverse link, and a third era that did not ship
+
+The three projects the audit put last, and the one of them that stopped.
+
+### The reverse roster link
+
+A class file is the men drafted in one year. The ones at the back of its board
+were not drafted at all — a draft is sixty picks and a class file is seventy-odd
+men — and they went back to college. The next season did not know that: it was
+played from its own file, so the world forgot a fifth of every class the moment
+its season ended. Three audits have recorded this as the largest hole in
+universe mode.
+
+`Engine.pastRosterFor` is the other direction of a mechanism that already
+existed. The forward link puts a later class's underclassmen on the rosters of
+the seasons they were actually on, computed off a PREVIEW because those seasons
+have not been played yet. The reverse link needs no preview at all: by the time
+2026 runs, 2025 has been simulated, and every fact it needs — a board rank, a
+class year, a programme — is on the finished result. Three gates decide who
+comes back, and each is the difference between a returner and a fiction: he
+went undrafted, he has eligibility left, and he was at a programme rather than
+at a club abroad.
+
+One bug fell out of building it. `ovrYearsAgo` computes how good a prospect was
+N years before his draft year, and a returner is the same arithmetic with N
+negative — which was `Math.pow` of a negative base and a fractional exponent,
+so it returned NaN, silently, through a clamp that cannot rescue it. It is
+symmetric now, and bounded forward by his own potential, because a man does not
+walk past his ceiling because a year went by.
+
+### The registry
+
+Everything a universe knew was keyed on a programme, because a programme has a
+name that is the same in every file and a player did not: a class file's key is
+its pid, which BBGM numbers from zero inside each export, so pid 7 exists in
+every file and means a different man in each.
+
+Every cross-file structure was keyed on it anyway — and `biographyOf` walked
+the files in order and took the first occurrence of each key, which in a chain
+of real BBGM exports hands the 2025 class's biography to the 2026 class's man
+with the same number, inside the map whose entire purpose is to make a replay
+reproduce the same men. `Universe.playerId` is fingerprint plus pid, which is
+the same pair `seedFor` already uses to key a season; `biographyForFile`
+projects the universe-wide map back down to the per-file map the engine reads,
+so the engine stays file-local and knows nothing about any of it. A version 1
+or 2 export's unscoped map still loads.
+
+On top of that, `Universe.registryOf` is the world indexed by person: one row
+each, with the seasons he appears in and what he was in each — his own draft
+class, a later class's underclassman on an earlier roster, or a man who went
+undrafted and came back. The Universe tab has a Careers section, a returner's
+seasons appear on his own player page after his draft year (and not in his
+export, which writes prior seasons as BBGM rows dated before the draft), and
+the registry travels with the exported world so an import whose class files are
+not to hand can still say who its people were.
+
+The one thread that is still deliberately absent is "he came back" — see the
+alumni threads above. It is now expressible, and it needs the registry to be
+the thing that says so rather than a name match, which is the next commit.
+
+### Years past the last file
+
+`extrapolateGap` has always invented a whole season out of the carry-over
+alone — a champion off programme level, an AP No. 1, a player of the year off
+the named returners — and flagged every row. It was reachable in exactly one
+way: leave a hole in your file list. `extrapolateYears` runs the same machinery
+forward past the newest class, which is where the carry-over finally gets
+interesting: levels have drifted, realignment has accumulated, banners have
+piled up, and three files is not long enough for any of it to become a history.
+The rows are flagged, they feed the records book and the news desk, and they
+are never fed back into the chain's tail — so loading a real class file later
+still extends the world from the last season that was actually played.
+
+### Composable flavours
+
+The season draws two or three storylines and stacks them; a class drew exactly
+one flavour, for no reason beyond the order the two were written in. Sixty-six
+flavours drawn one at a time is sixty-six kinds of year; drawn two at a time it
+is thousands. `flavorBlend` is the chance of a second, the multipliers and
+trait tilts stack the way log-space weights stack, and where both bend the same
+setting the second wins outright rather than being averaged — the same rule
+`applyNarrative` gives, because averaging two contradictions gives an ordinary
+class.
+
+At 0, which is the default, it is a complete no-op down to the RNG stream: the
+second draw is on its own child, which by construction costs the parent nothing
+whether it happens or not, so turning the dial up adds to a class rather than
+reshuffling it. A flavour asked for by name is never blended.
+
+### The third era, which is in the table and not in the picker
+
+`unfitted: true` keeps the 1990s era out of the era picker and out of the
+calibration sweep. The work is in the file: the team block, the six shifts
+swept against it at the seed counts CI runs, and the exact list of what still
+blocks it.
+
+What is honest about it: the scoring, pace, free-throw rate, foul rate,
+turnover rate and three-point rate are the shape of that game as it is publicly
+documented, and `fieldEff` was swept from -0.040 (field ORtg 95.7, far under)
+through -0.019 (99.0) to -0.006 (101.2). What is not: there is no 1990s
+player-season dataset in this repository, so the draft-year block is derived
+from the team block by the same construction `DRAFT_YEAR_MODERN` uses, and the
+assist and rebound anchors are the weakest numbers in it. At twenty seeds seven
+rows remain outside their bands, four of them within 2% of a floor that would
+close by moving those two anchors — which would make the era a label rather
+than a calibration, because the anchor would then be the model's own output.
+
+This repository's own rule is that a third era's anchors are fitted by sweeping
+rather than invented, and that shipping an unfitted one makes the dial less
+trustworthy rather than more. So the mechanism ships and the era does not, and
+the next person starts from a swept table instead of from nothing.
+
+One real fix came out of the attempt. `TEAM_PF` was a literal 16.6 — the modern
+game — while the era table has carried a `pf` per era all along, the way it
+carries the FGA, FTA and turnovers `chanceShape()` already reads. It went
+unnoticed because the only two eras were 16.8 and 16.6, which differ by less
+than the model's own noise. They do not all: a game with a hand-check rule
+commits twenty fouls, not sixteen, and a model that cannot say so produces that
+era's free-throw volume with the modern game's whistle behind it — which shows
+up as free throws per foul, a ratio this harness bands precisely because the
+two are the same event seen from two sides. The pool reads the era now.
+
 ## Known limits
 
 * A draft class is one season, but the seasons before it are **simulated** for

@@ -1673,6 +1673,19 @@
 		};
 		if (u.broken) out.broken = u.broken;
 		if (u.biography && Object.keys(u.biography).length) out.biography = u.biography;
+		/* THE CAREERS. Derived from the results, like the threads and the
+		   records book, and travelling with the timeline for the same reason:
+		   an imported world whose class files are not to hand can still say
+		   who its people were. Only the multi-season rows — a man who appears
+		   once is a draft prospect and the timeline already has him. */
+		if (u.registry) {
+			const careers = {};
+			for (const id of Object.keys(u.registry)) {
+				const x = u.registry[id];
+				if (x && x.span >= 2) careers[id] = x;
+			}
+			if (Object.keys(careers).length) out.registry = careers;
+		}
 		if (opts.embedFiles && Array.isArray(opts.files)) {
 			out.files = opts.files.map((f) => ({
 				name: f.name, fingerprint: f.fingerprint || null, data: f.data,
@@ -1689,13 +1702,54 @@
 	   been a sophomore in 2026, and re-drawing it each season would make him a
 	   different person every time somebody moved a slider. Exported so that a
 	   shared universe replays the same men, not merely the same seeds. */
-	function biographyOf(results) {
+	/* AN IDENTITY THAT SURVIVES A FILE BOUNDARY.
+
+	   A class file's player key is its pid, which BBGM numbers from zero
+	   inside each export — so pid 7 exists in every file in a universe and
+	   means a different man in each. Every cross-file structure here was keyed
+	   on it anyway, and `biographyOf` in particular walked the files in order
+	   and took the FIRST occurrence of each key: in a chain of real BBGM
+	   exports that hands the 2025 class's biography to the 2026 class's man
+	   with the same pid, silently, in a map whose entire purpose is to make a
+	   replay reproduce the same men.
+
+	   The file's fingerprint is its content, so fingerprint + pid is unique
+	   across a universe and stable across a replay — which is the same pair
+	   `seedFor` already uses to key a season. `biographyForFile` projects the
+	   universe-wide map back down to the per-file map the engine reads, so the
+	   engine stays file-local and knows nothing about any of this. */
+	function playerId(fingerprint, key) {
+		return String(fingerprint || "?").slice(0, 12) + "/" + String(key);
+	}
+
+	/* The per-file view the engine's `cfg.biography` wants. A version 1 or 2
+	   export's map is keyed on the bare pid, and is handed back unchanged: it
+	   is wrong in exactly the way described above, and rejecting it would
+	   break every universe file already in the wild for a fault that only
+	   shows up on colliding pids. Its own `__scoped` marker says which it is. */
+	function biographyForFile(map, fingerprint) {
+		if (!map || typeof map !== "object") return null;
+		if (!map.__scoped) return map;
+		const prefix = playerId(fingerprint, "");
 		const out = {};
-		for (const res of results || []) {
-			if (!res || !res.players) continue;
+		for (const id of Object.keys(map)) {
+			if (id === "__scoped" || id.indexOf(prefix) !== 0) continue;
+			out[id.slice(prefix.length)] = map[id];
+		}
+		return out;
+	}
+
+	function biographyOf(results, files) {
+		const out = { __scoped: true };
+		(results || []).forEach((res, i) => {
+			if (!res || !res.players) return;
+			const fp = (files && files[i] && files[i].fingerprint) ||
+				(res.leagueFile && res.leagueFile.startingSeason) || i;
 			for (const p of res.players) {
-				if (!p.key || out[p.key]) continue;
-				out[p.key] = {
+				if (!p.key) continue;
+				const id = playerId(fp, p.key);
+				if (out[id]) continue;
+				out[id] = {
 					classYear: p.classYear,
 					redshirt: p.redshirt || null,
 					reclassified: p.reclassified || null,
@@ -1706,6 +1760,93 @@
 					college: p.newCollege,
 				};
 			}
+		});
+		return out;
+	}
+
+	/* THE PERSISTENT PLAYER REGISTRY.
+
+	   Three audits have recorded this as the enabling change for half of the
+	   universe list, and it is one thing: an index of PEOPLE rather than of
+	   seasons. Everything a universe knew was keyed on a program — this school
+	   won N titles, that conference owned a decade — because a program has a
+	   name that is the same in every file and a player did not.
+
+	   Now he does (see playerId), and there is a second source of him: the
+	   reverse roster link puts an undrafted man on the rosters of the seasons
+	   after his own class file, and the forward link already put a later
+	   class's underclassmen on the seasons before theirs. So one man can
+	   appear in a universe as his own draft class, as somebody else's season's
+	   freshman, and as a returner — and the registry is what says those are
+	   one person.
+
+	   Deliberately compact. It is persisted, it rides in an export, and a
+	   forty-season universe carrying a full career per player is not a
+	   localStorage payload: one row per person, with the seasons he appears in
+	   and what he was in each. The heavy data stays on the results. */
+	function registryOf(results, files, rows) {
+		const out = {};
+		const seasonOf = (i) => {
+			const r = results && results[i];
+			if (r && Number.isFinite(r.season)) return r.season;
+			const row = rows && rows[i];
+			return row && Number.isFinite(row.season) ? row.season : null;
+		};
+		const fpOf = (i) => (files && files[i] && files[i].fingerprint) || String(i);
+		const touch = (id, name) => {
+			if (!out[id]) {
+				out[id] = { id, name, seasons: [], draft: null, honors: [], returned: [] };
+			}
+			return out[id];
+		};
+		(results || []).forEach((res, i) => {
+			if (!res) return;
+			const season = seasonOf(i);
+			/* His own class: the season he was drafted out of, where his board
+			   rank and his honours are. */
+			for (const p of res.players || []) {
+				if (!p.key) continue;
+				const e = touch(playerId(fpOf(i), p.key), p.name);
+				e.fileIndex = i;
+				e.draft = {
+					season, boardRank: p.boardRank || null,
+					slot: p.draftSlot || null, school: p.newCollege,
+					club: p.proClub || null, classYear: p.classYear,
+					ovr: p.newOvr, pot: p.newPot,
+				};
+				if (Number.isFinite(season)) e.seasons.push({ season, as: "draft class" });
+				for (const a of p.awards || []) e.honors.push({ season, award: a });
+			}
+			/* And every season he played that is not his own file's. The
+			   forward link and the reverse link both land here — they are the
+			   same fact about a person from two directions. */
+			for (const fp of res.futurePlayers || []) {
+				if (!fp.homeKey && !fp.key) continue;
+				const home = fp.past ? i : fp.fileIndex;
+				const key = fp.past ? fp.homeKey || fp.key : fp.homeKey;
+				if (!Number.isFinite(home) || !key) continue;
+				const e = touch(playerId(fpOf(home), key), fp.name);
+				if (Number.isFinite(season)) {
+					e.seasons.push({
+						season, as: fp.past ? "returned undrafted" : "underclassman",
+						school: fp.newCollege, classYear: fp.classYear,
+						ppg: fp.stats ? fp.stats.ppg : null,
+					});
+					if (fp.past) e.returned.push(season);
+				}
+				for (const a of fp.awards || []) e.honors.push({ season, award: a });
+			}
+		});
+		for (const id of Object.keys(out)) {
+			const e = out[id];
+			e.seasons.sort((a, b) => a.season - b.season);
+			e.honors.sort((a, b) => a.season - b.season);
+			e.returned.sort((a, b) => a - b);
+			/* The span is what makes a row worth looking at: a man who appears
+			   in one season is a draft prospect, and a man who appears in four
+			   is a career. */
+			e.span = e.seasons.length
+				? e.seasons[e.seasons.length - 1].season - e.seasons[0].season + 1 : 0;
 		}
 		return out;
 	}
@@ -1778,6 +1919,7 @@
 
 	global.Universe = {
 		VERSION, ENGINE_REV, validate, harvest, returnersOf, alumniOf, summarize,
+		playerId, biographyForFile, registryOf,
 		threads, moreThreads, records, exportUniverse, biographyOf, seedFor, resultFingerprint,
 		extrapolateGap, extrapolateSeason, topUpPartialSeason, extrapolatedAlumni,
 		PARTIAL_CLASS_SHARE,

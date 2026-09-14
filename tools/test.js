@@ -1258,6 +1258,14 @@ console.log("\nStaged pipeline coverage");
 	const EXEMPT = {
 		seed: "declared by build",
 		era: "declared by stats",
+		/* Chain-level settings, read by runUniverse in js/app.js rather than
+		   by the engine: they decide how many seasons are extrapolated past
+		   the last class file and whether the unplayed years inside a chain
+		   are filled in. The engine simulates one season and has no opinion
+		   about either, so declaring them on a phase would be declaring a
+		   dependency that does not exist. */
+		extrapolateYears: "read by the universe chain, not by a phase",
+		extrapolateGaps: "read by the universe chain, not by a phase",
 	};
 	const missing = Object.keys(global.Config.DEFAULTS)
 		.filter((k) => !declared.has(k) && !EXEMPT[k]);

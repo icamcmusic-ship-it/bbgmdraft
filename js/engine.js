@@ -2887,10 +2887,25 @@
 		   never reach the draft board or the export of THIS class; their own
 		   file shows the season on their career page (see app.js). */
 		const future = [];
-		for (const f of Array.isArray(cfg.universeRoster) ? cfg.universeRoster : []) {
+		/* Two directions now. `universeRoster` is the later classes'
+		   underclassmen playing the seasons they were on; `pastRoster` is the
+		   men an earlier class did not get drafted, who went back to college.
+		   They are the same kind of thing to this phase — a real player on a
+		   roster who is not in THIS file's draft class — so they go through
+		   one loop and are told apart by the `past` flag they carry. */
+		const roster = (Array.isArray(cfg.universeRoster) ? cfg.universeRoster : [])
+			.concat(Array.isArray(cfg.pastRoster) ? cfg.pastRoster : []);
+		for (const f of roster) {
 			if (!f || !f.team || !f.ratings || !C.COLLEGES[f.team]) continue;
 			const fp = {
-				key: "future:" + f.classSeason + ":" + f.key,
+				/* The key has to say which DIRECTION he came from as well as
+				   which file: a man can be both a later class's freshman and
+				   an earlier class's returner across one long chain, and two
+				   entries with one key would collide in every map that holds
+				   them. */
+				key: (f.past ? "past:" : "future:") + f.classSeason + ":" + f.key,
+				past: !!f.past,
+				undraftedFrom: f.undraftedFrom || null,
 				homeKey: f.key, fileIndex: f.fileIndex, classSeason: f.classSeason,
 				future: true,
 				name: f.name, classYear: f.classYear, draftClassYear: f.draftClassYear,
@@ -3313,7 +3328,23 @@
 		   (and keeps the cosmetic "Potential bias" dial out of the sim). */
 		const room = Math.max(2, (p.talentPot || p.newOvr) - p.newOvr);
 		const step = 2.6 + 0.32 * room;
-		return clamp(Math.round(p.newOvr - step * Math.pow(i, 0.85)), 8, 90);
+		/* NEGATIVE `i` IS A SEASON AFTER THE DRAFT YEAR, not before it — which
+		   is what the reverse roster link needs (see pastRosterFor: a man who
+		   went undrafted and came back is his draft-year self plus a year).
+
+		   Math.pow of a negative base and a fractional exponent is NaN, so
+		   this used to return NaN for every forward year, silently, through a
+		   clamp that cannot rescue it. The curve is the same shape in both
+		   directions; the sign is carried outside the power.
+
+		   Forward, it is also BOUNDED BY HIS CEILING. Backwards the curve is a
+		   description of where he came from and there is nothing above him to
+		   bump into; forwards it is a claim about development, and a man does
+		   not walk past his own potential because a year went by. */
+		const mag = step * Math.pow(Math.abs(i), 0.85);
+		const raw = i >= 0 ? p.newOvr - mag : p.newOvr + mag;
+		const ceiling = Math.max(p.newOvr, p.talentPot || p.newOvr);
+		return clamp(Math.round(i >= 0 ? raw : Math.min(raw, ceiling)), 8, 90);
 	}
 
 	/* A schedule for a season that was never played.
@@ -4181,7 +4212,7 @@
 				"archetypePool", "surpriseBudget", "traitCount",
 				// See variationSalt / pickClassPool: both reshape the class
 				// from the build phase down.
-				"variation", "flavorHint", "poolMemory", "recentPools",
+				"variation", "flavorHint", "flavorBlend", "poolMemory", "recentPools",
 				"anomalyMemory", "recentAnomalies", "flavorReach", "narrative",
 				/* The anomaly shortlist, and the meta-dial that moves half of
 				   the settings above. Both reshape the class from here down. */
@@ -4250,7 +4281,7 @@
 				   underclassmen who fill this season's rosters. Neither was
 				   declared, so a chain re-run could serve a season built on
 				   the previous run's world. */
-				"carryOver", "universeRoster"],
+				"carryOver", "universeRoster", "pastRoster"],
 			run: phaseRegular,
 		},
 		// weirdness bends upsetFactor, which this phase owns.
@@ -4438,6 +4469,77 @@
 				archetype: p.archetype, talentPot: p.talentPot || re.ovr,
 				hand: p.hand, volatility: p.volatility, orbBias: p.orbBias,
 				traitInjuryMult: p.traitInjuryMult, boardHint: p.origOvr,
+			});
+		}
+		return out;
+	}
+
+	/* WHO FROM AN EARLIER CLASS IS STILL PLAYING.
+
+	   `futureRosterFor` runs one direction: a later class's underclassmen go
+	   onto the rosters of the seasons they were actually on, because a class
+	   file knows its own men and the arithmetic backwards is exact. The
+	   reverse has been the largest hole in universe mode through three audits.
+	   A 2025 class file is the men drafted in 2025 — and the ones at the back
+	   of that board were not drafted at all, because a draft is sixty picks
+	   and a class file is seventy-odd men. Those men went back to college. The
+	   2026 file does not contain them, so 2026 was played without them, and
+	   the world forgot a fifth of every class the moment its season ended.
+
+	   This is that population, read off a season the chain has ALREADY played,
+	   which is what makes it cheap and what makes it exact: his board rank is
+	   known, his class year is known, and how much better he got is the same
+	   `ovrYearsAgo` arithmetic the forward link uses, run the other way.
+
+	   Three gates, and each one is the difference between a returner and a
+	   fiction. He has to have gone undrafted — past the last pick of the mock
+	   — because a drafted man does not come back. He has to have eligibility
+	   left, which his class year says. And he has to have been at a program,
+	   not at a club abroad, because a man on a professional contract is not
+	   returning to college basketball. */
+	const DRAFT_PICKS = 60;
+	function pastRosterFor(res, season, fileIndex) {
+		const out = [];
+		if (!res || !res.players || !Number.isFinite(res.season)) return out;
+		const ahead = season - res.season;
+		if (ahead < 1) return out;
+		for (const p of res.players) {
+			if (p.nonNcaa || !p.buildCleanBase || !RB.resolveTo) continue;
+			// Drafted men do not come back.
+			if (!Number.isFinite(p.boardRank) || p.boardRank <= DRAFT_PICKS) continue;
+			/* Eligibility. A senior or a graduate transfer has none left; a
+			   freshman has three. `priorYears` is the years already used, and
+			   a redshirt is a year on campus that did not spend one. */
+			const used = priorYears(p.classYear);
+			const left = 3 - used;
+			if (ahead > left) continue;
+			const team = p.newCollege;
+			if (!team || !C.COLLEGES[team]) continue;
+			/* He got better, by the same curve his own earlier seasons were
+			   built on — run forward instead of backward, so the man the 2026
+			   season puts on the floor is the man the 2025 file said he was
+			   plus a year of development. */
+			const ovr = ovrYearsAgo(p, -ahead);
+			let re;
+			try {
+				re = RB.resolveTo(p.buildCleanBase, ovr, p.archetype,
+					p.origRatings ? p.origRatings.fuzz : 0, p.buildPinned, p.buildCleanBase);
+			} catch (e) {
+				continue;
+			}
+			out.push({
+				key: p.key, name: p.name, team, fileIndex,
+				classSeason: res.season,
+				classYear: CLASS_YEARS[clamp(used + ahead, 0, 3)],
+				draftClassYear: p.classYear,
+				ovr: re.ovr, ratings: re.ratings, pos: BB.pos(re.ratings),
+				archetype: p.archetype, talentPot: p.talentPot || re.ovr,
+				hand: p.hand, volatility: p.volatility, orbBias: p.orbBias,
+				traitInjuryMult: p.traitInjuryMult,
+				// What he was when his own file drafted him, so a view can say
+				// "went undrafted in 2025 and came back".
+				undraftedFrom: res.season, boardRank: p.boardRank,
+				past: true,
 			});
 		}
 		return out;
@@ -7249,7 +7351,7 @@
 		MAX_CLASS, ANOMALY_MEMORY_DEPTH, NARRATIVES, isLeagueFile,
 		rerollSalt,
 		signatureGame, simulateProLeagues, assignRecruiting,
-		NOTE_LINES, DEFAULT_NOTE_LINES, PHASES, PRO_GAMES, strangeness,
+		NOTE_LINES, DEFAULT_NOTE_LINES, PHASES, PRO_GAMES, strangeness, pastRosterFor,
 		REROLL_PREDICATES, parseRerollClause,
 		previewClass, futureRosterFor, priorYears, ovrYearsAgo, CLASS_YEARS,
 	};

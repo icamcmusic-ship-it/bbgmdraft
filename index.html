@@ -138,6 +138,10 @@
 		<div class="ctl"><label for="specialization">Specialization <b></b></label><input type="range" id="specialization" min="0" max="2.5" step="0.05"></div>
 		<div class="ctl"><label for="archetypeDiversity">Archetype diversity <b></b></label><input type="range" id="archetypeDiversity" min="0" max="100" step="1"></div>
 		<div class="ctl"><label for="classFlavor">Flavor strength <b></b></label><input type="range" id="classFlavor" min="0" max="2" step="0.05"></div>
+		<!-- The season already draws two or three storylines and stacks them;
+		     a class drew exactly one flavor. See blendFlavor in js/ratings.js:
+		     0 is a complete no-op, down to the RNG stream. -->
+		<div class="ctl"><label for="flavorBlend">Two flavors at once <b></b></label><input type="range" id="flavorBlend" min="0" max="1" step="0.05"></div>
 		<div class="ctl"><label for="archetypePool">Builds per class <b></b></label><input type="range" id="archetypePool" min="0" max="361" step="1"></div>
 		<!-- One dial over the five that all answer "how far from the middle
 		     should this world sit". It moves a setting only while that setting
@@ -198,6 +202,10 @@
 		<div class="ctl"><label for="starReturners">Star returners <b></b></label><input type="range" id="starReturners" min="0" max="300" step="10"></div>
 		<div class="ctl"><label for="portalRate">Transfer portal <b></b></label><input type="range" id="portalRate" min="0" max="300" step="10"></div>
 		<div class="ctl"><label for="recruitMomentum">Recruiting momentum <b></b></label><input type="range" id="recruitMomentum" min="0" max="100" step="5"></div>
+		<!-- Years run past the last class file, from the carry-over alone. A
+		     season invented this way is flagged everywhere it appears and is
+		     never fed back into the chain. See extrapolateForward in js/app.js. -->
+		<div class="ctl"><label for="extrapolateYears">Years past the last class <b></b></label><input type="range" id="extrapolateYears" min="0" max="20" step="1"></div>
 	</details>
 
 	<details class="grp" id="grp-season">

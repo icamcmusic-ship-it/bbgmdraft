@@ -126,6 +126,30 @@ module.exports = function (ok, V) {
 			!!E.strangeness({ players: [], board: [], teams: {} }));
 	}
 
+	/* --- eras that are in the table and not in the picker -------------- */
+	{
+		const CAL = global.Calibration;
+		ok("every era in the table has the shift keys the model reads",
+			Object.keys(CAL.ERAS).every((k) => {
+				const s = CAL.ERAS[k].shift;
+				return ["ftr", "tov", "inside", "mid", "three", "fieldEff",
+					"prospectEff", "ppgBoost"].every((x) => Number.isFinite(s[x]));
+			}));
+		ok("an unfitted era is in the table and out of the selectable list",
+			Object.keys(CAL.ERAS).some((k) => CAL.ERAS[k].unfitted) &&
+			CAL.fittedEras().every((k) => !CAL.ERAS[k].unfitted));
+		ok("every selectable era states its own team fouls",
+			CAL.fittedEras().every((k) => Number.isFinite(CAL.ERAS[k].team.pf)));
+		/* The fouls are read from the era now rather than from one literal, so
+		   two eras with different whistles produce different free-throw rates.
+		   This is what the third era found; it is checked on the two that
+		   ship. */
+		ok("the team-foul pool is era-driven, not a single constant",
+			require("fs").readFileSync(
+				require("path").join(__dirname, "..", "..", "js", "stats.js"), "utf8")
+				.indexOf("CAL.TEAM && Number.isFinite(CAL.TEAM.pf)") !== -1);
+	}
+
 	/* --- the reroll-until clause grammar ------------------------------ */
 	{
 		const lf = V.realisticClass(4, 60);
