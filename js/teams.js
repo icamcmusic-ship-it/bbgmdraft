@@ -1879,7 +1879,14 @@
 		   down years, so an absolute threshold moved the meaning of the term
 		   every time either slider did. */
 		const ratingsSorted = names.map((n) => teams[n].rating).sort((a, b) => a - b);
-		const qualityBar = ratingsSorted[Math.floor(ratingsSorted.length * 0.8)] || 55;
+		/* `|| 55` fired on a legitimate 0 — the same falsy-fallback shape that
+		   cost the timeline its unbeaten-season thread (see js/universe.js).
+		   A field whose 80th-percentile rating really is 0 is a modded or
+		   degenerate colleges.js, and substituting 55 there silently
+		   reclassifies every quadrant record in the season rather than
+		   guarding anything. Fall back on PRESENCE. */
+		const barAt = ratingsSorted[Math.floor(ratingsSorted.length * 0.8)];
+		const qualityBar = Number.isFinite(barAt) ? barAt : 55;
 		for (const name of names) {
 			const t = teams[name];
 			t.quadWins = t.log.reduce(

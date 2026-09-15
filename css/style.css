@@ -1264,6 +1264,15 @@ tr.dnp > td.sticky, tr.dnp > td.num { font-style: normal; }
 .effrow:last-child { border-bottom: none; }
 .effkey { color: var(--dim); }
 .effval { font-family: var(--mono); color: var(--text); white-space: nowrap; }
+/* The per-control ghost value: what a setting was actually simulated at
+   after the flavor, the storylines and the class jitter moved it. Quieter
+   than the value the user set, because it is a consequence and not a
+   decision — and italic rather than merely dim so it still separates from
+   the label at prefers-contrast: more, where dim and text converge. */
+.ctl label .effghost {
+	color: var(--accent); font-style: italic; font-weight: normal;
+	font-size: 11px; margin-left: .4em; white-space: nowrap;
+}
 
 /* ---- reroll until ------------------------------------------------------
    One row per condition: a three-state sense control (off / must / must not)

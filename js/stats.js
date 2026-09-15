@@ -3225,9 +3225,30 @@
 
 	   Only the scoring volume moves — attempts and makes by the same factor,
 	   so every shooting percentage, every share and every non-scoring stat is
-	   exactly what the stat model said. Bounded at ±15%: past that the
+	   exactly what the stat model said. Bounded at ±18%: past that the
 	   disagreement is not a reconciliation, and a rotation should not be
-	   rewritten to chase one. */
+	   rewritten to chase one. (The comment said ±15% and the clamp said
+	   0.82/1.18 for as long as both existed. The clamp is the one that ran.)
+
+	   WHAT THIS DOES NOT MOVE, and why that is not a bug.
+
+	   `ppg`, `fga`, `tpa` and `fta` scale together, so true shooting is
+	   exactly invariant — that is the point of one factor. Turnovers do not
+	   scale, because a turnover is not a scoring event and multiplying it by
+	   the scoreboard's correction would be inventing possessions. The
+	   consequence is that a line's `usg`, recomputed from its own printed
+	   attempts, drifts from the printed `usg` by a little: measured over
+	   12,494 rotation lines the mean error is 0.0000 and the worst single
+	   line is 3.8 percentage points.
+
+	   That is left alone deliberately. `usg` is not a derived box-score
+	   figure here — it is the usage the solver ALLOCATED (see usgRate in
+	   statLine), and the efficiency model consumed it before any of these
+	   numbers existed: `loadAdj` bends true shooting by -0.30 * (usg - 0.245)
+	   and again past 0.30. Recomputing it after the anchor would make the
+	   printed usage disagree with the curve that produced the printed
+	   efficiency, which is a worse inconsistency than the one it fixes, and
+	   it would do so to correct a mean error of zero. */
 	function anchorPointsToScoreboard(lines, team) {
 		const log = team && team.log;
 		if (!log || !log.length || !lines.length) return;

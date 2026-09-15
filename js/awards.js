@@ -1412,13 +1412,25 @@
 		   Naismith leans to the record, the AP to the surprise, the Henry
 		   Iba to the tournament run — and each conference names its own. */
 		const coachHonors = [];
+		/* The constant floor under every expectation — see `expected` below.
+		   Exactly the 12.5 the old `0.25 * 50` produced, so this is a rename
+		   and not a re-tune. */
+		const COY_BASELINE = 12.5;
 		const crng = rng.child("coy");
 		const coachRows = Object.keys(teams)
 			.filter((n) => n.indexOf("__") !== 0 && teams[n] && teams[n].coach && teams[n].regGames)
 			.map((n) => {
 				const t = teams[n];
 				const c = t.coach;
-				const expected = 0.45 * (c.rep || 50) + 0.30 * (t.prestige || 50) + 0.25 * 50;
+				/* Weights over what the season was expected to be. The third
+				   term used to be written `0.25 * 50` — 12.5 for every coach
+				   in the country, so it shifted every row by the same amount
+				   and could not affect an ordering. Harmless and misleading:
+				   it is written in the shape of a weighted blend, so the next
+				   person to tune these will try to make them sum to one. It
+				   is a baseline, and it is named as one. */
+				const expected = COY_BASELINE +
+					0.45 * (c.rep || 50) + 0.30 * (t.prestige || 50);
 				const achieved = 100 * (t.regPct || 0) * 0.6 + (t.regSosAvg - 45) * 0.5 +
 					(t.quadWins || 0) * 1.4 +
 					(t.apRank ? Math.max(0, 26 - t.apRank) * 0.35 : 0) +
@@ -1431,33 +1443,66 @@
 				};
 			});
 		if (coachRows.length) {
-			const give = (award, pick, filter) => {
+			/* SIX BALLOTS, SIX ELECTORATES.
+
+			   There used to be ONE `noise` map, drawn per coach and then added
+			   to the Naismith, the AP, the Iba, the Hugh Durham and every
+			   conference award alike. So the panels were not disagreeing —
+			   they were reading one perturbed ranking through different
+			   weights, and the three national trophies swept far more often
+			   than three independent electorates should. The player-of-the-
+			   year trophies were given their own electorates and a per-class
+			   mood for exactly this reason (see the ballot model above); the
+			   coaching side never was.
+
+			   `house` is what the panels share: the season's own argument,
+			   which every voter in the country heard. `swing` is each panel's
+			   own. Their variances sum to 3.6 against the old 3.5, so this
+			   redistributes the disagreement rather than adding any.
+
+			   AND THE SCORE IS COMPUTED ONCE PER COACH.
+
+			   The AP and Iba rows used to call `crng.normal(0, 2)` INSIDE the
+			   function handed to `sort`, which calls it twice per comparison.
+			   That made the comparator inconsistent — a(b) and b(a) disagreed,
+			   so the "winner" depended on the engine's comparison order — and
+			   it consumed a number of draws that depended on how many
+			   comparisons the sort happened to make, which puts the shared
+			   `crng` stream at a position no replay can be relied on to
+			   reproduce. Every score is now drawn once, into a map, before
+			   anything is sorted. */
+			const house = new Map(coachRows.map((r) => [r, crng.normal(0, 2)]));
+			const give = (award, weigh, filter) => {
 				const pool = filter ? coachRows.filter(filter) : coachRows;
 				if (!pool.length) return;
-				const winner = pool.slice().sort((a, b) => pick(b) - pick(a))[0];
+				const arng = crng.child(award);
+				const score = new Map(pool.map((r) =>
+					[r, weigh(r) + house.get(r) + arng.normal(0, 3)]));
+				const winner = pool.slice()
+					.sort((a, b) => (score.get(b) - score.get(a)) ||
+						String(a.team.name).localeCompare(String(b.team.name)))[0];
 				coachHonors.push({
 					award, coach: winner.coach.name, school: winner.team.name,
 					conf: winner.team.conf, record: winner.team.regW + "-" + winner.team.regL,
 					situation: winner.coach.situationLabel || null,
 				});
 			};
-			const noise = new Map(coachRows.map((r) => [r, crng.normal(0, 3.5)]));
 			give("Naismith Coach of the Year",
-				(r) => r.surprise * 0.7 + r.record * 0.5 + r.march * 0.4 + noise.get(r));
+				(r) => r.surprise * 0.7 + r.record * 0.5 + r.march * 0.4);
 			give("AP Coach of the Year",
-				(r) => r.surprise * 1.0 + r.record * 0.3 + noise.get(r) + crng.normal(0, 2));
+				(r) => r.surprise * 1.0 + r.record * 0.3);
 			give("Henry Iba Award",
-				(r) => r.surprise * 0.5 + r.record * 0.3 + r.march * 0.8 + noise.get(r) + crng.normal(0, 2));
+				(r) => r.surprise * 0.5 + r.record * 0.3 + r.march * 0.8);
 			/* The Hugh Durham (mid-major) and Ben Jobe (minority coaches at
 			   any level — modeled here as the best coach outside the power
 			   leagues on a one-bid league's budget) awards. */
 			give("Hugh Durham Award",
-				(r) => r.surprise * 0.8 + r.record * 0.4 + r.march * 0.5 + noise.get(r),
+				(r) => r.surprise * 0.8 + r.record * 0.4 + r.march * 0.5,
 				(r) => (global.Colleges.CONFERENCES[r.team.conf] || {}).tier !== "high");
 			for (const conf of Object.keys(byConf)) {
 				const lb = label(conf);
 				give(lb + " Coach of the Year",
-					(r) => r.surprise * 0.8 + r.record * 0.5 + noise.get(r),
+					(r) => r.surprise * 0.8 + r.record * 0.5,
 					(r) => r.team.conf === conf);
 			}
 		}

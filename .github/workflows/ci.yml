@@ -4,9 +4,22 @@ on:
   push:
   pull_request:
 
+# A push to a branch that already has a run in flight supersedes it. Six jobs
+# run on every push and the regression suite alone is tens of minutes, so
+# without this a branch pushed three times in ten minutes has three full
+# matrices racing and two of them are answering a question nobody is asking
+# any more. Never cancels a run on the default branch, where the answer is the
+# record rather than feedback.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   check:
     runs-on: ubuntu-latest
+    # The default is six hours. Nothing here is healthy at one, and a job that
+    # hangs should say so while somebody is still waiting for it.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -49,6 +62,7 @@ jobs:
 
   ui:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -1646,7 +1646,18 @@ function main() {
 	   is the number that would have caught it on the day it was introduced. */
 	const SPECS = [0, 1, 2, 3];
 	for (const spec of SPECS) {
-		const cfg = global.Config.make({ specialization: spec });
+		/* PAST THE SLIDER ON PURPOSE, AND AROUND THE CLAMP ON PURPOSE.
+
+		   Config.make now brings every declared setting into the band its own
+		   control offers, because a shareable link must not be able to ask
+		   for a class the panel cannot describe. A harness is not a link: 3
+		   is outside the 0-2.5 the slider reaches precisely so the solver is
+		   asked a question harder than any user can pose, which is what makes
+		   the exactness figure below worth having. Written after make rather
+		   than through it, so the intent is visible instead of the clamp
+		   quietly turning this into a second measurement at 2.5. */
+		const cfg = global.Config.make({});
+		cfg.specialization = spec;
 		/* Exactness, at an arbitrary target — which is the harder ask, and
 		   what tests the solver's reach: the target here has nothing to do
 		   with the base's own overall, so the bisection has to travel. */

@@ -162,6 +162,11 @@
 		</div>
 		<div class="ctl"><label for="variation">Variation <b></b></label><input type="range" id="variation" min="0" max="12" step="1"></div>
 		<div class="ctl"><label for="poolMemory">Avoid repeating recent builds <b></b></label><input type="range" id="poolMemory" min="0" max="1" step="0.05"></div>
+		<!-- The same memory one layer UP, and the axis that never had one:
+		     sixty-six flavors drawn one a class repeat far sooner than
+		     forty-six builds drawn out of 385 do. See flavorMemoryFactor in
+		     js/ratings.js. -->
+		<div class="ctl"><label for="flavorMemory">Avoid repeating recent flavors <b></b></label><input type="range" id="flavorMemory" min="0" max="1" step="0.05"></div>
 		<div class="ctl"><label><input type="checkbox" id="varySize"> Let height &amp; weight drift with the build</label></div>
 		<div class="ctl"><label><input type="checkbox" id="lockHeights"> Keep every imported height exactly as the file listed it</label></div>
 		<p class="hint">On, nothing the tool draws can move a player's height rating — not a reroll, not the size drift, not the 7'4" anomaly. A height you set by hand still moves it.</p>

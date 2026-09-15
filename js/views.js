@@ -549,9 +549,18 @@
 					if (ba && bb) continue;
 					return ba ? 1 : -1;
 				}
+				/* THE SAME ORDER FOR NAMES AS EVERY OTHER LIST.
+
+				   This was a bare localeCompare while byName above — added
+				   precisely because "St. John's (NY)" and "Texas A&M" sat in
+				   different places on different tabs — passes
+				   { sensitivity: "base" }. The board is the biggest list of
+				   names in the tool and it was the one that never got the
+				   fix, so sorting by college here and reading the same
+				   colleges anywhere else could disagree. */
 				const cmp = numeric[key]
 					? Number(va) - Number(vb)
-					: String(va).localeCompare(String(vb));
+					: byName(va, vb);
 				if (cmp) return cmp * dir;
 			}
 			return 0;
