@@ -1811,12 +1811,33 @@
 		return out;
 	}
 
+	/* WHICH FILE A RESULT CAME OUT OF.
+
+	   Both functions below are handed `results` and `files` and used to index
+	   the second with the first's array position. That is right only while the
+	   two arrays line up, and in the app they do not have to: the chain's
+	   results are collected by walking the files it actually ran (see
+	   liveResults in js/app.js), so a file that failed validation, or one
+	   loaded after the chain, is skipped and every result after it shifts down
+	   one. The fingerprints then belong to the wrong men — two careers merged
+	   under one id, one career split across two — and the Careers table's
+	   "open his page" button opened somebody else's file.
+
+	   So the chain stamps the file index on the result it produced, and this
+	   reads it. A result without one (tools/universe.js builds its chain one
+	   result per file, in order) falls back to the position, which is what it
+	   always did and is correct there. */
+	function fileIndexOf(res, i) {
+		return res && Number.isFinite(res.fileIndex) ? res.fileIndex : i;
+	}
+
 	function biographyOf(results, files) {
 		const out = { __scoped: true };
 		(results || []).forEach((res, i) => {
 			if (!res || !res.players) return;
-			const fp = (files && files[i] && files[i].fingerprint) ||
-				(res.leagueFile && res.leagueFile.startingSeason) || i;
+			const at = fileIndexOf(res, i);
+			const fp = (files && files[at] && files[at].fingerprint) ||
+				(res.leagueFile && res.leagueFile.startingSeason) || at;
 			for (const p of res.players) {
 				if (!p.key) continue;
 				const id = playerId(fp, p.key);
@@ -1874,12 +1895,13 @@
 		(results || []).forEach((res, i) => {
 			if (!res) return;
 			const season = seasonOf(i);
+			const self = fileIndexOf(res, i);
 			/* His own class: the season he was drafted out of, where his board
 			   rank and his honours are. */
 			for (const p of res.players || []) {
 				if (!p.key) continue;
-				const e = touch(playerId(fpOf(i), p.key), p.name);
-				e.fileIndex = i;
+				const e = touch(playerId(fpOf(self), p.key), p.name);
+				e.fileIndex = self;
 				e.draft = {
 					season, boardRank: p.boardRank || null,
 					slot: p.draftSlot || null, school: p.newCollege,
@@ -1894,7 +1916,11 @@
 			   same fact about a person from two directions. */
 			for (const fp of res.futurePlayers || []) {
 				if (!fp.homeKey && !fp.key) continue;
-				const home = fp.past ? i : fp.fileIndex;
+				/* `self` and `fp.fileIndex` are both FILE indices — the one
+				   the result came out of, and the one the roster entry was
+				   built from. Mixing a file index with an array position here
+				   is exactly what fileIndexOf exists to stop. */
+				const home = fp.past ? self : fp.fileIndex;
 				const key = fp.past ? fp.homeKey || fp.key : fp.homeKey;
 				if (!Number.isFinite(home) || !key) continue;
 				const e = touch(playerId(fpOf(home), key), fp.name);

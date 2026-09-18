@@ -1270,7 +1270,14 @@
 		["buildNoise", 2.5, 5, 11],
 		["upsetFactor", 0.55, 1.0, 1.8],
 		["anomalyMemory", 0.4, 1, 2.6],
-		["variation", 0, 0, 0],
+		/* `variation` used to sit here as [0, 0, 0] — three values that
+		   interpolate to the default at every position of the dial, so the
+		   row cost a guard and a branch to write the number that was already
+		   there. It reads as a setting the dial moves and is not one, which
+		   is the only kind of harm a no-op row does. Left out rather than
+		   given values: variation is "the same class, different men", and a
+		   meta-dial about how STRANGE a world is has no business redrawing
+		   who is in it. */
 		["bluebloodDownYears", 0, 0, 3],
 		["midMajorLift", 0, 0, 6],
 		["realignmentRate", 0.1, 0.35, 0.9],
@@ -4235,6 +4242,35 @@
 		{ key: "cinderella", label: "a No. 11 seed or worse in the Final Four",
 			test: (res) => !!(res && res.tourney && res.tourney.finalFour &&
 				res.tourney.finalFour.some((x) => x && x.seed >= 11)) },
+		/* Four more, each read off a fact the result already carries. The
+		   eight above are all about the top of the board or about March; a
+		   search is only as expressive as its vocabulary, and "a team went
+		   unbeaten" and "the best player in the country is not in this class"
+		   are both years people remember and neither was sayable. */
+		{ key: "unbeaten", label: "a team went unbeaten in the regular season",
+			test: (res) => Object.keys((res && res.teams) || {})
+				.some((k) => {
+					const t = res.teams[k];
+					return t && t.regSnapshot && t.regSnapshot.l === 0 &&
+						t.regSnapshot.w >= 20;
+				}) },
+		{ key: "abroadLottery", label: "three or more of the top fourteen played abroad",
+			test: (res) => ((res && res.board) || []).slice(0, 14)
+				.filter((p) => p && p.nonNcaa).length >= 3 },
+		{ key: "unrankedTop10", label: "a two-star or unranked recruit in the top ten",
+			test: (res) => ((res && res.board) || []).slice(0, 10)
+				.some((p) => p && p.recruiting && p.recruiting.stars <= 2) },
+		{ key: "poyOutsideClass",
+			label: "the player of the year is not in this draft class",
+			test: (res) => {
+				const set = global.Universe && global.Universe.nationalPOYSet
+					? global.Universe.nationalPOYSet() : new Set();
+				const mine = ((res && res.players) || [])
+					.some((p) => (p.awards || []).some((a) => set.has(a)));
+				const field = ((res && res.fieldHonors) || [])
+					.some((h) => h && set.has(h.award));
+				return !mine && field;
+			} },
 		{ key: "poyIsNo1", label: "the player of the year is the No. 1 pick",
 			test: (res) => {
 				const set = global.Universe && global.Universe.nationalPOYSet
@@ -4494,7 +4530,19 @@
 		const effective = Object.assign({}, cfg, { seed });
 		const key = phaseKey(PHASES[0], effective);
 		let byKey = previewCache.get(leagueFile);
-		if (byKey && byKey.key === key) return byKey.value;
+		if (byKey && byKey.key === key) {
+			/* A HIT HAS TO COUNT AS USE.
+
+			   The eviction below takes the oldest INSERTION, and a hit used to
+			   return without touching the map — so on a chain with more files
+			   than the budget the file previewed first every run (season one)
+			   was also the first evicted every run, and the entry that was
+			   never reused sat in front of it. Re-inserting makes the cache
+			   the LRU its comment says it is. */
+			previewCache.delete(leagueFile);
+			previewCache.set(leagueFile, byKey);
+			return byKey.value;
+		}
 		const state = { leagueFile: lf, rng: new Rng(seed), seed, cfg: effective };
 		phaseBuild(state);
 		const value = {

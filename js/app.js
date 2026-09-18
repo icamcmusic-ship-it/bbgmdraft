@@ -149,6 +149,15 @@
 		/* Which season's carry-over the Universe tab's world table is showing.
 		   See worldSection in js/views.js. */
 		worldSeason: null,
+		/* THE LAST SEARCH, SO IT CAN BE RUN AGAIN.
+
+		   "Reroll until…" is the tool's one iterative verb — you run it,
+		   look at what came back, and run it again with the same conditions
+		   and a longer leash — and the dialog opened blank every time, so
+		   every repeat meant re-picking the clauses off a list of twelve.
+		   {keys: ["!tallTop5", …], tries: n}, persisted like every other
+		   view choice. */
+		lastUntil: null,
 	};
 	global.App = { state };
 
@@ -321,6 +330,7 @@
 			settingLocks: state.settingLocks,
 			settingTier: state.settingTier,
 			challenge: state.challenge,
+			lastUntil: state.lastUntil,
 			sessions: state.sessions.slice(0, SESSIONS_MAX),
 			// The branch point, so a reload continues the lineage rather than
 			// starting a second root beside it. See rememberSession.
@@ -482,6 +492,20 @@
 				coachTree: saved.universe.coachTree &&
 					typeof saved.universe.coachTree === "object"
 					? saved.universe.coachTree : null,
+				/* THE REGISTRY WAS WRITTEN AND NEVER READ BACK.
+
+				   universeForStorage() persists it — deliberately bounded to
+				   the longest careers, for exactly the reason a persisted
+				   payload is bounded — and this rebuilt state.universe
+				   without the field, so every reload dropped it. The Careers
+				   section renders off u.registry and returns early when it is
+				   missing, so the one view in the tool that is about PEOPLE
+				   rather than about programmes was empty after every refresh,
+				   silently, while the data sat in localStorage. */
+				registry: saved.universe.registry &&
+					typeof saved.universe.registry === "object" &&
+					!Array.isArray(saved.universe.registry)
+					? saved.universe.registry : null,
 				broken: saved.universe.broken || null,
 				cfgs: {},
 				running: false,
@@ -521,6 +545,22 @@
 		if (typeof saved.challenge === "string" &&
 			CHALLENGES.some((c) => c.key === saved.challenge)) {
 			state.challenge = saved.challenge;
+		}
+		/* Checked against the live predicate table, not trusted: a clause
+		   whose predicate has since been renamed is dropped rather than
+		   pre-filling a condition the dialog cannot show. */
+		if (saved.lastUntil && typeof saved.lastUntil === "object" &&
+			Array.isArray(saved.lastUntil.keys)) {
+			const keys = saved.lastUntil.keys
+				.filter((k) => typeof k === "string" &&
+					global.Engine.parseRerollClause(k));
+			if (keys.length) {
+				state.lastUntil = {
+					keys,
+					tries: Number.isFinite(Number(saved.lastUntil.tries))
+						? Number(saved.lastUntil.tries) : 25,
+				};
+			}
 		}
 		const sort = validSortStack(saved.sort);
 		if (sort) state.sort = sort;
@@ -2625,11 +2665,34 @@
 				got.dataset.arch = a.name;
 				got.title = "Share of the last generated class that came out as " + a.name;
 				row.appendChild(got);
+				/* BALANCED HAS NO RARITY WEIGHT, AND HAD A BOX FOR ONE.
+
+				   Every other build competes for the specialist mass by
+				   weight; Balanced takes exactly (1 - archetypeDiversity) of
+				   the draw whatever the table says, and calibrateWeights,
+				   archetypeWeight and poolWeight all filter it out by name.
+				   So this input was a control that did nothing at any value —
+				   measured, a weight of 1e9 on it produces a byte-identical
+				   class — sitting in the one panel whose whole promise is
+				   that the number you type is the share you get. It is
+				   replaced by the sentence that is true, and by the name of
+				   the slider that does move it. The realized share beside it
+				   stays, because that is a fact about the class either way. */
+				if (a.name === "Balanced") {
+					const note = el("span", "unit archnote",
+						"set by Archetype diversity");
+					note.title = "Balanced is not drawn by rarity weight: it takes " +
+						"whatever share the Archetype diversity slider leaves to " +
+						"it. Lower that slider for more Balanced players.";
+					row.appendChild(note);
+					aw.appendChild(row);
+					continue;
+				}
 				const inp = el("input");
 				inp.type = "number";
 				inp.step = "0.05";
 				inp.min = "0";
-				inp.max = "8";
+				inp.max = String(CFG.ARCH_WEIGHT_MAX || 8);
 				inp.dataset.arch = a.name;
 				inp.value = a.w === undefined ? 1 : a.w;
 				inp.title = archetypeTooltip(a);
@@ -3862,6 +3925,13 @@
 		// unless it has its own randomized-settings patch (fileCfgFor), or
 		// is a universe-mode season with its own carry-over (universeCfgFor).
 		state.results[i] = runner.run(ucfg || fileCfgFor(i) || effectiveCfg());
+		/* WHICH FILE THIS RESULT IS. Universe.biographyOf and
+		   Universe.registryOf are handed a LIST of results beside
+		   state.files, and liveResults() skips any file the chain did not
+		   run — so the list's positions are not file indices and the two
+		   were being used interchangeably. Stamped here and at the chain's
+		   own store, read by Universe.fileIndexOf. */
+		if (state.results[i]) state.results[i].fileIndex = i;
 		/* A universe result rebuilt after eviction is the RAW season; the
 		   career links are a pass the chain runs on top of it. Relink it, or
 		   a rehydrated file shows the freshman year its own file guessed
@@ -4066,6 +4136,7 @@
 			state.results = new Array(state.files.length).fill(null);
 			res = state.runners[state.active].run(
 				fileCfgFor(state.active) || effectiveCfg());
+			res.fileIndex = state.active;
 			state.results[state.active] = res;
 			state.lastSeed = res.seed;
 			clearError();
@@ -4349,6 +4420,12 @@
 			"conditions from the same class find the same seed again."));
 		const list = el("div", "colpicker");
 		const rows = [];
+		/* The last search's clauses, so running it again is one click rather
+		   than twelve. See state.lastUntil. */
+		const was = {};
+		for (const k of (state.lastUntil && state.lastUntil.keys) || []) {
+			was[k.charAt(0) === "!" ? k.slice(1) : k] = k.charAt(0) === "!" ? "no" : "yes";
+		}
 		for (const pr of REROLL_PREDICATES) {
 			const row = el("div", "untilrow");
 			/* Three states in one control, because two checkboxes per
@@ -4359,6 +4436,7 @@
 			sel.appendChild(new Option("—", ""));
 			sel.appendChild(new Option("must", "yes"));
 			sel.appendChild(new Option("must not", "no"));
+			if (was[pr.key]) sel.value = was[pr.key];
 			row.appendChild(sel);
 			row.appendChild(el("span", "untillabel", pr.label));
 			list.appendChild(row);
@@ -4380,7 +4458,8 @@
 		tries.id = "rerollUntilTries";
 		tries.min = "1";
 		tries.max = String(REROLL_UNTIL_MAX);
-		tries.value = "25";
+		tries.value = String(state.lastUntil && Number.isFinite(state.lastUntil.tries)
+			? state.lastUntil.tries : 25);
 		triesRow.appendChild(tries);
 		triesRow.appendChild(el("span", "unit", " tries (about a third of a second each)"));
 		box.appendChild(triesRow);
@@ -4390,6 +4469,8 @@
 			const n = Math.max(1, Math.min(REROLL_UNTIL_MAX, Number(tries.value) || 25));
 			closeModal();
 			if (!picked.length) { setStatus("Tick at least one condition."); return; }
+			state.lastUntil = { keys: picked.slice(), tries: n };
+			persist();
 			rerollUntil(picked, n);
 		}, "Search");
 	}
@@ -4937,8 +5018,19 @@
 			recentAnomalies: (saved.recentAnomalies || []).map((a) => a.slice()),
 			lastSeason: before.length ? before[before.length - 1].season : null,
 			rows: u.rows.filter((r) => {
-				const i = keptFingerprints.indexOf(r.fingerprint);
-				return i !== -1;
+				if (!r) return false;
+				/* An extrapolated row has no fingerprint — it was never a
+				   file — so filtering on one dropped every year inside the
+				   chain that no file covered. Those years belong to the held
+				   seasons and are not re-drawn by the resumed run (step()
+				   only fills a gap it walks past), so a resume used to delete
+				   them permanently. A held year is kept; a guessed year after
+				   the resume point goes with the seasons it described. */
+				if (r.extrapolated) {
+					return Number.isFinite(r.season) && before.length &&
+						r.season <= before[before.length - 1].season;
+				}
+				return keptFingerprints.indexOf(r.fingerprint) !== -1;
 			}),
 			keptFingerprints,
 		};
@@ -5297,6 +5389,37 @@
 		   is untouched, so loading a real class file later extends the world
 		   from the last season that was actually simulated. */
 		const extrapolateForward = (years) => {
+			/* LAST RUN'S GUESSED TAIL COMES OFF FIRST.
+
+			   An extension keeps state.universe.rows — that is the point of
+			   it — and these rows are the ones drawn PAST the end of the
+			   chain, so after an extend the seasons they cover have either
+			   been played for real or are about to be redrawn from a world
+			   four years further on. Appending without pruning put two rows
+			   on the timeline for the same year, out of order, and fed both
+			   to the records book and the news desk; turning the dial down to
+			   zero left the old tail behind entirely.
+
+			   A gap's rows are never touched: they sit before `lastSeason`
+			   and they describe years inside the chain, which have not
+			   moved. Done before the early return below, so a tail is
+			   dropped even when nothing replaces it. */
+			const kept = [];
+			const stale = [];
+			for (const row of state.universe.rows) {
+				if (row && row.extrapolated && Number.isFinite(row.season) &&
+					Number.isFinite(lastSeason) && row.season > lastSeason) {
+					stale.push(row.season);
+					continue;
+				}
+				kept.push(row);
+			}
+			if (stale.length) {
+				state.universe.rows = kept;
+				const drop = new Set(stale);
+				state.universe.alumni = (state.universe.alumni || []).filter((a) =>
+					!(a && a.extrapolated && drop.has(a.season)));
+			}
 			const n = Math.max(0, Math.round(years));
 			if (!n || !carry || !Number.isFinite(lastSeason)) return 0;
 			const guessed = U.extrapolateGap(carry, lastSeason, lastSeason + n + 1, baseSeed);
@@ -5386,6 +5509,7 @@
 				   other tab then re-simulated the file with no carry-over and
 				   the base seed, and disagreed with the timeline it had just
 				   drawn. */
+				res.fileIndex = d.index;
 				state.results[d.index] = res;
 				state.universe.cfgs[d.index] = {
 					seed: cfg.seed,
@@ -8494,6 +8618,15 @@
 			if (e.key !== "s" || e.ctrlKey || e.metaKey || e.altKey) return;
 			const tag = (e.target && e.target.tagName) || "";
 			if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+			// A contenteditable is typing too, whatever its tag says.
+			if (e.target && e.target.isContentEditable) return;
+			/* AND NOT BEHIND A DIALOG. Every other single-key shortcut
+			   returns while a modal is open (see the main keydown handler);
+			   this one is bound separately and did not, so pressing s with
+			   "Reroll until…" or the column picker open slid the settings
+			   panel around underneath it. */
+			const modalEl = $("modal");
+			if (modalEl && !modalEl.hidden) return;
 			toggle();
 		});
 		window.addEventListener("resize", apply);

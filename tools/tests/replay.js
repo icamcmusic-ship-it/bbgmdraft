@@ -150,6 +150,28 @@ module.exports = function (ok, V) {
 				.indexOf("CAL.TEAM && Number.isFinite(CAL.TEAM.pf)") !== -1);
 	}
 
+	/* NO ROW OF THE WEIRDNESS TABLE IS A NO-OP.
+
+	   `variation` sat in it as [0, 0, 0]: every position of the dial
+	   interpolated to the default, so the row read as a setting the dial
+	   moves and was not one. A row whose three values are the same value
+	   cannot move anything, and is a claim the panel makes and the engine
+	   does not keep. */
+	{
+		const src = require("fs").readFileSync(
+			require("path").join(__dirname, "..", "..", "js", "engine.js"), "utf8");
+		const table = /const WEIRDNESS = \[([\s\S]*?)\n\t\];/.exec(src);
+		const rows = table
+			? (table[1].match(/\["[A-Za-z]+",[^\]]*\]/g) || []) : [];
+		const dead = rows.filter((r) => {
+			const nums = (r.match(/-?\d+(\.\d+)?/g) || []).map(Number);
+			return nums.length === 3 && nums[0] === nums[1] && nums[1] === nums[2];
+		});
+		ok("the weirdness table has rows at all", rows.length > 5, String(rows.length));
+		ok("and no row of it interpolates to its own default at every position",
+			dead.length === 0, dead.join(" "));
+	}
+
 	/* --- the reroll-until clause grammar ------------------------------ */
 	{
 		const lf = V.realisticClass(4, 60);

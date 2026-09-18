@@ -502,6 +502,34 @@
 		return out;
 	}
 
+	/* THE BAND A WEIGHT EDITOR OFFERS.
+
+	   Both weight tables are edited through a number input with a declared
+	   min and max — 0 to 100 a destination, 0 to 8 a build — and both are
+	   also written straight out of a URL payload, a saved preset and an
+	   imported settings JSON, where nothing checked them at all. A NaN, a
+	   negative or a 1e9 reached the engine verbatim: it survives all three
+	   (rng.weighted floors at zero and Colleges.leagueWeight ignores a
+	   non-finite override), so nothing corrupts — and the panel then
+	   displayed a number its own control cannot express, which is the same
+	   "the tool is describing a class other than the one in front of you"
+	   fault the scalar clamp below exists to close. */
+	const LEAGUE_WEIGHT_MAX = 100;
+	const ARCH_WEIGHT_MAX = 8;
+	function weightMap(src, hi) {
+		const out = {};
+		if (!src || typeof src !== "object" || Array.isArray(src)) return out;
+		for (const k of Object.keys(src)) {
+			const v = Number(src[k]);
+			// A broken value is dropped rather than floored: an entry that is
+			// not a number is an entry that says nothing, and the built-in
+			// weight behind it is a better answer than zero.
+			if (!Number.isFinite(v)) continue;
+			out[k] = v < 0 ? 0 : v > hi ? hi : v;
+		}
+		return out;
+	}
+
 	function make(overrides) {
 		const cfg = Object.assign({}, DEFAULTS, overrides || {});
 		/* Copy every container the UI can write into, so a preset or a URL
@@ -513,24 +541,50 @@
 		   (or a shared link) rewrote the preset itself, silently and
 		   permanently. leagueWeights is rebuilt below, but from an object the
 		   caller still owns. */
-		cfg.noteLines = (cfg.noteLines || DEFAULTS.noteLines).slice();
+		/* AND THE CONTAINERS GO THROUGH THE SAME DOOR.
+
+		   The clamp below covers every SCALAR setting, for the reason its own
+		   comment gives: a shareable link, a saved preset and an imported
+		   settings JSON can carry anything, and a value the panel cannot show
+		   is a value the panel cannot honestly display. Three settings are not
+		   scalars and were left out of that argument entirely — `noteLines`,
+		   `leagueWeights` and `archetypeWeights` — and they arrive through
+		   exactly the same three doors.
+
+		   `noteLines` is the one that bites: a payload carrying the string
+		   "stats" instead of ["stats"] was `.slice()`d (a string has one) and
+		   stored as a string, so cfg.noteLines was a note template that is not
+		   a list. buildNote survives it by checking Array.isArray and falling
+		   back, which means the note template silently reverted to the default
+		   and the panel went on painting the tick boxes the payload asked for.
+		   A non-array is a broken value like a NaN pace, and goes back to the
+		   default the same way. */
+		cfg.noteLines = (Array.isArray(cfg.noteLines) ? cfg.noteLines : DEFAULTS.noteLines)
+			.filter((k) => typeof k === "string").slice();
+		if (!cfg.noteLines.length) cfg.noteLines = DEFAULTS.noteLines.slice();
 		// Deep-copied for the same reason noteLines is: the pool memory is a
 		// container the UI writes into between runs.
 		cfg.recentPools = Array.isArray(cfg.recentPools)
 			? cfg.recentPools.filter(Array.isArray).map((a) => a.slice())
 			: null;
-		cfg.archetypeWeights = Object.assign({}, cfg.archetypeWeights || {});
+		cfg.archetypeWeights = weightMap(cfg.archetypeWeights, ARCH_WEIGHT_MAX);
 		// Destination weights: start from the built-ins, apply anything the
 		// caller set, then fold in the three legacy sliders so old presets and
 		// old shareable links still mean what they meant.
-		const lw = Object.assign(defaultLeagueWeights(), cfg.leagueWeights || {});
+		/* The caller's table is cleaned BEFORE it is laid over the built-ins,
+		   so a broken entry falls back to the league's own default weight
+		   rather than removing the league from the table altogether — which
+		   would also make untouchedLeagueWeights report a hand-edited table
+		   on the strength of a NaN somebody never typed. */
+		const lw = Object.assign(defaultLeagueWeights(),
+			weightMap(cfg.leagueWeights, LEAGUE_WEIGHT_MAX));
 		const legacy = {
 			wEuroLeague: "EuroLeague", wGLeague: "NBA G League", wNBL: "NBL",
 		};
 		for (const key of Object.keys(legacy)) {
 			if (Number.isFinite(cfg[key])) lw[legacy[key]] = cfg[key];
 		}
-		cfg.leagueWeights = lw;
+		cfg.leagueWeights = weightMap(lw, LEAGUE_WEIGHT_MAX);   // the legacy fold, too
 		/* AND THE BANDS ARE ENFORCED HERE, at the front door.
 
 		   CLAMP was a table the engine consulted at a dozen read sites and
@@ -631,6 +685,19 @@
 		flavorReach: { lo: 0, hi: 100 },
 		recruitMomentum: { lo: 0, hi: 100 },
 		flavorMemory: { lo: 0, hi: 1 },
+		/* THE THREE LEGACY DESTINATION SLIDERS.
+
+		   They are in COUNTS, they are folded into `leagueWeights` by make()
+		   and by a flavor's bend, and they were the one settings path with no
+		   declared band at all — so a link carrying wEuroLeague: 1e9 sent
+		   every prospect abroad to one league while the destination editor
+		   displayed the built-in weight beside it. The band is the one that
+		   editor's own number inputs offer (0-100), because that is where the
+		   value ends up. No slider on the page carries these names, so
+		   tools/tests/review.js skips them; make() does not. */
+		wEuroLeague: { lo: 0, hi: 100 },
+		wGLeague: { lo: 0, hi: 100 },
+		wNBL: { lo: 0, hi: 100 },
 
 		/* THE OTHER THIRTY-EIGHT.
 
@@ -702,5 +769,5 @@
 	}
 
 	global.Config = { DEFAULTS, PRESETS, make, defaultLeagueWeights, COUNTS, isCount,
-		CLAMP, sliderRange };
+		CLAMP, sliderRange, LEAGUE_WEIGHT_MAX, ARCH_WEIGHT_MAX };
 })(typeof window !== "undefined" ? window : self);

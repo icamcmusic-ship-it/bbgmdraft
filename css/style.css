@@ -539,6 +539,9 @@ tbody tr.editing td.sticky { background: rgba(9,105,218,.14); }
 .archrow { grid-template-columns: 1fr 42px 62px; }
 .archgot { font-variant-numeric: tabular-nums; text-align: right; font-size: 10px; color: var(--accent); }
 .archgot.none { color: var(--dim); opacity: .5; }
+/* Balanced has no rarity weight to type, so the third cell carries the
+   sentence that says which control does move it. See paintArchWeights. */
+.archrow .archnote { font-size: 10px; text-align: right; opacity: .75; }
 .archlist { max-height: 300px; }
 .archfilters { gap: 6px; margin-bottom: 4px; }
 .archfilters input[type=search] { flex: 1 1 120px; min-width: 0; }
