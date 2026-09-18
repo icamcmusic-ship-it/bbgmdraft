@@ -196,6 +196,151 @@ module.exports = function (ok, V) {
 			pf.players.every((p) => p.experience === 0));
 	}
 
+	/* ---------------------------------------------------------------- 2026
+
+	   The front door closes over the CONTAINERS too. Config.make's clamp
+	   covered every scalar setting and left the three settings that are not
+	   scalars to arrive from a URL, a preset or an imported settings JSON
+	   unchecked. */
+	{
+		const c = CFG.make({ noteLines: "stats" });
+		ok("make: a non-array note template falls back to the default",
+			Array.isArray(c.noteLines) && c.noteLines.length > 1,
+			JSON.stringify(c.noteLines));
+		const c2 = CFG.make({ noteLines: ["stats", 7, "awards"] });
+		ok("make: a note template keeps only its strings",
+			JSON.stringify(c2.noteLines) === JSON.stringify(["stats", "awards"]),
+			JSON.stringify(c2.noteLines));
+		const c3 = CFG.make({ leagueWeights: { EuroLeague: NaN, NBL: -5,
+			"Liga ACB": 1e9 } });
+		const built = CFG.defaultLeagueWeights();
+		ok("make: a broken destination weight falls back to the built-in",
+			c3.leagueWeights.EuroLeague === built.EuroLeague,
+			String(c3.leagueWeights.EuroLeague));
+		ok("make: destination weights are held to the editor's own band",
+			c3.leagueWeights.NBL === 0 &&
+			c3.leagueWeights["Liga ACB"] === CFG.LEAGUE_WEIGHT_MAX,
+			c3.leagueWeights.NBL + " / " + c3.leagueWeights["Liga ACB"]);
+		ok("make: the destination table keeps every league",
+			Object.keys(c3.leagueWeights).length === Object.keys(built).length);
+		const c4 = CFG.make({ archetypeWeights: { A: -1, B: 500, C: NaN } });
+		ok("make: build weights are held to the editor's own band",
+			c4.archetypeWeights.A === 0 &&
+			c4.archetypeWeights.B === CFG.ARCH_WEIGHT_MAX &&
+			!("C" in c4.archetypeWeights),
+			JSON.stringify(c4.archetypeWeights));
+		/* The three legacy destination sliders were the one settings path
+		   with no declared band at all, and make() folds them into the table
+		   the engine reads. */
+		for (const k of ["wEuroLeague", "wGLeague", "wNBL"]) {
+			ok("make: " + k + " is clamped to its declared band",
+				!!CFG.CLAMP[k] && CFG.make({ [k]: 1e9 })[k] === CFG.CLAMP[k].hi);
+		}
+		ok("make: a legacy slider cannot outrun the table it folds into",
+			CFG.make({ wEuroLeague: 1e9 }).leagueWeights.EuroLeague ===
+				CFG.LEAGUE_WEIGHT_MAX);
+	}
+
+	/* The build-pool clamp is a second copy of the table's size. The comment
+	   over `archetypePool` in js/config.js says the number is checked against
+	   ARCHETYPES.length; the CEILING beside it was not, so a table that grows
+	   leaves a slider that cannot reach the whole of it. */
+	ok("the build-pool clamp reaches the whole archetype table",
+		CFG.CLAMP.archetypePool.hi === global.RatingsBuilder.ARCHETYPES.length,
+		CFG.CLAMP.archetypePool.hi + " against " +
+			global.RatingsBuilder.ARCHETYPES.length);
+
+	/* BALANCED IS NOT DRAWN BY WEIGHT, so the panel must not offer a box for
+	   one. Behavioural, because the claim is about the draw and not about the
+	   markup: two classes that differ only in Balanced's weight are the same
+	   class. */
+	{
+		const lf = V.syntheticClass(11, 60);
+		const a = E.run(lf, CFG.make({ seed: "bal" }));
+		const b = E.run(lf, CFG.make({ seed: "bal",
+			archetypeWeights: { Balanced: 8 } }));
+		const shape = (r) => r.players.map((p) => p.archetype).join("|");
+		ok("a weight on Balanced changes nothing about the class",
+			shape(a) === shape(b));
+		const app = fs.readFileSync(path.join(ROOT, "js", "app.js"), "utf8");
+		ok("and the panel says so instead of offering a dead input",
+			/a\.name === "Balanced"[\s\S]{0,400}archnote/.test(app));
+	}
+
+	/* THE ARCHETYPE FILTER IS A FILTER. It was missing from both halves of
+	   the empty-state card — the list of what is hiding rows, and the reset. */
+	{
+		ok("the filter reset restores every filter key, archetype included",
+			/function clearFilters\(\)[\s\S]{0,400}archetype: ""/.test(VIEWS));
+		ok("the empty state names the archetype filter among the active ones",
+			/function describeFilters\(\)[\s\S]{0,600}f\.archetype/.test(VIEWS));
+		ok("the filter bar carries its own reset",
+			/Clear " \+\s*\(active\.length === 1/.test(VIEWS));
+	}
+
+	/* THE UNIVERSE'S TWO INDEX SPACES. registryOf and biographyOf are handed
+	   a list of results beside the whole file list, and used to index the
+	   second with the first's position — which is only right while every
+	   loaded file is in the chain. */
+	{
+		const files = [{ fingerprint: "fpA" }, { fingerprint: "fpB" },
+			{ fingerprint: "fpC" }];
+		// The chain ran files 0 and 2; file 1 was not runnable.
+		const results = [
+			{ season: 2030, fileIndex: 0, players: [{ key: "7", name: "A",
+				newCollege: "Kansas", classYear: "Freshman", awards: [] }],
+				futurePlayers: [] },
+			{ season: 2032, fileIndex: 2, players: [{ key: "7", name: "C",
+				newCollege: "Duke", classYear: "Senior", awards: [] }],
+				futurePlayers: [] },
+		];
+		const reg = U.registryOf(results, files, []);
+		const ids = Object.keys(reg);
+		ok("registryOf keys a man by the file he actually came out of",
+			ids.some((id) => id.indexOf("fpA") === 0) &&
+			ids.some((id) => id.indexOf("fpC") === 0) &&
+			!ids.some((id) => id.indexOf("fpB") === 0), ids.join(", "));
+		ok("registryOf reports the file index a view can open",
+			ids.map((id) => reg[id].fileIndex).sort().join(",") === "0,2");
+		const bio = U.biographyOf(results, files);
+		ok("biographyOf scopes a biography to the right file",
+			!!bio["fpA/7"] && !!bio["fpC/7"] && !bio["fpB/7"],
+			Object.keys(bio).join(", "));
+		// And the old, aligned shape still keys the way it always did.
+		const plain = U.registryOf(
+			results.map((r) => Object.assign({}, r, { fileIndex: undefined })), files, []);
+		ok("a result with no file index falls back to its position",
+			Object.keys(plain).some((id) => id.indexOf("fpB") === 0));
+	}
+
+	/* The two universe payloads that were written and never read back. */
+	{
+		const app = fs.readFileSync(path.join(ROOT, "js", "app.js"), "utf8");
+		ok("the persisted career registry is restored on reload",
+			/registry: saved\.universe\.registry/.test(app));
+		ok("an extension drops last run's extrapolated tail before redrawing it",
+			/row\.extrapolated &&[\s\S]{0,200}row\.season > lastSeason/.test(app));
+		ok("a resumed chain keeps the guessed years inside the seasons it held",
+			/if \(r\.extrapolated\) \{[\s\S]{0,200}r\.season <= before/.test(app));
+		ok("the settings shortcut does not fire behind a dialog",
+			/if \(e\.key !== "s"[\s\S]{0,900}modalEl\.hidden\) return;/.test(app));
+		ok("the preview cache counts a hit as use",
+			/previewCache\.delete\(leagueFile\);\s*\n\s*previewCache\.set\(leagueFile, byKey\);/
+				.test(fs.readFileSync(path.join(ROOT, "js", "engine.js"), "utf8")));
+	}
+
+	/* The four conditions a search could not express. */
+	{
+		const keys = E.REROLL_PREDICATES.map((p) => p.key);
+		for (const k of ["unbeaten", "abroadLottery", "unrankedTop10",
+			"poyOutsideClass"]) {
+			ok("reroll-until can ask for " + k, keys.indexOf(k) !== -1);
+		}
+		const app = fs.readFileSync(path.join(ROOT, "js", "app.js"), "utf8");
+		ok("and the dialog remembers the last search",
+			/state\.lastUntil = \{ keys: picked\.slice\(\), tries: n \};/.test(app));
+	}
+
 	/* Quick wins that are static facts about the page. */
 	ok("every script tag is deferred", !/<script src=/.test(HTML) &&
 		(HTML.match(/<script defer src=/g) || []).length >= 20);

@@ -2127,6 +2127,107 @@ async function gotoProspects(page) {
 			/specialization: .*default/.test(text), text.slice(0, 400));
 	}
 
+	/* THE FILTER BAR'S OWN RESET, AND THE ARCHETYPE FILTER IT FORGOT.
+
+	   Both live entirely in the DOM. The reset used to exist only inside the
+	   "No prospects match" card, so the way to find it was to filter the
+	   table down to nothing — and the card's list of what was hiding rows
+	   left the archetype select off it, which is the one filter that can
+	   empty a table on its own while the card says nothing is set. */
+	{
+		console.log("\nClearing the filters");
+		await page.goto(base);
+		await page.evaluate(() => localStorage.clear());
+		await page.goto(base);
+		await page.evaluate(() => {
+			const data = window.Sample.makeClass(414, 40, 2029);
+			window.App.state.cfg.seed = "uismoke-filters";
+			window.App.installFiles([{ name: "filter-sample.json", data }], []);
+		});
+		await page.waitForSelector("table tbody tr", { timeout: 60000 });
+		// The filter bar belongs to the Draft board's edit face.
+		await page.evaluate(() => {
+			window.App.state.boardMode = "edit";
+			window.App.render();
+		});
+		await page.waitForSelector(".filters", { timeout: 60000 });
+		const clean = await page.evaluate(() =>
+			document.querySelectorAll("table tbody tr").length);
+		ok("a class renders with no filters set", clean > 0, String(clean));
+		ok("and the bar carries no reset while nothing is set",
+			!(await page.evaluate(() => Array.from(
+				document.querySelectorAll(".filters .chip"))
+				.some((b) => /^Clear /.test(b.textContent)))));
+
+		// A build nobody in the class has: the table empties on this alone.
+		await page.evaluate(() => {
+			window.App.state.filter.archetype = "__no-such-build__";
+			window.App.render();
+		});
+		await page.waitForTimeout(200);
+		const card = await page.evaluate(() => {
+			const box = document.querySelector(".empty-state");
+			return box ? box.textContent : "";
+		});
+		ok("an empty table says the archetype filter is what emptied it",
+			/build __no-such-build__/.test(card), card.slice(0, 200));
+
+		await page.evaluate(() => {
+			const b = Array.from(document.querySelectorAll(".empty-state button"))
+				.filter((x) => /Clear all filters/.test(x.textContent))[0];
+			if (b) b.click();
+		});
+		await page.waitForTimeout(300);
+		const back = await page.evaluate(() => ({
+			rows: document.querySelectorAll("table tbody tr").length,
+			arch: window.App.state.filter.archetype,
+		}));
+		ok("clearing the filters clears the archetype filter too",
+			back.rows === clean && back.arch === "",
+			back.rows + " rows, archetype " + JSON.stringify(back.arch));
+
+		// And the bar's own reset appears the moment something is set.
+		await page.evaluate(() => {
+			window.App.state.filter.pos = "PG";
+			window.App.render();
+		});
+		await page.waitForTimeout(200);
+		const chip = await page.evaluate(() => {
+			const b = Array.from(document.querySelectorAll(".filters .chip"))
+				.filter((x) => /^Clear /.test(x.textContent))[0];
+			return b ? b.textContent : "";
+		});
+		ok("the bar offers a reset as soon as a filter is set",
+			/^Clear 1 filter$/.test(chip), chip);
+		await page.evaluate(() => {
+			const b = Array.from(document.querySelectorAll(".filters .chip"))
+				.filter((x) => /^Clear /.test(x.textContent))[0];
+			if (b) b.click();
+		});
+		await page.waitForTimeout(300);
+		ok("and clicking it puts every row back",
+			(await page.evaluate(() =>
+				document.querySelectorAll("table tbody tr").length)) === clean);
+
+		/* Balanced is not drawn by rarity weight, so the frequency panel
+		   must not offer a box for one. */
+		const bal = await page.evaluate(() => {
+			const row = document.querySelector('.archrow[data-arch="Balanced"]');
+			if (!row) return null;
+			return {
+				input: !!row.querySelector("input"),
+				note: (row.querySelector(".archnote") || {}).textContent || "",
+				share: !!row.querySelector(".archgot"),
+			};
+		});
+		ok("the Balanced row offers no weight to type", !!bal && !bal.input,
+			JSON.stringify(bal));
+		ok("and points at the control that does move it",
+			!!bal && /Archetype diversity/.test(bal.note), bal && bal.note);
+		ok("while still showing what share the class came out at",
+			!!bal && bal.share);
+	}
+
 	console.log("\nNo errors");
 	ok("no console or page errors", errors.length === 0, errors.join("\n         "));
 

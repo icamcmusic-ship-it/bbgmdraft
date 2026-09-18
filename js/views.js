@@ -1199,6 +1199,22 @@
 		const cols = el("button", null, "Columns…");
 		cols.addEventListener("click", () => columnPicker());
 		bar.appendChild(cols);
+		/* CLEARING THEM WITHOUT EMPTYING THE TABLE FIRST.
+
+		   There are nine filters on this bar and as many range rows under it,
+		   and the only reset lived inside the "No prospects match" card — so
+		   the way to find it was to filter the table down to nothing. Shown
+		   only when something is set, and it says how many, so a table that
+		   looks short has a number on screen explaining why. */
+		const active = describeFilters();
+		if (active.length) {
+			const clear = el("button", "chip", "Clear " +
+				(active.length === 1 ? "1 filter" : active.length + " filters"));
+			clear.type = "button";
+			clear.title = "Active: " + active.join(" · ");
+			clear.addEventListener("click", clearFilters);
+			bar.appendChild(clear);
+		}
 		return bar;
 	}
 
@@ -1926,13 +1942,20 @@
 	}
 
 	/* Nothing matched. Say which filters are on and offer to clear them. */
-	function emptyState(res) {
-		const st = A().state;
-		const f = st.filter;
-		const box = el("div", "card empty-state");
-		box.appendChild(el("h4", null, "No prospects match"));
+	/* WHAT IS CURRENTLY HIDING ROWS, IN WORDS.
+
+	   This list used to live inside emptyState and left the ARCHETYPE filter
+	   off it — the one filter that is a select on the bar rather than a tick
+	   box, and so the easiest of the lot to set and forget. A table emptied by
+	   it alone reported "Every prospect in this class is hidden" and named
+	   nothing, which is the least useful of the three answers the card can
+	   give. Shared with the bar below, so the two cannot disagree about what
+	   counts as a filter. */
+	function describeFilters() {
+		const f = A().state.filter || {};
 		const on = [];
 		if (f.q) on.push('search "' + f.q + '"');
+		if (f.archetype) on.push("build " + f.archetype);
 		if (f.pos) on.push("position " + f.pos);
 		if (f.conf) on.push("conference " + f.conf);
 		if (f.changedOnly) on.push("reassigned colleges only");
@@ -1947,18 +1970,35 @@
 				(Number.isFinite(r.min) ? " ≥ " + r.min : "") +
 				(Number.isFinite(r.max) ? " ≤ " + r.max : ""));
 		}
+		return on;
+	}
+
+	/* The canonical empty filter. Written out rather than assembled by
+	   leaving keys off: the old reset omitted `archetype` altogether, so it
+	   persisted a filter object with a different set of keys than the one the
+	   session starts with. */
+	function clearFilters() {
+		const st = A().state;
+		st.filter = {
+			q: "", pos: "", conf: "", archetype: "",
+			changedOnly: false, lockedOnly: false,
+			playedOnly: false, didNotPlayOnly: false, ranges: [],
+		};
+		A().persist();
+		A().render();
+	}
+
+	function emptyState(res) {
+		const box = el("div", "card empty-state");
+		box.appendChild(el("h4", null, "No prospects match"));
+		const on = describeFilters();
 		box.appendChild(el("p", "hint", on.length
 			? "Active filters: " + on.join(" · ")
 			: "Every prospect in this class is hidden."));
 		const clear = el("button", "tiny", "Clear all filters");
-		clear.addEventListener("click", () => {
-			st.filter = { q: "", pos: "", conf: "", changedOnly: false,
-				lockedOnly: false, playedOnly: false, didNotPlayOnly: false,
-				ranges: [] };
-			A().persist();
-			A().render();
-		});
+		clear.addEventListener("click", clearFilters);
 		box.appendChild(clear);
+		void res;
 		return box;
 	}
 
@@ -2709,13 +2749,37 @@
 	const REGISTRY_ROWS = 40;
 	function registrySection(view, u) {
 		const reg = u.registry;
-		if (!reg) return;
+		/* SAY WHY IT IS EMPTY, RATHER THAN RENDERING NOTHING.
+
+		   Both of these returned silently, so a tab that has a Careers
+		   heading in some worlds and simply does not in others looks like a
+		   view that failed rather than one with nothing to say. A career
+		   needs two seasons with the same man in them, which needs classes
+		   whose draft years are close enough for the roster links to reach
+		   across — that is a fact about the files, and it is worth one line. */
+		const explain = (why) => {
+			view.appendChild(el("h4", null, "Careers"));
+			view.appendChild(el("p", "legendline", why));
+		};
+		if (!reg) {
+			if ((u.rows || []).length) {
+				explain("No career index for this world yet. It is built when a " +
+					"chain finishes; run the universe to fill it in.");
+			}
+			return;
+		}
 		const people = Object.keys(reg).map((id) => reg[id])
 			.filter((x) => x.span >= 2)
 			.sort((a, b) => b.span - a.span ||
 				(b.honors ? b.honors.length : 0) - (a.honors ? a.honors.length : 0) ||
 				String(a.name).localeCompare(String(b.name)));
-		if (!people.length) return;
+		if (!people.length) {
+			explain("Nobody in this world appears in more than one season. A " +
+				"career needs a man whose class file is close enough to another " +
+				"season for him to have played it — a later class's " +
+				"underclassman, or someone who went undrafted and came back.");
+			return;
+		}
 		view.appendChild(el("h4", null, "Careers"));
 		view.appendChild(el("p", "legendline",
 			"The men this world saw more than once. A universe used to be a " +
