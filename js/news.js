@@ -539,7 +539,7 @@
 		const v = n % 100;
 		return n + (s[(v - 20) % 10] || s[v] || s[0]);
 	}
-	function pctText(x) { return (x * 100).toFixed(1) + "%"; }
+	function pctText(x) { return Number.isFinite(x) ? (x * 100).toFixed(1) + "%" : "no attempts"; }
 	/* A player's best scoring night before the article's date. */
 	function bestBefore(f) {
 		if (!f.player || !f.player.gameLog) return null;
@@ -2978,7 +2978,7 @@
 		slots: (p) => ({
 			player: PL(p.name, p.key), team: TM(p.newCollege),
 			rank: T("No. " + p.boardRank),
-			tpp: T(p.stats ? (p.stats.tpp * 100).toFixed(1) + "%" : "his college number"),
+			tpp: T(p.stats && Number.isFinite(p.stats.tpp) ? (p.stats.tpp * 100).toFixed(1) + "%" : "his college number"),
 		}),
 		headlines: [
 			"{player} shoots for scouts",
@@ -7397,7 +7397,7 @@
 			player: PL(p.name, p.key), team: TM(p.newCollege),
 			trait: T((p.traitNames || []).filter((n) =>
 				/release|two-motion|form is broken|flat trajectory|left-handed release/i.test(n))[0]),
-			tpp: T(p.stats ? Math.round(100 * p.stats.tpp) + "%" : "his percentage"),
+			tpp: T(p.stats && Number.isFinite(p.stats.tpp) ? Math.round(100 * p.stats.tpp) + "%" : "his percentage"),
 			rank: T(String(p.boardRank)),
 		}),
 		headlines: [

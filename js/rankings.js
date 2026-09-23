@@ -385,15 +385,30 @@
 		   68% and the preseason No. 1 is a different program in eight seasons
 		   of twenty rather than six. The point is WHICH blue blood is No. 1,
 		   not whether the ballot is any good. */
+		/* What the panel sees of the roster. The program's level is a
+		   program-scale number; the roster it will actually play with is
+		   t.rating, and the two part company at the very top — a blue blood
+		   at level 80 with a roster rated 40th in the country was the
+		   preseason No. 1 in about one season in six, and missed the field
+		   every time (a real preseason No. 1 misses about one year in
+		   twenty). Half of the level a voter reads is the roster's rating
+		   mapped onto the level scale. */
+		const lvOf = (t) => (Number.isFinite(t.level) ? t.level : (t.prestige || 0));
+		const rated = list.filter((t) => Number.isFinite(t.rating) && Number.isFinite(t.level));
+		const mOf = (a) => a.reduce((x, y) => x + y, 0) / Math.max(1, a.length);
+		const sOf = (a) => { const m = mOf(a); return Math.sqrt(mOf(a.map((x) => (x - m) * (x - m)))) || 1; };
+		const rM = mOf(rated.map((t) => t.rating)), rS = sOf(rated.map((t) => t.rating));
+		const lM = mOf(rated.map((t) => t.level)), lS = sOf(rated.map((t) => t.level));
+		const seenLevel = (t) => Number.isFinite(t.rating) && rated.length > 1
+			? 0.5 * lvOf(t) + 0.5 * (lM + (t.rating - rM) / rS * lS)
+			: lvOf(t);
 		const hype = new Map();
 		for (const t of list) {
-			const base = 0.4 * (t.prestige || 0) +
-				0.6 * (Number.isFinite(t.level) ? t.level : (t.prestige || 0));
+			const base = 0.4 * (t.prestige || 0) + 0.6 * seenLevel(t);
 			const w = clamp((base - 60) / 20, 0, 1);
 			hype.set(t.name, w * rng.child("hype:" + t.name).normal(0, 3.5));
 		}
-		const repOf = (t) => 0.4 * (t.prestige || 0) +
-			0.6 * (Number.isFinite(t.level) ? t.level : (t.prestige || 0)) +
+		const repOf = (t) => 0.4 * (t.prestige || 0) + 0.6 * seenLevel(t) +
 			(hype.get(t.name) || 0);
 
 		/* The opponent ranking a voter reads at a checkpoint: the NET over

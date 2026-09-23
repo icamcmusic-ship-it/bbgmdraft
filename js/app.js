@@ -6863,15 +6863,17 @@
 					" than an average schedule");
 			}
 		}
+		// A season with no attempts has no percentage (null), not 0%.
+		const pctOrDash = (x) => Number.isFinite(x) ? (x * 100).toFixed(1) + "%" : "—";
 		row("Shot mix", n1(s.fga) + " field goals, " + n1(s.tpa) + " of them threes, " +
 			n1(s.fta) + " free throws");
 		row("Efficiency", (s.ts * 100).toFixed(1) + "% true shooting on " +
 			(s.fgp * 100).toFixed(1) + "% from the floor");
 		row("The arithmetic", n1(s.fga - s.tpa) + " twos at " +
-			(((s.fgp * s.fga - s.tpa * s.tpp) / Math.max(0.01, s.fga - s.tpa)) * 100)
+			(((s.fgp * s.fga - s.tpa * (s.tpp || 0)) / Math.max(0.01, s.fga - s.tpa)) * 100)
 				.toFixed(1) + "%, " +
-			n1(s.tpa) + " threes at " + (s.tpp * 100).toFixed(1) + "%, " +
-			n1(s.fta) + " free throws at " + (s.ftp * 100).toFixed(1) + "% = " +
+			n1(s.tpa) + " threes at " + pctOrDash(s.tpp) + ", " +
+			n1(s.fta) + " free throws at " + pctOrDash(s.ftp) + " = " +
 			n1(s.ppg) + " points");
 		box.appendChild(dl);
 		return box;

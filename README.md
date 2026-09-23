@@ -3221,6 +3221,271 @@ presets on the board, a pinned-baseline delta column, a "why is he here?" popove
 and an optional concatenation step for the 27 script tags are all still
 proposals. The registry work above is the one of them that started.
 
+## The full-search audit of September 2026, third round
+
+Seven audits, one per area: engine, app and settings, news and awards, ratings and solvers, stats and teams, views and site, and Universe. After them came a fix pass on every finding. Nothing below repeats an item from the earlier README audit sections. Each finding appears in exactly one section; when another section touches it, it points to it by ID (§1-A3, §5-U2, …) instead of restating it. Unless a row says otherwise, every item has been fixed in this PR.
+
+---
+
+### §1 Bugs
+
+Correctness faults: wrong behaviour, crashes, and wrong facts. Calculation faults are in §3 and Universe-mode faults in §5.
+
+**App controller (`js/app.js`, `js/config.js`)**
+
+| ID | Bug | Sev |
+|---|---|---|
+| A1 | *Reroll until…*: every unsuccessful worker search threw `ReferenceError` (TDZ on `finish`/`step`), leaving the status stuck | High |
+| A2 | A link with a bad `era` (`#c={"era":"bogus"}`) threw during the first paint, before any control was bound, and was persisted, so every reload stayed broken | High |
+| A3 | `paintConfig` overwrote `document.body.className`, closing the settings panel on phones after any slider move | High |
+| A4 | Slider number boxes clamped on every keystroke: typing `70` into pace gave `82` | High |
+| A5 | Undo after loading a different file re-applied the old class's locks to different players | Med |
+| A6 | Rapid double reroll pushed an undo entry with a null seed | Med |
+| A7 | *Reroll until…* had no busy state: it could race a second search, and it applied the found seed to changed settings | Med |
+| A8 | Adding a file extended the universe even with Universe mode off | Med |
+| A9 | Pasting a link into an open tab did nothing (no `hashchange`) | Med |
+| A10 | *Surprise me* pushed three undo entries while saying Ctrl+Z undoes all of it | Low |
+| A11 | Copy buttons stuck on "Copied ✓" after a double-click | Low |
+| A12 | Ctrl+Enter rerolled behind an open dialog | Low |
+| A13 | A corrupt `.gz` reported "Failed to fetch" | Low |
+| A14 | Re-picking the same file fired nothing | Low |
+| A15 | A settings-only link kept stale localStorage locks; `#c=null` threw | Low |
+| A16 | "Show only what I changed" counted non-setting rows ("2 of 62" at defaults) | Low |
+| A17 | Typing a seed or picking one from history was not undoable | Low |
+| A18 | The lock CSV import locked a player at ovr 0 when the cell was empty (found while building §6 Q1) | Low |
+
+**Engine (`js/engine.js`, `js/rng.js`, `js/batch.js`)**
+
+| ID | Bug | Sev |
+|---|---|---|
+| E1 | Sophomores and juniors became "Graduate" fifth-year transfers: about half of all Graduates | Med |
+| E2 | The late-reach draft note called upperclassmen "a 19-year-old" (29 of 40) | Med |
+| E3 | A late reach could draft a man past board No. 60, whom Universe mode then treated as undrafted; the note read "drafted No. 61" | Med |
+| E4 | A transfer's earlier seasons were scheduled in his *new* school's conference, sometimes against his own old school (97 logs) | Low-Med |
+| E5 | An anomaly's age reached the export but not the potential model or the board | Med |
+| E6 | Recruiting classes for this cycle counted upperclassmen | Med |
+| E7 | The league merge dropped the exported class-year age (`born`) | Med |
+| E8 | The strangeness score's "unbeaten" test counted March losses | Low |
+| E9 | A relegated club could "make the playoffs" | Low |
+| E10 | "Lost season" gave a medical redshirt without the `Redshirt` prefix, so the age missed a year | Low |
+| E11 | `rng.weighted` could return a zero-weight item; NaN weights were not handled; `batch.summarize` had an unguarded champion lookup; `stre 0` read as 50 | Low |
+
+**Stats and teams (`js/stats.js`, `js/teams.js`, `js/sample.js`)**
+
+| ID | Bug | Sev |
+|---|---|---|
+| S1 | Big conferences still produced triple meetings; `when` was drawn independently per game, so 1,069 of 1,092 teams had two games within half a day | Med |
+| S2 | Pro leagues had no meeting cap (one pair met 8 times), home share ranged 13–83%, the cup was played on one day, and tables printed records that included playoff games | Med |
+| S3 | 3P% was shown on 0 attempts (9% of prospects) | Low-Med |
+| S4 | The app's percentages disagreed with the exported file (built from integer game-log totals) | Low-Med |
+| S5 | The rotation-size draw said "8 to 11" on a 10-man roster | Low |
+| S6 | 48-minute leagues fouled out at 5 | Low |
+| S7 | Game plus/minus used the season's minute share, not that night's minutes | Low |
+| S8 | The "synthetic" sample class produced real NBA names (Nikola Jokic in 13 of 300) | Low |
+| S9 | Returning stars changed position and height every season | Med |
+| S10 | "a 18-game winning streak" (article before a number) | Low |
+
+**Ratings and traits (`js/bbgm.js`, `js/traits.js`, `js/colleges.js`)**
+
+| ID | Bug | Sev |
+|---|---|---|
+| R1 | `skills` was no longer sorted, while upstream sorts it: 2.9% of players exported an array in a different order than BBGM writes | Low |
+| R2 | The trait "has not missed a game" went to players who missed games (14 of 24) | Med |
+| R3 | The conference table, dated 2027-28, missed the July 2026 moves (Hawaii, NIU, WAC → UAC, CBU, UVU, SUU, Utah Tech, Sac State, five ASUN schools) | Low-Med |
+| R4 | Trait gates read the build's authored offsets rather than the finished ratings: "plays above the rim" on 0 of 28 players with the A skill, "maxed-out frame" 18 of 18 below typical weight | Med |
+| R5 | "young/old for his class" had no age gate | Low |
+| R6 | Missing aliases: Saint Peter's, Detroit, Miami (Ohio), Hawai'i | Low |
+
+**News and text (`js/news.js`, `js/text.js`)**: the paper contradicted the season's own results
+
+| ID | Bug | Sev |
+|---|---|---|
+| N1 | "automatic bid" written about conference-tournament losers (11 of 11) | High |
+| N2 | "bracketology" called the first teams *out* "last four in" (17 of 17) | High |
+| N3 | "withdraws and returns" about players who were then drafted (12 of 12) | High |
+| N4 | Scores printed winner-last ("Virginia beat them 75-82", 17 of 17); "Indiana won 50-97" | High |
+| N5 | Road/home filters matched `home === -1` both ways (the road trip only ever found neutral courts; "student section" counted road games) | High |
+| N6 | Unsorted lists presented as rankings (the lottery "consensus first name" was board No. 3–13) | High |
+| N7 | Conference POY counts matched DPOY and national awards; "all-defensive" ranked by steals+blocks, not the award | High |
+| N8 | The returning-star "best player in the country" story ran in papers where a class member won national POY | High |
+| N9 | Time travel: November–January articles printed end-of-season records and final AP ranks (171 of 174); offseason stories dated before the season | Med |
+| N10 | One-school career claims about transfers (78% of multi-season prospects transferred) | Med |
+| N11 | "leads the country" without being national No. 1 (19–23 of 30) | Med |
+| N12 | About 20 smaller wrong facts: "ended in the Lost in the Round of 32", "2 2 wins", "21th", "in a American", "cut it to four", "a 8-point", "a N.J.I.T.", "UConn", "MAC", and others | Low-Med |
+| N13 | Datelines: Selection Sunday and the first weekend were datelined "Championship Week" (545 articles) | Low |
+| N14 | `quoteFor` shuffled with a random comparator inside `sort`, which is nondeterministic across browser engines | Low |
+
+**Awards, bracket and almanac (`js/awards.js`, `js/tournament.js`, `js/almanac.js`)**
+
+| ID | Bug | Sev |
+|---|---|---|
+| W1 | Final Four MOP went to semifinal losers (12 of 40), and when the field won, nobody was recorded (17 of 40) | High |
+| W2 | NIT MVP went to a player on the NIT champion in only 6 of 40 seasons | Med |
+| W3 | "single" trophies had 3 winners at `awardStrictness` 0.4 | Med |
+| W4 | Ineligible first choices vacated national trophies instead of passing them down the ballot (22 per 40 seasons) | Med |
+| W5 | No games-played floor: a 13-game player made All-Big Ten First Team | Low |
+| W6 | The bracket let same-conference teams meet in the Round of 32 (136 in 80 seasons) and put two top-4 seeds from one conference in a region (188) | Med |
+| W7 | The almanac's final AP table counted NCAA games, had two columns headed "Conf", and printed `null` in the Settings table | Low |
+
+**Views and exported site (`js/views.js`, `js/site.js`, `js/faces.js`)**
+
+| ID | Bug | Sev |
+|---|---|---|
+| V1 | **Script injection from a loaded file's `face` colours**: facesjs pastes colour strings into SVG markup | **High (security)** |
+| V2 | Numeric columns sorted as text (team record, honours, caps); Year sorted alphabetically; Conf sorted pros as blank; Mock sorted "1-10" before "1-2" | Med |
+| V3 | Back did nothing on the first page; scroll position carried into a new page; horizontal scroll leaked between tabs | Med |
+| V4 | Columns… Cancel did not cancel; the "why" popover was orphaned after a re-render | Med |
+| V5 | Player page: dead team link for pros, the file's weight instead of the new one, heights printed as 5'12", box score showing raw "reg" | Low |
+| V6 | Double arrows in the AP movement column ("▲▲6") | Low |
+
+---
+
+### §2 UI/UX and QOL
+
+Visual and accessibility defects, then interface improvements. All are done.
+
+**Defects**
+- **Contrast.** The active tab was 2.63:1 in the dark themes. Scout-report's orange text ran 2.27–2.92:1, and bracket seeds 2.8–3.5:1. The exported site's light mode kept the dark greens and reds (1.65–3.02:1).
+- **Phone layout.**
+  - The app header took 180 px and the site header 446 px (13 tabs wrapped onto 6 rows).
+  - The site's Prospects section scrolled sideways.
+  - The editor drawer opened under the sticky header.
+  - The header height (`--headerH`) was measured only at startup.
+- **Default columns.** The `off: true` column flag was never read, so a new user got 61 columns with a 73 px face in every row.
+- **Exported site.** Sticky table headers never stuck; the name column scrolled out of view; the colophon printed internal key names; the theme was forgotten and ignored `prefers-color-scheme`.
+- **Settings panel.** Checkbox labels sat far from their boxes; the "re-runs" hints were drawn in the error red.
+
+**Improvements made**
+- **Dialogs and header.**
+  - Destructive dialogs focus Cancel; information dialogs show only Close; Enter submits one-line dialogs.
+  - The Guide and shortcut buttons have distinct glyphs (📖 / ⌨).
+  - Uncaught errors and unhandled rejections now reach the error banner.
+- **Screen readers and keyboard.**
+  - Slider accessible names no longer include the lock glyph.
+  - A "Skip to content" link; roving tabindex on the Draft board.
+- **Phones.** The header is non-sticky; the tabs are one row that scrolls sideways; Player Edit folds its controls into a *Filters (n)* disclosure; desktop Player Edit collapses the storyline pills.
+- **Column picker.** Grouped (Identity, Recruiting, Team, Box, Shooting, Advanced), with a description for each column, All/None buttons, and a Cancel that really cancels.
+- **Tables and navigation.**
+  - The Draft board has search, a position filter and sortable headers.
+  - The AP Poll & Teams table sorts on NET, SOS, ORtg and DRtg and has a sticky header.
+  - Clicking the active tab returns to its list.
+  - Compare pre-fills the top two, and a "Compare…" action is on the player page and the row menu.
+- **Exported site.** Deep links (`#p=<id>`, `#section`) with history; Enter opens the first search hit and Esc closes the list; skill codes shown as words; front-page names are links.
+- **Loading non-class files.** Dropping or loading a universe export, a locks CSV or a settings JSON now routes to the right importer.
+- **Reroll until…** shows progress and has a Cancel (the button, or Esc).
+
+---
+
+### §3 Settings, solvers, stats, formulas and calculations
+
+**Solver and BBGM ports (verified, no change needed)**
+- **Solver.** 358,720 solves across 385 builds, height 0–100 and targets 0–100: **0 misses**. No ratings outside 0–100, no non-integer ratings, no broken pins, no nondeterminism, never pot < ovr.
+- **Formula ports.** `ovr`, `pos`, `compositeRating`, `COMPOSITE_WEIGHTS`, `heightToRating` and the `bbgmstats` advanced block (PER, EWA, ORtg/DRtg, WS, BPM, VORP) match zengm `master` coefficient for coefficient. The one exception was the skills sort (§1-R1).
+
+**Calculation faults, fixed**
+
+| ID | Finding | Fix |
+|---|---|---|
+| C1 | Player season totals added up to 94% of the team (worst 75%). Absences removed games from a line, but no one's minutes rose to cover them | New `redistributeAbsences`; team box and scoreboard anchor weighted by gp/G. Minutes now sum to 5 × game length × G plus overtime |
+| C2 | Tempo (scheduled pace) and ORtg/DRtg (box possessions) disagreed by −14 to +13 | Games log possessions; `team.pace` is the box possessions |
+| C3 | A player's DRtg was anchored at 104, not to his team (correlation 0.46) | Minute-weighted mean equals the team DRtg; correlation now 0.82 |
+| C4 | FT% overshot at statNoise above 1 (100% on 149 attempts) | Effective sample size scaled by 1/noise², with soft ceilings; 3P% leaders now .474–.490 |
+| C5 | Earlier seasons' box scores ran +7.5 points above their own scoreboard (hardcoded `pace*2.06`) | Scheduled first and anchored to the era's points per possession; gap now +0.04 |
+| C6 | The NET was a 4-pass truncated SRS | Iterated to a fixed point, damped and re-centred; Spearman against true strength .921 → .930 |
+| C7 | The AP poll graded every week's opponents on the *final* NET | NET as of each week; teams that won all their games that week dropped more than 2 places 8.0% → 1.1% of the time |
+| C8 | COY read a hidden-rating quality-win count (`t.quadWins`, `regSosAvg`) | Uses the NET quadrant record and the opponents' NET percentile |
+| C9 | `bidCheck` expected Big 12 10 bids against the sim's 5.6, so "a lean year" ran in 23 of 30 seasons | Expected bids fitted to the sim (`BID_FIT`); 2 of 30 |
+| C10 | The preseason ballot read program level but not the roster: the No. 1 missed the field in 6 of 36 seasons | Half of the level voters read is the roster rating; misses 3 of 36, top-25 teams in the field 68% → 75% |
+| C11 | Team 3PA rate was .302 in every era | Era three-point share: .348 (2009-21) and .389 (modern), against real ≈.35/.39 |
+| C12 | Potential: the tool's pot−ovr gap rose with ovr while BBGM's estimator falls | New setting, `potModel: "bbgm"`, uses BBGM's `potEstimator`; the default is unchanged |
+| C13 | The harness's `makeClass` used a 24-inch height span, while the engine uses 27 | Fixed; the 7-footer BPG row is now keyed at 84+ inches, as its comment says |
+
+**Settings audit**
+
+| ID | Finding | Fix |
+|---|---|---|
+| K1 | `bluebloodDownYears` and `midMajorLift` changed `t.level` after the rosters were built. They had **no effect on games**, and neither did the two storylines built on them | They now move the returners' talent and recompute the rating |
+| K2 | The pace slider saturated at 78 (the scoreboard and stat model clamped below the slider's 82) | Every layer clamps to `Config.CLAMP.pace` |
+| K3 | The draft-events slider did nothing at values 6–8 (only 5 kinds existed) | 4 new kinds (see §6-Q4) |
+| K4 | Storylines lost to weirdness and flavor, because "touched" was tested against a config those had already bent. A "dominant favourite" season played at `upsetFactor` 1.53 | Tested against the user's own config |
+| K5 | Text-choice settings and booleans were never validated (the root cause of §1-A2) | Validated in `Config.make` |
+| K6 | `leagueWeights` and `archetypeWeights` always read as "changed": 700-character links, `[object Object]` in the text copy, Reset unreachable | Compared against the expanded defaults |
+| K7 | The "Loaded class" and "Blue-blood wave" presets set dials that only work in curve mode | They now set `ovrMode: "curve"` |
+| K8 | Five dials had no unit format; the tier filter hid changed settings; presets switched Universe mode off; saved presets stored class-specific picks | All fixed |
+| K9 | Pro clubs got no class-reference volume correction | Passed through (efficiency deliberately left out, to keep PER in band) |
+
+---
+
+### §4 Replayability
+
+What makes a reroll or a new class read differently. All done:
+
+- **Newspaper variety**
+  - The quote pool doubled (77 → 155 lines), with no repeats within a paper and better situation matching.
+  - The most repeated openers now have 4–5 versions (the résumé opener had run 221 times).
+  - A de-duplication pass drops a second story about the same subject.
+- **New story kinds**
+  - "fell out of the poll", from the weekly AP history
+  - "national statistical leader", from the national stat ranks
+  - "the rubber match": two regular-season meetings plus a conference-tournament rematch
+- **Schedules with dates**: return legs 1–5 weeks apart and home/away by date, so "won the rematch" and "rivalry week" are real.
+- **Pro leagues**: double round robin, best-of-three playoff series and a mid-season cup, so league champions are less random.
+- **Reroll-until targets**: strangeness (`strangeness:30`, `strangeness:50`, any `strangeness≥N`).
+- **Opt-in settings**
+  - **Signature skills** (`signatureSkills`, default off): shooting builds reach the `3` badge 33% → 55% of the time, athletic builds reach `A` 1% → 10%.
+  - **Potential model** (§3-C12).
+- **Finished-rating trait gates** (§1-R4): two prospects of the same build now read differently for real reasons.
+
+---
+
+### §5 Universe mode
+
+**Bugs (all fixed)**
+
+| ID | Bug | Sev |
+|---|---|---|
+| U1 | Memory was not bounded: runners and returners pinned every season (about 16 MB a season, roughly 800 MB for 50 files); `pastRosterFor` was quadratic | High |
+| U2 | The coaching tree emptied (93 → 0 hires) after any awards-only warm re-run | Med-High |
+| U3 | Resume and extend dropped the reverse roster link, so resuming with nothing changed gave a different world | Med |
+| U4 | An extended or resumed universe could not be replayed from its own export | Med |
+| U5 | Extending after forward extrapolation duplicated seasons | Med |
+| U6 | After Stop, adding a file skipped every class that had been loaded but not played | Med |
+| U7 | Exporting after a reload wrote the current panel settings, no tail, and an empty registry that overwrote the saved one | Med |
+| U8 | Import dropped the registry; a v3 import needed its class files; a partial import invented champions for seasons the file already had; alumni were capped at 400 | Med |
+| U9 | Same-season files collided on import | Low |
+| U10 | Realignment only ever grew conferences (Big 12 16 → 29) | Med |
+| U11 | Extrapolated years could not build a dynasty; a gap kept the old champion's recruiting boost | Low-Med |
+| U12 | The "same pid set" duplicate-file warning fired on every pair of fixtures | Low |
+| U13 | The duplicate-player merge skipped its own dedupe and left one-sided relatives | Low |
+| U14 | Warm re-runs kept stale `laterSeasons` (that branch had in fact never run) | Low |
+| U15 | The coach's situation adjustment fed back into the carried program level, so hot seats fed themselves | Low |
+
+**Improvements built**
+- **Shared chain loop.** The loop now lives in `Universe.beginChain`, which the app and the harness both run, so the harness can catch resume and extend bugs. Exports record their segments (cold, extend, resume) and replay them in order. An import without class files opens as a view-only universe.
+- **Program history** (team page, and a *Programs* section on the Universe tab): a level sparkline with title and conference-move markers, banners, and a per-season table of coach, conference, record, March result and drift.
+- **Record book for people:** most honours, most seasons, best undrafted returners, best single honours season.
+- **Rivalries:** head-to-head carried across seasons, a "met in March N times in M years" thread, and a Rivalries table.
+- **Prestige drift:** a bounded, mean-reverting drift, so blue bloods can decline and mid-majors can rise.
+- **Coaching carousel:** a coach hired away takes a real open job elsewhere as the same man, shown as "from X" / "hired away → Y".
+- **Harness:** `tools/universe.js` grew from 79 to 134 checks. The new ones cover resume = full, extend = appended, stop-then-extend, bounded memory, warm re-runs keeping the tree, and import round trips.
+
+---
+
+### §6 Quick wins (new small features)
+
+| ID | Feature |
+|---|---|
+| Q1 | **Export → Locked prospects as CSV** and **Settings as JSON** (the menu's tooltip already promised both) |
+| Q2 | A pasted link applies live (`hashchange`) as one undoable step |
+| Q3 | Strangeness as a *Reroll until* clause |
+| Q4 | Four draft-night events: a promise, fell after interviews, rights dealt, withdrew and returned to school |
+| Q5 | Best-of-three pro playoff series |
+| Q6 | `potModel` and `signatureSkills` in the settings panel |
+| Q7 | A "Default" column preset; a user who chose "all columns" keeps it |
+| Q8 | The exported site remembers its theme |
+| Q9 | Trend column sorts by second-half minus first-half scoring |
+| Q10 | "Compare him now" in the row menu |
+
 ## Known limits
 
 * A draft class is one season, but the seasons before it are **simulated** for

@@ -5645,7 +5645,7 @@
 		return log ? log.best : null;
 	}
 
-	function pct(x) { return (x * 100).toFixed(1) + "%"; }
+	function pct(x) { return Number.isFinite(x) ? (x * 100).toFixed(1) + "%" : "—"; }
 	function n1(x) { return x.toFixed(1); }
 
 	/* The scouting note written into the exported file. Which lines appear is

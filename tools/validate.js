@@ -804,8 +804,13 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   spread them too evenly. Real drafted 7-footers average roughly
 		   1.8-2.2 blocks and 8.5-9.5 rebounds; a real class's big:guard
 		   block ratio is 8-10x, not 4x. */
-		["BPG mean (81+ inches)", (function () {
-			const v = all.filter((p) => p.newHgtInches >= 81).map((p) => p.stats.bpg);
+		/* Seven-footers, as the comment above and the 1.9 anchor say. The
+		   row read 81+ inches (6'9") while being calibrated to 7-footers,
+		   and once the fixture's heights were fixed (see makeClass) the
+		   6'9"-6'11" bigs it swept in — who block about one a game — pulled
+		   the mean under the band. */
+		["BPG mean (84+ inches)", (function () {
+			const v = all.filter((p) => p.newHgtInches >= 84).map((p) => p.stats.bpg);
 			return v.length ? mean(v) : 1.9;
 		})()].concat(within(1.9, 0.75)),
 		["RPG mean (81+ inches)", (function () {
