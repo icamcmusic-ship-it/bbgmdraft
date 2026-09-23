@@ -291,7 +291,6 @@
 		const liveRegions = REGIONS.filter((r) => regions[r].length);
 
 		const ROUND_NAME = ["Round of 64", "Round of 32", "Sweet 16", "Elite Eight"];
-		const lateCfg = Object.assign({}, cfg, { upsetFactor: (cfg.upsetFactor === undefined ? 1 : cfg.upsetFactor) * +(process.env.TN_LATE || 1) });
 		const regionResults = {};
 		for (const r of liveRegions) {
 			const bySeed = {};
@@ -319,12 +318,10 @@
 					   The LOG still records a neutral court: the game-log
 					   generator's home lift is a binary 5.5% and applying it
 					   to a pod would overstate a one-point edge sixfold. */
-					const REGE = +(process.env.TN_REG || 0);
 					const pod = regionRounds.length <= 1
 						? (A.seed < B.seed ? 0.3 : A.seed > B.seed ? -0.3 : 0)
-						: (A.seed === 1 ? REGE : B.seed === 1 ? -REGE : 0);
-					const sc = T.playGameScore(rng, A.team, B.team, pod,
-						regionRounds.length >= 2 ? lateCfg : cfg, 1, true);
+						: 0;
+					const sc = T.playGameScore(rng, A.team, B.team, pod, cfg, 1, true);
 					T.recordPostseason(A.team, B.team, sc, "ncaa",
 						1.07 + regionRounds.length * 0.01, roundName);
 					const won = sc.won;
@@ -351,7 +348,7 @@
 		const semis = [];
 		const finalists = [];
 		for (let i = 0; i + 1 < ff.length; i += 2) {
-			const sc = T.playGameScore(rng, ff[i].team, ff[i + 1].team, 0, lateCfg, 1, true);
+			const sc = T.playGameScore(rng, ff[i].team, ff[i + 1].team, 0, cfg, 1, true);
 			T.recordPostseason(ff[i].team, ff[i + 1].team, sc, "ncaa", 1.12, "Final Four");
 			const won = sc.won;
 			const winner = won ? ff[i] : ff[i + 1];
@@ -373,7 +370,7 @@
 		let finalGame;
 		let finalScore = "";
 		if (finalists.length >= 2) {
-			const finalSc = T.playGameScore(rng, finalists[0].team, finalists[1].team, 0, lateCfg, 1, true);
+			const finalSc = T.playGameScore(rng, finalists[0].team, finalists[1].team, 0, cfg, 1, true);
 			T.recordPostseason(finalists[0].team, finalists[1].team, finalSc, "ncaa", 1.13,
 				"National Championship");
 			const wonFinal = finalSc.won;

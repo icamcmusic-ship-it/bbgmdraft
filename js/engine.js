@@ -3565,8 +3565,15 @@
 		   of how many years ago: a freshman is the fifth or sixth option
 		   whether he turns into a lottery pick or a fifth-year senior, and
 		   using the distance back instead made a sophomore's freshman year and
-		   a senior's freshman year two different seasons. */
-		const AHEAD_BY_YEAR = [4.4, 2.9, 1.7, 0.9];
+		   a senior's freshman year two different seasons.
+
+		   Retuned from [4.4, 2.9, 1.7, 0.9] when the prior season's box
+		   started answering to its own scoreboard (see priorSchedule): the
+		   old counts were fitted to a box that ran about seven points a night
+		   over the scores it printed, and anchored they left every ovr band's
+		   earlier seasons 1.5-2.5 points under the draft year — at the edge
+		   of validate.js's band. These put the bands back near -1.5. */
+		const AHEAD_BY_YEAR = [3.0, 1.8, 0.9, 0.3];
 		const yearIdx = clamp(priorYears(p.classYear) - i, 0, 3);
 		const ahead = clamp(
 			Math.round(rng.normal(AHEAD_BY_YEAR[yearIdx], 1.1)), 0, 7);

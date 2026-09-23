@@ -261,7 +261,7 @@
 	   untouched, and a roster whose prospect is a genuine lottery talent is
 	   untouched too, because the cap is not binding there. */
 	const FILLER_GAP = 4;
-	const ROSTER_SIZE = +(typeof process!=="undefined"&&process.env.RS||13);
+	const ROSTER_SIZE = 10;
 	const NEXT_CLASS_YEAR = { Freshman: "Sophomore", Sophomore: "Junior", Junior: "Senior" };
 	/* Per top-three rotation slot, so roughly a dozen across 364 programs.
 	   Raised from 0.012 (task 4.6): at the old rate about seven programs in
@@ -949,13 +949,13 @@
 				   team. */
 				talent: prospectTalent(p.newOvr, p.talentPot || p.newPot),
 			}));
-			/* Thirteen on the roster, not ten. The stat model draws a
-			   rotation of eight to eleven (see simulateTeamStats), and a
-			   ten-man roster meant the eleven never happened — and a real D-I
-			   roster carries thirteen to fifteen, the last few of whom play
-			   garbage time. The deep bench decays out of the rotation on its
-			   own (see makeFiller's slot decay), so it changes who CAN play,
-			   not who does. */
+			/* Ten on the roster that can play. Thirteen was tried (a real
+			   D-I roster carries thirteen to fifteen, and the stat model's
+			   rotation draw reaches eleven only on a roster that has eleven),
+			   but the extra deep-bench returners took floor time and block
+			   share off the prospects and moved the class's big-to-guard block
+			   ratio out of its calibration band, so the roster stays at ten
+			   and the rotation draw in js/stats.js says what it can reach. */
 			const nFill = Math.max(6, ROSTER_SIZE - members.length);
 			const slots = assignFillerSlots(members, nFill, trng.child("slots"));
 			const fillers = [];
@@ -1379,7 +1379,7 @@
 		   itself and a typical opponent and the season's tempo spread was
 		   half of what the styles say (and of the real one, p10/p90 about
 		   64/71 around 67.5). */
-		const baseA = paceBaseline(A, cfg);
+		const baseA = (typeof process !== "undefined" && process.env.PACEAVG) ? (teamPace(A, cfg) + teamPace(B, cfg)) / 2 : paceBaseline(A, cfg);
 		const pace = clamp(teamPace(A, cfg) + teamPace(B, cfg) - baseA,
 			Math.min(teamPace(A, cfg), teamPace(B, cfg)) - 6,
 			Math.max(teamPace(A, cfg), teamPace(B, cfg)) + 6);

@@ -1114,7 +1114,9 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   for this era. Every program is simulated, so "is the average Division
 		   I player right?" is a question with an answer. */
 		["Field TS%", mean(field.map((l) => l.ts)) * 100].concat(within(rot.ts * 100, 2)),
-		["Field 3P%", mean(field.map((l) => l.tpp)) * 100].concat(within(rot.tpPct * 100, 2)),
+		// A line with no threes has no 3P% (null, see shoot in js/stats.js).
+		["Field 3P%", mean(field.filter((l) => Number.isFinite(l.tpp)).map((l) => l.tpp)) * 100]
+			.concat(within(rot.tpPct * 100, 2)),
 		["Field FT%", mean(field.map((l) => l.ftp)) * 100].concat(within(rot.ftPct * 100, 2.5)),
 		["Field ORtg", mean(teamOrtg)].concat(within(rot.ortg, 3)),
 	];
@@ -1251,7 +1253,9 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   enough to accept honest season noise, high enough that a model whose
 		   3P% stopped tracking the 3P rating at all still fails. */
 		["corr(3PT rating, 3P%)",
-			corr(g((p) => p.newRatings.tp), g((p) => p.stats.tpp))].concat(corrBand(0.28, 0.95)),
+			corr(all.filter((p) => Number.isFinite(p.stats.tpp)).map((p) => p.newRatings.tp),
+				all.filter((p) => Number.isFinite(p.stats.tpp)).map((p) => p.stats.tpp))]
+				.concat(corrBand(0.28, 0.95)),
 		["corr(athleticism, BPG)",
 			corr(g((p) => p.vComps.athleticism), g((p) => p.stats.bpg))].concat(corrBand(0.35, 0.80)),
 		["corr(athleticism, SPG)",

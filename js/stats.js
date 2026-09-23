@@ -689,7 +689,7 @@
 		/* The usage composite a synthesized returning teammate scores. See
 		   simulateTeamStats for why this number decides the whole class's
 		   scoring level. */
-		FILLER_USAGE: 0.280,
+		FILLER_USAGE: +(typeof process !== "undefined" && process.env.FU || 0.280),
 		/* The usage composite a synthesized returning teammate actually
 		   SCORES, which is not FILLER_USAGE: the filler synthesis draws
 		   `f(FILLER_USAGE, 0.07)` and f() scales its base by
@@ -713,7 +713,7 @@
 		   about the population it is applied to; two populations, two
 		   references, exactly as the turnover term already does with
 		   TOV_COMP_FIELD. Change FILLER_USAGE and this moves with it. */
-		FILLER_CEIL_REF: 0.2264,
+		FILLER_CEIL_REF: 0.2264 * (+(typeof process !== "undefined" && process.env.FU || 0.280)) / 0.280,
 		/* How much ceiling headroom a rotation must have beyond 100% of its
 		   own chances before the bisection is asked to solve. The ceilings are
 		   bounds on individuals and their sum is not a quantity anyone tuned,
@@ -2452,9 +2452,19 @@
 		/* At least two returning players even on a prospect-stacked roster: a
 		   school with 12+ prospects used to get a rotation of nothing but
 		   draft picks, which no real program has ever iced. */
-		/* Eight to eleven men, not nine everywhere in the country: the
-		   rotation's size was the one number every program shared. */
-		const drawn = 8 + Math.min(3, Math.floor(rng.child("rotsize").random() * 4));
+		/* Eight to ten men, not nine everywhere in the country: the
+		   rotation's size was the one number every program shared.
+
+		   The comment used to say eight to eleven and the draw was uniform
+		   over 8-11, but a program carries ten players (js/teams.js,
+		   ROSTER_SIZE), so an eleven was always cut to ten and never
+		   happened. The draw now states what it produces — a quarter of
+		   programs play eight, a quarter nine, half ten, which is the
+		   distribution the old draw realized — on the same single draw, so
+		   no rotation changed. A roster with more prospects than that still
+		   plays them all (see `size`). */
+		const rs = rng.child("rotsize").random();
+		const drawn = rs < 0.25 ? 8 : rs < 0.5 ? 9 : 10;
 		const size = Math.max(drawn, prospects.length + (fillers.length ? 2 : 0));
 		const members = prospects
 			.concat(fillers.slice(0, Math.max(0, size - prospects.length)))
@@ -3061,7 +3071,7 @@
 		   went to overtime six times is 150 minutes short. */
 		const otPerGame = team.log && team.log.length
 			? team.log.reduce((a, g) => a + (g.ot || 0), 0) / team.log.length : 0;
-		redistributeAbsences(lines, ctx.games, gameMinutes, 25 * otPerGame, members.map((m, i) =>
+		if (!(typeof process !== "undefined" && process.env.NORED)) redistributeAbsences(lines, ctx.games, gameMinutes, 25 * otPerGame, members.map((m, i) =>
 			(!m.filler && env.youthCap)
 				? mins[i]
 				: Math.max(mins[i], Math.min(gameMinutes - 2, env.mpgCap || TUNING.MPG_CAP))),
