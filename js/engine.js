@@ -1218,7 +1218,12 @@
 	   wins rather than the two being averaged — "a wide-open year" and "chalk
 	   all the way" is a contradiction, and averaging two contradictions gives
 	   an ordinary season, which is the outcome this exists to avoid. */
-	function applyNarrative(cfg, rng) {
+	/* `userCfg` is the config the USER handed in, before weirdness and the
+	   flavor bent it. "Has the user moved this setting" has to be asked of
+	   that: asked of the already-bent `cfg`, every setting the weirdness dial
+	   or the flavor had moved read as the user's, so the storyline — which is
+	   documented to get the last word on the season dials — never got it. */
+	function applyNarrative(cfg, rng, userCfg) {
 		if (!cfg || cfg.narrative === false) return { cfg, narrative: [] };
 		const pool = NARRATIVES.slice();
 		const n = rng.random() < 0.35 ? 3 : 2;
@@ -1242,7 +1247,7 @@
 				   explosion" being the slowest of all. */
 				const k = key === "paceShift" ? "pace" : key;
 				const want = key === "paceShift" ? D.pace + story.bend[key] : story.bend[key];
-				const touched = cfg[k] !== D[k];
+				const touched = (userCfg || cfg)[k] !== D[k];
 				if (touched) {
 					if (reach <= 0 || rng.random() >= reach) continue;
 					out[k] = cfg[k] + (want - cfg[k]) * 0.5 * reach;
@@ -1314,7 +1319,7 @@
 		return out;
 	}
 
-	function applyFlavorConfig(cfg, flavor) {
+	function applyFlavorConfig(cfg, flavor, userCfg) {
 		const bend = RB.flavorConfig(flavor);
 		if (!bend) return cfg;
 		const out = Object.assign({}, cfg);
@@ -1348,8 +1353,11 @@
 			? new Rng("flavorreach|" + (flavor.name || "") + "|" + (cfg.seed || "")) : null;
 		let moved = false;
 		let league = false;
+		const user = userCfg || cfg;
 		for (const k of Object.keys(bend)) {
-			const touched = cfg[k] !== D[k];
+			// Against the user's own settings, not the weirdness-bent ones —
+			// see applyNarrative.
+			const touched = user[k] !== D[k];
 			if (touched) {
 				if (!reachRng || reachRng.random() >= reach) continue;
 				/* Half of the way from the user's value to the authored one,
@@ -1383,7 +1391,7 @@
 			moved = true;
 			if (LEGACY_LEAGUE[k]) league = true;
 		}
-		if (league && untouchedLeagueWeights(cfg)) {
+		if (league && untouchedLeagueWeights(user)) {
 			const lw = Object.assign({}, out.leagueWeights);
 			for (const k of Object.keys(LEGACY_LEAGUE)) {
 				if (Number.isFinite(out[k])) lw[LEGACY_LEAGUE[k]] = out[k];
@@ -1424,7 +1432,8 @@
 		   narrative about the season they played, so the narrative gets the
 		   last word on the season dials. */
 		const narr = applyNarrative(
-			applyFlavorConfig(applyWeirdness(state.cfg), flavor), rng.child("narrative"));
+			applyFlavorConfig(applyWeirdness(state.cfg), flavor, state.cfg),
+			rng.child("narrative"), state.cfg);
 		state.narrative = narr.narrative;
 		const cfg = narr.cfg;
 
@@ -2989,7 +2998,8 @@
 		}
 		state.teams = teams;
 		state.recruitingClasses = computeRecruitingClasses(
-			state.players, teams, rng.child("recruitclasses" + variationSalt(state.cfg)));
+			state.players, teams, rng.child("recruitclasses" + variationSalt(state.cfg)),
+			state.season);
 		return state;
 	}
 
@@ -3003,7 +3013,7 @@
 	   The score is the 247-style shape: a per-recruit point value that
 	   decays steeply with national rank, with diminishing returns after the
 	   top handful of signees. */
-	function computeRecruitingClasses(players, teams, rng) {
+	function computeRecruitingClasses(players, teams, rng, season) {
 		const names = Object.keys(teams);
 		const real = {};
 		for (const p of players) {
@@ -3011,6 +3021,14 @@
 			// another school; a freshman was signed this cycle, here.
 			if (p.nonNcaa || !p.recruiting) continue;
 			if (p.transfer && p.transfer.from) continue;
+			/* ...and so does an upperclassman's: a junior was signed three
+			   cycles ago, and counting him made this cycle's class carry a
+			   rank-2 recruit who had already played two seasons. Only this
+			   cycle's high-school class is this cycle's signees. */
+			const hs = p.recruiting.hsClass;
+			const thisCycle = Number.isFinite(hs) && Number.isFinite(season)
+				? hs === season : p.classYear === "Freshman";
+			if (!thisCycle) continue;
 			(real[p.newCollege] = real[p.newCollege] || []).push(p);
 		}
 		const synthBySchool = {};
@@ -3279,7 +3297,13 @@
 		void bySchool;
 
 		// Pro / DII players: a real club in a real league table.
-		state.proLeagues = simulateProLeagues(state.players, cfg, statRng.child("pro"));
+		/* The class references go abroad too. A prospect's share of a
+		   rotation is scaled against THIS class (see classRefVolume above),
+		   and the clubs were simulated without it — so the same man read
+		   about half a point lower in a club rotation than in a college one
+		   for a reason that had nothing to do with the league. */
+		state.proLeagues = simulateProLeagues(state.players, cfg, statRng.child("pro"),
+			{ classRefVolume, classRefMult, classRefEfficiency });
 
 		// Per-game logs. signatureGame already fabricated one of these and threw
 		// it away; keeping it costs nothing and buys season highs, 20-point-game
@@ -3404,11 +3428,29 @@
 	   what it buys is that a junior's sophomore high is a night with an
 	   opponent and a score on it, drawn from the same generator as this
 	   year's, and reconciles to the line beside it the same way. */
-	function priorSchedule(home, level, rng, cfg) {
-		const confMates = (C.byConference[home.conf] || []).filter((n) => n !== home.name);
-		const pool = C.names.filter((n) => n !== home.name);
+	/* Points per possession-pair for the era, read the way js/teams.js's
+	   scoreboard reads it (pointsPerPair there): the era's calibrated team
+	   points over its possessions. A hardcoded 2.06 here put every prior
+	   season on the 2009-2021 scoreboard whatever era was asked for. */
+	function priorPointsPerPair(cfg) {
+		const CAL = global.Calibration;
+		const e = CAL && CAL.eraInfo ? CAL.eraInfo(cfg && cfg.era) : null;
+		const t = e && e.team;
+		return t && t.poss > 0 ? t.pts / t.poss : 1.03;
+	}
+
+	function priorSchedule(home, level, rng, cfg, exclude) {
+		const skip = (n) => n === home.name || (exclude && exclude.indexOf(n) >= 0);
+		const confMates = (C.byConference[home.conf] || []).filter((n) => !skip(n));
+		const pool = C.names.filter((n) => !skip(n));
 		const n = SEASON_GAMES;
-		const pace = clamp(Number.isFinite(cfg.pace) ? cfg.pace : 68, PACE_MIN, PACE_MAX);
+		/* The same tempo the draft-year scoreboard plays at (teamPace: the
+		   pace setting, the scoring environment and the program's style),
+		   so a prior season and the draft year are the same sport. */
+		const pace = T.teamPace
+			? T.teamPace({ style: home.style }, cfg)
+			: clamp(Number.isFinite(cfg.pace) ? cfg.pace : 68, PACE_MIN, PACE_MAX);
+		const ppp = priorPointsPerPair(cfg);
 		const log = [];
 		for (let i = 0; i < n; i++) {
 			const conference = i >= T.NON_CONF_GAMES && confMates.length > 0;
@@ -3421,7 +3463,7 @@
 				: (rng.random() < 0.55 ? 1 : rng.random() < 0.5 ? -1 : 0);
 			const edge = (level - oppLevel) * 0.6 + homeSide * 3.2;
 			const margin = edge * 0.72 + rng.normal(0, 11.3);
-			const total = clamp(pace * 2.06 + rng.normal(0, 9), 92, 190);
+			const total = clamp(pace * 2 * ppp + rng.normal(0, 9), pace * 1.35, pace * 2.95);
 			let a = Math.round((total + margin) / 2);
 			let b = Math.round((total - margin) / 2);
 			let ot = 0;
@@ -3500,12 +3542,31 @@
 		fillers.sort((a, b) => b.talent - a.talent);
 		T.capFillers(fillers, members);
 		for (const f of fillers) members.push(f);
+		/* The schedule is drawn FIRST, so the stat model's scoreboard anchor
+		   (anchorPointsToScoreboard) has a season to answer to. Drawn after,
+		   the log was empty when the anchor ran and it returned early: a
+		   prior season's box ran seven points a night over the scores its
+		   own game log printed.
+
+		   Against the conference of the school the row NAMES. A transfer's
+		   earlier seasons are labeled with the school he left, so scheduling
+		   them against his new school's league put Duquesne in the Big 12 —
+		   and could draw the origin school as its own opponent. */
+		const origin = p.transfer && p.transfer.from &&
+			Object.prototype.hasOwnProperty.call(C.COLLEGES, p.transfer.from)
+			? p.transfer.from : null;
+		const schedHome = origin
+			? { name: origin, conf: C.conferenceOf(origin), style: home.style }
+			: home;
+		const schedLevel = origin && teams[origin] && Number.isFinite(teams[origin].level)
+			? clamp(teams[origin].level + rng.normal(0, 3), 5, 99) : level;
+		const schedule = priorSchedule(schedHome, schedLevel, rng.child("schedule"), cfg);
 		const team = {
 			name: home.name + "|" + (season - i),
 			conf: home.conf,
 			style: home.style,
 			members,
-			log: [],
+			log: schedule,
 		};
 		S.simulateTeamStats(team, {
 			oppStrength: home.sosAvg || 50,
@@ -3524,7 +3585,6 @@
 		/* The nights behind the line: a drawn schedule and a game log off it,
 		   so an earlier season carries season highs, a best game and a
 		   twenty-point count the way the draft year does. See priorSchedule. */
-		team.log = priorSchedule(home, level, rng.child("schedule"), cfg);
 		team.w = team.log.filter((g) => g.won).length;
 		team.l = team.log.length - team.w;
 		let gameLog = null;
@@ -3724,7 +3784,11 @@
 			   carry no information (BBGM writes 19 for everyone). The gap
 			   used to be flat across class years — a rolled senior exported
 			   at 22 with a freshman's upside. */
-			const potAge = state.ageIsInformative || !Number.isFinite(p.age)
+			/* An anomaly that set the age outright (the 17-year-old
+			   prodigy, the 24-year-old JUCO) is a real age even in a file
+			   whose own ages say nothing — same rule as the export. */
+			const potAge = state.ageIsInformative || !Number.isFinite(p.age) ||
+				p.ageFromAnomaly
 				? p.age : ageForClassYear(p.classYear, p.transfer);
 			const factors = RB.potFactors(
 				p.archetype, potAge, p.newRatings,
@@ -3893,8 +3957,11 @@
 			label: "a late-first reach on upside",
 			// A reach is a man taken well before his board slot, so he has to
 			// have one well behind the late first.
-			pick: (i, n) => i >= 34 && i < n,
-			apply: (board, i, r) => {
+			/* ...and inside the draft: a man past the last pick moved up to
+			   the 20s would push the man at No. 60 out to 61, undrafting him
+			   while pastRosterFor still read his board rank as drafted. */
+			pick: (i, n) => i >= 34 && i < Math.min(n, DRAFT_PICKS),
+			apply: (board, i, r, state) => {
 				const to = r.int(20, 29);
 				if (to >= i) return false;
 				const p = board[i];
@@ -3908,7 +3975,7 @@
 					   player in the class" — drawn at random from a pool that
 					   had never read p.age, so a 22-year-old senior was
 					   regularly reached on for being nineteen. */
-					detail: reachDetail(p, board, r),
+					detail: reachDetail(p, board, r, state),
 				};
 				move(board, i, to);
 				return true;
@@ -3936,18 +4003,113 @@
 				return true;
 			},
 		},
+		/* Three more, because the slider runs to eight and there were five
+		   kinds: every setting above five drew the same five events and did
+		   nothing more. All three stay INSIDE the draft (every move lands
+		   before pick 60 and none takes a man from past it), so no event
+		   changes who was drafted — pastRosterFor's undrafted-returner test
+		   and the universe's carry both read draftSlot and see the same
+		   sixty men they would without these. The kinds are their own, not
+		   "rise"/"fall": a small move can be undone by a later event's
+		   shift, and each sentence is written from the move he actually
+		   ended up with. */
+		{
+			name: "a promise", w: 1.1,
+			label: "went early on a promise",
+			pick: (i, n) => i >= 18 && i < Math.min(45, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const to = Math.max(0, i - r.int(2, 6));
+				const p = board[i];
+				p.draftEvent = {
+					kind: "promise",
+					from: i,
+					say: (moved) => (moved < 0
+						? "went " + Text.plural(-moved, "spot") +
+							" earlier than the board had him, on a promise"
+						: "went where a team had promised to take him"),
+					detail: r.pick([
+						"he shut down his workouts after one visit",
+						"his agent cancelled every other workout in June",
+						"the promise was the worst-kept secret of the week",
+					]),
+				};
+				move(board, i, to);
+				return true;
+			},
+		},
+		{
+			name: "fell after interviews", w: 1.1,
+			label: "fell after the interview rounds",
+			pick: (i, n) => i >= 6 && i < Math.min(40, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const to = Math.min(board.length - 1, DRAFT_PICKS - 1, i + r.int(4, 10));
+				if (to <= i) return false;
+				const p = board[i];
+				p.draftEvent = {
+					kind: "interviews",
+					from: i,
+					say: (moved) => (moved > 0
+						? "slid " + Text.plural(moved, "spot") + " after the interview rounds"
+						: "interviewed poorly and went where the board had him anyway"),
+					detail: r.pick([
+						"teams came away unsure how much he wanted it",
+						"he did not know the playbook he had run all season",
+						"two front offices took him off their boards after meeting him",
+					]),
+				};
+				move(board, i, to);
+				return true;
+			},
+		},
+		{
+			name: "rights dealt on draft night", w: 1.0,
+			label: "had his rights dealt on draft night",
+			/* No move: the pick is the pick, only the team that made it
+			   changes. */
+			pick: (i, n) => i >= 8 && i < Math.min(n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const p = board[i];
+				p.draftEvent = {
+					kind: "traded",
+					from: i,
+					say: (moved, at) => "was taken at No. " + (at + 1) +
+						" and had his rights dealt before the night was over",
+					detail: r.pick([
+						"the pick was made on another team's behalf",
+						"flipped for two future second-rounders",
+						"part of a package for a veteran guard",
+						"the team that took him was picking for someone else",
+					]),
+				};
+				return true;
+			},
+		},
 	];
 
 	/* Why a team reached, in the player's own terms. A reach is a bet on
 	   upside, and what makes it a bet is either his age or the gap between
 	   what he can do and what he did. */
-	function reachDetail(p, board, r) {
+	function reachDetail(p, board, r, state) {
 		const options = [];
-		const youngest = board.reduce(
-			(a, b) => (Number.isFinite(b.age) && (!a || b.age < a.age) ? b : a), null);
-		if (youngest === p) options.push("the youngest player in the class");
-		if (Number.isFinite(p.age) && p.age <= 19) {
-			options.push("a " + Math.floor(p.age) + "-year-old with two tools and " +
+		/* The age a scout would give him (draftAge), not the file's raw
+		   `p.age` — which is 19 for everybody in a BBGM class, so a junior
+		   was "a 19-year-old" and the first man on the board was "the
+		   youngest player in the class". The youngest must also be strictly
+		   younger than everyone else: a tie is not a superlative. */
+		const ageOf = (x) => draftAge(x, state);
+		const mine = ageOf(p);
+		let youngestAge = Infinity;
+		let tie = 0;
+		for (const b of board) {
+			const a = ageOf(b);
+			if (!Number.isFinite(a)) continue;
+			if (a < youngestAge) { youngestAge = a; tie = 1; } else if (a === youngestAge) tie++;
+		}
+		if (Number.isFinite(mine) && mine === youngestAge && tie === 1) {
+			options.push("the youngest player in the class");
+		}
+		if (Number.isFinite(mine) && mine <= 19) {
+			options.push("a " + Math.floor(mine) + "-year-old with two tools and " +
 				(p.stats && p.stats.ppg < 11 ? "no production" : "a lot to clean up"));
 		}
 		if (Number.isFinite(p.newPot) && Number.isFinite(p.newOvr) &&
@@ -3970,7 +4132,7 @@
 		arr.splice(to, 0, x);
 	}
 
-	function applyDraftEvents(board, rng, cfg) {
+	function applyDraftEvents(board, rng, cfg, state) {
 		/* Clear last run's flags FIRST, and unconditionally.
 
 		   `pick` skips a player who already carries a draftEvent, so that two
@@ -4008,7 +4170,7 @@
 			if (!options.length) continue;
 			const at = options[Math.floor(rng.random() * options.length)];
 			const who = board[at];
-			if (!kind.apply(board, at, rng.child("de:" + kind.name))) {
+			if (!kind.apply(board, at, rng.child("de:" + kind.name), state || null)) {
 				who.draftEvent = null;
 				continue;
 			}
@@ -4053,6 +4215,8 @@
 	   state.ageIsInformative measures — the class year is the age. */
 	function draftAge(p, state) {
 		if (state && state.ageIsInformative && Number.isFinite(p.age)) return p.age;
+		// An anomaly's age is real even when the file's ages are not.
+		if (p && p.ageFromAnomaly && Number.isFinite(p.age)) return p.age;
 		return ageForClassYear(p.classYear, p.transfer);
 	}
 
@@ -4194,7 +4358,7 @@
 		});
 		const order = board.slice();
 		state.draftEvents = applyDraftEvents(order, rng.child("draftday"),
-			state.effectiveCfg || state.cfg);
+			state.effectiveCfg || state.cfg, state);
 		order.forEach((p, i) => { p.draftSlot = i + 1; });
 		state.draftOrder = order;
 		state.board = board;
@@ -4665,8 +4829,11 @@
 		if (ahead < 1) return out;
 		for (const p of res.players) {
 			if (p.nonNcaa || !p.buildCleanBase || !RB.resolveTo) continue;
-			// Drafted men do not come back.
-			if (!Number.isFinite(p.boardRank) || p.boardRank <= DRAFT_PICKS) continue;
+			/* Drafted men do not come back. Where he was TAKEN, not where the
+			   board ranked him: draft night moves men, and a man the board had
+			   at 70 who was reached on at 25 was drafted. */
+			const slot = Number.isFinite(p.draftSlot) ? p.draftSlot : p.boardRank;
+			if (!Number.isFinite(slot) || slot <= DRAFT_PICKS) continue;
 			/* Eligibility. A senior or a graduate transfer has none left; a
 			   freshman has three. `priorYears` is the years already used, and
 			   a redshirt is a year on campus that did not spend one. */
@@ -4752,8 +4919,8 @@
 				   settings and a deterministic stream, so recomputing is
 				   cheap and exact. */
 				const bent = applyNarrative(
-					applyFlavorConfig(applyWeirdness(effective), state.flavor),
-					new Rng(seed).child("narrative")).cfg;
+					applyFlavorConfig(applyWeirdness(effective), state.flavor, effective),
+					new Rng(seed).child("narrative"), effective).cfg;
 				/* Re-apply class-level environment jitter (same deterministic
 				   stream the build phase used). Without this a warm re-run that
 				   skips the build phase would lose the jitter. */
@@ -4965,7 +5132,76 @@
 		return bits.join("; ");
 	}
 
-	function simulateProLeagues(players, cfg, rng) {
+	/* A professional regular season is a round robin — every club plays
+	   every other the same number of times, home and away — and the
+	   scheduler used to be the college one (pairUp) with no meeting cap and a
+	   coin flip for the home side: the same two clubs could meet eight times
+	   in a thirty-four-game season and a club's home share ran from 13% to
+	   83%. This is the circle method: a shuffled club order, each cycle one
+	   full round robin, the home side assigned to balance each club's home
+	   count, and every second cycle the mirror of the first so a double round
+	   robin is exactly half at home. Cycles repeat until the league's game
+	   count is reached; the last cycle is cut at a round boundary. Returns
+	   rounds of [home, away] pairs. */
+	function proRoundRobin(clubs, games, rng) {
+		const order = rng.shuffle(clubs);
+		if (order.length % 2 === 1) order.push(null);   // a bye
+		const n = order.length;
+		if (n < 2) return [];
+		const cycle = [];
+		const homes = new Map();
+		for (const c of clubs) homes.set(c, 0);
+		const ring = order.slice(1);
+		for (let r = 0; r < n - 1; r++) {
+			const round = [];
+			const lineup = [order[0]].concat(ring);
+			for (let i = 0; i < n / 2; i++) {
+				const a = lineup[i];
+				const b = lineup[n - 1 - i];
+				if (!a || !b) continue;
+				// The side with fewer home games so far hosts; a tie
+				// alternates on the round so neither slot is favoured.
+				const ha = homes.get(a);
+				const hb = homes.get(b);
+				const aHome = ha < hb || (ha === hb && (r + i) % 2 === 0);
+				const home = aHome ? a : b;
+				const away = aHome ? b : a;
+				homes.set(home, homes.get(home) + 1);
+				round.push([home, away]);
+			}
+			cycle.push(round);
+			ring.unshift(ring.pop());
+		}
+		const perCycle = clubs.length % 2 === 1 ? clubs.length - 1 : n - 1;
+		const rounds = [];
+		let played = 0;
+		for (let k = 0; played < games && k <= games; k++) {
+			for (const round of cycle) {
+				if (played >= games) break;
+				rounds.push(k % 2 === 0 ? round : round.map(([h, a]) => [a, h]));
+				// Each round is one game for every club (but a bye).
+				played += perCycle / (n - 1);
+			}
+		}
+		return rounds;
+	}
+
+	/* Best of three, higher seed at home for games one and three. */
+	function proSeries(A, B, cfg, rng, when, roundName) {
+		let wa = 0;
+		let wb = 0;
+		const games = [];
+		for (let g = 0; wa < 2 && wb < 2; g++) {
+			const homeForA = g === 1 ? -1 : 1;
+			const sc = T.playGameScore(rng, A, B, homeForA, cfg, 1, true);
+			T.recordPostseason(A, B, sc, "playoff", when + g * 0.001, roundName, homeForA);
+			if (sc.won) wa++; else wb++;
+			games.push(sc.won ? A.name + " " + sc.a + "-" + sc.b : B.name + " " + sc.b + "-" + sc.a);
+		}
+		return { winner: wa > wb ? A : B, wa, wb, games };
+	}
+
+	function simulateProLeagues(players, cfg, rng, refs) {
 		const out = {};
 		const byLeague = {};
 		for (const p of players) {
@@ -5080,24 +5316,35 @@
 			for (const c of clubs) c.rating = T.teamRating(c.members);
 
 			const games = PRO_GAMES[lgName] || 30;
-			T.pairUp(lrng, clubs, games, null, (A, B) => {
-				const when = lrng.random();
-				// Which side was at home has to reach the log, or a prospect
-				// abroad never plays a home game.
-				const homeForA = lrng.random() < 0.5 ? 1 : -1;
-				const sc = T.playGameScore(lrng, A, B, homeForA, cfg, when);
-				T.recordPostseason(A, B, sc, "reg", when, null, homeForA);
+			/* A round robin (see proRoundRobin), each round on its own date,
+			   so a club's log is a season in order: home, away, home. */
+			const schedule = proRoundRobin(clubs, games, lrng.child("schedule"));
+			schedule.forEach((round, ri) => {
+				const when = (ri + 0.5) / schedule.length;
+				for (const [A, B] of round) {
+					const sc = T.playGameScore(lrng, A, B, 1, cfg, when);
+					T.recordPostseason(A, B, sc, "reg", when, null, 1);
+				}
 			});
 			for (const c of clubs) {
 				c.pct = c.games ? c.w / c.games : 0;
 				c.sosAvg = c.games ? c.sos / c.games : 50;
+				/* The regular-season record, kept apart from c.w / c.l, which
+				   go on to count playoff and cup games: the table is ordered
+				   by this one and a view printing the other showed a
+				   standings order its own records did not explain. */
+				c.regW = c.w;
+				c.regL = c.l;
 			}
 			const table = clubs.slice().sort((a, b) => b.pct - a.pct || b.rating - a.rating);
 			table.forEach((c, i) => { c.standing = i + 1; });
 
-			/* Playoff: top 8 (or the whole league if it is smaller), single
-			   elimination. Rounds are named, so the EuroLeague's ends in a
-			   Final Four rather than an anonymous "round 2". */
+			/* Playoff: top 8 (or the whole league if it is smaller). Rounds
+			   are named, so the EuroLeague's ends in a Final Four rather than
+			   an anonymous "round 2". Every round but a Final Four is a best
+			   of three — one game decided a professional season's title on a
+			   coin that a series mostly takes out — and the Final Four keeps
+			   its single games, which is what a Final Four is. */
 			let alive = table.slice(0, Math.min(8, table.length));
 			const rounds = [];
 			const names = PLAYOFF_ROUNDS[alive.length] || null;
@@ -5111,15 +5358,28 @@
 				for (let i = 0; i < Math.floor(alive.length / 2); i++) {
 					const A = alive[i];
 					const B = alive[alive.length - 1 - i];
-					// Higher seed hosts, in the playoffs as on the scoreboard.
-					const sc = T.playGameScore(lrng, A, B, 1, cfg, 1, true);
-					T.recordPostseason(A, B, sc, "playoff", 1.05 + ri * 0.01, roundName, 1);
-					const winner = sc.won ? A : B;
-					gamesLog.push({
-						a: A, b: B, winner, round: roundName,
-						score: sc.won ? sc.a + "-" + sc.b : sc.b + "-" + sc.a,
-					});
-					next.push(winner);
+					const single = roundName === "Final Four" ||
+						(roundName === "Final" && names === PLAYOFF_ROUNDS[8]);
+					if (single) {
+						// Higher seed hosts, in the playoffs as on the scoreboard.
+						const sc = T.playGameScore(lrng, A, B, 1, cfg, 1, true);
+						T.recordPostseason(A, B, sc, "playoff", 1.05 + ri * 0.01, roundName, 1);
+						const winner = sc.won ? A : B;
+						gamesLog.push({
+							a: A, b: B, winner, round: roundName,
+							score: sc.won ? sc.a + "-" + sc.b : sc.b + "-" + sc.a,
+						});
+						next.push(winner);
+					} else {
+						const ser = proSeries(A, B, cfg, lrng, 1.05 + ri * 0.01, roundName);
+						gamesLog.push({
+							a: A, b: B, winner: ser.winner, round: roundName,
+							// The series, winner's wins first, and each game.
+							score: Math.max(ser.wa, ser.wb) + "-" + Math.min(ser.wa, ser.wb),
+							series: true, games: ser.games,
+						});
+						next.push(ser.winner);
+					}
 				}
 				if (alive.length % 2 === 1) next.push(alive[Math.floor(alive.length / 2)]);
 				rounds.push({ name: roundName, games: gamesLog });
@@ -5139,17 +5399,22 @@
 			   "Prep / Postgrad Cup Winner" on prospects' award lists. */
 			let cupAlive = lg.pro && !lg.youth ? lrng.shuffle(clubs) : [];
 			const cupRounds = [];
+			/* Played DURING the season, not after it: every round used to be
+			   stamped 1.15, so a whole cup — first round to final — sorted
+			   after the league final in every log. The rounds are spread from
+			   late autumn to about February (the regular season runs 0..1),
+			   each on its own date. */
+			const cupCount = cupAlive.length > 1 ? Math.ceil(Math.log2(cupAlive.length)) : 0;
+			let cupRound = 0;
 			while (cupAlive.length > 1) {
+				const cupWhen = 0.25 + 0.45 * (cupRound + 1) / (cupCount + 1) + 0.0005;
 				const next = [];
 				const gamesLog = [];
 				for (let i = 0; i + 1 < cupAlive.length; i += 2) {
 					const A = cupAlive[i];
 					const B = cupAlive[i + 1];
-					const sc = T.playGameScore(lrng, A, B, 0, cfg, 1, true);
-					/* After the playoffs in the log's order (1.05 + rounds), so
-					   the cup final does not sort before the semifinal it was
-					   played after. */
-					T.recordPostseason(A, B, sc, "cup", 1.15, "Cup");
+					const sc = T.playGameScore(lrng, A, B, 0, cfg, cupWhen, true);
+					T.recordPostseason(A, B, sc, "cup", cupWhen, "Cup");
 					const winner = sc.won ? A : B;
 					gamesLog.push({
 						a: A, b: B, winner,
@@ -5160,6 +5425,7 @@
 				if (cupAlive.length % 2 === 1) next.push(cupAlive[cupAlive.length - 1]);
 				cupRounds.push(gamesLog);
 				cupAlive = next;
+				cupRound++;
 			}
 			const cupChamp = cupAlive[0];
 			if (cupChamp) cupChamp.cupChamp = true;
@@ -5192,10 +5458,17 @@
 			for (const c of clubs) {
 				if (!c.prospects.length) continue;
 				const idx = table.indexOf(c);
+				/* Relegation is read alongside the playoffs, not after them: a
+				   nine-club league with eight playoff places and two relegated
+				   clubs has a club that did both, and it used to read only
+				   "made the playoffs". */
+				const inPlayoffs = idx < Math.min(8, table.length);
 				c.finish = c.leagueChamp ? "league champions"
-					: idx < Math.min(8, table.length) ? "made the playoffs"
+					: inPlayoffs && c.relegated ? "made the playoffs but was relegated"
+					: inPlayoffs ? "made the playoffs"
 					: c.relegated ? "relegated"
 					: "missed the playoffs";
+				if (c.leagueChamp && c.relegated) c.finish += ", and still relegated";
 				if (c.cupChamp) c.finish += ", cup winners";
 				if (c.continental) {
 					c.finish += "; " + c.continental.competition + ": " + c.continental.result;
@@ -5214,6 +5487,9 @@
 					games: Math.round(c.games),
 					league: env,
 					pro: lg.pro,
+					classRefVolume: refs ? refs.classRefVolume : undefined,
+					classRefMult: refs ? refs.classRefMult : undefined,
+					classRefEfficiency: refs ? refs.classRefEfficiency : undefined,
 				}, cfg, lrng.child("stats:" + c.name));
 			}
 			for (const p of byLeague[lgName]) {
@@ -5602,7 +5878,8 @@
 				   label, so a man who rose on the workout circuit could read
 				   "down 3". */
 				(p.draftSlot && p.draftSlot !== p.boardRank
-					? " · drafted No. " + p.draftSlot : ""));
+					? (p.draftSlot > DRAFT_PICKS ? " · went undrafted"
+						: " · drafted No. " + p.draftSlot) : ""));
 		}
 		void state;
 		return lines.join("\n");
@@ -6403,6 +6680,9 @@
 		   position. mergeIntoLeague overlays size onto a league player only
 		   for these — see the overlay comment there. */
 		const sizeRewritten = new Set();
+		// Rows whose born.year this export rewrote (class-year age, an
+		// anomaly's age, a floored age) — mergeIntoLeague reads it.
+		const bornRewritten = new Set();
 		/* Shirt numbers already spoken for, so a class does not import with
 		   three number 23s. Seeded with whatever the source file had. */
 		const jerseysTaken = new Set();
@@ -6497,12 +6777,15 @@
 				   the user saying "do not touch the birth years in my file"
 				   and an anomaly is not an exception to that. */
 				out.born = Object.assign({}, out.born, { year: exportSeason - p.age });
+				bornRewritten.add(i);
 			} else if (opts.ages !== false && !result.ageIsInformative &&
 				out.born && Number.isFinite(Number(out.born.year))) {
 				out.born = Object.assign({}, out.born, {
 					year: exportSeason - ageForClassYear(p.classYear, p.transfer),
 				});
+				bornRewritten.add(i);
 			} else if (p.ageFloored && out.born && Number.isFinite(Number(out.born.year))) {
+				bornRewritten.add(i);
 				/* realisticAge corrected THIS player's file age (see
 				   phaseBuild) regardless of whether the flag above skipped
 				   everyone else — an exported file that still says sixteen
@@ -6850,6 +7133,7 @@
 		// Readable by the caller, never written into the file.
 		exportFile.passthroughs = passthroughs;
 		exportFile.sizeRewritten = sizeRewritten;
+		exportFile.bornRewritten = bornRewritten;
 		return file;
 	}
 
@@ -7281,6 +7565,7 @@
 		}
 		const ours = exportFile(result, opts).players;
 		const sized = exportFile.sizeRewritten || new Set();
+		const aged = exportFile.bornRewritten || new Set();
 		const season = classDraftYear(ours, result.season);
 		/* Players an earlier class in the same merge already wrote. They look
 		   exactly like the generated prospects this pass is replacing, so
@@ -7317,7 +7602,7 @@
 		   actually produced goes on top of him. statsTids is the one field
 		   that has to be recomputed rather than kept, because the rows being
 		   written name a team the player has no history with. */
-		const overlay = (target, p, sized) => {
+		const overlay = (target, p, sized, aged) => {
 			/* A WHITELIST, not a spread.
 
 			   This used to be Object.assign({}, target, p) — the whole
@@ -7344,6 +7629,14 @@
 			if (sized) {
 				if (src2.hgt !== undefined) out.hgt = src2.hgt;
 				if (src2.weight !== undefined) out.weight = src2.weight;
+			}
+			/* Birth YEAR only when this export rewrote it (the class-year
+			   age, an anomaly's age): that is the age the whole class was
+			   simulated at, and leaving the league's 19-for-everyone year
+			   in place made a merged graduate transfer nineteen again. His
+			   birthplace stays the league's. */
+			if (aged && src2.born && Number.isFinite(Number(src2.born.year))) {
+				out.born = Object.assign({}, target.born || {}, { year: Number(src2.born.year) });
 			}
 			/* The class's ratings row replaces the league prospect's row for
 			   the same season, and is appended when he has none. His earlier
@@ -7402,7 +7695,7 @@
 			   used to write the second over the first and lose a player,
 			   past the guard below, which only counts the league's side. */
 			if (target && sameName(target, p) && !replacements.has(target)) {
-				replacements.set(target, overlay(target, p, sized.has(oi)));
+				replacements.set(target, overlay(target, p, sized.has(oi), aged.has(oi)));
 			} else {
 				const copy = JSON.parse(JSON.stringify(p));
 				copy.pid = ++maxPid;

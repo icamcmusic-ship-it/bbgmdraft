@@ -131,7 +131,12 @@ function makeClass(rng, n, targetOvrAt) {
 			pid: i,
 			firstName: "Test", lastName: "P" + i,
 			born: { year: 2007, loc: pr.random() < 0.75 ? "Anytown, WA" : "Belgrade, Serbia" },
-			hgt: 66 + Math.round((hgt / 100) * 24),
+			/* BBGM's own height map (heightToRating.ts): rating =
+			   100 * (inches - 66) / 27, the same 27-inch span js/engine.js
+			   inverts (HGT_MIN_IN..HGT_MAX_IN). This fixture used 24, so every
+			   listed height it wrote was short of the rating beside it by up
+			   to three inches. */
+			hgt: 66 + Math.round((hgt / 100) * 27),
 			weight: Math.round(165 + hgt * 0.9),
 			college: pr.random() < 0.18 ? "" : pickCollege(pr.random()),
 			draft: { year: 2026, round: 1 + Math.floor(i / 30), pick: 1 + (i % 30) },

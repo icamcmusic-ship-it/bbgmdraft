@@ -21,7 +21,11 @@
 		"Sun Belt":       { strength: 63, bids: 1, tier: "mid" },
 		"Big West":       { strength: 63, bids: 1, tier: "mid" },
 		"CAA":            { strength: 63, bids: 1, tier: "mid" },
-		"WAC":            { strength: 62, bids: 1, tier: "low" },
+		/* The WAC renamed itself the United Athletic Conference on July 1,
+		   2026, when it absorbed five ASUN programs and lost its four western
+		   members. Keyed by the new name; CONF_ALIASES below carries "WAC"
+		   for an older saved universe or override. */
+		"UAC":            { strength: 62, bids: 1, tier: "low" },
 		"Horizon":        { strength: 61, bids: 1, tier: "low" },
 		"MAAC":           { strength: 58, bids: 1, tier: "low" },
 		"Southern":       { strength: 59, bids: 1, tier: "low" },
@@ -62,10 +66,21 @@
 	   Francis (PA) was still here after dropping to Division II at the end
 	   of 2025-26, and New Haven, Division I since 2025-26, was missing. One
 	   season, applied to all four: UC Davis is Mountain West, Louisiana Tech
-	   is Sun Belt, New Haven is in the NEC and St. Francis (PA) is out. */
+	   is Sun Belt, New Haven is in the NEC and St. Francis (PA) is out.
+
+	   And the moves effective July 1, 2026, which the 2027-28 table had
+	   missed: Hawaii to the Mountain West; Northern Illinois from the MAC to
+	   the Horizon; the WAC renamed the United Athletic Conference (UAC),
+	   with California Baptist and Utah Valley leaving for the Big West and
+	   Southern Utah and Utah Tech for the Big Sky, while Austin Peay,
+	   Eastern Kentucky, North Alabama, West Georgia and Central Arkansas
+	   came over from the ASUN to join Abilene Christian, Tarleton State and
+	   UT Arlington; and Sacramento State from the Big Sky to the Big West.
+	   The ASUN is left at seven, which is exactly the schedulable floor
+	   (MIN_CONF_MEMBERS in js/teams.js). */
 	// school -> [BBGM frequency, conference]
 	const COLLEGES = {
-		"Abilene Christian": [0.1, "WAC"],
+		"Abilene Christian": [0.1, "UAC"],
 		"Air Force": [1, "Mountain West"],
 		"Akron": [4, "MAC"],
 		"Alabama": [28, "SEC"],
@@ -82,7 +97,7 @@
 		"Arkansas-Pine Bluff": [1, "SWAC"],
 		"Army": [0.1, "Patriot"],
 		"Auburn": [23, "SEC"],
-		"Austin Peay": [7, "ASUN"],
+		"Austin Peay": [7, "UAC"],
 		"BYU": [22, "Big 12"],
 		"Ball State": [3, "MAC"],
 		"Baylor": [19, "Big 12"],
@@ -104,10 +119,10 @@
 		"Cal State Fullerton": [12, "Big West"],
 		"Cal State Northridge": [1, "Big West"],
 		"California": [37, "ACC"],
-		"California Baptist": [0.1, "WAC"],
+		"California Baptist": [0.1, "Big West"],
 		"Campbell": [2, "CAA"],
 		"Canisius": [11, "MAAC"],
-		"Central Arkansas": [1, "ASUN"],
+		"Central Arkansas": [1, "UAC"],
 		"Central Connecticut State": [2, "NEC"],
 		"Central Michigan": [8, "MAC"],
 		"Charleston": [3, "CAA"],
@@ -143,7 +158,7 @@
 		"East Carolina": [3, "American"],
 		"East Tennessee State": [3, "Southern"],
 		"Eastern Illinois": [2, "Ohio Valley"],
-		"Eastern Kentucky": [7, "ASUN"],
+		"Eastern Kentucky": [7, "UAC"],
 		"Eastern Michigan": [11, "MAC"],
 		"Eastern Washington": [2, "Big Sky"],
 		"Elon": [1, "CAA"],
@@ -173,7 +188,7 @@
 		"Green Bay": [4, "Horizon"],
 		"Hampton": [2, "CAA"],
 		"Harvard": [4, "Ivy"],
-		"Hawaii": [8, "Big West"],
+		"Hawaii": [8, "Mountain West"],
 		"High Point": [1, "Big South"],
 		"Hofstra": [5, "CAA"],
 		"Holy Cross": [11, "Patriot"],
@@ -261,7 +276,7 @@
 		"Niagara": [11, "MAAC"],
 		"Nicholls State": [2, "Southland"],
 		"Norfolk State": [5, "MEAC"],
-		"North Alabama": [0.1, "ASUN"],
+		"North Alabama": [0.1, "UAC"],
 		"North Carolina": [97, "ACC"],
 		"North Carolina A&T": [5, "CAA"],
 		"North Carolina Central": [3, "MEAC"],
@@ -274,7 +289,7 @@
 		"Northeastern": [5, "CAA"],
 		"Northern Arizona": [3, "Big Sky"],
 		"Northern Colorado": [1, "Big Sky"],
-		"Northern Illinois": [8, "MAC"],
+		"Northern Illinois": [8, "Horizon"],
 		"Northern Iowa": [0.1, "Missouri Valley"],
 		"Northern Kentucky": [0.1, "Horizon"],
 		"Northwestern": [18, "Big Ten"],
@@ -313,7 +328,7 @@
 		"Rutgers": [13, "Big Ten"],
 		"SIU-Edwardsville": [0.1, "Ohio Valley"],
 		"SMU": [17, "ACC"],
-		"Sacramento State": [0.1, "Big Sky"],
+		"Sacramento State": [0.1, "Big West"],
 		"Sacred Heart": [0.1, "MAAC"],
 		"Saint Joseph's (PA)": [21, "Atlantic 10"],
 		"Saint Louis": [15, "Atlantic 10"],
@@ -339,7 +354,7 @@
 		"Southern Illinois": [10, "Missouri Valley"],
 		"Southern Miss": [5, "Sun Belt"],
 		"Southern University": [6, "SWAC"],
-		"Southern Utah": [0.1, "WAC"],
+		"Southern Utah": [0.1, "Big Sky"],
 		"St. Bonaventure": [17, "Atlantic 10"],
 		"St. John's": [54, "Big East"],
 		"St. Peter's": [4, "MAAC"],
@@ -360,7 +375,7 @@
 		"Texas Southern": [5, "SWAC"],
 		"Texas State": [2, "Pac-12"],
 		"Texas Tech": [14, "Big 12"],
-		"Texas-Arlington": [1, "WAC"],
+		"Texas-Arlington": [1, "UAC"],
 		"Toledo": [11, "MAC"],
 		"Towson": [3, "CAA"],
 		"Troy": [0.1, "Sun Belt"],
@@ -384,7 +399,7 @@
 		"UTSA": [2, "American"],
 		"Utah": [31, "Big 12"],
 		"Utah State": [9, "Pac-12"],
-		"Utah Valley": [3, "WAC"],
+		"Utah Valley": [3, "Big West"],
 		"VCU": [10, "Atlantic 10"],
 		"Valparaiso": [7, "Missouri Valley"],
 		"Vanderbilt": [27, "SEC"],
@@ -405,13 +420,13 @@
 		"Mercyhurst": [0.1, "NEC"],
 		"Queens": [0.1, "ASUN"],
 		"Bellarmine": [0.1, "ASUN"],
-		"West Georgia": [0.1, "ASUN"],
+		"West Georgia": [0.1, "UAC"],
 		"Lindenwood": [0.1, "Ohio Valley"],
 		"Southern Indiana": [0.1, "Ohio Valley"],
 		"East Texas A&M": [0.1, "Southland"],
-		"Tarleton State": [0.2, "WAC"],
+		"Tarleton State": [0.2, "UAC"],
 		"UT Rio Grande Valley": [0.3, "Southland"],
-		"Utah Tech": [0.1, "WAC"],
+		"Utah Tech": [0.1, "Big Sky"],
 		"Little Rock": [7, "Ohio Valley"],
 		"Omaha": [0.3, "Summit"],
 		"St. Thomas": [0.2, "Summit"],
@@ -1218,6 +1233,33 @@
 		"UConn": "Connecticut",
 		"Mississippi": "Ole Miss",
 		"Penn": "Pennsylvania",
+		/* The schools' own spellings, which a hand-edited class uses as often
+		   as BBGM's. Each target is a key of COLLEGES. */
+		"Saint Peter's": "St. Peter's",
+		"Saint Peters": "St. Peter's",
+		"Detroit": "Detroit Mercy",
+		"Miami (Ohio)": "Miami (OH)",
+		"Miami-Ohio": "Miami (OH)",
+		"Miami (Fla.)": "Miami (FL)",
+		"Hawai'i": "Hawaii",
+		"Hawai\u02BBi": "Hawaii",
+		"UT Arlington": "Texas-Arlington",
+		"St. Mary's": "Saint Mary's",
+		"Cal State Long Beach": "Long Beach State",
+		"Southeast Missouri": "Southeast Missouri State",
+	};
+
+	/* Conference names a saved universe, an override or an older export may
+	   still carry. The WAC became the UAC on July 1, 2026. */
+	const CONF_ALIASES = {
+		"WAC": "UAC",
+		"Western Athletic Conference": "UAC",
+		"United Athletic Conference": "UAC",
+	};
+	const canonicalConference = (name) => {
+		if (name === undefined || name === null) return name;
+		const key = String(name).trim();
+		return CONF_ALIASES[key] || key;
 	};
 	const canonical = (name) => {
 		if (name === undefined || name === null) return name;
@@ -1271,7 +1313,7 @@
 		COLLEGES, CONFERENCES, NON_NCAA, PRO_CLUBS, byConference,
 		conferenceOf, frequencyOf, prestige, prestigeOrLowMajor, isKnown,
 		UNKNOWN_PRESTIGE, region, isUSA, leagueWeight,
-		ALIASES, canonical, CLUB_LEAGUE, leagueOfClub,
+		ALIASES, canonical, CONF_ALIASES, canonicalConference, CLUB_LEAGUE, leagueOfClub,
 		ABBREVS, abbrev,
 		CANADA_HINTS, US_STATES, GEORGIAN_CITIES, EURO_HINTS, OCEANIA_HINTS, ASIA_HINTS, LATAM_HINTS, AFRICA_HINTS,
 		names: Object.keys(COLLEGES),

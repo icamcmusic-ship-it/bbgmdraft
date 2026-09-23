@@ -61,7 +61,10 @@
 		presetDirty: false,
 		customPresets: {},
 		editing: null,   // player key currently open in the editor
-		hiddenColumns: {},
+		/* Seeded from the columns flagged `off` (see defaultHiddenColumns in
+		   js/views.js); a saved preference replaces it in loadSettings. It
+		   used to start {}, so a first visit showed all sixty-one columns. */
+		hiddenColumns: V.defaultHiddenColumns ? V.defaultHiddenColumns() : {},
 		// Column ORDER, as a list of keys. See orderedColumns in js/views.js.
 		columnOrder: null,
 		statMode: "perGame",
@@ -424,7 +427,7 @@
 			}
 			saved = upgraded;
 		}
-		if (saved.cfg && typeof saved.cfg === "object") state.cfg = CFG.make(saved.cfg);
+		if (saved.cfg && typeof saved.cfg === "object") state.cfg = fitEra(CFG.make(saved.cfg));
 		if (saved.overrides && typeof saved.overrides === "object" &&
 			!Array.isArray(saved.overrides)) state.overrides = saved.overrides;
 		if (validString(saved.overrideFingerprint)) {
@@ -726,6 +729,57 @@
 		"weirdness", "anomalyChoices", "flavorBlend", "extrapolateYears",
 	];
 
+	/* WHAT "AT ITS DEFAULT" MEANS.
+
+	   Config.DEFAULTS is the raw table, and two of its entries are null where
+	   make() expands them — leagueWeights into the full destination table,
+	   archetypeWeights into {}. So every comparison against the raw table saw
+	   both as changed on a fresh page: a 700-character link at defaults,
+	   "[object Object]" in the copied text, a Reset that offered to reset
+	   them. A weight table is compared by the weights it produces, missing
+	   entries reading as the built-in weight, so key order and an explicit
+	   copy of a built-in value are not "a change" either. */
+	let normDefaults = null;
+	function defaultCfg() { return normDefaults || (normDefaults = CFG.make()); }
+	function defaultOf(k) {
+		const d = defaultCfg()[k];
+		return d && typeof d === "object" ? JSON.parse(JSON.stringify(d)) : d;
+	}
+	function builtinWeight(k, name) {
+		if (k === "leagueWeights") return defaultCfg().leagueWeights[name];
+		const a = RB.ARCHETYPES.filter((x) => x.name === name)[0];
+		return a ? (a.w === undefined ? 1 : a.w) : undefined;
+	}
+	function isWeightTable(k) { return k === "leagueWeights" || k === "archetypeWeights"; }
+	function sameSetting(k, a, b) {
+		if (isWeightTable(k)) {
+			const x = a || {};
+			const y = b || {};
+			const names = new Set(Object.keys(x).concat(Object.keys(y)));
+			for (const n of names) {
+				const vx = Number.isFinite(x[n]) ? x[n] : builtinWeight(k, n);
+				const vy = Number.isFinite(y[n]) ? y[n] : builtinWeight(k, n);
+				if (vx !== vy) return false;
+			}
+			return true;
+		}
+		return JSON.stringify(a === undefined ? null : a) ===
+			JSON.stringify(b === undefined ? null : b);
+	}
+	function isDefaultSetting(k, v) { return sameSetting(k, v, defaultCfg()[k]); }
+	/* The part of a setting worth writing down: a weight table as only the
+	   entries that differ from the built-ins, anything else as itself.
+	   Undefined when the setting is at its default. */
+	function settingDelta(k, v) {
+		if (isDefaultSetting(k, v)) return undefined;
+		if (!isWeightTable(k)) return v;
+		const out = {};
+		for (const n of Object.keys(v || {})) {
+			if (v[n] !== builtinWeight(k, n)) out[n] = v[n];
+		}
+		return out;
+	}
+
 	// The build table is the authority on how many builds there are; every
 	// place that used to guess (98, 117, 121) has been wrong at some point.
 	function archetypeTableSize() {
@@ -761,6 +815,12 @@
 		realignmentRate: (v) => (v ? Math.round(v * 100) + "%" : "off"),
 		bluebloodDownYears: (v) => (v ? v + " program" + (v === 1 ? "" : "s") : "none"),
 		midMajorLift: (v) => (v ? "+" + v : "off"),
+		// The five that printed a bare number in a panel of units.
+		flavorBlend: (v) => (v ? Math.round(v * 100) + "%" : "off"),
+		styleDrift: (v) => v.toFixed(2) + "x",
+		anomalyMemory: (v) => v.toFixed(2) + "x",
+		weirdness: (v) => (v === 0 ? "ordinary" : (v > 0 ? "+" : "") + v),
+		variation: (v) => (v ? "#" + v : "the seed's own"),
 	};
 
 	/* What each slider actually does, in units. "Class quality 2" means nothing
@@ -922,7 +982,8 @@
 		   a constant: the hint said "≈70 points" whatever era was chosen,
 		   because it was written when there was only one. */
 		pace: (v) => {
-			const era = global.Calibration.eraInfo(state.cfg.era);
+			const CAL = global.Calibration;
+			const era = CAL.eraInfo(state.cfg.era) || CAL.eraInfo(CAL.DEFAULT_ERA);
 			return "≈" + Math.round((v * era.rotation.ortg) / 100) +
 				" team points per game (Division I only)";
 		},
@@ -1213,7 +1274,8 @@
 			input.value = state.cfg[key];
 			// Sync numeric input
 			const num = $(key + "Num");
-			if (num) num.value = state.cfg[key];
+			// Never under the cursor: see bindSliderNumbers.
+			if (num && num !== document.activeElement) num.value = state.cfg[key];
 			const ctl = input.closest(".ctl");
 			const shown = (FORMAT[key] || ((v) => String(v)))(Number(input.value));
 			const b = ctl.querySelector("label b");
@@ -1246,7 +1308,11 @@
 				const fmt = FORMAT[key] || ((v) => String(v));
 				const def = CFG.DEFAULTS[key];
 				const atDefault = Number(input.value) === Number(def);
-				hint.textContent = SLIDER_HINT[key](Number(input.value)) +
+				/* One hint that throws must not take the rest of the paint —
+				   and every binding after it at startup — down with it. */
+				let said = "";
+				try { said = SLIDER_HINT[key](Number(input.value)); } catch (e) { said = ""; }
+				hint.textContent = said +
 					(atDefault || !Number.isFinite(Number(def))
 						? "" : " · default " + fmt(Number(def)));
 			}
@@ -1348,7 +1414,16 @@
 		   cardMode in js/views.js), which is both narrower — it cannot reach a
 		   table that has no data-label attributes — and answerable: the user
 		   can now ask for cards at any width. */
-		document.body.className = "density-" + state.density;
+		/* Only the density class: the body also carries settings-open,
+		   settings-closed and busy, and assigning className wiped all three
+		   on every repaint — closing the panel, then moving a slider, opened
+		   it again. */
+		for (const c of Array.from(document.body.classList)) {
+			if (c.indexOf("density-") === 0 && c !== "density-" + state.density) {
+				document.body.classList.remove(c);
+			}
+		}
+		document.body.classList.add("density-" + state.density);
 		paintLockButtons();
 		paintGroupResets();
 	}
@@ -1493,7 +1568,7 @@
 			if (k === "seed") continue;
 			const x = a[k];
 			const y = b[k];
-			if (JSON.stringify(x) === JSON.stringify(y)) continue;
+			if (sameSetting(k, x, y)) continue;
 			if (x && typeof x === "object") { out.push(k + " (edited)"); continue; }
 			out.push(k + " " + x + " → " + y);
 		}
@@ -1664,12 +1739,12 @@
 				e.preventDefault();
 				e.stopPropagation();
 				const keys = groupKeys(details).filter(
-					(k) => JSON.stringify(state.cfg[k]) !== JSON.stringify(CFG.DEFAULTS[k]));
+					(k) => !isDefaultSetting(k, state.cfg[k]));
 				if (!keys.length) return;
 				pushUndo("reset " + (summary.dataset.label || "a group") + " to defaults");
 				for (const k of keys) {
-					const d = CFG.DEFAULTS[k];
-					state.cfg[k] = typeof d === "number" ? Number(d) : d;
+					const d = defaultOf(k);
+					state.cfg[k] = d;
 					const inp = $(k);
 					if (inp) {
 						if (inp.type === "checkbox") inp.checked = !!d;
@@ -1695,7 +1770,7 @@
 			const btn = details.querySelector(".grp-reset");
 			if (!btn) continue;
 			const n = groupKeys(details).filter(
-				(k) => JSON.stringify(state.cfg[k]) !== JSON.stringify(CFG.DEFAULTS[k])).length;
+				(k) => !isDefaultSetting(k, state.cfg[k])).length;
 			btn.hidden = n === 0;
 			btn.textContent = n ? "Reset " + n : "Reset group";
 		}
@@ -1720,7 +1795,15 @@
 			num.step = range.step;
 			num.value = range.value;
 			num.id = key + "Num";
-			num.setAttribute("aria-label", (ctl.querySelector("label") || {}).textContent || key);
+			/* The label also carries the readout, the padlock, the modified
+			   dot and the revert button, all of which became part of the
+			   slider's accessible NAME ("Pace 68 🔓 Lock pace against the
+			   randomizer ↺ …"). The name is the label's own words, fixed here
+			   before any of those are added. */
+			const name = ((ctl.querySelector("label") || {}).textContent || key)
+				.replace(/\s+/g, " ").trim() || key;
+			range.setAttribute("aria-label", name);
+			num.setAttribute("aria-label", name + " (number)");
 			wrapper.appendChild(num);
 		}
 	}
@@ -1728,9 +1811,8 @@
 	/* Per-setting modified marker and revert (Part 5C). */
 	function paintModifiedMarker(ctl, key, currentValue) {
 		if (!ctl) return;
-		const defaults = CFG.DEFAULTS;
-		const defaultValue = defaults[key];
-		const isModified = JSON.stringify(currentValue) !== JSON.stringify(defaultValue);
+		const defaultValue = defaultOf(key);
+		const isModified = !isDefaultSetting(key, currentValue);
 		// Remove existing marker elements
 		const existing = ctl.querySelector(".modified-dot");
 		if (existing) existing.remove();
@@ -1749,7 +1831,7 @@
 				revertBtn.addEventListener("click", (e) => {
 					e.stopPropagation();
 					pushUndo("reverted " + key + " to default");
-					state.cfg[key] = typeof defaultValue === "number" ? Number(defaultValue) : defaultValue;
+					state.cfg[key] = defaultOf(key);
 					markDirty();
 					// Update checkboxes and selects that paintConfig reads
 					const inp = $(key);
@@ -1782,25 +1864,34 @@
 			// When slider moves, update number
 			range.addEventListener("input", () => { num.value = range.value; });
 			// When number is typed, update slider and trigger the same pipeline
+			/* A keystroke is half a number. Clamping each one turned "7" of a
+			   typed "70" into the pace floor of 58, painted 58 back into the
+			   box under the cursor, and the "0" then made 580 -> 82. So a
+			   keystroke only applies a value already inside the band and never
+			   rewrites the box; the clamp happens once, on change/blur. */
 			let numPushed = false;
-			num.addEventListener("input", () => {
+			const applyNum = (v) => {
 				if (!numPushed) { pushUndo("moved " + key); numPushed = true; }
-				const v = Number(num.value);
-				if (!Number.isFinite(v)) return;
-				const clamped = Math.max(Number(range.min), Math.min(Number(range.max), v));
-				range.value = clamped;
-				state.cfg[key] = clamped;
+				range.value = v;
+				state.cfg[key] = Number(range.value);
 				markDirty();
 				paintConfig();
 				scheduleRun();
+			};
+			num.addEventListener("input", () => {
+				if (num.value.trim() === "") return;
+				const v = Number(num.value);
+				if (!Number.isFinite(v) || v < Number(range.min) || v > Number(range.max)) return;
+				applyNum(v);
 			});
 			num.addEventListener("change", () => {
-				numPushed = false;
-				// Clamp on blur
 				const v = Number(num.value);
-				if (Number.isFinite(v)) {
-					num.value = Math.max(Number(range.min), Math.min(Number(range.max), v));
+				if (num.value.trim() !== "" && Number.isFinite(v)) {
+					const clamped = Math.max(Number(range.min), Math.min(Number(range.max), v));
+					if (clamped !== state.cfg[key]) applyNum(clamped);
 				}
+				num.value = state.cfg[key];
+				numPushed = false;
 				persist();
 			});
 			/* DOUBLE-CLICK A SLIDER TO PUT IT BACK.
@@ -1860,6 +1951,8 @@
 	   world, and a randomizer that keeps changing the length of a list you are
 	   reading is an irritation rather than a surprise. */
 	const RANDOM_SCOPES = ["gentle", "wide"].concat(Object.keys(RANDOM_GROUPS));
+	// The controls marked data-curve in index.html.
+	const CURVE_KEYS = ["classQuality", "classDepth", "eliteCount"];
 	const RANDOM_KEYS = Object.keys(RANDOM_GROUPS)
 		.reduce((a, g) => a.concat(RANDOM_GROUPS[g]), []);
 
@@ -1918,6 +2011,10 @@
 		for (const g of groups) {
 			for (const key of RANDOM_GROUPS[g]) {
 				if (state.settingLocks[key]) { locked++; continue; }
+				/* The curve dials do nothing while overalls are preserved —
+				   the panel dims them — and a draw spent on one is a
+				   "randomized 3 settings" that changed nothing. */
+				if (CURVE_KEYS.indexOf(key) !== -1 && state.cfg.ovrMode !== "curve") continue;
 				const v = randomSliderValue(key, mode, rng);
 				if (v === null || v === state.cfg[key]) continue;
 				patch[key] = v;
@@ -1955,9 +2052,9 @@
 		return Math.floor(Math.random() * 0x7fffffff).toString(36);
 	}
 
-	function randomizeSettings(scope, givenSeed) {
+	function randomizeSettings(scope, givenSeed, noUndo) {
 		if (RANDOM_SCOPES.indexOf(scope) === -1) scope = "gentle";
-		pushUndo("randomized settings (" + scope + ")");
+		if (!noUndo) pushUndo("randomized settings (" + scope + ")");
 		const rseed = givenSeed && String(givenSeed).trim()
 			? String(givenSeed).trim() : mintRandomSeed();
 		state.lastRandomSeed = rseed;
@@ -2038,13 +2135,16 @@
 	   the part a reroll is usually FOR. */
 	function surpriseMe() {
 		if (!state.files.length) { setStatus("Load a class file first."); return; }
+		/* ONE undo entry for the whole gesture, as the status line promises:
+		   the randomizer and the reroll below are told not to push their own,
+		   or Ctrl+Z took back the reroll and left the wide settings behind. */
 		pushUndo("surprise me");
-		randomizeSettings("wide");
+		randomizeSettings("wide", null, true);
 		/* After the randomizer's own run, not instead of it: randomizeSettings
 		   schedules a run and the reroll has to follow the settings it drew,
 		   or the class on screen is the old settings with a new seed. */
 		setTimeout(() => {
-			reroll();
+			reroll({ noUndo: true });
 			setTimeout(() => {
 				const res = state.results[state.active];
 				if (!res) return;
@@ -2306,27 +2406,28 @@
 			for (const ctl of ctls) {
 				const input = ctl.querySelector("input, select");
 				const key = input && input.id;
-				total++;
+				/* Only a control with a config key is a SETTING: the batch
+				   row and the anomaly shortlist are rows in the panel, and
+				   counting them made "only what I changed" read "2 of 62
+				   settings" on a page at its defaults. */
+				const isSetting = !!(key && key in D);
+				const changed = isSetting && !isDefaultSetting(key, state.cfg[key]);
+				if (isSetting) total++;
 				let show = true;
 				if (q && settingText(ctl).indexOf(q) === -1) show = false;
-				if (show && !q && !changedOnly && TIER_RANK[tierOf(key)] > tierRank) {
+				// A setting you changed is never hidden behind a tier.
+				if (show && !q && !changedOnly && !changed &&
+					TIER_RANK[tierOf(key)] > tierRank) {
 					show = false;
-					tiered++;
+					if (isSetting) tiered++;
 				}
-				if (show && changedOnly && key && key in D) {
-					const cur = state.cfg[key];
-					const def = D[key];
-					const same = typeof cur === "object" || typeof def === "object"
-						? JSON.stringify(cur) === JSON.stringify(def)
-						: cur === def;
-					if (same) show = false;
-				}
+				if (show && changedOnly && !changed) show = false;
 				/* The stylesheet's own class, not the `hidden` attribute: a
 				   .ctl inside a <details> that is closed is already not
 				   rendered, and mixing the two mechanisms made "show only what
 				   I changed" leave empty gaps where a control used to be. */
 				ctl.classList.toggle("settings-hidden", !show);
-				if (show) { any++; shown++; }
+				if (show) { any++; if (isSetting) shown++; }
 			}
 			/* A group with nothing in it is hidden rather than left as an
 			   empty heading, and a group with a match is opened — otherwise
@@ -2493,18 +2594,32 @@
 			run();
 		});
 		$("seed").addEventListener("change", () => {
-			state.cfg.seed = $("seed").value.trim();
+			const seed = $("seed").value.trim();
+			if (seed === state.cfg.seed) return;
+			// A typed seed replaces the class on screen, so it is undoable
+			// like the reroll that does the same thing.
+			pushUndo(seed ? "typed the seed " + seed : "cleared the seed");
+			state.cfg.seed = seed;
 			run();
 		});
 
+		const SESSION_TOGGLES = ["universe", "lockHeights", "narrative"];
 		const preset = $("preset");
 		preset.addEventListener("change", () => {
 			const p = CFG.PRESETS[preset.value] || state.customPresets[preset.value];
 			if (!p) return;
 			pushUndo("applied the preset " + preset.value);
 			const seed = state.cfg.seed;
-			state.cfg = CFG.make(p);
+			/* A preset is about the CLASS. Universe mode, the height lock and
+			   the storylines are how this session runs, and a preset that
+			   does not mention them used to switch all three back to their
+			   defaults without a word. */
+			const keep = {};
+			for (const k of SESSION_TOGGLES) if (!(k in p)) keep[k] = state.cfg[k];
+			const wasUniverse = !!state.cfg.universe;
+			state.cfg = fitEra(CFG.make(Object.assign({}, p, keep)));
 			state.cfg.seed = seed;
+			if (!!state.cfg.universe !== wasUniverse) state.universe.cfgs = {};
 			state.presetName = preset.value;
 			state.presetDirty = false;
 			paintConfig();
@@ -2529,12 +2644,14 @@
 						: "Give the preset a name."));
 					return;
 				}
+				/* A preset is the settings, not this class: the seed and the
+				   anomaly shortlist's answers (kind names drawn for ONE class)
+				   stay out, and a weight table is kept as its edits only. */
 				const saved = {};
 				for (const k of Object.keys(CFG.DEFAULTS)) {
-					if (k === "seed") continue;
-					if (JSON.stringify(state.cfg[k]) !== JSON.stringify(CFG.DEFAULTS[k])) {
-						saved[k] = state.cfg[k];
-					}
+					if (k === "seed" || k === "anomalyPicks") continue;
+					const d = settingDelta(k, state.cfg[k]);
+					if (d !== undefined) saved[k] = d;
 				}
 				state.customPresets[name] = saved;
 				state.presetName = name;
@@ -2560,8 +2677,7 @@
 			// What is actually about to be lost, counted, so the dialog is a
 			// fact rather than a warning.
 			const moved = Object.keys(CFG.DEFAULTS).filter((k) =>
-				k !== "seed" &&
-				JSON.stringify(state.cfg[k]) !== JSON.stringify(CFG.DEFAULTS[k]));
+				k !== "seed" && !isDefaultSetting(k, state.cfg[k]));
 			if (!moved.length) {
 				setStatus("Every setting is already at its default.");
 				return;
@@ -2935,9 +3051,8 @@
 	function encodeConfig(withDrawnSeed) {
 		const out = {};
 		for (const k of Object.keys(CFG.DEFAULTS)) {
-			const v = state.cfg[k];
-			const d = CFG.DEFAULTS[k];
-			if (JSON.stringify(v) !== JSON.stringify(d)) out[k] = v;
+			const d = settingDelta(k, state.cfg[k]);
+			if (d !== undefined) out[k] = d;
 		}
 		/* A rerolled class has no typed seed; the one it drew is the only
 		   thing that reproduces it, and a link without it opened a
@@ -2987,15 +3102,26 @@
 			lines.push("settings changed from default (" + keys.length + "):");
 			for (const k of keys) {
 				const v = payload[k];
-				const shown = typeof v === "number" && FORMAT[k] ? FORMAT[k](v) : String(v);
-				const def = CFG.DEFAULTS[k];
-				const defShown = typeof def === "number" && FORMAT[k] ? FORMAT[k](def) : String(def);
+				if (isWeightTable(k)) {
+					const names = Object.keys(v || {});
+					lines.push("  " + k + ": " + (names.length
+						? names.map((n) => n + " " + v[n] + " (default " +
+							builtinWeight(k, n) + ")").join(", ")
+						: "edited"));
+					continue;
+				}
+				const shown = typeof v === "number" && FORMAT[k] ? FORMAT[k](v)
+					: v && typeof v === "object" ? JSON.stringify(v) : String(v);
+				const def = defaultOf(k);
+				const defShown = typeof def === "number" && FORMAT[k] ? FORMAT[k](def)
+					: def && typeof def === "object" ? JSON.stringify(def) : String(def);
 				lines.push("  " + k + ": " + shown + "  (default " + defShown + ")");
 			}
 		}
 		const locks = Object.keys(state.overrides).length;
 		if (locks) lines.push("", locks + " locked player" + (locks === 1 ? "" : "s") +
-			" — not carried by this text; share the link or the locks CSV for those.");
+			" — not carried by this text; share the link, or More ▾ → locked " +
+			"prospects as CSV, for those.");
 		return lines.join("\n");
 	}
 
@@ -3005,6 +3131,8 @@
 	   it got, and applies the wrong settings. */
 	const HASH_LIMIT = 8000;
 	let hashWarned = false;
+	// What writeHash last put in the address bar; see the hashchange listener.
+	let lastWrittenHash = null;
 
 	function writeHash(withDrawnSeed) {
 		try {
@@ -3024,31 +3152,48 @@
 					hashWarned = true;
 					setStatus("This class has too many locked players to fit in a " +
 						"shareable link, so the link carries the settings only. " +
-						"Export the locks as CSV to share those.", true);
+						"Export the locks as CSV (More ▾) to share those.", true);
 				}
 			}
+			lastWrittenHash = body ? "#c=" + body : "";
 			history.replaceState(null, "", body ? "#c=" + body : "#");
 		} catch (e) { /* a hash that will not fit is not worth an error banner */ }
+	}
+
+	/* The era picker offers only the eras the model is fitted to. Config.make
+	   accepts any era the table knows (the harness runs an unfitted one by
+	   name), so a link or a stored session naming an unfitted era is brought
+	   back to the default here, where the panel is the one reading it. */
+	function fitEra(cfg) {
+		const CAL = global.Calibration;
+		if (cfg && CAL.fittedEras().indexOf(cfg.era) === -1) cfg.era = CAL.DEFAULT_ERA;
+		return cfg;
 	}
 
 	function readHash() {
 		const m = /[#&]c=([^&]+)/.exec(location.hash || "");
 		if (!m) return false;
+		let payload;
 		try {
-			const payload = JSON.parse(decodeURIComponent(m[1]));
-			if (payload.overrides) {
-				state.overrides = payload.overrides;
-				state.overrideFingerprint = payload.fp || null;
-				delete payload.overrides;
-				delete payload.fp;
-			}
-			state.cfg = CFG.make(payload);
-			state.presetDirty = true;
-			return true;
+			payload = JSON.parse(decodeURIComponent(m[1]));
 		} catch (e) {
 			showError(new Error("Could not read the settings in this link."));
 			return false;
 		}
+		/* `#c=null`, `#c=[]`, `#c=5`: valid JSON and not a settings object.
+		   Nothing to apply, and nothing worth an error banner either. */
+		if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
+		/* A LINK IS THE WHOLE STATE IT DESCRIBES. A link without locks is a
+		   class with no locks — keeping the ones localStorage remembered from
+		   some other session applied them to the linked class, silently. */
+		const ov = payload.overrides;
+		state.overrides = ov && typeof ov === "object" && !Array.isArray(ov) ? ov : {};
+		state.overrideFingerprint = state.overrides === ov ? (payload.fp || null) : null;
+		delete payload.overrides;
+		delete payload.fp;
+		state.cfg = fitEra(CFG.make(payload));
+		state.presetDirty = true;
+		return true;
 	}
 
 	/* A short, stable identity for one GENERATED class. Built from what the
@@ -3148,7 +3293,13 @@
 			}
 			const stream = new Blob([raw]).stream()
 				.pipeThrough(new DecompressionStream("gzip"));
-			return new Response(stream).arrayBuffer();
+			/* A truncated or damaged archive fails inside the stream, and the
+			   browser reports that as "Failed to fetch" — which reads like a
+			   network fault in a tool that never touches the network. */
+			return new Response(stream).arrayBuffer().catch(() => {
+				throw new Error("the .gz file is incomplete or corrupt — download " +
+					"or export it again");
+			});
 		}).then((out) => new TextDecoder("utf-8").decode(out).replace(/^\ufeff/, ""));
 	}
 
@@ -3246,10 +3397,28 @@
 		$("empty").classList.add("busy");
 		setStatus("Reading " + fileList.length + " file" +
 			(fileList.length === 1 ? "" : "s") + "…", true);
+		/* Not every file the tool writes is a draft class, and each of the
+		   others has its own door: a universe export, a settings JSON and
+		   the locks CSV all came back through here and were rejected as
+		   malformed classes. They are set aside and handed to their own
+		   importer once the classes in the same drop are in. */
+		const side = { universe: [], settings: [], csv: [] };
 		const jobs = Array.from(fileList).map(
 			(f) => readTextFile(f).then(
 				(text) => {
+					if (/\.csv$/i.test(f.name || "") || f.type === "text/csv") {
+						side.csv.push(text);
+						return null;
+					}
 					const data = JSON.parse(text);
+					if (data && data.format === "bbgm-draft-workshop/universe") {
+						side.universe.push(data);
+						return null;
+					}
+					if (data && data.format === SETTINGS_FORMAT) {
+						side.settings.push(data);
+						return null;
+					}
 					// Full schema check up front, so a bad file is rejected
 					// with a sentence instead of throwing a raw TypeError
 					// out of the middle of the sim.
@@ -3264,8 +3433,83 @@
 				return null;
 			}),
 		);
-		Promise.all(jobs).then((loaded) => installFiles(
-			loaded.filter(Boolean).reduce((a, b) => a.concat(b), []), problems, opts));
+		Promise.all(jobs).then((loaded) => {
+			const classes = loaded.filter(Boolean).reduce((a, b) => a.concat(b), []);
+			const other = side.universe.length + side.settings.length + side.csv.length;
+			if (classes.length || !other) installFiles(classes, problems, opts);
+			else {
+				$("empty").classList.remove("busy");
+				if (problems.length) showError(new Error(problems.join("\n")));
+				setStatus("");
+			}
+			for (const s of side.settings) applySettingsJson(s);
+			for (const u of side.universe) importUniverse(u);
+			for (const text of side.csv) {
+				if (!state.files.length) {
+					showError(new Error("Load a draft class first — a locks CSV is " +
+						"applied to the class on screen."));
+				} else if (state.results[state.active]) importLocksCsv(text);
+				else run(() => importLocksCsv(text));
+			}
+		});
+	}
+
+	/* THE SETTINGS, AS A FILE. What "More ▾ → Export settings JSON" writes
+	   and what a drop of one reads back: the same payload a shareable link
+	   carries, without the locks, under a format tag so it is never taken
+	   for a draft class. */
+	const SETTINGS_FORMAT = "bbgm-draft-workshop/settings";
+	function settingsJson() {
+		const cfg = encodeConfig(true);
+		delete cfg.overrides;
+		delete cfg.fp;
+		return { format: SETTINGS_FORMAT, v: 1, cfg };
+	}
+	function exportSettingsJson() {
+		download("draft-workshop-settings.json", JSON.stringify(settingsJson(), null, 2),
+			"application/json");
+		exported("the settings — drop the file on the page to load them again");
+	}
+	function applySettingsJson(json) {
+		const cfg = json && json.cfg;
+		if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) {
+			showError(new Error("That settings file carries no settings."));
+			return;
+		}
+		pushUndo("loaded settings from a file");
+		state.cfg = fitEra(CFG.make(cfg));
+		state.presetDirty = true;
+		paintConfig();
+		persist();
+		if (state.files.length) run(() => setStatus("Loaded the settings from the file."));
+		else setStatus("Loaded the settings from the file.");
+	}
+
+	/* The locks, in exactly the shape importLocksCsv reads back: one row per
+	   locked prospect, key and name to match him, and only the columns a lock
+	   can carry. A per-rating lock has no column, so it is said, not lost
+	   silently. */
+	function exportLocksCsv() {
+		const res = state.results[state.active];
+		const keys = Object.keys(state.overrides);
+		if (!res || !keys.length) { setStatus("No prospect in this class is locked."); return; }
+		const byKey = {};
+		for (const p of res.players) byKey[p.key] = p;
+		const cols = ["key", "name", "ovr", "pot", "archetype", "college"];
+		const lines = [cols.join(",")];
+		let ratingsOnly = 0;
+		for (const k of keys) {
+			const o = state.overrides[k] || {};
+			const p = byKey[k];
+			const row = [k, p ? p.name : "", o.ovr, o.pot, o.archetype, o.college];
+			if (row.slice(2).every((v) => v === undefined || v === null || v === "")) ratingsOnly++;
+			lines.push(row.map(esc).join(","));
+		}
+		const base = ((activeFile() || {}).name || "class").replace(/\.json(\.gz)?$|\.gz$/i, "");
+		download(base + "_locks.csv", "﻿" + csvJoin(lines), "text/csv");
+		exported(keys.length + " locked prospect" + (keys.length === 1 ? "" : "s") +
+			(ratingsOnly ? "; " + ratingsOnly + " of them lock only individual ratings, " +
+				"which a CSV row has no column for" : ""));
 	}
 
 	/* A synthetic class for a visitor with nothing to drop. It goes through
@@ -3349,6 +3593,12 @@
 			   patch drawn for somebody else's third file to whatever loads
 			   into that slot now. */
 			state.fileCfgs = {};
+			/* The undo history belongs to the classes it was made on. Undoing
+			   across a replacing load restored the old class's locks — keyed
+			   by pid — onto whoever holds those pids in the new one. */
+			state.undo = [];
+			state.redo = [];
+			paintUndo();
 			paintRandomPerFile();
 			const sel = $("fileSelect");
 			sel.innerHTML = "";
@@ -3452,13 +3702,13 @@
 		}
 		if (warns.length) showWarning(warns.join("\n"));
 		const added = fresh.length + " class" + (fresh.length === 1 ? "" : "es") + " added";
-		if (state.universe.rows.length && canExtendUniverse()) {
+		if (state.cfg.universe && state.universe.rows.length && canExtendUniverse()) {
 			setStatus(added + " — extending the universe from " +
 				state.universe.tail.lastSeason + "…", true);
 			runUniverse(null, { extend: true });
 			return;
 		}
-		if (state.universe.rows.length) {
+		if (state.cfg.universe && state.universe.rows.length) {
 			const tail = universeTail();
 			setStatus(added + ". " + (tail
 				? "One of them is not later than " + tail.lastSeason +
@@ -3538,7 +3788,14 @@
 	function bindFiles() {
 		$("btnLoad").addEventListener("click", () => $("file").click());
 		if ($("btnSample")) $("btnSample").addEventListener("click", loadSample);
-		$("file").addEventListener("change", (e) => readFiles(e.target.files));
+		$("file").addEventListener("change", (e) => {
+			/* Copied before the reset: a FileList is live, and a value left
+			   in place meant picking the same file again (after fixing it on
+			   disk, say) fired no change and did nothing. */
+			const files = Array.from(e.target.files || []);
+			e.target.value = "";
+			if (files.length) readFiles(files);
+		});
 		if ($("btnAddFiles")) {
 			$("btnAddFiles").addEventListener("click", () => $("addFile").click());
 		}
@@ -4479,7 +4736,21 @@
 	   reasoning as the table above: one definition, in the engine. */
 	const parseClause = global.Engine.parseRerollClause;
 
+	/* THE SEARCH IN FLIGHT, if any: { cancel }. One at a time — a second
+	   search used to start a second worker beside the first, and whichever
+	   finished last decided the class. */
+	let untilSearch = null;
+	/* What a search's answer is only valid for. A seed is found under one set
+	   of settings and locks; applied under another it is just a seed. */
+	function untilKey() {
+		return JSON.stringify([state.cfg, state.overrides, state.active, state.fileCfgs]);
+	}
+
 	function rerollUntil(keys, maxTries) {
+		if (untilSearch) {
+			setStatus("A search is already running — press Esc or its Cancel button first.");
+			return;
+		}
 		const preds = keys.map(parseClause).filter(Boolean);
 		if (!preds.length || !state.files.length) return;
 		const runner = state.runners[state.active];
@@ -4491,6 +4762,8 @@
 			"|until|" + keys.join("+");
 		const searchRng = new global.BBGMRng.Rng(base);
 		const cfg = fileCfgFor(state.active) || effectiveCfg();
+		const searchedFor = untilKey();
+		const said = preds.map((p) => p.label).join(" and ");
 		/* One counter array for both paths. Every candidate is tested against
 		   every clause rather than short-circuited — the classes are already
 		   simulated, so the extra tests are free — and the per-clause counts
@@ -4498,81 +4771,103 @@
 		const hits = preds.map(() => 0);
 		let k = 0;
 		let found = null;
-
-		/* OFF THE MAIN THREAD, WHERE A SEARCH BELONGS.
-
-		   The interactive run cannot move: the staged runner keeps its state
-		   between calls as a graph of live objects and that is not a message.
-		   A SEARCH is the opposite shape — up to sixty full simulations that
-		   need one boolean each and hand back a seed — so it is all cost and
-		   no payload, which is exactly what a worker is for. Sliced on a timer
-		   it kept the tab technically alive and made it useless for twenty
-		   seconds.
-
-		   The worker gets the seed, not the class. The main thread re-runs it
-		   through its own runner, which is what puts it in the pill, the
-		   history and the undo stack, and means nothing about the result graph
-		   has to survive a structured clone. The inline path below stays, for
-		   the same reason the batch runner's does: opening index.html off the
-		   disk blocks workers in most browsers, and that is the documented way
-		   to use this tool. */
+		let timer = null;
 		let searchWorker = null;
-		const finishFound = (seed, tries, got) => {
-			k = tries;
-			for (let i = 0; i < got.length && i < hits.length; i++) hits[i] = got[i];
-			if (!seed) { finish(); return; }
+		let inline = false;
+
+		/* PROGRESS AND A WAY OUT. The Until… button becomes the search's
+		   Cancel for as long as it runs, with the count on it; Esc does the
+		   same. Progress is written straight to the status line rather than
+		   through setStatus, so sixty "try n of 60" lines do not bury the
+		   message history. */
+		const untilBtn = $("btnRerollUntil");
+		const restLabel = untilBtn ? untilBtn.textContent : "";
+		const restTitle = untilBtn ? untilBtn.title : "";
+		function progress(done, total) {
+			const s = $("status");
+			s.textContent = "Reroll until: try " + done + " of " + total + "… (Esc cancels)";
+			s.hidden = false;
+			if (untilBtn) untilBtn.textContent = "Cancel " + done + "/" + total;
+		}
+		function end() {
+			untilSearch = null;
+			clearTimeout(timer);
+			if (searchWorker) { searchWorker.terminate(); searchWorker = null; }
+			document.body.classList.remove("searching");
+			if (untilBtn) {
+				untilBtn.textContent = restLabel;
+				untilBtn.title = restTitle;
+				untilBtn.removeAttribute("aria-pressed");
+			}
+		}
+		function cancel() {
+			end();
+			setStatus("Search cancelled after " + k + " tr" + (k === 1 ? "y" : "ies") +
+				". The class on screen is unchanged.");
+			// The inline path left the runner's cache on its last candidate.
+			if (inline) run();
+		}
+		untilSearch = { cancel };
+		document.body.classList.add("searching");
+		if (untilBtn) {
+			untilBtn.title = "Cancel the search (Esc)";
+			untilBtn.setAttribute("aria-pressed", "true");
+		}
+		progress(0, maxTries);
+
+		/* The answer, applied only to the settings it answers. A seed found
+		   and then run against settings moved in the meantime is a class
+		   that was never tested against the conditions at all. */
+		function apply(seed) {
+			end();
+			if (untilKey() !== searchedFor) {
+				setStatus("Found seed " + seed + " on try " + k + ", but the settings " +
+					"or locks changed during the search, so it was not applied — it " +
+					"satisfies " + said + " only under the settings it was searched with.",
+					true);
+				if (inline) run();
+				return;
+			}
 			state.cfg.seed = "";
 			$("seed").value = "";
 			state.lastSeed = seed;
 			state.editing = null;
 			state.selected = {};
 			run(() => setStatus("Found it on try " + k + ": seed " + seed +
-				" satisfies " + preds.map((p) => p.label).join(" and ") + "." +
+				" satisfies " + said + "." +
 				(preds.length > 1 ? " On the way: " + preds
 					.map((p, i) => p.label + " " + hits[i] + "/" + k).join("; ") + "." : "")));
-		};
-		try {
-			searchWorker = new Worker("js/worker.js");
-			searchWorker.onmessage = (e) => {
-				const m = e.data || {};
-				if (m.type === "searchProgress") {
-					setStatus("Reroll until: try " + m.done + " of " + m.total + "…", true);
-				} else if (m.type === "searchDone") {
-					searchWorker.terminate();
-					searchWorker = null;
-					finishFound(m.found, m.tries, m.hits || []);
-				} else if (m.type === "error") {
-					searchWorker.terminate();
-					searchWorker = null;
-					showError(new Error(m.message));
-					run();
-				}
-			};
-			searchWorker.onerror = () => {
-				if (searchWorker) { searchWorker.terminate(); searchWorker = null; }
-				setStatus("Reroll until: searching…", true);
-				setTimeout(step, 0);
-			};
-			searchWorker.postMessage({
-				type: "search", leagueFile: activeFile().data, cfg,
-				base, keys, maxTries,
-			});
-			return;
-		} catch (cannotStartWorker) {
-			searchWorker = null;
 		}
 		/* WHAT THE SEARCH LEARNED ON THE WAY.
 
 		   A failed search said "no class in 40 tries", which tells the user
-		   that something is unlikely and nothing about WHICH something. Every
-		   candidate is tested against every clause rather than short-circuited
-		   — the classes are already simulated, so the extra tests are free —
-		   and the per-clause hit counts turn a dead end into a fact about the
+		   that something is unlikely and nothing about WHICH something. The
+		   per-clause hit counts turn a dead end into a fact about the
 		   settings: "the 7'2" clause matched 2 of 40; the mid-major champion
-		   matched 19". That is the model telling the user what their own
-		   configuration makes likely, which is most of what a simulation is
-		   for. */
-		const step = () => {
+		   matched 19". Named worst-first, because the rarest clause is the one
+		   to drop and the one the user most wants named. */
+		function finish() {
+			if (found) { apply(found.seed); return; }
+			end();
+			const breakdown = preds
+				.map((p, i) => ({ label: p.label, n: hits[i] }))
+				.sort((a, b) => a.n - b.n)
+				.map((x) => x.label + " matched " + x.n + " of " + k)
+				.join("; ");
+			setStatus("No class in " + k + " tries satisfied " + said + ". " + breakdown +
+				". The class on screen is unchanged; raise the try limit, " +
+				"drop the rarest condition, or change the settings that make " +
+				"it unlikely.");
+			/* The runner's cached state belongs to the last candidate;
+			   re-run the class that was on screen so the phase cache and the
+			   page agree again. */
+			run();
+		}
+		/* Declared, not assigned: the worker's onerror falls back to it, and
+		   as a `const` below the worker's early return it was never
+		   initialised on that path — the fallback threw instead of running. */
+		function step() {
+			if (untilSearch === null) return;
 			if (found || k >= maxTries) { finish(); return; }
 			const seed = "u" + Math.floor(searchRng.random() * 1e9).toString(36);
 			k++;
@@ -4586,41 +4881,66 @@
 				});
 				if (all) found = res;
 			} catch (e) { /* a failed candidate is just not the one */ }
-			setStatus("Reroll until: try " + k + " of " + maxTries + "…", true);
-			setTimeout(step, 0);
-		};
-		const finish = () => {
-			if (!found) {
-				/* Named worst-first, because the rarest clause is the one to
-				   drop and the one the user most wants named. */
-				const breakdown = preds
-					.map((p, i) => ({ label: p.label, n: hits[i] }))
-					.sort((a, b) => a.n - b.n)
-					.map((x) => x.label + " matched " + x.n + " of " + k)
-					.join("; ");
-				setStatus("No class in " + k + " tries satisfied " +
-					preds.map((p) => p.label).join(" and ") + ". " + breakdown +
-					". The class on screen is unchanged; raise the try limit, " +
-					"drop the rarest condition, or change the settings that make " +
-					"it unlikely.");
-				/* The runner's cached state belongs to the last candidate;
-				   re-run the class that was on screen so the phase cache and
-				   the page agree again. */
-				run();
-				return;
-			}
-			state.cfg.seed = "";
-			$("seed").value = "";
-			state.lastSeed = found.seed;
-			state.editing = null;
-			state.selected = {};
-			run(() => setStatus("Found it on try " + k + ": seed " + found.seed +
-				" satisfies " + preds.map((p) => p.label).join(" and ") + "." +
-				(preds.length > 1 ? " On the way: " + preds
-					.map((p, i) => p.label + " " + hits[i] + "/" + k).join("; ") + "." : "")));
-		};
-		setStatus("Reroll until: searching…", true);
-		setTimeout(step, 0);
+			progress(k, maxTries);
+			timer = setTimeout(step, 0);
+		}
+		function startInline() {
+			inline = true;
+			timer = setTimeout(step, 0);
+		}
+		function finishFound(seed, tries, got) {
+			k = tries;
+			for (let i = 0; i < got.length && i < hits.length; i++) hits[i] = got[i];
+			if (seed) apply(seed);
+			else finish();
+		}
+
+		/* OFF THE MAIN THREAD, WHERE A SEARCH BELONGS.
+
+		   The interactive run cannot move: the staged runner keeps its state
+		   between calls as a graph of live objects and that is not a message.
+		   A SEARCH is the opposite shape — up to sixty full simulations that
+		   need one boolean each and hand back a seed — so it is all cost and
+		   no payload, which is exactly what a worker is for.
+
+		   The worker gets the seed, not the class. The main thread re-runs it
+		   through its own runner, which is what puts it in the pill, the
+		   history and the undo stack. The inline path stays, for the same
+		   reason the batch runner's does: opening index.html off the disk
+		   blocks workers in most browsers, and that is the documented way to
+		   use this tool. */
+		try {
+			const w = new Worker("js/worker.js");
+			searchWorker = w;
+			w.onmessage = (e) => {
+				if (searchWorker !== w) return;
+				const m = e.data || {};
+				if (m.type === "searchProgress") {
+					progress(m.done, m.total);
+				} else if (m.type === "searchDone") {
+					w.terminate();
+					searchWorker = null;
+					finishFound(m.found, m.tries, m.hits || []);
+				} else if (m.type === "error") {
+					end();
+					showError(new Error(m.message));
+					run();
+				}
+			};
+			w.onerror = () => {
+				if (searchWorker !== w) return;
+				w.terminate();
+				searchWorker = null;
+				startInline();
+			};
+			w.postMessage({
+				type: "search", leagueFile: activeFile().data, cfg,
+				base, keys, maxTries,
+			});
+		} catch (cannotStartWorker) {
+			searchWorker = null;
+			startInline();
+		}
 	}
 
 	/* ------------------------------------------------------------ challenges
@@ -4828,9 +5148,13 @@
 		bar.appendChild(give);
 	}
 
-	function reroll() {
+	function reroll(opts) {
+		/* A second reroll inside the busy window of the first one read a
+		   lastSeed the first had blanked, and pushed an undo entry that
+		   restored nothing. One at a time. */
+		if (busyDepth > 0 || untilSearch) return;
 		const previous = state.lastSeed;
-		pushUndo("rerolled the class");
+		if (!(opts && opts.noUndo)) pushUndo("rerolled the class");
 		// The class being replaced goes into the run history, with everything
 		// needed to come back to it. See rememberSession.
 		rememberSession();
@@ -6071,6 +6395,42 @@
 		} catch (e) { /* file:// in some browsers */ }
 	}
 
+	/* Keep the CURRENT history entry describing where the user is. The first
+	   page of a session had no bbgmNav entry at all, so Back from the first
+	   team or player page opened left the popstate handler nothing to go back
+	   to and did nothing; and a destination changed without a push (an
+	   editor opening, the arrow keys on the tab bar) left the entry stale.
+	   Only written when it differs — Safari throws after 100 writes in 30s. */
+	function syncNav() {
+		try {
+			const want = navState();
+			const cur = history.state;
+			if (cur && cur.bbgmNav && cur.tab === want.tab && cur.team === want.team &&
+				cur.player === want.player && cur.game === want.game) return;
+			history.replaceState(Object.assign({}, cur && typeof cur === "object" ? cur : {},
+				{ bbgmNav: true }, want), "");
+		} catch (e) { /* file:// in some browsers */ }
+	}
+
+	/* A tab is a destination too: clicking one pushes history, so Back
+	   returns to the tab you came from. Clicking the tab you are ALREADY on
+	   is "take me to this tab's front page" — it clears the player, team or
+	   box score open inside it. */
+	function showTab(key) {
+		if (key === state.tab) {
+			if (!state.player && !state.team && !state.game) return;
+			state.player = null;
+			state.team = null;
+			state.game = null;
+		} else {
+			state.tab = key;
+		}
+		pushNav();
+		persist();
+		render();
+	}
+	global.App.showTab = showTab;
+
 	function showPlayer(key) {
 		state.player = key || null;
 		if (key) state.tab = "board";
@@ -6105,8 +6465,20 @@
 		state.team = st.team;
 		state.player = st.player;
 		state.game = st.game || null;
+		// Back/forward returns to where that page was scrolled, not the top.
+		navRestore = true;
 		render();
 	});
+
+	/* Where each destination was scrolled when the user left it, so Back can
+	   put it back; see render(). A destination is tab + player + team + game. */
+	const destScroll = {};
+	let lastDest = null;
+	let navRestore = false;
+	function destKey() {
+		return [state.tab, state.tab === "board" ? state.boardMode || "board" : "",
+			state.player || "", state.team || "", state.game || ""].join("|");
+	}
 
 	function render() {
 		const tabs = $("tabs");
@@ -6122,7 +6494,7 @@
 			b.setAttribute("role", "tab");
 			b.setAttribute("aria-selected", key === state.tab ? "true" : "false");
 			b.tabIndex = key === state.tab ? 0 : -1;
-			b.addEventListener("click", () => { state.tab = key; persist(); render(); });
+			b.addEventListener("click", () => showTab(key));
 			b.addEventListener("keydown", (e) => {
 				const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
 				if (!d) return;
@@ -6149,8 +6521,25 @@
 		   positions are keyed by the container's position in the view, so they
 		   survive a rebuild that produces the same shape and are simply not
 		   found when it does not. */
-		const scrolls = captureScroll(view);
-		const focus = captureFocus(view);
+		/* A rebuild of the SAME destination keeps its scroll (that is the
+		   point above). A NEW destination starts at the top — restoring the
+		   old scrollY after opening a player from row 60 of the board put
+		   his page 3000px down — unless it is a Back/forward, which restores
+		   what that destination had. */
+		const dest = destKey();
+		const sameDest = dest === lastDest;
+		let scrolls = captureScroll(view);
+		if (lastDest !== null) destScroll[lastDest] = scrolls;
+		if (!sameDest) {
+			scrolls = navRestore && destScroll[dest] ? destScroll[dest] : { list: [], page: 0, win: 0, top: true };
+		}
+		navRestore = false;
+		lastDest = dest;
+		syncNav();
+		// A popover or row menu belongs to the view being thrown away.
+		if (V.closeWhy) V.closeWhy();
+		if (V.closeRowMenu) V.closeRowMenu();
+		const focus = sameDest ? captureFocus(view) : null;
 		view.innerHTML = "";
 		const res = ensureResult(state.active);
 		if (!res) {
@@ -6185,22 +6574,33 @@
 
 	const SCROLLERS = ".scroll, .tablewrap, .drawer";
 
+	/* Containers are keyed by TAB as well as by index: the third scroller on
+	   the Teams tab and the third on the board are different tables, and
+	   restoring one's horizontal offset onto the other was the old rule. */
 	function captureScroll(view) {
 		const out = [];
 		view.querySelectorAll(SCROLLERS).forEach((n, i) => {
 			if (n.scrollLeft || n.scrollTop) out.push([i, n.scrollLeft, n.scrollTop]);
 		});
-		return { list: out, page: view.scrollTop, win: global.scrollY || 0 };
+		return { tab: state.tab, list: out, page: view.scrollTop, win: global.scrollY || 0 };
 	}
 
 	function restoreScroll(view, saved) {
 		if (!saved) return;
-		const nodes = view.querySelectorAll(SCROLLERS);
-		for (const [i, left, top] of saved.list) {
-			const n = nodes[i];
-			if (!n) continue;
-			n.scrollLeft = left;
-			n.scrollTop = top;
+		if (saved.top) {
+			// A new destination: the top of it.
+			view.scrollTop = 0;
+			if (global.scrollY) global.scrollTo(0, 0);
+			return;
+		}
+		if (saved.tab === state.tab) {
+			const nodes = view.querySelectorAll(SCROLLERS);
+			for (const [i, left, top] of saved.list) {
+				const n = nodes[i];
+				if (!n) continue;
+				n.scrollLeft = left;
+				n.scrollTop = top;
+			}
 		}
 		if (saved.page) view.scrollTop = saved.page;
 		if (saved.win) global.scrollTo(0, saved.win);
@@ -6921,14 +7321,20 @@
 	let modalTrigger = null;      // the element that opened the modal
 	let modalTrapCleanup = null;  // focus-trap teardown
 
-	function modal(title, body, onOk, okLabel) {
+	/* `opts.focusCancel`: a destructive confirmation starts on Cancel, so an
+	   Enter pressed out of habit does not throw the work away. */
+	function modal(title, body, onOk, okLabel, opts) {
 		modalTrigger = document.activeElement;
 		$("modalTitle").textContent = title;
 		const b = $("modalBody");
 		b.innerHTML = "";
 		b.appendChild(body);
-		$("modalOk").textContent = okLabel || "OK";
+		$("modalOk").textContent = okLabel || (onOk ? "OK" : "Close");
 		modalOk = onOk;
+		/* An information dialog has one way out. Showing "Close" beside a
+		   "Cancel" that did the same thing asked a question there was no
+		   answer to. */
+		$("modalCancel").hidden = !onOk;
 		const m = $("modal");
 		m.hidden = false;
 		// Install focus trap
@@ -6936,6 +7342,10 @@
 		modalTrapCleanup = trapFocus(m.querySelector(".modalbox"));
 		// Move focus to the first focusable element inside the modal
 		requestAnimationFrame(() => {
+			if (opts && opts.focusCancel && !$("modalCancel").hidden) {
+				$("modalCancel").focus();
+				return;
+			}
 			const first = m.querySelector(FOCUSABLE_SEL);
 			if (first) first.focus();
 		});
@@ -6958,7 +7368,7 @@
 		box.appendChild(el("p", null, detail));
 		box.appendChild(el("p", "hint",
 			"This can be undone with Ctrl+Z, or the Undo button in the header."));
-		modal(title, box, onOk, okLabel);
+		modal(title, box, onOk, okLabel, { focusCancel: true });
 	}
 
 	function closeModal() {
@@ -6981,7 +7391,13 @@
 		   a word for the rest of the session — and the wider button reflowed
 		   the whole header. The parameter is still honoured where a caller
 		   wants a different resting label. */
-		const was = button ? button.textContent : "";
+		/* The RESTING label, kept on the button itself: reading textContent
+		   at call time read "Copied ✓" on a second click inside the flash,
+		   and that became the label for good. */
+		if (button && button.dataset.restLabel === undefined) {
+			button.dataset.restLabel = button.textContent;
+		}
+		const was = button ? button.dataset.restLabel : "";
 		const done = () => {
 			/* Announce it. The seed pill's copy changed the BUTTON's text and
 			   nothing else, so a screen reader user pressing it got no
@@ -6991,7 +7407,10 @@
 			announce("Copied: " + String(text).slice(0, 60));
 			if (!button) return;
 			button.textContent = "Copied ✓";
-			setTimeout(() => { button.textContent = restore || was; }, 1400);
+			clearTimeout(Number(button.dataset.copyTimer) || 0);
+			button.dataset.copyTimer = String(setTimeout(() => {
+				button.textContent = restore || was;
+			}, 1400));
 		};
 		function fallback() {
 			const ta = document.createElement("textarea");
@@ -7701,8 +8120,10 @@
 			if (!p) { unmatched.push(k || nm); continue; }
 			const patch = {};
 			const num = (c) => {
-				const v = Number(String(r[c]).trim());
-				return Number.isFinite(v) ? v : null;
+				// An empty cell is no lock, not a lock at 0 (Number("") is 0).
+				const t = String(r[c] === undefined ? "" : r[c]).trim();
+				const v = Number(t);
+				return t !== "" && Number.isFinite(v) ? v : null;
 			};
 			if (cols.ovr >= 0 && num(cols.ovr) !== null) patch.ovr = num(cols.ovr);
 			if (cols.pot >= 0 && num(cols.pot) !== null) patch.pot = num(cols.pot);
@@ -8023,7 +8444,9 @@
 		item("Season as a BBGM league fragment — teams, records, coaches", () => exportLeagueFragment(res));
 		item("Note text only, for a spreadsheet", () => exportNotes(res));
 		item("Notes as Markdown, for a forum post", () => exportNotesMarkdown(res));
+		item("Locked prospects as CSV — the file Import locks reads back", exportLocksCsv);
 		item("Import locks from a CSV…", () => $("csvFile").click());
+		item("Settings as JSON — drop it on the page to load them again", exportSettingsJson);
 		item("Message history", messageHistory);
 		item("Compare two presets…", comparePresets);
 		box.appendChild(list);
@@ -8543,10 +8966,58 @@
 		exportCsv, setStatus, showError, indexSnapshot,
 	});
 
+	/* AN UNCAUGHT ERROR SAYS SO. A throw inside a listener used to leave
+	   the page half-updated with nothing on screen, and the only record was
+	   a console most users never open. Said once per distinct message, and
+	   never re-entered: an error raised while reporting one is dropped
+	   rather than looping. */
+	let lastUncaught = null;
+	let reportingUncaught = false;
+	function reportUncaught(err) {
+		if (reportingUncaught) return;
+		const text = err && err.message ? err.message : String(err || "unknown error");
+		// Benign by specification, and fired by the header's observer.
+		if (/ResizeObserver loop/.test(text) || text === lastUncaught) return;
+		lastUncaught = text;
+		reportingUncaught = true;
+		try {
+			showError(new Error("Something went wrong: " + text +
+				". The page may be out of step with the settings — Re-apply, or " +
+				"reload if it persists."));
+		} catch (e) { /* nothing left to report with */ } finally {
+			reportingUncaught = false;
+		}
+	}
+	window.addEventListener("error", (e) => reportUncaught(e.error || e.message));
+	window.addEventListener("unhandledrejection", (e) => reportUncaught(e.reason));
+
 	const saved = restore();
-	const fromHash = readHash();
-	if (fromHash) state.overrideFingerprint = state.overrideFingerprint || null;
+	readHash();
+	lastWrittenHash = location.hash || "";
+	/* A link pasted into a tab that is already open changes only the hash,
+	   which reloads nothing — so the page went on showing the old class. The
+	   hash writeHash put there itself is not news and is ignored. */
+	window.addEventListener("hashchange", () => {
+		const h = location.hash || "";
+		if (h === lastWrittenHash || !/[#&]c=/.test(h)) return;
+		lastWrittenHash = h;
+		pushUndo("opened a shared link");
+		if (!readHash()) { state.undo.pop(); paintUndo(); return; }
+		state.editing = null;
+		state.selected = {};
+		checkLockFingerprint();
+		paintConfig();
+		persist();
+		run(() => setStatus("Applied the settings in the link."));
+	});
 	window.addEventListener("resize", syncHeaderHeight);
+	/* The header wraps without the window resizing — a long "Undo …" label,
+	   the seed history appearing, the file picker after a load — and every
+	   one of those left --headerH at its startup value, so the sticky panel
+	   sat under the header or floated below it. */
+	if (typeof ResizeObserver === "function" && document.querySelector("header")) {
+		new ResizeObserver(syncHeaderHeight).observe(document.querySelector("header"));
+	}
 	syncHeaderHeight();
 
 	bindSettingsSearch();
@@ -8634,7 +9105,11 @@
 	})();
 
 	$("btnReroll").addEventListener("click", reroll);
-	$("btnRerollUntil").addEventListener("click", rerollUntilDialog);
+	// The same button cancels a search in flight; see rerollUntil.
+	$("btnRerollUntil").addEventListener("click", () => {
+		if (untilSearch) untilSearch.cancel();
+		else rerollUntilDialog();
+	});
 	// Not `run` directly: run takes an `after` callback and a listener
 	// would pass it the click event.
 	$("btnRerun").addEventListener("click", () => run());
@@ -8718,6 +9193,7 @@
 		e.target.value = "";
 		if (!v) return;
 		if (historyCommand(v)) return;
+		pushUndo("went back to the seed " + v);
 		state.cfg.seed = v;
 		$("seed").value = v;
 		run();
@@ -8795,10 +9271,23 @@
 		if (fn) fn();
 	});
 	$("modalCancel").addEventListener("click", closeModal);
+	/* Enter in a dialog's text box submits it — "Use a seed", "Save
+	   preset", "Reroll until" — as it would in any form. Only a dialog
+	   that has an OK action, and only from a one-line box. */
+	$("modalBody").addEventListener("keydown", (e) => {
+		if (e.key !== "Enter" || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing) return;
+		const t = e.target;
+		if (!t || t.tagName !== "INPUT" ||
+			!/^(text|number|search|url|email)$/.test(t.type || "text")) return;
+		if (!modalOk || $("modal").hidden) return;
+		e.preventDefault();
+		$("modalOk").click();
+	});
 	$("modal").addEventListener("click", (e) => { if (e.target === $("modal")) closeModal(); });
 	document.addEventListener("keydown", (e) => {
 		if (e.key === "Escape") V.closeRowMenu();
 		if (e.key === "Escape" && !$("modal").hidden) closeModal();
+		else if (e.key === "Escape" && untilSearch) untilSearch.cancel();
 		else if (e.key === "Escape" && state.editing !== null && state.editing !== undefined) {
 			// The shortcut sheet promises this closes the editor too.
 			state.editing = null;
@@ -8809,6 +9298,9 @@
 		/* Ctrl+Enter / Cmd+Enter triggers generation (Part 5D). Works even
 		   when typing, since Ctrl+Enter is not a standard text input combo. */
 		if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+			/* Not behind a dialog: the class the dialog is about would be
+			   replaced underneath it. */
+			if (!$("modal").hidden) return;
 			e.preventDefault();
 			if (!$("btnReroll").disabled) reroll();
 			return;

@@ -892,6 +892,16 @@
 		return LEAGUE_ENV[name] || NCAA_ENV;
 	}
 
+	/* The foul that ends a night. College and FIBA basketball disqualify on
+	   the fifth; a 48-minute league plays NBA rules and disqualifies on the
+	   sixth (the G League, and the 48-minute domestic leagues that follow
+	   the NBA's book). An env may say so explicitly with `foulOut`. */
+	function foulOutOf(env) {
+		const e = env || NCAA_ENV;
+		if (Number.isFinite(e.foulOut)) return e.foulOut;
+		return (e.gameMinutes || 40) >= 48 ? 6 : 5;
+	}
+
 	/* Class year as a number, 0 = freshman. The string carries decorations —
 	   "Redshirt Junior", "Graduate" — so it cannot be looked up directly, and
 	   a redshirt year IS an extra year in the program even though it is not
@@ -1812,7 +1822,7 @@
 		const jv = (x, sd) => Math.max(0, x * (1 + rng.normal(0, sd * noise)));
 		const tov = jv(tovPoss * tovRate, 0.10);
 		const fga = jv((poss - tov) / (1 + FT_TRIP * ftRate), 0.045);
-		const fta = jv(fga * ftRate, 0.06);
+		let fta = jv(fga * ftRate, 0.06);
 
 		// Shot mix: 3PA share anchored to the height buckets (.39 for guards
 		// down to .085 for 6'11"+), stretched by shooting talent.
@@ -1844,8 +1854,8 @@
 			0.045 * noise * clamp(base3 / 0.30, 0.3, 1));
 		share3 = clamp(share3, 0.0, 0.75);
 
-		const tpa = fga * share3;
-		const twoA = fga - tpa;
+		let tpa = fga * share3;
+		let twoA = fga - tpa;
 
 		/* Attempts -> season percentage. `a` is attempts per game and `games`
 		   is the season he actually played, so N is the season's attempt count
@@ -1855,12 +1865,39 @@
 		   still exactly deterministic (which several callers rely on) and
 		   statNoise 2 is twice as wild, the same contract every other term in
 		   this function honors. */
-		const shoot = (r, a, p, nz) => {
+		/* NO ATTEMPTS, NO PERCENTAGE. A season with zero attempts used to
+		   return the true-talent p, which a table then printed as "31.2% from
+		   three" beside an attempt column of 0.0. It returns null now, and
+		   the caller folds any sub-attempt residue back into the other
+		   column so the volume and the percentage agree.
+
+		   THE NOISE SLIDER SCALES THE SAMPLE, NOT THE DEVIATION. The old
+		   `p + nz * (k/N - p)` stretched one binomial draw by nz, which at
+		   statNoise 2 doubled a 149-attempt free-throw season's deviation past
+		   anything a binomial can produce (100% on 149 attempts, a leader at
+		   .981), and the realized value was then clamped to [0, 1]. The
+		   statistically honest dial is the effective sample size: variance of
+		   a proportion is p(1-p)/N, so drawing over N / nz^2 attempts scales
+		   the standard deviation by exactly nz while every realized value
+		   stays a genuine proportion. At nz = 1 this is the same draw over
+		   the same N as before. `ceil` is a soft volume-dependent ceiling on
+		   the REALIZED season (see shootCeil) — a tail, not a wall. */
+		const shoot = (r, a, p, nz, ceilOf) => {
 			const N = Math.round(Math.max(0, a) * games);
-			if (N <= 0 || !(nz > 0)) return p;
-			const k = rbinom(r, N, p);
-			return clamp(p + nz * (k / N - p), 0, 1);
+			if (N <= 0) return null;
+			if (!(nz > 0)) return p;
+			const Ne = Math.max(1, Math.round(N / (nz * nz)));
+			const k = rbinom(r, Ne, p);
+			const v = k / Ne;
+			return ceilOf ? Math.min(v, softCeil(v, ceilOf(N), 0.9)) : v;
 		};
+		/* A realized-season ceiling that only binds at volume. Real D-I
+		   seasons top out near .95 at the line and .48 from three on a full
+		   season's attempts, while a man who took twelve free throws can
+		   genuinely make all twelve — so the ceiling relaxes toward 1 as the
+		   sample shrinks. */
+		const ftCeil = (N) => 1 - 0.055 * clamp((N - 20) / 100, 0, 1);
+		const tpCeil = (N) => 1 - 0.47 * clamp((N - 25) / 100, 0, 1);
 
 		// A shared "touch" term so a player's 3P% and FT% move together — the
 		// old model drew them independently and produced 46%/58% shooters.
@@ -1931,7 +1968,7 @@
 			tpLim, 0.86),
 			0.16, 0.52,
 		);
-		const tpp = shoot(rng, tpa, tpTrue, noise);
+		let tpp = shoot(rng, tpa, tpTrue, noise, tpCeil);
 		// Rim/mid split and finishing: rim FG% runs .59 (guards) to .72 (bigs).
 		// The calibration table already carries the height effect, so the skill
 		// composites (which lean heavily on hgt) are centered at what a player of
@@ -1977,6 +2014,11 @@
 			0.34, 0.68,
 		);
 		const twoP = shoot(rng, twoA, twoTrue, noise);
+		/* A three-point volume that rounds to no attempts over the season is
+		   no attempts: its sliver goes back into the two-point column, where
+		   it was going to be a shot anyway, so the line never prints a 3P%
+		   beside an empty attempt column (or the reverse). */
+		if (tpp === null && tpa > 0) { twoA += tpa; tpa = 0; }
 		// FT%: draft-year mean .726 with a real size gradient (.78 guards, .67
 		// centers) beyond what the ft rating alone carries.
 		/* Free-throw shooting reads the raw `ft` rating rather than a composite,
@@ -1990,11 +2032,13 @@
 				mix(touch, rng.normal(0, 1)) * 0.018 * noise,
 			0.35, 0.94,
 		);
-		const ftp = shoot(rng, fta, ftTrue, noise);
-
-		const fgm = twoA * twoP + tpa * tpp;
+		let ftp = shoot(rng, fta, ftTrue, noise, ftCeil);
+		// Same for the line: under half an attempt all season is none.
+		if (ftp === null) fta = 0;
+		const twoMade = twoA * (twoP === null ? 0 : twoP);
+		const fgm = twoMade + tpa * (tpp || 0);
 		const fgp = fga > 0 ? fgm / fga : 0;
-		const pts = twoA * twoP * 2 + tpa * tpp * 3 + fta * ftp;
+		const pts = twoMade * 2 + tpa * (tpp || 0) * 3 + fta * (ftp || 0);
 
 		// Counting stats scale off team totals and the player's share. The team
 		// totals themselves respond to the roster (see teamPools), so a real
@@ -2928,6 +2972,26 @@
 		   clipped surplus to the players with room. Below the cap nothing
 		   moves, so the distribution keeps the shape statLine gave it. */
 		reconcileTeamTotals(lines, pools, gameMinutes);
+		/* AND THEN PLAY THE GAMES HE MISSED WITHOUT HIM.
+
+		   Everything above is per game with the whole rotation available, and
+		   every line's gp has its absences taken out — so the season totals
+		   (per-game times games played) summed to about 94.5% of the team's
+		   minutes and points, because nobody's minutes rose to cover the
+		   nights a teammate sat. See redistributeAbsences: the absent man's
+		   minutes, and the production that comes with them, go to whoever
+		   played, and every per-game number becomes a per-game-PLAYED number
+		   whose season total is the team's. */
+		/* Overtime is floor time too: five men for five more minutes a
+		   period, which the season's minutes have to include or a team that
+		   went to overtime six times is 150 minutes short. */
+		const otPerGame = team.log && team.log.length
+			? team.log.reduce((a, g) => a + (g.ot || 0), 0) / team.log.length : 0;
+		redistributeAbsences(lines, ctx.games, gameMinutes, 25 * otPerGame, members.map((m, i) =>
+			(!m.filler && env.youthCap)
+				? mins[i]
+				: Math.max(mins[i], Math.min(gameMinutes - 2, (env.mpgCap || TUNING.MPG_CAP) + 1))),
+			3.85 * foulOutOf(env) / 5);
 		/* And then answer to the SCOREBOARD.
 
 		   A team's points existed three times over and no two of them agreed:
@@ -2955,17 +3019,24 @@
 		// Points and the attempts behind them are re-summed too: the anchor
 		// above moved them, and they were accumulated as the lines were built.
 		totals.pts = 0; totals.fga = 0; totals.fta = 0;
+		totals.cs = 0; totals.defl = 0;
+		/* Weighted by the share of the schedule each man played: a line is
+		   per game PLAYED (see redistributeAbsences), so the team's per-game
+		   total is the sum of season totals over the team's games. */
 		for (const line of lines) {
-			totals.pts += line.ppg;
-			totals.fga += line.fga;
-			totals.fta += line.fta;
-			totals.ast += line.apg;
-			totals.stl += line.spg;
-			totals.blk += line.bpg;
-			totals.pf += line.pfpg;
-			totals.orb += line.orpg;
-			totals.trb += line.rpg;
-			totals.tov += line.topg;
+			const wt = gpWeight(line, ctx.games);
+			totals.pts += line.ppg * wt;
+			totals.fga += line.fga * wt;
+			totals.fta += line.fta * wt;
+			totals.ast += line.apg * wt;
+			totals.stl += line.spg * wt;
+			totals.blk += line.bpg * wt;
+			totals.pf += line.pfpg * wt;
+			totals.orb += line.orpg * wt;
+			totals.trb += line.rpg * wt;
+			totals.tov += line.topg * wt;
+			totals.cs += (line.cspg || 0) * wt;
+			totals.defl += (line.deflpg || 0) * wt;
 		}
 		totals.poss = totals.fga - totals.orb + totals.tov + FT_TRIP * totals.fta;
 		team.teamTotals = totals;
@@ -2996,13 +3067,16 @@
 		team.offRtg = totals.poss > 0 ? (100 * totals.pts) / totals.poss : null;
 		// Each prospect's share of the team totals, for the award model and the
 		// share-cap regression checks.
+		/* Season shares: his season total over the team's, which is his
+		   per-game-played line weighted by the games he played. */
 		for (const o of out) {
+			const wt = gpWeight(o.line, ctx.games);
 			o.player.shareOf = {
-				ast: totals.ast > 0 ? o.line.apg / totals.ast : 0,
-				reb: totals.trb > 0 ? o.line.rpg / totals.trb : 0,
-				blk: totals.blk > 0 ? o.line.bpg / totals.blk : 0,
-				stl: totals.stl > 0 ? o.line.spg / totals.stl : 0,
-				pts: totals.pts > 0 ? o.line.ppg / totals.pts : 0,
+				ast: totals.ast > 0 ? (o.line.apg * wt) / totals.ast : 0,
+				reb: totals.trb > 0 ? (o.line.rpg * wt) / totals.trb : 0,
+				blk: totals.blk > 0 ? (o.line.bpg * wt) / totals.blk : 0,
+				stl: totals.stl > 0 ? (o.line.spg * wt) / totals.stl : 0,
+				pts: totals.pts > 0 ? (o.line.ppg * wt) / totals.pts : 0,
 			};
 		}
 		return out;
@@ -3023,23 +3097,29 @@
 			min: 0, fg: 0, fga: 0, tp: 0, tpa: 0, ft: 0, fta: 0,
 			orb: 0, drb: 0, trb: 0, ast: 0, tov: 0, stl: 0, blk: 0, pf: 0, pts: 0,
 		};
+		/* Weighted by games played. A line is per game PLAYED, and a man who
+		   sat eight nights contributed nothing on them; summing the per-game
+		   averages as if everybody played every night overstated a team that
+		   had absences by exactly the nights it did not have them (and, before
+		   redistributeAbsences, understated it by the minutes nobody covered). */
 		for (const L of lines) {
-			box.min += L.mpg;
-			box.fga += L.fga;
-			box.fg += L.fga * L.fgp;
-			box.tpa += L.tpa;
-			box.tp += L.tpa * L.tpp;
-			box.fta += L.fta;
-			box.ft += L.fta * L.ftp;
-			box.orb += L.orpg;
-			box.drb += L.drpg;
-			box.trb += L.rpg;
-			box.ast += L.apg;
-			box.tov += L.topg;
-			box.stl += L.spg;
-			box.blk += L.bpg;
-			box.pf += L.pfpg;
-			box.pts += L.ppg;
+			const w = gpWeight(L, games);
+			box.min += L.mpg * w;
+			box.fga += L.fga * w;
+			box.fg += L.fga * (L.fgp || 0) * w;
+			box.tpa += L.tpa * w;
+			box.tp += L.tpa * (L.tpp || 0) * w;
+			box.fta += L.fta * w;
+			box.ft += L.fta * (L.ftp || 0) * w;
+			box.orb += L.orpg * w;
+			box.drb += L.drpg * w;
+			box.trb += L.rpg * w;
+			box.ast += L.apg * w;
+			box.tov += L.topg * w;
+			box.stl += L.spg * w;
+			box.blk += L.bpg * w;
+			box.pf += L.pfpg * w;
+			box.pts += L.ppg * w;
 		}
 		box.poss = box.fga - box.orb + box.tov + FT_TRIP * box.fta;
 		// Possessions per game IS the pace when a game is one game long; the
@@ -3048,6 +3128,128 @@
 		box.pace = box.poss;
 		box.gameMinutes = gameMinutes;
 		return box;
+	}
+
+	/* The share of the team's schedule a line's man played. A line without a
+	   gp (or a team without a schedule length) counts as every game, which is
+	   what every caller assumed before absences were modeled. */
+	function gpWeight(line, games) {
+		const G = Number(games);
+		if (!(G > 0) || !Number.isFinite(line && line.gp)) return 1;
+		return clamp(line.gp / G, 0, 1);
+	}
+
+	/* Cover the nights a man missed.
+
+	   The rotation's lines come out of the pool machinery as per-game numbers
+	   for a night on which everybody dressed, and each carries a gp with his
+	   absences removed. Nothing gave the missing minutes to anybody: the
+	   season's minutes summed to about 94.5% of 5 * 40 * G, its points to
+	   94% of what the scoreboard says, and a team with three men hurt
+	   "scored" 75% of its own points.
+
+	   So, per absent man, his minutes on the nights he sat go to whoever
+	   played them, in proportion to the minutes each of them already plays
+	   (a starter covers more of a starter's minutes than the eleventh man
+	   does), up to a per-player ceiling `caps[j]`. That makes each man's
+	   minutes per game PLAYED a factor r_j above what the pool gave him.
+	   His production rides the same factor — per-minute rates are the
+	   stat model's answer and are not in question — and each category is
+	   then re-centred by one factor so its season total is exactly the team
+	   total the pool (and the reconciliation above) decided:
+
+	       sum_j x'_j * gp_j / G  ==  sum_j x_j
+
+	   so every team number downstream is unchanged, and every player's
+	   per-game line is the line of the games he actually played. Points and
+	   the attempts behind them share one factor, so no percentage moves.
+
+	   Solved by bisection on a common multiplier on each man's absorption
+	   rate, because the ceilings make the map piecewise. Deterministic, and a
+	   no-op for a team nobody missed a game for. */
+	function redistributeAbsences(lines, games, gameMinutes, extraMinutes, caps, pfCap) {
+		const G = Number(games);
+		if (!(G > 0) || !lines.length) return;
+		const n = lines.length;
+		const w = lines.map((l) => gpWeight(l, G));
+		const m = lines.map((l) => Math.max(0, l.mpg || 0));
+		let T = 0;
+		for (const v of m) T += v;
+		if (T <= 1e-9) return;
+		// The season's floor time per team game: regulation plus overtime.
+		const want = T + Math.max(0, extraMinutes || 0);
+		let lost = want - T;
+		for (let i = 0; i < n; i++) lost += m[i] * (1 - w[i]);
+		if (lost <= 1e-9) return;
+		// How much of a missing teammate's floor time lands on each man.
+		const absorb = m.map((mj, j) => {
+			let a = 0;
+			for (let i = 0; i < n; i++) {
+				if (i === j || m[i] <= 0 || T - m[i] <= 1e-9) continue;
+				a += (m[i] * (1 - w[i])) / (T - m[i]);
+			}
+			return a;
+		});
+		const capAt = (j) => Math.max(m[j], Number.isFinite(caps && caps[j]) ? caps[j] : gameMinutes);
+		const minutesAt = (lam) => m.map((mj, j) => Math.min(capAt(j), mj * (1 + lam * absorb[j])));
+		const seasonAt = (lam) => minutesAt(lam).reduce((a, v, j) => a + v * w[j], 0);
+		let lo = 0;
+		let hi = 1;
+		/* Overtime minutes are shared like any other, so they ride the same
+		   absorption shape: a man nobody missed still plays his share of an
+		   extra period. The floor keeps a team with no absences solvable. */
+		const extraShare = T > 0 ? Math.max(0, want - T) / T : 0;
+		for (let j = 0; j < n; j++) absorb[j] += extraShare;
+		for (let k = 0; k < 20 && seasonAt(hi) < want; k++) hi *= 2;
+		for (let k = 0; k < 50; k++) {
+			const mid = (lo + hi) / 2;
+			if (seasonAt(mid) < want) lo = mid;
+			else hi = mid;
+		}
+		const next = minutesAt(hi);
+		const r = m.map((mj, j) => (mj > 1e-9 ? next[j] / mj : 1));
+		lines.forEach((l, j) => { l.mpg = next[j]; });
+		/* The scoring group is re-centred on one factor so the season's
+		   points hold exactly (anchorPointsToScoreboard moves them onto the
+		   scoreboard next anyway, and it needs a consistent starting total).
+		   Everything else rides r alone: the man who covers for an absent
+		   rebounder rebounds at HIS rate, not the absent man's, so a team
+		   that loses its best big for a month really does rebound a little
+		   less — and every per-40 ceiling reconcileTeamTotals enforced is
+		   preserved exactly, because minutes and production move together. */
+		const rescale = (keys, recentre) => {
+			const lead = keys[0];
+			let before = 0;
+			let after = 0;
+			for (let j = 0; j < n; j++) {
+				const v = lines[j][lead] || 0;
+				before += v;
+				after += v * r[j] * w[j];
+			}
+			const c = recentre && after > 1e-12 ? before / after : 1;
+			for (let j = 0; j < n; j++) {
+				for (const k of keys) {
+					if (Number.isFinite(lines[j][k])) lines[j][k] *= r[j] * c;
+				}
+			}
+		};
+		const pfBefore = lines.map((l) => l.pfpg || 0);
+		rescale(["ppg", "fga", "tpa", "fta"], true);
+		for (const k of ["orpg", "drpg", "apg", "spg", "bpg", "topg", "pfpg",
+			"cspg", "deflpg", "chgpg"]) rescale([k], false);
+		// Usage is a share of the team's chances and has to sum to one.
+		rescale(["usgShare"], true);
+		for (const l of lines) l.rpg = (l.orpg || 0) + (l.drpg || 0);
+		/* Fouls do not scale past the whistle. A coach covering for an
+		   absent starter plays his foul-prone big a few more minutes, not
+		   into a fourth foul a night: the reconciliation's own absolute
+		   ceiling holds, and a line already above it (it cannot be, but) is
+		   left where it was. */
+		lines.forEach((l, j) => {
+			if (Number.isFinite(l.pfpg) && l.pfpg > pfBefore[j]) {
+				l.pfpg = Math.max(pfBefore[j], Math.min(l.pfpg, (pfCap || 3.85)));
+			}
+		});
 	}
 
 	/* Renormalize one category to its pool, then clip the tail at `cap` of the
@@ -3258,8 +3460,11 @@
 			if (Number.isFinite(g.teamPts)) { pf += g.teamPts; n++; }
 		}
 		if (!n) return;
+		/* Season points over the team's games: each line is per game PLAYED
+		   (see redistributeAbsences), so it counts for the share of the
+		   schedule its man was there for. */
 		let pts = 0;
-		for (const l of lines) pts += l.ppg || 0;
+		for (const l of lines) pts += (l.ppg || 0) * gpWeight(l, log.length);
 		if (pts <= 1e-9) return;
 		const k = clamp((pf / n) / pts, 0.82, 1.18);
 		if (Math.abs(k - 1) < 1e-6) return;

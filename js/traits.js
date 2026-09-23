@@ -70,6 +70,18 @@
 	                       so maxInj gates the clean-file traits away from the
 	                       fragile builds and minInj the medical-history ones
 	                       away from the iron men.
+	   FINISHED-RATING gates (see matchesFinished), read against the player's
+	   own finished ratings rather than the build's authored offsets:
+	     fin               { rating: [lo, hi] } percentile bounds WITHIN THE
+	                       CLASS (0..1), either side null
+	     finSkill          a BBGM skill label that satisfies `fin` on its own
+	                       ("plays above the rim": top 40% jmp OR the A)
+	     skill             a BBGM skill label he must carry outright
+	     frame             "heavy": listed weight at or over typicalWeight for
+	                       his listed height
+	     age               "young" / "old": against his class year's mean age
+	                       when the file's ages are informative, else against
+	                       an anomaly-set age; neither, and it is not drawn
 	   `eff` fields, all optional:
 	     vol               multiplier on night-to-night spread (see gameLog)
 	     orbBias           shifts the offensive/defensive rebound split
@@ -89,7 +101,7 @@
 		{ name: "room to fill out", group: "frame", w: 2.6, needs: { years: ["Freshman", "Sophomore"] },
 			note: "a frame that will carry another twenty pounds",
 			adj: "wiry" },
-		{ name: "maxed-out frame", group: "frame", w: 1.4, needs: { years: ["Senior", "Graduate"], off: { stre: [-10, null] } },
+		{ name: "maxed-out frame", group: "frame", w: 1.4, needs: { years: ["Senior", "Graduate"], off: { stre: [-10, null] }, frame: "heavy" },
 			note: "a body that is not going to change much from here",
 			adj: "physically finished" },
 		{ name: "narrow-shouldered", group: "frame", w: 1.1,
@@ -100,12 +112,12 @@
 		   builds that author stre -8 or worse (Toughness Question at -22),
 		   "explosive first step" on 38 with spd -8 or worse, and so on down —
 		   a scouting line that the rating vector beside it flatly denies. */
-		{ name: "genuinely strong", group: "frame", w: 1.6, needs: { off: { stre: [-4, null] } },
+		{ name: "genuinely strong", group: "frame", w: 1.6, needs: { off: { stre: [-4, null] }, fin: { stre: [0.5, null] } },
 			note: "the kind of strength that decides where he gets to catch it",
 			adj: "powerful" },
 
 		// ---------------------------------------------------- athleticism
-		{ name: "explosive first step", group: "athleticism", w: 2.0, needs: { maxHgt: 62, off: { spd: [-4, null] } },
+		{ name: "explosive first step", group: "athleticism", w: 2.0, needs: { maxHgt: 62, off: { spd: [-4, null] }, fin: { spd: [0.5, null] } },
 			note: "a first step that gets him past his man without a screen",
 			adj: "explosive" },
 		{ name: "two-foot leaper", group: "athleticism", w: 1.6, needs: { off: { jmp: [-6, null] } },
@@ -120,15 +132,15 @@
 		{ name: "straight-line only", group: "athleticism", w: 1.3,
 			note: "straight-line speed that does not survive a change of direction",
 			adj: "north-south" },
-		{ name: "heavy-footed", group: "athleticism", w: 1.2, needs: { minHgt: 55, off: { spd: [null, 6] } },
+		{ name: "heavy-footed", group: "athleticism", w: 1.2, needs: { minHgt: 55, off: { spd: [null, 6] }, fin: { spd: [null, 0.5] } },
 			note: "feet that are a step slow on the perimeter and will be tested there",
 			adj: "ground-bound" },
-		{ name: "plays above the rim", group: "athleticism", w: 1.4, needs: { anyTag: ["athletic"] },
+		{ name: "plays above the rim", group: "athleticism", w: 1.4, needs: { anyTag: ["athletic"], fin: { jmp: [0.6, null] }, finSkill: "A" },
 			note: "a vertical that makes the lob a real option rather than a highlight",
 			adj: "vertical" },
 
 		// ----------------------------------------------------------- motor
-		{ name: "relentless motor", group: "motor", w: 2.2, needs: { off: { endu: [-8, null] } },
+		{ name: "relentless motor", group: "motor", w: 2.2, needs: { off: { endu: [-8, null] }, fin: { endu: [0.5, null] } },
 			note: "a motor that does not stop, which shows up in the possessions nobody counts",
 			adj: "relentless", mood: "W" },
 		{ name: "motor questions", group: "motor", w: 1.4,
@@ -137,7 +149,7 @@
 		{ name: "plays every possession", group: "motor", w: 1.5, needs: { off: { endu: [-8, null] } },
 			note: "a habit of finishing every possession, on both ends",
 			adj: "conscientious", mood: "W" },
-		{ name: "conditioning questions", group: "motor", w: 1.0, needs: { off: { endu: [null, 8] } },
+		{ name: "conditioning questions", group: "motor", w: 1.0, needs: { off: { endu: [null, 8] }, fin: { endu: [null, 0.5] } },
 			note: "conditioning that becomes a factor in the second half",
 			adj: "winded" },
 
@@ -209,7 +221,7 @@
 		{ name: "catch-and-shoot only", group: "shooting", w: 1.5, needs: { off: { tp: [-4, null] } },
 			note: "a jumper that lives entirely on the catch",
 			adj: "spot-up" },
-		{ name: "NBA range already", group: "shooting", w: 1.1, needs: { anyTag: ["shooting"], off: { tp: [2, null] } },
+		{ name: "NBA range already", group: "shooting", w: 1.1, needs: { anyTag: ["shooting"], off: { tp: [2, null] }, skill: "3" },
 			note: "range that already extends well past the college line",
 			adj: "deep-range" },
 		{ name: "broken free-throw stroke", group: "shooting", w: 0.9, needs: { minHgt: 60, off: { ft: [null, 2] } },
@@ -291,10 +303,10 @@
 			adj: "available", eff: { inj: 0.7 } },
 
 		// ------------------------------------------------------ background
-		{ name: "young for his class", group: "background", w: 1.3, needs: { years: ["Freshman", "Sophomore"] },
+		{ name: "young for his class", group: "background", w: 1.3, needs: { years: ["Freshman", "Sophomore"], age: "young" },
 			note: "a late birthday that makes him young for everything he has done",
 			adj: "young", mood: "F" },
-		{ name: "old for his class", group: "background", w: 1.1,
+		{ name: "old for his class", group: "background", w: 1.1, needs: { age: "old" },
 			note: "an age that flatters the production a little",
 			adj: "experienced" },
 		{ name: "family in the sport", group: "background", w: 1.0,
@@ -399,7 +411,7 @@
 		{ name: "second-jump quickness", group: "athleticism", w: 1.5, needs: { off: { jmp: [-4, null] } },
 			note: "a second jump that arrives before anybody else's first",
 			adj: "twitchy" },
-		{ name: "slow off the floor", group: "athleticism", w: 1.2, needs: { off: { jmp: [null, 8] } },
+		{ name: "slow off the floor", group: "athleticism", w: 1.2, needs: { off: { jmp: [null, 8] }, fin: { jmp: [null, 0.5] } },
 			note: "a jump that needs two steps of runway he will not get at the next level",
 			adj: "flat-footed" },
 		{ name: "runs the floor every possession", group: "athleticism", w: 1.4, needs: { off: { endu: [-6, null] } },
@@ -408,7 +420,7 @@
 		{ name: "top-end speed only", group: "athleticism", w: 1.0, needs: { off: { spd: [-2, null] } },
 			note: "genuine top-end speed and nothing in the first two steps",
 			adj: "long-striding" },
-		{ name: "plays below the rim", group: "athleticism", w: 1.3, needs: { off: { jmp: [null, 6] } },
+		{ name: "plays below the rim", group: "athleticism", w: 1.3, needs: { off: { jmp: [null, 6] }, fin: { jmp: [null, 0.5] } },
 			note: "a game played entirely below the rim, by necessity rather than by choice",
 			adj: "earthbound" },
 		{ name: "fluid hips", group: "athleticism", w: 1.3, needs: { maxHgt: 70 },
@@ -888,6 +900,214 @@
 		return RB.ARCHETYPES.filter((x) => x.name === p.archetype)[0] || null;
 	}
 
+	/* ---------------------------------------------------- finished ratings
+
+	   matches() reads the BUILD — its authored offsets, tags and injury
+	   multiplier — and never the finished player, so a trait could clear
+	   every gate and still be contradicted by the numbers printed beside
+	   it. Measured over 4,200 prospects: "relentless motor" carriers sat
+	   BELOW the class median endurance 55% of the time, "plays above the
+	   rim" was on 29 players and none of them carried BBGM's athleticism
+	   skill, "NBA range already" was on 18 and only 8 had the 3, and every
+	   "maxed-out frame" was lighter than a typical player of his height.
+	   The build says what he is supposed to be; these gates say what he
+	   turned out to be, and a trait now has to agree with both.
+
+	   Percentiles are WITHIN THE CLASS when the caller hands in a
+	   classContext (which is what a scout compares against), and against
+	   REF_DECILES — the same ratings measured over forty default classes —
+	   when it does not, so a caller that has not been wired for the context
+	   still gets gates that bite. */
+	const REF_DECILES = {
+		endu: [1, 20, 26, 32, 36, 41, 44, 49, 54, 62, 97],
+		stre: [1, 17, 24, 29, 34, 38, 43, 47, 52, 59, 97],
+		spd: [1, 17, 24, 30, 34, 38, 42, 46, 52, 59, 90],
+		jmp: [1, 16, 24, 29, 33, 37, 41, 46, 52, 59, 92],
+	};
+
+	/* The ages BBGM's class years imply — engine.js AGE_FOR_CLASS, which
+	   this file cannot reach. Used only for an anomaly-set age: a
+	   seventeen-year-old freshman is young for his class whatever the
+	   file's other ages say. */
+	const AGE_FOR_CLASS = { Freshman: 19, Sophomore: 20, Junior: 21, Senior: 22, Graduate: 23 };
+	function expectedAge(p) {
+		const cy = String(p.classYear || "Freshman");
+		let age = AGE_FOR_CLASS[cy.replace(/^Redshirt /, "")];
+		if (!Number.isFinite(age)) age = AGE_FOR_CLASS.Freshman;
+		if (/^Redshirt /.test(cy)) age += 1;
+		if (p.transfer && p.transfer.kind === "JUCO transfer") age += 1;
+		return age;
+	}
+
+	/* What the finished gates compare against. `players` is the class (the
+	   engine's state.players once every rating is final); `opts.ageIsInformative`
+	   is the engine's own measurement of whether the file's ages vary. */
+	function classContext(players, opts) {
+		const sorted = {};
+		for (const k of Object.keys(REF_DECILES)) sorted[k] = [];
+		const byYear = {};
+		for (const p of players || []) {
+			if (!p || !p.newRatings) continue;
+			for (const k of Object.keys(sorted)) {
+				const v = p.newRatings[k];
+				if (Number.isFinite(v)) sorted[k].push(v);
+			}
+			if (Number.isFinite(p.age)) {
+				const cy = String(p.classYear || "");
+				(byYear[cy] = byYear[cy] || []).push(p.age);
+			}
+		}
+		for (const k of Object.keys(sorted)) sorted[k].sort((a, b) => a - b);
+		const cyAge = {};
+		for (const cy of Object.keys(byYear)) {
+			const a = byYear[cy];
+			cyAge[cy] = a.reduce((x, y) => x + y, 0) / a.length;
+		}
+		return { sorted, cyAge, ageIsInformative: !!(opts && opts.ageIsInformative) };
+	}
+
+	/* Mid-rank percentile of v in an ascending list: ties count half, so the
+	   class median sits at 0.5 however many players share it. */
+	function pctIn(sorted, v) {
+		const n = sorted.length;
+		if (!n) return 0.5;
+		let lo = 0, hi = n;
+		while (lo < hi) { const m = (lo + hi) >> 1; if (sorted[m] < v) lo = m + 1; else hi = m; }
+		const below = lo;
+		lo = below; hi = n;
+		while (lo < hi) { const m = (lo + hi) >> 1; if (sorted[m] <= v) lo = m + 1; else hi = m; }
+		return (below + (lo - below) / 2) / n;
+	}
+	function pctRef(dec, v) {
+		if (v <= dec[0]) return 0;
+		if (v >= dec[10]) return 1;
+		for (let i = 0; i < 10; i++) {
+			if (v <= dec[i + 1]) {
+				const span = dec[i + 1] - dec[i];
+				return (i + (span > 0 ? (v - dec[i]) / span : 1)) / 10;
+			}
+		}
+		return 1;
+	}
+	function percentile(key, v, ctx) {
+		const list = ctx && ctx.sorted && ctx.sorted[key];
+		if (list && list.length >= 10) return pctIn(list, v);
+		return REF_DECILES[key] ? pctRef(REF_DECILES[key], v) : 0.5;
+	}
+
+	function skillsOf(p) {
+		if (Array.isArray(p.newSkills)) return p.newSkills;
+		const BB = global.BBGM;
+		return BB && p.newRatings ? BB.skills(p.newRatings) : [];
+	}
+
+	function ageSide(p, ctx) {
+		if (!Number.isFinite(p.age)) return null;
+		if (ctx && ctx.ageIsInformative && ctx.cyAge) {
+			const mean = ctx.cyAge[String(p.classYear || "")];
+			if (Number.isFinite(mean)) {
+				if (p.age <= mean - 0.5) return "young";
+				if (p.age >= mean + 0.5) return "old";
+				return null;
+			}
+		}
+		if (p.ageFromAnomaly) {
+			const e = expectedAge(p);
+			return p.age < e ? "young" : p.age > e ? "old" : null;
+		}
+		return null;
+	}
+
+	function matchesFinished(t, p, ctx) {
+		const n = t.needs;
+		if (!n) return true;
+		const r = p.newRatings;
+		if (n.skill && skillsOf(p).indexOf(n.skill) === -1) return false;
+		if (n.fin) {
+			let ok = !!r;
+			if (ok) {
+				for (const k of Object.keys(n.fin)) {
+					if (!Number.isFinite(r[k])) { ok = false; break; }
+					const q = percentile(k, r[k], ctx);
+					const [lo, hi] = n.fin[k];
+					if (lo !== null && lo !== undefined && q < lo) { ok = false; break; }
+					if (hi !== null && hi !== undefined && q > hi) { ok = false; break; }
+				}
+			}
+			if (!ok && !(n.finSkill && skillsOf(p).indexOf(n.finSkill) !== -1)) return false;
+		}
+		if (n.frame === "heavy") {
+			const RB = global.RatingsBuilder;
+			const h = Number.isFinite(p.newHgtInches) ? p.newHgtInches : p.hgtInches;
+			const w = Number.isFinite(p.newWeight) ? p.newWeight : p.weight;
+			if (!RB || !RB.typicalWeight || !Number.isFinite(h) || !Number.isFinite(w)) return false;
+			if (w < RB.typicalWeight(h)) return false;
+		}
+		if (n.age && ageSide(p, ctx) !== n.age) return false;
+		return true;
+	}
+
+	/* Both halves: the build gates and the finished-player gates. */
+	function eligible(t, p, ctx) {
+		return matches(t, p) && matchesFinished(t, p, ctx);
+	}
+
+	/* --------------------------------------------------- after availability
+
+	   The medical file is drawn in the build phase and the season's
+	   availability is rolled much later (assignAvailability, in the regular
+	   season phase), so "has not missed a game" — "a career without a missed
+	   game in it" — landed on players who then missed games: 15 of 25
+	   carriers over forty classes. The claim is about the season the
+	   player is shown with, so it is checked against that season.
+
+	   IDEMPOTENT: the draw is kept on p.traitsDrawn and the displayed list
+	   is re-derived from it every call, because a warm re-run of the season
+	   phase re-rolls availability without re-drawing the traits. The
+	   player's effects (injuryMult, volatility, rebound split) are left as
+	   drawn: the availability roll READ them, and changing them after the
+	   fact would make a warm re-run differ from a cold one.
+
+	   Returns the number of players whose displayed traits changed. */
+	const AVAILABILITY_CLAIMS = {
+		"has not missed a game": "cleared without conditions",
+		"heavy minutes with no maintenance days": null,
+	};
+	function missedGames(p) {
+		const a = p.availability;
+		return !!(a && Number.isFinite(a.games) && a.games > 0);
+	}
+	function regateAfterAvailability(players) {
+		let changed = 0;
+		for (const p of players || []) {
+			if (!p || !Array.isArray(p.traits)) continue;
+			if (p.traits !== p.traitsShown) p.traitsDrawn = p.traits;
+			const drawn = p.traitsDrawn || p.traits;
+			let out = drawn;
+			if (missedGames(p) && drawn.some((t) => t && AVAILABILITY_CLAIMS[t.name] !== undefined)) {
+				out = [];
+				for (const t of drawn) {
+					if (!t || AVAILABILITY_CLAIMS[t.name] === undefined) { out.push(t); continue; }
+					/* An absence that was not an injury (illness, a coach's
+					   decision) still leaves a clean medical file; an injury
+					   leaves nothing clean to say. */
+					const swapName = AVAILABILITY_CLAIMS[t.name];
+					const swap = swapName && !(p.availability && p.availability.injury)
+						? TRAITS.filter((x) => x.name === swapName)[0] : null;
+					if (swap && matches(swap, p) && !drawn.some((x) => x && x.name === swapName)) out.push(swap);
+				}
+			}
+			if (out !== drawn || p.traits !== drawn) {
+				const was = (p.traits || []).map((t) => t.name).join("|");
+				p.traits = out;
+				p.traitNames = out.map((t) => t.name);
+				if (was !== p.traitNames.join("|")) changed++;
+			}
+			p.traitsShown = p.traits;
+		}
+		return changed;
+	}
+
 	/* Draw a player's traits.
 
 	   Two to four of them, one per group at most, weighted by rarity and
@@ -907,7 +1127,9 @@
 		return t && Number.isFinite(t[group]) && t[group] > 0 ? t[group] : 1;
 	}
 
-	function assign(p, rng, cfg, flavor) {
+	/* `ctx` (optional) is a classContext for the finished-rating gates;
+	   without one they read REF_DECILES. */
+	function assign(p, rng, cfg, flavor, ctx) {
 		const want = clamp(
 			cfg && Number.isFinite(cfg.traitCount) ? cfg.traitCount : 3, 0, 6);
 		const arch = archOf(p);
@@ -918,7 +1140,7 @@
 		const out = [];
 		if (want > 0) {
 			const usedGroups = {};
-			let pool = TRAITS.filter((t) => matches(t, p));
+			let pool = TRAITS.filter((t) => eligible(t, p, ctx));
 			const n = Math.max(1, Math.round(want + rng.uniform(-0.9, 0.9)));
 			for (let i = 0; i < n && pool.length; i++) {
 				/* The authored weight, capped.
@@ -980,6 +1202,8 @@
 	}
 
 	global.Traits = {
-		TRAITS, GROUPS, assign, matches, noteClause, adjective, tagsOf, VOL_SPREAD,
+		TRAITS, GROUPS, assign, matches, matchesFinished, eligible, classContext,
+		regateAfterAvailability, percentile, REF_DECILES,
+		noteClause, adjective, tagsOf, VOL_SPREAD,
 	};
 })(typeof window !== "undefined" ? window : self);

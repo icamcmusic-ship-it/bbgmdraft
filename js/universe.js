@@ -188,16 +188,30 @@
 		// Cross-file duplicate pids: legitimate between separate BBGM exports
 		// (each starts from 0), so a warning, not a rejection — but worth
 		// saying, because identical pid SETS usually mean a duplicated file.
-		const pidSig = rows.map((r) => {
+		/* THE SAME MEN, NOT THE SAME NUMBERS.
+
+		   This compared pid sets, and every BBGM export numbers its players
+		   from zero — so any two files of the same size (a 70-man 2025 class
+		   and a 70-man 2026 class) had "identical pid sets" and were reported
+		   as a duplicate. What identifies a class is who is in it: the file's
+		   own fingerprint when the caller has one, and otherwise the set of
+		   names, birth years and draft years, which two different classes do
+		   not share. */
+		const who = rows.map((r) => {
 			if (!r.ok) return null;
-			const pids = (files[r.index].data.players || [])
-				.map((p) => p.pid).filter((x) => x !== undefined);
-			return pids.length ? pids.slice(0, 50).join(",") + "|" + pids.length : null;
+			const ps = files[r.index].data.players || [];
+			if (!ps.length) return null;
+			const ids = ps.map((p) => [
+				p.name || ((p.firstName || "") + " " + (p.lastName || "")).trim(),
+				p.born && p.born.year, p.draft && p.draft.year,
+			].join("|")).sort();
+			return hashString(ids.join(";")) + "|" + ps.length;
 		});
+		const fpSig = rows.map((r) => (r.ok && files[r.index].fingerprint) || null);
 		for (let i = 0; i < rows.length; i++) {
 			for (let j = i + 1; j < rows.length; j++) {
-				if (pidSig[i] && pidSig[i] === pidSig[j]) {
-					rows[j].warnings.push("identical pid set to " + rows[i].name +
+				if ((fpSig[i] && fpSig[i] === fpSig[j]) || (who[i] && who[i] === who[j])) {
+					rows[j].warnings.push("the same players as " + rows[i].name +
 						" — looks like the same class loaded twice");
 				}
 			}

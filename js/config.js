@@ -445,7 +445,7 @@
 
 	const PRESETS = {
 		default: {},
-		"Loaded class": { classQuality: 2, eliteCount: 4, potBias: 1 },
+		"Loaded class": { classQuality: 2, eliteCount: 4, potBias: 1, ovrMode: "curve" },
 		"Weak class": { classQuality: -2, eliteCount: 0, potBias: -1, ovrMode: "curve" },
 		"Top heavy": { classDepth: -2, eliteCount: 3, ovrMode: "curve" },
 		"Deep, no stars": { classDepth: 2, eliteCount: 0, ovrMode: "curve" },
@@ -480,7 +480,9 @@
 		},
 		"Vanilla builds": { specialization: 0.2, archetypeDiversity: 20 },
 		"One-and-done era": { freshmanShare: 78 },
-		"Blue-blood freshman wave": { freshmanShare: 46, eliteCount: 3 },
+		/* eliteCount only acts on a rebuilt curve; without ovrMode it was a
+		   dimmed slider the preset moved and the class ignored. */
+		"Blue-blood freshman wave": { freshmanShare: 46, eliteCount: 3, ovrMode: "curve" },
 		"Veteran-heavy class": { freshmanShare: 16 },
 		"2015 scoring drought": { era: "2009-2021", pace: 64, efficiencyEnv: -1 },
 		/* Two flavors and a louder world, for somebody who wants the tool to
