@@ -749,9 +749,9 @@
 		"Conference USA": ["TX", "SE", "TN", "MTN"],
 		"MAC": ["OH"],
 		"Sun Belt": ["SE", "TX", "CAR"],
-		"Big West": ["W"],
+		"Big West": ["W", "MTN"],
 		"CAA": ["NE", "MA", "CAR"],
-		"WAC": ["TX", "MTN", "W"],
+		"UAC": ["TX", "TN", "SE"],
 		"Horizon": ["OH", "MW"],
 		"MAAC": ["NE", "MA"],
 		"Southern": ["CAR", "SE", "TN"],
@@ -795,7 +795,12 @@
 		const carried = cfg && cfg.carryOver && cfg.carryOver.confOf;
 		for (const name of C.names) {
 			const base = C.conferenceOf(name) || "Independent";
-			const remembered = carried && carried[name];
+			/* A save from before a conference was renamed ("WAC" is the
+			   UAC now) still names the old league; read it through the
+			   alias table so the program lands in a league that exists. */
+			const remembered = carried && carried[name]
+				? (C.canonicalConference ? C.canonicalConference(carried[name]) : carried[name])
+				: null;
 			confOf[name] = remembered &&
 				(memory >= 1 || rng.child("memory:" + name).random() < memory)
 				? remembered : base;
@@ -1582,8 +1587,18 @@
 			while (guard++ < maxGuard) {
 				// Always serve the neediest team first. That keeps the remaining
 				// need spread evenly instead of stranding one team at the end.
-				const avail = pool.filter((t) => need.get(t) > 0)
-					.sort((a, b) => need.get(b) - need.get(a));
+				/* Need descending, pool order within a need — a counting sort,
+				   since needs are small integers; the comparison sort it
+				   replaces was most of the cost of a season's schedule. */
+				const buckets = [];
+				for (const t of pool) {
+					const v = need.get(t);
+					if (v > 0) (buckets[v] || (buckets[v] = [])).push(t);
+				}
+				const avail = [];
+				for (let v = buckets.length - 1; v > 0; v--) {
+					if (buckets[v]) for (const t of buckets[v]) avail.push(t);
+				}
 				if (avail.length < 2) break;
 				const a = avail[0];
 				const rest = avail.slice(1);
@@ -1673,9 +1688,9 @@
 		const busy = new Map();
 		const lastMet = new Map();
 		const dayFree = (t, d, gap) => {
-			const set = busy.get(t);
-			if (!set) return true;
-			for (let k = -gap + 1; k < gap; k++) if (set.has(d + k)) return false;
+			const cal = busy.get(t);
+			if (!cal) return true;
+			for (let k = -gap + 1; k < gap; k++) if (cal[d + k + 2]) return false;
 			return true;
 		};
 		const pk = (a, b) => (a.name < b.name ? a.name + "|" + b.name : b.name + "|" + a.name);
@@ -1712,8 +1727,16 @@
 			f.day = day;
 			f.when = (day + 0.5) / DAYS;
 			for (const t of [f.a, f.b]) {
-				if (!busy.has(t)) busy.set(t, new Set());
-				busy.get(t).add(day);
+				// Padded by two days a side, so a window check never indexes
+				// off either end; grown if a fixture landed past the season.
+				let cal = busy.get(t);
+				if (!cal || cal.length < day + 5) {
+					const next = new Uint8Array(Math.max(DAYS + 4, day + 5));
+					if (cal) next.set(cal);
+					cal = next;
+					busy.set(t, cal);
+				}
+				cal[day + 2] = 1;
 			}
 			const key = pk(f.a, f.b);
 			if (!lastMet.has(key)) lastMet.set(key, []);

@@ -146,11 +146,15 @@
 	   exactly, and the team page's Tempo is the box's own possessions (see
 	   simulateTeamStats), which is what both ratings divide by. */
 	const ANCHOR_EFF_BAND = 0.02;
-	const FT_CEIL = (N) => 1 - 0.055 * clamp((N - 20) / 100, 0, 1);
+	const FT_CEIL = (N) => 1 - 0.03 * clamp((N - 20) / 100, 0, 1);
+	/* The free-throw knee sits higher than the three-point one: a real
+	   volume shooter at .90 from the line is common and must not be bent,
+	   while one at .98 on 150 attempts is not a season. */
+	const FT_KNEE = 0.92;
 	const TP_CEIL = (N) => 1 - 0.49 * clamp((N - 25) / 75, 0, 1);
-	function ceilPct(v, lim) {
+	function ceilPct(v, lim, knee) {
 		if (v === null || !Number.isFinite(v)) return v;
-		return Math.min(v, softCeil(v, lim, 0.9));
+		return Math.min(v, softCeil(v, lim, knee || 0.9));
 	}
 
 	/* Tuning constants for the volume model. Exported so tools/validate.js and
@@ -1945,7 +1949,7 @@
 			const Ne = Math.max(Math.min(N, 8), Math.round(N / (nz * nz)));
 			const k = rbinom(r, Ne, p);
 			const v = k / Ne;
-			return ceilOf ? ceilPct(v, ceilOf(N)) : v;
+			return ceilOf ? ceilPct(v, ceilOf(N), ceilOf === FT_CEIL ? FT_KNEE : 0.9) : v;
 		};
 		const ftCeil = FT_CEIL;
 		const tpCeil = TP_CEIL;
@@ -3761,7 +3765,7 @@
 				if (tpm > cap) { lost += 3 * (tpm - cap); tpm = cap; }
 			}
 			if (l.fta > 0) {
-				const cap = l.fta * Math.min(0.99, ceilPct(ftm / l.fta, FT_CEIL(l.fta * gpN)));
+				const cap = l.fta * Math.min(0.99, ceilPct(ftm / l.fta, FT_CEIL(l.fta * gpN), FT_KNEE));
 				if (ftm > cap) { lost += ftm - cap; ftm = cap; }
 			}
 			const two = Math.min(two0 * vol * eff + lost / 2, 0.97 * twoA);
@@ -4024,7 +4028,7 @@
 		   against a real 3-6%. The third number is how much of the night's
 		   form reaches the stat: scoring rides it, fouls barely do. */
 		const SPREAD = {
-			pts: [1.35, 0.6, 1.0], reb: [1.0, 0.4, 0.8], ast: [0.95, 0.3, 0.8],
+			pts: [1.30, 0.6, 1.0], reb: [1.0, 0.4, 0.8], ast: [0.95, 0.3, 0.8],
 			stl: [0.85, 0.2, 0.4], blk: [0.85, 0.2, 0.4], tov: [0.85, 0.2, 0.5],
 			fouls: [0.45, 0.12, 0.25],
 		};
