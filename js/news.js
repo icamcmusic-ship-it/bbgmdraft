@@ -6232,7 +6232,10 @@
 		find: (ctx) => {
 			const t = ctx.res.tourney;
 			if (!t || !t.selection) return null;
-			const cand = ctx.teamList.filter((x) => (x.apRank || 99) <= 12 &&
+			/* The poll now grades opponents on the NET as of each week, so
+			   the two agree more often than they did; a top-15 team outside
+			   the NET's top 24 is still the argument. */
+			const cand = ctx.teamList.filter((x) => (x.apRank || 99) <= 15 &&
 				Number.isFinite(x.netRank) && x.netRank >= 25);
 			return cand.length ? ctx.rng.pick(cand) : null;
 		},
