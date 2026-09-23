@@ -530,8 +530,25 @@
 		return out;
 	}
 
+	/* The settings that are a choice from a list, and the list. Each is a
+	   function because two of the lists live in files that load after this
+	   one; a list that is not loaded yet (null) is not checked. `era` is
+	   checked against every era the table knows, fitted or not — the harness
+	   runs an unfitted era by name on purpose; the panel narrows it further. */
+	const CHOICES = {
+		ovrMode: () => ["preserve", "curve"],
+		priorSeasons: () => ["simulate", "reconstruct"],
+		collegeSource: () => ["blanks", "respect", "rewrite"],
+		era: () => (global.Calibration && global.Calibration.ERAS
+			? Object.keys(global.Calibration.ERAS) : null),
+		flavorHint: () => (global.RatingsBuilder && global.RatingsBuilder.CLASS_FLAVORS
+			? [""].concat(global.RatingsBuilder.CLASS_FLAVORS.map((f) => f.name)) : null),
+	};
+
 	function make(overrides) {
-		const cfg = Object.assign({}, DEFAULTS, overrides || {});
+		const src = overrides && typeof overrides === "object" && !Array.isArray(overrides)
+			? overrides : {};
+		const cfg = Object.assign({}, DEFAULTS, src);
 		/* Copy every container the UI can write into, so a preset or a URL
 		   payload can never be mutated in place by the editor that displays it.
 
@@ -559,9 +576,39 @@
 		   and the panel went on painting the tick boxes the payload asked for.
 		   A non-array is a broken value like a NaN pace, and goes back to the
 		   default the same way. */
+		/* Known keys only, once the engine that names them is loaded: an
+		   unknown line is a tick box the panel cannot show and a note line
+		   buildNote silently skips. */
+		const known = global.Engine && Array.isArray(global.Engine.NOTE_LINES)
+			? new Set(global.Engine.NOTE_LINES.map((x) => x[0])) : null;
 		cfg.noteLines = (Array.isArray(cfg.noteLines) ? cfg.noteLines : DEFAULTS.noteLines)
-			.filter((k) => typeof k === "string").slice();
+			.filter((k) => typeof k === "string" && (!known || known.has(k)))
+			.filter((k, i, a) => a.indexOf(k) === i);
 		if (!cfg.noteLines.length) cfg.noteLines = DEFAULTS.noteLines.slice();
+		/* THE TEXT CHOICES AND THE SWITCHES go through the same door as the
+		   numbers. A link carrying `"era": "bogus"` was stored verbatim, and
+		   the pace hint then read the anchors of an era that does not exist
+		   and threw inside the first paint — before a single control was
+		   bound, and persisted, so a reload failed the same way. */
+		for (const key of Object.keys(CHOICES)) {
+			const allowed = CHOICES[key]();
+			if (allowed && allowed.indexOf(cfg[key]) === -1) cfg[key] = DEFAULTS[key];
+		}
+		for (const key of Object.keys(DEFAULTS)) {
+			if (typeof DEFAULTS[key] !== "boolean") continue;
+			const v = cfg[key];
+			cfg[key] = typeof v === "boolean" ? v
+				: v === "false" || v === "0" || v === 0 ? false
+				: v === "true" || v === "1" || v === 1 ? true
+				: DEFAULTS[key];
+		}
+		/* The three legacy destination sliders arrive as strings from an old
+		   link ("50"), and Number.isFinite("50") is false, so the fold below
+		   skipped them and the setting silently did nothing. */
+		for (const key of ["wEuroLeague", "wGLeague", "wNBL"]) {
+			if (typeof cfg[key] === "string" && cfg[key].trim() !== "" &&
+				Number.isFinite(Number(cfg[key]))) cfg[key] = Number(cfg[key]);
+		}
 		// Deep-copied for the same reason noteLines is: the pool memory is a
 		// container the UI writes into between runs.
 		cfg.recentPools = Array.isArray(cfg.recentPools)

@@ -199,10 +199,17 @@
 		return out;
 	}
 
-	/* Labels are pushed in COMPOSITE_WEIGHTS order, which is how BBGM itself
-	   builds the array. This used to sort alphabetically — cosmetic in-game,
-	   but a needless difference in a file whose premise is byte-level
-	   fidelity.
+	/* Labels are pushed in COMPOSITE_WEIGHTS order and then sorted, which is
+	   exactly what BBGM does: src/worker/core/player/skills.ts ends
+
+	       sk.sort();
+	       return sk;
+
+	   An earlier revision of this file dropped the sort on the belief that
+	   upstream kept insertion order; that exported about 3% of players with
+	   their labels in a different order from the game's own (e.g. ["V","B"]
+	   where BBGM writes ["B","V"]). Default Array.prototype.sort is a UTF-16
+	   code-unit sort, which is what the upstream call is too.
 
 	   The `c !== "hgt"` fuzz exclusion in compositeRating was carried here
 	   with a note saying it was unverified against upstream. It is verified
@@ -223,6 +230,7 @@
 				sk.push(c.skill.label);
 			}
 		}
+		sk.sort();
 		return sk;
 	}
 

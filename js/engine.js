@@ -228,7 +228,14 @@
 			// Transfers. Freshmen do not transfer; the rest increasingly do.
 			p.transfer = null;
 			if (yearIdx >= 1 && r.random() < transferShare * (0.55 + 0.55 * yearIdx)) {
-				const kind = r.weighted(TRANSFER_KINDS);
+				/* A fifth-year or graduate transfer is by definition a man
+				   who has used four years, so those kinds are only open to a
+				   senior. Drawing from the full list made them force
+				   "Graduate" onto sophomores and juniors — about half of all
+				   Graduates in a class were two-year players. */
+				const kinds = yearIdx >= 3 ? TRANSFER_KINDS
+					: TRANSFER_KINDS.filter((k) => !k.fifthYear);
+				const kind = r.weighted(kinds);
 				const pool = kind.from === "juco" ? JUCO
 					: kind.from === "academy" ? ACADEMIES
 					: kind.from === "overseas" ? OVERSEAS_ORIGINS
@@ -242,7 +249,13 @@
 						: (pool.length ? r.pick(pool) : "junior college"),
 					fifthYear: !!kind.fifthYear,
 				};
-				if (kind.fifthYear) p.classYear = "Graduate";
+				if (kind.fifthYear) {
+					/* A redshirt senior's fifth year IS the graduate year (the
+					   same age, 23), so the flag is folded into the class year
+					   rather than left on a "Graduate" it no longer prefixes. */
+					p.classYear = "Graduate";
+					p.redshirt = null;
+				}
 			}
 			const b = bio && bio[p.key];
 			if (b) {
@@ -1454,7 +1467,7 @@
 				: inchesFromHgtRating(r.hgt);
 			const wt = num(p.weight) !== undefined
 				? clamp(num(p.weight), PHYSICAL_RANGE.weight[0], PHYSICAL_RANGE.weight[1])
-				: Math.round(140 + hgtIn * 0.9 + (r.stre || 50) * 0.35);
+				: Math.round(140 + hgtIn * 0.9 + (Number.isFinite(r.stre) ? r.stre : 50) * 0.35);
 			const key = playerKey(p, idx, keysSeen);
 			/* Age at the class's own season, floored to what a season can
 			   actually contain — see realisticAge just above classYear.
@@ -1854,7 +1867,7 @@
 			label: "coming back off a lost season",
 			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman",
 			apply: (p) => {
-				p.redshirt = "medical redshirt";
+				markRedshirt(p, "medical redshirt");
 				p.lostSeason = true;
 			},
 		},
@@ -2049,7 +2062,7 @@
 			label: "ineligible as a freshman",
 			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman",
 			apply: (p) => {
-				p.redshirt = "academic redshirt";
+				markRedshirt(p, "academic redshirt");
 				p.backstory = "was academically ineligible for his freshman season";
 			},
 		},
@@ -4278,7 +4291,21 @@
 				const no1 = res && res.board && res.board[0];
 				return !!no1 && (no1.awards || []).some((a) => set.has(a));
 			} },
+		/* Strangeness as a clause: "reroll until the world comes out weird".
+		   Any "strangeness:N" key parses (see parseRerollClause); these two
+		   are the thresholds the dialog lists. */
+		strangenessPredicate(30),
+		strangenessPredicate(50),
 	];
+
+	function strangenessPredicate(n) {
+		const t = Math.max(0, Math.min(100, Math.round(Number(n) || 0)));
+		return { key: "strangeness:" + t, label: "strangeness " + t + " or more (out of 100)",
+			test: (res) => {
+				const sc = strangeness(res);
+				return !!sc && sc.score >= t;
+			} };
+	}
 
 	/* A CLAUSE IS A PREDICATE AND A SENSE.
 
@@ -4292,7 +4319,11 @@
 		const raw = String(key || "");
 		const negated = raw.charAt(0) === "!";
 		const bare = negated ? raw.slice(1) : raw;
-		const pred = REROLL_PREDICATES.filter((p) => p.key === bare)[0];
+		let pred = REROLL_PREDICATES.filter((p) => p.key === bare)[0];
+		if (!pred) {
+			const m = /^strangeness(?::|>=)(\d{1,3})$/.exec(bare);
+			if (m) pred = strangenessPredicate(Number(m[1]));
+		}
 		if (!pred) return null;
 		return {
 			key: raw, pred, negated,
@@ -4466,8 +4497,13 @@
 		const anomalies = (res.surprises || []).length;
 		if (anomalies >= 6) add(8, anomalies + " anomalies in one class");
 		else if (anomalies >= 5) add(4, anomalies + " anomalies in one class");
+		/* The REGULAR season, as the reroll predicate reads it: a team's
+		   final record includes March, so `t.l === 0` only ever fired for the
+		   national champion and missed every unbeaten team that then lost in
+		   the tournament. */
 		const unbeaten = Object.values(res.teams || {})
-			.filter((t) => t && t.l === 0 && t.w >= 20);
+			.filter((t) => t && t.regSnapshot && t.regSnapshot.l === 0 &&
+				t.regSnapshot.w >= 20);
 		if (unbeaten.length) add(20, unbeaten[0].name + " went unbeaten");
 		/* The class's own shape, against what a draft class usually looks
 		   like: a top-heavy year and a year with no stars in it are both
@@ -6210,6 +6246,17 @@
 	   costs a year without costing eligibility, and junior college costs two.
 	   Nothing here is a draw — the biography already happened, this only reads
 	   it back. */
+	/* A redshirt is a year on the clock that is not on the class year, so it
+	   has to show as the "Redshirt " prefix: that prefix is what
+	   ageForClassYear reads for the extra year. The anomalies that grant one
+	   used to set the flag alone, so a medical redshirt senior exported at a
+	   plain senior's age. */
+	function markRedshirt(p, kind) {
+		p.redshirt = kind;
+		const cy = String(p.classYear || "");
+		if (cy && !/^Redshirt /.test(cy)) p.classYear = "Redshirt " + cy;
+	}
+
 	const AGE_FOR_CLASS = {
 		Freshman: 19, Sophomore: 20, Junior: 21, Senior: 22, Graduate: 23,
 	};
@@ -6220,8 +6267,12 @@
 		const base = AGE_FOR_CLASS[cy.replace(/^Redshirt /, "")];
 		let age = Number.isFinite(base) ? base : AGE_FOR_CLASS.Freshman;
 		if (redshirt) age += 1;
-		// A JUCO man spent two years somewhere that does not appear on his
-		// D-I class year at all.
+		/* A JUCO man's two junior-college seasons DO count on his class
+		   year (he arrives a junior), so they are not added again. The one
+		   year added here is the typical extra year of the route — the
+		   qualifying year or gap year that sent him to a JUCO in the first
+		   place — which is why a JUCO junior reads a year older than a
+		   four-year junior. */
 		if (transfer && transfer.kind === "JUCO transfer") age += 1;
 		return clamp(age, 18, AGE_CAP);
 	}
@@ -6838,7 +6889,8 @@
 			seed: result.seed,
 			season: result.season,
 			flavor: result.flavor ? result.flavor.label : null,
-			champion: result.tourney ? result.tourney.champion.team.name : null,
+			champion: result.tourney && result.tourney.champion && result.tourney.champion.team
+				? result.tourney.champion.team.name : null,
 			runnerUp: result.tourney && result.tourney.runnerUp ? result.tourney.runnerUp.team.name : null,
 			nitChampion: result.tourney && result.tourney.nit && result.tourney.nit.champion
 				? result.tourney.nit.champion.name : null,
