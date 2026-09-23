@@ -1705,6 +1705,54 @@ async function gotoProspects(page) {
 			uni.headings.join(" | "));
 		ok("every season records a fingerprint of what it produced",
 			uni.fingerprints);
+		/* PROGRAM HISTORY, PEOPLE AND RIVALRIES. Universe.programHistory,
+		   records.people and the rivalry threads are data the chain keeps;
+		   the tab and a team page have to draw them. A rivalry thread is
+		   synthesised from a made-up book, because two seasons cannot meet
+		   the bar a real one needs. */
+		const hist = await page.evaluate(() => {
+			const st = window.App.state;
+			const all = window.Universe.programHistory(st.universe, null,
+				st.results.filter(Boolean));
+			const name = Object.keys(all).filter((n) => all[n].length >= 2)
+				.sort((a, b) => (all[b][all[b].length - 1].titles || 0) -
+					(all[a][all[a].length - 1].titles || 0))[0] || null;
+			const tab = {
+				programs: !!document.getElementById("uprograms"),
+				people: Array.from(document.querySelectorAll("#view h5"))
+					.some((h) => h.textContent === "People") || !st.universe.registry,
+			};
+			const saved = st.universe.threads;
+			const riv = window.Universe.rivalryThreads({ "Duke|Kansas": { a: "Duke", b: "Kansas",
+				games: 4, aw: 3, bw: 1, march: [2026, 2027, 2028] } });
+			st.universe.threads = (saved || []).concat(riv);
+			window.App.render();
+			const line = Array.from(document.querySelectorAll("#view .note div"))
+				.filter((d) => /^Duke and Kansas met in March/.test(d.textContent))[0];
+			const rivalry = !!line && line.querySelectorAll("button.linky").length === 2;
+			st.universe.threads = saved;
+			window.App.render();
+			return { name, rows: name ? all[name].length : 0, tab, rivalry,
+				kinds: riv.map((t) => t.kind) };
+		});
+		ok("the universe tab has a Programs section and the people records",
+			hist.tab.programs && hist.tab.people, JSON.stringify(hist.tab));
+		ok("a rivalry thread renders with both programs linked",
+			hist.rivalry && hist.kinds[0] === "rivalry", JSON.stringify(hist));
+		if (hist.name) {
+			await page.evaluate((n) => window.App.showTeam(n), hist.name);
+			await page.waitForTimeout(150);
+			const tp = await page.evaluate(() => ({
+				heads: Array.from(document.querySelectorAll("#view h4")).map((h) => h.textContent),
+				rows: document.querySelectorAll("#view table.proghist tbody tr").length,
+				spark: !!document.querySelector("#view svg.levelspark path.lvlline"),
+			}));
+			ok("a team page in universe mode shows the program's history",
+				tp.heads.indexOf("Program history") !== -1 && tp.rows === hist.rows && tp.spark,
+				JSON.stringify(tp) + " expected rows " + hist.rows);
+			await page.evaluate(() => { window.App.showTeam(null);
+				window.App.state.tab = "universe"; window.App.render(); });
+		}
 		ok("the universe exports as one players file with unique pids",
 			uni.players > 100 && uni.players === uni.uniquePids,
 			uni.players + " players, " + uni.uniquePids + " pids");
@@ -1719,6 +1767,37 @@ async function gotoProspects(page) {
 		ok("turning universe mode off clears the cached chain configs",
 			(await page.evaluate(() =>
 				Object.keys(window.App.state.universe.cfgs).length)) === 0);
+	}
+
+	console.log("\nSaved column visibility");
+	{
+		/* An empty hidden-columns map saved by a build before the
+		   default-hidden scheme is what every install had, not a choice: it
+		   restores as the defaults. The same empty map saved WITH the scheme
+		   marker is a user who asked for every column, and is kept. */
+		const restored = async (mutate) => {
+			await page.evaluate((m) => {
+				window.App.persist();
+				const key = "bbgm-draft-workshop/v1";
+				const saved = JSON.parse(localStorage.getItem(key));
+				(new Function("saved", m))(saved);
+				localStorage.setItem(key, JSON.stringify(saved));
+			}, mutate);
+			await page.reload();
+			await page.waitForFunction(() => window.App && window.App.state);
+			return page.evaluate(() => ({
+				hidden: Object.keys(window.App.state.hiddenColumns || {}).length,
+				defaults: Object.keys(window.Views.defaultHiddenColumns()).length,
+			}));
+		};
+		const legacy = await restored("saved.hiddenColumns = {}; delete saved.hiddenColumnsScheme;");
+		ok("an empty column map from an older build falls back to the defaults",
+			legacy.defaults > 0 && legacy.hidden === legacy.defaults, JSON.stringify(legacy));
+		const chosen = await restored("saved.hiddenColumns = {};");
+		ok("an empty column map saved under the new scheme keeps every column",
+			chosen.hidden === 0, JSON.stringify(chosen));
+		const some = await restored("saved.hiddenColumns = { ppg: true }; delete saved.hiddenColumnsScheme;");
+		ok("a non-empty older column map is kept as it was", some.hidden === 1, JSON.stringify(some));
 	}
 
 	console.log("\nThe table's own numbers");

@@ -689,7 +689,7 @@
 		/* The usage composite a synthesized returning teammate scores. See
 		   simulateTeamStats for why this number decides the whole class's
 		   scoring level. */
-		FILLER_USAGE: +(typeof process !== "undefined" && process.env.FU || 0.280),
+		FILLER_USAGE: 0.280,
 		/* The usage composite a synthesized returning teammate actually
 		   SCORES, which is not FILLER_USAGE: the filler synthesis draws
 		   `f(FILLER_USAGE, 0.07)` and f() scales its base by
@@ -713,7 +713,7 @@
 		   about the population it is applied to; two populations, two
 		   references, exactly as the turnover term already does with
 		   TOV_COMP_FIELD. Change FILLER_USAGE and this moves with it. */
-		FILLER_CEIL_REF: 0.2264 * (+(typeof process !== "undefined" && process.env.FU || 0.280)) / 0.280,
+		FILLER_CEIL_REF: 0.2264,
 		/* How much ceiling headroom a rotation must have beyond 100% of its
 		   own chances before the bisection is asked to solve. The ceilings are
 		   bounds on individuals and their sum is not a quantity anyone tuned,
@@ -3071,11 +3071,11 @@
 		   went to overtime six times is 150 minutes short. */
 		const otPerGame = team.log && team.log.length
 			? team.log.reduce((a, g) => a + (g.ot || 0), 0) / team.log.length : 0;
-		if (!(typeof process !== "undefined" && process.env.NORED)) redistributeAbsences(lines, ctx.games, gameMinutes, 25 * otPerGame, members.map((m, i) =>
+		redistributeAbsences(lines, ctx.games, gameMinutes, 25 * otPerGame, members.map((m, i) =>
 			(!m.filler && env.youthCap)
 				? mins[i]
 				: Math.max(mins[i], Math.min(gameMinutes - 2, env.mpgCap || TUNING.MPG_CAP))),
-			3.85 * foulOutOf(env) / 5);
+			3.9 * foulOutOf(env) / 5);
 		/* And then answer to the SCOREBOARD.
 
 		   A team's points existed three times over and no two of them agreed:
@@ -3094,8 +3094,10 @@
 		   it wins: one factor over the whole rotation puts the pool's points on
 		   the points the team actually scored. One factor and not a per-player
 		   fit because the SHARES are the stat model's answer and are not in
-		   question — only the total is. Percentages are untouched (attempts and
-		   makes move together), and the bound keeps a freak schedule from
+		   question — only the total is. Most of the factor goes on the
+		   attempts, sized so the box's possessions land on the tempo the
+		   games were played at; at most 2% goes on the makes (see
+		   ANCHOR_EFF_BAND), and the bound keeps a freak schedule from
 		   rewriting a rotation rather than correcting it. */
 		anchorPointsToScoreboard(lines, team, played);
 		totals.ast = 0; totals.stl = 0; totals.blk = 0; totals.pf = 0;
@@ -3326,7 +3328,9 @@
 		   minutes put most of it on the starters and walked them to the
 		   minutes ceiling; headroom is what a coach actually has to give. */
 		const capAt = (j) => Math.max(m[j], Number.isFinite(caps && caps[j]) ? caps[j] : gameMinutes);
-		const h = m.map((mj, j) => (mj > 0 ? Math.max(0, capAt(j) - mj) : 0));
+		/* Squared, so it is the bench that grows: a man with twenty minutes
+		   of room takes sixteen times the share of one with five. */
+		const h = m.map((mj, j) => (mj > 0 ? Math.pow(Math.max(0, capAt(j) - mj), 2) : 0));
 		let H = 0;
 		for (const v of h) H += v;
 		const give = m.map((mj, j) => {
@@ -3387,13 +3391,16 @@
 				}
 				return t;
 			});
-			/* Spread by the floor time each man had beside the absences
-			   (minutes, not his own volume): the shots a missing scorer
-			   leaves are taken by whoever is on the floor instead of him,
-			   and weighting them by volume handed nearly all of them to the
-			   prospects, who are the volume — measured, half a point a game
-			   on a draft class, past the class's own scoring band. */
-			const mm = lines.map((l) => Math.max(0, l.mpg || 0));
+			/* Spread the way the minutes were: by headroom. The shots a
+			   missing scorer leaves are taken by the men who take his
+			   minutes — the bench moving up — and weighting them by volume
+			   handed nearly all of them to the prospects, who are the volume:
+			   measured, half a point a game on a draft class, past the
+			   class's own scoring band. Bounded at 1.6x a man's own rate, so
+			   a garbage-time reserve does not become a volume scorer on
+			   paper; anything the bound keeps back is restored by the
+			   scoreboard anchor that runs next. */
+			const mm = h;
 			let lam = 0;
 			if (recentre) {
 				let q = 0;
@@ -3404,7 +3411,9 @@
 			const flat = recentre && lam === null && after > 1e-12 ? before / after : 1;
 			for (let j = 0; j < n; j++) {
 				const f = lam === null ? r[j] * flat
-					: x[j] > 1e-12 ? Math.max(0.5 * r[j], r[j] + (lam * a[j] * mm[j]) / x[j]) : r[j];
+					: x[j] > 1e-12
+						? clamp(r[j] + (lam * a[j] * mm[j]) / x[j], 0.5 * r[j], 1.6 * r[j])
+						: r[j];
 				for (const k of keys) {
 					if (Number.isFinite(lines[j][k])) lines[j][k] *= f;
 				}
@@ -3445,7 +3454,8 @@
 		   left where it was. */
 		lines.forEach((l, j) => {
 			if (Number.isFinite(l.pfpg) && l.pfpg > pfBefore[j]) {
-				l.pfpg = Math.max(pfBefore[j], Math.min(l.pfpg, (pfCap || 3.85)));
+				// Soft, so the top of the column is a tail and not a wall.
+				l.pfpg = Math.max(pfBefore[j], softCeil(l.pfpg, pfCap || 3.9, 0.9));
 			}
 		});
 	}
@@ -3647,17 +3657,18 @@
 	   season behind it (a prior year that was never scheduled) keeps the
 	   pool's own answer, which is all there is.
 
-	   Only the scoring volume moves — attempts and makes by the same factor,
-	   so every shooting percentage, every share and every non-scoring stat is
-	   exactly what the stat model said. Bounded at ±18%: past that the
+	   Only scoring moves — mostly the volume (attempts, sized to the played
+	   tempo) and a little of the efficiency (see below and ANCHOR_EFF_BAND);
+	   every share and every non-scoring stat is exactly what the stat model
+	   said. Bounded at ±18%: past that the
 	   disagreement is not a reconciliation, and a rotation should not be
 	   rewritten to chase one. (The comment said ±15% and the clamp said
 	   0.82/1.18 for as long as both existed. The clamp is the one that ran.)
 
 	   WHAT THIS DOES NOT MOVE, and why that is not a bug.
 
-	   `ppg`, `fga`, `tpa` and `fta` scale together, so true shooting is
-	   exactly invariant — that is the point of one factor. Turnovers do not
+	   `ppg`, `fga`, `tpa` and `fta` scale together apart from the small
+	   efficiency half, so true shooting moves by at most 2%. Turnovers do not
 	   scale, because a turnover is not a scoring event and multiplying it by
 	   the scoreboard's correction would be inventing possessions. The
 	   consequence is that a line's `usg`, recomputed from its own printed

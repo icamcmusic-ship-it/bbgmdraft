@@ -182,6 +182,8 @@
 	   versioned and the payload inside it was not, so a future settings change
 	   would read stale keys out of an old blob and silently half-apply them. */
 	const STORE_VERSION = 3;
+	// Bumped when the meaning of a saved hiddenColumns map changes; see restore.
+	const HIDDEN_COLUMNS_SCHEME = 2;
 
 	/* MIGRATIONS.
 
@@ -335,6 +337,9 @@
 			presetDirty: state.presetDirty,
 			customPresets: state.customPresets,
 			hiddenColumns: state.hiddenColumns,
+			/* Marks hiddenColumns as saved under the default-hidden scheme, so
+			   an empty map here is a deliberate "show everything". */
+			hiddenColumnsScheme: HIDDEN_COLUMNS_SCHEME,
 			columnOrder: state.columnOrder,
 			statMode: state.statMode,
 			compare: state.compare,
@@ -476,7 +481,16 @@
 		state.presetDirty = !!saved.presetDirty;
 		if (saved.customPresets && typeof saved.customPresets === "object" &&
 			!Array.isArray(saved.customPresets)) state.customPresets = saved.customPresets;
-		state.hiddenColumns = validFlagMap(saved.hiddenColumns) || state.hiddenColumns;
+		/* An EMPTY hidden-columns map from a build before the default-hidden
+		   scheme is not a choice: it is what every install started with, so
+		   such a user kept all sixty-one columns forever. Only a map saved
+		   under the scheme marker is trusted when empty. */
+		{
+			const hc = validFlagMap(saved.hiddenColumns);
+			const marked = Number(saved.hiddenColumnsScheme) >= HIDDEN_COLUMNS_SCHEME;
+			if (hc && (Object.keys(hc).length || marked)) state.hiddenColumns = hc;
+			else if (hc && V.defaultHiddenColumns) state.hiddenColumns = V.defaultHiddenColumns();
+		}
 		if (Array.isArray(saved.columnOrder)) {
 			state.columnOrder = saved.columnOrder.filter((k) => typeof k === "string");
 		}

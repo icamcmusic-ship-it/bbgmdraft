@@ -1379,7 +1379,7 @@
 		   itself and a typical opponent and the season's tempo spread was
 		   half of what the styles say (and of the real one, p10/p90 about
 		   64/71 around 67.5). */
-		const baseA = (typeof process !== "undefined" && process.env.PACEAVG) ? (teamPace(A, cfg) + teamPace(B, cfg)) / 2 : paceBaseline(A, cfg);
+		const baseA = paceBaseline(A, cfg);
 		const pace = clamp(teamPace(A, cfg) + teamPace(B, cfg) - baseA,
 			Math.min(teamPace(A, cfg), teamPace(B, cfg)) - 6,
 			Math.max(teamPace(A, cfg), teamPace(B, cfg)) + 6);
@@ -1693,7 +1693,8 @@
 			const hi = Math.min(DAYS - 1, Math.floor(f.window[1] * DAYS) - 1);
 			const tiers = [
 				[lo, hi, 2, REMATCH_GAP], [lo, hi, 2, 7], [lo, hi, 1, REMATCH_GAP],
-				[lo, hi, 1, 1], [0, DAYS - 1, 2, 7], [0, DAYS - 1, 1, 1],
+				[lo, hi, 1, 7], [0, DAYS - 1, 2, 7], [0, DAYS - 1, 1, 7],
+				[lo, hi, 1, 1], [0, DAYS - 1, 1, 1],
 			];
 			let day = -1;
 			for (const [from, to, gap, rgap] of tiers) {
@@ -2075,15 +2076,23 @@
 		   buys the game, but the gap decides how usually, and about one in
 		   seven is played somewhere else entirely. */
 		const homeCount = new Map();
+		/* Conference home dates are balanced on their own count. Games are
+		   played in calendar order now, so by the time a league slate starts
+		   a team has already played its non-conference games — and balancing
+		   the league's home dates on the TOTAL let a team that bought a pile
+		   of November home games play most of its conference road games,
+		   which the half-of-the-slate rule exists to prevent. */
+		const confHome = new Map();
 		const venue = new Map();
 		const homeOf = (t) => homeCount.get(t) || 0;
+		const confHomeOf = (t) => confHome.get(t) || 0;
 		const vKey = (a, b) => (a.name < b.name ? a.name + "|" + b.name : b.name + "|" + a.name);
 		const pickVenue = (A, B, conference) => {
 			const prev = venue.get(vKey(A, B));
 			// The return leg.
 			if (prev !== undefined) return prev === A ? -1 : 1;
 			if (conference) {
-				const d = homeOf(A) - homeOf(B);
+				const d = confHomeOf(A) - confHomeOf(B);
 				return d === 0 ? (rng.random() < 0.5 ? 1 : -1) : (d < 0 ? 1 : -1);
 			}
 			if (rng.random() < 0.15) return 0;   // a neutral-site or holiday event
@@ -2095,6 +2104,8 @@
 			if (aHome === null) aHome = pickVenue(A, B, conference);
 			if (aHome > 0) homeCount.set(A, homeOf(A) + 1);
 			else if (aHome < 0) homeCount.set(B, homeOf(B) + 1);
+			if (conference && aHome > 0) confHome.set(A, confHomeOf(A) + 1);
+			else if (conference && aHome < 0) confHome.set(B, confHomeOf(B) + 1);
 			if (aHome !== 0) venue.set(vKey(A, B), aHome > 0 ? A : B);
 			const sc = playGameScore(rng, A, B, aHome, cfg, when);
 			record(A, B, sc.won, conference, { us: sc.a, them: sc.b, ot: sc.ot, poss: sc.poss }, aHome, when, "reg");

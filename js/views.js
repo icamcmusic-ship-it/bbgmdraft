@@ -2825,8 +2825,26 @@
 	   a club has no team page to open. Text for those, a link for the rest. */
 	function programLink(name) {
 		const C = global.Colleges;
-		if (C && C.conferenceOf && C.conferenceOf(name)) return teamLink(name);
-		return document.createTextNode(String(name));
+		if (!(C && C.conferenceOf && C.conferenceOf(name))) {
+			return document.createTextNode(String(name));
+		}
+		/* With universe mode OFF the team page is the loaded file's season,
+		   not this world, so a program named on the Universe tab opens its
+		   history in the tab's own Programs section instead. */
+		const st = A().state;
+		if (!st.cfg.universe && st.tab === "universe" && st.universe &&
+			(st.universe.rows || []).length) {
+			const b = el("button", "linky", name);
+			b.title = "Program history in this universe";
+			b.addEventListener("click", () => {
+				st.universeProgram = name;
+				A().render();
+				const sec = document.getElementById("uprograms");
+				if (sec && sec.scrollIntoView) sec.scrollIntoView({ block: "start" });
+			});
+			return b;
+		}
+		return teamLink(name);
 	}
 
 	/* Named for what it is, and NOT `leaderTable`: this file already had one,
@@ -2939,7 +2957,15 @@
 			/* A vacancy is the single most consequential thing in this table
 			   and it was not on the timeline at all. */
 			if (c && c.fired) {
-				td2.appendChild(el("span", "tag", c.reason || "leaving"));
+				td2.appendChild(el("span", "tag", (c.reason || "leaving") +
+					(c.hiredBy ? " → " + c.hiredBy : "")));
+			}
+			/* The carousel moves men: a vacancy filled by the coach another
+			   program lost to it is the same man, and says where from. */
+			const from = (c && c.from) || (coach && coach.movedFrom);
+			if (from) {
+				td2.appendChild(document.createTextNode(" "));
+				td2.appendChild(el("span", "tag moved", "from " + from));
 			}
 			tr.appendChild(td2);
 			tr.appendChild(el("td", "num", coach && coach.tenure ? String(coach.tenure) : ""));
@@ -3159,7 +3185,7 @@
 		view.appendChild(cm);
 	}
 
-	function recordsSection(view, rec) {
+	function recordsSection(view, rec, u) {
 		view.appendChild(el("h4", null, "Records book"));
 		view.appendChild(el("p", "legendline",
 			"All-time across this universe — every line is derived from the " +
@@ -3208,6 +3234,13 @@
 				m.name + " (" + m.school + ", " + m.seasons.join(", ") + ") — " +
 				m.reasons.join("; ")).join("\n")));
 		}
+		/* The registry's record book. An export from before it existed has
+		   records without it; derive it when the registry is here. */
+		let people = rec.people;
+		if (!people && u && u.registry && global.Universe && global.Universe.peopleRecords) {
+			try { people = global.Universe.peopleRecords(u.registry); } catch (e) { people = null; }
+		}
+		peopleRecordsSection(view, people, u && u.registry);
 	}
 
 	/* THE COACHING TREE.
@@ -3242,6 +3275,369 @@
 		view.appendChild(box);
 	}
 
+
+	/* PROGRAM HISTORY.
+
+	   Universe.programHistory keeps one row per programme per played season —
+	   level, prestige drift, coach, conference, record, March — and until now
+	   nothing drew it, so a team page could say what a programme did this
+	   season and nothing about it in the world. The same block renders on a
+	   team page (universe mode) and in the Universe tab's Programs section.
+	   With no recorded rows (a reload: the table is not persisted) the data
+	   layer rebuilds what it can from the live results handed in. */
+	function programHistoryAll() {
+		const U = global.Universe;
+		const st = A().state;
+		const u = st.universe;
+		if (!U || !U.programHistory || !u || !(u.rows || []).length) return {};
+		try {
+			return U.programHistory(u, null, (st.results || []).filter(Boolean)) || {};
+		} catch (e) { return {}; }
+	}
+
+	function programHistoryOf(name) {
+		const U = global.Universe;
+		const st = A().state;
+		const u = st.universe;
+		if (!name || !U || !U.programHistory || !u || !(u.rows || []).length) return [];
+		try {
+			return U.programHistory(u, name, (st.results || []).filter(Boolean)) || [];
+		} catch (e) { return []; }
+	}
+
+	const SVGNS = "http://www.w3.org/2000/svg";
+	function svgEl(tag, attrs, text) {
+		const n = document.createElementNS(SVGNS, tag);
+		for (const k of Object.keys(attrs || {})) n.setAttribute(k, String(attrs[k]));
+		if (text !== undefined) n.textContent = text;
+		return n;
+	}
+
+	/* Level over the seasons, as a line. Seasons are placed by year, so a gap
+	   in the files is a gap in the line rather than two seasons drawn as
+	   neighbours; a title is a filled dot and a conference move a dashed
+	   tick, which are the two things a programme's history turns on. */
+	function levelSpark(rows) {
+		const pts = rows.filter((r) => Number.isFinite(r.season) && Number.isFinite(r.level));
+		if (pts.length < 2) return null;
+		const W = 280;
+		const H = 46;
+		const s0 = pts[0].season;
+		const s1 = pts[pts.length - 1].season;
+		let lo = Math.min.apply(null, pts.map((r) => r.level));
+		let hi = Math.max.apply(null, pts.map((r) => r.level));
+		if (hi - lo < 8) { const mid = (hi + lo) / 2; lo = mid - 4; hi = mid + 4; }
+		const x = (s) => 6 + (s1 === s0 ? 0 : ((s - s0) / (s1 - s0)) * (W - 12));
+		const y = (v) => 5 + (1 - (v - lo) / (hi - lo)) * (H - 10);
+		const svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, class: "spark levelspark",
+			role: "img" });
+		svg.setAttribute("aria-label", "Program level by season: " +
+			pts.map((r) => r.season + " " + r.level.toFixed(1) + (r.title ? " (title)" : ""))
+				.join(", "));
+		svg.appendChild(svgEl("line", { x1: 0, x2: W, y1: H - 0.5, y2: H - 0.5, class: "lvlbase" }));
+		for (let i = 1; i < pts.length; i++) {
+			if (pts[i].conf && pts[i - 1].conf && pts[i].conf !== pts[i - 1].conf) {
+				const mx = x(pts[i].season);
+				const tick = svgEl("line", { x1: mx, x2: mx, y1: 1, y2: H - 1, class: "lvlmove" });
+				tick.appendChild(svgEl("title", null, pts[i].season + ": " + pts[i - 1].conf +
+					" → " + pts[i].conf));
+				svg.appendChild(tick);
+			}
+		}
+		let d = "";
+		pts.forEach((r, i) => {
+			const joined = i > 0 && r.season - pts[i - 1].season === 1;
+			d += (joined ? "L" : "M") + x(r.season).toFixed(1) + " " + y(r.level).toFixed(1) + " ";
+		});
+		svg.appendChild(svgEl("path", { d: d.trim(), class: "lvlline" }));
+		for (const r of pts) {
+			const c = svgEl("circle", { cx: x(r.season).toFixed(1), cy: y(r.level).toFixed(1),
+				r: r.title ? 4.2 : 2, class: r.title ? "lvltitle" : "lvldot" });
+			c.appendChild(svgEl("title", null, r.season + ": level " + r.level.toFixed(1) +
+				(r.title ? " — national champion" : "")));
+			svg.appendChild(c);
+		}
+		return svg;
+	}
+
+	function signed(v, dp) {
+		if (!Number.isFinite(v)) return "";
+		const s = v.toFixed(dp);
+		return v > 0 ? "+" + s : s === (0).toFixed(dp) ? s : s.replace("-", "−");
+	}
+
+	function programHistoryBlock(box, name, rows, opts) {
+		opts = opts || {};
+		const head = el(opts.heading || "h4", "progtitle");
+		if (opts.link) head.appendChild(teamLink(name));
+		else head.appendChild(document.createTextNode(opts.title || "Program history"));
+		box.appendChild(head);
+		if (!rows.length) {
+			box.appendChild(el("p", "hint", "No seasons of " + name +
+				" are on record in this universe yet."));
+			return;
+		}
+		const titles = rows.filter((r) => r.title).map((r) => r.season);
+		const trips = rows.filter((r) => r.seed || (r.ncaa && !/First Four/.test(r.ncaa)));
+		const w = rows.reduce((a, r) => a + (r.w || 0), 0);
+		const l = rows.reduce((a, r) => a + (r.l || 0), 0);
+		const confs = [];
+		for (const r of rows) if (r.conf && confs[confs.length - 1] !== r.conf) confs.push(r.conf);
+		const coaches = [];
+		for (const r of rows) if (r.coach && coaches[coaches.length - 1] !== r.coach) coaches.push(r.coach);
+		const first = rows[0];
+		const last = rows[rows.length - 1];
+		box.appendChild(el("p", "legendline",
+			rows.length + " season" + (rows.length === 1 ? "" : "s") + " on record (" +
+			first.season + (rows.length > 1 ? "–" + last.season : "") + ") · " +
+			w + "-" + l + " · " + trips.length + " NCAA trip" + (trips.length === 1 ? "" : "s") +
+			" · level " + first.level.toFixed(1) +
+			(rows.length > 1 ? " → " + last.level.toFixed(1) : "") +
+			" · " + coaches.length + " head coach" + (coaches.length === 1 ? "" : "es") +
+			(confs.length > 1 ? " · conferences " + confs.join(" → ") : "")));
+		const top = el("div", "proghead");
+		if (titles.length) {
+			const ban = el("div", "banners");
+			ban.setAttribute("aria-label", titles.length + " national title" +
+				(titles.length === 1 ? "" : "s"));
+			for (const s of titles) {
+				const b = el("span", "banner");
+				b.appendChild(el("span", "bannery", String(s)));
+				b.appendChild(el("span", "bannerw", "Champions"));
+				ban.appendChild(b);
+			}
+			top.appendChild(ban);
+		}
+		const spark = levelSpark(rows);
+		if (spark) {
+			const fig = el("figure", "levelfig");
+			fig.appendChild(spark);
+			fig.appendChild(el("figcaption", "unit",
+				"Program level by season" + (titles.length ? " · filled dot: title" : "") +
+				(confs.length > 1 ? " · dashed: conference move" : "")));
+			top.appendChild(fig);
+		}
+		if (top.childNodes.length) box.appendChild(top);
+		const wrap = el("div", "scroll");
+		const table = el("table", "proghist");
+		const hr = el("tr");
+		const NUM = ["Record", "Level", "Drift", "Banners"];
+		for (const h of ["Season", "Conference", "Coach", "Record", "March", "Level", "Drift",
+			"Banners"]) {
+			hr.appendChild(el("th", NUM.indexOf(h) >= 0 ? "num" : "", h));
+		}
+		const thead = el("thead");
+		thead.appendChild(hr);
+		table.appendChild(thead);
+		const tb = el("tbody");
+		/* Newest first: the question on a team page is "how did we get here". */
+		for (let i = rows.length - 1; i >= 0; i--) {
+			const r = rows[i];
+			const prev = i > 0 ? rows[i - 1] : null;
+			const tr = el("tr", [r.title ? "titlerow" : "",
+				r.season === opts.season ? "now" : ""].join(" ").trim());
+			const sc = el("td", null, String(r.season));
+			if (r.season === opts.season) sc.title = "The season on screen";
+			tr.appendChild(sc);
+			const moved = prev && prev.conf && r.conf && prev.conf !== r.conf;
+			const cf = el("td", moved ? "confmove" : null, r.conf || "—");
+			if (moved) {
+				cf.appendChild(document.createTextNode(" "));
+				cf.appendChild(el("span", "tag moved", "from " + prev.conf));
+			}
+			tr.appendChild(cf);
+			const co = el("td", null, r.coach || "—");
+			if (r.movedFrom) {
+				co.appendChild(document.createTextNode(" "));
+				const tag = el("span", "tag moved", "from " + r.movedFrom);
+				tag.title = "Hired away from " + r.movedFrom + " — the same man, a new program";
+				co.appendChild(tag);
+			} else if (prev && prev.coach && r.coach && prev.coach !== r.coach) {
+				co.appendChild(document.createTextNode(" "));
+				co.appendChild(el("span", "tag", "new"));
+			}
+			tr.appendChild(co);
+			tr.appendChild(el("td", "num", (r.w || 0) + "-" + (r.l || 0)));
+			tr.appendChild(el("td", null, r.title ? "National champion" +
+				(r.seed ? " (No. " + r.seed + ")" : "")
+				: r.seed ? "No. " + r.seed + " · " + (r.ncaa || "in the field")
+					: r.ncaa || "—"));
+			const lv = el("td", "num", Number.isFinite(r.level) ? r.level.toFixed(1) : "—");
+			if (prev && Number.isFinite(prev.level) && Number.isFinite(r.level)) {
+				const dl = r.level - prev.level;
+				if (Math.abs(dl) >= 0.05) {
+					lv.appendChild(el("span", dl > 0 ? "lvup" : "lvdown", " " + signed(dl, 1)));
+				}
+			}
+			tr.appendChild(lv);
+			tr.appendChild(el("td", "num", Number.isFinite(r.drift) && r.drift ? signed(r.drift, 2) : ""));
+			tr.appendChild(el("td", "num", r.titles ? String(r.titles) : ""));
+			tb.appendChild(tr);
+		}
+		table.appendChild(tb);
+		wrap.appendChild(table);
+		box.appendChild(wrap);
+	}
+
+	/* The Universe tab's own way in to a programme: every one the chain has
+	   rows for, titles first, so a program name anywhere on the tab has
+	   somewhere to go when universe mode is off and the team page is not
+	   this world. */
+	function programsSection(view) {
+		const all = programHistoryAll();
+		const names = Object.keys(all).filter((n) => all[n].length);
+		if (!names.length) return;
+		const st = A().state;
+		const titlesOf = (n) => all[n].length ? all[n][all[n].length - 1].titles || 0 : 0;
+		const lastLevel = (n) => all[n].length ? all[n][all[n].length - 1].level || 0 : 0;
+		names.sort((a, b) => titlesOf(b) - titlesOf(a) || lastLevel(b) - lastLevel(a) ||
+			byName(a, b));
+		const sec = el("section", "programs");
+		sec.id = "uprograms";
+		sec.appendChild(el("h4", null, "Programs"));
+		sec.appendChild(el("p", "legendline",
+			"Every program's run through this world: its level season by season, " +
+			"the conference it played in, who coached it and what March did. " +
+			"Programs with banners are listed first."));
+		const bar = el("div", "filters");
+		const sel = el("select");
+		sel.setAttribute("aria-label", "Program");
+		for (const n of names) {
+			const t = titlesOf(n);
+			sel.appendChild(new Option(n + (t ? " — " + t + " title" + (t === 1 ? "" : "s") : ""), n));
+		}
+		const chosen = st.universeProgram && all[st.universeProgram] ? st.universeProgram : names[0];
+		sel.value = chosen;
+		sel.addEventListener("change", () => {
+			st.universeProgram = sel.value;
+			A().render();
+		});
+		bar.appendChild(sel);
+		/* The quick picks: the programs the world is about. */
+		for (const n of names.slice(0, 6)) {
+			if (n === chosen) continue;
+			const b = el("button", "tiny", n);
+			b.addEventListener("click", () => { st.universeProgram = n; A().render(); });
+			bar.appendChild(b);
+		}
+		sec.appendChild(bar);
+		programHistoryBlock(sec, chosen, all[chosen], { heading: "h5", link: true });
+		view.appendChild(sec);
+	}
+
+	/* RIVALRIES, AS A LIST.
+
+	   The threads name the few pairs that crossed the bar; this is the top of
+	   the book itself (the carry's rivalry ledger, see rivalriesStep), which
+	   is the answer to "who keeps running into whom in March". */
+	function rivalriesSection(view, u) {
+		const riv = u.tail && u.tail.carry ? u.tail.carry.rivalries : null;
+		const list = Object.keys(riv || {}).map((k) => riv[k])
+			.filter((e) => e && e.a && e.b && (e.march || []).length >= 2)
+			.sort((x, y) => y.march.length - x.march.length || y.games - x.games ||
+				Math.max.apply(null, y.march) - Math.max.apply(null, x.march) ||
+				String(x.a + x.b).localeCompare(String(y.a + y.b)))
+			.slice(0, 10);
+		if (!list.length) return;
+		view.appendChild(el("h4", null, "Rivalries"));
+		view.appendChild(el("p", "legendline",
+			"Pairs that met in the NCAA tournament more than once. Once a pair " +
+			"has met in March, every later game between them counts toward the series."));
+		const wrap = el("div", "scroll");
+		const table = el("table");
+		const hr = el("tr");
+		for (const h of ["Rivalry", "March meetings", "Seasons", "Series"]) {
+			hr.appendChild(el("th", h === "March meetings" ? "num" : "", h));
+		}
+		const thead = el("thead");
+		thead.appendChild(hr);
+		table.appendChild(thead);
+		const tb = el("tbody");
+		for (const e of list) {
+			const tr = el("tr");
+			const td = el("td");
+			td.appendChild(programLink(e.a));
+			td.appendChild(document.createTextNode(" vs "));
+			td.appendChild(programLink(e.b));
+			tr.appendChild(td);
+			tr.appendChild(el("td", "num", String(e.march.length)));
+			tr.appendChild(el("td", null, e.march.slice().sort((a, b) => a - b).join(", ")));
+			tr.appendChild(el("td", null, e.aw === e.bw ? "level " + e.aw + "-" + e.bw
+				: (e.aw > e.bw ? e.a + " " + e.aw + "-" + e.bw : e.b + " " + e.bw + "-" + e.aw) +
+					" (" + e.games + " game" + (e.games === 1 ? "" : "s") + ")"));
+			tb.appendChild(tr);
+		}
+		table.appendChild(tb);
+		wrap.appendChild(table);
+		view.appendChild(wrap);
+	}
+
+	/* THE RECORD BOOK FOR PEOPLE (Universe.peopleRecords): the registry's
+	   men ranked by what a save's record book asks about people. A name opens
+	   his page in his own class when the registry knows which file that is. */
+	function personLink(x, reg) {
+		const r = reg && reg[x.id];
+		if (r && Number.isFinite(r.fileIndex) && r.draft) {
+			const go = el("button", "linky", x.name);
+			go.title = "Open his page in the " + r.draft.season + " class";
+			go.addEventListener("click", () => {
+				A().showPlayerInFile(r.fileIndex, String(x.id).split("/").pop());
+			});
+			return go;
+		}
+		return document.createTextNode(String(x.name));
+	}
+
+	function peopleRecordsSection(view, pr, reg) {
+		if (!pr) return;
+		const boxes = [];
+		const table = (title, list, cells) => {
+			if (!list || !list.length) return;
+			const box = el("div");
+			box.appendChild(el("h5", null, title));
+			const t = el("table");
+			const tb = el("tbody");
+			for (const x of list) {
+				const tr = el("tr");
+				const td = el("td");
+				td.appendChild(personLink(x, reg));
+				if (x.school) td.appendChild(el("span", "unit pschool", x.school));
+				tr.appendChild(td);
+				cells(x).forEach((c, i) => tr.appendChild(el("td", i ? "pdetail" : "num", c)));
+				tb.appendChild(tr);
+			}
+			t.appendChild(tb);
+			box.appendChild(t);
+			boxes.push(box);
+		};
+		table("Most honors", pr.mostHonors, (x) => [x.count + " honor" + (x.count === 1 ? "" : "s"),
+			(x.seasons || []).join(", ")]);
+		table("Most seasons", pr.mostSeasons, (x) => [x.count + " seasons",
+			x.from + "–" + x.to]);
+		table("Undrafted, and back", pr.bestReturners, (x) => [
+			x.bestPpg ? x.bestPpg.toFixed(1) + " ppg" : "—",
+			"back in " + (x.returned || []).join(", ") +
+				(x.honors ? " · " + x.honors + " honor" + (x.honors === 1 ? "" : "s") : "")]);
+		if (!boxes.length && !pr.bestHonorSeason) return;
+		view.appendChild(el("h5", null, "People"));
+		view.appendChild(el("p", "legendline",
+			(pr.people || 0) + " people in this world's registry, " + (pr.careers || 0) +
+			" of them seen in more than one season."));
+		if (boxes.length) {
+			const grid = el("div", "cards peoplegrid");
+			for (const b of boxes) grid.appendChild(b);
+			view.appendChild(grid);
+		}
+		if (pr.bestHonorSeason) {
+			const b = pr.bestHonorSeason;
+			const line = el("div", "note");
+			line.appendChild(document.createTextNode("Best single honors season: "));
+			line.appendChild(personLink(b, reg));
+			line.appendChild(document.createTextNode((b.school ? " (" + b.school + ")" : "") +
+				", " + b.season + " — " + b.count + " honors"));
+			view.appendChild(line);
+		}
+	}
 
 	function viewUniverse(view, res) {
 		const st = A().state;
@@ -3513,7 +3909,16 @@
 				const line = el("div");
 				if (typeof t === "string") {
 					line.appendChild(document.createTextNode(t));
-				} else if (t.team) {
+				} else if (t.team && t.other &&
+					String(t.text).indexOf(t.team + " and " + t.other) === 0) {
+					/* A rivalry names two programs, and both are links. */
+					line.className = "thread-" + (t.kind || "pair");
+					line.appendChild(programLink(t.team));
+					line.appendChild(document.createTextNode(" and "));
+					line.appendChild(programLink(t.other));
+					line.appendChild(document.createTextNode(
+						String(t.text).slice((t.team + " and " + t.other).length)));
+				} else if (t.team && String(t.text).indexOf(t.team) === 0) {
 					line.appendChild(programLink(t.team));
 					line.appendChild(document.createTextNode(
 						" " + String(t.text).slice(t.team.length + 1)));
@@ -3524,7 +3929,9 @@
 			}
 			view.appendChild(tl);
 		}
-		if (u.records) recordsSection(view, u.records);
+		if (u.records) recordsSection(view, u.records, u);
+		if (!u.running) rivalriesSection(view, u);
+		if (!u.running) programsSection(view);
 		if (!u.running && u.cfgs && Object.keys(u.cfgs).length) worldSection(view, u);
 		if (!u.running) registrySection(view, u);
 		if (!u.running && u.cfgs && Object.keys(u.cfgs).length) careersSection(view, u);
@@ -5685,7 +6092,8 @@
 		// the coach today, but the guard was on the wrong object.
 		if (t.coach && t.style) {
 			row("Coach", t.coach.name + ", year " + t.coach.tenure +
-				" — plays " + t.style.name);
+				" — plays " + t.style.name +
+				(t.coach.movedFrom ? " · hired away from " + t.coach.movedFrom : ""));
 		}
 		row("Program level", Math.round(t.level) + " (rating " +
 			t.rating.toFixed(1) + ")");
@@ -5749,6 +6157,17 @@
 			}).join(", "));
 		}
 		box.appendChild(dl);
+
+		/* In universe mode this season is one of many the program played;
+		   its history across the world goes right under the season's facts. */
+		if (A().state.cfg.universe) {
+			const hist = programHistoryOf(t.name);
+			if (hist.length) {
+				const sec = el("section", "programs");
+				programHistoryBlock(sec, t.name, hist, { season: res.season });
+				box.appendChild(sec);
+			}
+		}
 
 		box.appendChild(el("h4", null, "Prospects"));
 		const plist = el("div", "cards");

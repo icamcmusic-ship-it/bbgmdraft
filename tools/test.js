@@ -2371,7 +2371,10 @@ console.log("\nMechanical anomalies and season narrative");
 			   measures one absence against another and says nothing about
 			   the hold. */
 			if (p.eligibilityHold && q.stats.gp >= 28) dt.gpElig.push(q.stats.gp - p.stats.gp);
-			if (p.surprise && p.surprise.name === "suspension") {
+			/* Same rule as the hold: against a baseline with no absence
+			   of his own, or a sprained ankle in the anomaly-free run
+			   reads as a suspension that GAINED him games. */
+			if (p.surprise && p.surprise.name === "suspension" && !q.availability) {
 				dt.gpSusp.push(q.stats.gp - p.stats.gp);
 			}
 		}

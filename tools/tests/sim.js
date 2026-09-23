@@ -422,6 +422,184 @@ module.exports = function (ok, V) {
 				mean(middle).toFixed(2) + " (" + middle.length + ")");
 	}
 
+	/* ------------------------------------- season totals are the team's (B1)
+
+	   Every line is per game PLAYED and carries its own gp. Summing per-game
+	   averages as if every man played every night left the season's minutes
+	   at 94.5% of 5 x 40 x G and its points at 94% of the scoreboard; the
+	   absent men's minutes (and production) now go to whoever played. */
+	{
+		let teams = 0;
+		let minOff = 0;
+		let ptsOff = 0;
+		let boxOff = 0;
+		let worstMin = 1;
+		let worstPts = 1;
+		const S = global.StatsSim;
+		for (const res of runs) {
+			const pros = new Set();
+			for (const p of res.players) if (p.proTeam && !res.teams[p.newCollege]) pros.add(p.proTeam);
+			for (const t of Object.values(res.teams).concat(Array.from(pros))) {
+				if (!t.lines || !t.box || !t.log || !t.log.length) continue;
+				teams++;
+				const G = t.log.length;
+				const gm = t.box.gameMinutes || 40;
+				const ot = t.log.reduce((a, g) => a + (g.ot || 0), 0);
+				let min = 0;
+				let pts = 0;
+				let fga = 0;
+				for (const L of t.lines) {
+					min += L.mpg * L.gp;
+					pts += L.ppg * L.gp;
+					fga += L.fga * L.gp;
+				}
+				const wantMin = 5 * (gm * G + 5 * ot);
+				const logPts = t.log.reduce((a, g) => a + (g.teamPts || 0), 0);
+				const rm = min / wantMin;
+				const rp = pts / logPts;
+				if (Math.abs(rm - 1) > 0.01) minOff++;
+				// The anchor is bounded at +/-18%, so a freak schedule may
+				// stay off; the box itself must always be its lines' sum.
+				if (Math.abs(rp - 1) > 0.01) ptsOff++;
+				if (Math.abs(t.box.fga * G - fga) > 0.01 * fga ||
+					Math.abs(t.box.pts * G - pts) > 0.01 * pts) boxOff++;
+				if (Math.abs(rm - 1) > Math.abs(worstMin - 1)) worstMin = rm;
+				if (Math.abs(rp - 1) > Math.abs(worstPts - 1)) worstPts = rp;
+			}
+		}
+		ok("season minutes (sum of mpg x gp) are the team's floor time",
+			teams > 0 && minOff / teams < 0.01,
+			minOff + " of " + teams + " off by >1%, worst " + worstMin.toFixed(3));
+		ok("season points (sum of ppg x gp) are the scoreboard's",
+			ptsOff / teams < 0.02,
+			ptsOff + " of " + teams + " off by >1%, worst " + worstPts.toFixed(3));
+		ok("the team box is the gp-weighted sum of its lines",
+			boxOff === 0, boxOff + " of " + teams);
+		ok("redistributeAbsences is exported", typeof S.redistributeAbsences === "function");
+	}
+
+	/* ----------------------------------------------- the calendar (B2) */
+	{
+		const DAYS = global.TeamsSim.SEASON_DAYS || 130;
+		let teams = 0;
+		let sameDay = 0;
+		let unforced = 0;
+		let quickRematch = 0;
+		let venueRepeat = 0;
+		for (const res of runs) {
+			const byConf = {};
+			for (const t of Object.values(res.teams)) {
+				teams++;
+				(byConf[t.conf] = byConf[t.conf] || []).push(t);
+				const reg = t.log.filter((g) => g.stage === "reg")
+					.slice().sort((a, b) => a.when - b.when);
+				for (let i = 1; i < reg.length; i++) {
+					if ((reg[i].when - reg[i - 1].when) * DAYS < 0.999) { sameDay++; break; }
+				}
+				const byOpp = {};
+				for (const g of reg) (byOpp[g.opp] = byOpp[g.opp] || []).push(g);
+				for (const gs of Object.values(byOpp)) {
+					for (let i = 1; i < gs.length; i++) {
+						if ((gs[i].when - gs[i - 1].when) * DAYS < 7 - 1e-6) quickRematch++;
+						if (gs[i].home !== 0 && gs[i].home === gs[i - 1].home) venueRepeat++;
+					}
+				}
+			}
+			for (const ts of Object.values(byConf)) {
+				const slate = Math.min(20, Math.max(14, 2 * (ts.length - 1)));
+				if (slate > 2 * (ts.length - 1)) continue;   // a small league: forced
+				for (const t of ts) {
+					const meet = {};
+					for (const g of t.log) {
+						if (g.stage === "reg" && g.conference) meet[g.opp] = (meet[g.opp] || 0) + 1;
+					}
+					for (const v of Object.values(meet)) if (v > 2) unforced++;
+				}
+			}
+		}
+		ok("no team plays twice within a day", sameDay === 0,
+			sameDay + " of " + teams + " teams");
+		ok("the conference meeting cap holds wherever a double round robin fits",
+			unforced === 0, unforced + " over-cap meetings");
+		ok("a rematch is at least a week after the first meeting",
+			quickRematch === 0, quickRematch + " rematches inside seven days");
+		ok("a return leg is played at the other building", venueRepeat === 0,
+			venueRepeat + " same-venue rematches");
+	}
+
+	/* --------------------------------------- no attempts, no percentage (B6) */
+	{
+		let bad = 0;
+		let nulls = 0;
+		let lines = 0;
+		for (const res of runs) {
+			for (const t of Object.values(res.teams)) {
+				for (const L of t.lines || []) {
+					lines++;
+					const tpN = Math.round((L.tpa || 0) * (L.gp || 0));
+					const ftN = Math.round((L.fta || 0) * (L.gp || 0));
+					if (tpN === 0 && L.tpp !== null && L.tpp > 0) bad++;
+					if (ftN === 0 && L.ftp !== null && L.ftp > 0) bad++;
+					if (L.tpp === null) nulls++;
+					if (L.tpp !== null && !(L.tpp >= 0 && L.tpp <= 1)) bad++;
+				}
+			}
+			for (const p of res.players) {
+				if (!p.stats) continue;
+				if (p.stats.tpa === 0 && p.stats.tpp !== null) bad++;
+				if (p.stats.fta === 0 && p.stats.ftp !== null) bad++;
+			}
+		}
+		ok("a line with no attempts has no percentage", bad === 0,
+			bad + " bad of " + lines + " lines (" + nulls + " with no threes)");
+	}
+
+	/* ---------------------------------------------- rotation size (B9) */
+	{
+		const sizes = {};
+		let over = 0;
+		for (const res of runs) {
+			for (const t of Object.values(res.teams)) {
+				const n = (t.lines || []).length;
+				sizes[n] = (sizes[n] || 0) + 1;
+				const prospects = t.members.filter((m) => !m.filler).length;
+				if (n > Math.max(t.members.length, 10) || (n > 10 && n > prospects + 2)) over++;
+			}
+		}
+		ok("every rotation size the draw can produce happens (8, 9 and 10)",
+			sizes[8] > 0 && sizes[9] > 0 && sizes[10] > 0, JSON.stringify(sizes));
+		ok("no rotation is larger than its roster allows", over === 0, over + " teams");
+	}
+
+	/* -------------------------------------------- the foul-out limit (B10) */
+	{
+		const S = global.StatsSim;
+		let bad = 0;
+		let checked = 0;
+		let fortyEight = 0;
+		for (const res of runs) {
+			for (const p of res.players) {
+				const gl = p.gameLog;
+				if (!gl || !gl.games) continue;
+				const t = p.nonNcaa ? p.proTeam : res.teams[p.newCollege];
+				if (!t) continue;
+				const gm = t.gameMinutes || 40;
+				const limit = p.nonNcaa ? S.foulOutOf(S.leagueEnv(t.conf)) : 5;
+				checked++;
+				if (gm >= 48) fortyEight++;
+				if (gl.foulOutAt !== limit) bad++;
+				for (const g of gl.games) if (g.fouls > limit) bad++;
+				if (gl.foulOuts !== gl.games.filter((g) => g.fouls >= limit).length) bad++;
+			}
+		}
+		ok("a 48-minute NBA-rules league fouls out on six, everyone else on five",
+			S.foulOutOf(S.leagueEnv("NBA G League")) === 6 && S.foulOutOf(S.NCAA_ENV) === 5 &&
+				S.foulOutOf(S.leagueEnv("EuroLeague")) === 5,
+			"G League " + S.foulOutOf(S.leagueEnv("NBA G League")));
+		ok("every game log fouls out at its own league's limit", checked > 0 && bad === 0,
+			bad + " bad of " + checked + " logs (" + fortyEight + " in 48-minute leagues)");
+	}
+
 	/* ---------------------------------------------- conference tournaments */
 	{
 		let missing = 0;

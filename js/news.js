@@ -2751,7 +2751,9 @@
 	});
 
 	TPL({
-		kind: "champion's coach", group: "NCAA tournament", p: 0.6, when: 1.20,
+		// A title story: weighted up so the desk budget does not crowd it out
+		// of the few seasons whose champion has a young staff.
+		kind: "champion's coach", group: "NCAA tournament", p: 0.75, when: 1.20,
 		find: (ctx) => {
 			const t = ctx.res.tourney;
 			if (!t || !t.champion) return null;
@@ -3003,7 +3005,11 @@
 			const drafted = (p) => Number.isFinite(p.draftSlot) && p.draftSlot <= 60;
 			const back = ctx.ncaa.filter((p) => !drafted(p) && p.draftEvent &&
 				/withdr|return/i.test(String(p.draftEvent.kind || p.draftEvent.text || p.draftEvent)));
-			const cand = back.length ? back : ctx.ncaa.filter((p) => p.mockRound === 2 &&
+			/* The mock second round is almost always DRAFTED, so the fallback
+			   is the underclassman on the fringe of the board — inside the top
+			   ninety, not taken — which is who actually withdraws. */
+			const cand = back.length ? back : ctx.ncaa.filter((p) =>
+				Number.isFinite(p.boardRank) && p.boardRank <= 90 &&
 				!drafted(p) && !/Senior|Graduate/.test(String(p.classYear)));
 			return cand.length ? ctx.rng.pick(cand) : null;
 		},
@@ -3021,7 +3027,7 @@
 		],
 		bodies: [
 			"{player} has withdrawn from the draft and will return to {team}. He was projected around {rank} and averaged {ppg} as a {year}.",
-			"The feedback was second round and the decision followed it. {player} is back at {team} for another season.",
+			"The feedback was second round at best and the decision followed it. {player} is back at {team} for another season.",
 			"{team} spent six weeks recruiting its own player and got him. {player} withdraws, and a roster that looked thin for next season is not.",
 			"{player} is coming back. At {ppg} a game he was a sure thing at {team}; at {rank} on a board he was a maybe. He chose the first one.",
 		],
