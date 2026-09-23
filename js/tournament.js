@@ -155,26 +155,49 @@
 
 	function balanceBracket(regions) {
 		const at = (r, seed) => regions[r].findIndex((x) => x.seed === seed);
-		const swap = (r1, i1, r2, i2) => {
-			const t = regions[r1][i1];
-			regions[r1][i1] = regions[r2][i2];
-			regions[r2][i2] = t;
+		// Every legal move: one seed line, two regions trading their teams.
+		const moves = [];
+		for (let seed = 16; seed >= 1; seed--) {
+			for (let a = 0; a < REGIONS.length; a++) {
+				for (let b = a + 1; b < REGIONS.length; b++) {
+					if (at(REGIONS[a], seed) >= 0 && at(REGIONS[b], seed) >= 0) {
+						moves.push([seed, REGIONS[a], REGIONS[b]]);
+					}
+				}
+			}
+		}
+		const apply = (m) => {
+			const ia = at(m[1], m[0]);
+			const ib = at(m[2], m[0]);
+			const t = regions[m[1]][ia];
+			regions[m[1]][ia] = regions[m[2]][ib];
+			regions[m[2]][ib] = t;
 		};
 		let cost = bracketPenalty(regions);
 		for (let pass = 0; pass < 40 && cost > 0; pass++) {
 			let improved = false;
-			for (let seed = 16; seed >= 1 && cost > 0; seed--) {
-				for (let a = 0; a < REGIONS.length; a++) {
-					for (let b = a + 1; b < REGIONS.length; b++) {
-						const ia = at(REGIONS[a], seed);
-						const ib = at(REGIONS[b], seed);
-						if (ia < 0 || ib < 0) continue;
-						swap(REGIONS[a], ia, REGIONS[b], ib);
-						const next = bracketPenalty(regions);
-						if (next < cost) { cost = next; improved = true; }
-						else swap(REGIONS[a], ia, REGIONS[b], ib);
-					}
+			// Single trades first, lowest seed lines first.
+			for (const m of moves) {
+				apply(m);
+				const next = bracketPenalty(regions);
+				if (next < cost) { cost = next; improved = true; }
+				else apply(m);
+				if (cost === 0) break;
+			}
+			if (improved) continue;
+			/* No single trade helps. A conflict can still need two: the
+			   9 seed that should leave a Big Ten 8 seed's pod can only go
+			   where another Big Ten team sits until THAT one moves too. */
+			outer:
+			for (let i = 0; i < moves.length; i++) {
+				apply(moves[i]);
+				for (let j = i + 1; j < moves.length; j++) {
+					apply(moves[j]);
+					const next = bracketPenalty(regions);
+					if (next < cost) { cost = next; improved = true; break outer; }
+					apply(moves[j]);
 				}
+				apply(moves[i]);
 			}
 			if (!improved) break;
 		}

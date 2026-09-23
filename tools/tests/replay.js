@@ -32,8 +32,12 @@ module.exports = function (ok, V) {
 			(quiet.surprises || []).length + " against " + (loud.surprises || []).length);
 		ok("...and leans its flavor harder",
 			loud.effectiveCfg.classFlavor > quiet.effectiveCfg.classFlavor);
+		/* With the storylines off: a season's narrative gets the last word
+		   on the season dials (see applyNarrative), so "chalk all the way"
+		   drawn on this seed legitimately calms a loud world's March. */
+		const loudPlain = E.run(lf, CFG.make({ seed: "weird", weirdness: 3, narrative: false }));
 		ok("...and lets March misbehave",
-			loud.effectiveCfg.upsetFactor > quiet.effectiveCfg.upsetFactor);
+			loudPlain.effectiveCfg.upsetFactor > quiet.effectiveCfg.upsetFactor);
 		/* THE RULE THAT MAKES IT SAFE TO SHIP: a setting the user has moved is
 		   the user's, exactly as it is for a class flavor. Without this the
 		   dial would be a second, invisible owner of five controls. */

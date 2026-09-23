@@ -3356,22 +3356,22 @@
 		const next = minutesAt(hi);
 		const r = m.map((mj, j) => (mj > 1e-9 ? next[j] / mj : 1));
 		lines.forEach((l, j) => { l.mpg = next[j]; });
-		/* The scoring group is re-centred on one factor so the season's
-		   points hold exactly (anchorPointsToScoreboard moves them onto the
-		   scoreboard next anyway, and it needs a consistent starting total).
-		   Everything else rides r alone: the man who covers for an absent
-		   rebounder rebounds at HIS rate, not the absent man's, so a team
-		   that loses its best big for a month really does rebound a little
-		   less — and every per-40 ceiling reconcileTeamTotals enforced is
-		   preserved exactly, because minutes and production move together. */
-		/* The re-centring is not one factor for everybody. When the leading
-		   scorer sits, it is his TEAMMATES who take his shots that night — so
-		   the extra volume lands on each man in proportion to how much of the
-		   missing volume he played beside (a_j below: the absent men's share
-		   of the rotation's volume, weighted by how often they were out),
-		   scaled by his own volume. A flat factor also handed the absent star
-		   a share of the shots taken in his own absence, which is what pushed
-		   a 24-game scorer's BBGM usage past 40%. */
+		/* The scoring group (and usage, which must sum to one) is
+		   re-centred so the season's points hold exactly —
+		   anchorPointsToScoreboard moves them onto the scoreboard next, and
+		   it needs a consistent starting total. Everything else rides r
+		   alone: the man who covers for an absent rebounder rebounds at HIS
+		   rate, not the absent man's, so a team that loses its best big for a
+		   month really does rebound a little less — and every per-40
+		   ceiling reconcileTeamTotals enforced is preserved exactly, because
+		   minutes and production move together.
+
+		   The re-centring is not one factor for everybody. When the leading
+		   scorer sits it is his TEAMMATES who take his shots — a_j below is
+		   how much of the rotation's volume was missing while j played — and
+		   a flat factor also handed the absent star a share of the shots
+		   taken in his own absence, which pushed a 24-game scorer's BBGM
+		   usage past 40%. */
 		const rescale = (keys, recentre) => {
 			const lead = keys[0];
 			const x = lines.map((l) => Math.max(0, l[lead] || 0));

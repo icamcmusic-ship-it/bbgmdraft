@@ -1911,7 +1911,8 @@
 				st.t.name + " has not lost in " + st.n + " games",
 				st.n + " straight for " + st.t.name + ", and the schedule ahead does " +
 					"not obviously end it",
-				st.t.name + " put together a " + st.n + "-game winning streak that " +
+				st.t.name + " put together " +
+					global.Text.withArticle(st.n + "-game winning streak") + " that " +
 					"turned its season around",
 			]), rng.uniform(0.3, 0.8), [st.t.name]);
 		}
@@ -2083,6 +2084,7 @@
 		   of November home games play most of its conference road games,
 		   which the half-of-the-slate rule exists to prevent. */
 		const confHome = new Map();
+		const confSlate = new Map();
 		const venue = new Map();
 		const homeOf = (t) => homeCount.get(t) || 0;
 		const confHomeOf = (t) => confHome.get(t) || 0;
@@ -2096,8 +2098,13 @@
 				return d === 0 ? (rng.random() < 0.5 ? 1 : -1) : (d < 0 ? 1 : -1);
 			}
 			if (rng.random() < 0.15) return 0;   // a neutral-site or holiday event
+			/* Home dates so far, with the league slate counted at the half
+			   it will come to: non-conference games are played first on the
+			   calendar now, so the live count alone would balance November
+			   against nothing. */
+			const expected = (t) => homeOf(t) - confHomeOf(t) + (confSlate.get(t) || 0) / 2;
 			const gap = (A.prestige || 60) - (B.prestige || 60) +
-				2.5 * (homeOf(B) - homeOf(A));
+				2.5 * (expected(B) - expected(A));
 			return rng.random() < 1 / (1 + Math.exp(-gap / 20)) ? 1 : -1;
 		};
 		const play = (A, B, aHome, conference, when) => {
@@ -2130,6 +2137,10 @@
 		const scheduled = (t) => sched.get(t) || 0;
 		const book = (A, B, conference, aHome, window) => {
 			fixtures.push({ a: A, b: B, conference, aHome, window });
+			if (conference) {
+				confSlate.set(A, (confSlate.get(A) || 0) + 1);
+				confSlate.set(B, (confSlate.get(B) || 0) + 1);
+			}
 			sched.set(A, scheduled(A) + 1);
 			sched.set(B, scheduled(B) + 1);
 		};

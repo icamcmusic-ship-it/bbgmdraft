@@ -3573,7 +3573,7 @@
 		   over the scores it printed, and anchored they left every ovr band's
 		   earlier seasons 1.5-2.5 points under the draft year — at the edge
 		   of validate.js's band. These put the bands back near -1.5. */
-		const AHEAD_BY_YEAR = [3.0, 1.8, 0.9, 0.3];
+		const AHEAD_BY_YEAR = [3.4, 1.8, 0.9, 0.3];
 		const yearIdx = clamp(priorYears(p.classYear) - i, 0, 3);
 		const ahead = clamp(
 			Math.round(rng.normal(AHEAD_BY_YEAR[yearIdx], 1.1)), 0, 7);
@@ -4103,6 +4103,31 @@
 				return true;
 			},
 		},
+		/* The man who came out, went through the process and went back.
+			   Only past the last pick (he was not taken, so nothing about who
+			   was drafted changes) and only an underclassman at a program —
+			   the same man pastRosterFor may bring back next season, which is
+			   what makes the sentence true. */
+		{
+			name: "withdrew and returned to school", w: 0.9,
+			label: "withdrew and returned to school",
+			pick: (i, n, p) => i >= DRAFT_PICKS && i < n && !!p && !p.nonNcaa &&
+				!/Senior|Graduate/.test(String(p.classYear || "")),
+			apply: (board, i, r) => {
+				const p = board[i];
+				p.draftEvent = {
+					kind: "withdrew",
+					from: i,
+					say: () => "withdrew from the draft and returned to school",
+					detail: r.pick([
+						"the feedback said one more year",
+						"no team would promise him a second-round pick",
+						"his school kept a scholarship open until the deadline",
+					]),
+				};
+				return true;
+			},
+		},
 		{
 			name: "rights dealt on draft night", w: 1.0,
 			label: "had his rights dealt on draft night",
@@ -4207,7 +4232,7 @@
 			const options = [];
 			for (let i = 0; i < board.length; i++) {
 				if (board[i].draftEvent) continue;
-				if (kind.pick(i, board.length)) options.push(i);
+				if (kind.pick(i, board.length, board[i])) options.push(i);
 			}
 			if (!options.length) continue;
 			const at = options[Math.floor(rng.random() * options.length)];
