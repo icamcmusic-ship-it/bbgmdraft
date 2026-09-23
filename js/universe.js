@@ -2677,6 +2677,15 @@
 		const runnable = (spec.runnable || []).map((d) => ({
 			index: d.index, name: d.name, season: d.season, fingerprint: fpAt(d.index),
 		}));
+		const indexOf = (d) => {
+			if (d && Number.isFinite(d.index) && files[d.index] &&
+				(!d.fingerprint || files[d.index].fingerprint === d.fingerprint)) return d.index;
+			if (!d || !d.fingerprint) return -1;
+			for (let i = 0; i < files.length; i++) {
+				if (files[i] && files[i].fingerprint === d.fingerprint) return i;
+			}
+			return -1;
+		};
 		let held = [];
 		let carry = null;
 		let lastSeason = null;
@@ -2689,7 +2698,11 @@
 		let segment;
 		if (mode === "extend") {
 			const tail = prior.tail;
-			held = (prior.order || []).slice();
+			/* A persisted order's file indices are the LAST session's; the
+			   files may have been dropped back in a different order. Each
+			   held entry is re-pointed at the loaded file with its
+			   fingerprint, or at none. */
+			held = (prior.order || []).map((h) => Object.assign({}, h, { index: indexOf(h) }));
 			carry = tail.carry || null;
 			lastSeason = tail.lastSeason;
 			recentPools = copyPools(tail.recentPools);
@@ -2792,15 +2805,6 @@
 		   rebuilt from the seed and settings each held season recorded, so
 		   the recruiting cohorts a resumed or extended season is ranked in
 		   are the ones a cold chain over the same files ranks it in. */
-		const indexOf = (d) => {
-			if (d && Number.isFinite(d.index) && files[d.index] &&
-				(!d.fingerprint || files[d.index].fingerprint === d.fingerprint)) return d.index;
-			if (!d || !d.fingerprint) return -1;
-			for (let i = 0; i < files.length; i++) {
-				if (files[i] && files[i].fingerprint === d.fingerprint) return i;
-			}
-			return -1;
-		};
 		const heldPreviews = [];
 		{
 			let pools = [];

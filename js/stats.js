@@ -130,10 +130,22 @@
 	   of a season is spread over the last few points rather than stacked on
 	   one number. N is the season's attempts. */
 	/* Three-point attempt rate by era, as a multiplier on the pooled height
-	   table's shot mix (see base3 in statLine). Fitted to the team 3PA/FGA
-	   of each era: about .35 for 2009-2021 and .39 for the modern game, from
-	   a pooled table that lands every era near .30. */
-	const THREE_RATE_ERA = process.env.NOTHREE ? {} : { "2009-2021": 1.17, modern: 1.30 };
+	   table's shot mix for returning players (see base3 in statLine). Fitted
+	   to the team 3PA/FGA of each era: about .35 for 2009-2021 and .39 for
+	   the modern game, from a pooled table that landed every era near .30. */
+	const THREE_RATE_ERA = { "2009-2021": 1.16, modern: 1.30 };
+	/* How much of the scoreboard anchor may go on the MAKES rather than the
+	   attempts (see anchorPointsToScoreboard). The residual left after the
+	   tempo is matched runs +/-6% (p10/p90), and it lands mostly on good
+	   teams, which is where the prospects are: letting all of it reach the
+	   makes lifted a class's true shooting by two points and its BBGM
+	   offensive rating past the calibration band (115.4 against a ceiling
+	   of 114 at twenty seeds). At 2% the prospects move about a point of
+	   offensive rating, and the rest of the gap goes back on the attempts —
+	   so the box's possessions track the played tempo closely but not
+	   exactly, and the team page's Tempo is the box's own possessions (see
+	   simulateTeamStats), which is what both ratings divide by. */
+	const ANCHOR_EFF_BAND = 0.02;
 	const FT_CEIL = (N) => 1 - 0.055 * clamp((N - 20) / 100, 0, 1);
 	const TP_CEIL = (N) => 1 - 0.49 * clamp((N - 25) / 75, 0, 1);
 	function ceilPct(v, lim) {
@@ -1870,8 +1882,17 @@
 		   every era — against a real 34-35% across 2009-2021 and 38-39% in
 		   the modern game. The era scales the whole shot mix, the
 		   willingness gate included, so a non-shooter is still a
-		   non-shooter in 2025. */
-		const eraThree = THREE_RATE_ERA[CAL.currentEra ? CAL.currentEra() : ""] || 1;
+		   non-shooter in 2025.
+
+		   It scales the FIELD, not the class. The height table is drafted
+		   players' own shot mix and every draft-year band is fitted against
+		   it; applied to prospects as well, the multiplier pushed a crowd of
+		   marginal shooters over four attempts a game and took the class's
+		   volume-shooter 3P% median under its band (37.2 against 37.5). The
+		   returning players are four-fifths of every rotation, so they are
+		   where a team's three-point rate lives. */
+		const eraThree = me.filler
+			? (THREE_RATE_ERA[CAL.currentEra ? CAL.currentEra() : ""] || 1) : 1;
 		const base3 = eraThree * (CAL.threeShare(bigness, ratings.tp + refVol * 100, ratings.tp) +
 			willing * style.three);
 		/* The shot-mix noise is RELATIVE. A flat sd of 0.045 is a tenth of a
@@ -3040,10 +3061,10 @@
 		   went to overtime six times is 150 minutes short. */
 		const otPerGame = team.log && team.log.length
 			? team.log.reduce((a, g) => a + (g.ot || 0), 0) / team.log.length : 0;
-		if (!process.env.NORED) redistributeAbsences(lines, ctx.games, gameMinutes, 25 * otPerGame, members.map((m, i) =>
+		redistributeAbsences(lines, ctx.games, gameMinutes, 25 * otPerGame, members.map((m, i) =>
 			(!m.filler && env.youthCap)
 				? mins[i]
-				: Math.max(mins[i], Math.min(gameMinutes - 2, (env.mpgCap || TUNING.MPG_CAP) + 1))),
+				: Math.max(mins[i], Math.min(gameMinutes - 2, env.mpgCap || TUNING.MPG_CAP))),
 			3.85 * foulOutOf(env) / 5);
 		/* And then answer to the SCOREBOARD.
 
@@ -3288,25 +3309,30 @@
 		let lost = want - T;
 		for (let i = 0; i < n; i++) lost += m[i] * (1 - w[i]);
 		if (lost <= 1e-9) return;
-		// How much of a missing teammate's floor time lands on each man.
-		const absorb = m.map((mj, j) => {
+		/* Who covers. The minutes go by HEADROOM, not by minutes already
+		   played: when a starter sits, the sixth man starts and the ninth man
+		   plays, while the other starters — already at thirty-four minutes —
+		   play about what they always do. Routing the time in proportion to
+		   minutes put most of it on the starters and walked them to the
+		   minutes ceiling; headroom is what a coach actually has to give. */
+		const capAt = (j) => Math.max(m[j], Number.isFinite(caps && caps[j]) ? caps[j] : gameMinutes);
+		const h = m.map((mj, j) => (mj > 0 ? Math.max(0, capAt(j) - mj) : 0));
+		let H = 0;
+		for (const v of h) H += v;
+		const give = m.map((mj, j) => {
+			if (mj <= 0) return 0;
 			let a = 0;
 			for (let i = 0; i < n; i++) {
-				if (i === j || m[i] <= 0 || T - m[i] <= 1e-9) continue;
-				a += (m[i] * (1 - w[i])) / (T - m[i]);
+				if (i === j || m[i] <= 0 || H - h[i] <= 1e-9) continue;
+				a += (m[i] * (1 - w[i]) * h[j]) / (H - h[i]);
 			}
-			return a;
+			// Overtime is shared like regulation: in proportion to minutes.
+			return a + (Math.max(0, want - T) * mj) / T;
 		});
-		const capAt = (j) => Math.max(m[j], Number.isFinite(caps && caps[j]) ? caps[j] : gameMinutes);
-		const minutesAt = (lam) => m.map((mj, j) => Math.min(capAt(j), mj * (1 + lam * absorb[j])));
+		const minutesAt = (lam) => m.map((mj, j) => Math.min(capAt(j), mj + lam * give[j]));
 		const seasonAt = (lam) => minutesAt(lam).reduce((a, v, j) => a + v * w[j], 0);
 		let lo = 0;
 		let hi = 1;
-		/* Overtime minutes are shared like any other, so they ride the same
-		   absorption shape: a man nobody missed still plays his share of an
-		   extra period. The floor keeps a team with no absences solvable. */
-		const extraShare = T > 0 ? Math.max(0, want - T) / T : 0;
-		for (let j = 0; j < n; j++) absorb[j] += extraShare;
 		for (let k = 0; k < 20 && seasonAt(hi) < want; k++) hi *= 2;
 		for (let k = 0; k < 50; k++) {
 			const mid = (lo + hi) / 2;
@@ -3324,19 +3350,53 @@
 		   that loses its best big for a month really does rebound a little
 		   less — and every per-40 ceiling reconcileTeamTotals enforced is
 		   preserved exactly, because minutes and production move together. */
+		/* The re-centring is not one factor for everybody. When the leading
+		   scorer sits, it is his TEAMMATES who take his shots that night — so
+		   the extra volume lands on each man in proportion to how much of the
+		   missing volume he played beside (a_j below: the absent men's share
+		   of the rotation's volume, weighted by how often they were out),
+		   scaled by his own volume. A flat factor also handed the absent star
+		   a share of the shots taken in his own absence, which is what pushed
+		   a 24-game scorer's BBGM usage past 40%. */
 		const rescale = (keys, recentre) => {
 			const lead = keys[0];
+			const x = lines.map((l) => Math.max(0, l[lead] || 0));
+			let S = 0;
+			for (const v of x) S += v;
 			let before = 0;
 			let after = 0;
 			for (let j = 0; j < n; j++) {
-				const v = lines[j][lead] || 0;
-				before += v;
-				after += v * r[j] * w[j];
+				before += x[j];
+				after += x[j] * r[j] * w[j];
 			}
-			const c = recentre && after > 1e-12 ? before / after : 1;
+			const a = x.map((xj, j) => {
+				let t = 0;
+				for (let i = 0; i < n; i++) {
+					if (i === j || S - x[i] <= 1e-12) continue;
+					t += (x[i] * (1 - w[i])) / (S - x[i]);
+				}
+				return t;
+			});
+			/* Spread by the floor time each man had beside the absences
+			   (minutes, not his own volume): the shots a missing scorer
+			   leaves are taken by whoever is on the floor instead of him,
+			   and weighting them by volume handed nearly all of them to the
+			   prospects, who are the volume — measured, half a point a game
+			   on a draft class, past the class's own scoring band. */
+			const mm = lines.map((l) => Math.max(0, l.mpg || 0));
+			let lam = 0;
+			if (recentre) {
+				let q = 0;
+				for (let j = 0; j < n; j++) q += mm[j] * w[j] * a[j];
+				if (q > 1e-12) lam = (before - after) / q;
+				else if (after > 1e-12) lam = null;
+			}
+			const flat = recentre && lam === null && after > 1e-12 ? before / after : 1;
 			for (let j = 0; j < n; j++) {
+				const f = lam === null ? r[j] * flat
+					: x[j] > 1e-12 ? Math.max(0.5 * r[j], r[j] + (lam * a[j] * mm[j]) / x[j]) : r[j];
 				for (const k of keys) {
-					if (Number.isFinite(lines[j][k])) lines[j][k] *= r[j] * c;
+					if (Number.isFinite(lines[j][k])) lines[j][k] *= f;
 				}
 			}
 		};
@@ -3353,9 +3413,11 @@
 		   had already enforced — the check a reader makes (his rebounds a
 		   night over his team's) and the one tools/validate.js makes. The
 		   same soft ceiling, holding the SEASON total fixed. */
+		/* Assists and rebounds only: those are the two whose caps bind (the
+		   steal and block caps sit well above any realized share, and
+		   re-bending the block leaders flattened the big-to-guard block
+		   gradient the calibration bands). */
 		capPlayedShare(lines, "apg", TUNING.AST_CAP, w);
-		capPlayedShare(lines, "spg", TUNING.STL_CAP, w);
-		capPlayedShare(lines, "bpg", TUNING.BLK_CAP, w);
 		{
 			const before = lines.map((l) => l.rpg || 0);
 			capPlayedShare(lines, "rpg", TUNING.REB_CAP, w);
@@ -3639,8 +3701,7 @@
 		   factor is split evenly. Makes are capped at the attempts and the
 		   points are re-derived from the makes, so every line still adds up. */
 		let vol = Math.sqrt(k);
-		if (process.env.VOLA) vol = Math.pow(k, +process.env.VOLA);
-		else if (hasTempo) {
+		if (hasTempo) {
 			let fga = 0;
 			let fta = 0;
 			let orb = 0;
@@ -3654,12 +3715,9 @@
 			}
 			const shots = fga + FT_TRIP * fta;
 			if (shots > 1e-9) vol = clamp((targetPoss + orb - tov) / shots, 0.85, 1.15);
-			if (process.env.DBG2) (global.__d2 = global.__d2 || []).push([(shots - orb + tov) / targetPoss, k, k / vol, !!(team.scorePace), shots]);
 		}
-		if (process.env.DBG3) { let a=0,n=0; for (const l of lines) if (l.mpg>=10 && l.ts>0) {a+=l.ts;n++;} (global.__d3b=global.__d3b||[]).push(a/n); }
-		const EB = +(process.env.EB || 0.18);
-		const eff = process.env.NOEFF ? 1 : clamp(k / vol, 1 - EB, 1 + EB);
-		vol = k / eff; if (process.env.DBG3) team._eff = eff;
+		const eff = clamp(k / vol, 1 - ANCHOR_EFF_BAND, 1 + ANCHOR_EFF_BAND);
+		vol = k / eff;
 		for (const l of lines) {
 			const twoA0 = Math.max(0, (l.fga || 0) - (l.tpa || 0));
 			const two0 = Math.max(0, (l.fga || 0) * (l.fgp || 0) - (l.tpa || 0) * (l.tpp || 0));
@@ -3694,7 +3752,6 @@
 			const tsa = 2 * (l.fga + FT_TRIP * l.fta);
 			l.ts = tsa > 0 ? l.ppg / tsa : 0;
 		}
-		if (process.env.DBG3) { let a=0,n=0; for (const l of lines) if (l.mpg>=10 && l.ts>0) {a+=l.ts;n++;} (global.__d3a=global.__d3a||[]).push(a/n); }
 	}
 
 	function reconcileTeamTotals(lines, pools, gameMinutes) {

@@ -261,7 +261,7 @@
 	   untouched, and a roster whose prospect is a genuine lottery talent is
 	   untouched too, because the cap is not binding there. */
 	const FILLER_GAP = 4;
-	const ROSTER_SIZE = 13;
+	const ROSTER_SIZE = +(typeof process!=="undefined"&&process.env.RS||13);
 	const NEXT_CLASS_YEAR = { Freshman: "Sophomore", Sophomore: "Junior", Junior: "Senior" };
 	/* Per top-three rotation slot, so roughly a dozen across 364 programs.
 	   Raised from 0.012 (task 4.6): at the old rate about seven programs in

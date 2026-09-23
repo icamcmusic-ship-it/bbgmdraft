@@ -3400,6 +3400,9 @@
 			player: PL(p.name, p.key), team: TM(p.newCollege), opp: TM(g.opp),
 			blk: T(String(g.blk)), stl: T(g.stl + (g.stl === 1 ? " steal" : " steals")),
 			pts: T(String(g.pts)), result: T(nightText(g)),
+			// "{team} won the game" only when it did.
+			verdict: g.won ? [TM(p.newCollege), T(" won the game on the defensive end")]
+				: [TM(p.newCollege), T(" lost, but not on the defensive end,")],
 		}),
 		headlines: [
 			"{blk} blocks, {stl}: {player} shuts the door on {opp}",
@@ -3409,7 +3412,7 @@
 		bodies: [
 			"{player} finished with {blk} blocks and {stl} in {result}. {opp} stopped driving by the second half; there was nowhere to go.",
 			"The {pts} points were incidental. {player}'s night was {blk} blocked shots and {stl}, the kind of line that gets a defensive coordinator to send a text.",
-			"{team} won the game on the defensive end and {player} was most of the reason: {blk} blocks, {stl}, and a paint {opp} never got comfortable in.",
+			"{verdict} and {player} was most of the reason: {blk} blocks, {stl}, and a paint {opp} never got comfortable in.",
 		],
 	});
 

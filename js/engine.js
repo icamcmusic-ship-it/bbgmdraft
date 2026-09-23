@@ -3303,7 +3303,7 @@
 		   about half a point lower in a club rotation than in a college one
 		   for a reason that had nothing to do with the league. */
 		state.proLeagues = simulateProLeagues(state.players, cfg, statRng.child("pro"),
-			{ classRefVolume, classRefMult, classRefEfficiency });
+			{ classRefVolume, classRefMult });
 
 		// Per-game logs. signatureGame already fabricated one of these and threw
 		// it away; keeping it costs nothing and buys season highs, 20-point-game
@@ -5522,9 +5522,14 @@
 					games: Math.round(c.games),
 					league: env,
 					pro: lg.pro,
+					/* The rotation-share references only. classRefEfficiency
+					   is the class's shooting reference against the COLLEGE
+					   environment, and a club plays in its own (leagueEnv):
+					   carried abroad it lifted every pro prospect's true
+					   shooting and pushed the draft year's PER and BPM medians
+					   past their bands in validate.js. */
 					classRefVolume: refs ? refs.classRefVolume : undefined,
 					classRefMult: refs ? refs.classRefMult : undefined,
-					classRefEfficiency: refs ? refs.classRefEfficiency : undefined,
 				}, cfg, lrng.child("stats:" + c.name));
 			}
 			for (const p of byLeague[lgName]) {

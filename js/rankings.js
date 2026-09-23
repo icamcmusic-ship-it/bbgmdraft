@@ -601,6 +601,7 @@
 
 	global.Rankings = {
 		computeRankings, weeklyPoll, quadOf, QUADS,
-		VOTERS, WEEKS, INERTIA,
+		VOTERS, WEEKS, INERTIA, WIN_WEEK_HOLD,
+		computeAdjEff, netScores, MARGIN_CAP, HOME_EDGE,
 	};
 })(typeof window !== "undefined" ? window : self);

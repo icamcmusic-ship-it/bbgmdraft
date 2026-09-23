@@ -27,6 +27,9 @@
 		return Number.isFinite(t.committeeScore) ? t.committeeScore : t.resume;
 	}
 
+	/* The at-large model behind bidCheck's expectation; see selectField. */
+	const BID_FIT = { a: -2.224, prestige: 0.61, strength: 0.385 };
+
 	function selectField(teams) {
 		const autos = [];
 		const autoSet = new Set();
@@ -69,18 +72,37 @@
 		/* Expected off THIS season's membership and strength, not a static
 		   number beside a map that has since changed: the WCC's "3" outlived
 		   Gonzaga and "A lean year for the WCC" ran in nine seasons of
-		   twelve. A sixteen-team league at 92 expects about seven, an
-		   eleven-team league at 87 about four, a one-bid league one. */
+		   twelve.
+
+		   And expected off what THIS SIM does, not off a real-world
+		   intuition. The old curve (0.55 x ((strength - 68) / 25)^1.4 of the
+		   league) wanted eight or nine bids from the Big 12, SEC and ACC in a
+		   sim whose committee gives them 5.6, 6.5 and 8.2 on average, so "A
+		   lean year for the Big 12" ran in 23 seasons of 30 — a note about
+		   the formula, not the season. The expectation is now one auto bid
+		   plus each member's chance of an at-large, a logistic in the
+		   member's prestige and its league's strength fitted to 40 seasons
+		   of this committee's own selections (mean absolute error under 0.4
+		   of a bid for every multi-bid league), and a season is flagged only
+		   when it misses that by two bids or by 35% of it, whichever is
+		   more — about one conference-season in twenty. */
+		const atLargeChance = (t, strength) => 1 / (1 + Math.exp(-(
+			BID_FIT.a + BID_FIT.prestige * ((t.prestige || 0) - 60) / 10 +
+			BID_FIT.strength * (strength - 70) / 10)));
 		const expectedFor = (conf) => {
-			const n = (pools[conf] || []).length;
+			const members = pools[conf] || [];
+			const n = members.length;
 			const strength = C.CONFERENCES[conf] ? C.CONFERENCES[conf].strength : null;
 			if (!n || strength === null) return null;
-			const share = 0.55 * Math.pow(Math.max(0, (strength - 68) / 25), 1.4);
-			return Math.max(1, Math.round(n * share));
+			// One member holds the auto bid and cannot also be an at-large.
+			const atLargeSum = members.reduce((acc, t) => acc + atLargeChance(t, strength), 0);
+			return Math.max(1, Math.round(1 + atLargeSum * (n - 1) / n));
 		};
 		for (const conf of Object.keys(gotByConf)) {
 			const expected = expectedFor(conf);
-			if (expected !== null && Math.abs(gotByConf[conf] - expected) >= 2) {
+			if (expected === null) continue;
+			const margin = Math.max(2, Math.ceil(0.35 * expected));
+			if (Math.abs(gotByConf[conf] - expected) >= margin) {
 				bidCheck.push({ conf, expected, got: gotByConf[conf] });
 			}
 		}

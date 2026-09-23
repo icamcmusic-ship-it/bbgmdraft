@@ -5422,6 +5422,8 @@
 		}
 		if (state.universe.running) return;
 		if (universeReplay && opts.replaying === undefined) return;
+		// A replay run that returns early below must not leave the gate shut.
+		if (opts.replaying !== undefined) universeReplay = false;
 		/* `only`: the files this run may touch, by fingerprint — how an import
 		   replays the runs a universe was built in (see importUniverse). */
 		const only = Array.isArray(opts.only) ? new Set(opts.only) : null;
@@ -5442,6 +5444,12 @@
 		   resume re-runs its tail. */
 		const resume = !extend && Number.isFinite(opts.resumeFrom)
 			? universeResumeState(opts.resumeFrom) : null;
+		if (Number.isFinite(opts.resumeFrom) && opts.replaying !== undefined && !resume) {
+			setStatus("The imported universe's partial re-run could not be replayed.", true);
+			state.universeExpect = null;
+			state.universeImported = null;
+			return;
+		}
 		const diags = U.validate(state.files);
 		state.universe.diags = diags;
 		let runnable = diags.filter((d) => d.ok)
