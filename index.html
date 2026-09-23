@@ -130,6 +130,14 @@
 			</select>
 			<p class="hint" id="ovrModeHint"></p>
 		</div>
+		<div class="ctl">
+			<label for="potModel">Potential model</label>
+			<select id="potModel">
+				<option value="tool">Tool (default)</option>
+				<option value="bbgm">BBGM potEstimator (what the game will show)</option>
+			</select>
+		</div>
+		<div class="ctl"><label><input type="checkbox" id="signatureSkills"> Signature skills (builds reach their promised BBGM skill badge)</label></div>
 		<div class="ctl" data-curve><label for="classQuality">Class quality <b></b></label><input type="range" id="classQuality" min="-3" max="3" step="0.5"></div>
 		<div class="ctl" data-curve><label for="classDepth">Depth (top-heavy → deep) <b></b></label><input type="range" id="classDepth" min="-3" max="3" step="0.5"></div>
 		<div class="ctl" data-curve><label for="eliteCount">Elite prospects <b></b></label><input type="range" id="eliteCount" min="0" max="8" step="1"></div>

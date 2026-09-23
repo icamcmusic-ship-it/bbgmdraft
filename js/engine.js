@@ -1721,9 +1721,13 @@
 		   graduate. See js/traits.js. */
 		{
 			const trng = rng.child("traits" + vsalt);
+			/* The class the finished-rating gates compare against (see
+			   TR.classContext). */
+			const tctx = TR.classContext
+				? TR.classContext(players, { ageIsInformative: state.ageIsInformative }) : null;
 			for (const p of players) {
 				const t = TR.assign(p, trng.child("tr:" + p.key + rerollSalt(p, "traits")),
-					cfg, state.flavor);
+					cfg, state.flavor, tctx);
 				p.traits = t.traits;
 				p.traitNames = t.names;
 				/* Read by the game log (night-to-night spread), the rebound
@@ -1843,7 +1847,7 @@
 					}
 				}
 				const re = RB.resolveTo(base, p.newOvr, p.archetype,
-					p.origRatings.fuzz, p.buildPinned, cleanBase);
+					p.origRatings.fuzz, p.buildPinned, cleanBase, (ctx && ctx.cfg) || undefined);
 				p.newHgtInches = inches;
 				p.buildBase = re.base;
 				p.buildCleanBase = re.cleanBase;
@@ -2974,6 +2978,8 @@
 		state.futurePlayers = future;
 		state.bySchool = bySchool;
 		assignAvailability(state.players, rng.child("availability" + variationSalt(state.cfg)), cfg);
+		// A trait whose gate reads availability is re-checked now it exists.
+		if (TR.regateAfterAvailability) TR.regateAfterAvailability(state.players);
 		/* The class's season travels with the config, so a coach's style drifts
 		   year to year across a universe rather than being redrawn. */
 		const progCfg = Object.assign({}, cfg, { __season: state.season || 0 });
@@ -3864,6 +3870,8 @@
 				p.baseGap + bias + factors.total * 0.55 + factors.noise,
 				1, 100, POT_GAP_BAND);
 			p.newPot = clamp(Math.round(p.newOvr + gap), Math.min(p.newOvr + 1, 100), 100);
+			// The selected potential model (cfg.potModel; see RB.potForModel).
+			if (RB.potForModel) p.newPot = RB.potForModel(cfg.potModel, p.newOvr, potAge, p.newPot);
 		}
 		return state;
 	}
@@ -4580,7 +4588,7 @@
 				"wGLeague", "wNBL", "pDII", "overrides",
 				// The destination model (see destinationPool).
 				"collegeSource", "talentCoupling", "birthplaceWeight",
-				"archetypePool", "surpriseBudget", "traitCount",
+				"archetypePool", "surpriseBudget", "traitCount", "signatureSkills",
 				// See variationSalt / pickClassPool: both reshape the class
 				// from the build phase down.
 				"variation", "flavorHint", "flavorBlend", "poolMemory", "recentPools",
@@ -4667,7 +4675,7 @@
 				"priorSeasons"],
 			run: phaseStats,
 		},
-		{ name: "pot", deps: ["potBias", "potSpread"], run: phasePot },
+		{ name: "pot", deps: ["potBias", "potSpread", "potModel"], run: phasePot },
 		{
 			name: "awards",
 			deps: ["awardStrictness", "confAwardStrictness", "proAwardStrictness",

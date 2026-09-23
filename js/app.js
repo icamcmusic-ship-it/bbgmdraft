@@ -1407,6 +1407,8 @@
 		// Also mark non-slider settings
 		paintModifiedMarkerFor("ovrMode", state.cfg.ovrMode);
 		paintModifiedMarkerFor("priorSeasons", state.cfg.priorSeasons);
+		paintModifiedMarkerFor("potModel", state.cfg.potModel);
+		paintModifiedMarkerFor("signatureSkills", state.cfg.signatureSkills);
 		paintModifiedMarkerFor("collegeSource", state.cfg.collegeSource);
 		$("collegeSource").value = state.cfg.collegeSource || "blanks";
 		$("collegeSourceHint").textContent = state.cfg.collegeSource === "rewrite"
@@ -1424,6 +1426,8 @@
 		paintModifiedMarkerFor("flavorHint", state.cfg.flavorHint || "");
 		$("ovrMode").value = state.cfg.ovrMode;
 		$("priorSeasons").value = state.cfg.priorSeasons;
+		$("potModel").value = state.cfg.potModel || "tool";
+		$("signatureSkills").checked = !!state.cfg.signatureSkills;
 		$("varySize").checked = !!state.cfg.varySize;
 		$("lockHeights").checked = state.cfg.lockHeights !== false;
 		$("universe").checked = !!state.cfg.universe;
@@ -1539,7 +1543,7 @@
 	function paintPhaseCosts() {
 		for (const key of SLIDERS.concat(
 			["era", "ovrMode", "varySize", "lockHeights", "priorSeasons", "universe", "narrative",
-				"collegeSource"])) {
+				"collegeSource", "potModel", "signatureSkills"])) {
 			const input = $(key);
 			if (!input) continue;
 			const ctl = input.closest(".ctl");
@@ -2381,12 +2385,12 @@
 		"preset", "seed", "ovrMode", "classQuality", "classDepth", "eliteCount",
 		"specialization", "classFlavor", "flavorHint", "archetypePool",
 		"freshmanShare", "transferShare", "varySize", "lockHeights", "universe", "era",
-		"pDII", "collegeSource", "talentCoupling", "birthplaceWeight",
+		"pDII", "collegeSource", "talentCoupling", "birthplaceWeight", "signatureSkills",
 	]);
 	const TIER_SEASON = new Set([
 		"potBias", "potSpread", "surpriseBudget", "traitCount", "narrative",
 		"pace", "scoringEnv", "efficiencyEnv", "upsetFactor", "injuryRate",
-		"seasonEvents", "draftEvents", "awardStrictness", "priorSeasons",
+		"seasonEvents", "draftEvents", "awardStrictness", "priorSeasons", "potModel",
 		"coachTurnover", "realignmentRate", "redshirtShare", "reclassShare",
 		"archetypeDiversity",
 	]);
@@ -2588,6 +2592,20 @@
 		$("collegeSource").addEventListener("change", () => {
 			pushUndo("changed the college source");
 			state.cfg.collegeSource = $("collegeSource").value;
+			markDirty();
+			paintConfig();
+			scheduleRun();
+		});
+		$("potModel").addEventListener("change", () => {
+			pushUndo("changed the potential model");
+			state.cfg.potModel = $("potModel").value;
+			markDirty();
+			paintConfig();
+			scheduleRun();
+		});
+		$("signatureSkills").addEventListener("change", () => {
+			pushUndo(($("signatureSkills").checked ? "turned on" : "turned off") + " signature skills");
+			state.cfg.signatureSkills = $("signatureSkills").checked;
 			markDirty();
 			paintConfig();
 			scheduleRun();

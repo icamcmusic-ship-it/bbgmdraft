@@ -409,6 +409,14 @@
 		   the older behavior: a backward-scaled copy of the draft-year line,
 		   which reads fine and is not a season. */
 		priorSeasons: "simulate",   // "simulate" | "reconstruct"
+		/* Which model sets the exported pot. "tool" is this workshop's own
+		   gap model; "bbgm" is BBGM's potEstimator, which is what the game
+		   itself will show after the first preseason re-estimate. */
+		potModel: "tool",           // "tool" | "bbgm"
+		/* When on, a build whose tags promise a BBGM skill badge (shooting
+		   -> 3, athletic -> A, rebounding -> R) leans its solve toward the
+		   badge's cutoff at the same overall. Off keeps every output as it was. */
+		signatureSkills: false,
 
 		// --- postseason ---------------------------------------------------
 		upsetFactor: 1.0,      // 0 = chalk, 2 = madness
@@ -540,6 +548,7 @@
 	const CHOICES = {
 		ovrMode: () => ["preserve", "curve"],
 		priorSeasons: () => ["simulate", "reconstruct"],
+		potModel: () => ["tool", "bbgm"],
 		collegeSource: () => ["blanks", "respect", "rewrite"],
 		era: () => (global.Calibration && global.Calibration.ERAS
 			? Object.keys(global.Calibration.ERAS) : null),
