@@ -926,7 +926,7 @@
 	};
 
 	/* The ages BBGM's class years imply — engine.js AGE_FOR_CLASS, which
-	   this file cannot reach. Used only for an anomaly-set age: a
+	   this file cannot reach, less its JUCO year. Used only for an anomaly-set age: a
 	   seventeen-year-old freshman is young for his class whatever the
 	   file's other ages say. */
 	const AGE_FOR_CLASS = { Freshman: 19, Sophomore: 20, Junior: 21, Senior: 22, Graduate: 23 };
@@ -935,7 +935,9 @@
 		let age = AGE_FOR_CLASS[cy.replace(/^Redshirt /, "")];
 		if (!Number.isFinite(age)) age = AGE_FOR_CLASS.Freshman;
 		if (/^Redshirt /.test(cy)) age += 1;
-		if (p.transfer && p.transfer.kind === "JUCO transfer") age += 1;
+		/* No JUCO year here, unlike the engine's export map: "old for his
+		   class" is against his CLASSMATES, and the 24-year-old JUCO
+		   graduate is exactly the man it is about. */
 		return age;
 	}
 

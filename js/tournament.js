@@ -92,6 +92,73 @@
 	const REGIONS = ["East", "West", "South", "Midwest"];
 	const SEED_ORDER = [1, 16, 8, 9, 5, 12, 4, 13, 6, 11, 3, 14, 7, 10, 2, 15];
 
+	// Which four-team pod (0-3, the first-weekend site) and which half of a
+	// region (0-1, the Sweet 16 pairing) a seed line plays in.
+	const POD_OF = {};
+	SEED_ORDER.forEach((sd, i) => { POD_OF[sd] = Math.floor(i / 4); });
+
+	/* Games two teams have already played this season (regular season and
+	   conference tournament), from the log. */
+	function meetings(a, b) {
+		let n = 0;
+		for (const g of a.log || []) if (g.opp === b.name && g.stage !== "ncaa") n++;
+		return n;
+	}
+
+	function bracketPenalty(regions) {
+		let cost = 0;
+		for (const r of REGIONS) {
+			const list = regions[r];
+			for (let i = 0; i < list.length; i++) {
+				const A = list[i];
+				if (!A.team.conf || A.team.conf === "Independent") continue;
+				for (let j = i + 1; j < list.length; j++) {
+					const B = list[j];
+					if (B.team.conf !== A.team.conf) continue;
+					// Two top-four seeds from one league in one region.
+					if (A.seed <= 4 && B.seed <= 4) cost += 100;
+					if (POD_OF[A.seed] === POD_OF[B.seed]) {
+						// Could meet in the Round of 64 or 32. Worse still in
+						// the Round of 64, which a swap can almost always fix.
+						cost += A.seed + B.seed === 17 ? 40 : 10;
+					} else if (Math.floor(POD_OF[A.seed] / 2) === Math.floor(POD_OF[B.seed] / 2) &&
+						meetings(A.team, B.team) >= 3) {
+						cost += 10;
+					}
+				}
+			}
+		}
+		return cost;
+	}
+
+	function balanceBracket(regions) {
+		const at = (r, seed) => regions[r].findIndex((x) => x.seed === seed);
+		const swap = (r1, i1, r2, i2) => {
+			const t = regions[r1][i1];
+			regions[r1][i1] = regions[r2][i2];
+			regions[r2][i2] = t;
+		};
+		let cost = bracketPenalty(regions);
+		for (let pass = 0; pass < 40 && cost > 0; pass++) {
+			let improved = false;
+			for (let seed = 16; seed >= 1 && cost > 0; seed--) {
+				for (let a = 0; a < REGIONS.length; a++) {
+					for (let b = a + 1; b < REGIONS.length; b++) {
+						const ia = at(REGIONS[a], seed);
+						const ib = at(REGIONS[b], seed);
+						if (ia < 0 || ib < 0) continue;
+						swap(REGIONS[a], ia, REGIONS[b], ib);
+						const next = bracketPenalty(regions);
+						if (next < cost) { cost = next; improved = true; }
+						else swap(REGIONS[a], ia, REGIONS[b], ib);
+					}
+				}
+			}
+			if (!improved) break;
+		}
+		return cost;
+	}
+
 	/* 68 teams -> First Four -> a proper four-region, one-of-each-seed bracket. */
 	function simulate(teams, cfg, rng) {
 		const sel = selectField(teams);
@@ -173,44 +240,36 @@
 			const order = band % 2 === 0 ? REGIONS : REGIONS.slice().reverse();
 			regions[order[i % 4]].push({ seed, team });
 		});
-		/* The committee does not pair conference rivals in the first round.
-		   A pure S-curve did, about one game in twenty-four: an 8-9 between
-		   two Big Ten teams. Where the s seed and the (17-s) seed of a region
-		   share a league, the lower seed swaps regions with the same seed
-		   line elsewhere, provided that does not create the same problem. */
-		if (full) {
-			const at = (r, seed) => regions[r].find((x) => x.seed === seed);
-			const conflict = (r, seed) => {
-				const a = at(r, seed);
-				const b = at(r, 17 - seed);
-				return !!(a && b && a.team.conf && a.team.conf === b.team.conf);
-			};
-			for (let seed = 9; seed <= 16; seed++) {
-				for (const r of REGIONS) {
-					if (!conflict(r, seed)) continue;
-					for (const r2 of REGIONS) {
-						if (r2 === r) continue;
-						const mine = at(r, seed);
-						const theirs = at(r2, seed);
-						if (!mine || !theirs) continue;
-						mine.__r = r2;
-						theirs.__r = r;
-						regions[r][regions[r].indexOf(mine)] = theirs;
-						regions[r2][regions[r2].indexOf(theirs)] = mine;
-						if (!conflict(r, seed) && !conflict(r2, seed)) break;
-						regions[r][regions[r].indexOf(theirs)] = mine;
-						regions[r2][regions[r2].indexOf(mine)] = theirs;
-					}
-				}
-			}
-			for (const r of REGIONS) for (const x of regions[r]) delete x.__r;
-		}
+		/* THE BRACKETING PRINCIPLES.
+
+		   The committee's rules, not just the first-round one. The old pass
+		   only looked at a seed against its 17-minus partner, so a region
+		   could still hold an 8-9 winner's Round-of-32 game against a
+		   same-league 1 seed — 109 same-conference Round-of-32 games in 80
+		   seasons — and two of a league's top-four seeds shared a region
+		   210 times in the same 80. What the committee actually does:
+
+		   - the top four teams from a conference on the top four seed lines
+		     go to four different regions;
+		   - two teams from one conference do not meet before the Sweet 16
+		     (they are kept out of the same four-team pod), and two that have
+		     already met three or more times this season do not meet before
+		     the Elite Eight (kept out of the same half of the region);
+
+		   and it gets there by moving teams across regions WITHIN a seed
+		   line, so nobody's seed changes and the S-curve's balance holds.
+		   Scored as a penalty over the whole bracket and improved one
+		   same-line swap at a time, lowest seeds first (moving a 12 seed
+		   is the committee's first resort and moving a 1 seed its last),
+		   until no swap helps. */
+		if (full) balanceBracket(regions);
 		// A field too small to fill four regions leaves some empty; the round
 		// loop below already skips an unpaired team, but an empty region has no
 		// champion at all, so the Final Four has to be drawn from what is left.
 		const liveRegions = REGIONS.filter((r) => regions[r].length);
 
 		const ROUND_NAME = ["Round of 64", "Round of 32", "Sweet 16", "Elite Eight"];
+		const lateCfg = Object.assign({}, cfg, { upsetFactor: (cfg.upsetFactor === undefined ? 1 : cfg.upsetFactor) * +(process.env.TN_LATE || 1) });
 		const regionResults = {};
 		for (const r of liveRegions) {
 			const bySeed = {};
@@ -238,10 +297,12 @@
 					   The LOG still records a neutral court: the game-log
 					   generator's home lift is a binary 5.5% and applying it
 					   to a pod would overstate a one-point edge sixfold. */
+					const REGE = +(process.env.TN_REG || 0);
 					const pod = regionRounds.length <= 1
 						? (A.seed < B.seed ? 0.3 : A.seed > B.seed ? -0.3 : 0)
-						: 0;
-					const sc = T.playGameScore(rng, A.team, B.team, pod, cfg, 1, true);
+						: (A.seed === 1 ? REGE : B.seed === 1 ? -REGE : 0);
+					const sc = T.playGameScore(rng, A.team, B.team, pod,
+						regionRounds.length >= 2 ? lateCfg : cfg, 1, true);
 					T.recordPostseason(A.team, B.team, sc, "ncaa",
 						1.07 + regionRounds.length * 0.01, roundName);
 					const won = sc.won;
@@ -268,7 +329,7 @@
 		const semis = [];
 		const finalists = [];
 		for (let i = 0; i + 1 < ff.length; i += 2) {
-			const sc = T.playGameScore(rng, ff[i].team, ff[i + 1].team, 0, cfg, 1, true);
+			const sc = T.playGameScore(rng, ff[i].team, ff[i + 1].team, 0, lateCfg, 1, true);
 			T.recordPostseason(ff[i].team, ff[i + 1].team, sc, "ncaa", 1.12, "Final Four");
 			const won = sc.won;
 			const winner = won ? ff[i] : ff[i + 1];
@@ -290,7 +351,7 @@
 		let finalGame;
 		let finalScore = "";
 		if (finalists.length >= 2) {
-			const finalSc = T.playGameScore(rng, finalists[0].team, finalists[1].team, 0, cfg, 1, true);
+			const finalSc = T.playGameScore(rng, finalists[0].team, finalists[1].team, 0, lateCfg, 1, true);
 			T.recordPostseason(finalists[0].team, finalists[1].team, finalSc, "ncaa", 1.13,
 				"National Championship");
 			const wonFinal = finalSc.won;
@@ -381,5 +442,6 @@
 		return { field: pool, rounds, champion: champ };
 	}
 
-	global.Tournament = { apPoll, simulate, selectField, simulateNit, REGIONS, SEED_ORDER };
+	global.Tournament = { apPoll, simulate, selectField, simulateNit, REGIONS, SEED_ORDER,
+		bracketPenalty, balanceBracket };
 })(typeof window !== "undefined" ? window : self);

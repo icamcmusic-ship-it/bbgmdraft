@@ -3439,8 +3439,17 @@
 		return t && t.poss > 0 ? t.pts / t.poss : 1.03;
 	}
 
-	function priorSchedule(home, level, rng, cfg, exclude) {
-		const skip = (n) => n === home.name || (exclude && exclude.indexOf(n) >= 0);
+	/* `ref` is the program's own draft-year regular season, when it has
+	   one: { margin, level }. The opponent formula here (prestige and
+	   conference strength) is not the draft-year scoreboard's rating scale,
+	   and on its own it put a program's earlier seasons about three points a
+	   night worse than the season it actually played — measured, a 7.8-margin
+	   program's prior years averaged +4.4. So the draw keeps its opponents and
+	   its spread and is centered on the program's real margin, moved by the
+	   year's level jitter. With the scoreboard anchor in the stat model, that
+	   margin is also what sets a prior season's team points. */
+	function priorSchedule(home, level, rng, cfg, ref) {
+		const skip = (n) => n === home.name;
 		const confMates = (C.byConference[home.conf] || []).filter((n) => !skip(n));
 		const pool = C.names.filter((n) => !skip(n));
 		const n = SEASON_GAMES;
@@ -3451,7 +3460,7 @@
 			? T.teamPace({ style: home.style }, cfg)
 			: clamp(Number.isFinite(cfg.pace) ? cfg.pace : 68, PACE_MIN, PACE_MAX);
 		const ppp = priorPointsPerPair(cfg);
-		const log = [];
+		const games = [];
 		for (let i = 0; i < n; i++) {
 			const conference = i >= T.NON_CONF_GAMES && confMates.length > 0;
 			const opp = rng.pick(conference ? confMates : pool);
@@ -3462,23 +3471,48 @@
 				? (i % 2 ? 1 : -1)
 				: (rng.random() < 0.55 ? 1 : rng.random() < 0.5 ? -1 : 0);
 			const edge = (level - oppLevel) * 0.6 + homeSide * 3.2;
-			const margin = edge * 0.72 + rng.normal(0, 11.3);
-			const total = clamp(pace * 2 * ppp + rng.normal(0, 9), pace * 1.35, pace * 2.95);
-			let a = Math.round((total + margin) / 2);
-			let b = Math.round((total - margin) / 2);
+			games.push({ i, conference, opp, oppLevel, homeSide, edge,
+				noise: rng.normal(0, 11.3),
+				total: clamp(pace * 2 * ppp + rng.normal(0, 9), pace * 1.35, pace * 2.95) });
+		}
+		let shift = 0;
+		if (ref && Number.isFinite(ref.margin) && games.length) {
+			const drawn = games.reduce((a, g) => a + g.edge * 0.72, 0) / games.length;
+			const lvl = Number.isFinite(ref.level) ? (level - ref.level) * 0.6 * 0.72 : 0;
+			shift = clamp(ref.margin + lvl - drawn, -15, 15);
+		}
+		const log = [];
+		for (const g of games) {
+			const margin = g.edge * 0.72 + shift + g.noise;
+			let a = Math.round((g.total + margin) / 2);
+			let b = Math.round((g.total - margin) / 2);
 			let ot = 0;
 			while (a === b) {
 				ot++;
-				const swing = rng.normal(edge * 0.10, 4.2 + ot * 0.8);
+				const swing = rng.normal((g.edge + shift / 0.72) * 0.10, 4.2 + ot * 0.8);
 				a += Math.round(6 + swing / 2);
 				b += Math.round(6 - swing / 2);
 			}
 			log.push({
-				opp, won: a > b, conference, teamPts: a, oppPts: b, ot, home: homeSide,
-				when: (i + 0.5) / n, quality: oppLevel, stage: "reg", round: null,
+				opp: g.opp, won: a > b, conference: g.conference, teamPts: a, oppPts: b, ot,
+				home: g.homeSide, when: (g.i + 0.5) / n, quality: g.oppLevel, stage: "reg",
+				round: null,
 			});
 		}
 		return log;
+	}
+
+	/* A program's draft-year regular-season margin, for priorSchedule. */
+	function regMarginOf(t) {
+		if (!t || !t.log) return null;
+		let sum = 0;
+		let k = 0;
+		for (const g of t.log) {
+			if (g.stage !== "reg" || !Number.isFinite(g.teamPts) || !Number.isFinite(g.oppPts)) continue;
+			sum += g.teamPts - g.oppPts;
+			k++;
+		}
+		return k ? { margin: sum / k, level: Number.isFinite(t.level) ? t.level : null } : null;
 	}
 
 	/* One prior season, simulated. Returns a stat line or null. */
@@ -3560,7 +3594,8 @@
 			: home;
 		const schedLevel = origin && teams[origin] && Number.isFinite(teams[origin].level)
 			? clamp(teams[origin].level + rng.normal(0, 3), 5, 99) : level;
-		const schedule = priorSchedule(schedHome, schedLevel, rng.child("schedule"), cfg);
+		const schedule = priorSchedule(schedHome, schedLevel, rng.child("schedule"), cfg,
+			regMarginOf(origin ? teams[origin] : home));
 		const team = {
 			name: home.name + "|" + (season - i),
 			conf: home.conf,
@@ -7381,19 +7416,6 @@
 			for (const p of file.players) {
 				const idKey = ((p.firstName || "") + "|" + (p.lastName || "") + "|" +
 					(p.born && p.born.year)).toLowerCase();
-				/* The same man in two class files (a reclassification, or the
-				   same export loaded twice) is one player in the merged file:
-				   the later row wins, because it is the one whose draft year
-				   the universe actually played to. */
-				if (seen.has(idKey)) {
-					duplicates++;
-					const prev = seen.get(idKey);
-					p.pid = prev.pid;
-					players[prev.at] = p;
-					prev.season = season;
-					continue;
-				}
-				p.pid = nextPid++;
 				/* Awards: deduped on {season, type}. exportFile has already
 				   shifted each row to the season it belongs to, so the dedupe
 				   is over rows that are already in universe time. */
@@ -7423,7 +7445,34 @@
 					}
 					p.stats = keep;
 				}
-				seen.set(idKey, { pid: p.pid, at: players.length, season });
+				/* The same man in two class files (a reclassification, or the
+				   same export loaded twice) is one player in the merged file:
+				   the later row wins, because it is the one whose draft year
+				   the universe actually played to.
+
+				   AND IT WINS EVERYWHERE. The later row used to replace the
+				   player in `players` and `continue` — past the award and stat
+				   dedupe above (which now runs first), and leaving the EARLIER
+				   object in its old file's per-season list. The relatives pass
+				   reads those lists, so a father link written to the stale
+				   object never reached the file, and the son's link pointed at
+				   a man with no link back. The later row now moves into this
+				   season's list and out of the old one. */
+				if (seen.has(idKey)) {
+					duplicates++;
+					const prev = seen.get(idKey);
+					p.pid = prev.pid;
+					players[prev.at] = p;
+					const was = prev.rows.indexOf(prev.obj);
+					if (was !== -1) prev.rows.splice(was, 1);
+					prev.season = season;
+					prev.rows = rows;
+					prev.obj = p;
+					rows.push(p);
+					continue;
+				}
+				p.pid = nextPid++;
+				seen.set(idKey, { pid: p.pid, at: players.length, season, rows, obj: p });
 				rows.push(p);
 				players.push(p);
 			}

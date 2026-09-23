@@ -318,10 +318,13 @@ module.exports = function (ok, V) {
 		const app = fs.readFileSync(path.join(ROOT, "js", "app.js"), "utf8");
 		ok("the persisted career registry is restored on reload",
 			/registry: saved\.universe\.registry/.test(app));
+		/* The chain moved to js/universe.js (Universe.beginChain), so the
+		   two checks below read both files. */
+		const chainSrc = app + fs.readFileSync(path.join(ROOT, "js", "universe.js"), "utf8");
 		ok("an extension drops last run's extrapolated tail before redrawing it",
-			/row\.extrapolated &&[\s\S]{0,200}row\.season > lastSeason/.test(app));
+			/row\.extrapolated &&[\s\S]{0,200}row\.season > lastSeason/.test(chainSrc));
 		ok("a resumed chain keeps the guessed years inside the seasons it held",
-			/if \(r\.extrapolated\) \{[\s\S]{0,200}r\.season <= before/.test(app));
+			/if \(r\.extrapolated\) \{[\s\S]{0,200}r\.season <= (before|lastSeason)/.test(chainSrc));
 		ok("the settings shortcut does not fire behind a dialog",
 			/if \(e\.key !== "s"[\s\S]{0,900}modalEl\.hidden\) return;/.test(app));
 		ok("the preview cache counts a hit as use",

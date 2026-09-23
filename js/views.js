@@ -1528,9 +1528,20 @@
 			pills.push(res.archetypePool.length + " builds in this class");
 		}
 		for (const t of pills) summary.appendChild(el("span", "pill", t));
-		view.appendChild(summary);
+		/* COMPACT CONTROLS. The pills, the season's storylines and the story
+		   of the class stood between the tab bar and the table on every visit,
+		   so the first row of the table sat ~400px down a 900px screen. The
+		   pills stay on one line as the summary of a disclosure; the two
+		   paragraphs are behind it. */
+		const info = el("details", "classinfo");
+		info.open = !!uiMemo.classInfoOpen;
+		info.addEventListener("toggle", () => { uiMemo.classInfoOpen = info.open; });
+		const infoSum = el("summary");
+		infoSum.appendChild(summary);
+		info.appendChild(infoSum);
+		view.appendChild(info);
 		if ((res.narrative || []).length) {
-			view.appendChild(el("p", "legendline",
+			info.appendChild(el("p", "legendline",
 				"The season: " + res.narrative.map((n) => n.blurb).join("; ") + "."));
 		}
 		if (res.surprises && res.surprises.length) {
@@ -1545,14 +1556,26 @@
 				});
 				line.appendChild(b);
 			});
-			view.appendChild(line);
+			info.appendChild(line);
 		}
 		/* Realignment, the season's events and draft day used to be three more
 		   ·-joined walls here. They are proper dated articles on the News tab
 		   now, with every player and team mention a link. */
-		view.appendChild(filterBar(res));
-		view.appendChild(rangeBar(res));
-		view.appendChild(bulkBar(res));
+		/* On a phone the filters, presets, range rows and bulk bar were three
+		   screens of controls above the first prospect. They fold into one
+		   "Filters (n)" disclosure there; on a wider screen the fold is
+		   always open and its summary is hidden (see .filterfold). */
+		const phone = typeof window !== "undefined" && window.innerWidth <= CARD_BREAKPOINT;
+		const fold = el("details", "filterfold");
+		fold.open = !phone || !!uiMemo.filtersOpen;
+		fold.addEventListener("toggle", () => { if (phone) uiMemo.filtersOpen = fold.open; });
+		const nActive = describeFilters().length;
+		fold.appendChild(el("summary", null, "Filters" + (nActive ? " (" + nActive + ")" : "") +
+			" · columns · bulk edit"));
+		fold.appendChild(filterBar(res));
+		fold.appendChild(rangeBar(res));
+		fold.appendChild(bulkBar(res));
+		view.appendChild(fold);
 
 		/* On a phone the card layout picks its own columns (see CARD_COLUMNS):
 		   the desktop selection is a choice about a wide table and applying it
@@ -2009,13 +2032,9 @@
 			A().persist();
 			A().render();
 		});
-		if (p.newCollege) {
-			item("Open " + p.newCollege, () => {
-				st.team = p.newCollege;
-				st.tab = "teams";
-				A().persist();
-				A().render();
-			});
+		// Only a program with a Teams page: a pro's newCollege is his league.
+		if (p.newCollege && res.teams && res.teams[p.newCollege]) {
+			item("Open " + p.newCollege, () => A().showTeam(p.newCollege));
 		}
 		document.body.appendChild(menu);
 		// Kept inside the viewport: a right-click near the bottom right of the
@@ -4349,6 +4368,8 @@
 			view.appendChild(el("p", "hint", "No prospect on the board matches that search."));
 		}
 	}
+	// Disclosure states that should survive a re-render but are not settings.
+	const uiMemo = { classInfoOpen: false, filtersOpen: false };
 	// The board's own search, position filter and sort (see viewBoard).
 	const boardFilter = { q: "", pos: "", sort: null };
 
@@ -6324,7 +6345,11 @@
 			}
 			table.appendChild(tr);
 		}
-		box.appendChild(table);
+		// Its own horizontal scroll: four names and four faces do not fit a
+		// phone, and the page must not scroll sideways to show them.
+		const cwrap = el("div", "scroll comparewrap");
+		cwrap.appendChild(table);
+		box.appendChild(cwrap);
 		return box;
 	}
 
@@ -6333,6 +6358,35 @@
 	function derived(key, stats, player) {
 		return DERIVED[key] ? DERIVED[key](stats, player) : undefined;
 	}
+
+	/* Skip to content. The header and the settings panel are fifty-odd tab
+	   stops before the first prospect; the first tab stop on the page now
+	   jumps past them. Added here rather than in index.html because the
+	   target moves: the tab bar once a class is loaded, the drop zone before. */
+	(function skipLink() {
+		if (typeof document === "undefined" || !document.body ||
+			document.querySelector(".skiplink")) return;
+		const a = document.createElement("a");
+		a.className = "skiplink";
+		a.href = "#main";
+		a.textContent = "Skip to content";
+		a.addEventListener("click", (e) => {
+			e.preventDefault();
+			const app = document.getElementById("app");
+			const target = app && !app.hidden
+				? document.querySelector("#tabs button.active") || app
+				: document.querySelector("main");
+			if (!target) return;
+			if (!target.hasAttribute("tabindex") && target.tagName !== "BUTTON") {
+				target.setAttribute("tabindex", "-1");
+			}
+			target.focus();
+			if (target.scrollIntoView) target.scrollIntoView({ block: "start" });
+		});
+		const main = document.querySelector("main");
+		if (main && !main.id) main.id = "main";
+		document.body.insertBefore(a, document.body.firstChild);
+	})();
 
 	global.Views = {
 		players: viewPlayers, teams: viewTeams, bracket: viewBracket, bulkBar,
@@ -6345,6 +6399,7 @@
 		dropColumn, setColumnOrder,
 		matchesFilter, numericColumns, histogram, feet, closeRowMenu,
 		sortRows, classYearRank, CLASS_YEAR_ORDER, defaultHiddenColumns, closeWhy,
+		currentColumnPreset, COLUMN_PRESETS,
 		compareWith, sortableTable,
 		el, n1, pc, wrapCell, COMPARE_MAX, ratingRadar, RADAR_AXES,
 	};

@@ -55,77 +55,45 @@ function files(seasons, size) {
    phase cache is only consulted when a runner is reused, so every chain built
    with E.run() is a COLD chain and a whole class of staleness bug was
    invisible to this harness. */
-function chain(fileList, over, runners) {
-	const frozen = CFG.make(Object.assign({ seed: "harness" }, over || {}));
-	const rows = [];
-	const results = [];
-	let alumni = [];
-	let carry = null;
-	let recentPools = [];
-	let lastSeason = null;
-	let tree = null;
-	/* BOTH ROSTER LINKS, the way js/app.js runs them — this used to run a bare
-	   chain, so the two features that make a universe one WORLD rather than N
-	   seasons in a row (a later class's underclassmen on an earlier roster,
-	   and an earlier class's undrafted men on a later one) were never
-	   exercised by the harness that exists to guard it.
-
-	   Pass one is the previews: a later class's men have to be on an earlier
-	   roster before that season is played, and a preview is the only thing
-	   that exists yet. The reverse link needs no preview, because the season
-	   it reads has already been simulated. */
-	const previews = fileList.map((f, k) => {
-		const pcfg = CFG.make(frozen);
-		pcfg.seed = U.seedFor("harness", k, f.data.startingSeason, f.fingerprint);
-		pcfg.overrides = {};
-		try { return E.previewClass(f.data, pcfg); } catch (e) { return null; }
-	});
-	const returners = [];
-	fileList.forEach((f, k) => {
-		const season = f.data.startingSeason;
-		const gap = (carry && Number.isFinite(lastSeason))
-			? Math.max(0, season - lastSeason - 1) : 0;
-		if (gap > 0) carry = U.ageCarry(carry, gap);
-		const cfg = CFG.make(frozen);
-		cfg.seed = U.seedFor("harness", k, season, f.fingerprint);
-		cfg.overrides = {};
-		cfg.recentPools = recentPools.map((a) => a.slice());
-		cfg.carryOver = carry;
-		cfg.universeAlumni = alumni.slice(-120);
-		cfg.universeTitles = (carry && carry.titles) || {};
-		let future = [];
-		for (let j = k + 1; j < fileList.length; j++) {
-			if (!previews[j] || !(fileList[j].data.startingSeason > season)) continue;
-			future = future.concat(E.futureRosterFor(previews[j], season, j));
-		}
-		cfg.universeRoster = future;
-		let past = [];
-		for (const src of returners) {
-			if (!(season > src.season)) continue;
-			past = past.concat(E.pastRosterFor(src.res, season, src.index));
-		}
-		cfg.pastRoster = past;
-		const prevCarry = carry;
-		const res = runners ? runners[k].run(cfg) : E.run(f.data, cfg);
-		results.push(res);
-		tree = U.coachTreeStep(tree, prevCarry, res, season, "harness");
-		rows.push(Object.assign(U.summarize(res, cfg.seed, f.name), {
-			fingerprint: f.fingerprint, result: U.resultFingerprint(res), gap,
-		}));
-		alumni = alumni.concat(U.alumniOf(res, season, f.fingerprint));
-		if (E.pastRosterFor(res, season + 1, k).length) {
-			returners.push({ season, index: k, res });
-		}
-		carry = U.harvest(res, prevCarry);
-		lastSeason = season;
-		if (res.archetypePool) {
-			recentPools.unshift(res.archetypePool.slice());
-			recentPools = recentPools.slice(0, 3);
-		}
-	});
-	return { rows, results, alumni, tree, settings: frozen,
-		threads: U.threads(rows, alumni), records: U.records(rows, alumni) };
+function spec(fileList, over, extra) {
+	return Object.assign({
+		mode: "cold",
+		files: fileList,
+		runnable: fileList.map((f, i) => ({ index: i, name: f.name,
+			season: f.data.startingSeason })),
+		settings: CFG.make(Object.assign({ seed: "harness" }, over || {})),
+		baseSeed: "harness",
+		make: (st) => CFG.make(st),
+		runnerFor: (i) => ({ run: (cfg) => E.run(fileList[i].data, cfg) }),
+		/* Off by default so that row i is file i, which the older checks
+		   below index on; the gap checks turn it on. */
+		extrapolateGaps: false,
+	}, extra || {});
 }
+
+/* Drive Universe.beginChain the way js/app.js does, synchronously. */
+function drive(sp, finishOpts) {
+	const results = [];
+	if (!sp.store) sp.store = (i, res) => { results[i] = res; };
+	const c = U.beginChain(sp);
+	for (let k = 0; k < c.runnable.length; k++) c.step(k);
+	const out = c.finish(finishOpts || {});
+	return { u: c.universe, results, out, chain: c };
+}
+
+/* THE CHAIN, EXACTLY AS js/app.js RUNS IT — because it is the same code.
+   This used to be a copy of the app's loop, so a fault in the app's copy
+   (a resume that did not reproduce the chain, an extension that forgot the
+   returners of the seasons it held) could not be seen from here. */
+function chain(fileList, over, runners) {
+	const d = drive(spec(fileList, over,
+		runners ? { runnerFor: (i) => runners[i] } : null));
+	return { rows: d.u.rows, results: d.results, alumni: d.u.alumni,
+		tree: d.u.coachTree, settings: d.u.settings, u: d.u,
+		threads: d.u.threads, records: d.u.records };
+}
+
+const clone = (x) => JSON.parse(JSON.stringify(x));
 
 console.log("\nDeterminism");
 const fl = files([2025, 2026, 2027]);
@@ -661,6 +629,399 @@ console.log("\nOne definition of player of the year");
 	ok("the timeline column and the alumni index name the same man",
 		disagree === 0);
 	ok("the definition comes from the awards module", set.size > 2);
+}
+
+/* ------------------------------------------------------------------------
+   THE CHAIN'S OTHER WAYS IN: resume, extend, re-run, replay.
+
+   Everything above runs a cold chain. The app also resumes a chain from a
+   held season, extends a finished one with later classes, re-runs it warm
+   after a setting moves, evicts old seasons to bound memory and replays an
+   import run by run — and each of those used to reach a different world from
+   the one it claimed to reproduce. These run the same Universe.beginChain the
+   app runs. */
+
+/* Replay an export the way importUniverse does: Universe.replayPlan, then
+   one beginChain per recorded run. */
+function replay(json, fileList, finishOpts) {
+	const plan = U.replayPlan(json, fileList);
+	let u = null;
+	let last = null;
+	const byFp = new Map(fileList.map((f, i) => [f.fingerprint, i]));
+	for (const st of plan.steps) {
+		const settings = CFG.make(st.settings || {});
+		let runnable;
+		let extra = { settings, baseSeed: json.baseSeed };
+		if (st.kind === "resume") {
+			runnable = u.order.slice(st.from).map((d) => ({ index: d.index, name: d.name, season: d.season }));
+			extra = Object.assign(extra, { mode: "resume", from: st.from, universe: u });
+		} else {
+			const only = st.only ? new Set(st.only) : null;
+			const known = st.kind === "extend" ? new Set(u.tail.fingerprints) : new Set();
+			runnable = fileList.map((f, i) => ({ index: i, name: f.name, season: f.data.startingSeason, f }))
+				.filter((d) => (!only || only.has(d.f.fingerprint)) && !known.has(d.f.fingerprint))
+				.sort((a, b) => a.season - b.season || a.index - b.index);
+			if (st.kind === "extend") extra = Object.assign(extra, { mode: "extend", universe: u });
+		}
+		extra.runnable = runnable;
+		last = drive(spec(fileList, null, extra), finishOpts);
+		u = last.u;
+	}
+	void byFp;
+	return { u, plan };
+}
+
+console.log("\nResume reproduces the chain");
+{
+	const fl4 = files([2025, 2026, 2027, 2028], 74);
+	const full = drive(spec(fl4));
+	const base = drive(spec(fl4));
+	const resumed = drive(spec(fl4, null, {
+		mode: "resume", from: 2, universe: base.u,
+		runnable: fl4.slice(2).map((f, i) => ({ index: i + 2, name: f.name,
+			season: f.data.startingSeason })),
+	}));
+	ok("a resume with the same settings replays the same seasons, row for row",
+		JSON.stringify(full.u.rows) === JSON.stringify(resumed.u.rows),
+		JSON.stringify(full.u.rows.map((r) => r.result)) + " vs " +
+		JSON.stringify(resumed.u.rows.map((r) => r.result)));
+	const pr = (x, i) => (x.u.cfgs[i].pastRoster || []).length;
+	ok("...with the held seasons' undrafted men on the resumed rosters",
+		pr(resumed, 2) + pr(resumed, 3) > 0 && pr(resumed, 2) === pr(full, 2) &&
+		pr(resumed, 3) === pr(full, 3),
+		pr(full, 2) + "," + pr(full, 3) + " vs " + pr(resumed, 2) + "," + pr(resumed, 3));
+	ok("...ranked in the same recruiting cohorts",
+		JSON.stringify(full.u.cfgs[3].universeRecruiting) ===
+			JSON.stringify(resumed.u.cfgs[3].universeRecruiting));
+	ok("...with the same coaching tree, recorded once",
+		JSON.stringify(full.u.coachTree) === JSON.stringify(resumed.u.coachTree),
+		full.u.coachTree.hires.length + " vs " + resumed.u.coachTree.hires.length);
+	ok("...the same registry and the same tail",
+		JSON.stringify(full.u.registry) === JSON.stringify(resumed.u.registry) &&
+		JSON.stringify(full.u.tail) === JSON.stringify(resumed.u.tail));
+	/* A resume under NEW settings records them for the seasons it re-ran,
+	   not for the ones it held. */
+	const base2 = drive(spec(fl4));
+	const settings0 = JSON.stringify(base2.u.settings);
+	const held = clone(base2.u.rows.slice(0, 2));
+	const moved = drive(spec(fl4, { upsetFactor: 1.9 }, {
+		mode: "resume", from: 2, universe: base2.u,
+		runnable: fl4.slice(2).map((f, i) => ({ index: i + 2, name: f.name,
+			season: f.data.startingSeason })),
+	}));
+	ok("a resume under new settings keeps the held rows",
+		JSON.stringify(moved.u.rows.slice(0, 2)) === JSON.stringify(held));
+	ok("...and does not record the new settings as the held seasons'",
+		JSON.stringify(moved.u.settings) === settings0 &&
+		moved.u.cfgs[0].settings.upsetFactor !== 1.9 &&
+		moved.u.cfgs[3].settings.upsetFactor === 1.9);
+	ok("...and records the run as a segment",
+		moved.u.segments.length === 2 && moved.u.segments[1].kind === "resume" &&
+		moved.u.segments[1].from === 2);
+}
+
+console.log("\nExtend is the appended chain");
+{
+	const fl3 = files([2025, 2026, 2027], 74);
+	const idx2 = [{ index: 2, name: fl3[2].name, season: 2027 }];
+	const two = drive(spec(fl3.slice(0, 2)));
+	const rowsBefore = clone(two.u.rows);
+	/* The same two seasons, then saved and reloaded: the tail through JSON,
+	   no live configs, exactly what persist() and a page reload leave. */
+	const two2 = drive(spec(fl3.slice(0, 2)));
+	const reloaded = clone({
+		rows: two2.u.rows, alumni: two2.u.alumni, tail: two2.u.tail,
+		coachTree: two2.u.coachTree, segments: two2.u.segments,
+		order: two2.u.order, settings: two2.u.settings, registry: two2.u.registry,
+		baseSeed: two2.u.baseSeed,
+	});
+	reloaded.cfgs = {};
+	const ext = drive(spec(fl3, null, { mode: "extend", universe: two.u, runnable: idx2 }));
+	const ext2 = drive(spec(fl3, null, { mode: "extend", universe: reloaded, runnable: idx2 }));
+	ok("an extension leaves the played seasons exactly as they were",
+		JSON.stringify(ext.u.rows.slice(0, 2)) === JSON.stringify(rowsBefore));
+	ok("the extended season is the same whether the tail was live or reloaded",
+		JSON.stringify(ext.u.rows[2]) === JSON.stringify(ext2.u.rows[2]),
+		ext.u.rows[2].result + " vs " + ext2.u.rows[2].result);
+	ok("...and it is handed the held seasons' returners",
+		(ext.u.cfgs[2].pastRoster || []).length > 0,
+		(ext.u.cfgs[2].pastRoster || []).length + " returners");
+	ok("the seed index continues past the held seasons",
+		ext.u.tail.count === 3 && ext.u.segments.map((g) => g.kind).join() === "cold,extend");
+	/* And an import of it replays run by run into the same world. */
+	const json = U.exportUniverse(Object.assign({}, ext.u, { createdAt: "fixed" }));
+	const back = replay(json, fl3);
+	ok("an exported extension replays run by run",
+		back.plan.followed && back.plan.steps.map((x) => x.kind).join() === "cold,extend");
+	ok("...into the same world",
+		JSON.stringify(back.u.rows.map((r) => r.result)) ===
+			JSON.stringify(ext.u.rows.map((r) => r.result)),
+		JSON.stringify(back.u.rows.map((r) => r.result)) + " vs " +
+		JSON.stringify(ext.u.rows.map((r) => r.result)));
+	const cold3 = drive(spec(fl3));
+	ok("...which is not the cold chain of the same files (so the plan matters)",
+		cold3.u.rows[0].result !== ext.u.rows[0].result ||
+		cold3.u.rows[2].result !== ext.u.rows[2].result);
+}
+
+console.log("\nStop, then extend");
+{
+	const fl3 = files([2025, 2026, 2027]);
+	const sp = spec(fl3);
+	sp.store = () => {};
+	const c = U.beginChain(sp);
+	c.step(0);
+	c.finish({ cancelled: true });
+	ok("a stopped chain's tail names only the seasons it played",
+		c.universe.tail.fingerprints.length === 1 && c.universe.tail.count === 1 &&
+		c.universe.order.length === 1);
+	const ext = drive(spec(fl3, null, { mode: "extend", universe: c.universe,
+		runnable: fl3.slice(1).map((f, i) => ({ index: i + 1, name: f.name,
+			season: f.data.startingSeason })) }));
+	ok("...so extending it plays the classes it never reached",
+		ext.u.rows.length === 3 && ext.u.rows.every((r) => !r.error && !r.extrapolated));
+}
+
+console.log("\nAn awards-only warm re-run keeps the coaching tree");
+{
+	const fl = files([2025, 2026, 2027]);
+	const runners = fl.map((f) => E.createRunner(f.data));
+	chain(fl, { awardStrictness: 20 }, runners);
+	const warm = chain(fl, { awardStrictness: 80 }, runners);
+	const cold = chain(fl, { awardStrictness: 80 });
+	ok("the cold chain records hires", cold.tree.hires.length > 0);
+	ok("a warm re-run after an awards-only change records the same hires",
+		JSON.stringify(warm.tree) === JSON.stringify(cold.tree),
+		warm.tree.hires.length + " vs " + cold.tree.hires.length);
+	ok("...and the same seasons", JSON.stringify(warm.rows.map((r) => r.result)) ===
+		JSON.stringify(cold.rows.map((r) => r.result)));
+	ok("pruning the tree to a held season drops the later hires",
+		U.pruneCoachTree(cold.tree, 2025).hires.every((h) => h.season <= 2025));
+}
+
+console.log("\nMemory is bounded");
+{
+	/* Heap after a full collection, with the chain's own state still
+	   reachable: once with every result dropped by the caller, once with
+	   every result kept. If the chain pinned the results itself (it used to,
+	   through the returners list) the two would be the same size. WeakRef is
+	   no use here: a target stays alive until the end of the synchronous job
+	   that created the reference. */
+	let gc = null;
+	try {
+		require("v8").setFlagsFromString("--expose-gc");
+		gc = require("vm").runInNewContext("gc");
+	} catch (e) { gc = null; }
+	const fl6 = files([2025, 2026, 2027, 2028, 2029, 2030], 74);
+	const heap = () => { gc(); gc(); return process.memoryUsage().heapUsed; };
+	let c = null;
+	if (gc) {
+		const h0 = heap();
+		const sp = spec(fl6);
+		sp.store = () => {};
+		c = U.beginChain(sp);
+		for (let k = 0; k < c.runnable.length; k++) c.step(k);
+		c.finish({});
+		const dropped = heap() - h0;
+		const keep = [];
+		const sp2 = spec(fl6);
+		sp2.store = (i, res) => { keep.push(res); };
+		const c2 = U.beginChain(sp2);
+		for (let k = 0; k < c2.runnable.length; k++) c2.step(k);
+		c2.finish({});
+		const kept = heap() - h0 - dropped;
+		ok("the chain pins no finished season (the app's runner release does the rest)",
+			dropped < kept * 0.5,
+			"chain state " + Math.round(dropped / 1e6) + " MB, with results kept " +
+			Math.round(kept / 1e6) + " MB");
+		void c2;
+		void keep.length;
+	} else {
+		const sp = spec(fl6);
+		sp.store = () => {};
+		c = U.beginChain(sp);
+		for (let k = 0; k < c.runnable.length; k++) c.step(k);
+		c.finish({});
+	}
+	ok("the returner window is at most four seasons deep",
+		c.sources.length <= 4, c.sources.length + " sources");
+	const tailBytes = JSON.stringify(c.universe.tail).length;
+	ok("the tail is small enough to persist", tailBytes < 600000, tailBytes + " bytes");
+	/* The slim source is Engine.pastRosterFor's own input, not a copy of
+	   the rule: it must return exactly what the full result would. */
+	const res = E.run(fl6[0].data, CFG.make({ seed: "slim" }));
+	const src = U.returnerSource(res, 0);
+	let same = true;
+	for (let a = 1; a <= 3; a++) {
+		if (JSON.stringify(E.pastRosterFor(res, res.season + a, 0)) !==
+			JSON.stringify(U.pastRosterFrom(src ? [src] : [], res.season + a))) same = false;
+	}
+	ok("a slim returner source returns exactly the full season's returners", same);
+}
+
+console.log("\nNo season twice after extrapolate and extend");
+{
+	const fl = files([2025, 2026, 2029]);
+	const base = drive(spec(fl.slice(0, 2), null, { extrapolateGaps: true }),
+		{ extrapolateYears: 4 });
+	ok("four years are extrapolated past the last file",
+		base.u.rows.filter((r) => r.extrapolated).map((r) => r.season).join() ===
+			"2027,2028,2029,2030");
+	const ext = drive(spec(fl, null, { mode: "extend", universe: base.u,
+		extrapolateGaps: true,
+		runnable: [{ index: 2, name: fl[2].name, season: 2029 }] }), { extrapolateYears: 0 });
+	const seasons = ext.u.rows.map((r) => r.season);
+	ok("every season appears once after extending into the guessed years",
+		new Set(seasons).size === seasons.length, seasons.join(","));
+	ok("...and the played year is the played one",
+		ext.u.rows.filter((r) => r.season === 2029).every((r) => !r.extrapolated));
+	ok("...and no guessed alumni outlive their rows",
+		ext.u.alumni.filter((a) => a.extrapolated).every((a) => a.season < 2029));
+}
+
+console.log("\nImport keeps what the file knows");
+{
+	const fl3 = files([2025, 2026, 2027], 74);
+	const w = drive(spec(fl3));
+	const json = U.exportUniverse(Object.assign({}, w.u, { createdAt: "fixed" }));
+	ok("the export carries the registry",
+		json.registry && Object.keys(json.registry).length > 0);
+	ok("...and the whole alumni index", json.alumni.length === w.u.alumni.length);
+	/* The 2026 file is not loaded. */
+	const partial = fl3.filter((_, i) => i !== 1);
+	const plan = U.replayPlan(json, partial);
+	const run = drive(spec(partial, null, { extrapolateGaps: true }));
+	void plan;
+	ok("the partial replay guessed the missing year",
+		run.u.rows.some((r) => r.season === 2026 && r.extrapolated));
+	const imported = { rows: json.timeline, alumni: json.alumni,
+		registry: json.registry, tail: json.tail };
+	run.u.registry = null;
+	const out = U.restoreImported(run.u, imported, []);
+	const r26 = run.u.rows.filter((r) => r.season === 2026);
+	ok("a season whose class file is missing is the file's row, not a guess",
+		out.missing === 1 && r26.length === 1 && !r26[0].extrapolated &&
+		r26[0].missingFile && r26[0].champion === w.u.rows[1].champion);
+	ok("the import restores the registry",
+		run.u.registry && Object.keys(json.registry).every((id) => run.u.registry[id]));
+	ok("the alumni index is merged, not replaced",
+		run.u.alumni.some((a) => a.season === 2026) &&
+		run.u.alumni.some((a) => a.season === 2027));
+	const view = U.viewOnlyUniverse(json);
+	ok("with no class files at all, the file is still a readable world",
+		view.rows.length === json.timeline.length && view.registry && view.tail &&
+		view.records && view.viewOnly);
+	/* Two files claiming one season are two rows, and a divergence names
+	   the one that diverged. */
+	const keys = U.rowKeys([{ season: 2031, fingerprint: "a" }, { season: 2031, fingerprint: "b" },
+		{ season: 2031, fingerprint: "a" }, { season: 2032, extrapolated: true }]);
+	ok("rows are keyed per file and occurrence, not per season",
+		new Set(keys).size === 4, keys.join(" "));
+}
+
+console.log("\nThe carry: gaps, guesses, levels, the carousel");
+{
+	const fl6 = files([2025, 2026, 2027, 2028, 2029, 2030], 60);
+	const w = drive(spec(fl6));
+	const res0 = w.results[0];
+	const carry0 = U.harvest(res0, null);
+	ok("a gap clears last season's champion but keeps his banner",
+		carry0.champion && U.ageCarry(carry0, 1).champion === null &&
+		U.ageCarry(carry0, 1).titles[carry0.champion] === carry0.titles[carry0.champion]);
+	/* The carried level is the programme's, not the coached one. */
+	let checked = 0;
+	let wrong = 0;
+	for (const t of Object.values(res0.teams)) {
+		if (!t || !t.log || !t.coach || !t.coach.levelAdj) continue;
+		const want = t.level - t.coach.levelAdj + U.PRESTIGE_CAP * 0 +
+			(0.62 / 0.38) * carry0.prestigeDelta[t.name];
+		if (want < 5 || want > 99) continue;
+		checked++;
+		if (Math.abs(carry0.levels[t.name] - want) > 1e-9) wrong++;
+	}
+	ok("the carried level excludes the coach's situation adjustment",
+		checked > 0 && wrong === 0, wrong + " of " + checked);
+	const tail = w.u.tail.carry;
+	ok("prestige drift is bounded",
+		Object.values(tail.prestigeDelta).every((d) => Math.abs(d) <= U.PRESTIGE_CAP));
+	ok("prestige drift moves somebody", Object.values(tail.prestigeDelta)
+		.some((d) => Math.abs(d) >= 2));
+	/* Guessed titles are credited in the guessed world. */
+	const gap = U.extrapolateGap(tail, 2030, 2045, "harness");
+	const counts = {};
+	for (const r of gap) counts[r.champion] = (counts[r.champion] || 0) + 1;
+	ok("fourteen guessed seasons credit their champions",
+		gap.every((r) => !r.champion || Number.isFinite(r.titlesAfter)));
+	const rec = U.records(w.u.rows.concat(gap), w.u.alumni);
+	ok("the records book says which titles were guessed",
+		rec.titles.some((x) => x.extrapolated > 0));
+	/* The carousel moves men. */
+	let moved = 0;
+	let arrived = 0;
+	for (let i = 0; i + 1 < w.results.length; i++) {
+		const c = U.harvest(w.results[i], null);
+		for (const school of Object.keys(c.coaches)) {
+			const rec2 = c.coaches[school];
+			if (rec2.reason !== "hired") continue;
+			moved++;
+			const t = w.results[i + 1].teams[school];
+			if (t && t.coach && t.coach.name === rec2.coach.name) arrived++;
+		}
+	}
+	ok("a coach hired away arrives at the programme that hired him",
+		moved === 0 || arrived === moved, arrived + " of " + moved);
+	ok("the rivalry book fills from the bracket",
+		Object.keys(tail.rivalries).length > 0 &&
+		Object.keys(tail.rivalries).length <= U.RIVALRY_MAX);
+	const book = { "Duke|North Carolina": { a: "Duke", b: "North Carolina", games: 14,
+		aw: 9, bw: 5, march: [2027, 2029, 2031] } };
+	const riv = U.rivalryThreads(book);
+	ok("three March meetings in five years is a thread",
+		riv.length === 1 && /met in March 3 times in 5 years/.test(riv[0].text), riv[0] && riv[0].text);
+	ok("threads() reads the rivalry book",
+		U.threads(w.u.rows, w.u.alumni, { rivalries: book }).some((t) => t.kind === "rivalry"));
+	const hist = U.programHistory(w.u, "Duke");
+	ok("a programme has a history row for every played season",
+		hist.length === 6 && hist.every((h) => h.coach && h.conf && Number.isFinite(h.level)));
+	ok("...with a running title count",
+		Object.values(U.programHistory(w.u)).every((list) =>
+			list.every((h, i) => h.titles === list.slice(0, i + 1).filter((x) => x.title).length)));
+	ok("the records book has a page for people",
+		w.u.records.people && Array.isArray(w.u.records.people.mostSeasons) &&
+		w.u.records.people.mostSeasons.length > 0);
+}
+
+console.log("\nFile checks and the merged players file");
+{
+	const fl = files([2025, 2026, 2026, 2031]);
+	const diags = U.validate(fl);
+	ok("two different classes of the same size are not called duplicates",
+		diags.every((d) => d.warnings.every((w) => !/same players/.test(w))));
+	const twin = { name: "copy.json", fingerprint: "other",
+		data: clone(fl[0].data) };
+	ok("the same class loaded twice still is",
+		U.validate([fl[0], twin])[1].warnings.some((w) => /same players/.test(w)));
+	/* The same men in two files: one player each, in one season list. */
+	const a1 = files([2025])[0];
+	const a2 = { name: "again.json", fingerprint: "again", data: clone(a1.data) };
+	a2.data.startingSeason = 2026;
+	for (const p of a2.data.players) p.draft = Object.assign({}, p.draft, { year: 2026 });
+	const dupWorld = drive(spec([a1, a2]));
+	const merged2 = E.universePlayersFile(dupWorld.results, { stats: true, prior: true,
+		awards: true, seed: "harness" });
+	ok("a man in two files is merged", merged2.duplicates > 0, merged2.duplicates + " merged");
+	ok("...and sits in exactly one season list",
+		merged2.seasons.reduce((x, f) => x + f.players, 0) === merged2.file.players.length);
+	ok("...with his awards deduped",
+		merged2.file.players.every((p) => {
+			const seen = new Set();
+			for (const aw of p.awards || []) {
+				const k = aw.season + "|" + aw.type;
+				if (seen.has(k)) return false;
+				seen.add(k);
+			}
+			return true;
+		}));
 }
 
 console.log("\n" + (failures ? failures + " of " + checks + " checks FAILED"

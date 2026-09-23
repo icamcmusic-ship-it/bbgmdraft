@@ -14,14 +14,40 @@
 	/* Words whose first letter lies about their first sound. The list is not
 	   exhaustive English; it is the vocabulary this tool actually emits. */
 	const AN_BEFORE_CONSONANT = /^(hour|honou?r|honest|heir)/i;
-	const A_BEFORE_VOWEL = /^(uni|usa|use|usu|utah|utility|europe|euro|one|once|ou[ai])/i;
+	/* "a Ukrainian", "a UConn team", "a U-turn": a U said "you". */
+	const A_BEFORE_VOWEL = /^(uni|usa|use|usu|utah|utility|ukr|uconn|u\b|europe|euro|one|once|ou[ai])/i;
 	// Initialisms read letter by letter: "an NBA", "an FBI", "a UCLA".
 	const INITIALISM = /^[A-Z]{2,}\b/;
+	/* Dotted initialisms are read the same way: "an N.J.I.T. guard". */
+	const DOTTED = /^(?:[A-Z]\.){2,}/;
 	const LETTER_SOUND_VOWEL = /^[AEFHILMNORSX]/;
+	/* Acronyms said as WORDS, not letters: "a MAC title" (mack), "a SWAC
+	   team", "a MEAC school", "a MAAC guard", "a FIBA window", "a NET
+	   ranking", "a NAIA transfer" (nye-uh). The letter rule would give "an" to every one of them. */
+	const WORD_ACRONYM = /^(MAC|MAAC|MEAC|SWAC|NET|FIBA|NAIA)\b/;
+
+	/* A figure is read aloud, and its article is the spoken word's: "an 8",
+	   "an 11-point win", "an 18th", "an 80-72 loss", "an 800", "an 8,000",
+	   "an 11,000", but "a 1", "a 110", "a 1,100". Every number whose first
+	   digit is 8 starts with "eight"; eleven and eighteen are the only other
+	   vowel-led numbers, and they lead only when they head a group of three
+	   (11, 18, 11,000, 18,000,000). */
+	function numberArticle(w) {
+		const m = /^(\d[\d,]*)/.exec(w);
+		if (!m) return null;
+		const digits = m[1].replace(/,/g, "");
+		if (digits.charAt(0) === "8") return "an";
+		if (/^1[18]/.test(digits) && digits.length % 3 === 2) return "an";
+		return "a";
+	}
 
 	function article(word) {
 		const w = String(word === undefined || word === null ? "" : word).trim();
 		if (!w) return "a";
+		const num = numberArticle(w);
+		if (num) return num;
+		if (WORD_ACRONYM.test(w)) return "a";
+		if (DOTTED.test(w)) return LETTER_SOUND_VOWEL.test(w) ? "an" : "a";
 		if (INITIALISM.test(w)) return LETTER_SOUND_VOWEL.test(w) ? "an" : "a";
 		if (AN_BEFORE_CONSONANT.test(w)) return "an";
 		if (A_BEFORE_VOWEL.test(w)) return "a";
@@ -69,6 +95,14 @@
 		["a before a vowel sound", /(?:^|[.!?:;]\s+|\n)A ([AEIOUaeiou][a-z]+)/],
 		["an before a consonant sound", /\ban ([B-DF-HJ-NP-TV-Zb-df-hj-np-tv-z][a-z]+)/],
 		["an before a consonant sound", /(?:^|[.!?:;]\s+|\n)An ([B-DF-HJ-NP-TV-Zb-df-hj-np-tv-z][a-z]+)/],
+		/* "a 89-79 win", "a 11-point lead", "a NCAA bid", "a N.J.I.T.
+		   guard": an article before a FIGURE or an ACRONYM, which the word
+		   rules above never looked at because neither starts with a
+		   lowercase vowel. Deferred to article() like the rest. */
+		["a before a vowel sound", /\ba (\d[\d,]*|(?:[A-Z]\.){2,}|[A-Z]{2,}\b)/],
+		["a before a vowel sound", /(?:^|[.!?:;]\s+|\n)A (\d[\d,]*|(?:[A-Z]\.){2,}|[A-Z]{2,}\b)/],
+		["an before a consonant sound", /\ban (\d[\d,]*|(?:[A-Z]\.){2,}|[A-Z]{2,}\b)/],
+		["an before a consonant sound", /(?:^|[.!?:;]\s+|\n)An (\d[\d,]*|(?:[A-Z]\.){2,}|[A-Z]{2,}\b)/],
 		["space before punctuation", / [,.;:!?]/],
 		["doubled punctuation", /([,.;:])\1/],
 		/* "1 triple-doubles", "1 teams in the field": a count of one with a
@@ -95,12 +129,24 @@
 		const str = String(s === undefined || s === null ? "" : s);
 		const out = [];
 		for (const [label, re] of FAULTS) {
+			/* The article rules read EVERY match: the first "a" in a string
+			   is usually a legal one, and a single exec stopped there. */
+			if (/^an? before/.test(label)) {
+				const g = new RegExp(re.source, re.flags.indexOf("g") === -1 ? re.flags + "g" : re.flags);
+				let m;
+				let bad = false;
+				while (!bad && (m = g.exec(str)) !== null) {
+					// The article checks defer to article() itself, so the
+					// exception lists live in one place.
+					const want = label === "a before a vowel sound" ? "an" : "a";
+					if (article(m[1]) === want) bad = true;
+					if (m.index === g.lastIndex) g.lastIndex++;
+				}
+				if (bad) out.push(label);
+				continue;
+			}
 			const m = re.exec(str);
 			if (!m) continue;
-			// The article checks defer to article() itself, so the exception
-			// lists live in one place.
-			if (label === "a before a vowel sound" && article(m[1]) === "a") continue;
-			if (label === "an before a consonant sound" && article(m[1]) === "an") continue;
 			if (label === "number agreement" && ONE_OK.test(m[1])) continue;
 			out.push(label);
 		}

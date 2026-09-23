@@ -288,4 +288,179 @@ module.exports = function (ok, V) {
 			RB.pickClassPool(new Rng("p"), cfg, flavor) === null,
 			"got a pool back instead of null");
 	}
+
+	/* 16. BBGM's skills.ts ends `sk.sort(); return sk;` and this file's copy
+	   dropped the sort: about 3% of players exported their labels in an
+	   order the game itself never writes (["V","B"] for ["B","V"]). */
+	{
+		const high = { fuzz: 0 };
+		for (const k of BB.RATING_KEYS) high[k] = 95;
+		const all = BB.skills(high);
+		let unsorted = 0, n = 0;
+		for (let s = 0; s < 3; s++) {
+			const res = E.run(V.realisticClass(1600 + s, 70), C.make({ seed: "sk" + s }));
+			for (const p of res.players) {
+				n++;
+				const sk = p.newSkills || [];
+				if (JSON.stringify(sk) !== JSON.stringify(sk.slice().sort())) unsorted++;
+			}
+		}
+		ok("skills come back sorted, as BBGM's own skills() returns them",
+			all.length >= 5 && JSON.stringify(all) === JSON.stringify(all.slice().sort()) &&
+				unsorted === 0,
+			JSON.stringify(all) + ", " + unsorted + "/" + n + " players unsorted");
+	}
+
+	/* 17. The trait gates read only the build's authored offsets, never the
+	   finished player: "relentless motor" sat below the class median
+	   endurance 55% of the time, "plays above the rim" never carried the A,
+	   "NBA range already" carried the 3 on 8 of 18, and every "maxed-out
+	   frame" was lighter than typical for his height. Checked against the
+	   class context (the engine's, once it passes one) or the reference
+	   deciles (the fallback), whichever the draw used. */
+	{
+		const TR2 = global.Traits;
+		let carriers = 0, bad = 0, ex = "";
+		let motor = 0, motorLow = 0;
+		for (let s = 0; s < 8; s++) {
+			const res = E.run(V.realisticClass(1700 + s, 70), C.make({ seed: "fin" + s }));
+			const ctx = TR2.classContext(res.players, { ageIsInformative: res.ageIsInformative });
+			const endu = res.players.map((p) => p.newRatings.endu).sort((a, b) => a - b);
+			const med = endu[Math.floor(endu.length / 2)];
+			for (const p of res.players) {
+				for (const t of p.traits || []) {
+					const n = t.needs || {};
+					if (!n.fin && !n.skill && !n.frame && !n.age) continue;
+					carriers++;
+					if (!TR2.matchesFinished(t, p, ctx) && !TR2.matchesFinished(t, p, null)) {
+						bad++; ex = t.name + " on " + p.name;
+					}
+					if (t.name === "NBA range already" && (p.newSkills || []).indexOf("3") === -1) {
+						bad++; ex = "NBA range without the 3";
+					}
+					if (t.name === "maxed-out frame" &&
+						p.newWeight < RB.typicalWeight(p.newHgtInches)) {
+						bad++; ex = "maxed-out frame under typical weight";
+					}
+					if (t.name === "relentless motor") {
+						motor++;
+						if (p.newRatings.endu < med - 3) motorLow++;
+					}
+				}
+			}
+		}
+		ok("a trait that names a rating agrees with the finished rating",
+			carriers >= 20 && bad === 0 && motorLow <= Math.ceil(motor * 0.1),
+			carriers + " carriers, " + bad + " contradicted (" + ex + "), motor " +
+				motorLow + "/" + motor + " well under the median");
+	}
+
+	/* 18. "has not missed a game" was drawn in the build phase and
+	   availability rolled later, so 15 of 25 carriers had missed games.
+	   The re-gate runs on the season's availability, is idempotent, and
+	   gives the trait back if the season is re-rolled clean. */
+	{
+		const TR2 = global.Traits;
+		const claim = TR2.TRAITS.filter((t) => t.name === "has not missed a game")[0];
+		const p = { name: "x", archetype: "Balanced", classYear: "Senior",
+			newRatings: { hgt: 45 }, newOvr: 45, traits: [claim], availability: null };
+		TR2.regateAfterAvailability([p]);
+		const keptClean = p.traitNames ? p.traitNames.indexOf(claim.name) !== -1
+			: p.traits.indexOf(claim) !== -1;
+		p.availability = { games: 3, injury: true, kind: "ankle" };
+		TR2.regateAfterAvailability([p]);
+		const droppedHurt = p.traitNames.indexOf(claim.name) === -1;
+		TR2.regateAfterAvailability([p]);
+		const idem = p.traitNames.indexOf(claim.name) === -1;
+		p.availability = { games: 2, injury: false, kind: "illness" };
+		TR2.regateAfterAvailability([p]);
+		const swapped = p.traitNames.indexOf(claim.name) === -1 &&
+			p.traitNames.indexOf("cleared without conditions") !== -1;
+		p.availability = null;
+		TR2.regateAfterAvailability([p]);
+		const restored = p.traitNames.length === 1 && p.traitNames[0] === claim.name;
+		let carriers = 0, missed = 0;
+		for (let s = 0; s < 10; s++) {
+			const res = E.run(V.realisticClass(1800 + s, 70), C.make({ seed: "av" + s }));
+			TR2.regateAfterAvailability(res.players);
+			for (const q of res.players) {
+				if ((q.traitNames || []).indexOf(claim.name) === -1) continue;
+				carriers++;
+				if (q.availability && q.availability.games > 0) missed++;
+			}
+		}
+		ok("'has not missed a game' is never on a player who missed one",
+			keptClean && droppedHurt && idem && swapped && restored && missed === 0,
+			JSON.stringify({ keptClean, droppedHurt, idem, swapped, restored, carriers, missed }));
+	}
+
+	/* 19. "young/old for his class" had no age gate: 35 of 52 "young"
+	   carriers were older than their own class year's mean. With ages that
+	   vary they read the class; without, only an anomaly-set age can. */
+	{
+		let young = 0, old = 0, wrong = 0, ex = "";
+		for (let s = 0; s < 10; s++) {
+			const lf = V.realisticClass(1900 + s, 70);
+			const r = new Rng("ages" + s);
+			for (const p of lf.players) p.born.year = 2026 - (18 + r.int(0, 4));
+			for (const informative of [true, false]) {
+				if (!informative) for (const p of lf.players) p.born.year = 2007;
+				const res = E.run(lf, C.make({ seed: "age" + s }));
+				const by = {};
+				for (const p of res.players) (by[p.classYear] = by[p.classYear] || []).push(p.age);
+				const mean = (cy) => by[cy].reduce((a, b) => a + b, 0) / by[cy].length;
+				for (const p of res.players) {
+					const t = p.traitNames || [];
+					if (t.indexOf("young for his class") !== -1) {
+						young++;
+						if (!(p.age < mean(p.classYear))) { wrong++; ex = p.classYear + " " + p.age; }
+					}
+					if (t.indexOf("old for his class") !== -1) {
+						old++;
+						if (!(p.age > mean(p.classYear))) { wrong++; ex = p.classYear + " " + p.age; }
+					}
+				}
+			}
+		}
+		ok("'young/old for his class' agrees with his age", wrong === 0,
+			young + " young, " + old + " old, " + wrong + " wrong (" + ex + ")");
+	}
+
+	/* 20. The potential model selector. BBGM's potEstimator falls with ovr
+	   where the tool's gap rises; `potModel: "bbgm"` exports BBGM's curve. */
+	{
+		const est = (o, a) => RB.potForModel("bbgm", o, a, -1);
+		ok("the bbgm potential model is BBGM's potEstimator",
+			est(45, 19) === Math.round(72.314 - 2.3306 * 19 + 0.83309 * 45) &&
+				est(60, 29) === 60 && est(90, 28) === 90 &&
+				est(30, 19) - 30 > est(50, 19) - 50 &&
+				RB.potForModel("tool", 45, 19, 57) === 57 &&
+				RB.potForModel(undefined, 45, 19, 57) === 57 &&
+				RB.POT_MODEL_DEFAULT === "tool",
+			[est(45, 19), est(60, 29), est(90, 28)].join(","));
+	}
+
+	/* 21. The signature guarantee (off by default): a build whose tags
+	   promise a BBGM skill trades toward it at a fixed overall. */
+	{
+		const count = (on) => {
+			let n = 0, hit = 0, miss = 0;
+			for (let s = 0; s < 4; s++) {
+				const res = E.run(V.realisticClass(2000 + s, 70),
+					C.make({ seed: "sig" + s, signatureSkills: on }));
+				for (const p of res.players) {
+					if (BB.ovr(p.newRatings) !== p.newOvr) miss++;
+					const a = RB.archetypeByName(p.archetype);
+					if (!a || (a.t || []).indexOf("shooting") === -1) continue;
+					n++;
+					if ((p.newSkills || []).indexOf("3") !== -1) hit++;
+				}
+			}
+			return { n, hit, miss };
+		};
+		const off = count(false), on = count(true);
+		ok("the signature guarantee puts the 3 on more shooting builds, overall exact",
+			on.miss === 0 && off.miss === 0 && on.hit > off.hit,
+			JSON.stringify({ off, on }));
+	}
 };

@@ -3035,6 +3035,8 @@
 	};
 	const SIGNATURE_UP = 0.9;
 	const SIGNATURE_DOWN = 0.4;
+	const SIGNATURE_STEP = 2;
+	const SIGNATURE_STEPS = 6;
 	/* The per-key lean for a build under the flag, or null. */
 	function signatureLean(arch, cfg) {
 		if (!arch || !cfg || !cfg.signatureSkills) return null;
@@ -3630,16 +3632,57 @@
 				finalOvr = BB.ovr(retry);
 			}
 		}
+		/* The signature guarantee's second half. The lean above only acts
+		   when the solver has to ADD, and after neutralizeApplied it rarely
+		   adds much, so on its own it moved the 3 onto one shooting build in
+		   sixty. Here the promised skill's own ratings are stepped up in the
+		   base and the player re-solved to the SAME overall, which takes the
+		   points back out of everything else (the down-shift protects the
+		   leaned keys) — a trade at fixed ovr, stopped as soon as BBGM's own
+		   skills() shows the badge, after SIGNATURE_STEPS tries, or the moment
+		   a re-solve would miss. Only under cfg.signatureSkills. */
+		let outBase = base;
+		let outClean = cleanBase;
+		let outRange = range;
+		if (lean && finalOvr === reachable) {
+			const want = [];
+			for (const t of arch.t || []) {
+				if (SIGNATURE_SKILLS[t]) want.push(SIGNATURE_SKILLS[t]);
+			}
+			for (let step = 1; step <= SIGNATURE_STEPS; step++) {
+				const have = BB.skills(Object.assign({ fuzz: orig.fuzz }, solved));
+				const missing = want.filter((w) => have.indexOf(w.label) === -1);
+				if (!missing.length) break;
+				const nb = Object.assign({}, base);
+				const nc = Object.assign({}, cleanBase);
+				for (const w of missing) {
+					for (const k of Object.keys(w.keys)) {
+						if (k === "hgt" || (pinned && Number.isFinite(pinned[k]))) continue;
+						const d = SIGNATURE_STEP * step * w.keys[k];
+						nb[k] = clamp(base[k] + d, 1, 99);
+						nc[k] = clamp(cleanBase[k] + d, 1, 99);
+					}
+				}
+				const cand = solveToOvr(nb, finalOvr, arch, pinned, lean);
+				if (BB.ovr(cand) !== finalOvr) break;
+				const r2 = ovrRange(nc, arch, pinned, lean);
+				if (!(finalOvr >= r2.min && finalOvr <= r2.max)) break;
+				solved = cand;
+				outBase = nb;
+				outClean = nc;
+				outRange = r2;
+			}
+		}
 		const pot = clamp(Math.max(targetPot, finalOvr + 1), finalOvr, 100);
 
 		return {
 			// The pre-solve base, so a later change to a rating (a size
 			// surprise, say) can be re-solved to the same target rather than
 			// leaving ovr disagreeing with the rating vector it came from.
-			base,
+			base: outBase,
 			// The jitter-free vector, so a later re-solve (a forced height)
 			// can report the same stable range this build did.
-			cleanBase,
+			cleanBase: outClean,
 			archetype: arch.name,
 			ratings: solved,
 			ovr: finalOvr,
@@ -3648,7 +3691,7 @@
 			skills: BB.skills(Object.assign({ fuzz: orig.fuzz }, solved)),
 			// What this player's height actually allows, so an impossible lock
 			// can be reported instead of quietly ignored.
-			ovrRange: range,
+			ovrRange: outRange,
 			// Non-zero when the file asked for an overall this player cannot
 			// be built to: the signed distance from the asked-for overall to
 			// the one he was actually solved to.
