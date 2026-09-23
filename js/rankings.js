@@ -92,37 +92,78 @@
 
 	   Per-game margin, capped at 10 points like the real NET so blowouts
 	   cannot reward running up the score, adjusted for opponent quality and
-	   location by the same fixed-point iteration. */
-	const EFF_PASSES = 4;
+	   location: a team's rating is its average of (capped margin + the
+	   opponent's rating - the location edge), which is the least-squares
+	   fit of margin = own - opp + home.
+
+	   SOLVED, not sampled. This used to run four Jacobi passes from the raw
+	   margins and stop, with no centering: after four passes the numbers
+	   still moved by a fraction of a point on every pass, the level drifted
+	   with the schedule's shape, and the answer depended on the pass count
+	   rather than the games. It now iterates to a fixed point — damped, so a
+	   schedule that alternates between two groups of teams cannot make it
+	   oscillate, and mean-centered every pass, because the system only fixes
+	   ratings up to a constant (adding one point to everybody changes no
+	   margin). Stops when no team moves by more than EFF_TOL, or at
+	   EFF_MAX_ITERS. */
+	const EFF_MAX_ITERS = 400;
+	const EFF_TOL = 1e-4;
+	const EFF_DAMP = 0.5;
 	const MARGIN_CAP = 10;
 	const HOME_EDGE = 1.4;
 
 	function computeAdjEff(list, byName) {
-		const e = new Map();
-		const rawMargin = (t) => {
+		const idx = new Map();
+		list.forEach((t, i) => idx.set(t.name, i));
+		const n = list.length;
+		// Per team: the capped, location-adjusted margins and the opponent
+		// indices (-1 for an opponent outside the list, rated at the mean).
+		const rows = list.map((t) => {
 			const games = t.regGamesList.filter((g) => Number.isFinite(g.teamPts));
-			if (!games.length) return 0;
-			return games.reduce((a, g) =>
-				a + clamp(g.teamPts - g.oppPts, -MARGIN_CAP, MARGIN_CAP), 0) / games.length;
-		};
-		for (const t of list) e.set(t.name, rawMargin(t));
-		for (let pass = 0; pass < EFF_PASSES; pass++) {
-			const next = new Map();
-			for (const t of list) {
-				const games = t.regGamesList.filter((g) => Number.isFinite(g.teamPts));
-				if (!games.length) { next.set(t.name, 0); continue; }
-				let sum = 0;
-				for (const g of games) {
-					const opp = byName[g.opp];
-					sum += clamp(g.teamPts - g.oppPts, -MARGIN_CAP, MARGIN_CAP) +
-						(opp ? e.get(opp.name) : 0) -
-						HOME_EDGE * (g.home || 0);
-				}
-				next.set(t.name, sum / games.length);
+			const m = [];
+			const o = [];
+			for (const g of games) {
+				m.push(clamp(g.teamPts - g.oppPts, -MARGIN_CAP, MARGIN_CAP) -
+					HOME_EDGE * (g.home || 0));
+				const opp = byName[g.opp];
+				o.push(opp && idx.has(opp.name) ? idx.get(opp.name) : -1);
 			}
-			for (const t of list) e.set(t.name, next.get(t.name));
+			return { m, o };
+		});
+		let e = new Float64Array(n);
+		const center = (v) => {
+			let mean = 0;
+			for (let i = 0; i < n; i++) mean += v[i];
+			mean /= Math.max(1, n);
+			for (let i = 0; i < n; i++) v[i] -= mean;
+		};
+		for (let i = 0; i < n; i++) {
+			const r = rows[i];
+			e[i] = r.m.length ? r.m.reduce((a, v) => a + v, 0) / r.m.length : 0;
 		}
-		return e;
+		center(e);
+		let iters = 0;
+		for (; iters < EFF_MAX_ITERS; iters++) {
+			const next = new Float64Array(n);
+			for (let i = 0; i < n; i++) {
+				const r = rows[i];
+				if (!r.m.length) { next[i] = 0; continue; }
+				let sum = 0;
+				for (let k = 0; k < r.m.length; k++) {
+					sum += r.m[k] + (r.o[k] >= 0 ? e[r.o[k]] : 0);
+				}
+				next[i] = EFF_DAMP * e[i] + (1 - EFF_DAMP) * (sum / r.m.length);
+			}
+			center(next);
+			let delta = 0;
+			for (let i = 0; i < n; i++) delta = Math.max(delta, Math.abs(next[i] - e[i]));
+			e = next;
+			if (delta < EFF_TOL) { iters++; break; }
+		}
+		const out = new Map();
+		list.forEach((t, i) => out.set(t.name, e[i]));
+		out.iterations = iters;
+		return out;
 	}
 
 	/* --------------------------------------------------------- quadrants
@@ -143,6 +184,28 @@
 		return 4;
 	}
 
+	function zScorer(vals) {
+		const mean = vals.reduce((a, b) => a + b, 0) / Math.max(1, vals.length);
+		const sd = Math.sqrt(vals.reduce((a, v) => a + (v - mean) * (v - mean), 0) /
+			Math.max(1, vals.length - 1)) || 1;
+		return (v) => (v - mean) / sd;
+	}
+
+	/* NET: efficiency-led, results-checked — like the real one. Over whatever
+	   games each team's `regGamesList` holds, so the weekly poll can ask what
+	   the NET said on a given Monday. */
+	function netScores(list, byName) {
+		const strength = computeStrength(list, byName);
+		const adjEff = computeAdjEff(list, byName);
+		const zEff = zScorer(list.map((t) => adjEff.get(t.name)));
+		const zStr = zScorer(list.map((t) => strength.get(t.name)));
+		const score = new Map();
+		for (const t of list) {
+			score.set(t.name, 0.55 * zEff(adjEff.get(t.name)) + 0.45 * zStr(strength.get(t.name)));
+		}
+		return { strength, adjEff, score };
+	}
+
 	/* --------------------------------------------------------- main entry */
 
 	function computeRankings(teams) {
@@ -150,24 +213,9 @@
 		const byName = teams;
 		for (const t of list) t.regGamesList = regGames(t);
 
-		const strength = computeStrength(list, byName);
-		const adjEff = computeAdjEff(list, byName);
-
-		// NET: efficiency-led, results-checked — like the real one.
-		const effVals = list.map((t) => adjEff.get(t.name));
-		const strVals = list.map((t) => strength.get(t.name));
-		const z = (vals) => {
-			const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
-			const sd = Math.sqrt(vals.reduce((a, v) => a + (v - mean) * (v - mean), 0) /
-				Math.max(1, vals.length - 1)) || 1;
-			return (v) => (v - mean) / sd;
-		};
-		const zEff = z(effVals);
-		const zStr = z(strVals);
-		const ranked = list.map((t) => ({
-			t,
-			score: 0.55 * zEff(adjEff.get(t.name)) + 0.45 * zStr(strength.get(t.name)),
-		})).sort((a, b) => b.score - a.score);
+		const { strength, adjEff, score } = netScores(list, byName);
+		const ranked = list.map((t) => ({ t, score: score.get(t.name) }))
+			.sort((a, b) => b.score - a.score);
 		ranked.forEach((x, i) => {
 			x.t.netRank = i + 1;
 			x.t.netScore = x.score;
@@ -241,6 +289,7 @@
 	const VOTERS = 60;
 	const WEEKS = 15;          // preseason + 14 in-season checkpoints
 	const INERTIA = 0.62;
+	const WIN_WEEK_HOLD = 0.75;
 
 	function weeklyPoll(teams, rng) {
 		const list = Object.values(teams);
@@ -248,6 +297,7 @@
 		if (!n) return [];
 		for (const t of list) t.regGamesList = regGames(t)
 			.slice().sort((a, b) => a.when - b.when);
+		const seasonGames = new Map(list.map((t) => [t.name, t.regGamesList]));
 
 		/* HOW GOOD THE OPPONENT WAS, FROM RESULTS.
 
@@ -265,14 +315,26 @@
 		   has: results, and everyone else's results. */
 		const byName = {};
 		for (const t of list) byName[t.name] = t;
+		/* AS OF THAT WEEK, not as of March. The first version read the
+		   FINAL netRank at every checkpoint, so a December ballot knew which
+		   of a team's November opponents would finish the season in the top
+		   thirty — a win over a team that later collapsed was marked down
+		   retroactively, and a team that won every game in a week could fall
+		   three places on news from the future. Each checkpoint now ranks
+		   opponents on the NET computed from the games played BY THEN (see
+		   netByWeek below), blended early in the season with the reputation
+		   every voter starts from, because a NET over two games is not a
+		   thing anybody quotes. */
+		let weekRank = null;
 		const oppRank = (g) => {
 			const o = byName[g.opp];
-			return o && Number.isFinite(o.netRank) ? o.netRank : n;
+			if (!o) return n;
+			const r = weekRank ? weekRank.get(o.name) : o.netRank;
+			return Number.isFinite(r) ? r : n;
 		};
 		// On a 0-100 scale like the rating it replaces, so the voter weights
 		// and the percentile that reads it keep their range.
 		const oppStrength = (g) => 100 * (1 - (oppRank(g) - 1) / Math.max(1, n - 1));
-
 		// Voter biases, drawn once. Sum-normalized so every voter's ballot is
 		// on the same scale; the VARIATION between voters is the point.
 		const voters = [];
@@ -323,18 +385,60 @@
 		   68% and the preseason No. 1 is a different program in eight seasons
 		   of twenty rather than six. The point is WHICH blue blood is No. 1,
 		   not whether the ballot is any good. */
+		/* What the panel sees of the roster. The program's level is a
+		   program-scale number; the roster it will actually play with is
+		   t.rating, and the two part company at the very top — a blue blood
+		   at level 80 with a roster rated 40th in the country was the
+		   preseason No. 1 in about one season in six, and missed the field
+		   every time (a real preseason No. 1 misses about one year in
+		   twenty). Half of the level a voter reads is the roster's rating
+		   mapped onto the level scale. */
+		const lvOf = (t) => (Number.isFinite(t.level) ? t.level : (t.prestige || 0));
+		const rated = list.filter((t) => Number.isFinite(t.rating) && Number.isFinite(t.level));
+		const mOf = (a) => a.reduce((x, y) => x + y, 0) / Math.max(1, a.length);
+		const sOf = (a) => { const m = mOf(a); return Math.sqrt(mOf(a.map((x) => (x - m) * (x - m)))) || 1; };
+		const rM = mOf(rated.map((t) => t.rating)), rS = sOf(rated.map((t) => t.rating));
+		const lM = mOf(rated.map((t) => t.level)), lS = sOf(rated.map((t) => t.level));
+		const seenLevel = (t) => Number.isFinite(t.rating) && rated.length > 1
+			? 0.5 * lvOf(t) + 0.5 * (lM + (t.rating - rM) / rS * lS)
+			: lvOf(t);
 		const hype = new Map();
 		for (const t of list) {
-			const base = 0.4 * (t.prestige || 0) +
-				0.6 * (Number.isFinite(t.level) ? t.level : (t.prestige || 0));
+			const base = 0.4 * (t.prestige || 0) + 0.6 * seenLevel(t);
 			const w = clamp((base - 60) / 20, 0, 1);
 			hype.set(t.name, w * rng.child("hype:" + t.name).normal(0, 3.5));
 		}
+		const repOf = (t) => 0.4 * (t.prestige || 0) + 0.6 * seenLevel(t) +
+			(hype.get(t.name) || 0);
+
+		/* The opponent ranking a voter reads at a checkpoint: the NET over
+		   the games played to date, faded in from the reputation ranking
+		   over the first NET_RAMP_GAMES games of a typical team's season. */
+		const NET_RAMP_GAMES = 8;
+		const zRep = zScorer(list.map((t) => repOf(t)));
+		const netByWeek = (cutoff) => {
+			for (const t of list) {
+				t.regGamesList = seasonGames.get(t.name).filter((g) => g.when <= cutoff);
+			}
+			const played = list.map((t) => t.regGamesList.length).sort((a, b) => a - b);
+			const typical = played[played.length >> 1] || 0;
+			const w = clamp(typical / NET_RAMP_GAMES, 0, 1);
+			const net = w > 0 ? netScores(list, byName).score : null;
+			const order = list.map((t) => ({
+				name: t.name,
+				s: (net ? w * net.get(t.name) : 0) + (1 - w) * zRep(repOf(t)),
+			})).sort((a, b) => b.s - a.s);
+			const rank = new Map();
+			order.forEach((x, i) => rank.set(x.name, i + 1));
+			for (const t of list) t.regGamesList = seasonGames.get(t.name);
+			return rank;
+		};
 
 		const history = [];
 		let lastRanked = null;
 		for (let week = 0; week < WEEKS; week++) {
 			const cutoff = week / (WEEKS - 1);
+			weekRank = netByWeek(cutoff);
 			// Features to date. Preseason (week 0) has no games: the ballot
 			// runs on reputation, which is what a real preseason poll is.
 			const feats = list.map((t) => {
@@ -353,7 +457,11 @@
 					a + (g.won ? clamp((60 - oppRank(g)) / 45, 0, 1) : 0), 0));
 				const bad = played.reduce((a, g) =>
 					a + (!g.won ? clamp((oppRank(g) - 120) / 90, 0, 1) : 0), 0);
+				const prevCut = (week - 1) / (WEEKS - 1);
+				const thisWeek = week > 0 ? played.filter((g) => g.when > prevCut) : [];
 				return {
+					weekPlayed: thisWeek.length,
+					weekLost: thisWeek.filter((g) => !g.won).length,
 					games: played.length,
 					pct: played.length ? w / played.length : 0,
 					sos, qual, bad,
@@ -380,9 +488,7 @@
 					   moves the ballot and nothing else: the season is played
 					   on the level, and a preseason No. 1 that was hype finds
 					   that out in November. */
-					reputation: 0.4 * (t.prestige || 0) +
-						0.6 * (Number.isFinite(t.level) ? t.level : (t.prestige || 0)) +
-						(hype.get(t.name) || 0),
+					reputation: repOf(t),
 				};
 			});
 			const sosPct = pctRank(feats.map((f) => f.sos));
@@ -435,9 +541,23 @@
 							voter.wBad * 1.4 * f.bad) +
 						(1 - r) * reputation(f) +
 						voter.wEye * voter.eye[i];
-					scores.set(i, voter.prev && voter.prev.has(i)
+					let sc = voter.prev && voter.prev.has(i)
 						? INERTIA * voter.prev.get(i) + (1 - INERTIA) * base
-						: base);
+						: base;
+					/* A week in which a team won every game it played is not
+					   a week a voter marks it down for. Reputation fading
+					   into results, and each opponent's NET moving as the
+					   season fills in, could still pull an unbeaten week's
+					   score under last week's — 8% of the time a team that
+					   won all its games that week fell more than two places.
+					   The voter holds WIN_WEEK_HOLD of the ground: it can
+					   still slip when others jump it, and a little on its
+					   own, but a win does not read as a loss. */
+					if (voter.prev && voter.prev.has(i) && f.weekPlayed > 0 && f.weekLost === 0) {
+						const pv = voter.prev.get(i);
+						if (sc < pv) sc = pv - (1 - WIN_WEEK_HOLD) * (pv - sc);
+					}
+					scores.set(i, sc);
 				}
 				voter.prev = scores;
 				// This voter's 25-deep ballot.
@@ -496,6 +616,7 @@
 
 	global.Rankings = {
 		computeRankings, weeklyPoll, quadOf, QUADS,
-		VOTERS, WEEKS, INERTIA,
+		VOTERS, WEEKS, INERTIA, WIN_WEEK_HOLD,
+		computeAdjEff, netScores, MARGIN_CAP, HOME_EDGE,
 	};
 })(typeof window !== "undefined" ? window : self);

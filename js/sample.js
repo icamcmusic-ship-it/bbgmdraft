@@ -25,6 +25,28 @@
 		"Pierce", "Quinn", "Ramirez", "Sanders", "Turner", "Vaughn", "Walker", "Young",
 		"Jokic", "Petrovic", "Bogdanovic", "Markkanen", "Sarr", "Ndiaye", "Abdullahi",
 		"Kuminga", "Wembanyama", "Daniels", "Hardaway", "Whitmore", "Sheppard", "Castle"];
+	/* NAMES THAT BELONG TO SOMEBODY. The two pools are generic first and
+	   last names with a few recognisably international surnames, and their
+	   product includes real NBA players — "Nikola Jokic" came up in 13 of
+	   300 sample classes, "Jalen Williams" and "Cameron Johnson" in most of
+	   them. A fixture that hands a real player a made-up draft stock is not
+	   a fixture. Any pair on this list is redrawn. It is every current or
+	   recent NBA name the two pools can spell, plus a few high-profile
+	   college and NFL ones. */
+	const REAL_NAMES = new Set([
+		"Nikola Jokic", "Jalen Williams", "Jalen Johnson", "Jalen Harris", "Jalen Brooks",
+		"Jalen Carter", "Cameron Johnson", "Cameron Thomas", "Marcus Williams",
+		"Marcus Morgan", "Keon Johnson", "Darius Garland", "Devin Carter",
+		"Devin Harris", "Devin Williams", "Kobe Johnson", "Kobe Sanders", "Kobe Brown",
+		"Tyler Johnson", "Tyler Harris", "Chris Johnson", "Grant Williams",
+		"Ethan Thompson", "Nate Williams", "Cody Williams", "Terrence Williams",
+		"Jordan Williams", "Jordan Walker", "Jordan Young", "Sam Young",
+		"Vince Carter", "Vince Williams", "Isaiah Thompson", "Jaden Walker",
+		"Trey Johnson", "Josh Young", "Aaron Harris", "Dylan Harris", "Julian Carter",
+		"Caleb Foster", "Caleb Daniels", "Amari Williams", "Malik Williams",
+		"Xavier Johnson", "Andre Johnson", "Chris Walker", "Marcus Foster",
+		"Jaylen Brown", "Cole Anthony", "Trey Murphy",
+	]);
 	const HOME = [
 		["Chicago, IL", 6], ["Atlanta, GA", 5], ["Houston, TX", 5], ["Los Angeles, CA", 5],
 		["Philadelphia, PA", 4], ["Dallas, TX", 4], ["Charlotte, NC", 3], ["Memphis, TN", 3],
@@ -101,7 +123,8 @@
 			r.skills = [];
 			let first = pr.pick(FIRST);
 			let last = pr.pick(LAST);
-			for (let guard = 0; used.has(first + " " + last) && guard < 20; guard++) {
+			const taken = (n) => used.has(n) || REAL_NAMES.has(n);
+			for (let guard = 0; taken(first + " " + last) && guard < 40; guard++) {
 				first = pr.pick(FIRST);
 				last = pr.pick(LAST);
 			}
@@ -133,5 +156,5 @@
 		return { version: BB.LEAGUE_DATABASE_VERSION, startingSeason: yr, players };
 	}
 
-	global.Sample = { makeClass };
+	global.Sample = { makeClass, REAL_NAMES };
 })(typeof window !== "undefined" ? window : self);

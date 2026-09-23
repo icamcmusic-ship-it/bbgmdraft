@@ -117,7 +117,7 @@
 	   section absent from the JSON is absent from the page's nav too — the
 	   reader builds itself off what it finds. */
 
-	function buildFront(res, opts) {
+	function buildFront(res, opts, ids) {
 		const t = res.tourney;
 		const poy = (res.poyBallots || [])[0];
 		const top = (res.board || [])[0];
@@ -135,13 +135,18 @@
 				? { team: res.poll[0].name, record: res.poll[0].w + "-" + res.poll[0].l }
 				: null,
 			playerOfTheYear: winner
-				? { award: poy.award, name: winner.name, school: winner.school }
+				? {
+					award: poy.award, name: winner.name, school: winner.school,
+					// His capsule, when he is in the class.
+					id: winner.inClass && ids ? idOfKey(res, ids, winner.key) : null,
+				}
 				: null,
 			coachOfTheYear: coy
 				? { award: coy.award, coach: coy.coach, school: coy.school, record: coy.record }
 				: null,
 			topProspect: top
 				? {
+					id: ids ? ids.byPlayer.get(top) || null : null,
 					name: top.name, pos: top.newPos, ovr: num(top.newOvr),
 					pot: num(top.newPot), school: schoolOf(top),
 					archetype: top.archetype || null,
@@ -150,6 +155,11 @@
 			classSize: (res.players || []).length,
 			teamCount: Object.keys(res.teams || {}).length,
 		};
+	}
+
+	function idOfKey(res, ids, key) {
+		const p = (res.players || []).filter((x) => x.key === key)[0];
+		return p ? ids.byPlayer.get(p) || null : null;
 	}
 
 	function buildPoll(res) {
@@ -348,7 +358,10 @@
 				table: (lg.table || []).map((c, i) => ({
 					pos: i + 1,
 					club: c.name,
-					w: num(c.w), l: num(c.l),
+					// The regular-season record the table is ordered by, when
+					// the league keeps one apart from its cup and playoffs.
+					w: num(c.regW != null ? c.regW : c.w),
+					l: num(c.regW != null ? c.regL : c.l),
 					relegated: !!c.relegated,
 					prospects: (c.prospects || []).map((p) => ({
 						id: ids.byPlayer.get(p) || null,
@@ -465,16 +478,38 @@
 		return { events, carousel };
 	}
 
+	/* "classQuality" -> "Class quality". The settings have no label table
+	   outside index.html, and a colophon of raw keys reads as a debug dump. */
+	function humanKey(k) {
+		const words = String(k).replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+			.replace(/_/g, " ").toLowerCase();
+		return words.charAt(0).toUpperCase() + words.slice(1);
+	}
+
+	/* The settings the run used that are NOT the tool's defaults. Every key
+	   used to be listed, "null" values and all — seventy rows of which the
+	   handful anybody changed were impossible to find. A setting left at its
+	   default is counted, not listed. */
 	function buildColophon(res) {
 		const cfg = res.effectiveCfg || res.cfg || {};
+		const D = (global.Config && global.Config.DEFAULTS) || {};
+		let atDefault = 0;
 		const settings = Object.keys(cfg).sort()
-			.filter((k) => typeof cfg[k] !== "object" || cfg[k] === null)
-			.map((k) => ({ key: k, value: String(cfg[k]) }));
+			.filter((k) => cfg[k] !== null && cfg[k] !== undefined && typeof cfg[k] !== "object")
+			.filter((k) => {
+				if (k === "seed") return false;   // the colophon's own first line
+				const same = Object.prototype.hasOwnProperty.call(D, k) &&
+					String(D[k]) === String(cfg[k]);
+				if (same) atDefault++;
+				return !same;
+			})
+			.map((k) => ({ key: k, label: humanKey(k), value: String(cfg[k]) }));
 		return {
 			seed: res.seed,
 			season: res.season,
 			warnings: (res.warnings || []).slice(),
 			settings,
+			atDefault,
 		};
 	}
 
@@ -581,6 +616,7 @@
 		"  --warn:#e9b64d; --bad:#e4736b; --radius:10px; color-scheme: dark; }",
 		"[data-theme=\"light\"] { --bg:#f6f7f9; --panel:#fff; --panel2:#eef1f5;",
 		"  --line:#d5dae2; --ink:#141821; --dim:#5c6779; --accent:#1f6fd0;",
+		"  --good:#1a7f4b; --bad:#c0323a; --warn:#8a5a00;",
 		"  color-scheme: light; }",
 		"* { box-sizing: border-box; }",
 		"body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5",
@@ -617,7 +653,10 @@
 		"  border-radius:var(--radius); padding:.35rem .55rem; font:inherit; font-size:.9rem; }",
 		"button.btn { cursor:pointer; }",
 		"button.btn:hover { border-color:var(--accent); }",
-		".tablewrap { overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius); }",
+		/* A scroll box in both directions, so the sticky header below has
+		   something to stick to: with overflow-x alone the wrapper is the
+		   header's scroll container and never scrolls vertically. */
+		".tablewrap { overflow:auto; max-height:78vh; border:1px solid var(--line); border-radius:var(--radius); }",
 		"table { border-collapse:collapse; width:100%; font-size:.88rem; }",
 		"th, td { text-align:left; padding:.35rem .55rem; border-bottom:1px solid var(--line);",
 		"  white-space:nowrap; }",
@@ -625,6 +664,17 @@
 		"thead th { position:sticky; top:0; background:var(--panel2); cursor:pointer;",
 		"  user-select:none; z-index:1; }",
 		"thead th.no-sort { cursor:default; }",
+		/* The name column stays put while the numbers scroll past it. */
+		"th.stick, td.stick { position:sticky; left:0; background:var(--panel); z-index:1;",
+		"  box-shadow:1px 0 0 var(--line); }",
+		"thead th.stick { background:var(--panel2); z-index:2; }",
+		"tbody tr:hover td.stick { background:var(--panel2); }",
+		".stat .v .pill { font-weight:600; font-size:inherit; }",
+		"#hits { position:relative; margin-top:.4rem; }",
+		"#hits .hit[aria-selected=\"true\"] .pill { text-decoration:underline; }",
+		".skip { position:absolute; left:.5rem; top:-3rem; background:var(--accent); color:var(--bg);",
+		"  padding:.4rem .8rem; border-radius:var(--radius); z-index:9; }",
+		".skip:focus { top:.5rem; }",
 		"tbody tr:hover { background:var(--panel2); }",
 		"td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }",
 		".tag { display:inline-block; background:var(--panel2); border:1px solid var(--line);",
@@ -642,6 +692,16 @@
 		".split { display:grid; gap:1rem; grid-template-columns:minmax(13rem,20rem) 1fr;",
 		"  align-items:start; }",
 		"@media (max-width:800px) { .split { grid-template-columns:1fr; } }",
+		/* Grid children default to min-width:auto, so a wide stat table in the
+		   capsule widened the whole column and the page scrolled sideways. */
+		".split > * { min-width:0; }",
+		/* A phone: the header is thirteen tabs and a search. Sticky, it was
+		   446px of a 844px screen; it scrolls away now, and the tabs are one
+		   row that scrolls sideways. */
+		"@media (max-width:700px) { header.top { position:static; }",
+		"  nav.tabs { flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; }",
+		"  nav.tabs button { flex:none; white-space:nowrap; }",
+		"  .topline h1 { flex-basis:100%; } #jump { flex:1 1 10rem; min-width:0; } }",
 		".plist { max-height:70vh; overflow-y:auto; border:1px solid var(--line);",
 		"  border-radius:var(--radius); }",
 		".plist button { display:block; width:100%; text-align:left; background:none;",
@@ -688,6 +748,27 @@
 		const pct3 = (v) => (typeof v === "number"
 			? v.toFixed(3).replace(/^0/, "") : "");
 		const pc = (v) => (typeof v === "number" ? (v * 100).toFixed(1) + "%" : "");
+		/* Class year as an ordinal, so a Year column runs Freshman to
+		   Graduate instead of alphabetically. Same table as js/views.js. */
+		const YEARS = ["Freshman", "Redshirt Freshman", "Sophomore", "Redshirt Sophomore",
+			"Junior", "Redshirt Junior", "Senior", "Redshirt Senior", "Graduate"];
+		const yearRank = (y) => {
+			if (!y) return null;
+			const i = YEARS.indexOf(String(y).trim());
+			return i === -1 ? YEARS.length : i;
+		};
+		// "1-14" -> 114: the mock slot as one sortable number.
+		const mockRank = (m) => {
+			const x = /^(\d+)-(\d+)$/.exec(String(m || ""));
+			return x ? Number(x[1]) * 100 + Number(x[2]) : null;
+		};
+		/* BBGM's skill codes, in words. "Ps Di R" means nothing to someone
+		   who has not played the game. */
+		const SKILLS = {
+			"3": "Three-point shooter", A: "Athlete", B: "Ball handler",
+			Di: "Interior defender", Dp: "Perimeter defender", Po: "Post scorer",
+			Ps: "Passer", R: "Rebounder", V: "Volume scorer",
+		};
 		const rec = (w, l) => (typeof w === "number" ? w + "-" + l : "");
 		const ordinal = (n) => {
 			if (typeof n !== "number") return "";
@@ -732,13 +813,13 @@
 			const htr = el("tr");
 			cols.forEach((c, i) => {
 				const th = el("th", (c.num ? "num " : "") + (c.wrap ? "wrap " : "") +
-					(c.get ? "" : "no-sort"), c.h);
+					(c.stick ? "stick " : "") + (c.get ? "" : "no-sort"), c.h);
 				if (c.get) {
 					th.tabIndex = 0;
 					th.title = "Sort by " + c.h;
 					const sort = () => {
 						if (state.key === i) state.dir = -state.dir;
-						else { state.key = i; state.dir = c.num ? -1 : 1; }
+						else { state.key = i; state.dir = c.num && !c.asc ? -1 : 1; }
 						draw();
 					};
 					th.addEventListener("click", sort);
@@ -758,11 +839,13 @@
 			count.style.fontSize = ".8rem";
 			wrap.appendChild(count);
 
+			/* What the filter box searches: the words on screen AND the sort
+			   key, so a column that sorts on an ordinal (Year, Mock) still
+			   matches "Freshman". */
 			function text(row) {
-				return cols.map((c) => {
-					const v = c.get ? c.get(row) : c.text ? c.text(row) : "";
-					return v === null || v === undefined ? "" : String(v);
-				}).join(" ").toLowerCase();
+				return cols.map((c) => [c.text ? c.text(row) : "", c.get ? c.get(row) : ""]
+					.map((v) => (v === null || v === undefined ? "" : String(v))).join(" "))
+					.join(" ").toLowerCase();
 			}
 
 			function draw() {
@@ -776,8 +859,10 @@
 						const y = c.get(b);
 						/* A missing number sorts last whichever way the column
 						   is pointing — an empty cell is not a small one. */
-						const xn = x === null || x === undefined || x === "";
-						const yn = y === null || y === undefined || y === "";
+						const xn = x === null || x === undefined || x === "" ||
+							(typeof x === "number" && !isFinite(x));
+						const yn = y === null || y === undefined || y === "" ||
+							(typeof y === "number" && !isFinite(y));
 						if (xn || yn) return xn && yn ? 0 : xn ? 1 : -1;
 						if (typeof x === "number" && typeof y === "number") {
 							return (x - y) * state.dir;
@@ -790,7 +875,7 @@
 					const tr = el("tr");
 					for (const col of cols) {
 						const td = el("td", (col.num ? "num " : "") + (col.wrap ? "wrap " : "") +
-							(col.cls ? col.cls(row) : ""));
+							(col.stick ? "stick " : "") + (col.cls ? col.cls(row) : ""));
 						if (col.cell) {
 							const node = col.cell(row);
 							if (node !== null && node !== undefined) {
@@ -846,16 +931,32 @@
 		function stat(k, v, n) {
 			const box = el("div", "stat");
 			box.appendChild(el("div", "k", k));
-			box.appendChild(el("div", "v", v));
+			if (v && typeof v === "object" && v.nodeType) {
+				const holder = el("div", "v");
+				holder.appendChild(v);
+				box.appendChild(holder);
+			} else box.appendChild(el("div", "v", v));
 			if (n) box.appendChild(el("div", "n", n));
 			return box;
+		}
+
+		/* A team name that goes somewhere: the page has no team pages, so a
+		   team opens the section that says the most about it. */
+		function sectionLink(name, id) {
+			if (!name || !views.has(id)) return name || "";
+			const b = el("button", "pill", name);
+			b.addEventListener("click", () => showSection(id));
+			return b;
 		}
 
 		function viewFront(f) {
 			const out = el("div");
 			const card = el("div", "card");
 			if (f.champion) {
-				card.appendChild(el("div", "hero", f.champion + " won the national title"));
+				const hero = el("div", "hero");
+				hero.appendChild(sectionLink(f.champion, "bracket"));
+				hero.appendChild(document.createTextNode(" won the national title"));
+				card.appendChild(hero);
 				if (f.runnerUp) {
 					card.appendChild(el("p", "dim", "over " + f.runnerUp +
 						(f.finalScore ? ", " + f.finalScore : "") + "."));
@@ -865,9 +966,11 @@
 			}
 			out.appendChild(card);
 			const grid = el("div", "grid");
-			if (f.apNo1) grid.appendChild(stat("AP No. 1", f.apNo1.team, f.apNo1.record));
+			if (f.apNo1) grid.appendChild(stat("AP No. 1", sectionLink(f.apNo1.team, "poll"), f.apNo1.record));
 			if (f.playerOfTheYear) {
-				grid.appendChild(stat(f.playerOfTheYear.award, f.playerOfTheYear.name,
+				grid.appendChild(stat(f.playerOfTheYear.award,
+					f.playerOfTheYear.id ? playerLink(f.playerOfTheYear.id, f.playerOfTheYear.name)
+						: f.playerOfTheYear.name,
 					f.playerOfTheYear.school));
 			}
 			if (f.coachOfTheYear) {
@@ -875,7 +978,9 @@
 					f.coachOfTheYear.school + " · " + f.coachOfTheYear.record));
 			}
 			if (f.topProspect) {
-				grid.appendChild(stat("No. 1 prospect", f.topProspect.name,
+				grid.appendChild(stat("No. 1 prospect",
+					f.topProspect.id ? playerLink(f.topProspect.id, f.topProspect.name)
+						: f.topProspect.name,
 					f.topProspect.pos + " · " + f.topProspect.ovr + "/" +
 					f.topProspect.pot + " · " + f.topProspect.school));
 			}
@@ -889,7 +994,7 @@
 		function viewPoll(poll) {
 			return mkTable([
 				{ h: "#", get: (r) => r.rank, num: true },
-				{ h: "Team", get: (r) => r.team },
+				{ h: "Team", get: (r) => r.team, stick: true },
 				{ h: "Conf", get: (r) => r.conf },
 				{ h: "Record", get: (r) => (r.w || 0) - (r.l || 0), text: (r) => rec(r.w, r.l), num: true },
 				{ h: "Conf record", get: (r) => (r.cw || 0) - (r.cl || 0), text: (r) => rec(r.cw, r.cl), num: true },
@@ -916,7 +1021,7 @@
 				box.appendChild(el("h3", null, c.conf));
 				box.appendChild(mkTable([
 					{
-						h: "Team", get: (t) => t.name,
+						h: "Team", get: (t) => t.name, stick: true,
 						text: (t) => t.name + (t.regularChamp ? " †" : "") +
 							(t.tourneyChamp ? " ‡" : ""),
 					},
@@ -1061,7 +1166,7 @@
 					{ h: "Award", get: (r) => r.award },
 					{ h: "Player", get: (r) => r.name },
 					{ h: "School", get: (r) => r.school },
-					{ h: "Year", get: (r) => r.classYear },
+					{ h: "Year", get: (r) => yearRank(r.classYear), text: (r) => r.classYear },
 				], a.fieldHonors, { filter: "Filter honors…" }));
 			}
 			return out;
@@ -1140,13 +1245,13 @@
 			for (const c of confs.sort()) confSel.appendChild(new Option(c, c));
 			const table = mkTable([
 				{ h: "#", get: (p) => p.rank, num: true },
-				{ h: "Player", get: (p) => p.name, cell: (p) => playerLink(p.id, p.name) },
+				{ h: "Player", get: (p) => p.name, cell: (p) => playerLink(p.id, p.name), stick: true },
 				{ h: "Pos", get: (p) => p.pos },
 				{ h: "Ovr", get: (p) => p.ovr, num: true },
 				{ h: "Pot", get: (p) => p.pot, num: true },
 				{ h: "School", get: (p) => p.school },
 				{ h: "Conf", get: (p) => p.conf },
-				{ h: "Year", get: (p) => p.classYear },
+				{ h: "Year", get: (p) => yearRank(p.classYear), text: (p) => p.classYear },
 				{ h: "Archetype", get: (p) => p.archetype },
 				{ h: "PPG", get: (p) => p.ppg, text: (p) => n1(p.ppg), num: true },
 				{ h: "RPG", get: (p) => p.rpg, text: (p) => n1(p.rpg), num: true },
@@ -1159,7 +1264,7 @@
 					cls: (p) => (typeof p.move === "number" && p.move > 0 ? "up"
 						: typeof p.move === "number" && p.move < 0 ? "down" : ""),
 					num: true },
-				{ h: "Mock", get: (p) => p.mock },
+				{ h: "Mock", get: (p) => mockRank(p.mock), text: (p) => p.mock, num: true, asc: true },
 			], board, {
 				sort: 0,
 				filter: "Search the board…",
@@ -1175,21 +1280,26 @@
 		/* The prospects: a filterable list on the left, one capsule on the
 		   right. Every player link anywhere else on the page lands here. */
 		let selectPlayer = null;
+		// A #p=<id> deep link that arrived before the capsules were drawn.
+		let pendingPlayer = null;
 
 		function capsule(p) {
 			const out = el("div", "card");
 			out.appendChild(el("h3", null, (p.rank ? p.rank + ". " : "") + p.name));
 			const bits = [p.pos, p.ovr + "/" + p.pot, p.archetype, p.classYear, p.school];
 			if (typeof p.hgtInches === "number") {
-				bits.push(Math.floor(p.hgtInches / 12) + "'" + (p.hgtInches % 12) +
-					'" ' + p.weight + " lb");
+				const t = Math.round(p.hgtInches);
+				bits.push(Math.floor(t / 12) + "'" + (t % 12) + '"' +
+					(typeof p.weight === "number" ? " " + p.weight + " lb" : ""));
 			}
 			if (p.mock) bits.push("mock " + p.mock);
 			out.appendChild(el("p", "dim", bits.filter(Boolean).join(" · ")));
 			if (p.skills && p.skills.length) {
 				const row = el("p");
 				for (const s of p.skills) {
-					row.appendChild(el("span", "tag", s));
+					const tag = el("span", "tag", SKILLS[s] || s);
+					tag.title = "BBGM skill " + s;
+					row.appendChild(tag);
 					row.appendChild(document.createTextNode(" "));
 				}
 				out.appendChild(row);
@@ -1199,8 +1309,12 @@
 				const cols = [
 					["GP", s.gp], ["MPG", n1(s.mpg)], ["PPG", n1(s.ppg)], ["RPG", n1(s.rpg)],
 					["APG", n1(s.apg)], ["SPG", n1(s.spg)], ["BPG", n1(s.bpg)],
-					["TOPG", n1(s.topg)], ["FG%", pct3(s.fgp)], ["3P%", pct3(s.tpp)],
-					["FT%", pct3(s.ftp)], ["TS%", pc(s.ts)], ["USG", pc(s.usg)],
+					["TOPG", n1(s.topg)], ["FG%", pct3(s.fgp)],
+					// No attempts: the file carries no percentage, and 0 of 0
+					// is a dash rather than a hole in the table.
+					["3P%", typeof s.tpp === "number" ? pct3(s.tpp) : "—"],
+					["FT%", typeof s.ftp === "number" ? pct3(s.ftp) : "—"],
+					["TS%", pc(s.ts)], ["USG", pc(s.usg)],
 				].filter((c) => c[1] !== undefined && c[1] !== "");
 				const wrap = el("div", "tablewrap");
 				const t = el("table");
@@ -1260,7 +1374,7 @@
 			const buttons = new Map();
 			let current = null;
 
-			function show(id) {
+			function show(id, tapped) {
 				const p = byId.get(id);
 				if (!p) return;
 				current = id;
@@ -1269,6 +1383,11 @@
 				for (const [pid, b] of buttons) b.setAttribute("aria-current", pid === id ? "true" : "false");
 				const b = buttons.get(id);
 				if (b) b.scrollIntoView({ block: "nearest" });
+				/* One column on a phone: the capsule is BELOW the list, so a
+				   tap changed something off screen. Bring it into view. */
+				if (tapped && window.innerWidth <= 800 && right.scrollIntoView) {
+					right.scrollIntoView({ block: "start" });
+				}
 			}
 			selectPlayer = show;
 
@@ -1285,7 +1404,7 @@
 					b.appendChild(el("div", null, (p.rank ? p.rank + ". " : "") + p.name));
 					b.appendChild(el("div", "meta",
 						[p.pos, p.ovr + "/" + p.pot, p.school].filter(Boolean).join(" · ")));
-					b.addEventListener("click", () => show(p.id));
+					b.addEventListener("click", () => { show(p.id, true); setHash("p=" + p.id, true); });
 					buttons.set(p.id, b);
 					plist.appendChild(b);
 					shown++;
@@ -1298,7 +1417,8 @@
 			search.addEventListener("input", drawList);
 			posSel.addEventListener("change", drawList);
 			drawList();
-			if (list.length) show(list[0].id);
+			if (list.length) show(pendingPlayer && byId.has(pendingPlayer) ? pendingPlayer : list[0].id);
+			pendingPlayer = null;
 			return out;
 		}
 
@@ -1419,13 +1539,23 @@
 				for (const w of c.warnings) ul.appendChild(el("li", null, w));
 				out.appendChild(ul);
 			}
-			if (c.settings.length) {
-				out.appendChild(el("h3", null, "Settings"));
+			const shown = c.settings.filter((r) => r.value !== "null" && r.value !== "undefined");
+			out.appendChild(el("h3", null, "Settings"));
+			if (shown.length) {
 				out.appendChild(mkTable([
-					{ h: "Setting", get: (r) => r.key },
+					{ h: "Setting", get: (r) => r.label || r.key, cell: (r) => {
+						const span = el("span", null, r.label || r.key);
+						span.title = r.key;
+						return span;
+					} },
 					{ h: "Value", get: (r) => r.value, wrap: true },
-				], c.settings, { filter: "Filter settings…" }));
+				], shown, { filter: "Filter settings…" }));
 			}
+			out.appendChild(el("p", "dim", (shown.length
+				? "Only the settings changed from the tool's defaults are listed"
+				: "Every setting was at the tool's default") +
+				(typeof c.atDefault === "number" && c.atDefault
+					? " (" + c.atDefault + " at their defaults)." : ".")));
 			return out;
 		}
 
@@ -1444,7 +1574,18 @@
 		const views = new Map();
 		const built = new Set();
 
-		function showSection(id) {
+		/* The address bar follows the page: a section is #<id>, a prospect is
+		   #p=<id>. A user-driven change PUSHES, so Back walks the sections;
+		   the change made while answering Back itself only replaces. */
+		function setHash(h, push) {
+			if (location.hash === "#" + h) return;
+			try {
+				if (push) history.pushState(null, "", "#" + h);
+				else history.replaceState(null, "", "#" + h);
+			} catch (e) { /* a sandboxed frame */ }
+		}
+
+		function showSection(id, fromHistory) {
 			if (!views.has(id)) return;
 			for (const [key, node] of views) node.hidden = key !== id;
 			for (const b of tabs.children) {
@@ -1465,9 +1606,7 @@
 						(err && err.message ? err.message : String(err))));
 				}
 			}
-			if (location.hash !== "#" + id) {
-				history.replaceState(null, "", "#" + id);
-			}
+			if (!fromHistory) setHash(id, true);
 			window.scrollTo({ top: 0 });
 		}
 
@@ -1475,7 +1614,10 @@
 			if (!VIEWS[s.id] || D[s.key] === undefined) continue;
 			const b = el("button", null, s.label);
 			b.dataset.id = s.id;
-			b.addEventListener("click", () => showSection(s.id));
+			b.addEventListener("click", () => {
+				showSection(s.id);
+				b.scrollIntoView({ block: "nearest", inline: "nearest" });
+			});
 			tabs.appendChild(b);
 			const sec = el("section", "view");
 			sec.id = "section-" + s.id;
@@ -1485,10 +1627,14 @@
 			views.set(s.id, sec);
 		}
 
-		function showPlayer(id) {
+		function showPlayer(id, fromHistory) {
 			if (!views.has("capsules")) return;
-			showSection("capsules");
-			if (selectPlayer) selectPlayer(id);
+			pendingPlayer = id;
+			showSection("capsules", true);
+			// "tapped": on a phone the capsule is under the list; show it.
+			if (selectPlayer) selectPlayer(id, true);
+			pendingPlayer = null;
+			if (!fromHistory) setHash("p=" + id, true);
 		}
 
 		/* The header search jumps straight to a prospect: the question a
@@ -1496,25 +1642,47 @@
 		const jump = $("jump");
 		const hits = $("hits");
 		if (players.length) {
+			jump.setAttribute("aria-label", "Find a prospect");
+			jump.setAttribute("aria-controls", "hits");
+			let first = null;
+			const close = () => { hits.hidden = true; hits.textContent = ""; first = null; };
+			const open = (p) => {
+				showPlayer(p.id);
+				jump.value = "";
+				close();
+			};
 			jump.addEventListener("input", () => {
 				const q = jump.value.trim().toLowerCase();
 				hits.textContent = "";
+				first = null;
 				if (!q) { hits.hidden = true; return; }
 				const list = players.filter((p) =>
 					(p.name + " " + (p.school || "")).toLowerCase().indexOf(q) !== -1).slice(0, 8);
-				for (const p of list) {
+				first = list[0] || null;
+				list.forEach((p, i) => {
 					const b = el("button", "pill",
 						p.name + " — " + [p.pos, p.school].filter(Boolean).join(", "));
-					b.addEventListener("click", () => {
-						showPlayer(p.id);
-						jump.value = "";
-						hits.hidden = true;
-					});
-					const row = el("div");
+					b.addEventListener("click", () => open(p));
+					const row = el("div", "hit");
+					if (!i) row.setAttribute("aria-selected", "true");
 					row.appendChild(b);
 					hits.appendChild(row);
-				}
+				});
 				hits.hidden = !list.length;
+			});
+			// Enter opens the first hit; Escape (or a click anywhere else)
+			// puts the list away.
+			jump.addEventListener("keydown", (e) => {
+				if (e.key === "Enter" && first) { e.preventDefault(); open(first); }
+				else if (e.key === "Escape") { close(); }
+			});
+			document.addEventListener("keydown", (e) => {
+				if (e.key === "Escape" && !hits.hidden) close();
+			});
+			document.addEventListener("click", (e) => {
+				if (hits.hidden) return;
+				if (e.target === jump || hits.contains(e.target)) return;
+				close();
 			});
 		} else {
 			jump.hidden = true;
@@ -1534,19 +1702,43 @@
 			setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 		});
 
+		/* The theme: what the reader chose last time, else what their system
+		   prefers. It used to open dark every time and forget the toggle. */
 		const theme = $("theme");
+		const THEME_KEY = "bbgm-season-site-theme";
+		const setTheme = (t, save) => {
+			document.documentElement.dataset.theme = t;
+			theme.textContent = t === "light" ? "Dark mode" : "Light mode";
+			if (save) {
+				try { localStorage.setItem(THEME_KEY, t); } catch (e) { /* storage off */ }
+			}
+		};
+		{
+			let saved = null;
+			try { saved = localStorage.getItem(THEME_KEY); } catch (e) { saved = null; }
+			const prefersLight = !!(window.matchMedia &&
+				window.matchMedia("(prefers-color-scheme: light)").matches);
+			setTheme(saved === "light" || saved === "dark" ? saved
+				: prefersLight ? "light" : "dark", false);
+		}
 		theme.addEventListener("click", () => {
-			const light = document.documentElement.dataset.theme === "light";
-			document.documentElement.dataset.theme = light ? "dark" : "light";
-			theme.textContent = light ? "Light mode" : "Dark mode";
+			setTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light", true);
 		});
 
-		window.addEventListener("hashchange", () => {
-			const id = location.hash.replace(/^#/, "");
-			if (views.has(id)) showSection(id);
-		});
-		const first = location.hash.replace(/^#/, "");
-		showSection(views.has(first) ? first : views.keys().next().value);
+		function route() {
+			const h = location.hash.replace(/^#/, "");
+			const pm = /^p=(.+)$/.exec(h);
+			if (pm && byId.has(pm[1])) { showPlayer(pm[1], true); return true; }
+			if (views.has(h)) { showSection(h, true); return true; }
+			return false;
+		}
+		window.addEventListener("popstate", route);
+		window.addEventListener("hashchange", route);
+		if (!route()) {
+			const id = views.keys().next().value;
+			showSection(id, true);
+			setHash(id, false);
+		}
 	}
 
 	function html(result, options) {
@@ -1563,6 +1755,7 @@
 			"<style>", CSS, "</style>",
 			"</head>",
 			"<body>",
+			"<a class=\"skip\" href=\"#main\">Skip to content</a>",
 			"<header class=\"top\">",
 			"<div class=\"topline\">",
 			"<h1>" + escapeHtml(head) + "</h1>",

@@ -1441,6 +1441,41 @@
 		return 0.103535 * h * h - 10.779293 * h + 425.996970;
 	}
 
+	/* THE POTENTIAL MODEL SELECTOR.
+
+	   The tool's own potential (potFactors + the engine's gap) widens the
+	   pot-ovr gap as ovr rises: measured over thirty default classes, the
+	   gap climbs from the 20s to the 50s. BBGM's own estimator runs the
+	   other way — a better prospect has LESS room left — so a class
+	   imported into the game and then re-developed there is re-read on a
+	   different curve. `cfg.potModel` chooses:
+
+	     "tool"  (default) the tool's factor model — unchanged, so every
+	             existing seed and the golden hashes stay where they are
+	     "bbgm"  BBGM's potEstimator, src/worker/core/player/
+	             potEstimator.basketball.ts:
+	                 age >= 29          -> ovr
+	                 pot = 72.314 - 2.3306 * age + 0.83309 * ovr
+	                 ovr > pot          -> ovr
+	             rounded and clamped to [ovr, 100]
+
+	   `age` is the age BBGM will read (season - born.year); the engine
+	   passes the same age its potential phase already uses. */
+	const POT_MODELS = ["tool", "bbgm"];
+	const POT_MODEL_DEFAULT = "tool";
+	function bbgmPotEstimate(ovr, age) {
+		const a = Number.isFinite(age) ? age : 19;
+		if (a >= 29) return ovr;
+		const pot = 72.314 - 2.3306 * a + 0.83309 * ovr;
+		return ovr > pot ? ovr : pot;
+	}
+	/* The potential to export under `model`, given the tool's own answer.
+	   Anything that is not "bbgm" returns `toolPot` untouched. */
+	function potForModel(model, ovr, age, toolPot) {
+		if (model !== "bbgm" || !Number.isFinite(ovr)) return toolPot;
+		return clamp(Math.round(bbgmPotEstimate(ovr, age)), clamp(Math.round(ovr), 0, 100), 100);
+	}
+
 	/* Potential gap for a finished build.
 
 	   This used to be two terms — an archetype constant and an age slope — so
@@ -2979,7 +3014,46 @@
 	   (dribbling > .68) were previously unreachable for anything this tool
 	   produced, so exported classes systematically lacked three of the nine
 	   badges a native BBGM class has. */
-	function shiftScales(arch, up, pinned) {
+	/* THE SIGNATURE GUARANTEE (cfg.signatureSkills, default off).
+
+	   A build tagged "shooting" promises BBGM's 3, "athletic" the A and
+	   "rebounding" the R, and nothing made the solver try to deliver: its
+	   up-shift leans into the build's own authored offsets, which is the
+	   shape of the promise but not the badge. With the flag on, the
+	   composite ratings behind each promised skill get an extra lean on the
+	   way UP (and extra protection on the way down), so the points the
+	   solver has to add go first where they buy the badge.
+
+	   It only re-weights the shift: the scales stay non-negative and every
+	   scale vector is the identity at k = 0, so the bisection's monotonicity
+	   and the solver's exactness are untouched. Off by default so every
+	   existing seed and golden hash is unchanged. */
+	const SIGNATURE_SKILLS = {
+		shooting: { label: "3", keys: { tp: 1, oiq: 0.25 } },
+		athletic: { label: "A", keys: { stre: 1, spd: 1, jmp: 1 } },
+		rebounding: { label: "R", keys: { reb: 1, jmp: 0.25, stre: 0.25 } },
+	};
+	const SIGNATURE_UP = 0.9;
+	const SIGNATURE_DOWN = 0.4;
+	const SIGNATURE_STEP = 2;
+	const SIGNATURE_STEPS = 6;
+	/* The per-key lean for a build under the flag, or null. */
+	function signatureLean(arch, cfg) {
+		if (!arch || !cfg || !cfg.signatureSkills) return null;
+		const tags = arch.t || [];
+		let lean = null;
+		for (const t of tags) {
+			const sig = SIGNATURE_SKILLS[t];
+			if (!sig) continue;
+			lean = lean || {};
+			for (const k of Object.keys(sig.keys)) {
+				lean[k] = Math.max(lean[k] || 0, sig.keys[k]);
+			}
+		}
+		return lean;
+	}
+
+	function shiftScales(arch, up, pinned, lean) {
 		const out = {};
 		let maxOff = 0;
 		for (const k of Object.keys(arch.o || {})) maxOff = Math.max(maxOff, Math.abs(arch.o[k]));
@@ -2992,7 +3066,10 @@
 			const sig = maxOff > 0 ? clamp(off / maxOff, -1, 1) : 0;
 			// Going up: lean into the signature ratings. Going down: protect
 			// them and take the points out of everything else.
-			const f = up ? 1 + 0.75 * Math.max(0, sig) : 1 - 0.55 * Math.max(0, sig);
+			let f = up ? 1 + 0.75 * Math.max(0, sig) : 1 - 0.55 * Math.max(0, sig);
+			if (lean && lean[key]) {
+				f *= up ? 1 + SIGNATURE_UP * lean[key] : 1 - SIGNATURE_DOWN * lean[key];
+			}
 			out[key] = Math.max(0, base * f);
 		}
 		return out;
@@ -3188,9 +3265,9 @@
 	   that was reachable a moment ago stopped being so. It is a function of the
 	   original ratings, the archetype, the specialization setting and the
 	   pinned vector, all of which the user can see. */
-	function ovrRange(base, arch, pinned) {
-		const upScales = arch ? shiftScales(arch, true, pinned) : SHIFT_SCALE;
-		const downScales = arch ? shiftScales(arch, false, pinned) : SHIFT_SCALE;
+	function ovrRange(base, arch, pinned, lean) {
+		const upScales = arch ? shiftScales(arch, true, pinned, lean) : SHIFT_SCALE;
+		const downScales = arch ? shiftScales(arch, false, pinned, lean) : SHIFT_SCALE;
 		return {
 			min: BB.ovr(applyShift(base, -SHIFT_RANGE, downScales, pinned)),
 			max: BB.ovr(applyShift(base, SHIFT_RANGE, upScales, pinned)),
@@ -3200,7 +3277,9 @@
 	/* Re-solve a built player after one of his base ratings has been changed
 	   outside the builder — a forced height, in practice. Returns the same
 	   shape rebuild() does for the fields that move. */
-	function resolveTo(base, targetOvr, archName, fuzz, pinned, cleanBase) {
+	/* `cfg` (optional) is read only for the signature guarantee, so a
+	   re-solve keeps the lean its original build was solved with. */
+	function resolveTo(base, targetOvr, archName, fuzz, pinned, cleanBase, cfg) {
 		/* The fallback used to be ARCHETYPES[length - 1] — whichever build
 		   happened to be written last, silently re-shaping a player around a
 		   vector nobody asked for. Same contract as roleUsage and potFactors:
@@ -3229,10 +3308,11 @@
 		   than leaving the caller to notice that ovr and the ratings beside it
 		   disagree. `ovrShortfall` is the signed gap, so an editor can report
 		   an impossible request instead of appearing to grant it. */
-		const range = ovrRange(cleanBase || base, arch, pinned);
+		const lean = signatureLean(arch, cfg);
+		const range = ovrRange(cleanBase || base, arch, pinned, lean);
 		const reachable = Number.isFinite(range.min) && Number.isFinite(range.max)
 			? clamp(targetOvr, range.min, range.max) : targetOvr;
-		const solved = solveToOvr(base, reachable, arch, pinned);
+		const solved = solveToOvr(base, reachable, arch, pinned, lean);
 		const ovr = BB.ovr(solved);
 		return {
 			base,
@@ -3246,12 +3326,12 @@
 		};
 	}
 
-	function solveToOvr(base, targetOvr, arch, pinned) {
+	function solveToOvr(base, targetOvr, arch, pinned, lean) {
 		// Two scale vectors, one for each direction; both equal SHIFT_SCALE at
 		// k = 0, so the shift stays continuous and monotone across the origin
 		// and the bisection below is still valid.
-		const upScales = arch ? shiftScales(arch, true, pinned) : SHIFT_SCALE;
-		const downScales = arch ? shiftScales(arch, false, pinned) : SHIFT_SCALE;
+		const upScales = arch ? shiftScales(arch, true, pinned, lean) : SHIFT_SCALE;
+		const downScales = arch ? shiftScales(arch, false, pinned, lean) : SHIFT_SCALE;
 		const shift = (k) => applyShift(base, k, k >= 0 ? upScales : downScales, pinned);
 		let lo = -SHIFT_RANGE;
 		let hi = SHIFT_RANGE;
@@ -3523,7 +3603,8 @@
 			cleanBase[key] = clamp(orig[key] + applied[key], lo, hi);
 		}
 
-		const range = ovrRange(cleanBase, arch, pinned);
+		const lean = signatureLean(arch, cfg);
+		const range = ovrRange(cleanBase, arch, pinned, lean);
 		/* AN UNREACHABLE TARGET IS SOLVED TO THE NEAREST REACHABLE ONE.
 
 		   `ovrRange` is the honest answer to "what overall can this player be
@@ -3536,7 +3617,7 @@
 		   `ovrShortfall` is that amount. */
 		const reachable = clamp(targetOvr, range.min, range.max);
 		const shortfall = reachable - targetOvr;
-		let solved = solveToOvr(base, reachable, arch, pinned);
+		let solved = solveToOvr(base, reachable, arch, pinned, lean);
 		let finalOvr = BB.ovr(solved);
 		/* The reported range describes the jitter-free build, so it has to be
 		   a promise the solver keeps. Per-rating jitter can push a rating onto
@@ -3545,10 +3626,51 @@
 		   then silently missed. In that rare case the jitter is dropped for
 		   this player rather than the promise. */
 		if (finalOvr !== reachable && reachable >= range.min && reachable <= range.max) {
-			const retry = solveToOvr(cleanBase, reachable, arch, pinned);
+			const retry = solveToOvr(cleanBase, reachable, arch, pinned, lean);
 			if (Math.abs(BB.ovr(retry) - reachable) < Math.abs(finalOvr - reachable)) {
 				solved = retry;
 				finalOvr = BB.ovr(retry);
+			}
+		}
+		/* The signature guarantee's second half. The lean above only acts
+		   when the solver has to ADD, and after neutralizeApplied it rarely
+		   adds much, so on its own it moved the 3 onto one shooting build in
+		   sixty. Here the promised skill's own ratings are stepped up in the
+		   base and the player re-solved to the SAME overall, which takes the
+		   points back out of everything else (the down-shift protects the
+		   leaned keys) — a trade at fixed ovr, stopped as soon as BBGM's own
+		   skills() shows the badge, after SIGNATURE_STEPS tries, or the moment
+		   a re-solve would miss. Only under cfg.signatureSkills. */
+		let outBase = base;
+		let outClean = cleanBase;
+		let outRange = range;
+		if (lean && finalOvr === reachable) {
+			const want = [];
+			for (const t of arch.t || []) {
+				if (SIGNATURE_SKILLS[t]) want.push(SIGNATURE_SKILLS[t]);
+			}
+			for (let step = 1; step <= SIGNATURE_STEPS; step++) {
+				const have = BB.skills(Object.assign({ fuzz: orig.fuzz }, solved));
+				const missing = want.filter((w) => have.indexOf(w.label) === -1);
+				if (!missing.length) break;
+				const nb = Object.assign({}, base);
+				const nc = Object.assign({}, cleanBase);
+				for (const w of missing) {
+					for (const k of Object.keys(w.keys)) {
+						if (k === "hgt" || (pinned && Number.isFinite(pinned[k]))) continue;
+						const d = SIGNATURE_STEP * step * w.keys[k];
+						nb[k] = clamp(base[k] + d, 1, 99);
+						nc[k] = clamp(cleanBase[k] + d, 1, 99);
+					}
+				}
+				const cand = solveToOvr(nb, finalOvr, arch, pinned, lean);
+				if (BB.ovr(cand) !== finalOvr) break;
+				const r2 = ovrRange(nc, arch, pinned, lean);
+				if (!(finalOvr >= r2.min && finalOvr <= r2.max)) break;
+				solved = cand;
+				outBase = nb;
+				outClean = nc;
+				outRange = r2;
 			}
 		}
 		const pot = clamp(Math.max(targetPot, finalOvr + 1), finalOvr, 100);
@@ -3557,10 +3679,10 @@
 			// The pre-solve base, so a later change to a rating (a size
 			// surprise, say) can be re-solved to the same target rather than
 			// leaving ovr disagreeing with the rating vector it came from.
-			base,
+			base: outBase,
 			// The jitter-free vector, so a later re-solve (a forced height)
 			// can report the same stable range this build did.
-			cleanBase,
+			cleanBase: outClean,
 			archetype: arch.name,
 			ratings: solved,
 			ovr: finalOvr,
@@ -3569,7 +3691,7 @@
 			skills: BB.skills(Object.assign({ fuzz: orig.fuzz }, solved)),
 			// What this player's height actually allows, so an impossible lock
 			// can be reported instead of quietly ignored.
-			ovrRange: range,
+			ovrRange: outRange,
 			// Non-zero when the file asked for an overall this player cannot
 			// be built to: the signed distance from the asked-for overall to
 			// the one he was actually solved to.
@@ -3590,10 +3712,10 @@
 		// needs — both properties OF THIS FUNCTION, not of a class built with
 		// it, and neither reachable through the public entry points.
 		rebuild, classCurve, pickArchetype, solveToOvr, shiftScales, applyShift, ovrRange, resolveTo,
-		potAdjust, potFactors, sumFactors, potFromRole, ROLE_USG_CENTER, POT_BY_ARCHETYPE, computePotGap,
+		potAdjust, potFactors, sumFactors, POT_MODELS, POT_MODEL_DEFAULT, bbgmPotEstimate, potForModel, potFromRole, ROLE_USG_CENTER, POT_BY_ARCHETYPE, computePotGap,
 		POT_SKILL_W, POT_INTENT, POT_LEVEL_ANCHOR, POT_RAW_FLOOR, POT_HAND, typicalWeight,
 		ROLE_USAGE, roleUsage, computeRoleUsage, usageCompositeDelta, creationDelta,
-		rawCreation, CREATE_TAG_MEAN,
+		rawCreation, CREATE_TAG_MEAN, SIGNATURE_SKILLS, signatureLean,
 		ROLE_FIT, softBound, softBoundOrderError,
 		ROLE_INTENT, ROLE_INTENT_CAP, roleIntent, roleIntentOf, injuryMultiplier,
 		archetypeByName,

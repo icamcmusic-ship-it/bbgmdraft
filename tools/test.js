@@ -2371,7 +2371,10 @@ console.log("\nMechanical anomalies and season narrative");
 			   measures one absence against another and says nothing about
 			   the hold. */
 			if (p.eligibilityHold && q.stats.gp >= 28) dt.gpElig.push(q.stats.gp - p.stats.gp);
-			if (p.surprise && p.surprise.name === "suspension") {
+			/* Same rule as the hold: against a baseline with no absence
+			   of his own, or a sprained ankle in the anomaly-free run
+			   reads as a suspension that GAINED him games. */
+			if (p.surprise && p.surprise.name === "suspension" && !q.availability) {
 				dt.gpSusp.push(q.stats.gp - p.stats.gp);
 			}
 		}
@@ -5200,7 +5203,7 @@ console.log("\nAudit regressions (the second September 2026 pass)");
 	   to the season before it, which is how UC Davis sat in the Big West while
 	   UTEP and Grand Canyon had already moved; one target season, checked. */
 	{
-		ok("the Mountain West has its 2027 members", C.byConference["Mountain West"].length === 9 &&
+		ok("the Mountain West has its 2027 members", C.byConference["Mountain West"].length === 10 &&
 			C.conferenceOf("Grand Canyon") === "Mountain West" && C.conferenceOf("UTEP") === "Mountain West" &&
 			C.conferenceOf("UC Davis") === "Mountain West");
 		ok("Louisiana Tech is in the Sun Belt, New Haven in the NEC",
@@ -5210,6 +5213,29 @@ console.log("\nAudit regressions (the second September 2026 pass)");
 		ok("Seattle is in the WCC, Delaware in Conference USA, UMass in the MAC",
 			C.conferenceOf("Seattle") === "WCC" && C.conferenceOf("Delaware") === "Conference USA" &&
 			C.conferenceOf("Massachusetts") === "MAC");
+		/* The July 1, 2026 moves the 2027-28 table had missed. */
+		ok("Hawaii is Mountain West, Northern Illinois Horizon, Sacramento State Big West",
+			C.conferenceOf("Hawaii") === "Mountain West" &&
+			C.conferenceOf("Northern Illinois") === "Horizon" &&
+			C.conferenceOf("Sacramento State") === "Big West");
+		ok("the WAC is the UAC, with its 2026 membership",
+			!C.CONFERENCES.WAC && !!C.CONFERENCES.UAC && !C.byConference.WAC &&
+			C.canonicalConference("WAC") === "UAC" &&
+			["Abilene Christian", "Tarleton State", "Texas-Arlington", "Austin Peay",
+				"Eastern Kentucky", "North Alabama", "West Georgia", "Central Arkansas"]
+				.every((n) => C.conferenceOf(n) === "UAC") &&
+			C.byConference.UAC.length === 8 &&
+			C.conferenceOf("California Baptist") === "Big West" &&
+			C.conferenceOf("Utah Valley") === "Big West" &&
+			C.conferenceOf("Southern Utah") === "Big Sky" &&
+			C.conferenceOf("Utah Tech") === "Big Sky" &&
+			C.byConference.ASUN.length === 7);
+		ok("the schools' own spellings resolve",
+			C.canonical("Saint Peter's") === "St. Peter's" &&
+			C.canonical("Detroit") === "Detroit Mercy" &&
+			C.canonical("Miami (Ohio)") === "Miami (OH)" &&
+			C.canonical("Miami (OH)") === "Miami (OH)" &&
+			C.canonical("Hawai'i") === "Hawaii");
 		ok("every conference is schedulable", Object.keys(C.byConference)
 			.filter((c) => c !== "Independent").every((c) => C.byConference[c].length >= 7));
 		ok("Houston Baptist resolves to its current name", C.canonical("Houston Baptist") === "Houston Christian");

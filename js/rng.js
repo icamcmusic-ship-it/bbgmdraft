@@ -66,6 +66,13 @@
 	   caller who passed hi < lo got a value below lo and no complaint.
 	   tools/test.js measures the uniformity and asserts the bound holds. */
 	Rng.prototype.int = function (lo, hi) {
+		// A NaN bound would make every comparison false and floor() return
+		// NaN; fall back to whichever bound is finite (or 0).
+		if (!Number.isFinite(lo) || !Number.isFinite(hi)) {
+			if (Number.isFinite(lo)) return lo;
+			if (Number.isFinite(hi)) return hi;
+			return 0;
+		}
 		if (hi < lo) return lo;
 		const v = Math.floor(lo + (hi - lo + 1) * this.random());
 		return v < lo ? lo : v > hi ? hi : v;
@@ -101,16 +108,25 @@
 
 	// items: [{w: number, ...}] or parallel weights array
 	Rng.prototype.weighted = function (items, weightFn) {
-		const wf = weightFn || ((x) => x.w);
+		const wf0 = weightFn || ((x) => x.w);
+		// NaN / non-finite / negative weights count as 0.
+		const wf = (x) => {
+			const w = wf0(x);
+			return Number.isFinite(w) && w > 0 ? w : 0;
+		};
 		let total = 0;
-		for (const it of items) total += Math.max(0, wf(it));
-		if (total <= 0) return this.pick(items);
+		for (const it of items) total += wf(it);
+		if (!(total > 0) || !Number.isFinite(total)) return this.pick(items);
 		let r = this.random() * total;
+		let last = null;
 		for (const it of items) {
-			r -= Math.max(0, wf(it));
-			if (r <= 0) return it;
+			const w = wf(it);
+			if (w <= 0) continue; // never return a zero-weight item (random()==0)
+			last = it;
+			r -= w;
+			if (r < 0) return it;
 		}
-		return items[items.length - 1];
+		return last;
 	};
 
 	Rng.prototype.shuffle = function (arr) {

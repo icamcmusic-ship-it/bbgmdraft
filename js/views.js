@@ -33,6 +33,10 @@
 
 	const n1 = (x) => (x === undefined || x === null || !Number.isFinite(x) ? "" : x.toFixed(1));
 	const pc = (x) => (Number.isFinite(x) ? (x * 100).toFixed(1) : "");
+	/* A percentage with its sign, or a dash. 3P% and FT% are null for a man
+	   with no attempts (0 of 0 is not 0%), and "3P %" is what pc() + "%"
+	   printed for him. */
+	const pcs = (x) => (Number.isFinite(x) ? (x * 100).toFixed(1) + "%" : "—");
 
 	/* ------------------------------------------------------------- columns */
 
@@ -42,7 +46,7 @@
 	const COLUMNS = [
 		{ key: "pick", label: "", num: false, fixed: true, title: "Select for bulk editing" },
 		{ key: "lock", label: "🔒", num: false, fixed: true, title: "Locked settings survive a reroll" },
-		{ key: "face", label: "Face", num: false, off: true, title: "facesjs portrait — the face BBGM itself renders" },
+		{ key: "face", label: "Face", num: false, off: true, nosort: true, title: "facesjs portrait — the face BBGM itself renders" },
 		{ key: "name", label: "Player", num: false, fixed: true, sticky: true },
 		{ key: "pos", label: "Pos", num: false },
 		{ key: "year", label: "Year", num: false },
@@ -69,14 +73,14 @@
 		{ key: "recRank", label: "Rec", num: true, off: true, title: "National recruiting rank out of high school" },
 		{ key: "stars", label: "★", num: true, off: true, title: "Recruiting stars" },
 		{ key: "composite", label: "Comp", num: true, off: true, title: "247-style recruiting composite" },
-		{ key: "caps", label: "Caps", num: false, off: true, title: "Age-group or senior national-team caps, for a prospect abroad" },
+		{ key: "caps", label: "Caps", num: false, off: true, descFirst: true, title: "Age-group or senior national-team caps, for a prospect abroad" },
 		{ key: "continental", label: "Cont", num: false, off: true, title: "His club's continental competition and how far it went" },
 		{ key: "college", label: "College / League", num: false },
 		{ key: "conf", label: "Conf", num: false },
 		/* Team context. All three are on res.teams and none of them was shown,
 		   so a 19-point scorer's row said nothing about whether he did it for a
 		   one seed or for a team that finished 9-22. */
-		{ key: "record", label: "Team", num: false, off: true, title: "His team's record" },
+		{ key: "record", label: "Team", num: false, off: true, descFirst: true, title: "His team's record" },
 		{ key: "apRank", label: "AP", num: true, off: true, title: "His team's final AP ranking" },
 		{ key: "seed", label: "Seed", num: true, off: true, title: "His team's NCAA tournament seed" },
 		// Physicals, which varySize can change and which were never displayed.
@@ -89,8 +93,8 @@
 		   14 every night and one who scored 6 until January and 22 after read
 		   as the same row. Off by default — it is a picture, not a number, so
 		   it does not sort and it costs a column. */
-		{ key: "trend", label: "Trend", num: false, off: true, stat: true,
-			title: "Points per game across the season, game by game" },
+		{ key: "trend", label: "Trend", num: false, off: true, stat: true, descFirst: true,
+			title: "Points per game across the season, game by game — sorts by how much his second half outscored his first" },
 		{ key: "rpg", label: "RPG", num: true, stat: true },
 		{ key: "orpg", label: "ORB", num: true, stat: true, off: true },
 		{ key: "drpg", label: "DRB", num: true, stat: true, off: true },
@@ -130,7 +134,7 @@
 		{ key: "ts", label: "TS%", num: true },
 		{ key: "astTo", label: "A:TO", num: true, off: true, derived: true, title: "Assists per turnover" },
 		{ key: "prod", label: "PROD", num: true, off: true, derived: true, title: "Production score — the single number the award model ranks on" },
-		{ key: "awards", label: "Honors", num: false },
+		{ key: "awards", label: "Honors", num: false, descFirst: true },
 	];
 	const PCT_KEYS = { usg: 1, fgp: 1, tpp: 1, ftp: 1, ts: 1, efg: 1 };
 	/* Columns that are a RATIO on 0-1 and are printed as one — .381, the way
@@ -228,7 +232,9 @@
 	/* Height as a person reads it. */
 	function feet(inches) {
 		if (!Number.isFinite(inches)) return "";
-		return Math.floor(inches / 12) + "'" + Math.round(inches % 12) + '"';
+		// Round the whole height first: 6'11.6" is 6'12" otherwise.
+		const t = Math.round(inches);
+		return Math.floor(t / 12) + "'" + (t % 12) + '"';
 	}
 
 	/* --- the phone layout ------------------------------------------------
@@ -374,10 +380,13 @@
 			(bits.length ? bits.join("\n") : "  nothing notable");
 	}
 
+	/* "68 ▼1": the arrow (a ::before, see .delta in css/style.css) says the
+	   direction, so the text is the size alone — it used to print "68▼ -1". */
 	function delta(now, before) {
 		const d = now - before;
-		const s = el("span", d > 0 ? "up" : d < 0 ? "down" : "");
-		s.textContent = d === 0 ? "" : (d > 0 ? " +" : " ") + d;
+		const s = el("span", d > 0 ? "delta up" : d < 0 ? "delta down" : "delta");
+		s.textContent = d === 0 ? "" : String(Math.abs(d));
+		if (d) s.title = (d > 0 ? "up " : "down ") + Math.abs(d) + " from the file's " + before;
 		return s;
 	}
 
@@ -526,12 +535,35 @@
 			.join("\n");
 	}
 
-	function sortRows(rows) {
-		const keys = A().state.sort;
+	/* Class year as an ordinal, so "Year" sorts Freshman → Graduate rather
+	   than alphabetically (Graduate, Junior, Redshirt …, Senior, Sophomore).
+	   A redshirt sits just after the year he is listed as. Shared with the
+	   exported site, which carries its own copy of the same table. */
+	const CLASS_YEAR_ORDER = ["Freshman", "Redshirt Freshman", "Sophomore",
+		"Redshirt Sophomore", "Junior", "Redshirt Junior", "Senior",
+		"Redshirt Senior", "Graduate"];
+	function classYearRank(y) {
+		const i = CLASS_YEAR_ORDER.indexOf(String(y || "").trim());
+		return i === -1 ? (y ? CLASS_YEAR_ORDER.length : undefined) : i;
+	}
+
+	/* The columns a fresh install starts with hidden: every column flagged
+	   `off`. The flag was documented on each column and never read, so a new
+	   user got all sixty-one — faces included. App's initial state reads this. */
+	function defaultHiddenColumns() {
+		const out = {};
+		for (const c of COLUMNS) if (c.off && !c.fixed) out[c.key] = true;
+		return out;
+	}
+
+	function sortRows(rows, sortKeys) {
+		const keys = sortKeys || A().state.sort;
 		const numeric = {};
 		for (const { key } of keys) {
 			const col = COLUMNS.filter((c) => c.key === key)[0];
-			numeric[key] = col ? col.num !== false : true;
+			// A key that is not a table column (the board's own sorts) decides
+			// per pair: numbers as numbers, anything else as a name.
+			numeric[key] = col ? col.num !== false : false;
 		}
 		return rows.slice().sort((a, b) => {
 			for (const { key, dir } of keys) {
@@ -558,7 +590,12 @@
 				   names in the tool and it was the one that never got the
 				   fix, so sorting by college here and reading the same
 				   colleges anywhere else could disagree. */
-				const cmp = numeric[key]
+				/* Two numbers compare as numbers whatever the column's flag
+				   says. Team record (w-l), Honors (a count) and Caps were
+				   `num: false` because their CELLS are text, and so sorted
+				   "10" before "9". */
+				const bothNum = typeof va === "number" && typeof vb === "number";
+				const cmp = numeric[key] || bothNum
 					? Number(va) - Number(vb)
 					: byName(va, vb);
 				if (cmp) return cmp * dir;
@@ -670,6 +707,14 @@
 		const tr = el("tr");
 		const sort = A().state.sort;
 		for (const col of columns) {
+			/* A column with nothing to sort on (the portrait) must not look
+			   like one that does: no pointer, no tab stop, no sort handler. */
+			if (col.nosort) {
+				const th = el("th", (col.num ? "num " : "") + "nosort", col.label);
+				th.title = col.title || col.label;
+				tr.appendChild(th);
+				continue;
+			}
 			const th = el("th",
 				(col.num ? "num " : "") + (col.sticky ? "sticky " : "") + "sortable", col.label);
 			th.title = (col.title || col.label) + " — click to sort, shift-click to add a level";
@@ -679,11 +724,11 @@
 				const idx = sort.findIndex((s) => s.key === col.key);
 				if (!additive) {
 					if (idx === 0) sort[0].dir *= -1;
-					else A().state.sort = [{ key: col.key, dir: col.num === false ? 1 : -1 }];
+					else A().state.sort = [{ key: col.key, dir: col.num === false && !col.descFirst ? 1 : -1 }];
 				} else if (idx >= 0) {
 					sort[idx].dir *= -1;
 				} else {
-					sort.push({ key: col.key, dir: col.num === false ? 1 : -1 });
+					sort.push({ key: col.key, dir: col.num === false && !col.descFirst ? 1 : -1 });
 				}
 				A().persist();
 				A().render();
@@ -764,8 +809,9 @@
 
 	/* Move focus (and, when the editor is open, the editor) one row along. */
 	function moveRow(from, dir, follow) {
+		// Round dividers on the board are rows too, and not ones to land on.
 		const rows = Array.prototype.slice.call(
-			from.parentNode ? from.parentNode.querySelectorAll("tr") : []);
+			from.parentNode ? from.parentNode.querySelectorAll("tr:not(.bandrow)") : []);
 		const i = rows.indexOf(from);
 		const next = rows[i + dir];
 		if (!next) return;
@@ -794,6 +840,16 @@
 	   is no log to draw. */
 	const SPARK_W = 64;
 	const SPARK_H = 16;
+	/* The Trend column's sort value: points per game over the second half of
+	   his season less the first half. Rising scorers sort to the top. */
+	function trendValue(p) {
+		const games = p.gameLog && p.gameLog.games;
+		if (!games || games.length < 4) return undefined;
+		const half = Math.floor(games.length / 2);
+		const avg = (list) => list.reduce((a, g) => a + (g.pts || 0), 0) / (list.length || 1);
+		return avg(games.slice(half)) - avg(games.slice(0, half));
+	}
+
 	function sparkline(p, key) {
 		const games = p.gameLog && p.gameLog.games;
 		if (!games || games.length < 4) return null;
@@ -1222,6 +1278,8 @@
 	   quick select above, so the two cannot drift. "Export" is the set of
 	   fields that reach the file: what a reader checking an export wants. */
 	const COLUMN_PRESETS = [
+		// What a fresh install shows: every column not flagged `off`.
+		{ name: "Default", keys: COLUMNS.filter((c) => !c.off && !c.fixed).map((c) => c.key) },
 		{ name: "Everything", keys: null },
 		{ name: "Scouting", keys: ["pos", "year", "board", "move", "newOvr", "newPot",
 			"archetype", "college", "conf", "hgtInches", "weight",
@@ -1268,29 +1326,81 @@
 		}
 	}
 
-	function columnPicker() {
+	/* The picker's groups. Sixty checkboxes in one grid in COLUMNS order was
+	   a wall; grouped, a user looking for "3PA" looks under Shooting. Any
+	   column not named here lands under Advanced. */
+	const COLUMN_GROUPS = [
+		["Identity", ["face", "pos", "year", "board", "move", "newOvr", "newPot",
+			"archetype", "hand", "age", "hgtInches", "weight"]],
+		["Recruiting", ["recRank", "stars", "composite", "caps", "continental"]],
+		["Team", ["college", "conf", "record", "apRank", "seed", "awards"]],
+		["Box", ["gp", "mpg", "ppg", "trend", "rpg", "orpg", "drpg", "apg", "spg",
+			"bpg", "topg", "pfpg", "cspg", "deflpg", "chgpg", "pm"]],
+		["Shooting", ["fga", "tpa", "fta", "tpar", "ftr", "fgp", "efg", "tpp", "ftp", "ts"]],
+		["Advanced", null],
+	];
+
+	/* The checkboxes edit a DRAFT of the hidden set; OK commits it and Cancel
+	   (or Escape, or the ×) simply drops it. They used to write straight into
+	   state, so Cancel closed the dialog and kept every change. The presets
+	   and saved layouts are one-click actions that apply and close, as they
+	   always did. */
+	function columnPicker(draftIn) {
 		const st = A().state;
+		const draft = draftIn || Object.assign({}, st.hiddenColumns || {});
 		const box = el("div");
 		box.appendChild(el("p", "hint",
 			"Untick a column to hide it. The player name, lock and selection " +
 			"columns always stay."));
-		const grid = el("div", "colpicker");
-		for (const col of COLUMNS) {
-			if (col.fixed) continue;
-			const lab = el("label", "check");
-			const cb = el("input");
-			cb.type = "checkbox";
-			cb.checked = !st.hiddenColumns[col.key];
-			cb.addEventListener("change", () => {
-				if (cb.checked) delete st.hiddenColumns[col.key];
-				else st.hiddenColumns[col.key] = true;
-			});
-			lab.appendChild(cb);
-			lab.appendChild(document.createTextNode(" " + (col.label || col.key)));
-			lab.title = col.title || "";
-			grid.appendChild(lab);
+		const boxes = [];
+		const allNone = el("div", "rowflex");
+		const setAll = (show) => {
+			for (const { cb, col } of boxes) {
+				cb.checked = show;
+				if (show) delete draft[col.key];
+				else draft[col.key] = true;
+			}
+		};
+		const allBtn = el("button", "tiny", "All");
+		allBtn.type = "button";
+		allBtn.title = "Tick every column";
+		allBtn.addEventListener("click", () => setAll(true));
+		const noneBtn = el("button", "tiny", "None");
+		noneBtn.type = "button";
+		noneBtn.title = "Untick every column (name, lock and selection stay)";
+		noneBtn.addEventListener("click", () => setAll(false));
+		allNone.appendChild(allBtn);
+		allNone.appendChild(noneBtn);
+		box.appendChild(allNone);
+		const named = {};
+		for (const [, keys] of COLUMN_GROUPS) for (const k of keys || []) named[k] = true;
+		for (const [gname, keys] of COLUMN_GROUPS) {
+			const cols = COLUMNS.filter((c) => !c.fixed &&
+				(keys ? keys.indexOf(c.key) !== -1 : !named[c.key]));
+			if (!cols.length) continue;
+			const fs = el("fieldset", "colgroup");
+			fs.appendChild(el("legend", null, gname));
+			const grid = el("div", "colpicker");
+			for (const col of cols) {
+				const lab = el("label", "check colpick");
+				const cb = el("input");
+				cb.type = "checkbox";
+				cb.checked = !draft[col.key];
+				cb.addEventListener("change", () => {
+					if (cb.checked) delete draft[col.key];
+					else draft[col.key] = true;
+				});
+				lab.appendChild(cb);
+				const txt = el("span", "colpicktext");
+				txt.appendChild(el("span", "colpicklabel", col.label || col.key));
+				if (col.title) txt.appendChild(el("span", "colpicktitle", col.title));
+				lab.appendChild(txt);
+				grid.appendChild(lab);
+				boxes.push({ cb, col });
+			}
+			fs.appendChild(grid);
+			box.appendChild(fs);
 		}
-		box.appendChild(grid);
 
 		/* Saved layouts. The built-in presets below cover the common views, but
 		   with forty-odd columns everyone ends up with one arrangement they
@@ -1317,7 +1427,7 @@
 			x.addEventListener("click", () => {
 				delete saved[name];
 				A().persist();
-				columnPicker();
+				columnPicker(draft);
 			});
 			savedRow.appendChild(x);
 		}
@@ -1325,10 +1435,10 @@
 		saveBtn.addEventListener("click", () => {
 			const name = window.prompt("Name this column layout:", "");
 			if (!name || !name.trim()) return;
-			saved[name.trim()] = Object.assign({}, st.hiddenColumns);
+			saved[name.trim()] = Object.assign({}, draft);
 			A().persist();
 			A().setStatus("Saved the column layout “" + name.trim() + "”.");
-			columnPicker();
+			columnPicker(draft);
 		});
 		savedRow.appendChild(saveBtn);
 		box.appendChild(savedRow);
@@ -1367,7 +1477,11 @@
 		});
 		orderRow.appendChild(resetOrder);
 		box.appendChild(orderRow);
-		A().modal("Columns", box, () => { A().persist(); A().render(); });
+		A().modal("Columns", box, () => {
+			st.hiddenColumns = draft;
+			A().persist();
+			A().render();
+		});
 	}
 
 	function viewPlayers(view, res) {
@@ -1414,9 +1528,20 @@
 			pills.push(res.archetypePool.length + " builds in this class");
 		}
 		for (const t of pills) summary.appendChild(el("span", "pill", t));
-		view.appendChild(summary);
+		/* COMPACT CONTROLS. The pills, the season's storylines and the story
+		   of the class stood between the tab bar and the table on every visit,
+		   so the first row of the table sat ~400px down a 900px screen. The
+		   pills stay on one line as the summary of a disclosure; the two
+		   paragraphs are behind it. */
+		const info = el("details", "classinfo");
+		info.open = !!uiMemo.classInfoOpen;
+		info.addEventListener("toggle", () => { uiMemo.classInfoOpen = info.open; });
+		const infoSum = el("summary");
+		infoSum.appendChild(summary);
+		info.appendChild(infoSum);
+		view.appendChild(info);
 		if ((res.narrative || []).length) {
-			view.appendChild(el("p", "legendline",
+			info.appendChild(el("p", "legendline",
 				"The season: " + res.narrative.map((n) => n.blurb).join("; ") + "."));
 		}
 		if (res.surprises && res.surprises.length) {
@@ -1431,14 +1556,26 @@
 				});
 				line.appendChild(b);
 			});
-			view.appendChild(line);
+			info.appendChild(line);
 		}
 		/* Realignment, the season's events and draft day used to be three more
 		   ·-joined walls here. They are proper dated articles on the News tab
 		   now, with every player and team mention a link. */
-		view.appendChild(filterBar(res));
-		view.appendChild(rangeBar(res));
-		view.appendChild(bulkBar(res));
+		/* On a phone the filters, presets, range rows and bulk bar were three
+		   screens of controls above the first prospect. They fold into one
+		   "Filters (n)" disclosure there; on a wider screen the fold is
+		   always open and its summary is hidden (see .filterfold). */
+		const phone = typeof window !== "undefined" && window.innerWidth <= CARD_BREAKPOINT;
+		const fold = el("details", "filterfold");
+		fold.open = !phone || !!uiMemo.filtersOpen;
+		fold.addEventListener("toggle", () => { if (phone) uiMemo.filtersOpen = fold.open; });
+		const nActive = describeFilters().length;
+		fold.appendChild(el("summary", null, "Filters" + (nActive ? " (" + nActive + ")" : "") +
+			" · columns · bulk edit"));
+		fold.appendChild(filterBar(res));
+		fold.appendChild(rangeBar(res));
+		fold.appendChild(bulkBar(res));
+		view.appendChild(fold);
 
 		/* On a phone the card layout picks its own columns (see CARD_COLUMNS):
 		   the desktop selection is a choice about a wide table and applying it
@@ -1568,7 +1705,7 @@
 					break;
 				case "year":
 					td = el("td", null, p.classYear);
-					sortVals.year = p.classYear;
+					sortVals.year = classYearRank(p.classYear);
 					break;
 				case "board":
 					td = el("td", "num", p.boardRank === undefined ? "" : String(p.boardRank));
@@ -1685,7 +1822,9 @@
 					break;
 				case "conf":
 					td = el("td", null, team ? team.conf : p.nonNcaa ? p.newCollege : "");
-					sortVals.conf = team ? team.conf : "";
+					// A pro or a club player sorts by his league, which is what
+					// the cell shows, rather than as a blank.
+					sortVals.conf = team ? team.conf : p.nonNcaa ? (p.newCollege || "") : "";
 					break;
 				case "awards":
 					td = wrapCell((p.awards || []).join("; "));
@@ -1718,11 +1857,14 @@
 					const sp = sparkline(p, "pts");
 					if (sp) td.appendChild(sp);
 					else td.textContent = "—";
+					sortVals.trend = trendValue(p);
 					break;
 				}
 				default: {
 					const v = cellValue(p, col.key, res, mode);
-					const base = v === undefined ? ""
+					// A played season with no attempts: null, shown as a dash.
+					const base = v === undefined || v === null
+						? (p.stats && (PCT_KEYS[col.key] || RATIO_KEYS[col.key]) ? "—" : "")
 						: PCT_KEYS[col.key] ? pc(v)
 						// Rate ratios read as .381, the way every box score prints them.
 						: RATIO_KEYS[col.key] ? v.toFixed(3)
@@ -1866,6 +2008,8 @@
 				A().render();
 			});
 		}
+		item("Compare him now", () => compareWith(p, res),
+			"Open the Compare tab with him beside the board's best (or whoever is held)");
 		item("Compare with the rest of his position",
 			() => {
 				const keys = res.players.filter((x) => x.newPos === p.newPos)
@@ -1888,13 +2032,9 @@
 			A().persist();
 			A().render();
 		});
-		if (p.newCollege) {
-			item("Open " + p.newCollege, () => {
-				st.team = p.newCollege;
-				st.tab = "teams";
-				A().persist();
-				A().render();
-			});
+		// Only a program with a Teams page: a pro's newCollege is his league.
+		if (p.newCollege && res.teams && res.teams[p.newCollege]) {
+			item("Open " + p.newCollege, () => A().showTeam(p.newCollege));
 		}
 		document.body.appendChild(menu);
 		// Kept inside the viewport: a right-click near the bottom right of the
@@ -2115,6 +2255,83 @@
 
 	/* ---------------------------------------------------------- team views */
 
+	/* A small client-side sort for the tables that are not the prospect
+	   table: click a header (or Enter on it) to sort by that column, again to
+	   reverse. Values come from a cell's data-sv when it has one (numbers),
+	   else its text. The choice survives a re-render, keyed by `key`.
+	   `sortable` is a list of column indexes that sort; the rest stay plain. */
+	const tableSorts = {};
+	function sortableTable(table, key, sortable, numeric) {
+		const ths = table.querySelectorAll("thead th");
+		const tbody = table.querySelector("tbody");
+		if (!tbody) return table;
+		const original = Array.prototype.slice.call(tbody.rows);
+		const apply = () => {
+			const st = tableSorts[key];
+			for (const th of ths) {
+				th.removeAttribute("aria-sort");
+				th.classList.remove("sorted");
+				if (th.dataset.label) th.textContent = th.dataset.label;
+			}
+			let rows = original.slice();
+			if (st) {
+				const th = ths[st.i];
+				if (th) {
+					th.classList.add("sorted");
+					th.setAttribute("aria-sort", st.dir < 0 ? "descending" : "ascending");
+					th.textContent = th.dataset.label + (st.dir < 0 ? " ▾" : " ▴");
+				}
+				const val = (tr) => {
+					const td = tr.cells[st.i];
+					if (!td) return undefined;
+					if (td.dataset.sv !== undefined) {
+						return td.dataset.sv === "" ? undefined : Number(td.dataset.sv);
+					}
+					const t = td.textContent.trim();
+					return t === "" || t === "—" ? undefined : t;
+				};
+				rows = rows.map((tr, i) => ({ tr, i, v: val(tr) }));
+				rows.sort((a, b) => {
+					const ba = isBlank(a.v);
+					const bb = isBlank(b.v);
+					if (ba || bb) return ba && bb ? a.i - b.i : ba ? 1 : -1;
+					const c = typeof a.v === "number" && typeof b.v === "number"
+						? a.v - b.v : byName(a.v, b.v);
+					return c ? c * st.dir : a.i - b.i;
+				});
+				rows = rows.map((r) => r.tr);
+			}
+			for (const tr of rows) tbody.appendChild(tr);
+		};
+		sortable.forEach((i) => {
+			const th = ths[i];
+			if (!th) return;
+			th.dataset.label = th.textContent;
+			th.classList.add("sortable");
+			th.tabIndex = 0;
+			th.title = th.textContent + " — click to sort";
+			const go = () => {
+				const st = tableSorts[key];
+				if (st && st.i === i) st.dir *= -1;
+				else tableSorts[key] = { i, dir: numeric && numeric.indexOf(i) !== -1 ? -1 : 1 };
+				apply();
+			};
+			th.addEventListener("click", go);
+			th.addEventListener("keydown", (e) => {
+				if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); }
+			});
+		});
+		apply();
+		return table;
+	}
+	/* A number cell that sorts on its value, whatever it prints. */
+	function numCell(v, text) {
+		const td = el("td", "num", text !== undefined ? text
+			: Number.isFinite(v) ? String(v) : "—");
+		td.dataset.sv = Number.isFinite(v) ? String(v) : "";
+		return td;
+	}
+
 	function viewTeams(view, res) {
 		/* A team page. You could follow a program through the bracket and
 		   never see its roster, its style, its coach, its four prospects and
@@ -2135,7 +2352,8 @@
 			"as they happened — first-place votes split, teams rise and fall, " +
 			"and the preseason ballot runs on reputation the way the real one " +
 			"does. Click a team for its page."));
-		const wrap = el("div", "scroll");
+		// "tall": a scroll box of its own, so the header stays put over 25 rows.
+		const wrap = el("div", "scroll tall");
 		const table = el("table");
 		const thead = el("thead");
 		const hr = el("tr");
@@ -2151,14 +2369,14 @@
 		res.poll.forEach((t, i) => {
 			const tr = el("tr");
 			const fpv = i === 0 && t.apFirstPlace ? " (" + t.apFirstPlace + ")" : "";
-			tr.appendChild(el("td", "num", (i + 1) + fpv));
+			tr.appendChild(numCell(i + 1, (i + 1) + fpv));
 			// Movement against the preseason ballot.
 			const move = t.apPreseason ? t.apPreseason - (i + 1) : null;
 			const mv = el("td", "num");
 			mv.appendChild(el("span",
 				move === null ? "" : move > 0 ? "up" : move < 0 ? "down" : "",
-				move === null ? "NEW" : move === 0 ? "—"
-					: (move > 0 ? "▲" : "▼") + Math.abs(move)));
+				// The arrow is the .up/.down ::before; the text is the size.
+				move === null ? "NEW" : move === 0 ? "—" : String(Math.abs(move))));
 			mv.title = t.apPreseason
 				? "Preseason: No. " + t.apPreseason : "Unranked in the preseason poll";
 			tr.appendChild(mv);
@@ -2166,14 +2384,14 @@
 			tr.appendChild(el("td", null, t.conf));
 			tr.appendChild(el("td", null, t.w + "-" + t.l + (t.confRegularChamp ? " ★" : "")));
 			tr.appendChild(el("td", null, t.cw + "-" + t.cl));
-			tr.appendChild(el("td", "num", t.netRank ? String(t.netRank) : "—"));
+			tr.appendChild(numCell(t.netRank || undefined));
 			tr.appendChild(el("td", null, t.quads
 				? "Q1 " + t.quads.q1w + "-" + t.quads.q1l + " · Q2 " +
 					t.quads.q2w + "-" + t.quads.q2l
 				: "—"));
-			tr.appendChild(el("td", "num", t.sosAvg.toFixed(1)));
-			tr.appendChild(el("td", "num", t.offRtg ? t.offRtg.toFixed(1) : "—"));
-			tr.appendChild(el("td", "num", t.defRtg ? t.defRtg.toFixed(1) : "—"));
+			tr.appendChild(numCell(t.sosAvg, Number.isFinite(t.sosAvg) ? t.sosAvg.toFixed(1) : "—"));
+			tr.appendChild(numCell(t.offRtg || undefined, t.offRtg ? t.offRtg.toFixed(1) : "—"));
+			tr.appendChild(numCell(t.defRtg || undefined, t.defRtg ? t.defRtg.toFixed(1) : "—"));
 			tr.appendChild(el("td", null, t.ncaaSeed ? "No. " + t.ncaaSeed : "—"));
 			tr.appendChild(el("td", null, t.ncaaResult || t.nitResult ||
 				(t.bid ? "NCAA field" : "—")));
@@ -2182,6 +2400,10 @@
 			tb.appendChild(tr);
 		});
 		table.appendChild(tb);
+		// Rank, team, conference, NET, SOS, ORtg and DRtg sort; the rest are
+		// compound text. NET ascending is the natural first click; the
+		// ratings open best-first too (DRtg: lower is better).
+		sortableTable(table, "appoll", [0, 2, 3, 6, 8, 9, 10], [8, 9]);
 		wrap.appendChild(table);
 		view.appendChild(wrap);
 		view.appendChild(el("p", "legendline",
@@ -2443,7 +2665,7 @@
 			const lt = el("table");
 			const lh = el("thead");
 			const lhr = el("tr");
-			for (const h of ["#", "Club", "Record", "Prospects"]) {
+			for (const h of ["#", "Club", "Regular season", "Prospects"]) {
 				const th = el("th", h === "#" ? "num" : "", h);
 				th.scope = "col";
 				lhr.appendChild(th);
@@ -2456,7 +2678,10 @@
 				tr.appendChild(el("td", "num", String(i + 1)));
 				tr.appendChild(el("td", null, c.name + (c.leagueChamp ? " 🏆" : "") +
 					(c.cupChamp ? " 🥇" : "") + (c.relegated ? " ↓" : "")));
-				tr.appendChild(el("td", null, c.w + "-" + c.l));
+				// The regular-season record the table is ordered by; the
+				// all-competitions one mixed in cup and playoff games.
+				tr.appendChild(el("td", null, c.regW != null
+					? c.regW + "-" + c.regL : c.w + "-" + c.l));
 				tr.appendChild(wrapCell(c.prospects.map((p) =>
 					p.name + " (" + n1(p.stats.ppg) + " ppg" +
 					(p.proDeal ? ", " + p.proDeal : "") + ")").join(", ")));
@@ -2600,8 +2825,26 @@
 	   a club has no team page to open. Text for those, a link for the rest. */
 	function programLink(name) {
 		const C = global.Colleges;
-		if (C && C.conferenceOf && C.conferenceOf(name)) return teamLink(name);
-		return document.createTextNode(String(name));
+		if (!(C && C.conferenceOf && C.conferenceOf(name))) {
+			return document.createTextNode(String(name));
+		}
+		/* With universe mode OFF the team page is the loaded file's season,
+		   not this world, so a program named on the Universe tab opens its
+		   history in the tab's own Programs section instead. */
+		const st = A().state;
+		if (!st.cfg.universe && st.tab === "universe" && st.universe &&
+			(st.universe.rows || []).length) {
+			const b = el("button", "linky", name);
+			b.title = "Program history in this universe";
+			b.addEventListener("click", () => {
+				st.universeProgram = name;
+				A().render();
+				const sec = document.getElementById("uprograms");
+				if (sec && sec.scrollIntoView) sec.scrollIntoView({ block: "start" });
+			});
+			return b;
+		}
+		return teamLink(name);
 	}
 
 	/* Named for what it is, and NOT `leaderTable`: this file already had one,
@@ -2714,7 +2957,15 @@
 			/* A vacancy is the single most consequential thing in this table
 			   and it was not on the timeline at all. */
 			if (c && c.fired) {
-				td2.appendChild(el("span", "tag", c.reason || "leaving"));
+				td2.appendChild(el("span", "tag", (c.reason || "leaving") +
+					(c.hiredBy ? " → " + c.hiredBy : "")));
+			}
+			/* The carousel moves men: a vacancy filled by the coach another
+			   program lost to it is the same man, and says where from. */
+			const from = (c && c.from) || (coach && coach.movedFrom);
+			if (from) {
+				td2.appendChild(document.createTextNode(" "));
+				td2.appendChild(el("span", "tag moved", "from " + from));
 			}
 			tr.appendChild(td2);
 			tr.appendChild(el("td", "num", coach && coach.tenure ? String(coach.tenure) : ""));
@@ -2934,7 +3185,7 @@
 		view.appendChild(cm);
 	}
 
-	function recordsSection(view, rec) {
+	function recordsSection(view, rec, u) {
 		view.appendChild(el("h4", null, "Records book"));
 		view.appendChild(el("p", "legendline",
 			"All-time across this universe — every line is derived from the " +
@@ -2983,6 +3234,13 @@
 				m.name + " (" + m.school + ", " + m.seasons.join(", ") + ") — " +
 				m.reasons.join("; ")).join("\n")));
 		}
+		/* The registry's record book. An export from before it existed has
+		   records without it; derive it when the registry is here. */
+		let people = rec.people;
+		if (!people && u && u.registry && global.Universe && global.Universe.peopleRecords) {
+			try { people = global.Universe.peopleRecords(u.registry); } catch (e) { people = null; }
+		}
+		peopleRecordsSection(view, people, u && u.registry);
 	}
 
 	/* THE COACHING TREE.
@@ -3017,6 +3275,369 @@
 		view.appendChild(box);
 	}
 
+
+	/* PROGRAM HISTORY.
+
+	   Universe.programHistory keeps one row per programme per played season —
+	   level, prestige drift, coach, conference, record, March — and until now
+	   nothing drew it, so a team page could say what a programme did this
+	   season and nothing about it in the world. The same block renders on a
+	   team page (universe mode) and in the Universe tab's Programs section.
+	   With no recorded rows (a reload: the table is not persisted) the data
+	   layer rebuilds what it can from the live results handed in. */
+	function programHistoryAll() {
+		const U = global.Universe;
+		const st = A().state;
+		const u = st.universe;
+		if (!U || !U.programHistory || !u || !(u.rows || []).length) return {};
+		try {
+			return U.programHistory(u, null, (st.results || []).filter(Boolean)) || {};
+		} catch (e) { return {}; }
+	}
+
+	function programHistoryOf(name) {
+		const U = global.Universe;
+		const st = A().state;
+		const u = st.universe;
+		if (!name || !U || !U.programHistory || !u || !(u.rows || []).length) return [];
+		try {
+			return U.programHistory(u, name, (st.results || []).filter(Boolean)) || [];
+		} catch (e) { return []; }
+	}
+
+	const SVGNS = "http://www.w3.org/2000/svg";
+	function svgEl(tag, attrs, text) {
+		const n = document.createElementNS(SVGNS, tag);
+		for (const k of Object.keys(attrs || {})) n.setAttribute(k, String(attrs[k]));
+		if (text !== undefined) n.textContent = text;
+		return n;
+	}
+
+	/* Level over the seasons, as a line. Seasons are placed by year, so a gap
+	   in the files is a gap in the line rather than two seasons drawn as
+	   neighbours; a title is a filled dot and a conference move a dashed
+	   tick, which are the two things a programme's history turns on. */
+	function levelSpark(rows) {
+		const pts = rows.filter((r) => Number.isFinite(r.season) && Number.isFinite(r.level));
+		if (pts.length < 2) return null;
+		const W = 280;
+		const H = 46;
+		const s0 = pts[0].season;
+		const s1 = pts[pts.length - 1].season;
+		let lo = Math.min.apply(null, pts.map((r) => r.level));
+		let hi = Math.max.apply(null, pts.map((r) => r.level));
+		if (hi - lo < 8) { const mid = (hi + lo) / 2; lo = mid - 4; hi = mid + 4; }
+		const x = (s) => 6 + (s1 === s0 ? 0 : ((s - s0) / (s1 - s0)) * (W - 12));
+		const y = (v) => 5 + (1 - (v - lo) / (hi - lo)) * (H - 10);
+		const svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, class: "spark levelspark",
+			role: "img" });
+		svg.setAttribute("aria-label", "Program level by season: " +
+			pts.map((r) => r.season + " " + r.level.toFixed(1) + (r.title ? " (title)" : ""))
+				.join(", "));
+		svg.appendChild(svgEl("line", { x1: 0, x2: W, y1: H - 0.5, y2: H - 0.5, class: "lvlbase" }));
+		for (let i = 1; i < pts.length; i++) {
+			if (pts[i].conf && pts[i - 1].conf && pts[i].conf !== pts[i - 1].conf) {
+				const mx = x(pts[i].season);
+				const tick = svgEl("line", { x1: mx, x2: mx, y1: 1, y2: H - 1, class: "lvlmove" });
+				tick.appendChild(svgEl("title", null, pts[i].season + ": " + pts[i - 1].conf +
+					" → " + pts[i].conf));
+				svg.appendChild(tick);
+			}
+		}
+		let d = "";
+		pts.forEach((r, i) => {
+			const joined = i > 0 && r.season - pts[i - 1].season === 1;
+			d += (joined ? "L" : "M") + x(r.season).toFixed(1) + " " + y(r.level).toFixed(1) + " ";
+		});
+		svg.appendChild(svgEl("path", { d: d.trim(), class: "lvlline" }));
+		for (const r of pts) {
+			const c = svgEl("circle", { cx: x(r.season).toFixed(1), cy: y(r.level).toFixed(1),
+				r: r.title ? 4.2 : 2, class: r.title ? "lvltitle" : "lvldot" });
+			c.appendChild(svgEl("title", null, r.season + ": level " + r.level.toFixed(1) +
+				(r.title ? " — national champion" : "")));
+			svg.appendChild(c);
+		}
+		return svg;
+	}
+
+	function signed(v, dp) {
+		if (!Number.isFinite(v)) return "";
+		const s = v.toFixed(dp);
+		return v > 0 ? "+" + s : s === (0).toFixed(dp) ? s : s.replace("-", "−");
+	}
+
+	function programHistoryBlock(box, name, rows, opts) {
+		opts = opts || {};
+		const head = el(opts.heading || "h4", "progtitle");
+		if (opts.link) head.appendChild(teamLink(name));
+		else head.appendChild(document.createTextNode(opts.title || "Program history"));
+		box.appendChild(head);
+		if (!rows.length) {
+			box.appendChild(el("p", "hint", "No seasons of " + name +
+				" are on record in this universe yet."));
+			return;
+		}
+		const titles = rows.filter((r) => r.title).map((r) => r.season);
+		const trips = rows.filter((r) => r.seed || (r.ncaa && !/First Four/.test(r.ncaa)));
+		const w = rows.reduce((a, r) => a + (r.w || 0), 0);
+		const l = rows.reduce((a, r) => a + (r.l || 0), 0);
+		const confs = [];
+		for (const r of rows) if (r.conf && confs[confs.length - 1] !== r.conf) confs.push(r.conf);
+		const coaches = [];
+		for (const r of rows) if (r.coach && coaches[coaches.length - 1] !== r.coach) coaches.push(r.coach);
+		const first = rows[0];
+		const last = rows[rows.length - 1];
+		box.appendChild(el("p", "legendline",
+			rows.length + " season" + (rows.length === 1 ? "" : "s") + " on record (" +
+			first.season + (rows.length > 1 ? "–" + last.season : "") + ") · " +
+			w + "-" + l + " · " + trips.length + " NCAA trip" + (trips.length === 1 ? "" : "s") +
+			" · level " + first.level.toFixed(1) +
+			(rows.length > 1 ? " → " + last.level.toFixed(1) : "") +
+			" · " + coaches.length + " head coach" + (coaches.length === 1 ? "" : "es") +
+			(confs.length > 1 ? " · conferences " + confs.join(" → ") : "")));
+		const top = el("div", "proghead");
+		if (titles.length) {
+			const ban = el("div", "banners");
+			ban.setAttribute("aria-label", titles.length + " national title" +
+				(titles.length === 1 ? "" : "s"));
+			for (const s of titles) {
+				const b = el("span", "banner");
+				b.appendChild(el("span", "bannery", String(s)));
+				b.appendChild(el("span", "bannerw", "Champions"));
+				ban.appendChild(b);
+			}
+			top.appendChild(ban);
+		}
+		const spark = levelSpark(rows);
+		if (spark) {
+			const fig = el("figure", "levelfig");
+			fig.appendChild(spark);
+			fig.appendChild(el("figcaption", "unit",
+				"Program level by season" + (titles.length ? " · filled dot: title" : "") +
+				(confs.length > 1 ? " · dashed: conference move" : "")));
+			top.appendChild(fig);
+		}
+		if (top.childNodes.length) box.appendChild(top);
+		const wrap = el("div", "scroll");
+		const table = el("table", "proghist");
+		const hr = el("tr");
+		const NUM = ["Record", "Level", "Drift", "Banners"];
+		for (const h of ["Season", "Conference", "Coach", "Record", "March", "Level", "Drift",
+			"Banners"]) {
+			hr.appendChild(el("th", NUM.indexOf(h) >= 0 ? "num" : "", h));
+		}
+		const thead = el("thead");
+		thead.appendChild(hr);
+		table.appendChild(thead);
+		const tb = el("tbody");
+		/* Newest first: the question on a team page is "how did we get here". */
+		for (let i = rows.length - 1; i >= 0; i--) {
+			const r = rows[i];
+			const prev = i > 0 ? rows[i - 1] : null;
+			const tr = el("tr", [r.title ? "titlerow" : "",
+				r.season === opts.season ? "now" : ""].join(" ").trim());
+			const sc = el("td", null, String(r.season));
+			if (r.season === opts.season) sc.title = "The season on screen";
+			tr.appendChild(sc);
+			const moved = prev && prev.conf && r.conf && prev.conf !== r.conf;
+			const cf = el("td", moved ? "confmove" : null, r.conf || "—");
+			if (moved) {
+				cf.appendChild(document.createTextNode(" "));
+				cf.appendChild(el("span", "tag moved", "from " + prev.conf));
+			}
+			tr.appendChild(cf);
+			const co = el("td", null, r.coach || "—");
+			if (r.movedFrom) {
+				co.appendChild(document.createTextNode(" "));
+				const tag = el("span", "tag moved", "from " + r.movedFrom);
+				tag.title = "Hired away from " + r.movedFrom + " — the same man, a new program";
+				co.appendChild(tag);
+			} else if (prev && prev.coach && r.coach && prev.coach !== r.coach) {
+				co.appendChild(document.createTextNode(" "));
+				co.appendChild(el("span", "tag", "new"));
+			}
+			tr.appendChild(co);
+			tr.appendChild(el("td", "num", (r.w || 0) + "-" + (r.l || 0)));
+			tr.appendChild(el("td", null, r.title ? "National champion" +
+				(r.seed ? " (No. " + r.seed + ")" : "")
+				: r.seed ? "No. " + r.seed + " · " + (r.ncaa || "in the field")
+					: r.ncaa || "—"));
+			const lv = el("td", "num", Number.isFinite(r.level) ? r.level.toFixed(1) : "—");
+			if (prev && Number.isFinite(prev.level) && Number.isFinite(r.level)) {
+				const dl = r.level - prev.level;
+				if (Math.abs(dl) >= 0.05) {
+					lv.appendChild(el("span", dl > 0 ? "lvup" : "lvdown", " " + signed(dl, 1)));
+				}
+			}
+			tr.appendChild(lv);
+			tr.appendChild(el("td", "num", Number.isFinite(r.drift) && r.drift ? signed(r.drift, 2) : ""));
+			tr.appendChild(el("td", "num", r.titles ? String(r.titles) : ""));
+			tb.appendChild(tr);
+		}
+		table.appendChild(tb);
+		wrap.appendChild(table);
+		box.appendChild(wrap);
+	}
+
+	/* The Universe tab's own way in to a programme: every one the chain has
+	   rows for, titles first, so a program name anywhere on the tab has
+	   somewhere to go when universe mode is off and the team page is not
+	   this world. */
+	function programsSection(view) {
+		const all = programHistoryAll();
+		const names = Object.keys(all).filter((n) => all[n].length);
+		if (!names.length) return;
+		const st = A().state;
+		const titlesOf = (n) => all[n].length ? all[n][all[n].length - 1].titles || 0 : 0;
+		const lastLevel = (n) => all[n].length ? all[n][all[n].length - 1].level || 0 : 0;
+		names.sort((a, b) => titlesOf(b) - titlesOf(a) || lastLevel(b) - lastLevel(a) ||
+			byName(a, b));
+		const sec = el("section", "programs");
+		sec.id = "uprograms";
+		sec.appendChild(el("h4", null, "Programs"));
+		sec.appendChild(el("p", "legendline",
+			"Every program's run through this world: its level season by season, " +
+			"the conference it played in, who coached it and what March did. " +
+			"Programs with banners are listed first."));
+		const bar = el("div", "filters");
+		const sel = el("select");
+		sel.setAttribute("aria-label", "Program");
+		for (const n of names) {
+			const t = titlesOf(n);
+			sel.appendChild(new Option(n + (t ? " — " + t + " title" + (t === 1 ? "" : "s") : ""), n));
+		}
+		const chosen = st.universeProgram && all[st.universeProgram] ? st.universeProgram : names[0];
+		sel.value = chosen;
+		sel.addEventListener("change", () => {
+			st.universeProgram = sel.value;
+			A().render();
+		});
+		bar.appendChild(sel);
+		/* The quick picks: the programs the world is about. */
+		for (const n of names.slice(0, 6)) {
+			if (n === chosen) continue;
+			const b = el("button", "tiny", n);
+			b.addEventListener("click", () => { st.universeProgram = n; A().render(); });
+			bar.appendChild(b);
+		}
+		sec.appendChild(bar);
+		programHistoryBlock(sec, chosen, all[chosen], { heading: "h5", link: true });
+		view.appendChild(sec);
+	}
+
+	/* RIVALRIES, AS A LIST.
+
+	   The threads name the few pairs that crossed the bar; this is the top of
+	   the book itself (the carry's rivalry ledger, see rivalriesStep), which
+	   is the answer to "who keeps running into whom in March". */
+	function rivalriesSection(view, u) {
+		const riv = u.tail && u.tail.carry ? u.tail.carry.rivalries : null;
+		const list = Object.keys(riv || {}).map((k) => riv[k])
+			.filter((e) => e && e.a && e.b && (e.march || []).length >= 2)
+			.sort((x, y) => y.march.length - x.march.length || y.games - x.games ||
+				Math.max.apply(null, y.march) - Math.max.apply(null, x.march) ||
+				String(x.a + x.b).localeCompare(String(y.a + y.b)))
+			.slice(0, 10);
+		if (!list.length) return;
+		view.appendChild(el("h4", null, "Rivalries"));
+		view.appendChild(el("p", "legendline",
+			"Pairs that met in the NCAA tournament more than once. Once a pair " +
+			"has met in March, every later game between them counts toward the series."));
+		const wrap = el("div", "scroll");
+		const table = el("table");
+		const hr = el("tr");
+		for (const h of ["Rivalry", "March meetings", "Seasons", "Series"]) {
+			hr.appendChild(el("th", h === "March meetings" ? "num" : "", h));
+		}
+		const thead = el("thead");
+		thead.appendChild(hr);
+		table.appendChild(thead);
+		const tb = el("tbody");
+		for (const e of list) {
+			const tr = el("tr");
+			const td = el("td");
+			td.appendChild(programLink(e.a));
+			td.appendChild(document.createTextNode(" vs "));
+			td.appendChild(programLink(e.b));
+			tr.appendChild(td);
+			tr.appendChild(el("td", "num", String(e.march.length)));
+			tr.appendChild(el("td", null, e.march.slice().sort((a, b) => a - b).join(", ")));
+			tr.appendChild(el("td", null, e.aw === e.bw ? "level " + e.aw + "-" + e.bw
+				: (e.aw > e.bw ? e.a + " " + e.aw + "-" + e.bw : e.b + " " + e.bw + "-" + e.aw) +
+					" (" + e.games + " game" + (e.games === 1 ? "" : "s") + ")"));
+			tb.appendChild(tr);
+		}
+		table.appendChild(tb);
+		wrap.appendChild(table);
+		view.appendChild(wrap);
+	}
+
+	/* THE RECORD BOOK FOR PEOPLE (Universe.peopleRecords): the registry's
+	   men ranked by what a save's record book asks about people. A name opens
+	   his page in his own class when the registry knows which file that is. */
+	function personLink(x, reg) {
+		const r = reg && reg[x.id];
+		if (r && Number.isFinite(r.fileIndex) && r.draft) {
+			const go = el("button", "linky", x.name);
+			go.title = "Open his page in the " + r.draft.season + " class";
+			go.addEventListener("click", () => {
+				A().showPlayerInFile(r.fileIndex, String(x.id).split("/").pop());
+			});
+			return go;
+		}
+		return document.createTextNode(String(x.name));
+	}
+
+	function peopleRecordsSection(view, pr, reg) {
+		if (!pr) return;
+		const boxes = [];
+		const table = (title, list, cells) => {
+			if (!list || !list.length) return;
+			const box = el("div");
+			box.appendChild(el("h5", null, title));
+			const t = el("table");
+			const tb = el("tbody");
+			for (const x of list) {
+				const tr = el("tr");
+				const td = el("td");
+				td.appendChild(personLink(x, reg));
+				if (x.school) td.appendChild(el("span", "unit pschool", x.school));
+				tr.appendChild(td);
+				cells(x).forEach((c, i) => tr.appendChild(el("td", i ? "pdetail" : "num", c)));
+				tb.appendChild(tr);
+			}
+			t.appendChild(tb);
+			box.appendChild(t);
+			boxes.push(box);
+		};
+		table("Most honors", pr.mostHonors, (x) => [x.count + " honor" + (x.count === 1 ? "" : "s"),
+			(x.seasons || []).join(", ")]);
+		table("Most seasons", pr.mostSeasons, (x) => [x.count + " seasons",
+			x.from + "–" + x.to]);
+		table("Undrafted, and back", pr.bestReturners, (x) => [
+			x.bestPpg ? x.bestPpg.toFixed(1) + " ppg" : "—",
+			"back in " + (x.returned || []).join(", ") +
+				(x.honors ? " · " + x.honors + " honor" + (x.honors === 1 ? "" : "s") : "")]);
+		if (!boxes.length && !pr.bestHonorSeason) return;
+		view.appendChild(el("h5", null, "People"));
+		view.appendChild(el("p", "legendline",
+			(pr.people || 0) + " people in this world's registry, " + (pr.careers || 0) +
+			" of them seen in more than one season."));
+		if (boxes.length) {
+			const grid = el("div", "cards peoplegrid");
+			for (const b of boxes) grid.appendChild(b);
+			view.appendChild(grid);
+		}
+		if (pr.bestHonorSeason) {
+			const b = pr.bestHonorSeason;
+			const line = el("div", "note");
+			line.appendChild(document.createTextNode("Best single honors season: "));
+			line.appendChild(personLink(b, reg));
+			line.appendChild(document.createTextNode((b.school ? " (" + b.school + ")" : "") +
+				", " + b.season + " — " + b.count + " honors"));
+			view.appendChild(line);
+		}
+	}
 
 	function viewUniverse(view, res) {
 		const st = A().state;
@@ -3288,7 +3909,16 @@
 				const line = el("div");
 				if (typeof t === "string") {
 					line.appendChild(document.createTextNode(t));
-				} else if (t.team) {
+				} else if (t.team && t.other &&
+					String(t.text).indexOf(t.team + " and " + t.other) === 0) {
+					/* A rivalry names two programs, and both are links. */
+					line.className = "thread-" + (t.kind || "pair");
+					line.appendChild(programLink(t.team));
+					line.appendChild(document.createTextNode(" and "));
+					line.appendChild(programLink(t.other));
+					line.appendChild(document.createTextNode(
+						String(t.text).slice((t.team + " and " + t.other).length)));
+				} else if (t.team && String(t.text).indexOf(t.team) === 0) {
 					line.appendChild(programLink(t.team));
 					line.appendChild(document.createTextNode(
 						" " + String(t.text).slice(t.team.length + 1)));
@@ -3299,7 +3929,9 @@
 			}
 			view.appendChild(tl);
 		}
-		if (u.records) recordsSection(view, u.records);
+		if (u.records) recordsSection(view, u.records, u);
+		if (!u.running) rivalriesSection(view, u);
+		if (!u.running) programsSection(view);
 		if (!u.running && u.cfgs && Object.keys(u.cfgs).length) worldSection(view, u);
 		if (!u.running) registrySection(view, u);
 		if (!u.running && u.cfgs && Object.keys(u.cfgs).length) careersSection(view, u);
@@ -3579,7 +4211,8 @@
 		return v * (40 / gm);
 	}
 	function leaderTable(res, title, key, fmt, low) {
-		const list = res.players.filter((p) => p.stats && p.stats.mpg >= 15)
+		const list = res.players.filter((p) => p.stats && p.stats.mpg >= 15 &&
+			Number.isFinite(leaderValue(p, key)))
 			.sort((a, b) => (low
 				? leaderValue(a, key) - leaderValue(b, key)
 				: leaderValue(b, key) - leaderValue(a, key)))
@@ -3646,10 +4279,21 @@
 			const list = el("ol", "ballot");
 			for (const r of b.top) {
 				const li = el("li");
+				/* A returning player outside the class has a page too (see
+				   fieldPlayerPage) when his team carries his line; the name was
+				   plain text, so the one man a ballot preferred to the whole
+				   class was the one name on it you could not click. */
+				const team = res.teams && res.teams[r.school];
+				const fieldKey = !r.inClass && team
+					? ((team.fieldPlayers || []).filter((f) =>
+						(r.key && f.key === r.key) || f.name === r.name)[0] || {}).key
+					: null;
 				if (r.inClass && r.key) li.appendChild(playerLink(r.name, r.key));
+				else if (fieldKey) li.appendChild(playerLink(r.name, fieldKey));
 				else li.appendChild(document.createTextNode(r.name));
 				li.appendChild(document.createTextNode(" — "));
-				li.appendChild(teamLink(r.school));
+				if (team) li.appendChild(teamLink(r.school));
+				else li.appendChild(document.createTextNode(r.school || ""));
 				li.appendChild(el("span", "unit",
 					r.rank === 1 ? "  winner" : "  −" + r.behind.toFixed(2)));
 				if (!r.inClass) li.appendChild(el("span", "unit", "  not in the class"));
@@ -3672,7 +4316,7 @@
 		leaders.appendChild(leaderTable(res, "Points", "ppg"));
 		leaders.appendChild(leaderTable(res, "Rebounds", "rpg"));
 		leaders.appendChild(leaderTable(res, "Assists", "apg"));
-		leaders.appendChild(leaderTable(res, "True shooting", "ts", (v) => pc(v) + "%"));
+		leaders.appendChild(leaderTable(res, "True shooting", "ts", (v) => pcs(v)));
 		view.appendChild(leaders);
 
 		/* --- the defensive board -------------------------------------------
@@ -3811,7 +4455,7 @@
 			c.appendChild(el("div", "note",
 				p.newPos + " · " + p.newOvr + "/" + p.newPot + " · " + p.archetype + "\n" +
 				n1(s.ppg) + " PPG / " + n1(s.rpg) + " RPG / " + n1(s.apg) + " APG · " +
-				pc(s.fgp) + "% FG, " + pc(s.tpp) + "% 3P\n" +
+				pcs(s.fgp) + " FG, " + pcs(s.tpp) + " 3P\n" +
 				p.awards.join("\n") +
 				(p.priorAwards && p.priorAwards.length
 					? "\nEarlier: " + p.priorAwards.slice().sort((a, b) => b.season - a.season)
@@ -3940,13 +4584,91 @@
 			return;
 		}
 
+		/* Search, position and sort, on the board itself. Reading the board
+		   meant reading all sixty rows in board order; "the guards", "who is
+		   from Duke", "sort by PPG" each meant going to Player Edit. The
+		   filter lives here (not in the prospect table's filter) because the
+		   two views answer different questions and one should not quietly
+		   narrow the other. */
+		const bf = boardFilter;
+		const fbar = el("div", "filters");
+		const q = searchInput("Find a prospect, school or club…", "Search the board",
+			() => bf.q, (v) => { bf.q = v; });
+		fbar.appendChild(q);
+		const posSel = el("select");
+		posSel.setAttribute("aria-label", "Board position filter");
+		posSel.appendChild(new Option("all positions", ""));
+		for (const pos of ["PG", "G", "SG", "GF", "SF", "F", "PF", "FC", "C"]) {
+			posSel.appendChild(new Option(pos, pos));
+		}
+		posSel.value = bf.pos;
+		posSel.addEventListener("change", () => { bf.pos = posSel.value; A().render(); });
+		fbar.appendChild(posSel);
+		if (bf.sort) {
+			const reset = el("button", "chip", "Board order");
+			reset.type = "button";
+			reset.title = "Back to board order, with the round dividers";
+			reset.addEventListener("click", () => { bf.sort = null; A().render(); });
+			fbar.appendChild(reset);
+		}
+		view.appendChild(fbar);
+
+		/* One sort value per heading. Pick is the overall mock slot
+		   (round * 100 + pick), Year the class-year ordinal. */
+		const BOARD_SORT = {
+			Board: (p) => p.boardRank, Rd: (p) => p.mockRound || undefined,
+			Pick: (p) => (p.mockRound ? p.mockRound * 100 + p.mockPick : undefined),
+			Player: (p) => p.name, Pos: (p) => p.newPos, Year: (p) => classYearRank(p.classYear),
+			Ovr: (p) => p.newOvr, Pot: (p) => p.newPot,
+			"School / club": (p) => p.proClub || p.newCollege,
+			Preseason: (p) => p.preseasonRank, "±": (p) => p.stockMove,
+			PPG: (p) => (p.stats ? p.stats.ppg : undefined),
+			Honors: (p) => (p.awards || []).length,
+		};
+		const ASC_FIRST = { Board: 1, Rd: 1, Pick: 1, Player: 1, Pos: 1, Year: 1,
+			"School / club": 1, Preseason: 1 };
+		const needle = bf.q.trim().toLowerCase();
+		let list = (res.board || []).filter((p) => {
+			if (bf.pos && p.newPos !== bf.pos) return false;
+			if (!needle) return true;
+			return (p.name + " " + (p.newCollege || "") + " " + (p.proClub || "") + " " +
+				(p.archetype || "")).toLowerCase().indexOf(needle) !== -1;
+		});
+		if (bf.sort) {
+			const get = BOARD_SORT[bf.sort.key];
+			if (get) {
+				list = sortRows(list.map((p) => ({ p, sortVals: { b: get(p) } })),
+					[{ key: "b", dir: bf.sort.dir }]).map((r) => r.p);
+			}
+		}
+
 		const wrap = el("div", "scroll");
 		const table = el("table");
 		const thead = el("thead");
 		const hr = el("tr");
 		for (const h of BOARD_HEADS) {
-			const th = el("th", ["Board", "Rd", "Pick", "Ovr", "Pot", "Preseason", "±", "PPG"].indexOf(h) >= 0 ? "num" : "", h);
+			const th = el("th", (["Board", "Rd", "Pick", "Ovr", "Pot", "Preseason", "±", "PPG"].indexOf(h) >= 0 ? "num " : "") +
+				(h === "Player" ? "sticky " : "") + "sortable", h);
 			th.scope = "col";
+			th.tabIndex = 0;
+			th.title = h + " — click to sort";
+			const on = bf.sort && bf.sort.key === h;
+			if (on) {
+				th.textContent = h + (bf.sort.dir < 0 ? " ▾" : " ▴");
+				th.setAttribute("aria-sort", bf.sort.dir < 0 ? "descending" : "ascending");
+				th.classList.add("sorted");
+			}
+			const go = () => {
+				if (bf.sort && bf.sort.key === h) bf.sort.dir *= -1;
+				else bf.sort = { key: h, dir: ASC_FIRST[h] ? 1 : -1 };
+				// Board ascending IS board order: drop the sort, keep the dividers.
+				if (bf.sort.key === "Board" && bf.sort.dir === 1) bf.sort = null;
+				A().render();
+			};
+			th.addEventListener("click", go);
+			th.addEventListener("keydown", (e) => {
+				if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); }
+			});
 			hr.appendChild(th);
 		}
 		thead.appendChild(hr);
@@ -3963,9 +4685,12 @@
 			: p.mockRound === 1 && p.mockPick <= 14 ? "Lottery"
 			: p.mockRound === 1 ? "First round"
 			: p.mockRound === 2 ? "Second round" : "Round " + p.mockRound);
-		for (const p of res.board || []) {
+		// Dividers only make sense in board order.
+		const banded = !bf.sort;
+		let firstRow = true;
+		for (const p of list) {
 			const band = bandOf(p);
-			if (band !== lastBand) {
+			if (banded && band !== lastBand) {
 				lastBand = band;
 				const sep = el("tr", "bandrow");
 				const cell = el("td", null, band);
@@ -3974,7 +4699,13 @@
 				tb.appendChild(sep);
 			}
 			const tr = el("tr");
-			tr.tabIndex = 0;
+			/* Roving tabindex, as in Player Edit: one row in the tab order
+			   and the arrow keys (or j/k) walk the rest, instead of sixty tab
+			   stops between the header and whatever is under the board. */
+			tr.tabIndex = firstRow ? 0 : -1;
+			if (firstRow) tr.setAttribute("data-focus", "boardrow");
+			firstRow = false;
+			tr.dataset.pkey = p.key;
 			/* A prospect who did not play a season anywhere — a redshirt year
 			   lost to an injury, a man who sat out a transfer, a signing that
 			   never got minutes — has a blank PPG cell and no awards, and the
@@ -4003,6 +4734,10 @@
 				A().showPlayer(p.key);
 			});
 			tr.addEventListener("keydown", (e) => {
+				if (e.target !== tr) return;
+				const d = (e.key === "j" || e.key === "ArrowDown") ? 1
+					: (e.key === "k" || e.key === "ArrowUp") ? -1 : 0;
+				if (d) { e.preventDefault(); moveRow(tr, d, false); return; }
 				if (e.key !== "Enter" && e.key !== " ") return;
 				e.preventDefault();
 				A().showPlayer(p.key);
@@ -4036,7 +4771,14 @@
 		table.appendChild(tb);
 		wrap.appendChild(table);
 		view.appendChild(wrap);
+		if (!list.length) {
+			view.appendChild(el("p", "hint", "No prospect on the board matches that search."));
+		}
 	}
+	// Disclosure states that should survive a re-render but are not settings.
+	const uiMemo = { classInfoOpen: false, filtersOpen: false };
+	// The board's own search, position filter and sort (see viewBoard).
+	const boardFilter = { q: "", pos: "", sort: null };
 
 	/* --------------------------------------------------------- distributions */
 
@@ -4456,6 +5198,27 @@
 
 	/* --------------------------------------------------------------- compare */
 
+	/* Put a prospect into the comparison and go there. From a row's menu or
+	   his own page: the other side is whoever is already held, or failing
+	   that the best player on the board who is not him. */
+	function compareWith(p, res) {
+		const st = A().state;
+		const c = (Array.isArray(st.compare) ? st.compare.slice() : [])
+			.concat(new Array(COMPARE_MAX).fill(null)).slice(0, COMPARE_MAX);
+		if (c.indexOf(p.key) === -1) {
+			const free = c.indexOf(null);
+			c[free === -1 ? COMPARE_MAX - 1 : free] = p.key;
+		}
+		if (c.filter(Boolean).length < 2) {
+			const other = (res.board || []).filter((x) => x.key !== p.key)[0];
+			if (other) c[c.indexOf(null)] = other.key;
+		}
+		st.compare = c;
+		st.compareCleared = false;
+		if (A().showTab) A().showTab("compare");
+		else { st.tab = "compare"; st.player = null; A().persist(); A().render(); }
+	}
+
 	function viewCompare(view, res) {
 		/* Two verbs, not one. Pin gives you class-versus-class, which is what
 		   this tab did; the obvious missing one is player-versus-player, which
@@ -4674,10 +5437,18 @@
 		const idbox = el("div");
 		idbox.appendChild(el("h3", null, p.name));
 		const line = el("p", "legendline");
-		line.appendChild(teamLink(p.newCollege));
+		/* Only a program with a Teams page gets a link. A pro's newCollege is
+		   his LEAGUE and a man who sat out has "Did not play" — both used to
+		   open an empty team page. A pro reads as "club (league)". */
+		if (res.teams && res.teams[p.newCollege]) line.appendChild(teamLink(p.newCollege));
+		else if (p.proClub) {
+			line.appendChild(document.createTextNode(p.proClub +
+				(p.newCollege && p.newCollege !== p.proClub ? " (" + p.newCollege + ")" : "")));
+		} else line.appendChild(document.createTextNode(p.newCollege || "—"));
+		const wt = Number.isFinite(p.newWeight) ? p.newWeight : p.weight;
 		line.appendChild(document.createTextNode(
 			" · " + p.classYear + " · " + p.newPos + " · " + feet(p.newHgtInches) +
-			", " + p.weight + " lb · " + p.archetype));
+			(Number.isFinite(wt) ? ", " + wt + " lb" : "") + " · " + p.archetype));
 		idbox.appendChild(line);
 		const pills = el("div", "rowflex");
 		pills.appendChild(el("span", "pill", "ovr " + p.newOvr + " · pot " + p.newPot));
@@ -4687,6 +5458,13 @@
 		if (p.boardRank) pills.appendChild(el("span", "pill", "Board: No. " + p.boardRank));
 		if (p.surprise) pills.appendChild(el("span", "pill", p.surprise.label));
 		idbox.appendChild(pills);
+		const acts = el("div", "rowflex playeracts");
+		const cmp = el("button", "tiny", "Compare…");
+		cmp.type = "button";
+		cmp.title = "Open the Compare tab with " + p.name + " in it";
+		cmp.addEventListener("click", () => compareWith(p, res));
+		acts.appendChild(cmp);
+		idbox.appendChild(acts);
 		head.appendChild(idbox);
 		box.appendChild(head);
 
@@ -4742,13 +5520,13 @@
 			row("This season", s.gp + " GP · " + n1(s.mpg) + " MPG · " +
 				n1(s.ppg) + " / " + n1(s.rpg) + " / " + n1(s.apg) +
 				" · " + n1(s.spg) + " stl, " + n1(s.bpg) + " blk");
-			row("Shooting", "FG " + pc(s.fgp) + "% · 3P " + pc(s.tpp) + "% · FT " +
-				pc(s.ftp) + "% · TS " + pc(s.ts) + "%");
-			row("Usage", pc(s.usg) + "% of possessions · " + n1(s.topg) + " TO · " +
+			row("Shooting", "FG " + pcs(s.fgp) + " · 3P " + pcs(s.tpp) + " · FT " +
+				pcs(s.ftp) + " · TS " + pcs(s.ts));
+			row("Usage", pcs(s.usg) + " of possessions · " + n1(s.topg) + " TO · " +
 				n1(s.pfpg) + " PF");
 			const gl = p.gameLog;
-			row("Playmaking", (Number.isFinite(s.astdRate) ? "assisted on " + pc(s.astdRate) + "% of his makes · " : "") +
-				(Number.isFinite(s.transShare) ? pc(s.transShare) + "% of points in transition · " : "") +
+			row("Playmaking", (Number.isFinite(s.astdRate) ? "assisted on " + pcs(s.astdRate) + " of his makes · " : "") +
+				(Number.isFinite(s.transShare) ? pcs(s.transShare) + " of points in transition · " : "") +
 				(Number.isFinite(s.pm) ? (s.pm >= 0 ? "+" : "") + n1(s.pm) + " per game" +
 					(Number.isFinite(s.onOff) ? " (on/off " + (s.onOff >= 0 ? "+" : "") + n1(s.onOff) + ", est.)" : "") : ""));
 			if (gl && gl.clutch) {
@@ -5036,9 +5814,9 @@
 			row("This season", s.gp + " GP · " + n1(s.mpg) + " MPG · " +
 				n1(s.ppg) + " / " + n1(s.rpg) + " / " + n1(s.apg) +
 				" · " + n1(s.spg) + " stl, " + n1(s.bpg) + " blk");
-			row("Shooting", "FG " + pc(s.fgp) + "% · 3P " + pc(s.tpp) + "% · FT " +
-				pc(s.ftp) + "% · TS " + pc(s.ts) + "%");
-			row("Usage", pc(s.usg) + "% of possessions · " + n1(s.topg) + " TO · " +
+			row("Shooting", "FG " + pcs(s.fgp) + " · 3P " + pcs(s.tpp) + " · FT " +
+				pcs(s.ftp) + " · TS " + pcs(s.ts));
+			row("Usage", pcs(s.usg) + " of possessions · " + n1(s.topg) + " TO · " +
 				n1(s.pfpg) + " PF");
 		}
 		if (team) row("Team", team.w + "-" + team.l + (team.ncaaSeed
@@ -5100,9 +5878,9 @@
 			row("This season", s.gp + " GP · " + n1(s.mpg) + " MPG · " +
 				n1(s.ppg) + " / " + n1(s.rpg) + " / " + n1(s.apg) +
 				" · " + n1(s.spg) + " stl, " + n1(s.bpg) + " blk");
-			row("Shooting", "FG " + pc(s.fgp) + "% · 3P " + pc(s.tpp) + "% · FT " +
-				pc(s.ftp) + "% · TS " + pc(s.ts) + "%");
-			row("Usage", pc(s.usg) + "% of possessions · " + n1(s.topg) + " TO · " +
+			row("Shooting", "FG " + pcs(s.fgp) + " · 3P " + pcs(s.tpp) + " · FT " +
+				pcs(s.ftp) + " · TS " + pcs(s.ts));
+			row("Usage", pcs(s.usg) + " of possessions · " + n1(s.topg) + " TO · " +
 				n1(s.pfpg) + " PF");
 		}
 		const honors = (res.fieldHonors || []).filter((h) => h.key === key || (!h.key && h.name === fp.name && h.school === team.name));
@@ -5189,9 +5967,9 @@
 			tr.appendChild(td);
 			tr.appendChild(el("td", null, t.cw + "-" + t.cl));
 			tr.appendChild(el("td", null, t.w + "-" + t.l));
-			tr.appendChild(el("td", "num", t.sosAvg.toFixed(1)));
-			tr.appendChild(el("td", "num", t.offRtg ? t.offRtg.toFixed(1) : "—"));
-			tr.appendChild(el("td", "num", t.defRtg ? t.defRtg.toFixed(1) : "—"));
+			tr.appendChild(numCell(t.sosAvg, Number.isFinite(t.sosAvg) ? t.sosAvg.toFixed(1) : "—"));
+			tr.appendChild(numCell(t.offRtg || undefined, t.offRtg ? t.offRtg.toFixed(1) : "—"));
+			tr.appendChild(numCell(t.defRtg || undefined, t.defRtg ? t.defRtg.toFixed(1) : "—"));
 			tr.appendChild(el("td", null, t.ncaaSeed ? "No. " + t.ncaaSeed + " seed, " +
 				t.ncaaResult : (t.nitResult || "—")));
 			tb.appendChild(tr);
@@ -5314,7 +6092,8 @@
 		// the coach today, but the guard was on the wrong object.
 		if (t.coach && t.style) {
 			row("Coach", t.coach.name + ", year " + t.coach.tenure +
-				" — plays " + t.style.name);
+				" — plays " + t.style.name +
+				(t.coach.movedFrom ? " · hired away from " + t.coach.movedFrom : ""));
 		}
 		row("Program level", Math.round(t.level) + " (rating " +
 			t.rating.toFixed(1) + ")");
@@ -5378,6 +6157,17 @@
 			}).join(", "));
 		}
 		box.appendChild(dl);
+
+		/* In universe mode this season is one of many the program played;
+		   its history across the world goes right under the season's facts. */
+		if (A().state.cfg.universe) {
+			const hist = programHistoryOf(t.name);
+			if (hist.length) {
+				const sec = el("section", "programs");
+				programHistoryBlock(sec, t.name, hist, { season: res.season });
+				box.appendChild(sec);
+			}
+		}
 
 		box.appendChild(el("h4", null, "Prospects"));
 		const plist = el("div", "cards");
@@ -5549,6 +6339,12 @@
 	   space. */
 	function gameKeyFor(team, index) { return team + "|" + index; }
 
+	// A game's stage in words; "reg" was printed as-is.
+	const STAGE_LABEL = {
+		reg: "non-conference", conf: "conference tournament", ncaa: "NCAA tournament",
+		nit: "NIT", cbi: "CBI", pre: "preseason",
+	};
+
 	function gamePage(view, res, ref) {
 		const box = el("div");
 		const cut = String(ref || "").lastIndexOf("|");
@@ -5584,7 +6380,8 @@
 		box.appendChild(el("p", "legendline",
 			when + " · " + (g.home > 0 ? "at " + home.name
 				: g.home < 0 ? "at " + g.opp : "neutral floor") +
-			" · " + (g.round || (g.conference ? "conference game" : g.stage)) +
+			" · " + (g.round || (g.conference ? "conference game"
+				: STAGE_LABEL[g.stage] || g.stage || "")) +
 			(away ? " · " + g.opp + " " + away.w + "-" + away.l +
 				" · " + home.name + " " + home.w + "-" + home.l : "")));
 
@@ -5770,6 +6567,16 @@
 		if (!Array.isArray(st.compare)) st.compare = [];
 		while (st.compare.length < COMPARE_MAX) st.compare.push(null);
 		st.compare.length = COMPARE_MAX;
+		/* An empty comparison is an empty tab. Unless the user cleared it on
+		   purpose, open on the top two of the board — the comparison everyone
+		   makes first. A key from a previous class counts as empty. */
+		const known = {};
+		for (const p of res.players) known[p.key] = true;
+		st.compare = st.compare.map((k) => (k && known[k] ? k : null));
+		if (!st.compareCleared && st.compare.every((k) => !k)) {
+			const top = (res.board || []).slice(0, 2).map((p) => p.key);
+			top.forEach((k, i) => { st.compare[i] = k; });
+		}
 		const box = el("div", "card");
 		box.appendChild(el("h4", null, "Prospects side by side"));
 		const bar = el("div", "filters");
@@ -5805,6 +6612,7 @@
 		const clear = el("button", "tiny", "Clear");
 		clear.addEventListener("click", () => {
 			st.compare = new Array(COMPARE_MAX).fill(null);
+			st.compareCleared = true;
 			A().persist();
 			A().render();
 		});
@@ -5889,7 +6697,8 @@
 			if (key === "newOvr" || key === "newPot") return p[key];
 			if (!p.stats) return undefined;
 			if (key === "usg" || key === "ts" || key === "tpp" || key === "ftp") {
-				return p.stats[key] * 100;
+				// null for a man with no attempts: no value, not 0%.
+				return Number.isFinite(p.stats[key]) ? p.stats[key] * 100 : undefined;
 			}
 			return p.stats[key];
 		};
@@ -5955,7 +6764,11 @@
 			}
 			table.appendChild(tr);
 		}
-		box.appendChild(table);
+		// Its own horizontal scroll: four names and four faces do not fit a
+		// phone, and the page must not scroll sideways to show them.
+		const cwrap = el("div", "scroll comparewrap");
+		cwrap.appendChild(table);
+		box.appendChild(cwrap);
 		return box;
 	}
 
@@ -5964,6 +6777,35 @@
 	function derived(key, stats, player) {
 		return DERIVED[key] ? DERIVED[key](stats, player) : undefined;
 	}
+
+	/* Skip to content. The header and the settings panel are fifty-odd tab
+	   stops before the first prospect; the first tab stop on the page now
+	   jumps past them. Added here rather than in index.html because the
+	   target moves: the tab bar once a class is loaded, the drop zone before. */
+	(function skipLink() {
+		if (typeof document === "undefined" || !document.body ||
+			document.querySelector(".skiplink")) return;
+		const a = document.createElement("a");
+		a.className = "skiplink";
+		a.href = "#main";
+		a.textContent = "Skip to content";
+		a.addEventListener("click", (e) => {
+			e.preventDefault();
+			const app = document.getElementById("app");
+			const target = app && !app.hidden
+				? document.querySelector("#tabs button.active") || app
+				: document.querySelector("main");
+			if (!target) return;
+			if (!target.hasAttribute("tabindex") && target.tagName !== "BUTTON") {
+				target.setAttribute("tabindex", "-1");
+			}
+			target.focus();
+			if (target.scrollIntoView) target.scrollIntoView({ block: "start" });
+		});
+		const main = document.querySelector("main");
+		if (main && !main.id) main.id = "main";
+		document.body.insertBefore(a, document.body.firstChild);
+	})();
 
 	global.Views = {
 		players: viewPlayers, teams: viewTeams, bracket: viewBracket, bulkBar,
@@ -5975,6 +6817,9 @@
 		CARD_COLUMNS, CARD_BREAKPOINT, cardMode, orderedColumns, moveColumn,
 		dropColumn, setColumnOrder,
 		matchesFilter, numericColumns, histogram, feet, closeRowMenu,
+		sortRows, classYearRank, CLASS_YEAR_ORDER, defaultHiddenColumns, closeWhy,
+		currentColumnPreset, COLUMN_PRESETS,
+		compareWith, sortableTable,
 		el, n1, pc, wrapCell, COMPARE_MAX, ratingRadar, RADAR_AXES,
 	};
 })(window);

@@ -61,7 +61,10 @@
 		presetDirty: false,
 		customPresets: {},
 		editing: null,   // player key currently open in the editor
-		hiddenColumns: {},
+		/* Seeded from the columns flagged `off` (see defaultHiddenColumns in
+		   js/views.js); a saved preference replaces it in loadSettings. It
+		   used to start {}, so a first visit showed all sixty-one columns. */
+		hiddenColumns: V.defaultHiddenColumns ? V.defaultHiddenColumns() : {},
 		// Column ORDER, as a list of keys. See orderedColumns in js/views.js.
 		columnOrder: null,
 		statMode: "perGame",
@@ -179,6 +182,8 @@
 	   versioned and the payload inside it was not, so a future settings change
 	   would read stale keys out of an old blob and silently half-apply them. */
 	const STORE_VERSION = 3;
+	// Bumped when the meaning of a saved hiddenColumns map changes; see restore.
+	const HIDDEN_COLUMNS_SCHEME = 2;
 
 	/* MIGRATIONS.
 
@@ -243,18 +248,39 @@
 	const PERSIST_THREADS = 120;
 
 	function universeForStorage() {
+		const u = state.universe;
 		return {
-			rows: state.universe.rows.slice(-PERSIST_ROWS),
-			threads: (state.universe.threads || []).slice(0, PERSIST_THREADS),
-			alumni: (state.universe.alumni || []).slice(-PERSIST_ALUMNI),
-			baseSeed: state.universe.baseSeed,
-			records: state.universe.records || null,
+			rows: u.rows.slice(-PERSIST_ROWS),
+			threads: (u.threads || []).slice(0, PERSIST_THREADS),
+			alumni: (u.alumni || []).slice(-PERSIST_ALUMNI),
+			baseSeed: u.baseSeed,
+			records: u.records || null,
 			/* The careers, longest first, and only the multi-season ones: a
 			   person who appears once is a draft prospect and his page already
 			   says so. See PERSIST_REGISTRY. */
 			registry: registryForStorage(),
-			coachTree: state.universe.coachTree || null,
-			broken: state.universe.broken || null,
+			coachTree: u.coachTree || null,
+			broken: u.broken || null,
+			/* WHAT THE WORLD WAS BUILT UNDER, AND WHERE IT STOPPED.
+
+			   None of these were persisted, so after a reload the export fell
+			   back to the PANEL's settings, an extension had no tail to
+			   continue from, and the order the seeds are keyed to was gone.
+			   The tail is the carry (every programme, bounded), the pool and
+			   anomaly memories and the returner window — tens of kilobytes,
+			   and the one thing that turns "load a later class" into the next
+			   link rather than a rebuild. */
+			settings: u.settings || null,
+			segments: (u.segments || []).map((g) => ({
+				kind: g.kind, from: g.from, to: g.to, settings: g.settings || null,
+			})),
+			order: (u.order || []).map((d) => ({
+				index: d.index, name: d.name || null, season: d.season,
+				fingerprint: d.fingerprint || null, seed: d.seed || null,
+			})),
+			tail: u.running ? null : (u.tail || null),
+			engineRev: u.engineRev || null,
+			viewOnly: !!u.viewOnly,
 		};
 	}
 
@@ -311,6 +337,9 @@
 			presetDirty: state.presetDirty,
 			customPresets: state.customPresets,
 			hiddenColumns: state.hiddenColumns,
+			/* Marks hiddenColumns as saved under the default-hidden scheme, so
+			   an empty map here is a deliberate "show everything". */
+			hiddenColumnsScheme: HIDDEN_COLUMNS_SCHEME,
 			columnOrder: state.columnOrder,
 			statMode: state.statMode,
 			compare: state.compare,
@@ -424,7 +453,7 @@
 			}
 			saved = upgraded;
 		}
-		if (saved.cfg && typeof saved.cfg === "object") state.cfg = CFG.make(saved.cfg);
+		if (saved.cfg && typeof saved.cfg === "object") state.cfg = fitEra(CFG.make(saved.cfg));
 		if (saved.overrides && typeof saved.overrides === "object" &&
 			!Array.isArray(saved.overrides)) state.overrides = saved.overrides;
 		if (validString(saved.overrideFingerprint)) {
@@ -452,7 +481,16 @@
 		state.presetDirty = !!saved.presetDirty;
 		if (saved.customPresets && typeof saved.customPresets === "object" &&
 			!Array.isArray(saved.customPresets)) state.customPresets = saved.customPresets;
-		state.hiddenColumns = validFlagMap(saved.hiddenColumns) || state.hiddenColumns;
+		/* An EMPTY hidden-columns map from a build before the default-hidden
+		   scheme is not a choice: it is what every install started with, so
+		   such a user kept all sixty-one columns forever. Only a map saved
+		   under the scheme marker is trusted when empty. */
+		{
+			const hc = validFlagMap(saved.hiddenColumns);
+			const marked = Number(saved.hiddenColumnsScheme) >= HIDDEN_COLUMNS_SCHEME;
+			if (hc && (Object.keys(hc).length || marked)) state.hiddenColumns = hc;
+			else if (hc && V.defaultHiddenColumns) state.hiddenColumns = V.defaultHiddenColumns();
+		}
 		if (Array.isArray(saved.columnOrder)) {
 			state.columnOrder = saved.columnOrder.filter((k) => typeof k === "string");
 		}
@@ -507,6 +545,18 @@
 					!Array.isArray(saved.universe.registry)
 					? saved.universe.registry : null,
 				broken: saved.universe.broken || null,
+				/* What universeForStorage now keeps so that an export after a
+				   reload writes the world's own settings rather than the
+				   panel's, and a later class extends the chain rather than
+				   rebuilding it. Each is optional: an older payload has none. */
+				settings: saved.universe.settings && typeof saved.universe.settings === "object"
+					? saved.universe.settings : null,
+				segments: Array.isArray(saved.universe.segments) ? saved.universe.segments : [],
+				order: Array.isArray(saved.universe.order) ? saved.universe.order : [],
+				tail: saved.universe.tail && typeof saved.universe.tail === "object"
+					? saved.universe.tail : null,
+				engineRev: saved.universe.engineRev || null,
+				viewOnly: !!saved.universe.viewOnly,
 				cfgs: {},
 				running: false,
 			};
@@ -726,6 +776,57 @@
 		"weirdness", "anomalyChoices", "flavorBlend", "extrapolateYears",
 	];
 
+	/* WHAT "AT ITS DEFAULT" MEANS.
+
+	   Config.DEFAULTS is the raw table, and two of its entries are null where
+	   make() expands them — leagueWeights into the full destination table,
+	   archetypeWeights into {}. So every comparison against the raw table saw
+	   both as changed on a fresh page: a 700-character link at defaults,
+	   "[object Object]" in the copied text, a Reset that offered to reset
+	   them. A weight table is compared by the weights it produces, missing
+	   entries reading as the built-in weight, so key order and an explicit
+	   copy of a built-in value are not "a change" either. */
+	let normDefaults = null;
+	function defaultCfg() { return normDefaults || (normDefaults = CFG.make()); }
+	function defaultOf(k) {
+		const d = defaultCfg()[k];
+		return d && typeof d === "object" ? JSON.parse(JSON.stringify(d)) : d;
+	}
+	function builtinWeight(k, name) {
+		if (k === "leagueWeights") return defaultCfg().leagueWeights[name];
+		const a = RB.ARCHETYPES.filter((x) => x.name === name)[0];
+		return a ? (a.w === undefined ? 1 : a.w) : undefined;
+	}
+	function isWeightTable(k) { return k === "leagueWeights" || k === "archetypeWeights"; }
+	function sameSetting(k, a, b) {
+		if (isWeightTable(k)) {
+			const x = a || {};
+			const y = b || {};
+			const names = new Set(Object.keys(x).concat(Object.keys(y)));
+			for (const n of names) {
+				const vx = Number.isFinite(x[n]) ? x[n] : builtinWeight(k, n);
+				const vy = Number.isFinite(y[n]) ? y[n] : builtinWeight(k, n);
+				if (vx !== vy) return false;
+			}
+			return true;
+		}
+		return JSON.stringify(a === undefined ? null : a) ===
+			JSON.stringify(b === undefined ? null : b);
+	}
+	function isDefaultSetting(k, v) { return sameSetting(k, v, defaultCfg()[k]); }
+	/* The part of a setting worth writing down: a weight table as only the
+	   entries that differ from the built-ins, anything else as itself.
+	   Undefined when the setting is at its default. */
+	function settingDelta(k, v) {
+		if (isDefaultSetting(k, v)) return undefined;
+		if (!isWeightTable(k)) return v;
+		const out = {};
+		for (const n of Object.keys(v || {})) {
+			if (v[n] !== builtinWeight(k, n)) out[n] = v[n];
+		}
+		return out;
+	}
+
 	// The build table is the authority on how many builds there are; every
 	// place that used to guess (98, 117, 121) has been wrong at some point.
 	function archetypeTableSize() {
@@ -761,6 +862,12 @@
 		realignmentRate: (v) => (v ? Math.round(v * 100) + "%" : "off"),
 		bluebloodDownYears: (v) => (v ? v + " program" + (v === 1 ? "" : "s") : "none"),
 		midMajorLift: (v) => (v ? "+" + v : "off"),
+		// The five that printed a bare number in a panel of units.
+		flavorBlend: (v) => (v ? Math.round(v * 100) + "%" : "off"),
+		styleDrift: (v) => v.toFixed(2) + "x",
+		anomalyMemory: (v) => v.toFixed(2) + "x",
+		weirdness: (v) => (v === 0 ? "ordinary" : (v > 0 ? "+" : "") + v),
+		variation: (v) => (v ? "#" + v : "the seed's own"),
 	};
 
 	/* What each slider actually does, in units. "Class quality 2" means nothing
@@ -922,7 +1029,8 @@
 		   a constant: the hint said "≈70 points" whatever era was chosen,
 		   because it was written when there was only one. */
 		pace: (v) => {
-			const era = global.Calibration.eraInfo(state.cfg.era);
+			const CAL = global.Calibration;
+			const era = CAL.eraInfo(state.cfg.era) || CAL.eraInfo(CAL.DEFAULT_ERA);
 			return "≈" + Math.round((v * era.rotation.ortg) / 100) +
 				" team points per game (Division I only)";
 		},
@@ -1213,7 +1321,8 @@
 			input.value = state.cfg[key];
 			// Sync numeric input
 			const num = $(key + "Num");
-			if (num) num.value = state.cfg[key];
+			// Never under the cursor: see bindSliderNumbers.
+			if (num && num !== document.activeElement) num.value = state.cfg[key];
 			const ctl = input.closest(".ctl");
 			const shown = (FORMAT[key] || ((v) => String(v)))(Number(input.value));
 			const b = ctl.querySelector("label b");
@@ -1246,7 +1355,11 @@
 				const fmt = FORMAT[key] || ((v) => String(v));
 				const def = CFG.DEFAULTS[key];
 				const atDefault = Number(input.value) === Number(def);
-				hint.textContent = SLIDER_HINT[key](Number(input.value)) +
+				/* One hint that throws must not take the rest of the paint —
+				   and every binding after it at startup — down with it. */
+				let said = "";
+				try { said = SLIDER_HINT[key](Number(input.value)); } catch (e) { said = ""; }
+				hint.textContent = said +
 					(atDefault || !Number.isFinite(Number(def))
 						? "" : " · default " + fmt(Number(def)));
 			}
@@ -1294,6 +1407,8 @@
 		// Also mark non-slider settings
 		paintModifiedMarkerFor("ovrMode", state.cfg.ovrMode);
 		paintModifiedMarkerFor("priorSeasons", state.cfg.priorSeasons);
+		paintModifiedMarkerFor("potModel", state.cfg.potModel);
+		paintModifiedMarkerFor("signatureSkills", state.cfg.signatureSkills);
 		paintModifiedMarkerFor("collegeSource", state.cfg.collegeSource);
 		$("collegeSource").value = state.cfg.collegeSource || "blanks";
 		$("collegeSourceHint").textContent = state.cfg.collegeSource === "rewrite"
@@ -1311,6 +1426,8 @@
 		paintModifiedMarkerFor("flavorHint", state.cfg.flavorHint || "");
 		$("ovrMode").value = state.cfg.ovrMode;
 		$("priorSeasons").value = state.cfg.priorSeasons;
+		$("potModel").value = state.cfg.potModel || "tool";
+		$("signatureSkills").checked = !!state.cfg.signatureSkills;
 		$("varySize").checked = !!state.cfg.varySize;
 		$("lockHeights").checked = state.cfg.lockHeights !== false;
 		$("universe").checked = !!state.cfg.universe;
@@ -1348,7 +1465,16 @@
 		   cardMode in js/views.js), which is both narrower — it cannot reach a
 		   table that has no data-label attributes — and answerable: the user
 		   can now ask for cards at any width. */
-		document.body.className = "density-" + state.density;
+		/* Only the density class: the body also carries settings-open,
+		   settings-closed and busy, and assigning className wiped all three
+		   on every repaint — closing the panel, then moving a slider, opened
+		   it again. */
+		for (const c of Array.from(document.body.classList)) {
+			if (c.indexOf("density-") === 0 && c !== "density-" + state.density) {
+				document.body.classList.remove(c);
+			}
+		}
+		document.body.classList.add("density-" + state.density);
 		paintLockButtons();
 		paintGroupResets();
 	}
@@ -1417,7 +1543,7 @@
 	function paintPhaseCosts() {
 		for (const key of SLIDERS.concat(
 			["era", "ovrMode", "varySize", "lockHeights", "priorSeasons", "universe", "narrative",
-				"collegeSource"])) {
+				"collegeSource", "potModel", "signatureSkills"])) {
 			const input = $(key);
 			if (!input) continue;
 			const ctl = input.closest(".ctl");
@@ -1493,7 +1619,7 @@
 			if (k === "seed") continue;
 			const x = a[k];
 			const y = b[k];
-			if (JSON.stringify(x) === JSON.stringify(y)) continue;
+			if (sameSetting(k, x, y)) continue;
 			if (x && typeof x === "object") { out.push(k + " (edited)"); continue; }
 			out.push(k + " " + x + " → " + y);
 		}
@@ -1664,12 +1790,12 @@
 				e.preventDefault();
 				e.stopPropagation();
 				const keys = groupKeys(details).filter(
-					(k) => JSON.stringify(state.cfg[k]) !== JSON.stringify(CFG.DEFAULTS[k]));
+					(k) => !isDefaultSetting(k, state.cfg[k]));
 				if (!keys.length) return;
 				pushUndo("reset " + (summary.dataset.label || "a group") + " to defaults");
 				for (const k of keys) {
-					const d = CFG.DEFAULTS[k];
-					state.cfg[k] = typeof d === "number" ? Number(d) : d;
+					const d = defaultOf(k);
+					state.cfg[k] = d;
 					const inp = $(k);
 					if (inp) {
 						if (inp.type === "checkbox") inp.checked = !!d;
@@ -1695,7 +1821,7 @@
 			const btn = details.querySelector(".grp-reset");
 			if (!btn) continue;
 			const n = groupKeys(details).filter(
-				(k) => JSON.stringify(state.cfg[k]) !== JSON.stringify(CFG.DEFAULTS[k])).length;
+				(k) => !isDefaultSetting(k, state.cfg[k])).length;
 			btn.hidden = n === 0;
 			btn.textContent = n ? "Reset " + n : "Reset group";
 		}
@@ -1720,7 +1846,15 @@
 			num.step = range.step;
 			num.value = range.value;
 			num.id = key + "Num";
-			num.setAttribute("aria-label", (ctl.querySelector("label") || {}).textContent || key);
+			/* The label also carries the readout, the padlock, the modified
+			   dot and the revert button, all of which became part of the
+			   slider's accessible NAME ("Pace 68 🔓 Lock pace against the
+			   randomizer ↺ …"). The name is the label's own words, fixed here
+			   before any of those are added. */
+			const name = ((ctl.querySelector("label") || {}).textContent || key)
+				.replace(/\s+/g, " ").trim() || key;
+			range.setAttribute("aria-label", name);
+			num.setAttribute("aria-label", name + " (number)");
 			wrapper.appendChild(num);
 		}
 	}
@@ -1728,9 +1862,8 @@
 	/* Per-setting modified marker and revert (Part 5C). */
 	function paintModifiedMarker(ctl, key, currentValue) {
 		if (!ctl) return;
-		const defaults = CFG.DEFAULTS;
-		const defaultValue = defaults[key];
-		const isModified = JSON.stringify(currentValue) !== JSON.stringify(defaultValue);
+		const defaultValue = defaultOf(key);
+		const isModified = !isDefaultSetting(key, currentValue);
 		// Remove existing marker elements
 		const existing = ctl.querySelector(".modified-dot");
 		if (existing) existing.remove();
@@ -1749,7 +1882,7 @@
 				revertBtn.addEventListener("click", (e) => {
 					e.stopPropagation();
 					pushUndo("reverted " + key + " to default");
-					state.cfg[key] = typeof defaultValue === "number" ? Number(defaultValue) : defaultValue;
+					state.cfg[key] = defaultOf(key);
 					markDirty();
 					// Update checkboxes and selects that paintConfig reads
 					const inp = $(key);
@@ -1782,25 +1915,34 @@
 			// When slider moves, update number
 			range.addEventListener("input", () => { num.value = range.value; });
 			// When number is typed, update slider and trigger the same pipeline
+			/* A keystroke is half a number. Clamping each one turned "7" of a
+			   typed "70" into the pace floor of 58, painted 58 back into the
+			   box under the cursor, and the "0" then made 580 -> 82. So a
+			   keystroke only applies a value already inside the band and never
+			   rewrites the box; the clamp happens once, on change/blur. */
 			let numPushed = false;
-			num.addEventListener("input", () => {
+			const applyNum = (v) => {
 				if (!numPushed) { pushUndo("moved " + key); numPushed = true; }
-				const v = Number(num.value);
-				if (!Number.isFinite(v)) return;
-				const clamped = Math.max(Number(range.min), Math.min(Number(range.max), v));
-				range.value = clamped;
-				state.cfg[key] = clamped;
+				range.value = v;
+				state.cfg[key] = Number(range.value);
 				markDirty();
 				paintConfig();
 				scheduleRun();
+			};
+			num.addEventListener("input", () => {
+				if (num.value.trim() === "") return;
+				const v = Number(num.value);
+				if (!Number.isFinite(v) || v < Number(range.min) || v > Number(range.max)) return;
+				applyNum(v);
 			});
 			num.addEventListener("change", () => {
-				numPushed = false;
-				// Clamp on blur
 				const v = Number(num.value);
-				if (Number.isFinite(v)) {
-					num.value = Math.max(Number(range.min), Math.min(Number(range.max), v));
+				if (num.value.trim() !== "" && Number.isFinite(v)) {
+					const clamped = Math.max(Number(range.min), Math.min(Number(range.max), v));
+					if (clamped !== state.cfg[key]) applyNum(clamped);
 				}
+				num.value = state.cfg[key];
+				numPushed = false;
 				persist();
 			});
 			/* DOUBLE-CLICK A SLIDER TO PUT IT BACK.
@@ -1860,6 +2002,8 @@
 	   world, and a randomizer that keeps changing the length of a list you are
 	   reading is an irritation rather than a surprise. */
 	const RANDOM_SCOPES = ["gentle", "wide"].concat(Object.keys(RANDOM_GROUPS));
+	// The controls marked data-curve in index.html.
+	const CURVE_KEYS = ["classQuality", "classDepth", "eliteCount"];
 	const RANDOM_KEYS = Object.keys(RANDOM_GROUPS)
 		.reduce((a, g) => a.concat(RANDOM_GROUPS[g]), []);
 
@@ -1918,6 +2062,10 @@
 		for (const g of groups) {
 			for (const key of RANDOM_GROUPS[g]) {
 				if (state.settingLocks[key]) { locked++; continue; }
+				/* The curve dials do nothing while overalls are preserved —
+				   the panel dims them — and a draw spent on one is a
+				   "randomized 3 settings" that changed nothing. */
+				if (CURVE_KEYS.indexOf(key) !== -1 && state.cfg.ovrMode !== "curve") continue;
 				const v = randomSliderValue(key, mode, rng);
 				if (v === null || v === state.cfg[key]) continue;
 				patch[key] = v;
@@ -1955,9 +2103,9 @@
 		return Math.floor(Math.random() * 0x7fffffff).toString(36);
 	}
 
-	function randomizeSettings(scope, givenSeed) {
+	function randomizeSettings(scope, givenSeed, noUndo) {
 		if (RANDOM_SCOPES.indexOf(scope) === -1) scope = "gentle";
-		pushUndo("randomized settings (" + scope + ")");
+		if (!noUndo) pushUndo("randomized settings (" + scope + ")");
 		const rseed = givenSeed && String(givenSeed).trim()
 			? String(givenSeed).trim() : mintRandomSeed();
 		state.lastRandomSeed = rseed;
@@ -2038,13 +2186,16 @@
 	   the part a reroll is usually FOR. */
 	function surpriseMe() {
 		if (!state.files.length) { setStatus("Load a class file first."); return; }
+		/* ONE undo entry for the whole gesture, as the status line promises:
+		   the randomizer and the reroll below are told not to push their own,
+		   or Ctrl+Z took back the reroll and left the wide settings behind. */
 		pushUndo("surprise me");
-		randomizeSettings("wide");
+		randomizeSettings("wide", null, true);
 		/* After the randomizer's own run, not instead of it: randomizeSettings
 		   schedules a run and the reroll has to follow the settings it drew,
 		   or the class on screen is the old settings with a new seed. */
 		setTimeout(() => {
-			reroll();
+			reroll({ noUndo: true });
 			setTimeout(() => {
 				const res = state.results[state.active];
 				if (!res) return;
@@ -2234,12 +2385,12 @@
 		"preset", "seed", "ovrMode", "classQuality", "classDepth", "eliteCount",
 		"specialization", "classFlavor", "flavorHint", "archetypePool",
 		"freshmanShare", "transferShare", "varySize", "lockHeights", "universe", "era",
-		"pDII", "collegeSource", "talentCoupling", "birthplaceWeight",
+		"pDII", "collegeSource", "talentCoupling", "birthplaceWeight", "signatureSkills",
 	]);
 	const TIER_SEASON = new Set([
 		"potBias", "potSpread", "surpriseBudget", "traitCount", "narrative",
 		"pace", "scoringEnv", "efficiencyEnv", "upsetFactor", "injuryRate",
-		"seasonEvents", "draftEvents", "awardStrictness", "priorSeasons",
+		"seasonEvents", "draftEvents", "awardStrictness", "priorSeasons", "potModel",
 		"coachTurnover", "realignmentRate", "redshirtShare", "reclassShare",
 		"archetypeDiversity",
 	]);
@@ -2306,27 +2457,28 @@
 			for (const ctl of ctls) {
 				const input = ctl.querySelector("input, select");
 				const key = input && input.id;
-				total++;
+				/* Only a control with a config key is a SETTING: the batch
+				   row and the anomaly shortlist are rows in the panel, and
+				   counting them made "only what I changed" read "2 of 62
+				   settings" on a page at its defaults. */
+				const isSetting = !!(key && key in D);
+				const changed = isSetting && !isDefaultSetting(key, state.cfg[key]);
+				if (isSetting) total++;
 				let show = true;
 				if (q && settingText(ctl).indexOf(q) === -1) show = false;
-				if (show && !q && !changedOnly && TIER_RANK[tierOf(key)] > tierRank) {
+				// A setting you changed is never hidden behind a tier.
+				if (show && !q && !changedOnly && !changed &&
+					TIER_RANK[tierOf(key)] > tierRank) {
 					show = false;
-					tiered++;
+					if (isSetting) tiered++;
 				}
-				if (show && changedOnly && key && key in D) {
-					const cur = state.cfg[key];
-					const def = D[key];
-					const same = typeof cur === "object" || typeof def === "object"
-						? JSON.stringify(cur) === JSON.stringify(def)
-						: cur === def;
-					if (same) show = false;
-				}
+				if (show && changedOnly && !changed) show = false;
 				/* The stylesheet's own class, not the `hidden` attribute: a
 				   .ctl inside a <details> that is closed is already not
 				   rendered, and mixing the two mechanisms made "show only what
 				   I changed" leave empty gaps where a control used to be. */
 				ctl.classList.toggle("settings-hidden", !show);
-				if (show) { any++; shown++; }
+				if (show) { any++; if (isSetting) shown++; }
 			}
 			/* A group with nothing in it is hidden rather than left as an
 			   empty heading, and a group with a match is opened — otherwise
@@ -2444,6 +2596,20 @@
 			paintConfig();
 			scheduleRun();
 		});
+		$("potModel").addEventListener("change", () => {
+			pushUndo("changed the potential model");
+			state.cfg.potModel = $("potModel").value;
+			markDirty();
+			paintConfig();
+			scheduleRun();
+		});
+		$("signatureSkills").addEventListener("change", () => {
+			pushUndo(($("signatureSkills").checked ? "turned on" : "turned off") + " signature skills");
+			state.cfg.signatureSkills = $("signatureSkills").checked;
+			markDirty();
+			paintConfig();
+			scheduleRun();
+		});
 		$("priorSeasons").addEventListener("change", () => {
 			pushUndo("changed how earlier seasons are produced");
 			state.cfg.priorSeasons = $("priorSeasons").value;
@@ -2493,18 +2659,32 @@
 			run();
 		});
 		$("seed").addEventListener("change", () => {
-			state.cfg.seed = $("seed").value.trim();
+			const seed = $("seed").value.trim();
+			if (seed === state.cfg.seed) return;
+			// A typed seed replaces the class on screen, so it is undoable
+			// like the reroll that does the same thing.
+			pushUndo(seed ? "typed the seed " + seed : "cleared the seed");
+			state.cfg.seed = seed;
 			run();
 		});
 
+		const SESSION_TOGGLES = ["universe", "lockHeights", "narrative"];
 		const preset = $("preset");
 		preset.addEventListener("change", () => {
 			const p = CFG.PRESETS[preset.value] || state.customPresets[preset.value];
 			if (!p) return;
 			pushUndo("applied the preset " + preset.value);
 			const seed = state.cfg.seed;
-			state.cfg = CFG.make(p);
+			/* A preset is about the CLASS. Universe mode, the height lock and
+			   the storylines are how this session runs, and a preset that
+			   does not mention them used to switch all three back to their
+			   defaults without a word. */
+			const keep = {};
+			for (const k of SESSION_TOGGLES) if (!(k in p)) keep[k] = state.cfg[k];
+			const wasUniverse = !!state.cfg.universe;
+			state.cfg = fitEra(CFG.make(Object.assign({}, p, keep)));
 			state.cfg.seed = seed;
+			if (!!state.cfg.universe !== wasUniverse) state.universe.cfgs = {};
 			state.presetName = preset.value;
 			state.presetDirty = false;
 			paintConfig();
@@ -2529,12 +2709,14 @@
 						: "Give the preset a name."));
 					return;
 				}
+				/* A preset is the settings, not this class: the seed and the
+				   anomaly shortlist's answers (kind names drawn for ONE class)
+				   stay out, and a weight table is kept as its edits only. */
 				const saved = {};
 				for (const k of Object.keys(CFG.DEFAULTS)) {
-					if (k === "seed") continue;
-					if (JSON.stringify(state.cfg[k]) !== JSON.stringify(CFG.DEFAULTS[k])) {
-						saved[k] = state.cfg[k];
-					}
+					if (k === "seed" || k === "anomalyPicks") continue;
+					const d = settingDelta(k, state.cfg[k]);
+					if (d !== undefined) saved[k] = d;
 				}
 				state.customPresets[name] = saved;
 				state.presetName = name;
@@ -2560,8 +2742,7 @@
 			// What is actually about to be lost, counted, so the dialog is a
 			// fact rather than a warning.
 			const moved = Object.keys(CFG.DEFAULTS).filter((k) =>
-				k !== "seed" &&
-				JSON.stringify(state.cfg[k]) !== JSON.stringify(CFG.DEFAULTS[k]));
+				k !== "seed" && !isDefaultSetting(k, state.cfg[k]));
 			if (!moved.length) {
 				setStatus("Every setting is already at its default.");
 				return;
@@ -2935,9 +3116,8 @@
 	function encodeConfig(withDrawnSeed) {
 		const out = {};
 		for (const k of Object.keys(CFG.DEFAULTS)) {
-			const v = state.cfg[k];
-			const d = CFG.DEFAULTS[k];
-			if (JSON.stringify(v) !== JSON.stringify(d)) out[k] = v;
+			const d = settingDelta(k, state.cfg[k]);
+			if (d !== undefined) out[k] = d;
 		}
 		/* A rerolled class has no typed seed; the one it drew is the only
 		   thing that reproduces it, and a link without it opened a
@@ -2987,15 +3167,26 @@
 			lines.push("settings changed from default (" + keys.length + "):");
 			for (const k of keys) {
 				const v = payload[k];
-				const shown = typeof v === "number" && FORMAT[k] ? FORMAT[k](v) : String(v);
-				const def = CFG.DEFAULTS[k];
-				const defShown = typeof def === "number" && FORMAT[k] ? FORMAT[k](def) : String(def);
+				if (isWeightTable(k)) {
+					const names = Object.keys(v || {});
+					lines.push("  " + k + ": " + (names.length
+						? names.map((n) => n + " " + v[n] + " (default " +
+							builtinWeight(k, n) + ")").join(", ")
+						: "edited"));
+					continue;
+				}
+				const shown = typeof v === "number" && FORMAT[k] ? FORMAT[k](v)
+					: v && typeof v === "object" ? JSON.stringify(v) : String(v);
+				const def = defaultOf(k);
+				const defShown = typeof def === "number" && FORMAT[k] ? FORMAT[k](def)
+					: def && typeof def === "object" ? JSON.stringify(def) : String(def);
 				lines.push("  " + k + ": " + shown + "  (default " + defShown + ")");
 			}
 		}
 		const locks = Object.keys(state.overrides).length;
 		if (locks) lines.push("", locks + " locked player" + (locks === 1 ? "" : "s") +
-			" — not carried by this text; share the link or the locks CSV for those.");
+			" — not carried by this text; share the link, or More ▾ → locked " +
+			"prospects as CSV, for those.");
 		return lines.join("\n");
 	}
 
@@ -3005,6 +3196,8 @@
 	   it got, and applies the wrong settings. */
 	const HASH_LIMIT = 8000;
 	let hashWarned = false;
+	// What writeHash last put in the address bar; see the hashchange listener.
+	let lastWrittenHash = null;
 
 	function writeHash(withDrawnSeed) {
 		try {
@@ -3024,31 +3217,48 @@
 					hashWarned = true;
 					setStatus("This class has too many locked players to fit in a " +
 						"shareable link, so the link carries the settings only. " +
-						"Export the locks as CSV to share those.", true);
+						"Export the locks as CSV (More ▾) to share those.", true);
 				}
 			}
+			lastWrittenHash = body ? "#c=" + body : "";
 			history.replaceState(null, "", body ? "#c=" + body : "#");
 		} catch (e) { /* a hash that will not fit is not worth an error banner */ }
+	}
+
+	/* The era picker offers only the eras the model is fitted to. Config.make
+	   accepts any era the table knows (the harness runs an unfitted one by
+	   name), so a link or a stored session naming an unfitted era is brought
+	   back to the default here, where the panel is the one reading it. */
+	function fitEra(cfg) {
+		const CAL = global.Calibration;
+		if (cfg && CAL.fittedEras().indexOf(cfg.era) === -1) cfg.era = CAL.DEFAULT_ERA;
+		return cfg;
 	}
 
 	function readHash() {
 		const m = /[#&]c=([^&]+)/.exec(location.hash || "");
 		if (!m) return false;
+		let payload;
 		try {
-			const payload = JSON.parse(decodeURIComponent(m[1]));
-			if (payload.overrides) {
-				state.overrides = payload.overrides;
-				state.overrideFingerprint = payload.fp || null;
-				delete payload.overrides;
-				delete payload.fp;
-			}
-			state.cfg = CFG.make(payload);
-			state.presetDirty = true;
-			return true;
+			payload = JSON.parse(decodeURIComponent(m[1]));
 		} catch (e) {
 			showError(new Error("Could not read the settings in this link."));
 			return false;
 		}
+		/* `#c=null`, `#c=[]`, `#c=5`: valid JSON and not a settings object.
+		   Nothing to apply, and nothing worth an error banner either. */
+		if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
+		/* A LINK IS THE WHOLE STATE IT DESCRIBES. A link without locks is a
+		   class with no locks — keeping the ones localStorage remembered from
+		   some other session applied them to the linked class, silently. */
+		const ov = payload.overrides;
+		state.overrides = ov && typeof ov === "object" && !Array.isArray(ov) ? ov : {};
+		state.overrideFingerprint = state.overrides === ov ? (payload.fp || null) : null;
+		delete payload.overrides;
+		delete payload.fp;
+		state.cfg = fitEra(CFG.make(payload));
+		state.presetDirty = true;
+		return true;
 	}
 
 	/* A short, stable identity for one GENERATED class. Built from what the
@@ -3148,7 +3358,13 @@
 			}
 			const stream = new Blob([raw]).stream()
 				.pipeThrough(new DecompressionStream("gzip"));
-			return new Response(stream).arrayBuffer();
+			/* A truncated or damaged archive fails inside the stream, and the
+			   browser reports that as "Failed to fetch" — which reads like a
+			   network fault in a tool that never touches the network. */
+			return new Response(stream).arrayBuffer().catch(() => {
+				throw new Error("the .gz file is incomplete or corrupt — download " +
+					"or export it again");
+			});
 		}).then((out) => new TextDecoder("utf-8").decode(out).replace(/^\ufeff/, ""));
 	}
 
@@ -3246,10 +3462,28 @@
 		$("empty").classList.add("busy");
 		setStatus("Reading " + fileList.length + " file" +
 			(fileList.length === 1 ? "" : "s") + "…", true);
+		/* Not every file the tool writes is a draft class, and each of the
+		   others has its own door: a universe export, a settings JSON and
+		   the locks CSV all came back through here and were rejected as
+		   malformed classes. They are set aside and handed to their own
+		   importer once the classes in the same drop are in. */
+		const side = { universe: [], settings: [], csv: [] };
 		const jobs = Array.from(fileList).map(
 			(f) => readTextFile(f).then(
 				(text) => {
+					if (/\.csv$/i.test(f.name || "") || f.type === "text/csv") {
+						side.csv.push(text);
+						return null;
+					}
 					const data = JSON.parse(text);
+					if (data && data.format === "bbgm-draft-workshop/universe") {
+						side.universe.push(data);
+						return null;
+					}
+					if (data && data.format === SETTINGS_FORMAT) {
+						side.settings.push(data);
+						return null;
+					}
 					// Full schema check up front, so a bad file is rejected
 					// with a sentence instead of throwing a raw TypeError
 					// out of the middle of the sim.
@@ -3264,8 +3498,83 @@
 				return null;
 			}),
 		);
-		Promise.all(jobs).then((loaded) => installFiles(
-			loaded.filter(Boolean).reduce((a, b) => a.concat(b), []), problems, opts));
+		Promise.all(jobs).then((loaded) => {
+			const classes = loaded.filter(Boolean).reduce((a, b) => a.concat(b), []);
+			const other = side.universe.length + side.settings.length + side.csv.length;
+			if (classes.length || !other) installFiles(classes, problems, opts);
+			else {
+				$("empty").classList.remove("busy");
+				if (problems.length) showError(new Error(problems.join("\n")));
+				setStatus("");
+			}
+			for (const s of side.settings) applySettingsJson(s);
+			for (const u of side.universe) importUniverse(u);
+			for (const text of side.csv) {
+				if (!state.files.length) {
+					showError(new Error("Load a draft class first — a locks CSV is " +
+						"applied to the class on screen."));
+				} else if (state.results[state.active]) importLocksCsv(text);
+				else run(() => importLocksCsv(text));
+			}
+		});
+	}
+
+	/* THE SETTINGS, AS A FILE. What "More ▾ → Export settings JSON" writes
+	   and what a drop of one reads back: the same payload a shareable link
+	   carries, without the locks, under a format tag so it is never taken
+	   for a draft class. */
+	const SETTINGS_FORMAT = "bbgm-draft-workshop/settings";
+	function settingsJson() {
+		const cfg = encodeConfig(true);
+		delete cfg.overrides;
+		delete cfg.fp;
+		return { format: SETTINGS_FORMAT, v: 1, cfg };
+	}
+	function exportSettingsJson() {
+		download("draft-workshop-settings.json", JSON.stringify(settingsJson(), null, 2),
+			"application/json");
+		exported("the settings — drop the file on the page to load them again");
+	}
+	function applySettingsJson(json) {
+		const cfg = json && json.cfg;
+		if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) {
+			showError(new Error("That settings file carries no settings."));
+			return;
+		}
+		pushUndo("loaded settings from a file");
+		state.cfg = fitEra(CFG.make(cfg));
+		state.presetDirty = true;
+		paintConfig();
+		persist();
+		if (state.files.length) run(() => setStatus("Loaded the settings from the file."));
+		else setStatus("Loaded the settings from the file.");
+	}
+
+	/* The locks, in exactly the shape importLocksCsv reads back: one row per
+	   locked prospect, key and name to match him, and only the columns a lock
+	   can carry. A per-rating lock has no column, so it is said, not lost
+	   silently. */
+	function exportLocksCsv() {
+		const res = state.results[state.active];
+		const keys = Object.keys(state.overrides);
+		if (!res || !keys.length) { setStatus("No prospect in this class is locked."); return; }
+		const byKey = {};
+		for (const p of res.players) byKey[p.key] = p;
+		const cols = ["key", "name", "ovr", "pot", "archetype", "college"];
+		const lines = [cols.join(",")];
+		let ratingsOnly = 0;
+		for (const k of keys) {
+			const o = state.overrides[k] || {};
+			const p = byKey[k];
+			const row = [k, p ? p.name : "", o.ovr, o.pot, o.archetype, o.college];
+			if (row.slice(2).every((v) => v === undefined || v === null || v === "")) ratingsOnly++;
+			lines.push(row.map(esc).join(","));
+		}
+		const base = ((activeFile() || {}).name || "class").replace(/\.json(\.gz)?$|\.gz$/i, "");
+		download(base + "_locks.csv", "﻿" + csvJoin(lines), "text/csv");
+		exported(keys.length + " locked prospect" + (keys.length === 1 ? "" : "s") +
+			(ratingsOnly ? "; " + ratingsOnly + " of them lock only individual ratings, " +
+				"which a CSV row has no column for" : ""));
 	}
 
 	/* A synthetic class for a visitor with nothing to drop. It goes through
@@ -3349,6 +3658,12 @@
 			   patch drawn for somebody else's third file to whatever loads
 			   into that slot now. */
 			state.fileCfgs = {};
+			/* The undo history belongs to the classes it was made on. Undoing
+			   across a replacing load restored the old class's locks — keyed
+			   by pid — onto whoever holds those pids in the new one. */
+			state.undo = [];
+			state.redo = [];
+			paintUndo();
 			paintRandomPerFile();
 			const sel = $("fileSelect");
 			sel.innerHTML = "";
@@ -3452,13 +3767,13 @@
 		}
 		if (warns.length) showWarning(warns.join("\n"));
 		const added = fresh.length + " class" + (fresh.length === 1 ? "" : "es") + " added";
-		if (state.universe.rows.length && canExtendUniverse()) {
+		if (state.cfg.universe && state.universe.rows.length && canExtendUniverse()) {
 			setStatus(added + " — extending the universe from " +
 				state.universe.tail.lastSeason + "…", true);
 			runUniverse(null, { extend: true });
 			return;
 		}
-		if (state.universe.rows.length) {
+		if (state.cfg.universe && state.universe.rows.length) {
 			const tail = universeTail();
 			setStatus(added + ". " + (tail
 				? "One of them is not later than " + tail.lastSeason +
@@ -3538,7 +3853,14 @@
 	function bindFiles() {
 		$("btnLoad").addEventListener("click", () => $("file").click());
 		if ($("btnSample")) $("btnSample").addEventListener("click", loadSample);
-		$("file").addEventListener("change", (e) => readFiles(e.target.files));
+		$("file").addEventListener("change", (e) => {
+			/* Copied before the reset: a FileList is live, and a value left
+			   in place meant picking the same file again (after fixing it on
+			   disk, say) fired no change and did nothing. */
+			const files = Array.from(e.target.files || []);
+			e.target.value = "";
+			if (files.length) readFiles(files);
+		});
 		if ($("btnAddFiles")) {
 			$("btnAddFiles").addEventListener("click", () => $("addFile").click());
 		}
@@ -3718,7 +4040,11 @@
 		if (!state.cfg.universe) return null;
 		const saved = state.universe.cfgs && state.universe.cfgs[i];
 		if (!saved) return null;
-		const cfg = CFG.make(state.cfg);
+		/* The settings the season RAN under, recorded per season: after a
+		   partial re-run the held seasons ran under different ones from the
+		   panel, and rebuilding an evicted one under the panel's gave a
+		   different season from the one on the timeline. */
+		const cfg = CFG.make(saved.settings || state.cfg);
 		cfg.overrides = state.overrides;
 		cfg.seed = saved.seed;
 		cfg.carryOver = saved.carryOver || null;
@@ -3770,116 +4096,121 @@
 	   freshman year its own file guessed rather than the one the universe
 	   played, which is the same disagreement between tabs that keeping the
 	   results was meant to end. See ensureResult. */
-	function linkCareers(runnable, onlyIndex) {
-		const E = global.Engine;
-		for (let j = 0; j < runnable.length; j++) {
-			const dj = runnable[j];
-			if (onlyIndex !== undefined && dj.index !== onlyIndex) continue;
-			const resJ = ensureResult(dj.index);
+	function linkCareers(order, onlyIndex) {
+		const u = state.universe;
+		const inChain = new Set((order || []).map((d) => d.index));
+		/* READ FROM WHAT THE CHAIN RECORDED, NOT FROM EVERY EARLIER RESULT.
+
+		   This used to walk every target file and, for each, rehydrate every
+		   EARLIER season with ensureResult to read its futurePlayers — which
+		   at the end of a long chain re-simulated every evicted season and
+		   held all of them at once, undoing the memory bound the chain had
+		   just kept. The chain now records, as each season runs, the rows it
+		   produced for men from other files (state.universe.links, keyed by
+		   the file each man belongs to — see Universe.beginChain), so linking
+		   a file needs that file and nothing else.
+
+		   And BOTH directions are applied. The returner branch (a man from an
+		   EARLIER class playing a LATER season) sat inside a loop over the
+		   seasons BEFORE each file, where no returner can be, so it never
+		   ran: laterSeasons was only ever empty. */
+		const targets = onlyIndex !== undefined ? [onlyIndex] : Array.from(inChain);
+		/* The earlier season's page links forward to the man he became. The
+		   fields it needs are on the row itself, so a rehydrated source gets
+		   its links back without the target file being live. */
+		for (const i of targets) {
+			const res = state.results[i];
+			if (!res) continue;
+			for (const fp of res.futurePlayers || []) {
+				if (!fp || !fp.stats || !inChain.has(fp.fileIndex)) continue;
+				const key = fp.past ? (fp.homeKey || fp.key) : fp.homeKey;
+				if (!key) continue;
+				fp.laterKey = key;
+				fp.laterFileIndex = fp.fileIndex;
+			}
+		}
+		for (const j of targets) {
+			const resJ = state.results[j];
 			if (!resJ || !resJ.players) continue;
+			const entries = (u && u.links && u.links[j]) || [];
+			if (!entries.length) continue;
+			const byKey = new Map();
+			for (const p of resJ.players) if (p && p.key !== undefined) byKey.set(p.key, p);
 			const touched = new Set();
-			for (let k = 0; k < j; k++) {
-				const dk = runnable[k];
-				/* ensureResult, not state.results: a long chain evicts older
-				   results to bound memory (see evictUniverseResults) and this
-				   pass needs every earlier season. Rehydration is exact — the
-				   chain recorded the config each file ran under — and costs a
-				   re-simulation only for the seasons that were dropped. */
-				const resK = ensureResult(dk.index);
-				if (!resK || !resK.futurePlayers) continue;
-				for (const fp of resK.futurePlayers) {
-					/* THE SEASONS AFTER HIS DRAFT YEAR.
-
-					   A returner is a man from an EARLIER class playing a
-					   LATER season — the opposite direction from the
-					   underclassman rows below, and the opposite thing to say
-					   about him: not "this is the freshman year his own file
-					   guessed at" but "he went undrafted and came back, and
-					   here is what he did". It belongs on his career table and
-					   NOT in his priorSeasons, because exportFile writes those
-					   as BBGM stats rows dated before the draft, and a season
-					   after it is not that. */
-					if (fp.past && fp.stats && fp.fileIndex === dj.index) {
-						const owner = resJ.players.filter((x) => x.key === fp.homeKey)[0];
-						if (owner) {
-							if (!Array.isArray(owner.laterSeasons)) owner.laterSeasons = [];
-							if (!owner.laterSeasons.some((r) => r.season === resK.season)) {
-								const teamL = resK.teams[fp.newCollege];
-								owner.laterSeasons.push({
-									season: resK.season, team: fp.newCollege,
-									classYear: fp.classYear, ovr: fp.newOvr,
-									gp: Math.round(fp.stats.gp), mpg: fp.stats.mpg,
-									ppg: fp.stats.ppg, rpg: fp.stats.rpg, apg: fp.stats.apg,
-									ts: fp.stats.ts,
-									record: teamL ? { w: teamL.w, l: teamL.l } : null,
-									awards: (fp.awards || []).slice(),
-									universeFileIndex: dk.index, universeKey: fp.key,
-									after: true,
-								});
-								owner.laterSeasons.sort((a, b) => a.season - b.season);
-							}
-							fp.laterKey = owner.key;
-							fp.laterFileIndex = dj.index;
-							touched.add(owner);
-						}
-						continue;
-					}
-					if (fp.fileIndex !== dj.index || !fp.stats) continue;
-					const p = resJ.players.filter((x) => x.key === fp.homeKey)[0];
-					if (!p) continue;
-					const team = resK.teams[fp.newCollege];
-					if (!Array.isArray(p.priorSeasons)) p.priorSeasons = [];
-					let row = p.priorSeasons.filter((r) => r.season === resK.season && !r.redshirt)[0];
-					if (!row) {
-						row = { season: resK.season, redshirt: false };
-						p.priorSeasons.push(row);
-						p.priorSeasons.sort((a, b) => a.season - b.season);
-					}
-					const gl = fp.gameLog || null;
-					/* THE SEASON THIS ROW EXPORTS AS.
-
-					   A prior-season row is normally in its own file's LEAGUE
-					   time, and exportFile shifts every row by this file's own
-					   startingSeason-to-draft-year difference. A row played in
-					   another file of the universe is in THAT file's league
-					   time, and the two files need not share a shift: one BBGM
-					   export can carry startingSeason 2026 with draft.year 2027
-					   and the next carry both at 2028. Shifting it by this
-					   file's difference then dates the season wrong by exactly
-					   that mismatch. So the absolute season is computed once,
-					   here, where the file it was played in is known, and
-					   exportFile uses it in place of the shift. */
-					const shiftK = E.classSeasonOf(resK) - resK.season;
-					Object.assign(row, {
-						exportSeason: resK.season + shiftK,
-						team: fp.newCollege, classYear: fp.classYear, ovr: fp.newOvr,
-						gp: Math.round(fp.stats.gp), mpg: fp.stats.mpg, ppg: fp.stats.ppg,
-						rpg: fp.stats.rpg, apg: fp.stats.apg, usg: fp.stats.usg, ts: fp.stats.ts,
-						line: fp.stats, box: team ? team.box : null, lines: team ? team.lines : null,
-						pos: fp.newPos, gameLog: gl, highs: gl ? gl.highs : null, best: gl ? gl.best : null,
-						twentyPointGames: gl ? gl.twentyPointGames : 0,
-						doubleDoubles: gl ? gl.doubleDoubles : 0,
+			for (const x of entries) {
+				const fp = x.fp;
+				const team = x.team;
+				if (!fp || !fp.stats) continue;
+				/* THE SEASONS AFTER HIS DRAFT YEAR. A returner went undrafted
+				   and came back; it belongs on his career table and NOT in his
+				   priorSeasons, because exportFile writes those as BBGM stats
+				   rows dated before the draft. */
+				if (fp.past) {
+					const owner = byKey.get(fp.homeKey || fp.key);
+					if (!owner) continue;
+					if (!Array.isArray(owner.laterSeasons)) owner.laterSeasons = [];
+					const row = {
+						season: x.season, team: fp.newCollege,
+						classYear: fp.classYear, ovr: fp.newOvr,
+						gp: Math.round(fp.stats.gp), mpg: fp.stats.mpg,
+						ppg: fp.stats.ppg, rpg: fp.stats.rpg, apg: fp.stats.apg,
+						ts: fp.stats.ts,
 						record: team ? { w: team.w, l: team.l } : null,
 						awards: (fp.awards || []).slice(),
-						simulated: true, universe: true,
-						universeFileIndex: dk.index, universeKey: fp.key,
-						postseason: team ? (team.ncaaResult || team.nitResult || null) : null,
-					});
-					fp.laterKey = p.key;
-					fp.laterFileIndex = dj.index;
-					touched.add(p);
+						universeFileIndex: x.source, universeKey: fp.key,
+						after: true,
+					};
+					/* REFRESHED, not only added: a warm re-run produces a new
+					   line for the same season, and the old code kept the first
+					   one it ever saw. */
+					const at = owner.laterSeasons.findIndex((r) => r.season === x.season);
+					if (at >= 0) owner.laterSeasons[at] = row;
+					else owner.laterSeasons.push(row);
+					owner.laterSeasons.sort((a, b) => a.season - b.season);
+					touched.add(owner);
+					continue;
 				}
+				const p = byKey.get(fp.homeKey);
+				if (!p) continue;
+				if (!Array.isArray(p.priorSeasons)) p.priorSeasons = [];
+				let row = p.priorSeasons.filter((r) => r.season === x.season && !r.redshirt)[0];
+				if (!row) {
+					row = { season: x.season, redshirt: false };
+					p.priorSeasons.push(row);
+					p.priorSeasons.sort((a, b) => a.season - b.season);
+				}
+				const gl = fp.gameLog || null;
+				/* THE SEASON THIS ROW EXPORTS AS: the absolute season, computed
+				   where the file it was played in is known (see
+				   Universe.beginChain), so exportFile does not shift it by this
+				   file's own startingSeason-to-draft-year difference. */
+				Object.assign(row, {
+					exportSeason: x.exportSeason,
+					team: fp.newCollege, classYear: fp.classYear, ovr: fp.newOvr,
+					gp: Math.round(fp.stats.gp), mpg: fp.stats.mpg, ppg: fp.stats.ppg,
+					rpg: fp.stats.rpg, apg: fp.stats.apg, usg: fp.stats.usg, ts: fp.stats.ts,
+					line: fp.stats, box: team ? team.box : null, lines: team ? team.lines : null,
+					pos: fp.newPos, gameLog: gl, highs: gl ? gl.highs : null, best: gl ? gl.best : null,
+					twentyPointGames: gl ? gl.twentyPointGames : 0,
+					doubleDoubles: gl ? gl.doubleDoubles : 0,
+					record: team ? { w: team.w, l: team.l } : null,
+					awards: (fp.awards || []).slice(),
+					simulated: true, universe: true,
+					universeFileIndex: x.source, universeKey: fp.key,
+					postseason: team ? team.postseason : null,
+				});
+				touched.add(p);
 			}
 			for (const p of touched) {
 				p.priorAwards = [];
-				for (const r of p.priorSeasons) {
+				for (const r of p.priorSeasons || []) {
 					for (const award of r.awards || []) {
 						p.priorAwards.push({ season: r.season, classYear: r.classYear, award,
 							exportSeason: r.exportSeason });
 					}
 				}
 				try {
-					p.note = E.buildNote(p, resJ.teams, resJ.season, resJ.cfg);
+					p.note = global.Engine.buildNote(p, resJ.teams, resJ.season, resJ.cfg);
 				} catch (e) { /* the note is a convenience; the page still renders */ }
 			}
 		}
@@ -4479,7 +4810,21 @@
 	   reasoning as the table above: one definition, in the engine. */
 	const parseClause = global.Engine.parseRerollClause;
 
+	/* THE SEARCH IN FLIGHT, if any: { cancel }. One at a time — a second
+	   search used to start a second worker beside the first, and whichever
+	   finished last decided the class. */
+	let untilSearch = null;
+	/* What a search's answer is only valid for. A seed is found under one set
+	   of settings and locks; applied under another it is just a seed. */
+	function untilKey() {
+		return JSON.stringify([state.cfg, state.overrides, state.active, state.fileCfgs]);
+	}
+
 	function rerollUntil(keys, maxTries) {
+		if (untilSearch) {
+			setStatus("A search is already running — press Esc or its Cancel button first.");
+			return;
+		}
 		const preds = keys.map(parseClause).filter(Boolean);
 		if (!preds.length || !state.files.length) return;
 		const runner = state.runners[state.active];
@@ -4491,6 +4836,8 @@
 			"|until|" + keys.join("+");
 		const searchRng = new global.BBGMRng.Rng(base);
 		const cfg = fileCfgFor(state.active) || effectiveCfg();
+		const searchedFor = untilKey();
+		const said = preds.map((p) => p.label).join(" and ");
 		/* One counter array for both paths. Every candidate is tested against
 		   every clause rather than short-circuited — the classes are already
 		   simulated, so the extra tests are free — and the per-clause counts
@@ -4498,81 +4845,103 @@
 		const hits = preds.map(() => 0);
 		let k = 0;
 		let found = null;
-
-		/* OFF THE MAIN THREAD, WHERE A SEARCH BELONGS.
-
-		   The interactive run cannot move: the staged runner keeps its state
-		   between calls as a graph of live objects and that is not a message.
-		   A SEARCH is the opposite shape — up to sixty full simulations that
-		   need one boolean each and hand back a seed — so it is all cost and
-		   no payload, which is exactly what a worker is for. Sliced on a timer
-		   it kept the tab technically alive and made it useless for twenty
-		   seconds.
-
-		   The worker gets the seed, not the class. The main thread re-runs it
-		   through its own runner, which is what puts it in the pill, the
-		   history and the undo stack, and means nothing about the result graph
-		   has to survive a structured clone. The inline path below stays, for
-		   the same reason the batch runner's does: opening index.html off the
-		   disk blocks workers in most browsers, and that is the documented way
-		   to use this tool. */
+		let timer = null;
 		let searchWorker = null;
-		const finishFound = (seed, tries, got) => {
-			k = tries;
-			for (let i = 0; i < got.length && i < hits.length; i++) hits[i] = got[i];
-			if (!seed) { finish(); return; }
+		let inline = false;
+
+		/* PROGRESS AND A WAY OUT. The Until… button becomes the search's
+		   Cancel for as long as it runs, with the count on it; Esc does the
+		   same. Progress is written straight to the status line rather than
+		   through setStatus, so sixty "try n of 60" lines do not bury the
+		   message history. */
+		const untilBtn = $("btnRerollUntil");
+		const restLabel = untilBtn ? untilBtn.textContent : "";
+		const restTitle = untilBtn ? untilBtn.title : "";
+		function progress(done, total) {
+			const s = $("status");
+			s.textContent = "Reroll until: try " + done + " of " + total + "… (Esc cancels)";
+			s.hidden = false;
+			if (untilBtn) untilBtn.textContent = "Cancel " + done + "/" + total;
+		}
+		function end() {
+			untilSearch = null;
+			clearTimeout(timer);
+			if (searchWorker) { searchWorker.terminate(); searchWorker = null; }
+			document.body.classList.remove("searching");
+			if (untilBtn) {
+				untilBtn.textContent = restLabel;
+				untilBtn.title = restTitle;
+				untilBtn.removeAttribute("aria-pressed");
+			}
+		}
+		function cancel() {
+			end();
+			setStatus("Search cancelled after " + k + " tr" + (k === 1 ? "y" : "ies") +
+				". The class on screen is unchanged.");
+			// The inline path left the runner's cache on its last candidate.
+			if (inline) run();
+		}
+		untilSearch = { cancel };
+		document.body.classList.add("searching");
+		if (untilBtn) {
+			untilBtn.title = "Cancel the search (Esc)";
+			untilBtn.setAttribute("aria-pressed", "true");
+		}
+		progress(0, maxTries);
+
+		/* The answer, applied only to the settings it answers. A seed found
+		   and then run against settings moved in the meantime is a class
+		   that was never tested against the conditions at all. */
+		function apply(seed) {
+			end();
+			if (untilKey() !== searchedFor) {
+				setStatus("Found seed " + seed + " on try " + k + ", but the settings " +
+					"or locks changed during the search, so it was not applied — it " +
+					"satisfies " + said + " only under the settings it was searched with.",
+					true);
+				if (inline) run();
+				return;
+			}
 			state.cfg.seed = "";
 			$("seed").value = "";
 			state.lastSeed = seed;
 			state.editing = null;
 			state.selected = {};
 			run(() => setStatus("Found it on try " + k + ": seed " + seed +
-				" satisfies " + preds.map((p) => p.label).join(" and ") + "." +
+				" satisfies " + said + "." +
 				(preds.length > 1 ? " On the way: " + preds
 					.map((p, i) => p.label + " " + hits[i] + "/" + k).join("; ") + "." : "")));
-		};
-		try {
-			searchWorker = new Worker("js/worker.js");
-			searchWorker.onmessage = (e) => {
-				const m = e.data || {};
-				if (m.type === "searchProgress") {
-					setStatus("Reroll until: try " + m.done + " of " + m.total + "…", true);
-				} else if (m.type === "searchDone") {
-					searchWorker.terminate();
-					searchWorker = null;
-					finishFound(m.found, m.tries, m.hits || []);
-				} else if (m.type === "error") {
-					searchWorker.terminate();
-					searchWorker = null;
-					showError(new Error(m.message));
-					run();
-				}
-			};
-			searchWorker.onerror = () => {
-				if (searchWorker) { searchWorker.terminate(); searchWorker = null; }
-				setStatus("Reroll until: searching…", true);
-				setTimeout(step, 0);
-			};
-			searchWorker.postMessage({
-				type: "search", leagueFile: activeFile().data, cfg,
-				base, keys, maxTries,
-			});
-			return;
-		} catch (cannotStartWorker) {
-			searchWorker = null;
 		}
 		/* WHAT THE SEARCH LEARNED ON THE WAY.
 
 		   A failed search said "no class in 40 tries", which tells the user
-		   that something is unlikely and nothing about WHICH something. Every
-		   candidate is tested against every clause rather than short-circuited
-		   — the classes are already simulated, so the extra tests are free —
-		   and the per-clause hit counts turn a dead end into a fact about the
+		   that something is unlikely and nothing about WHICH something. The
+		   per-clause hit counts turn a dead end into a fact about the
 		   settings: "the 7'2" clause matched 2 of 40; the mid-major champion
-		   matched 19". That is the model telling the user what their own
-		   configuration makes likely, which is most of what a simulation is
-		   for. */
-		const step = () => {
+		   matched 19". Named worst-first, because the rarest clause is the one
+		   to drop and the one the user most wants named. */
+		function finish() {
+			if (found) { apply(found.seed); return; }
+			end();
+			const breakdown = preds
+				.map((p, i) => ({ label: p.label, n: hits[i] }))
+				.sort((a, b) => a.n - b.n)
+				.map((x) => x.label + " matched " + x.n + " of " + k)
+				.join("; ");
+			setStatus("No class in " + k + " tries satisfied " + said + ". " + breakdown +
+				". The class on screen is unchanged; raise the try limit, " +
+				"drop the rarest condition, or change the settings that make " +
+				"it unlikely.");
+			/* The runner's cached state belongs to the last candidate;
+			   re-run the class that was on screen so the phase cache and the
+			   page agree again. */
+			run();
+		}
+		/* Declared, not assigned: the worker's onerror falls back to it, and
+		   as a `const` below the worker's early return it was never
+		   initialised on that path — the fallback threw instead of running. */
+		function step() {
+			if (untilSearch === null) return;
 			if (found || k >= maxTries) { finish(); return; }
 			const seed = "u" + Math.floor(searchRng.random() * 1e9).toString(36);
 			k++;
@@ -4586,41 +4955,66 @@
 				});
 				if (all) found = res;
 			} catch (e) { /* a failed candidate is just not the one */ }
-			setStatus("Reroll until: try " + k + " of " + maxTries + "…", true);
-			setTimeout(step, 0);
-		};
-		const finish = () => {
-			if (!found) {
-				/* Named worst-first, because the rarest clause is the one to
-				   drop and the one the user most wants named. */
-				const breakdown = preds
-					.map((p, i) => ({ label: p.label, n: hits[i] }))
-					.sort((a, b) => a.n - b.n)
-					.map((x) => x.label + " matched " + x.n + " of " + k)
-					.join("; ");
-				setStatus("No class in " + k + " tries satisfied " +
-					preds.map((p) => p.label).join(" and ") + ". " + breakdown +
-					". The class on screen is unchanged; raise the try limit, " +
-					"drop the rarest condition, or change the settings that make " +
-					"it unlikely.");
-				/* The runner's cached state belongs to the last candidate;
-				   re-run the class that was on screen so the phase cache and
-				   the page agree again. */
-				run();
-				return;
-			}
-			state.cfg.seed = "";
-			$("seed").value = "";
-			state.lastSeed = found.seed;
-			state.editing = null;
-			state.selected = {};
-			run(() => setStatus("Found it on try " + k + ": seed " + found.seed +
-				" satisfies " + preds.map((p) => p.label).join(" and ") + "." +
-				(preds.length > 1 ? " On the way: " + preds
-					.map((p, i) => p.label + " " + hits[i] + "/" + k).join("; ") + "." : "")));
-		};
-		setStatus("Reroll until: searching…", true);
-		setTimeout(step, 0);
+			progress(k, maxTries);
+			timer = setTimeout(step, 0);
+		}
+		function startInline() {
+			inline = true;
+			timer = setTimeout(step, 0);
+		}
+		function finishFound(seed, tries, got) {
+			k = tries;
+			for (let i = 0; i < got.length && i < hits.length; i++) hits[i] = got[i];
+			if (seed) apply(seed);
+			else finish();
+		}
+
+		/* OFF THE MAIN THREAD, WHERE A SEARCH BELONGS.
+
+		   The interactive run cannot move: the staged runner keeps its state
+		   between calls as a graph of live objects and that is not a message.
+		   A SEARCH is the opposite shape — up to sixty full simulations that
+		   need one boolean each and hand back a seed — so it is all cost and
+		   no payload, which is exactly what a worker is for.
+
+		   The worker gets the seed, not the class. The main thread re-runs it
+		   through its own runner, which is what puts it in the pill, the
+		   history and the undo stack. The inline path stays, for the same
+		   reason the batch runner's does: opening index.html off the disk
+		   blocks workers in most browsers, and that is the documented way to
+		   use this tool. */
+		try {
+			const w = new Worker("js/worker.js");
+			searchWorker = w;
+			w.onmessage = (e) => {
+				if (searchWorker !== w) return;
+				const m = e.data || {};
+				if (m.type === "searchProgress") {
+					progress(m.done, m.total);
+				} else if (m.type === "searchDone") {
+					w.terminate();
+					searchWorker = null;
+					finishFound(m.found, m.tries, m.hits || []);
+				} else if (m.type === "error") {
+					end();
+					showError(new Error(m.message));
+					run();
+				}
+			};
+			w.onerror = () => {
+				if (searchWorker !== w) return;
+				w.terminate();
+				searchWorker = null;
+				startInline();
+			};
+			w.postMessage({
+				type: "search", leagueFile: activeFile().data, cfg,
+				base, keys, maxTries,
+			});
+		} catch (cannotStartWorker) {
+			searchWorker = null;
+			startInline();
+		}
 	}
 
 	/* ------------------------------------------------------------ challenges
@@ -4828,9 +5222,13 @@
 		bar.appendChild(give);
 	}
 
-	function reroll() {
+	function reroll(opts) {
+		/* A second reroll inside the busy window of the first one read a
+		   lastSeed the first had blanked, and pushed an undo entry that
+		   restored nothing. One at a time. */
+		if (busyDepth > 0 || untilSearch) return;
 		const previous = state.lastSeed;
-		pushUndo("rerolled the class");
+		if (!(opts && opts.noUndo)) pushUndo("rerolled the class");
 		// The class being replaced goes into the run history, with everything
 		// needed to come back to it. See rememberSession.
 		rememberSession();
@@ -4931,7 +5329,26 @@
 			if (state.results[i] && !keep.has(i)) held.push(i);
 		}
 		const over = held.length - UNIVERSE_LIVE_RESULTS;
-		for (let i = 0; i < over; i++) state.results[held[i]] = null;
+		for (let i = 0; i < over; i++) releaseUniverseResult(held[i]);
+	}
+
+	/* THE RUNNER GOES WITH THE RESULT.
+
+	   Nulling state.results[i] freed nothing: the file's runner keeps the
+	   whole staged state of its last run (players, teams, game logs — the
+	   same objects the result pointed at) so that a later run can skip the
+	   phases whose inputs did not change. Measured at about sixteen megabytes
+	   a season, held for every season the chain had ever played. An evicted
+	   season gets a FRESH runner: rebuilding it on demand (ensureResult, from
+	   the config the chain recorded) is a cold run either way, and a re-run
+	   of the chain simply runs it cold. */
+	function releaseUniverseResult(i) {
+		state.results[i] = null;
+		const f = state.files[i];
+		if (f && f.data && state.runners[i]) {
+			try { state.runners[i] = global.Engine.createRunner(f.data); }
+			catch (e) { /* keep the old runner rather than none */ }
+		}
 	}
 
 	/* Run every loaded file as one continuous world, oldest season first,
@@ -4968,12 +5385,13 @@
 	/* Whether the loaded files can extend the chain rather than replace it:
 	   there is a finished chain with a tail, and every file that is not
 	   already part of it is later than the last season it played. */
-	function canExtendUniverse() {
+	function canExtendUniverse(only) {
 		const tail = universeTail();
 		if (!tail || !state.universe.rows.length || state.universe.running) return false;
 		if (state.universe.broken) return false;
 		const known = new Set(tail.fingerprints || []);
-		const fresh = state.files.filter((f) => !known.has(f.fingerprint));
+		const fresh = state.files.filter((f) => !known.has(f.fingerprint) &&
+			(!only || only.has(f.fingerprint)));
 		if (!fresh.length) return false;
 		return fresh.every((f) => Number.isFinite(f.data && f.data.startingSeason) &&
 			f.data.startingSeason > tail.lastSeason);
@@ -5002,59 +5420,78 @@
 	   the extend path states its own version of it. */
 	function universeResumeState(from) {
 		const u = state.universe;
-		if (!u || !u.cfgs || !Array.isArray(u.order)) return null;
+		if (!u || !u.cfgs || !Array.isArray(u.order) || u.running) return null;
 		if (!(from > 0) || from >= u.order.length) return null;
 		const at = u.order[from];
 		const saved = at && u.cfgs[at.index];
 		if (!saved || !saved.carryOver) return null;
-		const before = u.order.slice(0, from);
-		const keptFingerprints = before
-			.map((d) => state.files[d.index] && state.files[d.index].fingerprint)
-			.filter(Boolean);
-		return {
-			from,
-			carry: saved.carryOver,
-			recentPools: (saved.recentPools || []).map((a) => a.slice()),
-			recentAnomalies: (saved.recentAnomalies || []).map((a) => a.slice()),
-			lastSeason: before.length ? before[before.length - 1].season : null,
-			rows: u.rows.filter((r) => {
-				if (!r) return false;
-				/* An extrapolated row has no fingerprint — it was never a
-				   file — so filtering on one dropped every year inside the
-				   chain that no file covered. Those years belong to the held
-				   seasons and are not re-drawn by the resumed run (step()
-				   only fills a gap it walks past), so a resume used to delete
-				   them permanently. A held year is kept; a guessed year after
-				   the resume point goes with the seasons it described. */
-				if (r.extrapolated) {
-					return Number.isFinite(r.season) && before.length &&
-						r.season <= before[before.length - 1].season;
-				}
-				return keptFingerprints.indexOf(r.fingerprint) !== -1;
-			}),
-			keptFingerprints,
-		};
+		return { from };
 	}
 
+	/* THE CHAIN ITSELF LIVES IN js/universe.js (Universe.beginChain), so the
+	   harness in tools/universe.js runs the same code this does: the state
+	   going in (cold, an extension's tail, or a held season's recorded
+	   config), both passes of previews and recruiting cohorts, both roster
+	   links, the step and the tail. What stays here is what is the app's:
+	   which files, which settings, the slices and the progress bar, memory,
+	   the career links, persistence and the import check. */
+	/* AN IMPORT'S REPLAY IS SEVERAL RUNS, AND NOTHING MAY CUT IN.
+
+	   Importing applies the file's settings to the panel, and a settings
+	   change schedules a re-run of the whole universe. With one cold replay
+	   that re-run found the chain running and returned; with a replay in
+	   several runs it lands in the gap between two of them, starts a cold
+	   chain, and the replay's next run then finds THAT running and stops —
+	   a world that is neither. Held until the last run of the replay ends. */
+	let universeReplay = false;
+
 	function runUniverse(after, opts) {
+		opts = opts || {};
 		const U = global.Universe;
 		if (!state.files.length) {
 			setStatus("Load two or more class files to run a universe.");
 			return;
 		}
 		if (state.universe.running) return;
-		const tail = (opts && opts.extend) ? universeTail() : null;
-		const extend = !!tail && canExtendUniverse();
+		if (universeReplay && opts.replaying === undefined) return;
+		// A replay run that returns early below must not leave the gate shut.
+		if (opts.replaying !== undefined) universeReplay = false;
+		/* `only`: the files this run may touch, by fingerprint — how an import
+		   replays the runs a universe was built in (see importUniverse). */
+		const only = Array.isArray(opts.only) ? new Set(opts.only) : null;
+		const tail = opts.extend ? universeTail() : null;
+		const extend = !!tail && canExtendUniverse(only);
+		if (opts.extend && opts.replaying !== undefined && !extend) {
+			/* A replayed extension that cannot extend must not silently turn
+			   into a cold chain of just the appended files. */
+			setStatus("The imported universe's extension could not be replayed " +
+				"(the chain before it did not finish).", true);
+			universeReplay = false;
+			state.universeExpect = null;
+			state.universeImported = null;
+			return;
+		}
 		/* Resuming from a season the user has held. Never combined with an
 		   extension: an extension appends to the END of a finished chain and a
-		   resume re-runs its tail, and doing both at once is two different
-		   answers to "what is the state going in". */
-		const resume = !extend && opts && Number.isFinite(opts.resumeFrom)
+		   resume re-runs its tail. */
+		const resume = !extend && Number.isFinite(opts.resumeFrom)
 			? universeResumeState(opts.resumeFrom) : null;
+		if (Number.isFinite(opts.resumeFrom) && opts.replaying !== undefined && !resume) {
+			setStatus("The imported universe's partial re-run could not be replayed.", true);
+			state.universeExpect = null;
+			state.universeImported = null;
+			return;
+		}
 		const diags = U.validate(state.files);
 		state.universe.diags = diags;
 		let runnable = diags.filter((d) => d.ok)
 			.sort((a, b) => (a.season || 0) - (b.season || 0) || a.index - b.index);
+		if (only && !resume) {
+			runnable = runnable.filter((d) => {
+				const f = state.files[d.index];
+				return f && only.has(f.fingerprint);
+			});
+		}
 		if (extend) {
 			const known = new Set(tail.fingerprints || []);
 			runnable = runnable.filter((d) => {
@@ -5080,14 +5517,9 @@
 				return;
 			}
 		}
-		/* THE "LOAD JUST THE CLASS" OFFER, HONOURED.
-
-		   Universe.validate hands back `classPids` for a whole-league file the
-		   way Engine.validateLeagueFile does for the standalone path, and the
-		   offer is taken here the same way classesFromFile takes it on drop:
-		   the file becomes the class it contains, once, and the runner is
-		   rebuilt on it. The fingerprint moves with it, since the export
-		   records which file a season was. */
+		/* THE "LOAD JUST THE CLASS" OFFER, HONOURED. See Universe.validate:
+		   a whole-league file becomes the class it contains, once, and the
+		   runner is rebuilt on it. */
 		for (const d of runnable) {
 			if (!d.classPids || !d.classPids.length) continue;
 			const f = state.files[d.index];
@@ -5108,16 +5540,8 @@
 			render();
 			return;
 		}
-		/* SAY HOW LONG THIS WILL TAKE, BEFORE IT STARTS.
-
-		   A season is about a third of a second cold, so a forty-file drop is
-		   most of a minute — and the only thing the user saw was the progress
-		   bar arriving after they had already committed. The estimate is the
-		   same arithmetic the progress bar reports afterwards, said in advance;
-		   below the threshold it would be noise, so it is not said at all.
-		   Deliberately not a confirmation dialog: the chain is cancellable
-		   (see cancelUniverse), and a modal in front of the ordinary case
-		   would cost every short run a click to save a long one a surprise. */
+		/* SAY HOW LONG THIS WILL TAKE, BEFORE IT STARTS. Not a confirmation
+		   dialog: the chain is cancellable (see cancelUniverse). */
 		if (runnable.length >= UNIVERSE_SLOW_SEASONS) {
 			const secs = Math.max(1, Math.round(runnable.length * SEASON_MS / 1000));
 			setStatus((extend ? "Extending" : "Running") + " " + runnable.length +
@@ -5126,477 +5550,124 @@
 				". Cancel on the Universe tab at any point; finished seasons are kept.",
 				true);
 		}
-		/* An extension keeps the seed the chain was built on, whatever the
-		   panel says now: the seed is part of the world's identity and a
-		   season appended under a different one is a different world. */
+		/* The seed is part of the world's identity: an extension and a resume
+		   keep the one the chain was built on, whatever the panel says now. A
+		   resume used to take the PANEL's seed, so a panel with the seed box
+		   cleared re-ran the held world's later seasons under a random one. */
 		const baseSeed = extend ? tail.baseSeed
+			: resume && state.universe.baseSeed ? state.universe.baseSeed
 			: (state.cfg.seed && state.cfg.seed.trim()
 				? state.cfg.seed.trim()
 				: "universe-" + Math.floor(Math.random() * 1e9));
-		/* THE CONFIG IS FROZEN BEFORE SEASON ONE.
+		/* THE CONFIG IS FROZEN BEFORE SEASON ONE. One config object is built
+		   here and handed down; a change made mid-run re-invalidates and
+		   restarts the chain.
 
-		   step(k) used to call CFG.make(state.cfg) fresh for every season, so
-		   a slider nudged while a forty-file chain was running gave seasons
-		   1-12 one world and 13-40 another, and nothing recorded that it had
-		   happened. One config object is built here and handed down; a change
-		   made mid-run re-invalidates and restarts the chain, which is what
-		   the user meant, rather than splicing two worlds together. */
-		/* And an extension runs under the settings the chain was FROZEN with,
-		   for the same reason: appending a season at a different coachTurnover
-		   splices two worlds together under one name. */
-		/* A resume runs under the CURRENT settings, unlike an extension: the
-		   whole point of holding the early seasons is to change something and
-		   see what it does to the late ones. The held seasons keep the rows
-		   they were played with, which is stated in the control. */
-		const frozen = extend && state.universe.settings
-			? CFG.make(state.universe.settings)
+		   An extension runs under the settings the chain's LAST run was
+		   frozen with (a resume may have changed them for the later seasons,
+		   and those are the world the new season follows). A resume runs
+		   under the CURRENT settings — that is the point of it — and records
+		   them for the seasons it re-runs only (see the segments in
+		   Universe.beginChain), not for the held ones. An import's replay
+		   hands each run the settings that run was recorded with. */
+		const lastSettings = U.segmentSettings(state.universe,
+			(state.universe.order || []).length - 1);
+		const frozen = opts.settings ? CFG.make(opts.settings)
+			: extend && lastSettings ? CFG.make(lastSettings)
 			: CFG.make(state.cfg);
-		/* An imported universe's own biographies, so the replay produces the
-		   same men and not merely the same seeds. See importUniverse.
-
-		   Held universe-wide and projected per file at the point of use (see
-		   the step below), because the engine's `cfg.biography` is keyed on a
-		   file's own pids and the map is keyed on an identity that survives a
-		   file boundary. */
+		/* An imported universe's own biographies are held universe-wide and
+		   projected per file at the point of use. */
 		frozen.biography = null;
+		universeReplay = !!opts.replaying;
 		universeCancel = false;
-		state.universe = extend
-			? Object.assign(state.universe, {
-				order: (state.universe.order || []).concat(runnable),
-				running: true, diags, total: runnable.length, done: 0,
-				cancelled: false, records: null, careers: null,
-			})
-			: resume
-			? Object.assign(state.universe, {
-				/* The order is unchanged — it is what the seeds are keyed to —
-				   and only the rows from the resumed season on are dropped. */
-				rows: resume.rows.slice(),
-				alumni: (state.universe.alumni || []).filter((a) =>
-					!Number.isFinite(resume.lastSeason) || a.season <= resume.lastSeason),
-				running: true, diags, total: runnable.length, done: 0,
-				cancelled: false, records: null, careers: null, broken: null,
-				settings: frozen,
-			})
-			: {
-				rows: [], threads: [], alumni: [], baseSeed, cfgs: {},
-				/* The chain's own order, so a result evicted to bound memory
-				   can be rebuilt AND relinked on demand — see ensureResult. */
-				order: runnable,
-				running: true, diags, total: runnable.length, done: 0,
-				settings: frozen, coachTree: null, records: null,
-				engineRev: U.ENGINE_REV, cancelled: false, broken: null,
-				tail: null,
-			};
 		/* Only jump to the Timeline when the user asked for a universe
-		   explicitly. With universe mode on as a SETTING the chain re-runs
-		   whenever anything invalidates it, and stealing the tab every time
-		   somebody moved a slider would make the tool unusable. */
+		   explicitly (see the universe setting). */
 		if (!state.cfg.universe) state.tab = "universe";
+		const chain = U.beginChain({
+			mode: extend ? "extend" : resume ? "resume" : "cold",
+			from: resume ? resume.from : undefined,
+			universe: extend || resume ? state.universe : null,
+			files: state.files,
+			runnable,
+			settings: frozen,
+			baseSeed,
+			diags,
+			make: (s) => CFG.make(s),
+			runnerFor: (i) => state.runners[i],
+			store: (i, res) => { state.results[i] = res; },
+			biographyFor: (fp) => U.biographyForFile(state.universeBiography, fp),
+			extrapolateGaps: state.cfg.extrapolateGaps !== false,
+			fullClass: UNIVERSE_FULL_CLASS,
+			anomalyHistory: ANOMALY_HISTORY,
+		});
+		state.universe = chain.universe;
 		render();
-		/* PASS ONE: who is in every class, before any season is played.
-
-		   The 2027 file's juniors were freshmen in 2025, and 2025 cannot put
-		   them on its rosters without knowing who they are — class years,
-		   colleges and builds are drawn in the build phase, from the seed and
-		   the pool memory and nothing the season produces. So every file's
-		   build phase runs first, in order (the pool memory chains through
-		   it exactly as the full run will), and each earlier season is then
-		   handed the underclassmen the later classes say were there. See
-		   Engine.previewClass and Engine.futureRosterFor. */
-		/* The seed index continues past the seasons already played, so an
-		   appended season is a new link and not a re-draw of season one. */
-		const seedBase = extend ? (tail.count || 0) : resume ? resume.from : 0;
-		const seedAt = (k) => U.seedFor(baseSeed, seedBase + k, runnable[k].season,
-			state.files[runnable[k].index].fingerprint);
-		const previews = [];
-		let previewPools = extend ? (tail.recentPools || []).map((a) => a.slice())
-			: resume ? resume.recentPools.map((a) => a.slice()) : [];
-		for (let k = 0; k < runnable.length; k++) {
-			const d = runnable[k];
-			let prev = null;
-			try {
-				const pcfg = CFG.make(frozen);
-				pcfg.seed = seedAt(k);
-				pcfg.overrides = {};
-				pcfg.recentPools = previewPools.map((a) => a.slice());
-				prev = global.Engine.previewClass(state.files[d.index].data, pcfg);
-			} catch (e) {
-				prev = null;
-			}
-			previews.push(prev);
-			if (prev && prev.archetypePool) {
-				previewPools.unshift(prev.archetypePool.slice());
-				previewPools = previewPools.slice(0, 3);
-			}
-		}
-		/* PASS ONE AND A HALF: rank every recruiting class across all the
-		   files at once, from the previews just built. See
-		   Universe.recruitingCohorts. */
-		let universeRecruiting = null;
-		try {
-			universeRecruiting = U.recruitingCohorts(previews);
-			state.universe.recruiting = universeRecruiting.cohorts;
-		} catch (e) {
-			universeRecruiting = null;
-		}
-		const rosterFor = (k) => {
-			const season = runnable[k].season;
-			if (!Number.isFinite(season)) return [];
-			let out = [];
-			for (let j = k + 1; j < runnable.length; j++) {
-				if (!previews[j] || !(runnable[j].season > season)) continue;
-				out = out.concat(global.Engine.futureRosterFor(
-					previews[j], season, runnable[j].index));
-			}
-			return out;
-		};
-		/* THE OTHER DIRECTION.
-
-		   rosterFor reads the PREVIEWS, because a later class's men have to be
-		   on an earlier roster before that season is played and a preview is
-		   the only thing that exists yet. The reverse link needs no preview at
-		   all: an earlier season has already been SIMULATED by the time a
-		   later one runs, so the men it did not get drafted — with their board
-		   ranks, their class years and their programs — are simply there to be
-		   read. See Engine.pastRosterFor.
-
-		   Accumulated as the chain goes rather than gathered up front, for
-		   exactly that reason: season k's returners are a fact about season
-		   k's result, which does not exist until season k has run. */
-		const returners = [];
-		const pastRosterFor = (k) => {
-			const season = runnable[k].season;
-			if (!Number.isFinite(season)) return [];
-			let out = [];
-			for (const src of returners) {
-				if (!(season > src.season)) continue;
-				/* Once per earlier season, not once per candidate: the whole
-				   population is one call, and a returner's overall is computed
-				   against the season that is asking rather than against
-				   whichever one asked first. */
-				out = out.concat(global.Engine.pastRosterFor(src.res, season, src.index));
-			}
-			return out;
-		};
-		/* Three ways in, and all three read the state back rather than
-		   reconstructing it: a cold chain starts from nothing, an extension
-		   from the tail the last run saved, and a resume from what
-		   state.universe.cfgs recorded the held season being handed. */
-		let carry = extend ? tail.carry : resume ? resume.carry : null;
-		let recentPools = extend ? (tail.recentPools || []).map((a) => a.slice())
-			: resume ? resume.recentPools.map((a) => a.slice()) : [];
-		/* The anomaly memory is universe-scoped, like the pool memory: a
-		   ten-season chain used to re-use the same six anomalies because
-		   each season was handed the standalone session's history rather
-		   than the chain's own. */
-		let recentAnomalies = extend
-			? (tail.recentAnomalies || []).map((a) => a.slice())
-			: resume ? resume.recentAnomalies.map((a) => a.slice()) : [];
-		let coachTree = extend || resume ? state.universe.coachTree : null;
-		let lastSeason = extend ? tail.lastSeason
-			: resume ? resume.lastSeason : null;
-		const finish = () => {
-			state.universe.running = false;
-			/* The years past the last file, if the user asked for any. Done
-			   before the threads and the records book are derived, because
-			   both read the rows. */
-			const guessedYears = extrapolateForward(state.cfg.extrapolateYears || 0);
-			/* WITH the alumni index: threads about people, not only about
-			   programmes. See moreThreads in js/universe.js — the parameter
-			   was in the signature and no caller passed it. */
-			state.universe.threads = U.threads(state.universe.rows, state.universe.alumni);
-			state.universe.coachTree = coachTree;
-			/* THE TAIL. Everything step() carried from one season to the next,
-			   kept so that loading a later class file extends this chain
-			   instead of replacing it. See canExtendUniverse. */
-			state.universe.tail = {
-				baseSeed,
-				carry,
-				lastSeason,
-				count: seedBase + runnable.length,
-				recentPools: recentPools.map((a) => a.slice()),
-				recentAnomalies: recentAnomalies.map((a) => a.slice()),
-				fingerprints: (state.universe.order || [])
-					.map((d) => state.files[d.index] && state.files[d.index].fingerprint)
-					.filter(Boolean),
-			};
-			state.universe.records = U.records(
-				state.universe.rows, state.universe.alumni);
-			/* THE REGISTRY: the world indexed by person rather than by season.
-			   Built once a chain finishes, from results it already has, and
-			   kept small enough to persist — one row per person with the
-			   seasons he appears in, not a career's worth of box scores. */
-			try {
-				state.universe.registry = U.registryOf(
-					liveResults(), state.files, state.universe.rows);
-			} catch (e) { state.universe.registry = null; }
-			/* PASS THREE: the seasons a player actually played, on his
-			   own page. See linkCareers. */
+		const total = chain.runnable.length;
+		const finish = (cancelled) => {
+			const out = chain.finish({
+				cancelled, extrapolateYears: state.cfg.extrapolateYears || 0,
+			});
+			const u = state.universe;
+			/* PASS THREE: the seasons a player actually played, on his own
+			   page — for the results that are live; an evicted one is linked
+			   when it is rebuilt. See linkCareers. */
 			linking = true;
-			try { linkCareers(runnable); }
+			try { linkCareers(u.order); }
 			catch (e) { showError(e); }
 			finally { linking = false; }
-			evictUniverseResults(runnable.slice(-UNIVERSE_LIVE_RESULTS)
+			evictUniverseResults(chain.runnable.slice(-UNIVERSE_LIVE_RESULTS)
 				.map((d) => d.index));
+			/* A replay stopped part-way is not the imported world, and the
+			   next unrelated run must not be checked against it. */
+			if (u.cancelled && opts.replaying !== undefined) {
+				state.universeExpect = null;
+				state.universeImported = null;
+				universeReplay = false;
+			}
 			persist();
-			const diverged = checkUniverseDivergence();
+			const diverged = opts.replaying ? null : checkUniverseDivergence();
 			if (diverged) showError(new Error(diverged));
-			/* Only worth saying when the staging saved something: on a cold
-			   chain every season is re-simulated and the sentence is noise. */
-			const forwardNote = guessedYears
-				? " " + guessedYears + " further season" +
-					(guessedYears === 1 ? " was" : "s were") +
+			const forwardNote = out.guessed
+				? " " + out.guessed + " further season" +
+					(out.guessed === 1 ? " was" : "s were") +
 					" extrapolated past the last file, and are flagged as such."
 				: "";
-			const saved = touched > resimulated
-				? " Re-simulated " + resimulated + " of " + touched +
-					" season" + (touched === 1 ? "" : "s") +
+			/* Only worth saying when the staging saved something. */
+			const saved = out.touched > out.resimulated
+				? " Re-simulated " + out.resimulated + " of " + out.touched +
+					" season" + (out.touched === 1 ? "" : "s") +
 					"; the rest were served from the phase cache." : "";
-			setStatus((state.universe.cancelled ? "Universe stopped: "
-				: extend ? "Universe extended by " + runnable.length + " season" +
-					(runnable.length === 1 ? "" : "s") + ": "
+			setStatus((u.cancelled ? "Universe stopped: "
+				: extend ? "Universe extended by " + total + " season" +
+					(total === 1 ? "" : "s") + ": "
 				: "Universe complete: ") +
-				state.universe.rows.length + " seasons, " +
-				state.universe.threads.length + " threads." + forwardNote + saved +
-				(state.universe.broken
-					? " Season " + state.universe.broken + " failed; the world was aged " +
+				u.rows.length + " seasons, " +
+				u.threads.length + " threads." + forwardNote + saved +
+				(u.broken
+					? " Season " + u.broken + " failed; the world was aged " +
 						"across it rather than frozen."
-					: ""));
+					: "") +
+				(u.importNote ? " " + u.importNote : ""));
+			u.importNote = null;
 			/* The active file's seed pill and title describe the universe
 			   run now, not a standalone re-simulation of it. */
 			const active = state.results[state.active];
 			if (active) stampSeedPill(active, null);
 			paintEffective();
 			render();
-			if (typeof after === "function") after();
+			if (typeof after === "function" && !u.cancelled) after();
 		};
-		/* RUNNING FORWARD PAST THE LAST FILE.
-
-		   `extrapolateGap` already invents a whole season from the carry-over
-		   alone — a champion off program level, an AP No. 1, a player of the
-		   year and a five-man All-America team off the named returners — and
-		   flags every row so nothing can mistake it for a simulated one. It
-		   was reachable in exactly one way: leave a hole in your file list.
-
-		   That is a season for almost nothing, and the reason to want it is
-		   the reason the carry-over exists at all. Program levels drift,
-		   realignment accumulates, coaches age out and banners pile up, and
-		   none of it is visible over the three or four files anybody actually
-		   has. Ten years past the end of the chain is where a dynasty becomes
-		   a dynasty. The rows are flagged, they feed the records book and the
-		   news desk exactly as a gap's rows do, and they are NOT fed back into
-		   anything that would let them masquerade as played: the chain's tail
-		   is untouched, so loading a real class file later extends the world
-		   from the last season that was actually simulated. */
-		const extrapolateForward = (years) => {
-			/* LAST RUN'S GUESSED TAIL COMES OFF FIRST.
-
-			   An extension keeps state.universe.rows — that is the point of
-			   it — and these rows are the ones drawn PAST the end of the
-			   chain, so after an extend the seasons they cover have either
-			   been played for real or are about to be redrawn from a world
-			   four years further on. Appending without pruning put two rows
-			   on the timeline for the same year, out of order, and fed both
-			   to the records book and the news desk; turning the dial down to
-			   zero left the old tail behind entirely.
-
-			   A gap's rows are never touched: they sit before `lastSeason`
-			   and they describe years inside the chain, which have not
-			   moved. Done before the early return below, so a tail is
-			   dropped even when nothing replaces it. */
-			const kept = [];
-			const stale = [];
-			for (const row of state.universe.rows) {
-				if (row && row.extrapolated && Number.isFinite(row.season) &&
-					Number.isFinite(lastSeason) && row.season > lastSeason) {
-					stale.push(row.season);
-					continue;
-				}
-				kept.push(row);
-			}
-			if (stale.length) {
-				state.universe.rows = kept;
-				const drop = new Set(stale);
-				state.universe.alumni = (state.universe.alumni || []).filter((a) =>
-					!(a && a.extrapolated && drop.has(a.season)));
-			}
-			const n = Math.max(0, Math.round(years));
-			if (!n || !carry || !Number.isFinite(lastSeason)) return 0;
-			const guessed = U.extrapolateGap(carry, lastSeason, lastSeason + n + 1, baseSeed);
-			for (const row of guessed) state.universe.rows.push(row);
-			state.universe.alumni = state.universe.alumni
-				.concat(U.extrapolatedAlumni(guessed));
-			return guessed.length;
-		};
-		let resimulated = 0;
-		let touched = 0;
 		const step = (k) => {
-			if (k >= runnable.length || universeCancel) {
-				state.universe.cancelled = universeCancel && k < runnable.length;
+			if (k >= total || universeCancel) {
+				const cancelled = universeCancel && k < total;
 				universeCancel = false;
-				finish();
+				finish(cancelled);
 				return;
 			}
-			const d = runnable[k];
-			/* A HOLE IN THE FILES IS TIME PASSING.
-
-			   2025, 2026, 2031 is six years and three files, and the carry
-			   used to be handed straight across as if one season had gone by.
-			   See Universe.ageCarry: coaches age and the oldest leave, program
-			   levels regress toward their own mean, star returners advance a
-			   class year and graduate out. */
-			const gap = (carry && Number.isFinite(lastSeason) && Number.isFinite(d.season))
-				? Math.max(0, d.season - lastSeason - 1) : 0;
-			/* THE YEARS NOBODY PLAYED GET AN ACCOUNT OF THEMSELVES.
-
-			   Aging the carry across a gap keeps the world moving and leaves
-			   the timeline with a hole where four seasons should be. The
-			   extrapolated rows are drawn from the carry as it stood going in
-			   — champions off program level, a player of the year off the
-			   named star returners — and are flagged so nothing mistakes them
-			   for a simulated season. They are pushed onto the timeline and
-			   NOT fed back into the chain: `carry` below is still ageCarry's,
-			   so this changes what the world remembers and not what it does.
-			   See Universe.extrapolateGap. */
-			if (gap > 0 && state.cfg.extrapolateGaps !== false) {
-				const guessed = U.extrapolateGap(carry, lastSeason, d.season, baseSeed);
-				for (const row of guessed) state.universe.rows.push(row);
-				state.universe.alumni = state.universe.alumni
-					.concat(U.extrapolatedAlumni(guessed));
-			}
-			if (gap > 0) carry = U.ageCarry(carry, gap);
-			try {
-				const cfg = CFG.make(frozen);
-				cfg.seed = seedAt(k);
-				cfg.overrides = {};
-				cfg.recentPools = recentPools.map((a) => a.slice());
-				cfg.recentAnomalies = recentAnomalies.map((a) => a.slice());
-				cfg.carryOver = carry;
-				cfg.universeRoster = rosterFor(k);
-				cfg.pastRoster = pastRosterFor(k);
-				/* The slice of the imported biography that belongs to THIS
-				   file. A version 1 or 2 export's map is unscoped and is
-				   passed through unchanged; see Universe.biographyForFile. */
-				cfg.biography = U.biographyForFile(state.universeBiography,
-					state.files[d.index] && state.files[d.index].fingerprint);
-				cfg.universeRecruiting = universeRecruiting
-					? { byKey: universeRecruiting.byFile[k] || {} } : null;
-				/* What the world remembers, for the news desk. The alumni
-				   index was built and only ever rendered on the Universe tab;
-				   a 2033 paper that can mention the 2027 player of the year is
-				   the difference between a timeline and a history. Bounded,
-				   because it rides in a config that is kept per file. */
-				cfg.universeAlumni = state.universe.alumni.slice(-120);
-				cfg.universeTitles = (carry && carry.titles) || {};
-				const prevCarry = carry;
-				const res = state.runners[d.index].run(cfg);
-				/* WHAT THE CHAIN ACTUALLY HAD TO REDO.
-
-				   Every file keeps its runner across chain runs, so a second
-				   pass only re-runs the phases whose inputs changed — and
-				   until the carry-over was declared as a phase input (see
-				   PHASES in js/engine.js) that saving was not something you
-				   could trust, so there was no point reporting it. Now it is,
-				   and a forty-season chain that re-runs because one award dial
-				   moved can say "re-simulated 0 of 40 seasons; re-scored 40"
-				   instead of looking exactly like a full replay. */
-				const heavy = (res.phasesRun || [])
-					.some((x) => x === "build" || x === "regular" || x === "stats");
-				if (heavy) resimulated++;
-				if ((res.phasesRun || []).length) touched++;
-				/* KEEP the result and the config that produced it. The chain
-				   used to discard both, which is the whole of bug B1: every
-				   other tab then re-simulated the file with no carry-over and
-				   the base seed, and disagreed with the timeline it had just
-				   drawn. */
-				res.fileIndex = d.index;
-				state.results[d.index] = res;
-				state.universe.cfgs[d.index] = {
-					seed: cfg.seed,
-					carryOver: cfg.carryOver,
-					recentPools: (cfg.recentPools || []).map((a) => a.slice()),
-					recentAnomalies: (cfg.recentAnomalies || []).map((a) => a.slice()),
-					universeRoster: cfg.universeRoster,
-					pastRoster: cfg.pastRoster,
-					universeRecruiting: cfg.universeRecruiting,
-					universeAlumni: cfg.universeAlumni,
-					universeTitles: cfg.universeTitles,
-				};
-				/* THE MEN THIS SEASON DID NOT GET DRAFTED.
-
-				   Held as a builder per season rather than as finished rows:
-				   a returner's overall in 2028 has to be computed against 2028
-				   and not against whichever later season happened to ask
-				   first. Engine.pastRosterFor owns every rule about who counts
-				   — undrafted, eligibility left, at a program rather than a
-				   club — so this closes over the finished result and asks it,
-				   which keeps one definition of "came back" rather than two. */
-				/* Kept only while it can still contribute anybody: a season
-				   whose undrafted men have all run out of eligibility is dead
-				   weight on every later season's pass. */
-				if (global.Engine.pastRosterFor(res, d.season + 1, d.index).length) {
-					returners.push({ season: d.season, index: d.index, res });
-				}
-				coachTree = U.coachTreeStep(coachTree, prevCarry, res, d.season, baseSeed);
-				/* A FILE THAT CARRIES PART OF A CLASS.
-
-				   A league export whose draft class is forty men produces a
-				   real season whose honours were drawn from a thin field.
-				   `share` is how much of a full class the file carried, and
-				   the top-up adds the All-America places that field could not
-				   fill, flagged as inferred. See
-				   Universe.topUpPartialSeason. */
-				const share = Math.min(1, (res.players || []).length /
-					Math.max(1, UNIVERSE_FULL_CLASS));
-				state.universe.rows.push(U.topUpPartialSeason(Object.assign(
-					U.summarize(res, cfg.seed, d.name),
-					{
-						fingerprint: state.files[d.index].fingerprint || null,
-						/* What came OUT, not only what went in — see
-						   Universe.resultFingerprint. An import replaying this
-						   universe compares these and can say a season
-						   diverged instead of silently handing back a
-						   different world with the same name. */
-						result: U.resultFingerprint(res),
-						gap,
-					}), prevCarry, baseSeed, share));
-				/* The file's fingerprint, so every alumni row carries an
-				   identity that survives a file boundary — a pid does not.
-				   See Universe.alumniOf and Universe.records. */
-				state.universe.alumni = state.universe.alumni
-					.concat(U.alumniOf(res, d.season,
-						state.files[d.index].fingerprint || null));
-				carry = U.harvest(res, prevCarry);
-				lastSeason = d.season;
-				if (res.archetypePool) {
-					recentPools.unshift(res.archetypePool.slice());
-					recentPools = recentPools.slice(0, 3);
-				}
-				if (Array.isArray(res.surprises) && res.surprises.length) {
-					recentAnomalies.unshift(res.surprises.map((sp) => sp.name));
-					recentAnomalies = recentAnomalies.slice(0, ANOMALY_HISTORY);
-				}
-			} catch (e) {
-				/* A FAILED SEASON STILL PASSES TIME.
-
-				   The error row used to be pushed and `carry` left pointing at
-				   season k-1, so season k+1 inherited a two-year-old world in
-				   which nothing had aged. The world is aged across the failure
-				   exactly as it is across a missing file, and the chain records
-				   where it broke so the timeline and the export can say the
-				   world after that point is not the world before it. */
-				state.universe.rows.push({
-					season: d.season, fileName: d.name, seed: null, gap,
-					error: e && e.message ? e.message : String(e),
-				});
-				carry = U.ageCarry(carry, 1);
-				if (Number.isFinite(d.season)) lastSeason = d.season;
-				if (!state.universe.broken) state.universe.broken = d.season || d.name;
-			}
-			state.universe.done = k + 1;
-			evictUniverseResults(runnable.slice(Math.max(0, k - UNIVERSE_LIVE_RESULTS + 1), k + 1)
+			chain.step(k);
+			evictUniverseResults(chain.runnable.slice(Math.max(0, k - UNIVERSE_LIVE_RESULTS + 1), k + 1)
 				.map((x) => x.index));
-			setStatus("Universe: season " + (k + 1) + " of " + runnable.length + "…", true);
+			setStatus("Universe: season " + (k + 1) + " of " + total + "…", true);
 			render();
 			setTimeout(() => step(k + 1), 0);
 		};
@@ -5646,31 +5717,41 @@
 
 	function exportUniverse(embedFiles) {
 		const U = global.Universe;
-		if (!state.universe.rows.length) {
+		const u = state.universe;
+		if (!u.rows.length) {
 			setStatus("Build a timeline first.");
 			return;
 		}
-		/* Settings and biographies travel with the seeds now. A universe is
-		   only reproducible if the settings it ran under are part of it —
-		   replaying somebody's fifty-season world at your own coachTurnover
-		   and your own era gives you a different world with the same seeds.
+		/* WHAT THE WORLD WAS BUILT UNDER, EVEN AFTER A RELOAD.
 
-		   The settings written are the FROZEN ones the chain actually ran
-		   under, not whatever the panel says now: a slider moved after the run
-		   would otherwise be exported as the world's own settings. */
-		const payload = U.exportUniverse(Object.assign({}, state.universe, {
-			settings: state.universe.settings || CFG.make(state.cfg),
-			/* Keyed by a cross-file identity now (see Universe.playerId): a
-			   class file's pid is unique inside its own export and means a
-			   different man in every other one, so a universe-wide map keyed
-			   on it handed one class's biography to another class's player
-			   with the same number. The files travel with the results so each
-			   entry can be scoped to the file it came out of. */
-			biography: U.biographyOf(liveResults(), state.files),
-			/* THE REGISTRY: one row per person rather than per season, which
-			   is what makes a career across files expressible at all. */
-			registry: U.registryOf(liveResults(), state.files, state.universe.rows),
+		   The settings, the tail, the order and the registry are persisted
+		   with the timeline now (see universeForStorage). The export used to
+		   read the frozen settings off the live chain and fall back to the
+		   PANEL — so a universe exported after a reload carried whatever the
+		   sliders said that day as the world's own settings, an empty
+		   biography and an empty registry. With neither recorded settings nor
+		   a live chain there is nothing honest to write, so it says so. */
+		const hasCfgs = !!(u.cfgs && Object.keys(u.cfgs).length);
+		if (!u.settings && !hasCfgs) {
+			setStatus("This timeline was saved without the settings it ran under — " +
+				"re-run the universe (load its class files) before exporting it.", true);
+			return;
+		}
+		const live = hasCfgs ? liveResults() : [];
+		const payload = U.exportUniverse(Object.assign({}, u, {
+			settings: u.settings || CFG.make(state.cfg),
+			/* Keyed by a cross-file identity (see Universe.playerId). Built
+			   from the live chain when there is one; otherwise the imported
+			   map this universe came with, rather than nothing. */
+			biography: live.length ? U.biographyOf(live, state.files)
+				: state.universeBiography || null,
+			/* THE REGISTRY: built as the chain ran (see Universe.beginChain),
+			   persisted, and never replaced by an empty rebuild. */
+			registry: u.registry && Object.keys(u.registry).length ? u.registry
+				: live.length ? U.registryOf(live, state.files, u.rows) : null,
 		}), { embedFiles: !!embedFiles, files: state.files });
+		// Rebuilding evicted seasons for the export must not keep them all.
+		if (live.length) evictUniverseResults([]);
 		/* SIZE.
 
 		   The seeds-and-fingerprints file is a kilobyte and is pretty-printed
@@ -5729,10 +5810,12 @@
 			/* The whole point is the seasons, so stats, prior seasons and
 			   awards are always on for this route whatever the export menu
 			   says — a universe players file without them is a class list. */
-			const out = global.Engine.universePlayersFile(liveResults(), Object.assign(
+			const all = liveResults();
+			const out = global.Engine.universePlayersFile(all, Object.assign(
 				{}, currentExportOpts(),
 				{ stats: true, prior: true, awards: true,
 					seed: state.universe.baseSeed }));
+			evictUniverseResults([]);
 			const blob = new Blob([JSON.stringify(out.file, null, "\t")],
 				{ type: "application/json" });
 			const a = document.createElement("a");
@@ -5837,8 +5920,10 @@
 
 	/* Re-import: a universe file carries seeds and file fingerprints, not
 	   output. With the same class files loaded, replaying it reproduces the
-	   same world exactly — that is what determinism buys. */
+	   same world exactly — that is what determinism buys — run by run, the
+	   way it was built (see Universe.replayPlan). */
 	function importUniverse(json) {
+		const U = global.Universe;
 		if (!json || json.format !== "bbgm-draft-workshop/universe") {
 			showError(new Error("Not a universe export."));
 			return;
@@ -5862,37 +5947,63 @@
 			if (loaded.length) installFiles(loaded, problems);
 		}
 		const have = new Set(state.files.map((f) => f.fingerprint));
-		const missing = (json.seasons || []).filter(
-			(s) => s.fingerprint && !have.has(s.fingerprint));
-		/* PARTIAL IMPORT. Refusing outright was the wrong call: a fifty-season
-		   universe whose 2031 class the user does not have is still forty-nine
-		   seasons they can replay, and the old behaviour was to import none of
-		   it and name the missing file. Now the seasons that are present run
-		   and the ones that are not are reported. */
-		if (missing.length && missing.length >= (json.seasons || []).length) {
+		const seasons = json.seasons || [];
+		const played = seasons.filter((s) => s && s.fingerprint);
+		const missing = played.filter((s) => !have.has(s.fingerprint));
+		/* NONE OF ITS FILES: A VIEW, NOT AN ERROR.
+
+		   A version 3 export carries the timeline, the threads, the records
+		   book, the alumni index, the registry and the tail. It used to be
+		   refused outright when none of its class files were loaded, which
+		   threw all of that away to say "load them first". It is installed as
+		   a view-only world now: readable, extendable with a later class
+		   (the tail is there), and replayable by importing it again once the
+		   classes are loaded. */
+		if (!played.length || missing.length >= played.length) {
+			if (Array.isArray(json.timeline) && json.timeline.length) {
+				pushUndo("imported a universe");
+				state.universe = U.viewOnlyUniverse(json);
+				state.universeImported = null;
+				state.universeExpect = null;
+				state.universeBiography = json.biography && typeof json.biography === "object"
+					? json.biography : null;
+				state.tab = "universe";
+				persist();
+				render();
+				setStatus("Imported " + state.universe.rows.length + " seasons as a view: " +
+					"none of this universe's class files are loaded, so nothing was replayed. " +
+					"The timeline, threads, records book, alumni and careers are the file's own." +
+					(missing.length ? " Load " + missing.slice(0, 6).map((m) => m.fileName)
+						.join(", ") + (missing.length > 6 ? "…" : "") +
+						" and import it again to replay it." : ""), true);
+				return;
+			}
 			showError(new Error("None of this universe's class files are loaded. " +
 				"Load them first: " + missing.map((m) => m.fileName).join(", ")));
 			return;
 		}
-		/* The settings the universe was built under, if it carries them. A
-		   version 1 export does not, and replaying it under the current
-		   settings is the best that can be done — which is said out loud
-		   rather than silently producing a different world. */
 		/* UNDOABLE. Importing a universe replaces every setting on the panel,
 		   and it used to be the one settings change Ctrl+Z could not take
 		   back. The snapshot is taken before anything below moves. */
 		pushUndo("imported a universe");
 		let note = "";
+		/* A locked setting is one the user has said must not move — the
+		   randomizer honours that, and so does this, for every run of the
+		   replay. The import is reported as partial so the divergence check
+		   later has an explanation ready. */
+		let held = [];
+		const lockOn = (settings) => {
+			if (!settings) return null;
+			const incoming = CFG.make(settings);
+			for (const k of held) incoming[k] = JSON.parse(JSON.stringify(state.cfg[k]));
+			return incoming;
+		};
 		if (json.settings) {
 			const seed = json.settings.seed;
-			const incoming = CFG.make(json.settings);
-			/* A locked setting is one the user has said must not move —
-			   the randomizer honours that, and so does this. The value
-			   under the lock stays; the import is reported as partial so the
-			   divergence check later has an explanation ready. */
-			const held = Object.keys(state.settingLocks || {})
-				.filter((k) => state.settingLocks[k] && k in incoming && k in state.cfg);
-			for (const k of held) incoming[k] = JSON.parse(JSON.stringify(state.cfg[k]));
+			const probe = CFG.make(json.settings);
+			held = Object.keys(state.settingLocks || {})
+				.filter((k) => state.settingLocks[k] && k in probe && k in state.cfg);
+			const incoming = lockOn(json.settings);
 			state.cfg = incoming;
 			state.cfg.seed = seed || state.cfg.seed;
 			note = " Settings from the file were applied." + (held.length
@@ -5904,46 +6015,35 @@
 			note = " This export predates settings capture (version " +
 				(json.version || 1) + "), so it replays under your current settings.";
 		}
-		/* THE BIOGRAPHIES ARE READ.
-
-		   They were exported and never consumed by anything — the field that
-		   makes a shared universe replay the same MEN rather than the same
-		   seeds was write-only. The engine reads cfg.biography now (see
-		   assignClassYears); this is where it comes from. Kept off state.cfg
-		   because it is a fact about THIS universe, not a setting, and it must
-		   not be persisted into every later run. */
+		/* THE BIOGRAPHIES ARE READ. Kept off state.cfg because they are a
+		   fact about THIS universe, not a setting. */
 		state.universeBiography = json.biography && typeof json.biography === "object"
 			? json.biography : null;
 		if (state.universeBiography) {
 			note += " " + Object.keys(state.universeBiography).length +
 				" player biographies were applied, so the same men come back.";
 		}
-		/* WHAT THE FILE SAYS EACH SEASON PRODUCED.
-
-		   Replaying somebody's universe on a newer engine reproduces the seeds
-		   and not necessarily the world. The per-season result fingerprints are
-		   kept here and checked once the chain finishes, so a divergence is
-		   named — "season 2034 diverged" — rather than silently handed back as
-		   the same universe. */
+		/* HOW IT WAS BUILT. An extended or partly re-run universe is replayed
+		   run by run with each run's own settings; see Universe.replayPlan. */
+		const plan = U.replayPlan(json, state.files);
+		/* WHAT THE FILE SAYS EACH SEASON PRODUCED, keyed per row — file and
+		   season and occurrence — not on the season alone: two files claiming
+		   the same season used to share one expectation. */
+		const expectRows = Array.isArray(json.timeline) && json.timeline.length
+			? json.timeline : seasons;
+		const keys = U.rowKeys(expectRows);
 		state.universeExpect = {
 			engineRev: Number.isFinite(json.engineRev) ? json.engineRev : null,
-			bySeason: {},
+			byKey: {},
+			followed: plan.followed,
+			segments: plan.segments,
+			reason: plan.reason || null,
 		};
-		for (const sn of json.seasons || []) {
-			if (sn && sn.result) state.universeExpect.bySeason[sn.season] = sn.result;
-		}
-		/* THE WORLD THE FILE DESCRIBES, KEPT.
-
-		   A version 3 export carries the timeline itself and not only the
-		   seeds that produced it (see Universe.exportUniverse). Divergence
-		   used to be detected and then reported as a sentence, which left the
-		   user holding a universe that is not the one they were given and no
-		   way to see the one they were. The file's own rows are held here and
-		   any season whose replay diverged is RESTORED from them once the
-		   chain finishes — so the timeline, the threads and the records book
-		   are the ones that were shared, flagged season by season, while the
-		   simulated detail on the other tabs stays honestly labelled as this
-		   machine's replay. */
+		expectRows.forEach((sn, i) => {
+			if (sn && sn.result && keys[i]) state.universeExpect.byKey[keys[i]] = sn.result;
+		});
+		/* THE WORLD THE FILE DESCRIBES, KEPT — including its registry, which
+		   the restore step read and this object never carried. */
 		state.universeImported = json.timeline && json.timeline.length
 			? {
 				rows: json.timeline,
@@ -5951,21 +6051,39 @@
 				records: json.records || null,
 				alumni: json.alumni || null,
 				tail: json.tail || null,
+				registry: json.registry && typeof json.registry === "object"
+					? json.registry : null,
 			}
 			: null;
 		state.cfg.universe = true;
 		state.cfg.seed = json.baseSeed || state.cfg.seed;
 		$("seed").value = state.cfg.seed;
 		paintConfig();
+		if (plan.steps.length > 1) {
+			note += " It was built in " + plan.steps.length + " runs (" +
+				plan.steps.map((s) => s.kind).join(", ") + "), and is replayed the same way.";
+		} else if (!plan.followed) {
+			note += " It was built in " + plan.segments + " runs, which cannot be " +
+				"followed without every class file loaded, so it replays as one.";
+		}
 		if (missing.length) {
-			setStatus("Replaying " +
-				((json.seasons || []).length - missing.length) + " of " +
-				(json.seasons || []).length + " seasons — not loaded: " +
+			setStatus("Replaying " + (played.length - missing.length) + " of " +
+				played.length + " seasons — not loaded: " +
 				missing.map((m) => m.fileName).join(", ") + "." + note);
 		} else {
-			setStatus("Replaying " + (json.seasons || []).length + " seasons." + note);
+			setStatus("Replaying " + played.length + " seasons." + note);
 		}
-		runUniverse();
+		const steps = plan.steps;
+		const runStep = (i) => {
+			const s = steps[i];
+			const last = i === steps.length - 1;
+			const o = { settings: lockOn(s.settings), replaying: !last };
+			if (s.kind === "extend") { o.extend = true; o.only = s.only; }
+			else if (s.kind === "resume") o.resumeFrom = s.from;
+			else if (s.only) o.only = s.only;
+			runUniverse(last ? null : () => runStep(i + 1), o);
+		};
+		runStep(0);
 	}
 
 	/* Did the replay produce the world the file describes? Called once a
@@ -5974,23 +6092,36 @@
 		const want = state.universeExpect;
 		if (!want) return null;
 		const diverged = [];
-		for (const r of state.universe.rows) {
-			const expected = want.bySeason[r.season];
-			if (!expected || !r.result) continue;
-			if (expected !== r.result) diverged.push(r.season);
-		}
+		const divergedSeasons = [];
+		const keys = global.Universe.rowKeys(state.universe.rows);
+		state.universe.rows.forEach((r, i) => {
+			const expected = want.byKey ? want.byKey[keys[i]] : null;
+			if (!expected || !r || !r.result) return;
+			if (expected !== r.result) {
+				diverged.push(keys[i]);
+				divergedSeasons.push(r.season);
+			}
+		});
 		state.universeExpect = null;
 		const kept = restoreImportedWorld(diverged);
 		if (!diverged.length) return null;
+		/* WHOSE FAULT. A universe built in several runs and replayed as one
+		   diverges because of the runs, not because of the class files — and
+		   used to be told the files or settings were different. */
 		const revNote = want.engineRev !== null && want.engineRev !== global.Universe.ENGINE_REV
 			? " This universe was built on engine revision " + want.engineRev +
 				" and you are running " + global.Universe.ENGINE_REV + "."
+			: !want.followed
+			? " It was built in " + want.segments + " runs (extended or partly " +
+				"re-run) and could not be replayed run by run" +
+				(want.reason ? " (" + want.reason + ")" : "") +
+				", so seasons after the first run are expected to differ."
 			: " The class files or the settings differ from the ones it was built on.";
-		return "Season" + (diverged.length > 1 ? "s " : " ") +
-			diverged.slice(0, 6).join(", ") +
-			(diverged.length > 6 ? " (+" + (diverged.length - 6) + " more)" : "") +
+		return "Season" + (divergedSeasons.length > 1 ? "s " : " ") +
+			divergedSeasons.slice(0, 6).join(", ") +
+			(divergedSeasons.length > 6 ? " (+" + (divergedSeasons.length - 6) + " more)" : "") +
 			" diverged from the imported universe." + revNote +
-			(kept
+			(kept && kept.restored
 				? " The timeline, the threads and the records book have been " +
 					"restored from the file, so the world you were given is the " +
 					"one on the Universe tab; the other tabs show this machine's " +
@@ -5999,57 +6130,22 @@
 					"to restore it from.");
 	}
 
-	/* Put the imported universe's own rows back where the replay disagreed.
-
-	   Only the diverged seasons are replaced: a season that replayed
-	   identically is better represented by the row the chain just built, which
-	   carries the same facts plus the result fingerprint and the live links.
-	   The threads and the records book are rebuilt from the merged rows rather
-	   than copied, so they cannot disagree with the timeline above them —
-	   except where the file carries its own and the whole timeline came from
-	   it, in which case the file's are used verbatim. */
+	/* Put the imported universe's own rows back where the replay disagreed,
+	   or could not play a season at all (its class file is not loaded), and
+	   merge — not replace — its alumni index and registry. See
+	   Universe.restoreImported. */
 	function restoreImportedWorld(diverged) {
 		const imported = state.universeImported;
 		state.universeImported = null;
-		if (!imported || !imported.rows || !imported.rows.length) return false;
-		if (!diverged.length) return false;
-		const bySeason = {};
-		for (const r of imported.rows) if (r && Number.isFinite(r.season)) bySeason[r.season] = r;
-		let n = 0;
-		state.universe.rows = state.universe.rows.map((r) => {
-			if (diverged.indexOf(r.season) === -1) return r;
-			const src = bySeason[r.season];
-			if (!src) return r;
-			n++;
-			/* `restored` is the flag every consumer needs: this row is what
-			   the file said happened, not what this machine simulated. */
-			return Object.assign({}, src, {
-				restored: true,
-				replayResult: r.result || null,
-				seed: r.seed || src.seed || null,
-			});
-		});
-		if (!n) return false;
-		state.universe.threads = global.Universe.threads(
-			state.universe.rows, state.universe.alumni);
-		state.universe.records = global.Universe.records(
-			state.universe.rows, imported.alumni && imported.alumni.length
-				? imported.alumni : state.universe.alumni);
-		if (imported.alumni && imported.alumni.length) {
-			state.universe.alumni = imported.alumni.slice();
+		if (!imported) return null;
+		const out = global.Universe.restoreImported(state.universe, imported, diverged || []);
+		if (out.missing) {
+			state.universe.importNote = out.missing + " season" +
+				(out.missing === 1 ? "" : "s") + " whose class file is not loaded " +
+				(out.missing === 1 ? "was" : "were") +
+				" taken from the imported timeline rather than extrapolated.";
 		}
-		/* And the tail, so an imported world can be extended with a later
-		   class rather than only replayed. The replay's own tail is kept when
-		   nothing diverged, because it matches the loaded files exactly. */
-		if (imported.tail) state.universe.tail = imported.tail;
-		/* The careers the exported world knew about. Rebuilt from the replay
-		   when the chain re-runs, so this is what the tab shows in the window
-		   before that finishes — and what an import of a world whose class
-		   files are not to hand can still say. */
-		if (imported.registry && typeof imported.registry === "object") {
-			state.universe.registry = imported.registry;
-		}
-		return true;
+		return out;
 	}
 
 	/* ------------------------------------------------------------ routing */
@@ -6070,6 +6166,45 @@
 			history.pushState(Object.assign({ bbgmNav: true }, navState()), "");
 		} catch (e) { /* file:// in some browsers */ }
 	}
+
+	/* Keep the CURRENT history entry describing where the user is. The first
+	   page of a session had no bbgmNav entry at all, so Back from the first
+	   team or player page opened left the popstate handler nothing to go back
+	   to and did nothing; and a destination changed without a push (an
+	   editor opening, the arrow keys on the tab bar) left the entry stale.
+	   Only written when it differs — Safari throws after 100 writes in 30s. */
+	function syncNav() {
+		try {
+			const want = navState();
+			const cur = history.state;
+			if (cur && cur.bbgmNav && cur.tab === want.tab && cur.team === want.team &&
+				cur.player === want.player && cur.game === want.game) return;
+			history.replaceState(Object.assign({}, cur && typeof cur === "object" ? cur : {},
+				{ bbgmNav: true }, want), "");
+		} catch (e) { /* file:// in some browsers */ }
+	}
+
+	/* A tab is a destination too: clicking one pushes history, so Back
+	   returns to the tab you came from. Clicking the tab you are ALREADY on
+	   is "take me to this tab's front page" — it clears the player, team or
+	   box score open inside it. */
+	function showTab(key) {
+		if (key === state.tab) {
+			/* Still re-rendered: the view can be showing something that is
+			   not the tab (a batch result renders into it), and clicking the
+			   tab is how the user gets the tab back. */
+			if (!state.player && !state.team && !state.game) { render(); return; }
+			state.player = null;
+			state.team = null;
+			state.game = null;
+		} else {
+			state.tab = key;
+		}
+		pushNav();
+		persist();
+		render();
+	}
+	global.App.showTab = showTab;
 
 	function showPlayer(key) {
 		state.player = key || null;
@@ -6105,8 +6240,20 @@
 		state.team = st.team;
 		state.player = st.player;
 		state.game = st.game || null;
+		// Back/forward returns to where that page was scrolled, not the top.
+		navRestore = true;
 		render();
 	});
+
+	/* Where each destination was scrolled when the user left it, so Back can
+	   put it back; see render(). A destination is tab + player + team + game. */
+	const destScroll = {};
+	let lastDest = null;
+	let navRestore = false;
+	function destKey() {
+		return [state.tab, state.tab === "board" ? state.boardMode || "board" : "",
+			state.player || "", state.team || "", state.game || ""].join("|");
+	}
 
 	function render() {
 		const tabs = $("tabs");
@@ -6122,7 +6269,7 @@
 			b.setAttribute("role", "tab");
 			b.setAttribute("aria-selected", key === state.tab ? "true" : "false");
 			b.tabIndex = key === state.tab ? 0 : -1;
-			b.addEventListener("click", () => { state.tab = key; persist(); render(); });
+			b.addEventListener("click", () => showTab(key));
 			b.addEventListener("keydown", (e) => {
 				const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
 				if (!d) return;
@@ -6135,6 +6282,18 @@
 			});
 			tabs.appendChild(b);
 		});
+		/* On a phone the tab strip is one sideways-scrolling row; keep the
+		   active tab in it rather than off the right edge. */
+		{
+			const act = tabs.querySelector("button.active");
+			if (act && tabs.scrollWidth > tabs.clientWidth) {
+				const r = act.getBoundingClientRect();
+				const t = tabs.getBoundingClientRect();
+				if (r.left < t.left || r.right > t.right) {
+					tabs.scrollLeft += (r.left - t.left) - (t.width - r.width) / 2;
+				}
+			}
+		}
 		const view = $("view");
 		/* Every interaction rebuilds this view from scratch — clicking a row to
 		   open the editor, ticking a sort level, typing in a filter. With a
@@ -6149,8 +6308,25 @@
 		   positions are keyed by the container's position in the view, so they
 		   survive a rebuild that produces the same shape and are simply not
 		   found when it does not. */
-		const scrolls = captureScroll(view);
-		const focus = captureFocus(view);
+		/* A rebuild of the SAME destination keeps its scroll (that is the
+		   point above). A NEW destination starts at the top — restoring the
+		   old scrollY after opening a player from row 60 of the board put
+		   his page 3000px down — unless it is a Back/forward, which restores
+		   what that destination had. */
+		const dest = destKey();
+		const sameDest = dest === lastDest;
+		let scrolls = captureScroll(view);
+		if (lastDest !== null) destScroll[lastDest] = scrolls;
+		if (!sameDest) {
+			scrolls = navRestore && destScroll[dest] ? destScroll[dest] : { list: [], page: 0, win: 0, top: true };
+		}
+		navRestore = false;
+		lastDest = dest;
+		syncNav();
+		// A popover or row menu belongs to the view being thrown away.
+		if (V.closeWhy) V.closeWhy();
+		if (V.closeRowMenu) V.closeRowMenu();
+		const focus = sameDest ? captureFocus(view) : null;
 		view.innerHTML = "";
 		const res = ensureResult(state.active);
 		if (!res) {
@@ -6185,22 +6361,33 @@
 
 	const SCROLLERS = ".scroll, .tablewrap, .drawer";
 
+	/* Containers are keyed by TAB as well as by index: the third scroller on
+	   the Teams tab and the third on the board are different tables, and
+	   restoring one's horizontal offset onto the other was the old rule. */
 	function captureScroll(view) {
 		const out = [];
 		view.querySelectorAll(SCROLLERS).forEach((n, i) => {
 			if (n.scrollLeft || n.scrollTop) out.push([i, n.scrollLeft, n.scrollTop]);
 		});
-		return { list: out, page: view.scrollTop, win: global.scrollY || 0 };
+		return { tab: state.tab, list: out, page: view.scrollTop, win: global.scrollY || 0 };
 	}
 
 	function restoreScroll(view, saved) {
 		if (!saved) return;
-		const nodes = view.querySelectorAll(SCROLLERS);
-		for (const [i, left, top] of saved.list) {
-			const n = nodes[i];
-			if (!n) continue;
-			n.scrollLeft = left;
-			n.scrollTop = top;
+		if (saved.top) {
+			// A new destination: the top of it.
+			view.scrollTop = 0;
+			if (global.scrollY) global.scrollTo(0, 0);
+			return;
+		}
+		if (saved.tab === state.tab) {
+			const nodes = view.querySelectorAll(SCROLLERS);
+			for (const [i, left, top] of saved.list) {
+				const n = nodes[i];
+				if (!n) continue;
+				n.scrollLeft = left;
+				n.scrollTop = top;
+			}
 		}
 		if (saved.page) view.scrollTop = saved.page;
 		if (saved.win) global.scrollTo(0, saved.win);
@@ -6676,15 +6863,17 @@
 					" than an average schedule");
 			}
 		}
+		// A season with no attempts has no percentage (null), not 0%.
+		const pctOrDash = (x) => Number.isFinite(x) ? (x * 100).toFixed(1) + "%" : "—";
 		row("Shot mix", n1(s.fga) + " field goals, " + n1(s.tpa) + " of them threes, " +
 			n1(s.fta) + " free throws");
 		row("Efficiency", (s.ts * 100).toFixed(1) + "% true shooting on " +
 			(s.fgp * 100).toFixed(1) + "% from the floor");
 		row("The arithmetic", n1(s.fga - s.tpa) + " twos at " +
-			(((s.fgp * s.fga - s.tpa * s.tpp) / Math.max(0.01, s.fga - s.tpa)) * 100)
+			(((s.fgp * s.fga - s.tpa * (s.tpp || 0)) / Math.max(0.01, s.fga - s.tpa)) * 100)
 				.toFixed(1) + "%, " +
-			n1(s.tpa) + " threes at " + (s.tpp * 100).toFixed(1) + "%, " +
-			n1(s.fta) + " free throws at " + (s.ftp * 100).toFixed(1) + "% = " +
+			n1(s.tpa) + " threes at " + pctOrDash(s.tpp) + ", " +
+			n1(s.fta) + " free throws at " + pctOrDash(s.ftp) + " = " +
 			n1(s.ppg) + " points");
 		box.appendChild(dl);
 		return box;
@@ -6921,14 +7110,20 @@
 	let modalTrigger = null;      // the element that opened the modal
 	let modalTrapCleanup = null;  // focus-trap teardown
 
-	function modal(title, body, onOk, okLabel) {
+	/* `opts.focusCancel`: a destructive confirmation starts on Cancel, so an
+	   Enter pressed out of habit does not throw the work away. */
+	function modal(title, body, onOk, okLabel, opts) {
 		modalTrigger = document.activeElement;
 		$("modalTitle").textContent = title;
 		const b = $("modalBody");
 		b.innerHTML = "";
 		b.appendChild(body);
-		$("modalOk").textContent = okLabel || "OK";
+		$("modalOk").textContent = okLabel || (onOk ? "OK" : "Close");
 		modalOk = onOk;
+		/* An information dialog has one way out. Showing "Close" beside a
+		   "Cancel" that did the same thing asked a question there was no
+		   answer to. */
+		$("modalCancel").hidden = !onOk;
 		const m = $("modal");
 		m.hidden = false;
 		// Install focus trap
@@ -6936,6 +7131,10 @@
 		modalTrapCleanup = trapFocus(m.querySelector(".modalbox"));
 		// Move focus to the first focusable element inside the modal
 		requestAnimationFrame(() => {
+			if (opts && opts.focusCancel && !$("modalCancel").hidden) {
+				$("modalCancel").focus();
+				return;
+			}
 			const first = m.querySelector(FOCUSABLE_SEL);
 			if (first) first.focus();
 		});
@@ -6958,7 +7157,7 @@
 		box.appendChild(el("p", null, detail));
 		box.appendChild(el("p", "hint",
 			"This can be undone with Ctrl+Z, or the Undo button in the header."));
-		modal(title, box, onOk, okLabel);
+		modal(title, box, onOk, okLabel, { focusCancel: true });
 	}
 
 	function closeModal() {
@@ -6981,7 +7180,13 @@
 		   a word for the rest of the session — and the wider button reflowed
 		   the whole header. The parameter is still honoured where a caller
 		   wants a different resting label. */
-		const was = button ? button.textContent : "";
+		/* The RESTING label, kept on the button itself: reading textContent
+		   at call time read "Copied ✓" on a second click inside the flash,
+		   and that became the label for good. */
+		if (button && button.dataset.restLabel === undefined) {
+			button.dataset.restLabel = button.textContent;
+		}
+		const was = button ? button.dataset.restLabel : "";
 		const done = () => {
 			/* Announce it. The seed pill's copy changed the BUTTON's text and
 			   nothing else, so a screen reader user pressing it got no
@@ -6991,7 +7196,10 @@
 			announce("Copied: " + String(text).slice(0, 60));
 			if (!button) return;
 			button.textContent = "Copied ✓";
-			setTimeout(() => { button.textContent = restore || was; }, 1400);
+			clearTimeout(Number(button.dataset.copyTimer) || 0);
+			button.dataset.copyTimer = String(setTimeout(() => {
+				button.textContent = restore || was;
+			}, 1400));
 		};
 		function fallback() {
 			const ta = document.createElement("textarea");
@@ -7701,8 +7909,10 @@
 			if (!p) { unmatched.push(k || nm); continue; }
 			const patch = {};
 			const num = (c) => {
-				const v = Number(String(r[c]).trim());
-				return Number.isFinite(v) ? v : null;
+				// An empty cell is no lock, not a lock at 0 (Number("") is 0).
+				const t = String(r[c] === undefined ? "" : r[c]).trim();
+				const v = Number(t);
+				return t !== "" && Number.isFinite(v) ? v : null;
 			};
 			if (cols.ovr >= 0 && num(cols.ovr) !== null) patch.ovr = num(cols.ovr);
 			if (cols.pot >= 0 && num(cols.pot) !== null) patch.pot = num(cols.pot);
@@ -8023,7 +8233,9 @@
 		item("Season as a BBGM league fragment — teams, records, coaches", () => exportLeagueFragment(res));
 		item("Note text only, for a spreadsheet", () => exportNotes(res));
 		item("Notes as Markdown, for a forum post", () => exportNotesMarkdown(res));
+		item("Locked prospects as CSV — the file Import locks reads back", exportLocksCsv);
 		item("Import locks from a CSV…", () => $("csvFile").click());
+		item("Settings as JSON — drop it on the page to load them again", exportSettingsJson);
 		item("Message history", messageHistory);
 		item("Compare two presets…", comparePresets);
 		box.appendChild(list);
@@ -8543,10 +8755,58 @@
 		exportCsv, setStatus, showError, indexSnapshot,
 	});
 
+	/* AN UNCAUGHT ERROR SAYS SO. A throw inside a listener used to leave
+	   the page half-updated with nothing on screen, and the only record was
+	   a console most users never open. Said once per distinct message, and
+	   never re-entered: an error raised while reporting one is dropped
+	   rather than looping. */
+	let lastUncaught = null;
+	let reportingUncaught = false;
+	function reportUncaught(err) {
+		if (reportingUncaught) return;
+		const text = err && err.message ? err.message : String(err || "unknown error");
+		// Benign by specification, and fired by the header's observer.
+		if (/ResizeObserver loop/.test(text) || text === lastUncaught) return;
+		lastUncaught = text;
+		reportingUncaught = true;
+		try {
+			showError(new Error("Something went wrong: " + text +
+				". The page may be out of step with the settings — Re-apply, or " +
+				"reload if it persists."));
+		} catch (e) { /* nothing left to report with */ } finally {
+			reportingUncaught = false;
+		}
+	}
+	window.addEventListener("error", (e) => reportUncaught(e.error || e.message));
+	window.addEventListener("unhandledrejection", (e) => reportUncaught(e.reason));
+
 	const saved = restore();
-	const fromHash = readHash();
-	if (fromHash) state.overrideFingerprint = state.overrideFingerprint || null;
+	readHash();
+	lastWrittenHash = location.hash || "";
+	/* A link pasted into a tab that is already open changes only the hash,
+	   which reloads nothing — so the page went on showing the old class. The
+	   hash writeHash put there itself is not news and is ignored. */
+	window.addEventListener("hashchange", () => {
+		const h = location.hash || "";
+		if (h === lastWrittenHash || !/[#&]c=/.test(h)) return;
+		lastWrittenHash = h;
+		pushUndo("opened a shared link");
+		if (!readHash()) { state.undo.pop(); paintUndo(); return; }
+		state.editing = null;
+		state.selected = {};
+		checkLockFingerprint();
+		paintConfig();
+		persist();
+		run(() => setStatus("Applied the settings in the link."));
+	});
 	window.addEventListener("resize", syncHeaderHeight);
+	/* The header wraps without the window resizing — a long "Undo …" label,
+	   the seed history appearing, the file picker after a load — and every
+	   one of those left --headerH at its startup value, so the sticky panel
+	   sat under the header or floated below it. */
+	if (typeof ResizeObserver === "function" && document.querySelector("header")) {
+		new ResizeObserver(syncHeaderHeight).observe(document.querySelector("header"));
+	}
 	syncHeaderHeight();
 
 	bindSettingsSearch();
@@ -8634,7 +8894,11 @@
 	})();
 
 	$("btnReroll").addEventListener("click", reroll);
-	$("btnRerollUntil").addEventListener("click", rerollUntilDialog);
+	// The same button cancels a search in flight; see rerollUntil.
+	$("btnRerollUntil").addEventListener("click", () => {
+		if (untilSearch) untilSearch.cancel();
+		else rerollUntilDialog();
+	});
 	// Not `run` directly: run takes an `after` callback and a listener
 	// would pass it the click event.
 	$("btnRerun").addEventListener("click", () => run());
@@ -8718,6 +8982,7 @@
 		e.target.value = "";
 		if (!v) return;
 		if (historyCommand(v)) return;
+		pushUndo("went back to the seed " + v);
 		state.cfg.seed = v;
 		$("seed").value = v;
 		run();
@@ -8795,10 +9060,23 @@
 		if (fn) fn();
 	});
 	$("modalCancel").addEventListener("click", closeModal);
+	/* Enter in a dialog's text box submits it — "Use a seed", "Save
+	   preset", "Reroll until" — as it would in any form. Only a dialog
+	   that has an OK action, and only from a one-line box. */
+	$("modalBody").addEventListener("keydown", (e) => {
+		if (e.key !== "Enter" || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing) return;
+		const t = e.target;
+		if (!t || t.tagName !== "INPUT" ||
+			!/^(text|number|search|url|email)$/.test(t.type || "text")) return;
+		if (!modalOk || $("modal").hidden) return;
+		e.preventDefault();
+		$("modalOk").click();
+	});
 	$("modal").addEventListener("click", (e) => { if (e.target === $("modal")) closeModal(); });
 	document.addEventListener("keydown", (e) => {
 		if (e.key === "Escape") V.closeRowMenu();
 		if (e.key === "Escape" && !$("modal").hidden) closeModal();
+		else if (e.key === "Escape" && untilSearch) untilSearch.cancel();
 		else if (e.key === "Escape" && state.editing !== null && state.editing !== undefined) {
 			// The shortcut sheet promises this closes the editor too.
 			state.editing = null;
@@ -8809,6 +9087,9 @@
 		/* Ctrl+Enter / Cmd+Enter triggers generation (Part 5D). Works even
 		   when typing, since Ctrl+Enter is not a standard text input combo. */
 		if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+			/* Not behind a dialog: the class the dialog is about would be
+			   replaced underneath it. */
+			if (!$("modal").hidden) return;
 			e.preventDefault();
 			if (!$("btnReroll").disabled) reroll();
 			return;

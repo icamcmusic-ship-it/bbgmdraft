@@ -188,16 +188,34 @@
 		// Cross-file duplicate pids: legitimate between separate BBGM exports
 		// (each starts from 0), so a warning, not a rejection — but worth
 		// saying, because identical pid SETS usually mean a duplicated file.
-		const pidSig = rows.map((r) => {
+		/* THE SAME MEN, NOT THE SAME NUMBERS.
+
+		   This compared pid sets, and every BBGM export numbers its players
+		   from zero — so any two files of the same size (a 70-man 2025 class
+		   and a 70-man 2026 class) had "identical pid sets" and were reported
+		   as a duplicate. What identifies a class is who is in it: the file's
+		   own fingerprint when the caller has one, and otherwise the set of
+		   names, births, draft years and ratings, which two different classes
+		   do not share. */
+		const who = rows.map((r) => {
 			if (!r.ok) return null;
-			const pids = (files[r.index].data.players || [])
-				.map((p) => p.pid).filter((x) => x !== undefined);
-			return pids.length ? pids.slice(0, 50).join(",") + "|" + pids.length : null;
+			const ps = files[r.index].data.players || [];
+			if (!ps.length) return null;
+			const ids = ps.map((p) => [
+				p.name || ((p.firstName || "") + " " + (p.lastName || "")).trim(),
+				p.born && p.born.year, p.born && p.born.loc, p.draft && p.draft.year,
+				/* The ratings too: generated names repeat ("Player 7") and a
+				   class's ratings are what nobody else's share. */
+				Array.isArray(p.ratings) && p.ratings.length
+					? JSON.stringify(p.ratings[p.ratings.length - 1]) : "",
+			].join("|")).sort();
+			return hashString(ids.join(";")) + "|" + ps.length;
 		});
+		const fpSig = rows.map((r) => (r.ok && files[r.index].fingerprint) || null);
 		for (let i = 0; i < rows.length; i++) {
 			for (let j = i + 1; j < rows.length; j++) {
-				if (pidSig[i] && pidSig[i] === pidSig[j]) {
-					rows[j].warnings.push("identical pid set to " + rows[i].name +
+				if ((fpSig[i] && fpSig[i] === fpSig[j]) || (who[i] && who[i] === who[j])) {
+					rows[j].warnings.push("the same players as " + rows[i].name +
 						" — looks like the same class loaded twice");
 				}
 			}
@@ -218,7 +236,12 @@
 	}
 
 	/* The named star returners on a roster, with what the next season needs
-	   to bring them back as the same men. See buildPrograms in js/teams.js. */
+	   to bring them back as the same men. See buildPrograms in js/teams.js.
+
+	   `hgt`, `slotType` and `endurance` travel too: a returner used to be
+	   handed back as a name and a talent and then poured into whatever filler
+	   slot the new roster drew, so a 6'11" center could come back as a guard.
+	   The build side reads them where it has them. */
 	function returnersOf(t) {
 		const out = [];
 		for (const m of t.members || []) {
@@ -227,22 +250,166 @@
 			out.push({
 				name: m.name, starReturner: m.starReturner, classYear: m.classYear,
 				talent: m.talent, slotIndex: Number.isFinite(slotIndex) ? slotIndex : 0,
+				hgt: Number.isFinite(m.hgt) ? m.hgt : null,
+				slotType: m.slotType || null,
+				endurance: Number.isFinite(m.endurance) ? m.endurance : null,
 			});
 		}
 		return out;
 	}
 
+	/* PROGRAM PRESTIGE DRIFT.
+
+	   A program's level is redrawn every season from its static prestige and
+	   blended 62/38 with last season's (see buildPrograms), so the world had
+	   memory of ONE year: a blue blood that went 12-20 for a decade was back
+	   near its prior every November, and a mid-major that won three titles
+	   in five years was dragged back to where the prestige table put it in
+	   2025. `prestigeDelta` is the slow variable underneath: it moves with
+	   how a season went against what that program expects, decays toward
+	   zero (so it is mean-reverting and a single fluke fades), and is capped,
+	   so a dynasty is worth a few levels and not a new tier table. It is a
+	   pure function of the finished season, so a replay draws the same one.
+
+	   How it reaches the sim: the carried level is what buildPrograms blends
+	   at 0.38. Adding PRESTIGE_GAIN x delta to it — 0.62 / 0.38 — makes the
+	   steady-state shift of the season's level exactly `delta`. */
+	const PRESTIGE_CAP = 8;
+	const PRESTIGE_DECAY = 0.85;
+	const PRESTIGE_GAIN = 0.62 / 0.38;
+
+	function priorPrestige(name, fallback) {
+		const C = global.Colleges;
+		if (C && typeof C.prestigeOrLowMajor === "function") {
+			const p = C.prestigeOrLowMajor(name);
+			if (Number.isFinite(p)) return p;
+		}
+		return Number.isFinite(fallback) ? fallback : 50;
+	}
+
+	function marchDepth(t) {
+		const r = String(t.ncaaResult || "");
+		if (/Champion/.test(r)) return 1.3;
+		if (/Runner/.test(r)) return 1.0;
+		if (!r) return 0;
+		return 0.1 + 0.18 * Math.max(0, t.ncaaWins || 0);
+	}
+
+	function prestigeStep(d0, t) {
+		const games = Math.max(1, (t.w || 0) + (t.l || 0));
+		const winPct = (t.w || 0) / games;
+		const prestige = priorPrestige(t.name, t.prestige);
+		// The same expectation the carousel fires coaches against.
+		const expected = Math.min(0.72, Math.max(0.32, 0.35 + 0.0037 * prestige));
+		const expMarch = prestige >= 70 ? 0.35 : prestige >= 50 ? 0.15 : 0.03;
+		const perf = Math.max(-1.2, Math.min(1.5,
+			(winPct - expected) * 3 + (marchDepth(t) - expMarch)));
+		const d = (Number.isFinite(d0) ? d0 : 0) * PRESTIGE_DECAY + perf * 0.9;
+		return Math.round(Math.max(-PRESTIGE_CAP, Math.min(PRESTIGE_CAP, d)) * 100) / 100;
+	}
+
+	/* RIVALRIES.
+
+	   A pair of programmes that keeps meeting in March is a story the
+	   timeline could not tell, because a row records the Final Four and not
+	   the bracket. The carry accumulates head-to-head between pairs from the
+	   team game logs: a pair enters the book the first time it meets in the
+	   NCAA tournament, and from then on every game between the two counts.
+	   Bounded (RIVALRY_MAX pairs, the ones with the most March meetings and
+	   the most recent), because the carry is persisted and exported. Copied
+	   rather than mutated: every season's recorded carry-over is a snapshot a
+	   resume reads back. */
+	const RIVALRY_MAX = 400;
+
+	function rivalriesStep(prev, res) {
+		const out = {};
+		for (const k of Object.keys(prev || {})) {
+			const e = prev[k];
+			if (e) out[k] = Object.assign({}, e, { march: (e.march || []).slice() });
+		}
+		const season = res && Number.isFinite(res.season) ? res.season : null;
+		const teams = Object.values((res && res.teams) || {})
+			.filter((t) => t && t.name && Array.isArray(t.log));
+		// Pass one: the pairs that met in March this season.
+		for (const t of teams) {
+			for (const g of t.log) {
+				if (!g || !g.opp || g.stage !== "ncaa" || !(t.name < g.opp)) continue;
+				const key = t.name + "|" + g.opp;
+				if (!out[key]) out[key] = { a: t.name, b: g.opp, games: 0, aw: 0, bw: 0, march: [] };
+				if (Number.isFinite(season)) out[key].march.push(season);
+			}
+		}
+		// Pass two: every game between a pair in the book.
+		for (const t of teams) {
+			for (const g of t.log) {
+				if (!g || !g.opp || !(t.name < g.opp)) continue;
+				const e = out[t.name + "|" + g.opp];
+				if (!e) continue;
+				e.games++;
+				if (g.won) e.aw++; else e.bw++;
+			}
+		}
+		const keys = Object.keys(out);
+		if (keys.length > RIVALRY_MAX) {
+			keys.sort((x, y) => {
+				const a = out[x], b = out[y];
+				return b.march.length - a.march.length ||
+					(b.march[b.march.length - 1] || 0) - (a.march[a.march.length - 1] || 0) ||
+					(x < y ? -1 : 1);
+			});
+			for (const k of keys.slice(RIVALRY_MAX)) delete out[k];
+		}
+		return out;
+	}
+
+	/* THE COACHING CAROUSEL MOVES MEN, NOT ONLY JOBS.
+
+	   A coach "hired away by a bigger program" used to vanish: his school got
+	   a first-year hire, and the bigger program that had a vacancy the same
+	   April got a freshly generated stranger. When a vacancy exists that
+	   season at a program of higher prestige, the coach who was hired away
+	   is the one who fills it — the same name, age, reputation and style.
+	   Deterministic: hired-away men are taken best season first, vacancies
+	   best program first, and each man takes the best open job above his
+	   own. An NBA departure stays a departure. */
+	const VACANCY = { "fired": 1, "retired": 1, "not retained": 1, "fired in-season": 1 };
+
+	function carouselMoves(res) {
+		const car = (res && res.coachingCarousel) || [];
+		const pct = (c) => (c.w || 0) / Math.max(1, (c.w || 0) + (c.l || 0));
+		const away = car.filter((c) => c && c.school && c.reason === "hired away" &&
+			!/NBA/.test(String(c.to || "")))
+			.sort((a, b) => pct(b) - pct(a) || (a.school < b.school ? -1 : 1));
+		const open = car.filter((c) => c && c.school && VACANCY[c.reason])
+			.map((c) => ({ school: c.school, p: priorPrestige(c.school) }))
+			.sort((a, b) => b.p - a.p || (a.school < b.school ? -1 : 1));
+		const taken = new Set();
+		const moves = {};
+		for (const c of away) {
+			const from = priorPrestige(c.school);
+			const job = open.filter((v) => !taken.has(v.school) && v.school !== c.school &&
+				v.p > from)[0];
+			if (!job) continue;
+			taken.add(job.school);
+			moves[job.school] = c.school;
+		}
+		return moves;
+	}
+
 	/* What one finished season hands the next.
 
-	   `prev` is the carry this season was handed, and it is read for one
-	   thing: the running title count, which is what makes recruiting momentum
-	   possible (see assignCollege in js/engine.js). A program's banner count
-	   is a fact about the world, not about one season, so it has to
-	   accumulate — and the alternative, re-deriving it from the timeline rows
-	   inside the engine, would make the engine depend on the app's state. */
+	   `prev` is the carry this season was handed, and it is read for the
+	   things that accumulate across seasons: the running title count (which
+	   is what makes recruiting momentum possible — see assignCollege in
+	   js/engine.js), the prestige drift and the rivalry book. A program's
+	   banner count is a fact about the world, not about one season, so it has
+	   to accumulate — and the alternative, re-deriving it from the timeline
+	   rows inside the engine, would make the engine depend on the app's
+	   state. */
 	function harvest(res, prev) {
 		const carry = { confOf: {}, levels: {}, coaches: {}, returners: {},
-			champion: null, titles: Object.assign({}, (prev && prev.titles) || {}) };
+			champion: null, titles: Object.assign({}, (prev && prev.titles) || {}),
+			prestigeDelta: {}, rivalries: rivalriesStep(prev && prev.rivalries, res) };
 		if (res.tourney && res.tourney.champion) {
 			carry.champion = res.tourney.champion.team.name;
 			carry.titles[carry.champion] = (carry.titles[carry.champion] || 0) + 1;
@@ -265,10 +432,25 @@
 			fired.add(c.school);
 			why[c.school] = c.reason;
 		}
+		const moves = carouselMoves(res);
+		const prevDelta = (prev && prev.prestigeDelta) || {};
 		for (const t of Object.values(res.teams || {})) {
 			if (!t || !t.name || !t.log) continue;
 			carry.confOf[t.name] = t.conf;
-			carry.levels[t.name] = t.level;
+			/* THE PROGRAM'S LEVEL, NOT THE COACHED ONE.
+
+			   `t.level` is the season's level PLUS the coach's situation
+			   adjustment (a first-year rebuild, a hot seat), and it was
+			   carried and blended back in at 0.38 — so a hot seat that cost
+			   a program 2.6 levels cost it again next season, which made the
+			   seat hotter, which is a loop and not a program. The situation
+			   is a fact about this season's sideline; what persists is the
+			   level under it. */
+			const adj = t.coach && Number.isFinite(t.coach.levelAdj) ? t.coach.levelAdj : 0;
+			const base = Number.isFinite(t.baseLevel) ? t.baseLevel : t.level - adj;
+			const d = prestigeStep(prevDelta[t.name], t);
+			carry.prestigeDelta[t.name] = d;
+			carry.levels[t.name] = Math.max(5, Math.min(99, base + PRESTIGE_GAIN * d));
 			carry.coaches[t.name] = {
 				coach: stripCoach(t.coach),
 				fired: fired.has(t.name),
@@ -276,6 +458,20 @@
 			};
 			const ret = returnersOf(t);
 			if (ret.length) carry.returners[t.name] = ret;
+		}
+		/* The men who moved: the vacancy is filled by the coach hired away,
+		   carried as a kept coach so buildPrograms brings him back a year
+		   older, at tenure one, at his new school. */
+		for (const to of Object.keys(moves)) {
+			const from = moves[to];
+			const was = res.teams && res.teams[from];
+			if (!was || !was.coach || !carry.coaches[to]) continue;
+			const coach = stripCoach(was.coach);
+			coach.tenure = 0;
+			coach.movedFrom = from;
+			carry.coaches[to] = { coach, fired: false, reason: "hired", from,
+				replaced: carry.coaches[to].coach ? carry.coaches[to].coach.name : null };
+			if (carry.coaches[from]) carry.coaches[from].hiredBy = to;
 		}
 		return carry;
 	}
@@ -306,10 +502,28 @@
 		const out = {
 			confOf: Object.assign({}, carry.confOf),
 			levels: {}, coaches: {}, returners: {},
-			champion: carry.champion || null,
+			/* NOT the champion from before the gap. `champion` is what the
+			   next season's recruiting reads as "the team that just won it"
+			   (see assignCollege), and a title five unplayed years ago is not
+			   that — it used to hand the pre-gap champion a recruiting boost
+			   in a season it had nothing to do with. The banner count keeps
+			   the title; the momentum is gone. */
+			champion: null,
 			titles: Object.assign({}, carry.titles || {}),
 			stale: (carry.stale || 0) + years,
+			/* The slow variables ride along: prestige drift decays toward
+			   zero at its own rate for every year nobody played, and the
+			   rivalry book is history and does not age at all. */
+			prestigeDelta: {},
+			rivalries: carry.rivalries || {},
 		};
+		if (carry.extrapolatedTitles) {
+			out.extrapolatedTitles = Object.assign({}, carry.extrapolatedTitles);
+		}
+		for (const name of Object.keys(carry.prestigeDelta || {})) {
+			out.prestigeDelta[name] = Math.round(carry.prestigeDelta[name] *
+				Math.pow(PRESTIGE_DECAY, years) * 100) / 100;
+		}
 		/* Regress toward THIS field's own mean, not a literal.
 
 		   The target was a hardcoded 55, which is only the middle of the range
@@ -375,8 +589,24 @@
 
 	   Kept out of the engine on purpose: a mentor is a fact about the
 	   TIMELINE, and a single class file run on its own has no tree. */
+	/* IDEMPOTENT, and it never trusts the result it is handed.
+
+	   It used to skip any team whose coach already carried a `mentor`, as a
+	   marker for "already processed" — but a warm runner hands back the SAME
+	   team objects when no phase before the awards had to re-run, so the
+	   second chain run after an awards-only change found every mentor set,
+	   skipped every hire, and recorded a coaching tree with nothing in it.
+	   Each step now recomputes every hire from the carry it was handed and
+	   the seed (so the same inputs give the same mentor whether the team
+	   object is fresh or cached), overwrites what is there, clears a stale
+	   one, and returns a NEW tree rather than appending to the caller's —
+	   which is what lets a resume hand it a pruned copy of the held seasons'
+	   tree (see pruneCoachTree). */
 	function coachTreeStep(tree, prevCarry, res, season, baseSeed) {
-		tree = tree || { by: {}, hires: [] };
+		tree = tree
+			? { by: {}, hires: (tree.hires || []).slice() }
+			: { by: {}, hires: [] };
+		rebuildTreeIndex(tree);
 		const pool = [];
 		for (const name of Object.keys((prevCarry && prevCarry.coaches) || {})) {
 			const c = prevCarry.coaches[name];
@@ -384,10 +614,16 @@
 				pool.push({ name: c.coach.name, school: name, rep: c.coach.rep || 0 });
 			}
 		}
-		if (!pool.length) return tree;
 		pool.sort((a, b) => (b.rep - a.rep) || (a.name < b.name ? -1 : 1));
 		for (const t of Object.values(res.teams || {})) {
-			if (!t || !t.coach || !t.coach.replaced || t.coach.mentor) continue;
+			if (!t || !t.coach) continue;
+			if (!t.coach.replaced || !pool.length) {
+				if (t.coach.mentor && !t.coach.replaced) {
+					delete t.coach.mentor;
+					delete t.coach.mentorSchool;
+				}
+				continue;
+			}
 			/* A deterministic pick weighted toward the men with a reputation:
 			   assistants come off good staffs. rng is the shared seeded RNG so
 			   this replays; the string is the one fact that identifies the
@@ -397,15 +633,40 @@
 			const idx = Math.min(pool.length - 1,
 				Math.floor(Math.pow(r.random(), 1.7) * pool.length));
 			const mentor = pool[idx];
-			if (!mentor || mentor.name === t.coach.name) continue;
+			if (!mentor || mentor.name === t.coach.name) {
+				delete t.coach.mentor;
+				delete t.coach.mentorSchool;
+				continue;
+			}
 			t.coach.mentor = mentor.name;
 			t.coach.mentorSchool = mentor.school;
+			const hire = { season, coach: t.coach.name, school: t.name,
+				mentor: mentor.name, mentorSchool: mentor.school };
+			tree.hires.push(hire);
 			if (!tree.by[mentor.name]) tree.by[mentor.name] = [];
-			tree.by[mentor.name].push({ season, coach: t.coach.name, school: t.name });
-			tree.hires.push({ season, coach: t.coach.name, school: t.name,
-				mentor: mentor.name, mentorSchool: mentor.school });
+			tree.by[mentor.name].push({ season, coach: hire.coach, school: hire.school });
 		}
 		return tree;
+	}
+
+	function rebuildTreeIndex(tree) {
+		tree.by = {};
+		for (const h of tree.hires || []) {
+			if (!h || !h.mentor) continue;
+			(tree.by[h.mentor] = tree.by[h.mentor] || [])
+				.push({ season: h.season, coach: h.coach, school: h.school });
+		}
+		return tree;
+	}
+
+	/* The tree as it stood after `lastSeason`: what a resume holds. The hires
+	   recorded by the seasons it is about to re-run come off, or they would be
+	   recorded twice. */
+	function pruneCoachTree(tree, lastSeason) {
+		if (!tree) return null;
+		const hires = (tree.hires || []).filter((h) => h &&
+			Number.isFinite(lastSeason) && h.season <= lastSeason);
+		return rebuildTreeIndex({ by: {}, hires });
 	}
 
 	/* The names a later season can drop: award winners, the top of the board,
@@ -625,7 +886,7 @@
 	   {kind, team, seasons, count, text}: `text` is the same sentence, built
 	   here so there is still one place that words it, and everything the view
 	   wants to make clickable is beside it. */
-	function threads(rows, alumni) {
+	function threads(rows, alumni, extra) {
 		const out = [];
 		const titleSeasons = {};
 		const no1Seasons = {};
@@ -687,6 +948,50 @@
 			}
 		}
 		out.push.apply(out, moreThreads(rows, alumni));
+		out.push.apply(out, rivalryThreads(extra && extra.rivalries));
+		return out;
+	}
+
+	/* RIVALRIES AS THREADS.
+
+	   Read off the carry's rivalry book (see rivalriesStep), which is the one
+	   place the bracket is remembered — a row keeps the Final Four and not the
+	   sixty-three games under it. A pair is a thread when it met in March
+	   three times inside five years, or four times at all; the sentence says
+	   when, and who leads the whole series. */
+	function rivalryThreads(riv) {
+		const out = [];
+		const list = Object.keys(riv || {}).map((k) => riv[k])
+			.filter((e) => e && e.a && e.b && (e.march || []).length >= 2);
+		const scored = [];
+		for (const e of list) {
+			const ss = e.march.slice().sort((a, b) => a - b);
+			let best = { count: 0, from: ss[0], to: ss[0] };
+			for (let i = 0; i < ss.length; i++) {
+				let j = i;
+				while (j + 1 < ss.length && ss[j + 1] - ss[i] <= 4) j++;
+				if (j - i + 1 > best.count) best = { count: j - i + 1, from: ss[i], to: ss[j] };
+			}
+			if (best.count < 3 && ss.length < 4) continue;
+			scored.push({ e, ss, best });
+		}
+		scored.sort((x, y) => y.best.count - x.best.count || y.ss.length - x.ss.length ||
+			String(x.e.a + x.e.b).localeCompare(String(y.e.a + y.e.b)));
+		for (const x of scored.slice(0, 6)) {
+			const e = x.e;
+			const inWindow = x.ss.filter((s) => s >= x.best.from && s <= x.best.to);
+			const lead = e.aw === e.bw
+				? "the series is level at " + e.aw + "-" + e.bw
+				: (e.aw > e.bw ? e.a + " leads the series " + e.aw + "-" + e.bw
+					: e.b + " leads the series " + e.bw + "-" + e.aw);
+			const text = x.best.count >= 3
+				? e.a + " and " + e.b + " met in March " + x.best.count + " times in " +
+					(x.best.to - x.best.from + 1) + " years (" + inWindow.join(", ") + "); " + lead
+				: e.a + " and " + e.b + " met in March " + x.ss.length + " times (" +
+					x.ss.join(", ") + "); " + lead;
+			out.push({ kind: "rivalry", team: e.a, other: e.b, seasons: x.ss,
+				count: x.ss.length, games: e.games, text });
+		}
 		return out;
 	}
 
@@ -1462,8 +1767,46 @@
 		for (let y = fromSeason + 1; y < toSeason; y++) {
 			world = ageCarry(world, 1);
 			const row = extrapolateSeason(world, y, baseSeed);
-			if (row) out.push(row);
+			if (row) {
+				out.push(row);
+				world = creditGuess(world, row);
+			}
 		}
+		return out;
+	}
+
+	/* A GUESSED TITLE IS STILL A TITLE IN THE GUESSED WORLD.
+
+	   Each missing year was drawn against the carry aged one more year, and
+	   nothing the previous missing year produced was credited to it — so the
+	   champion of 2031 was no stronger going into 2032 than a team that lost
+	   in the first round, and ten years past the last file could never
+	   produce a dynasty: every year was an independent draw off a field
+	   regressing to its mean. The records book, meanwhile, counted those
+	   titles off the rows. The guessed world now credits them — a banner, a
+	   bump in level for the champion and a smaller one for the runner-up —
+	   and keeps a separate `extrapolatedTitles` tally so nothing mistakes an
+	   inferred banner for a played one. This is the EXTRAPOLATION's world
+	   only: the chain's own carry across a gap is still ageCarry's (see
+	   runUniverse), so turning extrapolation off still changes what is
+	   displayed and not what is simulated. */
+	function creditGuess(world, row) {
+		if (!world || !row || !row.champion) return world;
+		const out = Object.assign({}, world, {
+			titles: Object.assign({}, world.titles || {}),
+			extrapolatedTitles: Object.assign({}, world.extrapolatedTitles || {}),
+			levels: Object.assign({}, world.levels || {}),
+			champion: row.champion,
+		});
+		out.titles[row.champion] = (out.titles[row.champion] || 0) + 1;
+		out.extrapolatedTitles[row.champion] = (out.extrapolatedTitles[row.champion] || 0) + 1;
+		if (Number.isFinite(out.levels[row.champion])) {
+			out.levels[row.champion] = Math.min(95, out.levels[row.champion] + 2.5);
+		}
+		if (row.runnerUp && Number.isFinite(out.levels[row.runnerUp])) {
+			out.levels[row.runnerUp] = Math.min(95, out.levels[row.runnerUp] + 1);
+		}
+		row.titlesAfter = out.titles[row.champion];
 		return out;
 	}
 
@@ -1564,10 +1907,20 @@
 	   costs a re-simulation.
 
 	   Everything here is structured for the same reason threads() is. */
-	function records(rows, alumni) {
+	function records(rows, alumni, registry) {
 		rows = (rows || []).filter((r) => r && !r.error);
 		alumni = alumni || [];
 		const titles = {};
+		/* Guessed titles are titles in the book — an extrapolated season has a
+		   champion and the timeline shows it — but they are counted apart, so
+		   the leaderboard can say "3 (1 extrapolated)" rather than pretending
+		   all three were played. */
+		const guessedTitles = {};
+		for (const r of rows) {
+			if (r.champion && r.extrapolated) {
+				guessedTitles[r.champion] = (guessedTitles[r.champion] || 0) + 1;
+			}
+		}
 		const finals = {};
 		const apOnes = {};
 		const poys = {};
@@ -1660,8 +2013,10 @@
 		}
 		const hall = men.slice(0, Math.max(5, Math.round(rows.length / 2)));
 
+		const titleLeaders = leaders(titles, "titles");
+		for (const x of titleLeaders) x.extrapolated = guessedTitles[x.team] || 0;
 		return {
-			titles: leaders(titles, "titles"),
+			titles: titleLeaders,
 			finals: leaders(finals, "title games"),
 			apOnes: leaders(apOnes, "seasons at AP No. 1"),
 			poys: leaders(poys, "players of the year"),
@@ -1671,7 +2026,124 @@
 			playersOfTheDecade: Object.keys(decades).sort()
 				.map((d) => ({ decade: Number(d), player: decades[d] })),
 			hall,
+			people: registry ? peopleRecords(registry) : null,
 		};
+	}
+
+	/* THE RECORD BOOK FOR PEOPLE.
+
+	   records() above is about programmes and about the alumni index's few
+	   names a season. The registry (see registryOf) is every person the world
+	   has met and every season he appears in, and it supports the questions a
+	   save's record book actually answers about men: who collected the most
+	   honours, who was around longest, who went undrafted and came back and
+	   did the most with it. Structured like everything else here; derived,
+	   so it costs no re-run. */
+	function peopleRecords(registry) {
+		const men = Object.keys(registry || {}).map((id) => registry[id])
+			.filter((x) => x && x.id);
+		const byName = (a, b) => String(a.name).localeCompare(String(b.name));
+		const brief = (x, extra) => Object.assign({ id: x.id, name: x.name,
+			span: x.span || 0, school: x.draft ? x.draft.school || null : null }, extra);
+		const mostHonors = men.filter((x) => (x.honors || []).length)
+			.sort((a, b) => b.honors.length - a.honors.length || b.span - a.span || byName(a, b))
+			.slice(0, 10).map((x) => brief(x, { count: x.honors.length,
+				seasons: Array.from(new Set(x.honors.map((h) => h.season))).sort() }));
+		const mostSeasons = men.filter((x) => (x.seasons || []).length >= 2)
+			.sort((a, b) => b.seasons.length - a.seasons.length || b.span - a.span || byName(a, b))
+			.slice(0, 10).map((x) => brief(x, { count: x.seasons.length,
+				from: x.seasons[0].season, to: x.seasons[x.seasons.length - 1].season }));
+		const returners = [];
+		for (const x of men) {
+			const back = (x.seasons || []).filter((s) => s.as === "returned undrafted");
+			if (!back.length) continue;
+			const ppg = back.reduce((a, s) => Math.max(a, Number.isFinite(s.ppg) ? s.ppg : 0), 0);
+			const honors = (x.honors || []).filter((h) => (x.returned || []).indexOf(h.season) !== -1).length;
+			returners.push(brief(x, { returned: back.map((s) => s.season), bestPpg: ppg, honors,
+				score: back.length * 10 + honors * 6 + ppg }));
+		}
+		returners.sort((a, b) => b.score - a.score || byName(a, b));
+		let bestSeason = null;
+		for (const x of men) {
+			const per = {};
+			for (const h of x.honors || []) per[h.season] = (per[h.season] || 0) + 1;
+			for (const season of Object.keys(per)) {
+				if (!bestSeason || per[season] > bestSeason.count) {
+					bestSeason = brief(x, { season: Number(season), count: per[season] });
+				}
+			}
+		}
+		return {
+			mostHonors, mostSeasons,
+			bestReturners: returners.slice(0, 10),
+			bestHonorSeason: bestSeason,
+			people: men.length,
+			careers: men.filter((x) => x.span >= 2).length,
+		};
+	}
+
+	/* PROGRAM HISTORY.
+
+	   The chain plays every programme every season and threw away everything
+	   but the champion's name: a team page could say what Butler did in the
+	   season on screen and nothing about Butler in the universe. One compact
+	   row per programme per played season — level (the programme's, not the
+	   coached one), prestige drift, coach, conference, record, March result,
+	   title — is recorded as the chain runs (see programRowsOf) and read here.
+	   With no recorded rows (a reload: the table is not persisted) it is
+	   rebuilt from whatever results are handed in. */
+	function programRowsOf(res, carryAfter) {
+		const out = {};
+		const champ = res && res.tourney && res.tourney.champion
+			? res.tourney.champion.team.name : null;
+		for (const t of Object.values((res && res.teams) || {})) {
+			if (!t || !t.name || !t.log) continue;
+			const adj = t.coach && Number.isFinite(t.coach.levelAdj) ? t.coach.levelAdj : 0;
+			const lvl = Number.isFinite(t.baseLevel) ? t.baseLevel : t.level - adj;
+			out[t.name] = {
+				season: res.season,
+				level: Math.round(lvl * 10) / 10,
+				drift: carryAfter && carryAfter.prestigeDelta
+					? carryAfter.prestigeDelta[t.name] || 0 : 0,
+				coach: t.coach ? t.coach.name : null,
+				movedFrom: t.coach && t.coach.movedFrom ? t.coach.movedFrom : null,
+				conf: t.conf || null,
+				w: t.w || 0, l: t.l || 0,
+				ncaa: t.ncaaResult || null,
+				seed: Number.isFinite(t.ncaaSeed) ? t.ncaaSeed : null,
+				title: t.name === champ,
+			};
+		}
+		return out;
+	}
+
+	function addProgramRows(programs, rows) {
+		for (const name of Object.keys(rows)) {
+			(programs[name] = programs[name] || []).push(rows[name]);
+		}
+		return programs;
+	}
+
+	function programHistory(u, name, results) {
+		let programs = u && u.programs;
+		if ((!programs || !Object.keys(programs).length) && Array.isArray(results)) {
+			programs = {};
+			const sorted = results.filter(Boolean).slice()
+				.sort((a, b) => (a.season || 0) - (b.season || 0));
+			for (const res of sorted) addProgramRows(programs, programRowsOf(res, null));
+		}
+		programs = programs || {};
+		const one = (list) => {
+			let titles = 0;
+			return (list || []).slice().sort((a, b) => a.season - b.season).map((r) => {
+				if (r.title) titles++;
+				return Object.assign({}, r, { titles });
+			});
+		};
+		if (name) return one(programs[name]);
+		const out = {};
+		for (const n of Object.keys(programs)) out[n] = one(programs[n]);
+		return out;
 	}
 
 	/* The universe as a file.
@@ -1692,6 +2164,8 @@
 
 	   `version` goes to 3. Older files still import — see importUniverse,
 	   which reads what is present and says what is missing. */
+	const ALUMNI_EXPORT_MAX = 5000;
+
 	function exportUniverse(u, opts) {
 		opts = opts || {};
 		const out = {
@@ -1740,8 +2214,30 @@
 			timeline: (u.rows || []).map((r) => Object.assign({}, r)),
 			threads: (u.threads || []).slice(0, 400),
 			records: u.records || null,
-			alumni: (u.alumni || []).slice(-400),
+			/* The whole index, not the last 400: a diverged import REPLACED
+			   the replay's alumni with this slice, so a forty-season world
+			   came back remembering its last eighty seasons' worth of names
+			   and none of its first. A row is a hundred bytes. */
+			alumni: (u.alumni || []).slice(-ALUMNI_EXPORT_MAX),
 			tail: u.tail || null,
+			/* HOW THE WORLD WAS BUILT, not only from what.
+
+			   A universe that was extended, or partly re-run under new
+			   settings, is not the cold chain of its files: an extension's
+			   earlier seasons never saw the appended classes, and a resumed
+			   run's later seasons ran under different settings from its held
+			   ones. `segments` records each run in order — cold, extend@k,
+			   resume@k — with the settings it ran under, and `order` the
+			   files in chain order, so an import can replay it run by run
+			   (see replayPlan) instead of replaying a cold chain and calling
+			   the difference a divergence. */
+			segments: (u.segments || []).map((g) => ({
+				kind: g.kind, from: g.from, to: g.to, settings: g.settings || null,
+			})),
+			order: (u.order || []).map((d) => ({
+				season: d.season, name: d.name || null,
+				fingerprint: d.fingerprint || null, seed: d.seed || null,
+			})),
 		};
 		if (u.broken) out.broken = u.broken;
 		if (u.biography && Object.keys(u.biography).length) out.biography = u.biography;
@@ -1949,6 +2445,59 @@
 		return out;
 	}
 
+	/* THE REGISTRY, BUILT AS THE CHAIN RUNS.
+
+	   registryOf takes every result at once, and the app used to call it at
+	   the end of a chain over liveResults() — which rehydrated (re-simulated)
+	   every season eviction had dropped, all of them at once, to build a map
+	   of a few thousand small rows. The chain now folds each season's rows
+	   in as it plays it, and a resume prunes the seasons it is about to
+	   re-run. Same rows, no rehydration. */
+	function finalizeEntry(e) {
+		e.seasons.sort((a, b) => a.season - b.season);
+		e.honors.sort((a, b) => a.season - b.season);
+		e.returned.sort((a, b) => a - b);
+		e.span = e.seasons.length
+			? e.seasons[e.seasons.length - 1].season - e.seasons[0].season + 1 : 0;
+		return e;
+	}
+
+	function mergeRegistry(into, add) {
+		into = into || {};
+		for (const id of Object.keys(add || {})) {
+			const x = add[id];
+			const e = into[id];
+			if (!e) { into[id] = x; continue; }
+			into[id] = finalizeEntry(Object.assign({}, e, {
+				name: e.name || x.name,
+				draft: x.draft || e.draft || null,
+				fileIndex: Number.isFinite(x.fileIndex) ? x.fileIndex : e.fileIndex,
+				seasons: (e.seasons || []).concat(x.seasons || []),
+				honors: (e.honors || []).concat(x.honors || []),
+				returned: (e.returned || []).concat(x.returned || []),
+			}));
+		}
+		return into;
+	}
+
+	function pruneRegistry(reg, lastSeason) {
+		const out = {};
+		if (!Number.isFinite(lastSeason)) return out;
+		for (const id of Object.keys(reg || {})) {
+			const e = reg[id];
+			if (!e) continue;
+			const seasons = (e.seasons || []).filter((s) => s.season <= lastSeason);
+			const draft = e.draft && e.draft.season <= lastSeason ? e.draft : null;
+			if (!seasons.length && !draft) continue;
+			out[id] = finalizeEntry(Object.assign({}, e, {
+				seasons, draft,
+				honors: (e.honors || []).filter((h) => h.season <= lastSeason),
+				returned: (e.returned || []).filter((s) => s <= lastSeason),
+			}));
+		}
+		return out;
+	}
+
 	/* ONE RECRUITING CLASS ACROSS SEVERAL FILES.
 
 	   assignRecruiting ranks within the high-school cohort, and a file run
@@ -2015,12 +2564,671 @@
 		return { byFile, cohorts };
 	}
 
+	/* ------------------------------------------------------ THE CHAIN
+
+	   What js/app.js used to run inline, as closures inside runUniverse: the
+	   state going into season one (cold, an extension's tail, or a held
+	   season's recorded config), the preview pass, the recruiting cohorts,
+	   both roster links, the step, and the tail a finished run leaves. It
+	   lives here so the app and tools/universe.js run the SAME code — the
+	   harness used to carry its own copy of the loop, and so a resume that did
+	   not reproduce the chain, or an extension that forgot the returners of
+	   the seasons it held, was invisible to it.
+
+	   Nothing here touches the DOM or app state: the caller hands in the
+	   files, a config maker, a runner per file and somewhere to put each
+	   result, and gets back an object that plays one season per step(). */
+
+	/* THE MEN A SEASON DID NOT GET DRAFTED, WITHOUT THE SEASON.
+
+	   The chain used to keep every finished result that had a returner in it
+	   (`returners.push({ res })`) for the rest of the run, and ask each one
+	   again every season — a result is the whole season (teams, box scores,
+	   game logs), so a forty-season chain held forty seasons whatever the
+	   eviction budget said, and every later season paid a pass over all of
+	   them. A source is now just the men Engine.pastRosterFor can ever return
+	   from that season, with the fields it reads, and `until` — the last
+	   season any of them has eligibility for — so a source drops out of the
+	   window the moment it cannot contribute. Small enough to ride in the
+	   tail, which is what lets an extension (and a resume) hand the next
+	   season the same returners a cold chain would have. */
+	function returnerSource(res, index) {
+		const E = global.Engine;
+		if (!res || !res.players || !Number.isFinite(res.season) ||
+			!E || typeof E.pastRosterFor !== "function") return null;
+		const keys = new Set();
+		let until = null;
+		for (let a = 1; a <= 4; a++) {
+			let got = [];
+			try { got = E.pastRosterFor(res, res.season + a, index); } catch (e) { got = []; }
+			if (!got.length) continue;
+			until = res.season + a;
+			for (const x of got) keys.add(x.key);
+		}
+		if (!keys.size) return null;
+		const players = [];
+		for (const p of res.players) {
+			if (!keys.has(p.key)) continue;
+			players.push({
+				key: p.key, name: p.name, nonNcaa: !!p.nonNcaa,
+				buildCleanBase: p.buildCleanBase, boardRank: p.boardRank,
+				classYear: p.classYear, newCollege: p.newCollege,
+				newOvr: p.newOvr, talentPot: p.talentPot, archetype: p.archetype,
+				origRatings: p.origRatings ? { fuzz: p.origRatings.fuzz } : null,
+				buildPinned: p.buildPinned, hand: p.hand, volatility: p.volatility,
+				orbBias: p.orbBias, traitInjuryMult: p.traitInjuryMult,
+			});
+		}
+		return { season: res.season, index, until, res: { season: res.season, players } };
+	}
+
+	function pastRosterFrom(sources, season) {
+		let out = [];
+		if (!Number.isFinite(season)) return out;
+		for (const src of sources || []) {
+			if (!src || !(season > src.season) || season > src.until) continue;
+			/* Once per earlier season, not once per candidate: the whole
+			   population is one call, and a returner's overall is computed
+			   against the season that is asking. */
+			out = out.concat(global.Engine.pastRosterFor(src.res, season, src.index));
+		}
+		return out;
+	}
+
+	/* The settings order position `p` last ran under. */
+	function segmentSettings(u, p) {
+		let found = null;
+		for (const g of (u && u.segments) || []) {
+			if (g && p >= g.from && p < g.to && g.settings) found = g.settings;
+		}
+		return found || (u && u.settings) || null;
+	}
+
+	function pruneProgramsAfter(programs, lastSeason) {
+		const out = {};
+		for (const name of Object.keys(programs || {})) {
+			const list = programs[name].filter((r) => !Number.isFinite(lastSeason) ||
+				r.season <= lastSeason);
+			if (list.length) out[name] = list;
+		}
+		return out;
+	}
+
+	/* spec: {
+	     mode: "cold" | "extend" | "resume", from (resume position),
+	     universe: the existing universe (extend / resume),
+	     files, runnable ([{index, name, season}] in chain order),
+	     settings (the frozen config), baseSeed, make (settings -> fresh cfg),
+	     runnerFor(index), store(index, res), biographyFor(fingerprint),
+	     extrapolateGaps, fullClass, anomalyHistory, diags,
+	   } */
+	function beginChain(spec) {
+		const E = global.Engine;
+		const make = spec.make;
+		const files = spec.files || [];
+		const prior = spec.universe || null;
+		const mode = spec.mode || "cold";
+		const frozen = spec.settings;
+		const baseSeed = spec.baseSeed;
+		const fullClass = spec.fullClass || 65;
+		const anomalyHistory = spec.anomalyHistory || 4;
+		const copyPools = (list) => (list || []).map((a) => a.slice());
+		const fpAt = (index) => (files[index] && files[index].fingerprint) || null;
+		const runnable = (spec.runnable || []).map((d) => ({
+			index: d.index, name: d.name, season: d.season, fingerprint: fpAt(d.index),
+		}));
+		const indexOf = (d) => {
+			if (d && Number.isFinite(d.index) && files[d.index] &&
+				(!d.fingerprint || files[d.index].fingerprint === d.fingerprint)) return d.index;
+			if (!d || !d.fingerprint) return -1;
+			for (let i = 0; i < files.length; i++) {
+				if (files[i] && files[i].fingerprint === d.fingerprint) return i;
+			}
+			return -1;
+		};
+		let held = [];
+		let carry = null;
+		let lastSeason = null;
+		let recentPools = [];
+		let recentAnomalies = [];
+		let sources = [];
+		let tree = null;
+		let seedBase = 0;
+		let u;
+		let segment;
+		if (mode === "extend") {
+			const tail = prior.tail;
+			/* A persisted order's file indices are the LAST session's; the
+			   files may have been dropped back in a different order. Each
+			   held entry is re-pointed at the loaded file with its
+			   fingerprint, or at none. */
+			held = (prior.order || []).map((h) => Object.assign({}, h, { index: indexOf(h) }));
+			carry = tail.carry || null;
+			lastSeason = tail.lastSeason;
+			recentPools = copyPools(tail.recentPools);
+			recentAnomalies = copyPools(tail.recentAnomalies);
+			sources = (tail.returners || []).slice();
+			tree = prior.coachTree || null;
+			seedBase = Number.isFinite(tail.count) ? tail.count : held.length;
+			/* THE LAST RUN'S GUESSED TAIL COMES OFF BEFORE ANYTHING IS
+			   APPENDED. The rows extrapolated past the old last season
+			   describe years this extension is about to play or re-draw;
+			   pruning them only in finish() left the gap rows the first new
+			   season draws sitting beside the old guesses for the same
+			   years. */
+			const live = (x) => !(x && x.extrapolated && Number.isFinite(x.season) &&
+				Number.isFinite(lastSeason) && x.season > lastSeason);
+			segment = { kind: "extend", from: held.length, to: held.length + runnable.length,
+				settings: frozen };
+			u = Object.assign(prior, {
+				rows: (prior.rows || []).filter((r) => r && live(r)),
+				alumni: (prior.alumni || []).filter((a) => a && live(a)),
+				order: held.concat(runnable),
+				segments: (prior.segments || []).concat([segment]),
+				links: prior.links || {},
+				programs: pruneProgramsAfter(prior.programs, lastSeason),
+				registry: prior.registry || {},
+				cfgs: prior.cfgs || {},
+				running: true, diags: spec.diags || prior.diags, total: runnable.length,
+				done: 0, cancelled: false, records: null, careers: null,
+			});
+		} else if (mode === "resume") {
+			const from = spec.from;
+			held = prior.order.slice(0, from);
+			const saved = prior.cfgs[prior.order[from].index];
+			carry = saved.carryOver || null;
+			recentPools = copyPools(saved.recentPools);
+			recentAnomalies = copyPools(saved.recentAnomalies);
+			sources = (saved.returners || []).slice();
+			lastSeason = held.length ? held[held.length - 1].season : null;
+			seedBase = from;
+			tree = pruneCoachTree(prior.coachTree, lastSeason);
+			const keptFps = held.map((d) => d.fingerprint).filter(Boolean);
+			const heldRow = (r) => {
+				if (!r) return false;
+				/* An extrapolated row belongs to the held seasons when it is
+				   inside them; a guessed year after the resume point goes with
+				   the seasons it described (step() re-draws a gap it walks
+				   past). */
+				if (r.extrapolated) {
+					return Number.isFinite(r.season) && Number.isFinite(lastSeason) &&
+						r.season <= lastSeason;
+				}
+				if (Number.isFinite(r.position)) return r.position < from;
+				return keptFps.indexOf(r.fingerprint) !== -1;
+			};
+			const links = {};
+			for (const t of Object.keys(prior.links || {})) {
+				const list = prior.links[t].filter((x) => x.position < from);
+				if (list.length) links[t] = list;
+			}
+			/* A superseded resume is dropped: everything it re-ran is being
+			   re-run again. Cold and extend segments stay, because they are
+			   what built the order the held seasons came from. */
+			const segs = (prior.segments || []).filter((g) =>
+				!(g.kind === "resume" && g.from >= from));
+			segment = { kind: "resume", from, to: held.length + runnable.length, settings: frozen };
+			const rows = (prior.rows || []).filter(heldRow);
+			u = Object.assign(prior, {
+				rows,
+				alumni: (prior.alumni || []).filter((a) => a && (Number.isFinite(a.position) && !a.extrapolated
+					? a.position < from
+					: !Number.isFinite(lastSeason) || a.season <= lastSeason)),
+				order: held.concat(runnable),
+				segments: segs.concat([segment]),
+				links,
+				programs: pruneProgramsAfter(prior.programs, lastSeason),
+				registry: pruneRegistry(prior.registry, lastSeason),
+				coachTree: tree,
+				running: true, diags: spec.diags || prior.diags, total: runnable.length,
+				done: 0, cancelled: false, records: null, careers: null,
+				broken: (rows.filter((r) => r.error)[0] || {}).season || null,
+			});
+		} else {
+			segment = { kind: "cold", from: 0, to: runnable.length, settings: frozen };
+			u = {
+				rows: [], threads: [], alumni: [], baseSeed, cfgs: {},
+				/* The chain's own order, so a result evicted to bound memory
+				   can be rebuilt AND relinked on demand. */
+				order: runnable.slice(),
+				running: true, diags: spec.diags || null, total: runnable.length, done: 0,
+				settings: frozen, segments: [segment], coachTree: null, records: null,
+				engineRev: ENGINE_REV, cancelled: false, broken: null, tail: null,
+				links: {}, programs: {}, registry: {},
+			};
+		}
+		const seedAt = (k) => seedFor(baseSeed, seedBase + k, runnable[k].season,
+			runnable[k].fingerprint);
+
+		/* PASS ONE: who is in every class, before any season is played — the
+		   files this run plays, AND the ones it holds. The held previews are
+		   rebuilt from the seed and settings each held season recorded, so
+		   the recruiting cohorts a resumed or extended season is ranked in
+		   are the ones a cold chain over the same files ranks it in. */
+		const heldPreviews = [];
+		{
+			let pools = [];
+			for (let p = 0; p < held.length; p++) {
+				const h = held[p];
+				const idx = indexOf(h);
+				const saved = prior && prior.cfgs && idx >= 0 ? prior.cfgs[idx] : null;
+				const seed = (saved && saved.seed) || h.seed || null;
+				const settings = (saved && saved.settings) || segmentSettings(prior, p) || frozen;
+				const use = saved && saved.recentPools ? saved.recentPools : pools;
+				let pv = null;
+				if (idx >= 0 && seed) {
+					try {
+						const c = make(settings);
+						c.seed = seed;
+						c.overrides = {};
+						c.recentPools = copyPools(use);
+						pv = E.previewClass(files[idx].data, c);
+					} catch (e) { pv = null; }
+				}
+				heldPreviews.push(pv);
+				pools = copyPools(use);
+				if (pv && pv.archetypePool) {
+					pools.unshift(pv.archetypePool.slice());
+					pools = pools.slice(0, 3);
+				}
+			}
+		}
+		const previews = [];
+		{
+			let pools = copyPools(recentPools);
+			for (let k = 0; k < runnable.length; k++) {
+				let pv = null;
+				try {
+					const c = make(frozen);
+					c.seed = seedAt(k);
+					c.overrides = {};
+					c.recentPools = copyPools(pools);
+					pv = E.previewClass(files[runnable[k].index].data, c);
+				} catch (e) { pv = null; }
+				previews.push(pv);
+				if (pv && pv.archetypePool) {
+					pools.unshift(pv.archetypePool.slice());
+					pools = pools.slice(0, 3);
+				}
+			}
+		}
+		/* PASS ONE AND A HALF: rank every recruiting class across ALL the
+		   files at once. See recruitingCohorts. */
+		let recruiting = null;
+		try {
+			recruiting = recruitingCohorts(heldPreviews.concat(previews));
+			u.recruiting = recruiting.cohorts;
+		} catch (e) { recruiting = null; }
+		const rosterFor = (k) => {
+			const season = runnable[k].season;
+			if (!Number.isFinite(season)) return [];
+			let out = [];
+			for (let j = k + 1; j < runnable.length; j++) {
+				if (!previews[j] || !(runnable[j].season > season)) continue;
+				out = out.concat(E.futureRosterFor(previews[j], season, runnable[j].index));
+			}
+			return out;
+		};
+
+		const stats = { resimulated: 0, touched: 0 };
+		const captureLinks = (res, d, position) => {
+			const shift = (typeof E.classSeasonOf === "function"
+				? E.classSeasonOf(res) : res.season) - res.season;
+			for (const fp of res.futurePlayers || []) {
+				if (!fp || !fp.stats || !Number.isFinite(fp.fileIndex)) continue;
+				const team = res.teams && res.teams[fp.newCollege];
+				(u.links[fp.fileIndex] = u.links[fp.fileIndex] || []).push({
+					source: d.index, position, season: res.season,
+					exportSeason: res.season + shift, fp,
+					team: team ? { w: team.w, l: team.l, box: team.box, lines: team.lines,
+						postseason: team.ncaaResult || team.nitResult || null } : null,
+				});
+			}
+		};
+
+		function step(k) {
+			const d = runnable[k];
+			const position = held.length + k;
+			/* A HOLE IN THE FILES IS TIME PASSING. See ageCarry. */
+			const gap = (carry && Number.isFinite(lastSeason) && Number.isFinite(d.season))
+				? Math.max(0, d.season - lastSeason - 1) : 0;
+			/* THE YEARS NOBODY PLAYED GET AN ACCOUNT OF THEMSELVES — on the
+			   timeline, and NOT fed back into the chain: `carry` below is
+			   still ageCarry's. See extrapolateGap. */
+			if (gap > 0 && spec.extrapolateGaps !== false) {
+				const guessed = extrapolateGap(carry, lastSeason, d.season, baseSeed);
+				for (const row of guessed) u.rows.push(row);
+				u.alumni = u.alumni.concat(extrapolatedAlumni(guessed));
+			}
+			if (gap > 0) carry = ageCarry(carry, gap);
+			let res = null;
+			try {
+				const cfg = make(frozen);
+				cfg.seed = seedAt(k);
+				cfg.overrides = {};
+				cfg.recentPools = copyPools(recentPools);
+				cfg.recentAnomalies = copyPools(recentAnomalies);
+				cfg.carryOver = carry;
+				cfg.universeRoster = rosterFor(k);
+				// The window: a source nobody in it can return from is gone.
+				if (Number.isFinite(d.season)) sources = sources.filter((s) => d.season <= s.until);
+				const sourcesIn = sources.slice();
+				cfg.pastRoster = pastRosterFrom(sources, d.season);
+				cfg.biography = spec.biographyFor ? spec.biographyFor(d.fingerprint) : null;
+				cfg.universeRecruiting = recruiting
+					? { byKey: recruiting.byFile[position] || {} } : null;
+				/* What the world remembers, for the news desk. Bounded,
+				   because it rides in a config that is kept per file. */
+				cfg.universeAlumni = u.alumni.slice(-120);
+				cfg.universeTitles = (carry && carry.titles) || {};
+				const prevCarry = carry;
+				res = spec.runnerFor(d.index).run(cfg);
+				const heavy = (res.phasesRun || [])
+					.some((x) => x === "build" || x === "regular" || x === "stats");
+				if (heavy) stats.resimulated++;
+				if ((res.phasesRun || []).length) stats.touched++;
+				res.fileIndex = d.index;
+				if (spec.store) spec.store(d.index, res);
+				/* Everything the season was run with, so it can be rebuilt on
+				   demand (see universeCfgFor in js/app.js) and so a resume can
+				   start from exactly here: the settings it ran under (a resume
+				   runs later seasons under new ones, and a held season is
+				   rebuilt under its own), and the returner sources it was
+				   handed. */
+				u.cfgs[d.index] = {
+					seed: cfg.seed,
+					settings: frozen,
+					position,
+					carryOver: cfg.carryOver,
+					recentPools: copyPools(cfg.recentPools),
+					recentAnomalies: copyPools(cfg.recentAnomalies),
+					universeRoster: cfg.universeRoster,
+					pastRoster: cfg.pastRoster,
+					universeRecruiting: cfg.universeRecruiting,
+					universeAlumni: cfg.universeAlumni,
+					universeTitles: cfg.universeTitles,
+					returners: sourcesIn,
+				};
+				if (u.order[position]) u.order[position].seed = cfg.seed;
+				const src = returnerSource(res, d.index);
+				if (src) sources.push(src);
+				tree = coachTreeStep(tree, prevCarry, res, d.season, baseSeed);
+				/* A FILE THAT CARRIES PART OF A CLASS. See topUpPartialSeason. */
+				const share = Math.min(1, (res.players || []).length / Math.max(1, fullClass));
+				u.rows.push(topUpPartialSeason(Object.assign(
+					summarize(res, cfg.seed, d.name),
+					{
+						fingerprint: d.fingerprint || null,
+						result: resultFingerprint(res),
+						gap,
+						position,
+					}), prevCarry, baseSeed, share));
+				u.alumni = u.alumni.concat(alumniOf(res, d.season, d.fingerprint || null)
+					.map((a) => Object.assign(a, { position })));
+				captureLinks(res, d, position);
+				try { mergeRegistry(u.registry, registryOf([res], files, null)); }
+				catch (e) { /* the registry is a view; the season stands */ }
+				carry = harvest(res, prevCarry);
+				addProgramRows(u.programs, programRowsOf(res, carry));
+				lastSeason = d.season;
+				if (res.archetypePool) {
+					recentPools.unshift(res.archetypePool.slice());
+					recentPools = recentPools.slice(0, 3);
+				}
+				if (Array.isArray(res.surprises) && res.surprises.length) {
+					recentAnomalies.unshift(res.surprises.map((sp) => sp.name));
+					recentAnomalies = recentAnomalies.slice(0, anomalyHistory);
+				}
+			} catch (e) {
+				/* A FAILED SEASON STILL PASSES TIME. */
+				u.rows.push({
+					season: d.season, fileName: d.name, seed: null, gap, position,
+					fingerprint: d.fingerprint || null,
+					error: e && e.message ? e.message : String(e),
+				});
+				carry = ageCarry(carry, 1);
+				if (Number.isFinite(d.season)) lastSeason = d.season;
+				if (!u.broken) u.broken = d.season || d.name;
+				res = null;
+			}
+			u.done = k + 1;
+			return res;
+		}
+
+		/* RUNNING FORWARD PAST THE LAST FILE. Guessed rows past the end are
+		   pruned first (so a dial turned down drops them), then redrawn. The
+		   tail is untouched: loading a real class later extends the world
+		   from the last season that was actually simulated. */
+		function extrapolateForward(years) {
+			const stale = new Set();
+			u.rows = u.rows.filter((row) => {
+				if (row && row.extrapolated && Number.isFinite(row.season) &&
+					Number.isFinite(lastSeason) && row.season > lastSeason) {
+					stale.add(row.season);
+					return false;
+				}
+				return true;
+			});
+			if (stale.size) {
+				u.alumni = (u.alumni || []).filter((a) =>
+					!(a && a.extrapolated && stale.has(a.season)));
+			}
+			const n = Math.max(0, Math.round(years || 0));
+			if (!n || !carry || !Number.isFinite(lastSeason)) return 0;
+			const guessed = extrapolateGap(carry, lastSeason, lastSeason + n + 1, baseSeed);
+			for (const row of guessed) u.rows.push(row);
+			u.alumni = u.alumni.concat(extrapolatedAlumni(guessed));
+			return guessed.length;
+		}
+
+		function finish(fo) {
+			fo = fo || {};
+			const done = u.done || 0;
+			u.running = false;
+			u.cancelled = !!fo.cancelled && done < runnable.length;
+			/* ONLY WHAT WAS PLAYED. After Stop, the order and the tail used to
+			   name every PLANNED file — so an extension treated the classes
+			   that never ran as part of the chain and skipped them. */
+			if (done < runnable.length) {
+				u.order = held.concat(runnable.slice(0, done));
+				segment.to = held.length + done;
+			}
+			const guessed = extrapolateForward(fo.extrapolateYears || 0);
+			u.coachTree = tree;
+			/* THE TAIL. Everything step() carries from one season to the
+			   next — now including the returner sources still inside their
+			   window — so an extension continues exactly where the chain
+			   stopped. */
+			u.tail = {
+				baseSeed,
+				carry,
+				lastSeason,
+				count: seedBase + done,
+				recentPools: copyPools(recentPools),
+				recentAnomalies: copyPools(recentAnomalies),
+				returners: sources.filter((s) => !Number.isFinite(lastSeason) ||
+					s.until > lastSeason),
+				fingerprints: u.order.map((d) => d.fingerprint).filter(Boolean),
+			};
+			u.threads = threads(u.rows, u.alumni, { rivalries: carry && carry.rivalries });
+			u.records = records(u.rows, u.alumni, u.registry || null);
+			return { guessed, resimulated: stats.resimulated, touched: stats.touched };
+		}
+
+		return {
+			universe: u, runnable, held, previews, heldPreviews, step, finish, stats,
+			get carry() { return carry; },
+			get lastSeason() { return lastSeason; },
+			get sources() { return sources; },
+		};
+	}
+
+	/* ---------------------------------------------------------- IMPORT */
+
+	/* WHICH ROW IS WHICH, when two files claim the same season.
+
+	   The import's expected results and its restorable rows were both keyed on
+	   the season alone, so two files both claiming 2031 — which validate()
+	   warns about but allows — collided: one overwrote the other, and the
+	   survivor was compared against (or restored over) both. A row's key is
+	   now its file fingerprint and season plus which occurrence of that pair
+	   it is; an extrapolated year, which has no file, is keyed on its season. */
+	function rowKeys(rows) {
+		const seen = {};
+		return (rows || []).map((r) => {
+			if (!r) return null;
+			if (r.extrapolated) return "x|" + r.season;
+			const base = (r.fingerprint || "") + "|" + r.season;
+			seen[base] = (seen[base] || 0) + 1;
+			return base + "#" + seen[base];
+		});
+	}
+
+	/* HOW TO REPLAY AN EXPORT: run by run, the way it was built.
+
+	   A version 3 export records its runs (see exportUniverse): replaying an
+	   extended universe as a cold chain gives its early seasons the appended
+	   classes' underclassmen they never had, and replaying a partly re-run one
+	   under one set of settings gives half of it the wrong ones. When every
+	   file in the recorded order is loaded, the plan is the recorded runs; when
+	   one is missing, or the export predates segments, it is one cold run of
+	   whatever is loaded, and `followed` says whether that is faithful. */
+	function replayPlan(json, files) {
+		const have = new Set((files || []).map((f) => f && f.fingerprint).filter(Boolean));
+		const order = Array.isArray(json && json.order) && json.order.length ? json.order : null;
+		const segs = (Array.isArray(json && json.segments) ? json.segments : [])
+			.filter((g) => g && g.kind);
+		const fps = order ? order.map((o) => o && o.fingerprint) : [];
+		const complete = !!order && fps.every((fp) => fp && have.has(fp));
+		if (segs.length && complete) {
+			return {
+				followed: true, segments: segs.length,
+				steps: segs.map((g) => {
+					const settings = g.settings || json.settings || null;
+					if (g.kind === "extend") {
+						return { kind: "extend", settings, only: fps.slice(g.from, g.to) };
+					}
+					if (g.kind === "resume") return { kind: "resume", settings, from: g.from };
+					return { kind: "cold", settings, only: fps.slice(0, g.to) };
+				}),
+			};
+		}
+		return {
+			followed: segs.length <= 1,
+			segments: segs.length,
+			reason: segs.length > 1 ? (order ? "missing files" : "no recorded order") : null,
+			steps: [{ kind: "cold", settings: (json && json.settings) || null, only: null }],
+		};
+	}
+
+	/* PUT THE IMPORTED WORLD BACK WHERE THE REPLAY COULD NOT REPRODUCE IT.
+
+	   Three cases, all of which used to lose the file's own account:
+	     - a season that replayed differently (`diverged`, by row key) is
+	       replaced by the file's row, flagged `restored`;
+	     - a season whose class file is not loaded was not played at all, and
+	       the replay filled the hole with an EXTRAPOLATED champion — the file
+	       says who actually won, so its row goes in instead (`missingFile`);
+	     - the alumni index and the registry are MERGED with the file's, not
+	       replaced by them: the replay's own entries are the live ones, and
+	       the file supplies what the replay could not.
+	   Threads and the records book are rebuilt from the merged timeline so
+	   they cannot disagree with it. Returns what it did. */
+	function restoreImported(u, imported, diverged) {
+		const out = { restored: 0, missing: 0, alumni: 0, registry: 0 };
+		if (!u || !imported) return out;
+		const importedRows = imported.rows || [];
+		const iKeys = rowKeys(importedRows);
+		const byKey = {};
+		importedRows.forEach((r, i) => { if (r && iKeys[i]) byKey[iKeys[i]] = r; });
+		const dset = new Set(diverged || []);
+		const rKeys = rowKeys(u.rows);
+		u.rows = (u.rows || []).map((r, i) => {
+			if (!dset.has(rKeys[i])) return r;
+			const src = byKey[rKeys[i]];
+			if (!src) return r;
+			out.restored++;
+			return Object.assign({}, src, {
+				restored: true, replayResult: r.result || null,
+				seed: r.seed || src.seed || null,
+			});
+		});
+		const have = new Set(rowKeys(u.rows));
+		importedRows.forEach((src, i) => {
+			if (!src || src.extrapolated || src.error || have.has(iKeys[i])) return;
+			const row = Object.assign({}, src, { restored: true, missingFile: true });
+			const at = u.rows.findIndex((r) => r && r.extrapolated && r.season === src.season);
+			if (at >= 0) u.rows[at] = row;
+			else u.rows.push(row);
+			out.missing++;
+		});
+		if (out.missing) {
+			u.rows = u.rows.map((r, i) => ({ r, i }))
+				.sort((a, b) => ((a.r && a.r.season) || 0) - ((b.r && b.r.season) || 0) || a.i - b.i)
+				.map((x) => x.r);
+		}
+		if (Array.isArray(imported.alumni) && imported.alumni.length) {
+			const key = (a) => (a.id || a.key) + "|" + a.season + "|" + a.why;
+			const seen = new Set((u.alumni || []).map(key));
+			const add = imported.alumni.filter((a) => a && !seen.has(key(a)));
+			if (add.length) {
+				out.alumni = add.length;
+				u.alumni = (u.alumni || []).concat(add).map((a, i) => ({ a, i }))
+					.sort((x, y) => (x.a.season || 0) - (y.a.season || 0) || x.i - y.i)
+					.map((x) => x.a);
+			}
+		}
+		if (imported.registry && typeof imported.registry === "object") {
+			const live = u.registry || {};
+			const merged = Object.assign({}, imported.registry, live);
+			out.registry = Object.keys(merged).length - Object.keys(live).length;
+			u.registry = merged;
+		}
+		if ((out.restored || out.missing) && imported.tail) u.tail = imported.tail;
+		if (out.restored || out.missing || out.alumni || out.registry) {
+			const riv = u.tail && u.tail.carry ? u.tail.carry.rivalries : null;
+			u.threads = threads(u.rows, u.alumni, { rivalries: riv });
+			u.records = records(u.rows, u.alumni, u.registry || null);
+		}
+		return out;
+	}
+
+	/* A universe from the file alone: no class files loaded, so nothing can
+	   be replayed — but the timeline, the threads, the records book, the
+	   alumni index, the registry and the tail are all in a version 3 export,
+	   and a shared world should be readable without the folder it was built
+	   from. Extendable, too, when a later class is loaded: the tail is here. */
+	function viewOnlyUniverse(json) {
+		const rows = (json.timeline || []).map((r) => Object.assign({}, r));
+		const alumni = (json.alumni || []).slice();
+		const registry = json.registry && typeof json.registry === "object" ? json.registry : null;
+		const tail = json.tail || null;
+		return {
+			rows, alumni, registry, tail,
+			threads: Array.isArray(json.threads) && json.threads.length ? json.threads
+				: threads(rows, alumni, { rivalries: tail && tail.carry ? tail.carry.rivalries : null }),
+			records: json.records || records(rows, alumni, registry),
+			baseSeed: json.baseSeed || "",
+			settings: json.settings || null,
+			segments: (json.segments || []).slice(),
+			order: (json.order || []).map((o) => ({ index: -1, name: o.name || null,
+				season: o.season, fingerprint: o.fingerprint || null, seed: o.seed || null })),
+			cfgs: {}, running: false, coachTree: null,
+			broken: json.broken || null, engineRev: json.engineRev || null,
+			viewOnly: true,
+		};
+	}
+
 	global.Universe = {
 		VERSION, ENGINE_REV, validate, harvest, returnersOf, alumniOf, summarize,
 		playerId, biographyForFile, registryOf,
 		threads, moreThreads, records, exportUniverse, biographyOf, seedFor, resultFingerprint,
 		extrapolateGap, extrapolateSeason, topUpPartialSeason, extrapolatedAlumni,
 		PARTIAL_CLASS_SHARE,
-		ageCarry, coachTreeStep, nationalPOYSet, recruitingCohorts,
+		ageCarry, coachTreeStep, pruneCoachTree, nationalPOYSet, recruitingCohorts,
+		peopleRecords, programHistory, programRowsOf, rivalryThreads,
+		returnerSource, pastRosterFrom, beginChain, rowKeys, replayPlan,
+		restoreImported, viewOnlyUniverse, segmentSettings, mergeRegistry, pruneRegistry,
+		PRESTIGE_CAP, RIVALRY_MAX,
 	};
 })(typeof window !== "undefined" ? window : self);

@@ -261,6 +261,7 @@
 	   untouched, and a roster whose prospect is a genuine lottery talent is
 	   untouched too, because the cap is not binding there. */
 	const FILLER_GAP = 4;
+	const ROSTER_SIZE = 10;
 	const NEXT_CLASS_YEAR = { Freshman: "Sophomore", Sophomore: "Junior", Junior: "Senior" };
 	/* Per top-three rotation slot, so roughly a dozen across 364 programs.
 	   Raised from 0.012 (task 4.6): at the old rate about seven programs in
@@ -721,6 +722,9 @@
 	   a raider never takes more than it can fit. Returns the per-run mapping
 	   plus a list of the moves, so the UI can say what happened. */
 	const MIN_CONF_MEMBERS = 7;
+	/* And a ceiling. The largest real leagues run to eighteen; without a cap a
+	   universe's raids compounded (see the shed step in realign). */
+	const MAX_CONF_MEMBERS = 18;
 	/* Where each conference lives, coarsely. Realignment was
 	   geography-blind — Tennessee State to the CAA, a New England and
 	   Mid-Atlantic league, in one sampled run — and the database carries no
@@ -745,9 +749,9 @@
 		"Conference USA": ["TX", "SE", "TN", "MTN"],
 		"MAC": ["OH"],
 		"Sun Belt": ["SE", "TX", "CAR"],
-		"Big West": ["W"],
+		"Big West": ["W", "MTN"],
 		"CAA": ["NE", "MA", "CAR"],
-		"WAC": ["TX", "MTN", "W"],
+		"UAC": ["TX", "TN", "SE"],
 		"Horizon": ["OH", "MW"],
 		"MAAC": ["NE", "MA"],
 		"Southern": ["CAR", "SE", "TN"],
@@ -791,7 +795,12 @@
 		const carried = cfg && cfg.carryOver && cfg.carryOver.confOf;
 		for (const name of C.names) {
 			const base = C.conferenceOf(name) || "Independent";
-			const remembered = carried && carried[name];
+			/* A save from before a conference was renamed ("WAC" is the
+			   UAC now) still names the old league; read it through the
+			   alias table so the program lands in a league that exists. */
+			const remembered = carried && carried[name]
+				? (C.canonicalConference ? C.canonicalConference(carried[name]) : carried[name])
+				: null;
 			confOf[name] = remembered &&
 				(memory >= 1 || rng.child("memory:" + name).random() < memory)
 				? remembered : base;
@@ -799,16 +808,71 @@
 		const rate = clamp(
 			cfg && cfg.realignmentRate !== undefined ? cfg.realignmentRate : 0.35, 0, 1);
 		const moves = [];
-		if (rate <= 0 || rng.random() >= rate) return { confOf, moves };
+		if (rate <= 0) return { confOf, moves };
 		const members = {};
 		for (const name of C.names) {
 			(members[confOf[name]] = members[confOf[name]] || []).push(name);
 		}
 		const strength = (conf) =>
 			(C.CONFERENCES[conf] ? C.CONFERENCES[conf].strength : 50);
-		// Who is raiding: a strong conference, weighted by how strong.
-		const raiders = Object.keys(members).filter((c) => strength(c) >= 62);
-		if (!raiders.length) return { confOf, moves };
+		const baseSize = {};
+		for (const name of C.names) {
+			const b = C.conferenceOf(name) || "Independent";
+			baseSize[b] = (baseSize[b] || 0) + 1;
+		}
+		/* THE WAY BACK DOWN. Realignment only ever went up: every raid moved
+		   good programs into a strong league and nothing ever left one, so
+		   over a forty-season universe the Big 12 grew from 16 members to 29
+		   and the leagues it raided shrank to their floor. Real leagues shed
+		   members too — a program that cannot compete, or that a league
+		   trims to protect its revenue share, goes back to the level below.
+		   Drawn on its own stream, before the raid, so it does not reshuffle
+		   which raid happens. A league that has grown past its founding size
+		   occasionally releases its weakest addition, preferably back to the
+		   league it came from. */
+		const rrng = rng.child("reverse");
+		// Listed after any raid, so a roundup still leads with the raider.
+		const shed = [];
+		const done = () => ({ confOf, moves: moves.concat(shed) });
+		const bloated = Object.keys(members)
+			.filter((c) => c !== "Independent" &&
+				members[c].length > (baseSize[c] || 0) + 2)
+			.sort((a, b) => (members[b].length - (baseSize[b] || 0)) -
+				(members[a].length - (baseSize[a] || 0)) || (a < b ? -1 : 1));
+		const shedChance = 0.35 * rate +
+			(bloated.length && members[bloated[0]].length > MAX_CONF_MEMBERS - 2 ? 0.4 : 0);
+		if (bloated.length && rrng.random() < shedChance) {
+			const from = bloated[0];
+			const added = members[from]
+				.filter((n) => (C.conferenceOf(n) || "Independent") !== from)
+				.sort((a, b) => C.prestigeOrLowMajor(a) - C.prestigeOrLowMajor(b) ||
+					(a < b ? -1 : 1));
+			const name = added[0];
+			if (name) {
+				const home = C.conferenceOf(name) || "Independent";
+				const fits = (c) => c !== from && members[c] &&
+					members[c].length < MAX_CONF_MEMBERS &&
+					strength(c) < strength(from) && regionsOverlap(c, from);
+				const dest = fits(home) ? home
+					: Object.keys(members).filter(fits)
+						.sort((a, b) => (members[a].length - (baseSize[a] || 0)) -
+							(members[b].length - (baseSize[b] || 0)) ||
+							strength(b) - strength(a) || (a < b ? -1 : 1))[0];
+				if (dest) {
+					members[from].splice(members[from].indexOf(name), 1);
+					members[dest].push(name);
+					confOf[name] = dest;
+					shed.push({ school: name, from, to: dest, down: true });
+				}
+			}
+		}
+		if (rng.random() >= rate) return done();
+		/* Who is raiding: a strong conference, weighted by how strong — and
+		   with room. MAX_CONF_MEMBERS is a ceiling on a league, so a raid
+		   that would push one past it takes fewer schools or does not happen. */
+		const raiders = Object.keys(members)
+			.filter((c) => strength(c) >= 62 && members[c].length < MAX_CONF_MEMBERS);
+		if (!raiders.length) return done();
 		const to = rng.weighted(raiders, (c) => Math.pow(strength(c) - 55, 2));
 		const wanted = rng.int(2, 5);
 		/* Who gets taken: a good program from the tier immediately below.
@@ -832,16 +896,18 @@
 				.sort((a, b) => C.prestigeOrLowMajor(b) - C.prestigeOrLowMajor(a))
 				.slice(0, 30);
 		}
+		let taken = 0;
 		for (const name of rng.shuffle(candidates)) {
-			if (moves.length >= wanted) break;
+			if (taken >= wanted || members[to].length >= MAX_CONF_MEMBERS) break;
 			const from = confOf[name];
 			if (members[from].length <= MIN_CONF_MEMBERS) continue;
 			members[from].splice(members[from].indexOf(name), 1);
 			members[to].push(name);
 			confOf[name] = to;
 			moves.push({ school: name, from, to });
+			taken++;
 		}
-		return { confOf, moves };
+		return done();
 	}
 
 	/* Build every NCAA program for the season. prospectsBySchool maps a college
@@ -888,7 +954,14 @@
 				   team. */
 				talent: prospectTalent(p.newOvr, p.talentPot || p.newPot),
 			}));
-			const nFill = Math.max(6, 10 - members.length);
+			/* Ten on the roster that can play. Thirteen was tried (a real
+			   D-I roster carries thirteen to fifteen, and the stat model's
+			   rotation draw reaches eleven only on a roster that has eleven),
+			   but the extra deep-bench returners took floor time and block
+			   share off the prospects and moved the class's big-to-guard block
+			   ratio out of its calibration band, so the roster stays at ten
+			   and the rotation draw in js/stats.js says what it can reach. */
+			const nFill = Math.max(6, ROSTER_SIZE - members.length);
 			const slots = assignFillerSlots(members, nFill, trng.child("slots"));
 			const fillers = [];
 			for (let i = 0; i < nFill; i++) {
@@ -910,18 +983,48 @@
 				   behaviour and 200 is a roster that empties every April. */
 				const portal = 0.18 * clamp(
 					(cfg && cfg.portalRate !== undefined ? cfg.portalRate : 100) / 100, 0, 5);
+				const taken = new Set();
 				for (const r of carry.returners[name]) {
 					const next = NEXT_CLASS_YEAR[r.classYear];
 					if (!next) continue;
 					if (portal > 0 &&
 						trng.child("portal:" + r.name).random() < portal) continue;
-					const slot = Math.min(Math.max(0, r.slotIndex || 0), fillers.length - 1);
+					/* THE SAME MAN, NOT THE SAME SLOT NUMBER. The returner was
+					   poured into whatever filler sat at his old index, keeping
+					   that filler's size, position and conditioning — so a
+					   returning 6'11" center came back as a guard, and a star
+					   changed height every November. He goes to the nearest
+					   free slot of his own type (by index, so his place in the
+					   pecking order holds), and brings his height and
+					   endurance with him where the carry has them (older
+					   universe data does not; the slot's own stay). */
+					const want = Math.min(Math.max(0, r.slotIndex || 0), fillers.length - 1);
+					let slot = -1;
+					if (r.slotType) {
+						for (let d = 0; d < fillers.length && slot < 0; d++) {
+							for (const i of [want - d, want + d]) {
+								if (i < 0 || i >= fillers.length || taken.has(i)) continue;
+								if (fillers[i].slotType === r.slotType) { slot = i; break; }
+							}
+						}
+					}
+					if (slot < 0) {
+						for (let d = 0; d < fillers.length && slot < 0; d++) {
+							for (const i of [want - d, want + d]) {
+								if (i >= 0 && i < fillers.length && !taken.has(i)) { slot = i; break; }
+							}
+						}
+					}
 					const f = fillers[slot];
 					if (!f) continue;
+					taken.add(slot);
 					f.name = r.name;
 					f.starReturner = r.starReturner;
 					f.classYear = next;
 					f.returned = true;
+					if (r.slotType && SLOT_HGT[r.slotType]) f.slotType = r.slotType;
+					if (Number.isFinite(r.hgt)) f.hgt = clamp(r.hgt, 5, 95);
+					if (Number.isFinite(r.endurance)) f.endurance = clamp(r.endurance, 0.15, 0.95);
 					// A year of growth, off the talent he actually had.
 					f.talent = clamp(Math.max(f.talent, r.talent + trng.uniform(0, 3)), 6, 96);
 				}
@@ -1024,6 +1127,28 @@
 		   "the year three blue bloods all went down" and "the year the
 		   mid-majors won" are the kind of thing a class is remembered for and
 		   the archetype-mix flavors could never express. */
+		/* THE BENDS HAVE TO REACH THE ROSTER.
+
+		   They used to move t.level after every roster existed, and games are
+		   played on t.rating, which is recomputed from the members — so a
+		   "down year" for three blue bloods and a "mid-major surge" were a
+		   label and a level number on a team page, and not one result in the
+		   season moved. A program's level acts on the court through its
+		   returning players (makeFiller draws them around 0.60 * level +
+		   12.6), so the same level shift is applied to them here, at the
+		   0.60 the draw itself uses, the two-best-returner cap is re-applied,
+		   and the rating is recomputed from the roster that will play. The
+		   prospects are untouched: a program's down year is not a claim about
+		   the draft pick on it. */
+		const shiftLevel = (t, delta) => {
+			const before = t.level;
+			t.level = clamp(t.level + delta, 5, 99);
+			const d = 0.60 * (t.level - before);
+			const fill = t.members.filter((m) => m.filler);
+			for (const f of fill) f.talent = clamp(f.talent + d, 6, 96);
+			capFillers(fill, t.members.filter((m) => !m.filler));
+			t.rating = teamRating(t.members);
+		};
 		const nrng = rng.child("narrative");
 		const down = Math.round(clamp(
 			cfg && cfg.bluebloodDownYears !== undefined ? cfg.bluebloodDownYears : 0, 0, 8));
@@ -1033,8 +1158,7 @@
 			for (const name of nrng.shuffle(blue).slice(0, down)) {
 				const t = teams[name];
 				if (!t) continue;
-				t.level = clamp(t.level - nrng.uniform(9, 16), 5, 99);
-				t.rating = teamRating(t.members);
+				shiftLevel(t, -nrng.uniform(9, 16));
 				t.downYear = true;
 			}
 		}
@@ -1044,7 +1168,7 @@
 			for (const name of C.names) {
 				const t = teams[name];
 				if (!t || C.prestigeOrLowMajor(name) >= 62) continue;
-				t.level = clamp(t.level + lift * nrng.uniform(0.4, 1.0), 5, 99);
+				shiftLevel(t, lift * nrng.uniform(0.4, 1.0));
 				t.midMajorSurge = true;
 			}
 		}
@@ -1190,10 +1314,25 @@
 		// A professional club carries its own league's pace (see leagueEnv).
 		if (t && Number.isFinite(t.scorePace)) return t.scorePace;
 		const style = t && t.style && Number.isFinite(t.style.pace) ? t.style.pace : 0;
-		/* Capped at 78 possessions: the fastest D-I team in the modern era
-		   sits near 76, and the class-level pace jitter plus a run-and-gun
-		   style could stack to 82, which is a game nobody has played. */
-		return clamp((cfg.pace || 68) + (cfg.scoringEnv || 0) * 1.6 + style, 55, 78);
+		/* Clamped to the declared pace band (js/config.js CLAMP.pace), the
+		   same one the stat model and the prior-season schedules read. It
+		   was capped at 78 here while the slider went to 82, so the top of
+		   the slider moved nothing on the scoreboard; a user who dials a
+		   track-meet season gets one. At the default the fastest style still
+		   lands in the mid-seventies, where the fastest real programs sit. */
+		const band = (global.Config && global.Config.CLAMP && global.Config.CLAMP.pace) ||
+			{ lo: 55, hi: 82 };
+		return clamp((cfg.pace || 68) + (cfg.scoringEnv || 0) * 1.6 + style, band.lo, band.hi);
+	}
+
+	/* The tempo a style-less team plays at in this run: the baseline the
+	   additive game tempo is measured against. A professional club's league
+	   pace is its own baseline. */
+	function paceBaseline(t, cfg) {
+		if (t && Number.isFinite(t.scorePace)) return t.scorePace;
+		const band = (global.Config && global.Config.CLAMP && global.Config.CLAMP.pace) ||
+			{ lo: 55, hi: 82 };
+		return clamp((cfg.pace || 68) + (cfg.scoringEnv || 0) * 1.6, band.lo, band.hi);
 	}
 
 	/* The home edge, in points. A flat 3.2 for every building in the country
@@ -1238,7 +1377,17 @@
 		// Tempo belongs to the fixture, not to one side of it: a game between
 		// a pressing team and a pack-line team is played somewhere between the
 		// two, which is what makes a style visible in a final score.
-		const pace = (teamPace(A, cfg) + teamPace(B, cfg)) / 2;
+		/* ADDITIVE, the way tempo-free statistics model it: a game's
+		   possessions are each side's tempo above the baseline, added. The
+		   mean of the two halved every program's deviation from the field,
+		   so the fastest team in the country played at the average of
+		   itself and a typical opponent and the season's tempo spread was
+		   half of what the styles say (and of the real one, p10/p90 about
+		   64/71 around 67.5). */
+		const baseA = paceBaseline(A, cfg);
+		const pace = clamp(teamPace(A, cfg) + teamPace(B, cfg) - baseA,
+			Math.min(teamPace(A, cfg), teamPace(B, cfg)) - 6,
+			Math.max(teamPace(A, cfg), teamPace(B, cfg)) + 6);
 		/* The bounds are derived from the pace rather than typed. They used to
 		   be 92 and 190 for college and 92 and 260 for anything with its own
 		   pace, which is two magic pairs describing one relationship: a game
@@ -1294,7 +1443,11 @@
 			a += Math.round(otPoints + swing / 2);
 			b += Math.round(otPoints - swing / 2);
 		}
-		return { a, b, ot, won: a > b };
+		/* The possessions the game was played at, overtime included, so the
+		   stat model can box a team at the tempo its scoreboard was actually
+		   played at (see simulateTeamStats in js/stats.js). */
+		const poss = pace * (1 + ot * 5 / Math.max(20, gameMinutes));
+		return { a, b, ot, won: a > b, poss };
 	}
 
 	function playGame(rng, A, B, homeForA, cfg, when, postseason) {
@@ -1325,6 +1478,7 @@
 			opp: opp.name, won, conference: !!conference,
 			teamPts: score ? score.us : null, oppPts: score ? score.them : null,
 			ot: score ? score.ot : 0,
+			poss: score && Number.isFinite(score.poss) ? Math.round(score.poss * 10) / 10 : null,
 			home: home === undefined ? 0 : home,
 			when: when === undefined ? 0.5 : when,
 			quality: opp.rating,
@@ -1346,9 +1500,9 @@
 	function recordPostseason(A, B, sc, stage, when, round, homeForA) {
 		const h = homeForA || 0;
 		record(A, B, sc.won, false,
-			{ us: sc.a, them: sc.b, ot: sc.ot, round }, h, when, stage);
+			{ us: sc.a, them: sc.b, ot: sc.ot, round, poss: sc.poss }, h, when, stage);
 		record(B, A, !sc.won, false,
-			{ us: sc.b, them: sc.a, ot: sc.ot, round }, -h, when, stage);
+			{ us: sc.b, them: sc.a, ot: sc.ot, round, poss: sc.poss }, -h, when, stage);
 	}
 
 	/* Chronological order, once every game has been played.
@@ -1377,72 +1531,218 @@
 	   team's 23-8. This one keeps matching the neediest teams until the need
 	   vector is empty, which it always can be: the total need is even (each
 	   game consumes two), so the only failure mode is a single team left
-	   needing games, which the odd-total guard below rules out. */
-	function pairUp(rng, pool, target, filterFn, onGame, maxMeet) {
-		if (pool.length < 2) return;
-		const need = new Map();
+	   needing games, which the odd-total guard below rules out.
+
+	   `opts.window` ([from, to] in season fractions) turns on DATED play: the
+	   pairings are made first, then every game gets a calendar slot from
+	   scheduleDates, and onGame(a, b, when) is called in date order. Without
+	   it onGame(a, b) is called as each pair is made, which is the old
+	   contract (the caller draws its own date). */
+	function pairUp(rng, pool, target, filterFn, onGame, maxMeet, opts) {
+		if (pool.length < 2) return [];
+		const need0 = new Map();
 		// `target` is a number, or a function of the team when the pool's
 		// members arrive with different amounts of schedule already played.
 		const targetOf = typeof target === "function" ? target : () => target;
-		for (const t of pool) need.set(t, targetOf(t));
-		/* How often the same pair may meet. pairUp guaranteed every team the
-		   right NUMBER of games and nothing about their spread, so the same
-		   two teams could meet four times while another pair never met — and
-		   the conference standings were decided over a schedule that was not
-		   round-robin-shaped. The cap is a preference, not a hard rule: when
-		   nothing else is available the schedule still completes. */
-		const meetCap = maxMeet || Infinity;
-		const met = new Map();
+		for (const t of pool) need0.set(t, targetOf(t));
+		/* How often the same pair may meet — A HARD CAP WHEREVER ONE IS
+		   FEASIBLE. It used to be a preference: when fourteen random tries
+		   found nobody, the fallback took "anyone at all", so leagues whose
+		   slate is exactly a double round robin still produced triple
+		   meetings (and a pair that never met) about one season in three.
+
+		   The cap is feasible when the biggest slate fits inside it — a team
+		   needing T games against n - 1 rivals needs some rival at least
+		   ceil(T / (n - 1)) times — so the effective cap is the larger of the
+		   two. That is the one documented exception: a seven-team league
+		   plays the fourteen-game conference floor, which is more than a
+		   double round robin of twelve, so two of its pairs meet three times.
+		   Within the effective cap the pairing is retried (on its own child
+		   streams, so it is deterministic) until it closes without breaking
+		   it, and only a pool that cannot close at all falls back to the old
+		   "complete beats spread" rule. */
+		let maxNeed = 0;
+		for (const t of pool) maxNeed = Math.max(maxNeed, need0.get(t));
+		const meetCap = maxMeet
+			? Math.max(maxMeet, Math.ceil(maxNeed / Math.max(1, pool.length - 1)))
+			: Infinity;
+		const prefCap = maxMeet || Infinity;
 		const pairKey = (a, b) => (a.name < b.name ? a.name + "|" + b.name : b.name + "|" + a.name);
-		const meetings = (a, b) => met.get(pairKey(a, b)) || 0;
 		// An odd (teams x target) product cannot be split into pairs; drop one
 		// game from a random team so the rest come out exact.
 		let totalNeed = 0;
-		for (const t of pool) totalNeed += need.get(t);
+		for (const t of pool) totalNeed += need0.get(t);
 		if (totalNeed % 2 === 1) {
-			const victims = pool.filter((t) => need.get(t) > 0);
+			const victims = pool.filter((t) => need0.get(t) > 0);
 			const victim = victims[Math.floor(rng.random() * victims.length)];
-			if (victim) need.set(victim, need.get(victim) - 1);
+			if (victim) need0.set(victim, need0.get(victim) - 1);
 		}
-		let guard = 0;
-		const maxGuard = totalNeed * 8 + 2000;
-		while (guard++ < maxGuard) {
-			// Always serve the neediest team first. That keeps the remaining
-			// need spread evenly instead of stranding one team at the end.
-			const avail = pool.filter((t) => need.get(t) > 0)
-				.sort((a, b) => need.get(b) - need.get(a));
-			if (avail.length < 2) break;
-			const a = avail[0];
-			const rest = avail.slice(1);
-			let b = null;
-			/* Prefer an opponent the filter likes, but never at the cost of
-			   leaving the schedule short.
+		const attempt = (r, hard) => {
+			const need = new Map(need0);
+			const met = new Map();
+			const meetings = (a, b) => met.get(pairKey(a, b)) || 0;
+			const games = [];
+			let guard = 0;
+			const maxGuard = totalNeed * 8 + 2000;
+			while (guard++ < maxGuard) {
+				// Always serve the neediest team first. That keeps the remaining
+				// need spread evenly instead of stranding one team at the end.
+				/* Need descending, pool order within a need — a counting sort,
+				   since needs are small integers; the comparison sort it
+				   replaces was most of the cost of a season's schedule. */
+				const buckets = [];
+				for (const t of pool) {
+					const v = need.get(t);
+					if (v > 0) (buckets[v] || (buckets[v] = [])).push(t);
+				}
+				const avail = [];
+				for (let v = buckets.length - 1; v > 0; v--) {
+					if (buckets[v]) for (const t of buckets[v]) avail.push(t);
+				}
+				if (avail.length < 2) break;
+				const a = avail[0];
+				const rest = avail.slice(1);
+				let b = null;
+				/* Prefer an opponent the filter likes, but never at the cost of
+				   leaving the schedule short.
 
-			   The acceptance draw is made HERE and handed to the filter, rather
-			   than being taken inside the filter's own predicate. The
-			   non-conference filter used to call rng.random() inside itself, up
-			   to fourteen times per pairing, which left the schedule sensitive
-			   to loop order in a way nothing tested — and which is exactly the
-			   hazard the rng.child() comment in js/rng.js exists to warn about.
-			   Determinism held; reasoning about it did not. */
-			for (let tries = 0; tries < 14 && !b; tries++) {
-				const cand = rest[Math.floor(rng.random() * Math.min(rest.length, 24))];
-				const roll = rng.random();
-				if (cand && meetings(a, cand) >= meetCap) continue;
-				if (cand && (!filterFn || filterFn(a, cand, roll))) b = cand;
+				   The acceptance draw is made HERE and handed to the filter,
+				   rather than being taken inside the filter's own predicate —
+				   see the rng.child() comment in js/rng.js. */
+				for (let tries = 0; tries < 14 && !b; tries++) {
+					const cand = rest[Math.floor(r.random() * Math.min(rest.length, 24))];
+					const roll = r.random();
+					if (cand && meetings(a, cand) >= prefCap) continue;
+					if (cand && (!filterFn || filterFn(a, cand, roll))) b = cand;
+				}
+				if (!b) {
+					/* Anyone still under the cap, the neediest of them first —
+					   serving the teams with the most games left is what keeps
+					   the end of the pairing from stranding a team whose only
+					   remaining rivals it has already met enough. */
+					/* A pair past the requested cap only once every other
+					   rival is at it, so a forced third meeting in a small
+					   league is spread rather than stacked on one pair. */
+					let under = rest.filter((t) => meetings(a, t) < prefCap);
+					if (!under.length) under = rest.filter((t) => meetings(a, t) < meetCap);
+					if (!under.length && hard) return null;
+					const from = under.length ? under : rest;
+					const top = need.get(from[0]);
+					const best = from.filter((t) => need.get(t) === top);
+					b = best[Math.floor(r.random() * best.length)];
+				}
+				games.push([a, b]);
+				met.set(pairKey(a, b), meetings(a, b) + 1);
+				need.set(a, need.get(a) - 1);
+				need.set(b, need.get(b) - 1);
 			}
-			if (!b) {
-				// First anyone still under the meeting cap, then anyone at all
-				// — a complete schedule beats a perfectly spread one.
-				const under = rest.filter((t) => meetings(a, t) < meetCap);
-				const from = under.length ? under : rest;
-				b = from[Math.floor(rng.random() * from.length)];
+			return games;
+		};
+		let games = null;
+		if (meetCap < Infinity) {
+			for (let k = 0; k < 40 && !games; k++) {
+				games = attempt(k === 0 ? rng : rng.child("pairUp:" + k), true);
 			}
-			onGame(a, b);
-			met.set(pairKey(a, b), meetings(a, b) + 1);
-			need.set(a, need.get(a) - 1);
-			need.set(b, need.get(b) - 1);
 		}
+		if (!games) games = attempt(meetCap < Infinity ? rng.child("pairUp:soft") : rng, false);
+		if (opts && opts.window) {
+			const fixtures = games.map(([a, b]) => ({ a, b, window: opts.window }));
+			scheduleDates(fixtures, rng.child("dates"), opts);
+			for (const f of fixtures.slice().sort((x, y) => x.day - y.day || x.order - y.order)) {
+				onGame(f.a, f.b, f.when);
+			}
+		} else {
+			for (const [a, b] of games) onGame(a, b);
+		}
+		return games;
+	}
+
+	/* THE CALENDAR.
+
+	   Every game used to draw its own `when` independently — conference games
+	   uniform on [0.35, 1], the rest on [0, 0.55] — so nothing stopped a team
+	   playing twice in one afternoon: 1,069 of 1,092 teams had two games
+	   within half a day of each other, and a pair could play the return leg
+	   three days after the first. The season is SEASON_DAYS long, each game
+	   is given a DAY, and a day is chosen so that:
+
+	     - neither team plays the day before, of or after it (at least two
+	       days between games), falling back to "not the same day" only if a
+	       team's window is genuinely full;
+	     - a rematch is at least REMATCH_GAP days from the last meeting of the
+	       same pair (a return leg is weeks later, not the same weekend),
+	       relaxed to a week and then to nothing only when that is the only
+	       way in;
+	     - the game stays inside its window (conference play later than
+	       non-conference), widened to the whole season only as a last resort.
+
+	   Fixtures are placed most-constrained first (the narrowest window) and in
+	   a shuffled order within that, on the rng they are handed, so the result
+	   is deterministic. A fixture comes back with `day`, `when` (the middle of
+	   its day, as a season fraction) and `order` (its input index, the
+	   tie-break for games on the same day). */
+	const SEASON_DAYS = 130;
+	const REMATCH_GAP = 21;
+	function scheduleDates(fixtures, rng, opts) {
+		const DAYS = (opts && opts.days) || SEASON_DAYS;
+		const busy = new Map();
+		const lastMet = new Map();
+		const dayFree = (t, d, gap) => {
+			const cal = busy.get(t);
+			if (!cal) return true;
+			for (let k = -gap + 1; k < gap; k++) if (cal[d + k + 2]) return false;
+			return true;
+		};
+		const pk = (a, b) => (a.name < b.name ? a.name + "|" + b.name : b.name + "|" + a.name);
+		const rematchOk = (f, d, gap) => {
+			const prev = lastMet.get(pk(f.a, f.b));
+			if (!prev) return true;
+			for (const p of prev) if (Math.abs(p - d) < gap) return false;
+			return true;
+		};
+		fixtures.forEach((f, i) => { f.order = i; });
+		const order = rng.shuffle(fixtures.slice())
+			.sort((x, y) => ((x.window[1] - x.window[0]) - (y.window[1] - y.window[0])));
+		for (const f of order) {
+			const lo = Math.max(0, Math.ceil(f.window[0] * DAYS));
+			const hi = Math.min(DAYS - 1, Math.floor(f.window[1] * DAYS) - 1);
+			const tiers = [
+				[lo, hi, 2, REMATCH_GAP], [lo, hi, 2, 7], [lo, hi, 1, REMATCH_GAP],
+				[lo, hi, 1, 7], [0, DAYS - 1, 2, 7], [0, DAYS - 1, 1, 7],
+				[lo, hi, 1, 1], [0, DAYS - 1, 1, 1],
+			];
+			let day = -1;
+			for (const [from, to, gap, rgap] of tiers) {
+				const ok = [];
+				for (let d = from; d <= to; d++) {
+					if (dayFree(f.a, d, gap) && dayFree(f.b, d, gap) && rematchOk(f, d, rgap)) ok.push(d);
+				}
+				if (ok.length) { day = ok[Math.floor(rng.random() * ok.length)]; break; }
+			}
+			if (day < 0) {
+				// A team with a game every day of the season: past the end.
+				day = DAYS;
+				while (!dayFree(f.a, day, 1) || !dayFree(f.b, day, 1)) day++;
+			}
+			f.day = day;
+			f.when = (day + 0.5) / DAYS;
+			for (const t of [f.a, f.b]) {
+				// Padded by two days a side, so a window check never indexes
+				// off either end; grown if a fixture landed past the season.
+				let cal = busy.get(t);
+				if (!cal || cal.length < day + 5) {
+					const next = new Uint8Array(Math.max(DAYS + 4, day + 5));
+					if (cal) next.set(cal);
+					cal = next;
+					busy.set(t, cal);
+				}
+				cal[day + 2] = 1;
+			}
+			const key = pk(f.a, f.b);
+			if (!lastMet.has(key)) lastMet.set(key, []);
+			lastMet.get(key).push(day);
+		}
+		return fixtures;
 	}
 
 	/* --- the season's mid-season events ---------------------------------
@@ -1634,7 +1934,8 @@
 				st.t.name + " has not lost in " + st.n + " games",
 				st.n + " straight for " + st.t.name + ", and the schedule ahead does " +
 					"not obviously end it",
-				st.t.name + " put together a " + st.n + "-game winning streak that " +
+				st.t.name + " put together " +
+					global.Text.withArticle(st.n + "-game winning streak") + " that " +
 					"turned its season around",
 			]), rng.uniform(0.3, 0.8), [st.t.name]);
 		}
@@ -1705,7 +2006,8 @@
 						.slice().sort((x, y) => x.when - y.when);
 					for (let i = 0; i + 2 < log.length; i++) {
 						const win = log.slice(i, i + 3);
-						if (win[2].when - win[0].when > 0.03) continue;
+						// Eight days on the calendar (see SEASON_DAYS).
+						if (win[2].when - win[0].when > 8 / SEASON_DAYS) continue;
 						if (!win.every((g) => rankedSet.has(g.opp))) continue;
 						cands.push({ t, n: win.filter((g) => g.won).length });
 					}
@@ -1798,33 +2100,75 @@
 		   buys the game, but the gap decides how usually, and about one in
 		   seven is played somewhere else entirely. */
 		const homeCount = new Map();
+		/* Conference home dates are balanced on their own count. Games are
+		   played in calendar order now, so by the time a league slate starts
+		   a team has already played its non-conference games — and balancing
+		   the league's home dates on the TOTAL let a team that bought a pile
+		   of November home games play most of its conference road games,
+		   which the half-of-the-slate rule exists to prevent. */
+		const confHome = new Map();
+		const confSlate = new Map();
 		const venue = new Map();
 		const homeOf = (t) => homeCount.get(t) || 0;
+		const confHomeOf = (t) => confHome.get(t) || 0;
 		const vKey = (a, b) => (a.name < b.name ? a.name + "|" + b.name : b.name + "|" + a.name);
 		const pickVenue = (A, B, conference) => {
 			const prev = venue.get(vKey(A, B));
 			// The return leg.
 			if (prev !== undefined) return prev === A ? -1 : 1;
 			if (conference) {
-				const d = homeOf(A) - homeOf(B);
+				const d = confHomeOf(A) - confHomeOf(B);
 				return d === 0 ? (rng.random() < 0.5 ? 1 : -1) : (d < 0 ? 1 : -1);
 			}
 			if (rng.random() < 0.15) return 0;   // a neutral-site or holiday event
+			/* Home dates so far, with the league slate counted at the half
+			   it will come to: non-conference games are played first on the
+			   calendar now, so the live count alone would balance November
+			   against nothing. */
+			const expected = (t) => homeOf(t) - confHomeOf(t) + (confSlate.get(t) || 0) / 2;
 			const gap = (A.prestige || 60) - (B.prestige || 60) +
-				2.5 * (homeOf(B) - homeOf(A));
+				2.5 * (expected(B) - expected(A));
 			return rng.random() < 1 / (1 + Math.exp(-gap / 20)) ? 1 : -1;
 		};
-		const play = (A, B, aHome, conference) => {
+		const play = (A, B, aHome, conference, when) => {
 			if (aHome === null) aHome = pickVenue(A, B, conference);
 			if (aHome > 0) homeCount.set(A, homeOf(A) + 1);
 			else if (aHome < 0) homeCount.set(B, homeOf(B) + 1);
+			if (conference && aHome > 0) confHome.set(A, confHomeOf(A) + 1);
+			else if (conference && aHome < 0) confHome.set(B, confHomeOf(B) + 1);
 			if (aHome !== 0) venue.set(vKey(A, B), aHome > 0 ? A : B);
-			// Conference play sits later in the calendar than non-conference.
-			const when = conference ? rng.uniform(0.35, 1) : rng.uniform(0, 0.55);
 			const sc = playGameScore(rng, A, B, aHome, cfg, when);
-			record(A, B, sc.won, conference, { us: sc.a, them: sc.b, ot: sc.ot }, aHome, when, "reg");
-			record(B, A, !sc.won, conference, { us: sc.b, them: sc.a, ot: sc.ot }, -aHome, when, "reg");
+			record(A, B, sc.won, conference, { us: sc.a, them: sc.b, ot: sc.ot, poss: sc.poss }, aHome, when, "reg");
+			record(B, A, !sc.won, conference, { us: sc.b, them: sc.a, ot: sc.ot, poss: sc.poss }, -aHome, when, "reg");
 		};
+
+		/* PAIR FIRST, DATE SECOND, PLAY IN ORDER.
+
+		   The season is built in three passes now. Every pairing is made
+		   (conference slates, then the non-conference slates that fill each
+		   team to 31, then the top-up), every game is given a day on one
+		   calendar (see scheduleDates: no team twice within a day, a rematch
+		   weeks after the first meeting, conference play later in the
+		   season), and only then are the games played, in date order. Playing
+		   them in pairing order meant the venue rules above — "the second
+		   meeting is the return leg at the other building", "a single meeting
+		   goes to whoever has fewer home dates so far" — followed the order
+		   the scheduler happened to pair teams in rather than the calendar,
+		   so a team could "return" a game it had not yet played. */
+		const fixtures = [];
+		const sched = new Map();
+		const scheduled = (t) => sched.get(t) || 0;
+		const book = (A, B, conference, aHome, window) => {
+			fixtures.push({ a: A, b: B, conference, aHome, window });
+			if (conference) {
+				confSlate.set(A, (confSlate.get(A) || 0) + 1);
+				confSlate.set(B, (confSlate.get(B) || 0) + 1);
+			}
+			sched.set(A, scheduled(A) + 1);
+			sched.set(B, scheduled(B) + 1);
+		};
+		const CONF_WINDOW = [0.35, 1];
+		const NONCONF_WINDOW = [0, 0.55];
 
 		// Out-of-database colleges land in "Independent", which has no members
 		// in byConference — so they used to get no conference slate, no
@@ -1839,39 +2183,43 @@
 			   league is every rival four times. Two round robins, floored
 			   at fourteen (the Ivy, the MEAC) and capped at twenty; the
 			   difference from the standard slate is made up out of
-			   conference below. */
+			   conference below. The meeting cap of two is hard wherever
+			   the slate fits in a double round robin (see pairUp); a league
+			   of seven or fewer, whose fourteen-game floor does not, meets
+			   some rivals a third time. */
 			const n = clamp(2 * (pool.length - 1), 14, 20);
 			pairUp(rng, pool, n, null, (A, B) => {
-				play(A, B, null, true);
+				book(A, B, true, null, CONF_WINDOW);
 			}, 2);
 		}
 
 		// Non-conference: teams mostly schedule near their own level, and the
 		// bigger program usually hosts.
 		const all = names.map((n) => teams[n]);
-		// A team short of a conference slate (a one-team synthetic conference)
-		// makes up the difference in the top-up loop below, which reads the
-		// live t.games directly. (An earlier draft built a shortfall map here
-		// that nothing ever read.)
 		/* Each team's non-conference slate is whatever its league left of
 		   the standard 31: fifteen games for an Ivy team, eleven for a
 		   twenty-game league. */
-		pairUp(rng, all, (t) => Math.max(0, CONF_GAMES + NON_CONF_GAMES - t.games),
+		pairUp(rng, all, (t) => Math.max(0, CONF_GAMES + NON_CONF_GAMES - scheduled(t)),
 			(a, b, roll) => a.conf !== b.conf &&
 				roll < Math.exp(-Math.abs(a.rating - b.rating) / 24) + 0.06,
 			(A, B) => {
-				play(A, B, null, false);
+				book(A, B, false, null, NONCONF_WINDOW);
 			}, 1);
 
 		// Anyone still short (a lone Independent, or the odd-total victim)
-		// tops up against the other short teams.
+		// tops up against the other short teams, on a neutral floor.
 		let guard = 0;
 		const target = CONF_GAMES + NON_CONF_GAMES;
 		while (guard++ < all.length * 4) {
-			const short = all.filter((t) => t.games < target)
-				.sort((a, b) => a.games - b.games);
+			const short = all.filter((t) => scheduled(t) < target)
+				.sort((a, b) => scheduled(a) - scheduled(b));
 			if (short.length < 2) break;
-			play(short[0], short[1], 0, false);
+			book(short[0], short[1], false, 0, NONCONF_WINDOW);
+		}
+
+		scheduleDates(fixtures, rng.child("calendar"));
+		for (const f of fixtures.slice().sort((x, y) => x.day - y.day || x.order - y.order)) {
+			play(f.a, f.b, f.aHome, f.conference, f.when);
 		}
 
 		/* "Quality win" as a percentile of THIS season's ratings: beating a
@@ -2203,13 +2551,14 @@
 	global.TeamsSim = {
 		buildPrograms, simulateRegularSeason, simulateConferenceTournaments,
 		prospectTalent, teamRating, winProb, playGame, playGameScore, ratingOn,
-		realign, makeCoach, COACH_SITUATIONS, COACH_PHILOSOPHIES, CONF_REGIONS, regionsOverlap,
+		realign, MIN_CONF_MEMBERS, MAX_CONF_MEMBERS, makeCoach, COACH_SITUATIONS, COACH_PHILOSOPHIES, CONF_REGIONS, regionsOverlap,
 		gameStrength, TOP_KNEE, TOP_STRETCH, REGULAR_NOISE, teamPace, homeEdge,
 		capFillers, FILLER_GAP, conferenceDrift, programLevel, applyOutages, makeFiller,
 		driftStyle, seasonOf,
 		assignFillerSlots, slotTypeOf, SLOT_HGT, SLOT_TARGET,
 		PROGRAM_VOL, DOWN_YEAR_RATE, BREAKOUT_RATE, STAR_RETURNER_RATE,
-		rotationWeights, rotationWeightAt, ROTATION_SHAPE, pairUp, record, recordPostseason, finalizeSchedule,
+		rotationWeights, rotationWeightAt, ROTATION_SHAPE, pairUp, scheduleDates, SEASON_DAYS,
+		REMATCH_GAP, record, recordPostseason, finalizeSchedule,
 		momentumArc, arcAt, ARC_KNOTS,
 		midSeasonEvents, longestRun, coachingCarousel, RETIRE_AGE,
 		label, adoptConference, conferencePools, PROGRAM_STYLES,

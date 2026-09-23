@@ -126,15 +126,30 @@
 
 	function writePoll(res) {
 		if (!res.poll || !res.poll.length) return "";
+		/* The record the voters saw. The final poll is voted before the NCAA
+		   tournament, and this column printed t.w-t.l — the season's record
+		   AFTER March — so a national champion sat at No. 3 "33-4" beside a
+		   pre-tournament ballot. The poll's own row carries the record it was
+		   voted on; the regular-season snapshot is the fallback. */
+		const hist = res.pollHistory || [];
+		const finalWeek = hist.length ? hist[hist.length - 1] : null;
+		const pollRecord = {};
+		if (finalWeek && finalWeek.ranks) {
+			for (const r of finalWeek.ranks) if (r.record) pollRecord[r.team] = r.record;
+		}
+		const recordAtPoll = (t) => pollRecord[t.name] ||
+			(t.regSnapshot ? t.regSnapshot.w + "-" + t.regSnapshot.l
+				: Number.isFinite(t.regW) ? t.regW + "-" + t.regL : t.w + "-" + t.l);
 		const rows = res.poll.slice(0, 25).map((t, i) => [
-			i + 1, t.name, t.conf, t.w + "-" + t.l,
+			i + 1, t.name, t.conf, recordAtPoll(t),
 			t.cw !== undefined ? t.cw + "-" + t.cl : "",
 			t.apFirstPlace || "", t.apPreseason || "—",
 			t.ncaaSeed ? ordinal(t.ncaaSeed) : "",
 			t.ncaaResult || t.nitResult || "",
 		]);
+		// Two columns were both headed "Conf": the league and the record in it.
 		return ["## Final AP poll", "",
-			table(["#", "Team", "Conf", "Record", "Conf", "1st-place votes",
+			table(["#", "Team", "Conference", "Record", "Conf. record", "1st-place votes",
 				"Preseason", "Seed", "Postseason"], rows), ""].join("\n");
 	}
 
@@ -488,8 +503,15 @@
 
 	function writeColophon(res) {
 		const cfg = res.effectiveCfg || res.cfg || {};
+		/* Only what was SET. The table printed every scalar key, so an unset
+		   dial came out as the word "null" (wEuroLeague, anomalyPicks, ...)
+		   and forty rows of defaults buried the three that made this run
+		   different. A value equal to the default is left out, and the
+		   heading says so; the same seed and these settings reproduce it. */
+		const D = (global.Config && global.Config.DEFAULTS) || {};
 		const rows = Object.keys(cfg).sort()
-			.filter((k) => typeof cfg[k] !== "object" || cfg[k] === null)
+			.filter((k) => cfg[k] !== null && cfg[k] !== undefined && typeof cfg[k] !== "object")
+			.filter((k) => !(k in D) || D[k] !== cfg[k])
 			.map((k) => [k, String(cfg[k])]);
 		const out = ["## Colophon", "",
 			"Written by the BBGM Draft Class Workshop from seed `" + res.seed +
@@ -499,11 +521,14 @@
 			out.push("**Warnings from the run:** " + res.warnings.join(" ") + "");
 			out.push("");
 		}
+		out.push("### Settings", "");
 		if (rows.length) {
-			out.push("### Settings", "");
+			out.push("_Changed from the defaults; everything else is at its default._", "");
 			out.push(table(["Setting", "Value"], rows));
-			out.push("");
+		} else {
+			out.push("Every setting at its default.");
 		}
+		out.push("");
 		return out.join("\n");
 	}
 

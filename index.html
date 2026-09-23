@@ -17,7 +17,9 @@
 	     panel hands its column back to the board. -->
 	<button id="btnSettings" class="iconbtn" aria-expanded="true"
 		aria-controls="settings" title="Show or hide the settings panel"><span aria-hidden="true">☰</span> Settings</button>
-	<input type="file" id="file" accept=".json,.gz,.json.gz" multiple hidden>
+	<!-- A universe export, a settings JSON and a locks CSV are all read
+	     through here too; see readFiles. -->
+	<input type="file" id="file" accept=".json,.gz,.json.gz,.csv" multiple hidden>
 	<input type="file" id="addFile" accept=".json,.gz,.json.gz" multiple hidden>
 	<input type="file" id="csvFile" accept=".csv" hidden>
 	<input type="file" id="leagueMergeFile" accept=".json,.gz,.json.gz" hidden>
@@ -50,8 +52,10 @@
 		<button id="btnPin" class="iconbtn" disabled title="Pin this class as a comparison baseline" aria-label="Pin as baseline">◎</button>
 		<button id="btnCopyLink" class="iconbtn" title="Copy a link that reproduces this exact class, settings and locks — shift-click to copy it as plain text instead" aria-label="Copy link">🔗</button>
 		<button id="btnCopyText" class="iconbtn" title="Copy the seed, the class fingerprint and every setting you changed as plain text, for a forum post or a chat message" aria-label="Copy seed and settings as text">📋</button>
-		<button id="btnHowTo" class="iconbtn" title="How to play — what everything does and a sensible order to do it in" aria-label="Guide">?</button>
-		<button id="btnKeys" class="iconbtn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">⌘</button>
+		<!-- The guide is a book and the shortcut sheet is a keyboard: the guide
+		     used to wear a "?" while the ? KEY opened the shortcuts. -->
+		<button id="btnHowTo" class="iconbtn" title="How to play — what everything does and a sensible order to do it in" aria-label="Guide">📖</button>
+		<button id="btnKeys" class="iconbtn" title="Keyboard shortcuts (press ?)" aria-label="Keyboard shortcuts">⌨</button>
 	</div>
 	<div class="btngroup" role="group" aria-label="Export">
 		<button id="btnExport" class="primary" disabled>Export JSON</button>
@@ -126,6 +130,14 @@
 			</select>
 			<p class="hint" id="ovrModeHint"></p>
 		</div>
+		<div class="ctl">
+			<label for="potModel">Potential model</label>
+			<select id="potModel">
+				<option value="tool">Tool (default)</option>
+				<option value="bbgm">BBGM potEstimator (what the game will show)</option>
+			</select>
+		</div>
+		<div class="ctl"><label><input type="checkbox" id="signatureSkills"> Signature skills (builds reach their promised BBGM skill badge)</label></div>
 		<div class="ctl" data-curve><label for="classQuality">Class quality <b></b></label><input type="range" id="classQuality" min="-3" max="3" step="0.5"></div>
 		<div class="ctl" data-curve><label for="classDepth">Depth (top-heavy → deep) <b></b></label><input type="range" id="classDepth" min="-3" max="3" step="0.5"></div>
 		<div class="ctl" data-curve><label for="eliteCount">Elite prospects <b></b></label><input type="range" id="eliteCount" min="0" max="8" step="1"></div>

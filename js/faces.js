@@ -85,10 +85,36 @@
 	   with holes in it. */
 	const REQUIRED = ["head", "eye", "eyebrow", "nose", "mouth", "ear", "hair", "body"];
 
+	/* facesjs pastes body.color, hair.color, the shave rgba and the team
+	   colors straight into SVG markup and parses it (insertAdjacentHTML), so
+	   a face object from a shared class file is untrusted markup waiting to
+	   happen: `"color": "#fff\"/><script>…"` would run. Every string anywhere
+	   in the face must therefore be a plain feature id or a plain CSS color;
+	   anything else — or any value of a type facesjs never produces — rejects
+	   the whole face, and the player gets his seeded one instead. */
+	const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
+	const COLOR_RE = /^(#[0-9a-f]{3,8}|rgba?\(\s*[\d.]+%?\s*,\s*[\d.]+%?\s*,\s*[\d.]+%?\s*(,\s*[\d.]+%?\s*)?\)|hsla?\(\s*[\d.]+(deg)?\s*,\s*[\d.]+%\s*,\s*[\d.]+%\s*(,\s*[\d.]+%?\s*)?\))$/i;
+
+	function safeString(s) {
+		return typeof s === "string" && (ID_RE.test(s) || COLOR_RE.test(s));
+	}
+
+	function safeValue(v, depth) {
+		if (v === null || v === undefined || typeof v === "boolean") return true;
+		if (typeof v === "number") return Number.isFinite(v);
+		if (typeof v === "string") return safeString(v);
+		if (typeof v !== "object" || depth > 4) return false;
+		if (Array.isArray(v)) return v.length <= 16 && v.every((x) => safeValue(x, depth + 1));
+		const keys = Object.keys(v);
+		if (keys.length > 64) return false;
+		return keys.every((k) => ID_RE.test(k) && safeValue(v[k], depth + 1));
+	}
+
 	function usable(face) {
-		if (!face || typeof face !== "object") return false;
-		return REQUIRED.every((k) => face[k] && typeof face[k] === "object" &&
-			typeof face[k].id === "string");
+		if (!face || typeof face !== "object" || Array.isArray(face)) return false;
+		if (!REQUIRED.every((k) => face[k] && typeof face[k] === "object" &&
+			typeof face[k].id === "string")) return false;
+		return safeValue(face, 0);
 	}
 
 	function faceOf(p) {
@@ -206,7 +232,7 @@
 	}
 
 	global.Faces = {
-		render, flush, faceOf, displayFace, seededFace, usable, kitFor,
+		render, flush, faceOf, displayFace, seededFace, usable, safeValue, kitFor,
 		BASKETBALL_JERSEYS, KITS,
 	};
 })(typeof window !== "undefined" ? window : self);

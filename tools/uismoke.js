@@ -1476,6 +1476,13 @@ async function gotoProspects(page) {
 	{
 		await gotoProspects(page);
 		await page.waitForTimeout(300);
+		/* The storylines sit behind the class-summary disclosure since the
+		   compact-controls pass; open it the way a reader would. */
+		await page.evaluate(() => {
+			const d = document.querySelector("#view details.classinfo");
+			if (d) d.open = true;
+		});
+		await page.waitForTimeout(100);
 		const text = await page.locator("#view").innerText();
 		const narrative = await page.evaluate(() => {
 			const st = window.App.state;
@@ -1698,6 +1705,54 @@ async function gotoProspects(page) {
 			uni.headings.join(" | "));
 		ok("every season records a fingerprint of what it produced",
 			uni.fingerprints);
+		/* PROGRAM HISTORY, PEOPLE AND RIVALRIES. Universe.programHistory,
+		   records.people and the rivalry threads are data the chain keeps;
+		   the tab and a team page have to draw them. A rivalry thread is
+		   synthesised from a made-up book, because two seasons cannot meet
+		   the bar a real one needs. */
+		const hist = await page.evaluate(() => {
+			const st = window.App.state;
+			const all = window.Universe.programHistory(st.universe, null,
+				st.results.filter(Boolean));
+			const name = Object.keys(all).filter((n) => all[n].length >= 2)
+				.sort((a, b) => (all[b][all[b].length - 1].titles || 0) -
+					(all[a][all[a].length - 1].titles || 0))[0] || null;
+			const tab = {
+				programs: !!document.getElementById("uprograms"),
+				people: Array.from(document.querySelectorAll("#view h5"))
+					.some((h) => h.textContent === "People") || !st.universe.registry,
+			};
+			const saved = st.universe.threads;
+			const riv = window.Universe.rivalryThreads({ "Duke|Kansas": { a: "Duke", b: "Kansas",
+				games: 4, aw: 3, bw: 1, march: [2026, 2027, 2028] } });
+			st.universe.threads = (saved || []).concat(riv);
+			window.App.render();
+			const line = Array.from(document.querySelectorAll("#view .note div"))
+				.filter((d) => /^Duke and Kansas met in March/.test(d.textContent))[0];
+			const rivalry = !!line && line.querySelectorAll("button.linky").length === 2;
+			st.universe.threads = saved;
+			window.App.render();
+			return { name, rows: name ? all[name].length : 0, tab, rivalry,
+				kinds: riv.map((t) => t.kind) };
+		});
+		ok("the universe tab has a Programs section and the people records",
+			hist.tab.programs && hist.tab.people, JSON.stringify(hist.tab));
+		ok("a rivalry thread renders with both programs linked",
+			hist.rivalry && hist.kinds[0] === "rivalry", JSON.stringify(hist));
+		if (hist.name) {
+			await page.evaluate((n) => window.App.showTeam(n), hist.name);
+			await page.waitForTimeout(150);
+			const tp = await page.evaluate(() => ({
+				heads: Array.from(document.querySelectorAll("#view h4")).map((h) => h.textContent),
+				rows: document.querySelectorAll("#view table.proghist tbody tr").length,
+				spark: !!document.querySelector("#view svg.levelspark path.lvlline"),
+			}));
+			ok("a team page in universe mode shows the program's history",
+				tp.heads.indexOf("Program history") !== -1 && tp.rows === hist.rows && tp.spark,
+				JSON.stringify(tp) + " expected rows " + hist.rows);
+			await page.evaluate(() => { window.App.showTeam(null);
+				window.App.state.tab = "universe"; window.App.render(); });
+		}
 		ok("the universe exports as one players file with unique pids",
 			uni.players > 100 && uni.players === uni.uniquePids,
 			uni.players + " players, " + uni.uniquePids + " pids");
@@ -1712,6 +1767,37 @@ async function gotoProspects(page) {
 		ok("turning universe mode off clears the cached chain configs",
 			(await page.evaluate(() =>
 				Object.keys(window.App.state.universe.cfgs).length)) === 0);
+	}
+
+	console.log("\nSaved column visibility");
+	{
+		/* An empty hidden-columns map saved by a build before the
+		   default-hidden scheme is what every install had, not a choice: it
+		   restores as the defaults. The same empty map saved WITH the scheme
+		   marker is a user who asked for every column, and is kept. */
+		const restored = async (mutate) => {
+			await page.evaluate((m) => {
+				window.App.persist();
+				const key = "bbgm-draft-workshop/v1";
+				const saved = JSON.parse(localStorage.getItem(key));
+				(new Function("saved", m))(saved);
+				localStorage.setItem(key, JSON.stringify(saved));
+			}, mutate);
+			await page.reload();
+			await page.waitForFunction(() => window.App && window.App.state);
+			return page.evaluate(() => ({
+				hidden: Object.keys(window.App.state.hiddenColumns || {}).length,
+				defaults: Object.keys(window.Views.defaultHiddenColumns()).length,
+			}));
+		};
+		const legacy = await restored("saved.hiddenColumns = {}; delete saved.hiddenColumnsScheme;");
+		ok("an empty column map from an older build falls back to the defaults",
+			legacy.defaults > 0 && legacy.hidden === legacy.defaults, JSON.stringify(legacy));
+		const chosen = await restored("saved.hiddenColumns = {};");
+		ok("an empty column map saved under the new scheme keeps every column",
+			chosen.hidden === 0, JSON.stringify(chosen));
+		const some = await restored("saved.hiddenColumns = { ppg: true }; delete saved.hiddenColumnsScheme;");
+		ok("a non-empty older column map is kept as it was", some.hidden === 1, JSON.stringify(some));
 	}
 
 	console.log("\nThe table's own numbers");
@@ -2226,6 +2312,112 @@ async function gotoProspects(page) {
 			!!bal && /Archetype diversity/.test(bal.note), bal && bal.note);
 		ok("while still showing what share the class came out at",
 			!!bal && bal.share);
+	}
+
+	/* ---------------------------------------------------------------------
+	   THE SECOND AUDIT'S APP FAULTS: a link that bricked the page, a panel
+	   class wiped on every paint, a number box that rewrote itself under the
+	   cursor, defaults that did not compare equal to themselves, and a
+	   search fallback that threw before it ran. */
+	{
+		console.log("\nSettings that arrive from outside, and the panel around them");
+		await page.goto(base + "#c=" + encodeURIComponent(JSON.stringify(
+			{ era: "bogus", ovrMode: "sideways", universe: "nope", pace: 70 })));
+		await page.evaluate(() => localStorage.clear());
+		await page.reload();
+		await page.waitForTimeout(300);
+		const bad = await page.evaluate(() => ({
+			era: window.App.state.cfg.era, ovr: window.App.state.cfg.ovrMode,
+			universe: window.App.state.cfg.universe, pace: window.App.state.cfg.pace,
+			presets: document.querySelectorAll("#preset option").length,
+			hint: (document.querySelector("#pace").closest(".ctl")
+				.querySelector(".unit") || {}).textContent || "",
+		}));
+		ok("a link naming an unknown era or mode falls back to the defaults",
+			bad.era === "modern" && bad.ovr === "preserve" && bad.universe === false &&
+			bad.pace === 70, JSON.stringify(bad));
+		ok("and the page still finishes painting (presets, hints)",
+			bad.presets > 3 && /team points/.test(bad.hint), JSON.stringify(bad));
+
+		await page.goto(base + "#");
+		await page.evaluate(() => localStorage.clear());
+		await page.goto(base);
+		await page.evaluate(() => {
+			const data = window.Sample.makeClass(4242, 40, 2027);
+			window.App.installFiles([{ name: "audit2-sample.json", data }], []);
+		});
+		await page.waitForSelector("table tbody tr", { timeout: 60000 });
+		await page.waitForTimeout(400);
+
+		// Defaults compare equal to themselves: nothing to encode, nothing
+		// "changed", and the plain text says so.
+		const defs = await page.evaluate(() => {
+			document.getElementById("btnCopyLink").click();
+			const box = document.getElementById("onlyChanged");
+			box.checked = true;
+			box.dispatchEvent(new Event("change"));
+			const note = document.getElementById("settingSearchNote").textContent;
+			box.checked = false;
+			box.dispatchEvent(new Event("change"));
+			return { hash: location.hash.replace(/^#c=/, ""), note };
+		});
+		const payload = defs.hash ? JSON.parse(decodeURIComponent(defs.hash)) : {};
+		ok("a link at the defaults carries no settings",
+			!("leagueWeights" in payload) && !("archetypeWeights" in payload),
+			Object.keys(payload).join(", "));
+		ok("\"only what I changed\" counts no settings at the defaults",
+			/^0 of \d+ settings/.test(defs.note), defs.note);
+
+		// The panel's own classes survive a repaint.
+		const kept = await page.evaluate(() => {
+			document.body.classList.add("settings-closed");
+			window.App.paintConfig();
+			const on = document.body.classList.contains("settings-closed");
+			document.body.classList.remove("settings-closed");
+			return on && /density-/.test(document.body.className);
+		});
+		ok("a repaint keeps the body's panel classes", kept);
+
+		// Typing 70 into the pace box means 70.
+		await page.evaluate(() => {
+			for (const d of document.querySelectorAll("details.grp")) d.open = true;
+		});
+		await page.locator("#paceNum").fill("");
+		await page.locator("#paceNum").click();
+		await page.keyboard.type("70");
+		await page.waitForTimeout(100);
+		const typed = await page.evaluate(() =>
+			[window.App.state.cfg.pace, document.getElementById("paceNum").value]);
+		ok("typing a number into a slider's box is not clamped keystroke by keystroke",
+			typed[0] === 70 && typed[1] === "70", typed.join(" / "));
+		await page.locator("#paceNum").fill("200");
+		await page.locator("#paceNum").press("Tab");
+		await page.waitForTimeout(200);
+		const clamped = await page.evaluate(() =>
+			[window.App.state.cfg.pace, document.getElementById("paceNum").value]);
+		ok("and an out-of-range number is clamped when the box is left",
+			clamped[0] === 82 && clamped[1] === "82", clamped.join(" / "));
+
+		// Reroll until, with the worker refused: the inline fallback runs.
+		await page.evaluate(() => {
+			window.__RealWorker = window.Worker;
+			window.Worker = class {
+				constructor() { setTimeout(() => this.onerror && this.onerror(new Event("error")), 5); }
+				postMessage() {}
+				terminate() {}
+			};
+			window.App.rerollUntil(["cinderella"], 2);
+		});
+		await page.waitForFunction(() =>
+			!/Cancel/.test(document.getElementById("btnRerollUntil").textContent),
+		null, { timeout: 60000 });
+		await page.waitForTimeout(600);
+		const fell = await page.evaluate(() => {
+			window.Worker = window.__RealWorker;
+			return document.getElementById("status").textContent;
+		});
+		ok("reroll until falls back to searching inline when the worker fails",
+			/Found it|No class in 2 tries/.test(fell), fell.slice(0, 120));
 	}
 
 	console.log("\nNo errors");

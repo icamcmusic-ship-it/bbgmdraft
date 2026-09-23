@@ -131,7 +131,12 @@ function makeClass(rng, n, targetOvrAt) {
 			pid: i,
 			firstName: "Test", lastName: "P" + i,
 			born: { year: 2007, loc: pr.random() < 0.75 ? "Anytown, WA" : "Belgrade, Serbia" },
-			hgt: 66 + Math.round((hgt / 100) * 24),
+			/* BBGM's own height map (heightToRating.ts): rating =
+			   100 * (inches - 66) / 27, the same 27-inch span js/engine.js
+			   inverts (HGT_MIN_IN..HGT_MAX_IN). This fixture used 24, so every
+			   listed height it wrote was short of the rating beside it by up
+			   to three inches. */
+			hgt: 66 + Math.round((hgt / 100) * 27),
 			weight: Math.round(165 + hgt * 0.9),
 			college: pr.random() < 0.18 ? "" : pickCollege(pr.random()),
 			draft: { year: 2026, round: 1 + Math.floor(i / 30), pick: 1 + (i % 30) },
@@ -799,8 +804,13 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   spread them too evenly. Real drafted 7-footers average roughly
 		   1.8-2.2 blocks and 8.5-9.5 rebounds; a real class's big:guard
 		   block ratio is 8-10x, not 4x. */
-		["BPG mean (81+ inches)", (function () {
-			const v = all.filter((p) => p.newHgtInches >= 81).map((p) => p.stats.bpg);
+		/* Seven-footers, as the comment above and the 1.9 anchor say. The
+		   row read 81+ inches (6'9") while being calibrated to 7-footers,
+		   and once the fixture's heights were fixed (see makeClass) the
+		   6'9"-6'11" bigs it swept in — who block about one a game — pulled
+		   the mean under the band. */
+		["BPG mean (84+ inches)", (function () {
+			const v = all.filter((p) => p.newHgtInches >= 84).map((p) => p.stats.bpg);
 			return v.length ? mean(v) : 1.9;
 		})()].concat(within(1.9, 0.75)),
 		["RPG mean (81+ inches)", (function () {
@@ -1109,7 +1119,9 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   for this era. Every program is simulated, so "is the average Division
 		   I player right?" is a question with an answer. */
 		["Field TS%", mean(field.map((l) => l.ts)) * 100].concat(within(rot.ts * 100, 2)),
-		["Field 3P%", mean(field.map((l) => l.tpp)) * 100].concat(within(rot.tpPct * 100, 2)),
+		// A line with no threes has no 3P% (null, see shoot in js/stats.js).
+		["Field 3P%", mean(field.filter((l) => Number.isFinite(l.tpp)).map((l) => l.tpp)) * 100]
+			.concat(within(rot.tpPct * 100, 2)),
 		["Field FT%", mean(field.map((l) => l.ftp)) * 100].concat(within(rot.ftPct * 100, 2.5)),
 		["Field ORtg", mean(teamOrtg)].concat(within(rot.ortg, 3)),
 	];
@@ -1246,7 +1258,9 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   enough to accept honest season noise, high enough that a model whose
 		   3P% stopped tracking the 3P rating at all still fails. */
 		["corr(3PT rating, 3P%)",
-			corr(g((p) => p.newRatings.tp), g((p) => p.stats.tpp))].concat(corrBand(0.28, 0.95)),
+			corr(all.filter((p) => Number.isFinite(p.stats.tpp)).map((p) => p.newRatings.tp),
+				all.filter((p) => Number.isFinite(p.stats.tpp)).map((p) => p.stats.tpp))]
+				.concat(corrBand(0.28, 0.95)),
 		["corr(athleticism, BPG)",
 			corr(g((p) => p.vComps.athleticism), g((p) => p.stats.bpg))].concat(corrBand(0.35, 0.80)),
 		["corr(athleticism, SPG)",

@@ -50,6 +50,10 @@
 	const FT_TRIP = global.BBGMStats.FT_TRIP;
 	const BB = global.BBGM;
 	const CAL = global.Calibration;
+	/* The declared pace band, read from js/config.js like js/engine.js does,
+	   so the stat model cannot saturate somewhere the slider does not. */
+	const PACE_BAND = (global.Config && global.Config.CLAMP && global.Config.CLAMP.pace) ||
+		{ lo: 55, hi: 82 };
 
 	/* A CEILING THAT BENDS.
 
@@ -115,6 +119,42 @@
 		let k = 0;
 		for (let i = 0; i < N; i++) if (rng.random() < q) k++;
 		return k;
+	}
+
+	/* A realized-season ceiling that only binds at volume. Real D-I seasons
+	   top out near .95 at the line and in the high forties from three on a
+	   full season's attempts (the national leader at 2.5 made a game runs
+	   .46-.49), while a man who took twelve free throws can genuinely make all
+	   twelve — so each limit relaxes toward 1 as the sample shrinks, and the
+	   realized value bends toward it softly (softCeil, knee 0.9), so the top
+	   of a season is spread over the last few points rather than stacked on
+	   one number. N is the season's attempts. */
+	/* Three-point attempt rate by era, as a multiplier on the pooled height
+	   table's shot mix for returning players (see base3 in statLine). Fitted
+	   to the team 3PA/FGA of each era: about .35 for 2009-2021 and .39 for
+	   the modern game, from a pooled table that landed every era near .30. */
+	const THREE_RATE_ERA = { "2009-2021": 1.16, modern: 1.30 };
+	/* How much of the scoreboard anchor may go on the MAKES rather than the
+	   attempts (see anchorPointsToScoreboard). The residual left after the
+	   tempo is matched runs +/-6% (p10/p90), and it lands mostly on good
+	   teams, which is where the prospects are: letting all of it reach the
+	   makes lifted a class's true shooting by two points and its BBGM
+	   offensive rating past the calibration band (115.4 against a ceiling
+	   of 114 at twenty seeds). At 2% the prospects move about a point of
+	   offensive rating, and the rest of the gap goes back on the attempts —
+	   so the box's possessions track the played tempo closely but not
+	   exactly, and the team page's Tempo is the box's own possessions (see
+	   simulateTeamStats), which is what both ratings divide by. */
+	const ANCHOR_EFF_BAND = 0.02;
+	const FT_CEIL = (N) => 1 - 0.03 * clamp((N - 20) / 100, 0, 1);
+	/* The free-throw knee sits higher than the three-point one: a real
+	   volume shooter at .90 from the line is common and must not be bent,
+	   while one at .98 on 150 attempts is not a season. */
+	const FT_KNEE = 0.92;
+	const TP_CEIL = (N) => 1 - 0.49 * clamp((N - 25) / 75, 0, 1);
+	function ceilPct(v, lim, knee) {
+		if (v === null || !Number.isFinite(v)) return v;
+		return Math.min(v, softCeil(v, lim, knee || 0.9));
 	}
 
 	/* Tuning constants for the volume model. Exported so tools/validate.js and
@@ -890,6 +930,16 @@
 
 	function leagueEnv(name) {
 		return LEAGUE_ENV[name] || NCAA_ENV;
+	}
+
+	/* The foul that ends a night. College and FIBA basketball disqualify on
+	   the fifth; a 48-minute league plays NBA rules and disqualifies on the
+	   sixth (the G League, and the 48-minute domestic leagues that follow
+	   the NBA's book). An env may say so explicitly with `foulOut`. */
+	function foulOutOf(env) {
+		const e = env || NCAA_ENV;
+		if (Number.isFinite(e.foulOut)) return e.foulOut;
+		return (e.gameMinutes || 40) >= 48 ? 6 : 5;
 	}
 
 	/* Class year as a number, 0 = freshman. The string carries decorations —
@@ -1812,7 +1862,7 @@
 		const jv = (x, sd) => Math.max(0, x * (1 + rng.normal(0, sd * noise)));
 		const tov = jv(tovPoss * tovRate, 0.10);
 		const fga = jv((poss - tov) / (1 + FT_TRIP * ftRate), 0.045);
-		const fta = jv(fga * ftRate, 0.06);
+		let fta = jv(fga * ftRate, 0.06);
 
 		// Shot mix: 3PA share anchored to the height buckets (.39 for guards
 		// down to .085 for 6'11"+), stretched by shooting talent.
@@ -1831,8 +1881,24 @@
 		   somebody else, so both terms are scaled by the same willingness
 		   factor the base term uses. */
 		const willing = ratings.tp >= 30 ? 1 : Math.max(0, ratings.tp) / 30;
-		const base3 = CAL.threeShare(bigness, ratings.tp + refVol * 100, ratings.tp) +
-			willing * style.three;
+		/* The era's three-point rate. The height table behind threeShare is
+		   one pooled table, so a team took 30% of its shots from three in
+		   every era — against a real 34-35% across 2009-2021 and 38-39% in
+		   the modern game. The era scales the whole shot mix, the
+		   willingness gate included, so a non-shooter is still a
+		   non-shooter in 2025.
+
+		   It scales the FIELD, not the class. The height table is drafted
+		   players' own shot mix and every draft-year band is fitted against
+		   it; applied to prospects as well, the multiplier pushed a crowd of
+		   marginal shooters over four attempts a game and took the class's
+		   volume-shooter 3P% median under its band (37.2 against 37.5). The
+		   returning players are four-fifths of every rotation, so they are
+		   where a team's three-point rate lives. */
+		const eraThree = me.filler
+			? (THREE_RATE_ERA[CAL.currentEra ? CAL.currentEra() : ""] || 1) : 1;
+		const base3 = eraThree * (CAL.threeShare(bigness, ratings.tp + refVol * 100, ratings.tp) +
+			willing * style.three);
 		/* The shot-mix noise is RELATIVE. A flat sd of 0.045 is a tenth of a
 		   guard's 0.39 share and half of a seven-footer's 0.085, so the same
 		   draw that moved a guard from 12 threes a hundred shots to 16 moved a
@@ -1844,8 +1910,8 @@
 			0.045 * noise * clamp(base3 / 0.30, 0.3, 1));
 		share3 = clamp(share3, 0.0, 0.75);
 
-		const tpa = fga * share3;
-		const twoA = fga - tpa;
+		let tpa = fga * share3;
+		let twoA = fga - tpa;
 
 		/* Attempts -> season percentage. `a` is attempts per game and `games`
 		   is the season he actually played, so N is the season's attempt count
@@ -1855,12 +1921,38 @@
 		   still exactly deterministic (which several callers rely on) and
 		   statNoise 2 is twice as wild, the same contract every other term in
 		   this function honors. */
-		const shoot = (r, a, p, nz) => {
+		/* NO ATTEMPTS, NO PERCENTAGE. A season with zero attempts used to
+		   return the true-talent p, which a table then printed as "31.2% from
+		   three" beside an attempt column of 0.0. It returns null now, and
+		   the caller folds any sub-attempt residue back into the other
+		   column so the volume and the percentage agree.
+
+		   THE NOISE SLIDER SCALES THE SAMPLE, NOT THE DEVIATION. The old
+		   `p + nz * (k/N - p)` stretched one binomial draw by nz, which at
+		   statNoise 2 doubled a 149-attempt free-throw season's deviation past
+		   anything a binomial can produce (100% on 149 attempts, a leader at
+		   .981), and the realized value was then clamped to [0, 1]. The
+		   statistically honest dial is the effective sample size: variance of
+		   a proportion is p(1-p)/N, so drawing over N / nz^2 attempts scales
+		   the standard deviation by exactly nz while every realized value
+		   stays a genuine proportion. At nz = 1 this is the same draw over
+		   the same N as before. `ceil` is a soft volume-dependent ceiling on
+		   the REALIZED season (see shootCeil) — a tail, not a wall. */
+		const shoot = (r, a, p, nz, ceilOf) => {
 			const N = Math.round(Math.max(0, a) * games);
-			if (N <= 0 || !(nz > 0)) return p;
-			const k = rbinom(r, N, p);
-			return clamp(p + nz * (k / N - p), 0, 1);
+			if (N <= 0) return null;
+			if (!(nz > 0)) return p;
+			/* Never coarser than the attempts themselves allow: on a handful
+			   of attempts N / nz^2 rounds to one or two draws, and a season
+			   of nine threes printed as 0% or 100%. Below eight attempts the
+			   draw is over the attempts actually taken. */
+			const Ne = Math.max(Math.min(N, 8), Math.round(N / (nz * nz)));
+			const k = rbinom(r, Ne, p);
+			const v = k / Ne;
+			return ceilOf ? ceilPct(v, ceilOf(N), ceilOf === FT_CEIL ? FT_KNEE : 0.9) : v;
 		};
+		const ftCeil = FT_CEIL;
+		const tpCeil = TP_CEIL;
 
 		// A shared "touch" term so a player's 3P% and FT% move together — the
 		// old model drew them independently and produced 46%/58% shooters.
@@ -1931,7 +2023,7 @@
 			tpLim, 0.86),
 			0.16, 0.52,
 		);
-		const tpp = shoot(rng, tpa, tpTrue, noise);
+		let tpp = shoot(rng, tpa, tpTrue, noise, tpCeil);
 		// Rim/mid split and finishing: rim FG% runs .59 (guards) to .72 (bigs).
 		// The calibration table already carries the height effect, so the skill
 		// composites (which lean heavily on hgt) are centered at what a player of
@@ -1977,6 +2069,11 @@
 			0.34, 0.68,
 		);
 		const twoP = shoot(rng, twoA, twoTrue, noise);
+		/* A three-point volume that rounds to no attempts over the season is
+		   no attempts: its sliver goes back into the two-point column, where
+		   it was going to be a shot anyway, so the line never prints a 3P%
+		   beside an empty attempt column (or the reverse). */
+		if (tpp === null && tpa > 0) { twoA += tpa; tpa = 0; }
 		// FT%: draft-year mean .726 with a real size gradient (.78 guards, .67
 		// centers) beyond what the ft rating alone carries.
 		/* Free-throw shooting reads the raw `ft` rating rather than a composite,
@@ -1990,11 +2087,13 @@
 				mix(touch, rng.normal(0, 1)) * 0.018 * noise,
 			0.35, 0.94,
 		);
-		const ftp = shoot(rng, fta, ftTrue, noise);
-
-		const fgm = twoA * twoP + tpa * tpp;
+		let ftp = shoot(rng, fta, ftTrue, noise, ftCeil);
+		// Same for the line: under half an attempt all season is none.
+		if (ftp === null) fta = 0;
+		const twoMade = twoA * (twoP === null ? 0 : twoP);
+		const fgm = twoMade + tpa * (tpp || 0);
 		const fgp = fga > 0 ? fgm / fga : 0;
-		const pts = twoA * twoP * 2 + tpa * tpp * 3 + fta * ftp;
+		const pts = twoMade * 2 + tpa * (tpp || 0) * 3 + fta * (ftp || 0);
 
 		// Counting stats scale off team totals and the player's share. The team
 		// totals themselves respond to the roster (see teamPools), so a real
@@ -2105,7 +2204,11 @@
 		// average can physically reach — and the national leader in fouls
 		// per game sits around 3.6-3.8, not five.
 		const pfRaw = (teamCtx.pfPool * pfW) / teamCtx.pfDen;
-		const pfLim = Math.min(4.2, 5.0 * (minutes / 40) * 0.95 + 0.6);
+		/* On his league's own foul limit and clock: minutes / gameMinutes of a
+		   night at the limit, which for a 40-minute, five-foul game is the
+		   same 5 * minutes / 40 it always was. */
+		const foLim = foulOutOf(env);
+		const pfLim = Math.min(4.2 * foLim / 5, foLim * (minutes / gameMinutes) * 0.95 + 0.6);
 		const pf = clamp(jv(saturate(pfRaw, 3.3, 0.60), 0.12), 0, pfLim);
 
 		/* --- the defensive box score --------------------------------------
@@ -2353,9 +2456,19 @@
 		/* At least two returning players even on a prospect-stacked roster: a
 		   school with 12+ prospects used to get a rotation of nothing but
 		   draft picks, which no real program has ever iced. */
-		/* Eight to eleven men, not nine everywhere in the country: the
-		   rotation's size was the one number every program shared. */
-		const drawn = 8 + Math.min(3, Math.floor(rng.child("rotsize").random() * 4));
+		/* Eight to ten men, not nine everywhere in the country: the
+		   rotation's size was the one number every program shared.
+
+		   The comment used to say eight to eleven and the draw was uniform
+		   over 8-11, but a program carries ten players (js/teams.js,
+		   ROSTER_SIZE), so an eleven was always cut to ten and never
+		   happened. The draw now states what it produces — a quarter of
+		   programs play eight, a quarter nine, half ten, which is the
+		   distribution the old draw realized — on the same single draw, so
+		   no rotation changed. A roster with more prospects than that still
+		   plays them all (see `size`). */
+		const rs = rng.child("rotsize").random();
+		const drawn = rs < 0.25 ? 8 : rs < 0.5 ? 9 : 10;
 		const size = Math.max(drawn, prospects.length + (fillers.length ? 2 : 0));
 		const members = prospects
 			.concat(fillers.slice(0, Math.max(0, size - prospects.length)))
@@ -2676,9 +2789,14 @@
 		// slider is labeled "College season", and it used to silently rewrite
 		// EuroLeague and G League box scores.
 		const stylePace = (team.style && team.style.pace) || 0;
+		/* The college clamp is the declared pace band (js/config.js
+		   CLAMP.pace, 55-82), the same one the scoreboard and the prior-season
+		   schedules read. It was [58, 78] here and [55, 78] on the
+		   scoreboard, so the top of the slider saturated twice and the two
+		   halves of a season disagreed about the fastest game there was. */
 		const pace = env.pace !== null && env.pace !== undefined
 			? clamp(env.pace + (cfg.scoringEnv || 0) * 1.2 + stylePace, 50, 115)
-			: clamp(cfg.pace + cfg.scoringEnv * 1.6 + stylePace, 58, 78);
+			: clamp(cfg.pace + cfg.scoringEnv * 1.6 + stylePace, PACE_BAND.lo, PACE_BAND.hi);
 		// Chances exceed possessions by the team's offensive rebounds; solve
 		// chances = poss + orbRate * missShare * chances for the multiplier.
 		// One pass on a nominal ORB rate, then refine with the roster's own.
@@ -2708,10 +2826,24 @@
 		   more shots against assist, rebound and block pools sized for the
 		   slow pace — a drift in implied team ORB% and AST/FGM that no band
 		   caught, because individual lines are recomputed from attempts. */
+		/* THE TEMPO THE GAMES WERE PLAYED AT.
+
+		   js/teams.js plays every game at the mean of the two teams' paces and
+		   now logs it (`poss`, overtime included). The box score used to draw
+		   its own tempo — this team's nominal pace plus an independent
+		   jitter — so the displayed Tempo (this number) and the box's
+		   possessions (which ORtg and DRtg divide by, after the scoreboard
+		   anchor rescaled the attempts) disagreed by -14 to +13 a game. A
+		   team with a season behind it is boxed at the regulation tempo its
+		   scoreboard was played at; the jitter survives only for a season
+		   with no schedule (a prior year that was never played). */
 		const paceAdj = rng.normal(0, 2.0);
-		const jitteredPace = env.pace !== null && env.pace !== undefined
-			? clamp(pace + paceAdj, 50, 118)
-			: clamp(pace + paceAdj, 58, 78);
+		const played = scoreboardPace(team, gameMinutes);
+		const jitteredPace = played !== null
+			? played
+			: env.pace !== null && env.pace !== undefined
+				? clamp(pace + paceAdj, 50, 118)
+				: clamp(pace + paceAdj, PACE_BAND.lo, PACE_BAND.hi);
 		let chanceMult = mult(TUNING.ORB_RATE);
 		let pools = teamPools(comps, mins, jitteredPace, chanceMult, gameMinutes, poolEnv);
 		chanceMult = mult(pools.orbRate);
@@ -2928,6 +3060,26 @@
 		   clipped surplus to the players with room. Below the cap nothing
 		   moves, so the distribution keeps the shape statLine gave it. */
 		reconcileTeamTotals(lines, pools, gameMinutes);
+		/* AND THEN PLAY THE GAMES HE MISSED WITHOUT HIM.
+
+		   Everything above is per game with the whole rotation available, and
+		   every line's gp has its absences taken out — so the season totals
+		   (per-game times games played) summed to about 94.5% of the team's
+		   minutes and points, because nobody's minutes rose to cover the
+		   nights a teammate sat. See redistributeAbsences: the absent man's
+		   minutes, and the production that comes with them, go to whoever
+		   played, and every per-game number becomes a per-game-PLAYED number
+		   whose season total is the team's. */
+		/* Overtime is floor time too: five men for five more minutes a
+		   period, which the season's minutes have to include or a team that
+		   went to overtime six times is 150 minutes short. */
+		const otPerGame = team.log && team.log.length
+			? team.log.reduce((a, g) => a + (g.ot || 0), 0) / team.log.length : 0;
+		redistributeAbsences(lines, ctx.games, gameMinutes, 25 * otPerGame, members.map((m, i) =>
+			(!m.filler && env.youthCap)
+				? mins[i]
+				: Math.max(mins[i], Math.min(gameMinutes - 2, env.mpgCap || TUNING.MPG_CAP))),
+			3.9 * foulOutOf(env) / 5);
 		/* And then answer to the SCOREBOARD.
 
 		   A team's points existed three times over and no two of them agreed:
@@ -2946,26 +3098,35 @@
 		   it wins: one factor over the whole rotation puts the pool's points on
 		   the points the team actually scored. One factor and not a per-player
 		   fit because the SHARES are the stat model's answer and are not in
-		   question — only the total is. Percentages are untouched (attempts and
-		   makes move together), and the bound keeps a freak schedule from
+		   question — only the total is. Most of the factor goes on the
+		   attempts, sized so the box's possessions land on the tempo the
+		   games were played at; at most 2% goes on the makes (see
+		   ANCHOR_EFF_BAND), and the bound keeps a freak schedule from
 		   rewriting a rotation rather than correcting it. */
-		anchorPointsToScoreboard(lines, team);
+		anchorPointsToScoreboard(lines, team, played);
 		totals.ast = 0; totals.stl = 0; totals.blk = 0; totals.pf = 0;
 		totals.orb = 0; totals.trb = 0; totals.tov = 0;
 		// Points and the attempts behind them are re-summed too: the anchor
 		// above moved them, and they were accumulated as the lines were built.
 		totals.pts = 0; totals.fga = 0; totals.fta = 0;
+		totals.cs = 0; totals.defl = 0;
+		/* Weighted by the share of the schedule each man played: a line is
+		   per game PLAYED (see redistributeAbsences), so the team's per-game
+		   total is the sum of season totals over the team's games. */
 		for (const line of lines) {
-			totals.pts += line.ppg;
-			totals.fga += line.fga;
-			totals.fta += line.fta;
-			totals.ast += line.apg;
-			totals.stl += line.spg;
-			totals.blk += line.bpg;
-			totals.pf += line.pfpg;
-			totals.orb += line.orpg;
-			totals.trb += line.rpg;
-			totals.tov += line.topg;
+			const wt = gpWeight(line, ctx.games);
+			totals.pts += line.ppg * wt;
+			totals.fga += line.fga * wt;
+			totals.fta += line.fta * wt;
+			totals.ast += line.apg * wt;
+			totals.stl += line.spg * wt;
+			totals.blk += line.bpg * wt;
+			totals.pf += line.pfpg * wt;
+			totals.orb += line.orpg * wt;
+			totals.trb += line.rpg * wt;
+			totals.tov += line.topg * wt;
+			totals.cs += (line.cspg || 0) * wt;
+			totals.defl += (line.deflpg || 0) * wt;
 		}
 		totals.poss = totals.fga - totals.orb + totals.tov + FT_TRIP * totals.fta;
 		team.teamTotals = totals;
@@ -2994,15 +3155,55 @@
 			? (100 * paAvg) / totals.poss
 			: null;
 		team.offRtg = totals.poss > 0 ? (100 * totals.pts) / totals.poss : null;
+		/* ONE TEMPO. The Tempo a team page shows and the possessions both
+		   ratings divide by are the same number: the box's own possessions,
+		   which (see scoreboardPace and the anchor's volume half) now sit
+		   within a few of the tempo the games were played at. It used to
+		   show the model's scheduled pace while ORtg and DRtg divided by the
+		   box, and the two disagreed by up to fourteen a game. Players carry
+		   it too, since the award model normalizes a resume by it. */
+		if (totals.poss > 0) {
+			team.pace = totals.poss;
+			for (const o of out) o.player.teamPace = team.pace;
+		}
+		/* EVERY MAN'S DEFENSIVE RATING IS A SHARE OF HIS TEAM'S.
+
+		   statLine anchors a player's DRtg at a flat 104 and moves it by what
+		   he does, so the ratings of a team's players averaged 104.8 over the
+		   country against a team DRtg of 108.3 and correlated with their own
+		   team's defense at 0.46: a man on the worst defense in the country
+		   could rate as a stopper because his steals said so. The individual
+		   spread is the stat model's answer and is kept; the LEVEL is his
+		   team's, so the minute-weighted mean of a rotation's ratings is
+		   exactly the points per 100 that team actually gave up. */
+		if (Number.isFinite(team.defRtg)) {
+			let wsum = 0;
+			let dsum = 0;
+			for (const l of lines) {
+				if (!Number.isFinite(l.drtg)) continue;
+				const wt = (l.mpg || 0) * gpWeight(l, ctx.games);
+				wsum += wt;
+				dsum += wt * l.drtg;
+			}
+			if (wsum > 1e-9) {
+				const shift = team.defRtg - dsum / wsum;
+				for (const l of lines) {
+					if (Number.isFinite(l.drtg)) l.drtg += shift;
+				}
+			}
+		}
 		// Each prospect's share of the team totals, for the award model and the
 		// share-cap regression checks.
+		/* Season shares: his season total over the team's, which is his
+		   per-game-played line weighted by the games he played. */
 		for (const o of out) {
+			const wt = gpWeight(o.line, ctx.games);
 			o.player.shareOf = {
-				ast: totals.ast > 0 ? o.line.apg / totals.ast : 0,
-				reb: totals.trb > 0 ? o.line.rpg / totals.trb : 0,
-				blk: totals.blk > 0 ? o.line.bpg / totals.blk : 0,
-				stl: totals.stl > 0 ? o.line.spg / totals.stl : 0,
-				pts: totals.pts > 0 ? o.line.ppg / totals.pts : 0,
+				ast: totals.ast > 0 ? (o.line.apg * wt) / totals.ast : 0,
+				reb: totals.trb > 0 ? (o.line.rpg * wt) / totals.trb : 0,
+				blk: totals.blk > 0 ? (o.line.bpg * wt) / totals.blk : 0,
+				stl: totals.stl > 0 ? (o.line.spg * wt) / totals.stl : 0,
+				pts: totals.pts > 0 ? (o.line.ppg * wt) / totals.pts : 0,
 			};
 		}
 		return out;
@@ -3023,23 +3224,29 @@
 			min: 0, fg: 0, fga: 0, tp: 0, tpa: 0, ft: 0, fta: 0,
 			orb: 0, drb: 0, trb: 0, ast: 0, tov: 0, stl: 0, blk: 0, pf: 0, pts: 0,
 		};
+		/* Weighted by games played. A line is per game PLAYED, and a man who
+		   sat eight nights contributed nothing on them; summing the per-game
+		   averages as if everybody played every night overstated a team that
+		   had absences by exactly the nights it did not have them (and, before
+		   redistributeAbsences, understated it by the minutes nobody covered). */
 		for (const L of lines) {
-			box.min += L.mpg;
-			box.fga += L.fga;
-			box.fg += L.fga * L.fgp;
-			box.tpa += L.tpa;
-			box.tp += L.tpa * L.tpp;
-			box.fta += L.fta;
-			box.ft += L.fta * L.ftp;
-			box.orb += L.orpg;
-			box.drb += L.drpg;
-			box.trb += L.rpg;
-			box.ast += L.apg;
-			box.tov += L.topg;
-			box.stl += L.spg;
-			box.blk += L.bpg;
-			box.pf += L.pfpg;
-			box.pts += L.ppg;
+			const w = gpWeight(L, games);
+			box.min += L.mpg * w;
+			box.fga += L.fga * w;
+			box.fg += L.fga * (L.fgp || 0) * w;
+			box.tpa += L.tpa * w;
+			box.tp += L.tpa * (L.tpp || 0) * w;
+			box.fta += L.fta * w;
+			box.ft += L.fta * (L.ftp || 0) * w;
+			box.orb += L.orpg * w;
+			box.drb += L.drpg * w;
+			box.trb += L.rpg * w;
+			box.ast += L.apg * w;
+			box.tov += L.topg * w;
+			box.stl += L.spg * w;
+			box.blk += L.bpg * w;
+			box.pf += L.pfpg * w;
+			box.pts += L.ppg * w;
 		}
 		box.poss = box.fga - box.orb + box.tov + FT_TRIP * box.fta;
 		// Possessions per game IS the pace when a game is one game long; the
@@ -3048,6 +3255,237 @@
 		box.pace = box.poss;
 		box.gameMinutes = gameMinutes;
 		return box;
+	}
+
+	/* Regulation possessions per game off the log js/teams.js wrote, or null
+	   for a season with no logged tempo. Overtime is taken back out because
+	   everything per-game in the stat model is a regulation game. */
+	function scoreboardPace(team, gameMinutes) {
+		const log = team && team.log;
+		if (!log || !log.length) return null;
+		const gm = Math.max(20, gameMinutes || 40);
+		let sum = 0;
+		let n = 0;
+		for (const g of log) {
+			if (!Number.isFinite(g.poss) || g.poss <= 0) continue;
+			sum += g.poss / (1 + (g.ot || 0) * 5 / gm);
+			n++;
+		}
+		return n >= Math.max(1, log.length / 2) ? sum / n : null;
+	}
+
+	/* The share of the team's schedule a line's man played. A line without a
+	   gp (or a team without a schedule length) counts as every game, which is
+	   what every caller assumed before absences were modeled. */
+	function gpWeight(line, games) {
+		const G = Number(games);
+		if (!(G > 0) || !Number.isFinite(line && line.gp)) return 1;
+		return clamp(line.gp / G, 0, 1);
+	}
+
+	/* Cover the nights a man missed.
+
+	   The rotation's lines come out of the pool machinery as per-game numbers
+	   for a night on which everybody dressed, and each carries a gp with his
+	   absences removed. Nothing gave the missing minutes to anybody: the
+	   season's minutes summed to about 94.5% of 5 * 40 * G, its points to
+	   94% of what the scoreboard says, and a team with three men hurt
+	   "scored" 75% of its own points.
+
+	   So, per absent man, his minutes on the nights he sat go to whoever
+	   played them, in proportion to the minutes each of them already plays
+	   (a starter covers more of a starter's minutes than the eleventh man
+	   does), up to a per-player ceiling `caps[j]`. That makes each man's
+	   minutes per game PLAYED a factor r_j above what the pool gave him.
+	   His production rides the same factor — per-minute rates are the
+	   stat model's answer and are not in question — and each category is
+	   then re-centred by one factor so its season total is exactly the team
+	   total the pool (and the reconciliation above) decided:
+
+	       sum_j x'_j * gp_j / G  ==  sum_j x_j
+
+	   so every team number downstream is unchanged, and every player's
+	   per-game line is the line of the games he actually played. Points and
+	   the attempts behind them share one factor, so no percentage moves.
+
+	   Solved by bisection on a common multiplier on each man's absorption
+	   rate, because the ceilings make the map piecewise. Deterministic, and a
+	   no-op for a team nobody missed a game for. */
+	function redistributeAbsences(lines, games, gameMinutes, extraMinutes, caps, pfCap) {
+		const G = Number(games);
+		if (!(G > 0) || !lines.length) return;
+		const n = lines.length;
+		const w = lines.map((l) => gpWeight(l, G));
+		const m = lines.map((l) => Math.max(0, l.mpg || 0));
+		let T = 0;
+		for (const v of m) T += v;
+		if (T <= 1e-9) return;
+		// The season's floor time per team game: regulation plus overtime.
+		const want = T + Math.max(0, extraMinutes || 0);
+		let lost = want - T;
+		for (let i = 0; i < n; i++) lost += m[i] * (1 - w[i]);
+		if (lost <= 1e-9) return;
+		/* Who covers. The minutes go by HEADROOM, not by minutes already
+		   played: when a starter sits, the sixth man starts and the ninth man
+		   plays, while the other starters — already at thirty-four minutes —
+		   play about what they always do. Routing the time in proportion to
+		   minutes put most of it on the starters and walked them to the
+		   minutes ceiling; headroom is what a coach actually has to give. */
+		const capAt = (j) => Math.max(m[j], Number.isFinite(caps && caps[j]) ? caps[j] : gameMinutes);
+		/* Squared, so it is the bench that grows: a man with twenty minutes
+		   of room takes sixteen times the share of one with five. */
+		const h = m.map((mj, j) => (mj > 0 ? Math.pow(Math.max(0, capAt(j) - mj), 2) : 0));
+		let H = 0;
+		for (const v of h) H += v;
+		const give = m.map((mj, j) => {
+			if (mj <= 0) return 0;
+			let a = 0;
+			for (let i = 0; i < n; i++) {
+				if (i === j || m[i] <= 0 || H - h[i] <= 1e-9) continue;
+				a += (m[i] * (1 - w[i]) * h[j]) / (H - h[i]);
+			}
+			// Overtime is shared like regulation: in proportion to minutes.
+			return a + (Math.max(0, want - T) * mj) / T;
+		});
+		const minutesAt = (lam) => m.map((mj, j) => Math.min(capAt(j), mj + lam * give[j]));
+		const seasonAt = (lam) => minutesAt(lam).reduce((a, v, j) => a + v * w[j], 0);
+		let lo = 0;
+		let hi = 1;
+		for (let k = 0; k < 20 && seasonAt(hi) < want; k++) hi *= 2;
+		for (let k = 0; k < 50; k++) {
+			const mid = (lo + hi) / 2;
+			if (seasonAt(mid) < want) lo = mid;
+			else hi = mid;
+		}
+		const next = minutesAt(hi);
+		const r = m.map((mj, j) => (mj > 1e-9 ? next[j] / mj : 1));
+		lines.forEach((l, j) => { l.mpg = next[j]; });
+		/* The scoring group (and usage, which must sum to one) is
+		   re-centred so the season's points hold exactly —
+		   anchorPointsToScoreboard moves them onto the scoreboard next, and
+		   it needs a consistent starting total. Everything else rides r
+		   alone: the man who covers for an absent rebounder rebounds at HIS
+		   rate, not the absent man's, so a team that loses its best big for a
+		   month really does rebound a little less — and every per-40
+		   ceiling reconcileTeamTotals enforced is preserved exactly, because
+		   minutes and production move together.
+
+		   The re-centring is not one factor for everybody. When the leading
+		   scorer sits it is his TEAMMATES who take his shots — a_j below is
+		   how much of the rotation's volume was missing while j played — and
+		   a flat factor also handed the absent star a share of the shots
+		   taken in his own absence, which pushed a 24-game scorer's BBGM
+		   usage past 40%. */
+		const rescale = (keys, recentre) => {
+			const lead = keys[0];
+			const x = lines.map((l) => Math.max(0, l[lead] || 0));
+			let S = 0;
+			for (const v of x) S += v;
+			let before = 0;
+			let after = 0;
+			for (let j = 0; j < n; j++) {
+				before += x[j];
+				after += x[j] * r[j] * w[j];
+			}
+			const a = x.map((xj, j) => {
+				let t = 0;
+				for (let i = 0; i < n; i++) {
+					if (i === j || S - x[i] <= 1e-12) continue;
+					t += (x[i] * (1 - w[i])) / (S - x[i]);
+				}
+				return t;
+			});
+			/* Spread the way the minutes were: by headroom. The shots a
+			   missing scorer leaves are taken by the men who take his
+			   minutes — the bench moving up — and weighting them by volume
+			   handed nearly all of them to the prospects, who are the volume:
+			   measured, half a point a game on a draft class, past the
+			   class's own scoring band. Bounded at 1.6x a man's own rate, so
+			   a garbage-time reserve does not become a volume scorer on
+			   paper; anything the bound keeps back is restored by the
+			   scoreboard anchor that runs next. */
+			const mm = h;
+			let lam = 0;
+			if (recentre) {
+				let q = 0;
+				for (let j = 0; j < n; j++) q += mm[j] * w[j] * a[j];
+				if (q > 1e-12) lam = (before - after) / q;
+				else if (after > 1e-12) lam = null;
+			}
+			const flat = recentre && lam === null && after > 1e-12 ? before / after : 1;
+			for (let j = 0; j < n; j++) {
+				const f = lam === null ? r[j] * flat
+					: x[j] > 1e-12
+						? clamp(r[j] + (lam * a[j] * mm[j]) / x[j], 0.5 * r[j], 1.6 * r[j])
+						: r[j];
+				for (const k of keys) {
+					if (Number.isFinite(lines[j][k])) lines[j][k] *= f;
+				}
+			}
+		};
+		const pfBefore = lines.map((l) => l.pfpg || 0);
+		rescale(["ppg", "fga", "tpa", "fta"], true);
+		for (const k of ["orpg", "drpg", "apg", "spg", "bpg", "topg", "pfpg",
+			"cspg", "deflpg", "chgpg"]) rescale([k], false);
+		// Usage is a share of the team's chances and has to sum to one.
+		rescale(["usgShare"], true);
+		for (const l of lines) l.rpg = (l.orpg || 0) + (l.drpg || 0);
+		/* The share caps, re-read against the season. The man who covered for
+		   an absent teammate plays more a night, so his per-game share of the
+		   team's per-game total can walk back over a cap the reconciliation
+		   had already enforced — the check a reader makes (his rebounds a
+		   night over his team's) and the one tools/validate.js makes. The
+		   same soft ceiling, holding the SEASON total fixed. */
+		/* Assists and rebounds only: those are the two whose caps bind (the
+		   steal and block caps sit well above any realized share, and
+		   re-bending the block leaders flattened the big-to-guard block
+		   gradient the calibration bands). */
+		capPlayedShare(lines, "apg", TUNING.AST_CAP, w);
+		{
+			const before = lines.map((l) => l.rpg || 0);
+			capPlayedShare(lines, "rpg", TUNING.REB_CAP, w);
+			lines.forEach((l, j) => {
+				const f = before[j] > 1e-9 ? l.rpg / before[j] : 1;
+				l.orpg = (l.orpg || 0) * f;
+				l.drpg = (l.drpg || 0) * f;
+				l.rpg = l.orpg + l.drpg;
+			});
+		}
+		/* Fouls do not scale past the whistle. A coach covering for an
+		   absent starter plays his foul-prone big a few more minutes, not
+		   into a fourth foul a night: the reconciliation's own absolute
+		   ceiling holds, and a line already above it (it cannot be, but) is
+		   left where it was. */
+		lines.forEach((l, j) => {
+			if (Number.isFinite(l.pfpg) && l.pfpg > pfBefore[j]) {
+				// Soft, so the top of the column is a tail and not a wall.
+				l.pfpg = Math.max(pfBefore[j], softCeil(l.pfpg, pfCap || 3.9, 0.9));
+			}
+		});
+	}
+
+	/* fitToPool's soft share cap for lines that are per game PLAYED: the team
+	   total is the gp-weighted sum, and a clipped surplus is handed out so
+	   that total does not move. */
+	function capPlayedShare(lines, key, cap, w) {
+		const x = lines.map((l) => (Number.isFinite(l[key]) && l[key] > 0 ? l[key] : 0));
+		let total = 0;
+		for (let j = 0; j < x.length; j++) total += x[j] * w[j];
+		if (total <= 1e-9) return;
+		const lim = total * cap;
+		for (let iter = 0; iter < 25; iter++) {
+			let excess = 0;
+			for (let j = 0; j < x.length; j++) {
+				const v = softCeil(x[j], lim);
+				if (v < x[j]) { excess += (x[j] - v) * w[j]; x[j] = v; }
+			}
+			if (excess < 2e-4 * total) break;
+			let room = 0;
+			for (let j = 0; j < x.length; j++) room += Math.max(0, lim - x[j]) * w[j];
+			if (room < 1e-9) break;
+			for (let j = 0; j < x.length; j++) x[j] += (excess * Math.max(0, lim - x[j])) / room;
+		}
+		lines.forEach((l, j) => { if (Number.isFinite(l[key])) l[key] = x[j]; });
 	}
 
 	/* Renormalize one category to its pool, then clip the tail at `cap` of the
@@ -3223,17 +3661,18 @@
 	   season behind it (a prior year that was never scheduled) keeps the
 	   pool's own answer, which is all there is.
 
-	   Only the scoring volume moves — attempts and makes by the same factor,
-	   so every shooting percentage, every share and every non-scoring stat is
-	   exactly what the stat model said. Bounded at ±18%: past that the
+	   Only scoring moves — mostly the volume (attempts, sized to the played
+	   tempo) and a little of the efficiency (see below and ANCHOR_EFF_BAND);
+	   every share and every non-scoring stat is exactly what the stat model
+	   said. Bounded at ±18%: past that the
 	   disagreement is not a reconciliation, and a rotation should not be
 	   rewritten to chase one. (The comment said ±15% and the clamp said
 	   0.82/1.18 for as long as both existed. The clamp is the one that ran.)
 
 	   WHAT THIS DOES NOT MOVE, and why that is not a bug.
 
-	   `ppg`, `fga`, `tpa` and `fta` scale together, so true shooting is
-	   exactly invariant — that is the point of one factor. Turnovers do not
+	   `ppg`, `fga`, `tpa` and `fta` scale together apart from the small
+	   efficiency half, so true shooting moves by at most 2%. Turnovers do not
 	   scale, because a turnover is not a scoring event and multiplying it by
 	   the scoreboard's correction would be inventing possessions. The
 	   consequence is that a line's `usg`, recomputed from its own printed
@@ -3249,7 +3688,7 @@
 	   printed usage disagree with the curve that produced the printed
 	   efficiency, which is a worse inconsistency than the one it fixes, and
 	   it would do so to correct a mean error of zero. */
-	function anchorPointsToScoreboard(lines, team) {
+	function anchorPointsToScoreboard(lines, team, targetPoss) {
 		const log = team && team.log;
 		if (!log || !log.length || !lines.length) return;
 		let pf = 0;
@@ -3258,13 +3697,85 @@
 			if (Number.isFinite(g.teamPts)) { pf += g.teamPts; n++; }
 		}
 		if (!n) return;
+		/* Season points over the team's games: each line is per game PLAYED
+		   (see redistributeAbsences), so it counts for the share of the
+		   schedule its man was there for. */
 		let pts = 0;
-		for (const l of lines) pts += l.ppg || 0;
+		for (const l of lines) pts += (l.ppg || 0) * gpWeight(l, log.length);
 		if (pts <= 1e-9) return;
 		const k = clamp((pf / n) / pts, 0.82, 1.18);
-		if (Math.abs(k - 1) < 1e-6) return;
+		const hasTempo = Number.isFinite(targetPoss) && targetPoss > 0;
+		if (Math.abs(k - 1) < 1e-6 && !hasTempo) return;
+		/* VOLUME TO THE TEMPO, THE REST TO EFFICIENCY.
+
+		   The whole factor used to go on the attempts, which made it a claim
+		   about POSSESSIONS: a team whose scoreboard said eight more points
+		   than its pool took eight points' worth of extra shots, and its box
+		   possessions — the number both team ratings divide by — ran up to
+		   fourteen a game away from the Tempo the team page printed (and past
+		   the pace band's ceiling). The scoreboard knows both halves now: its
+		   points, and the possessions the games were played at (`targetPoss`,
+		   see scoreboardPace). So the attempts are scaled to put the box's
+		   possessions on that tempo, and what is left of the points gap is
+		   how WELL the team scored — it goes on the makes, which is where a
+		   better team's margin actually comes from. Both factors are bounded
+		   (the volume to +/-15%, the efficiency to -15%/+18%, the old anchor's
+		   own range); a team whose split would break them keeps the scoring
+		   total and gives up the exact tempo, which is the rarer failure.
+		   Without a tempo (a prior season with no logged possessions) the
+		   factor is split evenly. Makes are capped at the attempts and the
+		   points are re-derived from the makes, so every line still adds up. */
+		let vol = Math.sqrt(k);
+		if (hasTempo) {
+			let fga = 0;
+			let fta = 0;
+			let orb = 0;
+			let tov = 0;
+			for (const l of lines) {
+				const w = gpWeight(l, log.length);
+				fga += (l.fga || 0) * w;
+				fta += (l.fta || 0) * w;
+				orb += (l.orpg || 0) * w;
+				tov += (l.topg || 0) * w;
+			}
+			const shots = fga + FT_TRIP * fta;
+			if (shots > 1e-9) vol = clamp((targetPoss + orb - tov) / shots, 0.85, 1.15);
+		}
+		const eff = clamp(k / vol, 1 - ANCHOR_EFF_BAND, 1 + ANCHOR_EFF_BAND);
+		vol = k / eff;
 		for (const l of lines) {
-			l.ppg *= k; l.fga *= k; l.tpa *= k; l.fta *= k;
+			const twoA0 = Math.max(0, (l.fga || 0) - (l.tpa || 0));
+			const two0 = Math.max(0, (l.fga || 0) * (l.fgp || 0) - (l.tpa || 0) * (l.tpp || 0));
+			const tpm0 = (l.tpa || 0) * (l.tpp || 0);
+			const ftm0 = (l.fta || 0) * (l.ftp || 0);
+			l.fga *= vol; l.tpa *= vol; l.fta *= vol;
+			const twoA = twoA0 * vol;
+			/* The efficiency half cannot walk a percentage back over the
+			   realized ceilings statLine drew it under (see TP_CEIL): a
+			   hot-shooting team's best shooter at .47 times 1.10 is not a
+			   .52 season. What the ceilings take off the threes and free
+			   throws goes onto the twos, points-for-points, so the team
+			   still scores what its scoreboard says. */
+			const gpN = Number.isFinite(l.gp) ? l.gp : log.length;
+			let tpm = tpm0 * vol * eff;
+			let ftm = ftm0 * vol * eff;
+			let lost = 0;
+			if (l.tpa > 0) {
+				const cap = l.tpa * Math.min(0.97, ceilPct(tpm / l.tpa, TP_CEIL(l.tpa * gpN)));
+				if (tpm > cap) { lost += 3 * (tpm - cap); tpm = cap; }
+			}
+			if (l.fta > 0) {
+				const cap = l.fta * Math.min(0.99, ceilPct(ftm / l.fta, FT_CEIL(l.fta * gpN), FT_KNEE));
+				if (ftm > cap) { lost += ftm - cap; ftm = cap; }
+			}
+			const two = Math.min(two0 * vol * eff + lost / 2, 0.97 * twoA);
+			if (l.tpp !== null && l.tpa > 0) l.tpp = tpm / l.tpa;
+			if (l.ftp !== null && l.fta > 0) l.ftp = ftm / l.fta;
+			if (Number.isFinite(l.twoPct) && twoA > 0) l.twoPct = two / twoA;
+			l.fgp = l.fga > 0 ? (two + tpm) / l.fga : 0;
+			l.ppg = 2 * two + 3 * tpm + ftm;
+			const tsa = 2 * (l.fga + FT_TRIP * l.fta);
+			l.ts = tsa > 0 ? l.ppg / tsa : 0;
 		}
 	}
 
@@ -3517,7 +4028,7 @@
 		   against a real 3-6%. The third number is how much of the night's
 		   form reaches the stat: scoring rides it, fouls barely do. */
 		const SPREAD = {
-			pts: [1.35, 0.6, 1.0], reb: [1.0, 0.4, 0.8], ast: [0.95, 0.3, 0.8],
+			pts: [1.30, 0.6, 1.0], reb: [1.0, 0.4, 0.8], ast: [0.95, 0.3, 0.8],
 			stl: [0.85, 0.2, 0.4], blk: [0.85, 0.2, 0.4], tov: [0.85, 0.2, 0.5],
 			fouls: [0.45, 0.12, 0.25],
 		};
@@ -3552,11 +4063,19 @@
 		   league's game length (see simulateProLeagues). */
 		const gameMinutes = team.gameMinutes || 40;
 		const scale = gameMinutes / 40;
+		/* The foul that ends his night is his league's: five in college and
+		   under FIBA rules, six in a 48-minute NBA-rules league. It was five
+		   everywhere, so a G League prospect "fouled out" on nights the
+		   G League would have let him keep playing. */
+		const foulOut = Number.isFinite(team.foulOut) ? team.foulOut
+			: foulOutOf(LEAGUE_ENV[team.conf] ||
+				(gameMinutes >= 48 ? { gameMinutes } : NCAA_ENV));
 		const CEIL = {
 			pts: 4 + 1.55 * mpg / scale, reb: 3 + 0.6 * mpg / scale, ast: 2 + 0.42 * mpg / scale,
 			stl: 2 + 0.2 * mpg / scale, blk: 2 + 0.2 * mpg / scale, tov: 2 + 0.25 * mpg / scale,
-			// Below five: a man on four sits, so the draw bends before the cap.
-			fouls: 4.5,
+			// Below the limit: a man one foul short sits, so the draw bends
+			// before the cap.
+			fouls: foulOut - 0.5,
 		};
 		for (let i = 0; i < schedule.length; i++) {
 			if (missed.has(i)) continue;
@@ -3604,13 +4123,22 @@
 		for (const key of Object.keys(targets)) {
 			allocate(games, key, games.map((g) => g[key]),
 				Math.round(targets[key] * games.length),
-				key === "fouls" ? () => 5 : null);
+				key === "fouls" ? () => foulOut : null);
 		}
 
 		/* Minutes and the shooting line behind the points. The log carried
 		   counting stats only, so "best game" could say he scored 30 and
 		   not whether it was 11-of-15 or a 28-shot night. */
-		attachMinutesAndShooting(games, s, rng, gameMinutes);
+		attachMinutesAndShooting(games, s, rng, gameMinutes, foulOut);
+		/* THE LINE TAKES THE LOG'S INTEGERS.
+
+		   The export writes season totals summed off this log (see
+		   js/engine.js), and the app printed the line's modeled percentages,
+		   so the same season read 35.7% from three in the app and 36.1% in the
+		   league file. The log is the season that was played; the line is its
+		   average. Every shooting field is re-read off the log's own makes
+		   and attempts, and a category with no attempts has no percentage. */
+		lineFromLog(s, games);
 		// The minutes the game had, so an export can count them.
 		for (const g of games) g.avail = gameMinutes + 5 * (g.ot || 0);
 
@@ -3628,9 +4156,20 @@
 		   defined per 100 possessions, bounded there, and zero-sum over the
 		   rotation. */
 		const impact = impactTerms(team, gameMinutes).get(s) || 0;
+		/* THAT NIGHT'S floor time, not the season's. The margin he was on
+		   the floor for is the margin times the share of THAT game he played:
+		   a starter who played eleven minutes in a blowout he fouled out of
+		   was not on the floor for three quarters of it. The season share
+		   survives only as the mean of the nightly ones, which is what the
+		   on/off arithmetic below divides by. The impact term is likewise
+		   scaled by the night's minutes against his average. */
+		const nightShare = (g) => (Number.isFinite(g.min) && g.avail > 0
+			? clamp(g.min / g.avail, 0, 1) : share);
+		const nightImpact = (g) => (mpg > 1e-9 && Number.isFinite(g.min)
+			? impact * clamp(g.min / mpg, 0, 2.5) : impact);
 		for (const g of games) {
 			const margin = Number.isFinite(g.teamPts) && Number.isFinite(g.oppPts) ? g.teamPts - g.oppPts : 0;
-			g.pm = margin * share + impact + rng.normal(0, 5.0);
+			g.pm = margin * nightShare(g) + nightImpact(g) + rng.normal(0, 5.0);
 		}
 		/* The nights vary; the SEASON does not. The per-night noise is
 		   recentred to sum to zero, so his season plus/minus is exactly the
@@ -3644,7 +4183,7 @@
 			let want = 0;
 			for (const g of games) {
 				const margin = Number.isFinite(g.teamPts) && Number.isFinite(g.oppPts) ? g.teamPts - g.oppPts : 0;
-				want += margin * share + impact;
+				want += margin * nightShare(g) + nightImpact(g);
 				have += g.pm;
 			}
 			const off = (have - want) / games.length;
@@ -3666,9 +4205,14 @@
 		   not what it computed: subtracting the team's overall margin left
 		   his own minutes in the comparison and understated the difference by
 		   a factor of (1 - share). */
-		const without = share < 0.95 ? (teamMargin - plusMinus) / (1 - share) : null;
-		const onOff = share > 0.05 && without !== null
-			? plusMinus / share - without : 0;
+		/* The season share for the on/off arithmetic is the one the nights
+		   actually add up to: his minutes over the minutes the games had. */
+		const availT = games.reduce((a, g) => a + (g.avail || gameMinutes), 0);
+		const minT = games.reduce((a, g) => a + (Number.isFinite(g.min) ? g.min : 0), 0);
+		const seasonShare = availT > 0 && minT > 0 ? clamp(minT / availT, 0, 1) : share;
+		const without = seasonShare < 0.95 ? (teamMargin - plusMinus) / (1 - seasonShare) : null;
+		const onOff = seasonShare > 0.05 && without !== null
+			? plusMinus / seasonShare - without : 0;
 		// Close games: decided by five or fewer, or in overtime.
 		const closeGames = games.filter((g) =>
 			Number.isFinite(g.teamPts) && Number.isFinite(g.oppPts) && (Math.abs(g.teamPts - g.oppPts) <= 5 || g.ot));
@@ -3707,7 +4251,8 @@
 			/* Fouling out is one of the most legible things in a box score,
 			   and the number a physically plausible foul rate is actually
 			   constrained by. */
-			foulOuts: games.filter((g) => g.fouls >= 5).length,
+			foulOuts: games.filter((g) => g.fouls >= foulOut).length,
+			foulOutAt: foulOut,
 			plusMinus,
 			onOff,
 			clutch,
@@ -3724,6 +4269,25 @@
 			splits: phaseSplits(games),
 			postseason: postseasonSplit(games),
 		};
+	}
+
+	function lineFromLog(s, games) {
+		const n = games.length;
+		if (!n || !games.every((g) => Number.isFinite(g.fga) && Number.isFinite(g.fgm))) return;
+		const sum = (k) => games.reduce((a, g) => a + (g[k] || 0), 0);
+		const fgaT = sum("fga");
+		const tpaT = sum("tpa");
+		const ftaT = sum("fta");
+		const ptsT = sum("pts");
+		s.fga = fgaT / n;
+		s.tpa = tpaT / n;
+		s.fta = ftaT / n;
+		s.ppg = ptsT / n;
+		s.fgp = fgaT > 0 ? sum("fgm") / fgaT : 0;
+		s.tpp = tpaT > 0 ? sum("tpm") / tpaT : null;
+		s.ftp = ftaT > 0 ? sum("ftm") / ftaT : null;
+		const tsa = 2 * (s.fga + FT_TRIP * s.fta);
+		s.ts = tsa > 0 ? s.ppg / tsa : 0;
 	}
 
 	/* Hand out an integer total across games by largest remainder, scaling
@@ -3767,7 +4331,8 @@
 	   for two free throws — both points-neutral) moves the season's FGM
 	   and 3PM totals onto the line's own, so the percentages a reader
 	   recomputes off the log are the percentages beside it. */
-	function attachMinutesAndShooting(games, s, rng, gameMinutes) {
+	function attachMinutesAndShooting(games, s, rng, gameMinutes, foulOut) {
+		const fo = Number.isFinite(foulOut) ? foulOut : 5;
 		const n = games.length;
 		const mpg = Number.isFinite(s.mpg) ? s.mpg : 0;
 		const gm = gameMinutes || 40;
@@ -3775,7 +4340,7 @@
 		const rawMin = games.map((g) => {
 			let m = mpg + rng.normal(0, 0.11 * mpg + 1.4);
 			if (g.ot) m += 2.5 * g.ot * Math.min(1, mpg / 30);
-			if (g.fouls >= 5) m = Math.min(m, Math.max(4, mpg * 0.8));
+			if (g.fouls >= fo) m = Math.min(m, Math.max(4, mpg * 0.8));
 			return Math.max(0, Math.min(gameMin(g), m));
 		});
 		allocate(games, "min", rawMin, Math.round(mpg * n), gameMin);
@@ -4107,7 +4672,7 @@
 		fitToPool, reconcileTeamTotals, teamBox, CONVERGENCE,
 		defenseProfile, rosterDefenseProfile, rosterShooting,
 		astWeight, stlWeight, rebWeight, passSkill,
-		leagueEnv, LEAGUE_ENV, NCAA_ENV,
+		leagueEnv, LEAGUE_ENV, NCAA_ENV, foulOutOf, redistributeAbsences, gpWeight,
 		TUNING, ROTATION_SHAPE, classYearIndex, experienceUsage, collegeRole,
 		archetypeIdentity, IDENTITY_FTR, IDENTITY_PF,
 		IDENTITY_REB, IDENTITY_AST, IDENTITY_STL, IDENTITY_BLK, IDENTITY_AXES,

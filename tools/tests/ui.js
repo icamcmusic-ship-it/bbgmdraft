@@ -114,4 +114,56 @@ module.exports = function (ok, V) {
 		ok("the build-pool slider is not still capped at 40",
 			!!m && Number(m[1]) > 40, m ? "max " + m[1] : "slider not found");
 	}
+
+	/* ------------------------------------ the second audit (app.js faults) */
+
+	/* The text choices go through Config.make like the numbers do. A link
+	   carrying an era that does not exist was stored verbatim and threw
+	   inside the first paint, before any control was bound. */
+	{
+		const CFG = global.Config;
+		const c = CFG.make({ era: "bogus", ovrMode: "x", priorSeasons: 3,
+			collegeSource: null, flavorHint: "no such flavor", universe: "true",
+			narrative: "maybe", noteLines: ["stats", "nope", "stats"], wEuroLeague: "50" });
+		ok("Config.make puts an unknown era, mode or flavor back to its default",
+			c.era === CFG.DEFAULTS.era && c.ovrMode === "preserve" &&
+			c.priorSeasons === "simulate" && c.collegeSource === "blanks" &&
+			c.flavorHint === "", JSON.stringify([c.era, c.ovrMode, c.priorSeasons,
+				c.collegeSource, c.flavorHint]));
+		ok("and coerces the switches to booleans",
+			c.universe === true && c.narrative === CFG.DEFAULTS.narrative);
+		ok("and keeps only the note lines the engine knows, once each",
+			JSON.stringify(c.noteLines) === '["stats"]', JSON.stringify(c.noteLines));
+		ok("and folds a legacy destination weight that arrived as a string",
+			c.leagueWeights.EuroLeague === 50, String(c.leagueWeights.EuroLeague));
+		ok("and a payload that is not an object is the defaults",
+			CFG.make(null).pace === CFG.DEFAULTS.pace &&
+			CFG.make("junk").era === CFG.DEFAULTS.era);
+		// Every preset that moves a curve dial asks for the curve.
+		const curveKeys = ["classQuality", "classDepth", "eliteCount"];
+		const inert = Object.keys(CFG.PRESETS).filter((n) =>
+			curveKeys.some((k) => k in CFG.PRESETS[n]) && CFG.PRESETS[n].ovrMode !== "curve");
+		ok("every preset that sets a curve dial turns the curve on",
+			inert.length === 0, inert.join(", "));
+	}
+
+	const APP = fs.readFileSync(path.join(ROOT, "js", "app.js"), "utf8");
+	/* rerollUntil's worker branch returns before the inline fallback's
+	   helpers are reached, so they must be hoisted declarations — as consts
+	   the worker's onerror hit them in the temporal dead zone. */
+	{
+		const body = (APP.match(/function rerollUntil\(keys, maxTries\) \{[\s\S]*?\n\t\}\n/) || [""])[0];
+		ok("rerollUntil's fallback helpers are declarations, not late consts",
+			!!body && !/const (step|finish|finishFound) =/.test(body) &&
+			/function step\(\)/.test(body), body ? "" : "rerollUntil not found");
+	}
+	ok("nothing assigns the body's whole className (it carries panel state)",
+		!/document\.body\.className\s*=/.test(APP));
+	/* The density classes are toggled one at a time, and the number box
+	   under the cursor is not rewritten by a repaint. */
+	ok("paintConfig does not repaint the number box being typed in",
+		/num !== document\.activeElement/.test(APP));
+	ok("defaults are compared after Config.make expands them",
+		/function isDefaultSetting\(/.test(APP) &&
+		!/JSON\.stringify\(state\.cfg\[k\]\) !== JSON\.stringify\(CFG\.DEFAULTS\[k\]\)/.test(APP));
 };

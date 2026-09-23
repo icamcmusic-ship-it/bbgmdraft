@@ -52,7 +52,8 @@
 			teamPpg: mean(teams.map((t) => t.teamTotals.pts)),
 			teamAst: mean(teams.map((t) => t.teamTotals.ast)),
 			archetypes: new Set(res.players.map((p) => p.archetype)).size,
-			champion: res.tourney ? res.tourney.champion.team.name : null,
+			champion: res.tourney && res.tourney.champion && res.tourney.champion.team
+				? res.tourney.champion.team.name : null,
 			/* The tournament's shape, so a batch can show whether March
 			   is calibrated rather than only whether the box scores are. */
 			champSeed: res.tourney && res.tourney.champion ? res.tourney.champion.seed : null,

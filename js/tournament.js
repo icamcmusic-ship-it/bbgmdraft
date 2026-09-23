@@ -27,6 +27,9 @@
 		return Number.isFinite(t.committeeScore) ? t.committeeScore : t.resume;
 	}
 
+	/* The at-large model behind bidCheck's expectation; see selectField. */
+	const BID_FIT = { a: -2.224, prestige: 0.61, strength: 0.385 };
+
 	function selectField(teams) {
 		const autos = [];
 		const autoSet = new Set();
@@ -69,18 +72,37 @@
 		/* Expected off THIS season's membership and strength, not a static
 		   number beside a map that has since changed: the WCC's "3" outlived
 		   Gonzaga and "A lean year for the WCC" ran in nine seasons of
-		   twelve. A sixteen-team league at 92 expects about seven, an
-		   eleven-team league at 87 about four, a one-bid league one. */
+		   twelve.
+
+		   And expected off what THIS SIM does, not off a real-world
+		   intuition. The old curve (0.55 x ((strength - 68) / 25)^1.4 of the
+		   league) wanted eight or nine bids from the Big 12, SEC and ACC in a
+		   sim whose committee gives them 5.6, 6.5 and 8.2 on average, so "A
+		   lean year for the Big 12" ran in 23 seasons of 30 — a note about
+		   the formula, not the season. The expectation is now one auto bid
+		   plus each member's chance of an at-large, a logistic in the
+		   member's prestige and its league's strength fitted to 40 seasons
+		   of this committee's own selections (mean absolute error under 0.4
+		   of a bid for every multi-bid league), and a season is flagged only
+		   when it misses that by two bids or by 35% of it, whichever is
+		   more — about one conference-season in twenty. */
+		const atLargeChance = (t, strength) => 1 / (1 + Math.exp(-(
+			BID_FIT.a + BID_FIT.prestige * ((t.prestige || 0) - 60) / 10 +
+			BID_FIT.strength * (strength - 70) / 10)));
 		const expectedFor = (conf) => {
-			const n = (pools[conf] || []).length;
+			const members = pools[conf] || [];
+			const n = members.length;
 			const strength = C.CONFERENCES[conf] ? C.CONFERENCES[conf].strength : null;
 			if (!n || strength === null) return null;
-			const share = 0.55 * Math.pow(Math.max(0, (strength - 68) / 25), 1.4);
-			return Math.max(1, Math.round(n * share));
+			// One member holds the auto bid and cannot also be an at-large.
+			const atLargeSum = members.reduce((acc, t) => acc + atLargeChance(t, strength), 0);
+			return Math.max(1, Math.round(1 + atLargeSum * (n - 1) / n));
 		};
 		for (const conf of Object.keys(gotByConf)) {
 			const expected = expectedFor(conf);
-			if (expected !== null && Math.abs(gotByConf[conf] - expected) >= 2) {
+			if (expected === null) continue;
+			const margin = Math.max(2, Math.ceil(0.35 * expected));
+			if (Math.abs(gotByConf[conf] - expected) >= margin) {
 				bidCheck.push({ conf, expected, got: gotByConf[conf] });
 			}
 		}
@@ -91,6 +113,96 @@
 
 	const REGIONS = ["East", "West", "South", "Midwest"];
 	const SEED_ORDER = [1, 16, 8, 9, 5, 12, 4, 13, 6, 11, 3, 14, 7, 10, 2, 15];
+
+	// Which four-team pod (0-3, the first-weekend site) and which half of a
+	// region (0-1, the Sweet 16 pairing) a seed line plays in.
+	const POD_OF = {};
+	SEED_ORDER.forEach((sd, i) => { POD_OF[sd] = Math.floor(i / 4); });
+
+	/* Games two teams have already played this season (regular season and
+	   conference tournament), from the log. */
+	function meetings(a, b) {
+		let n = 0;
+		for (const g of a.log || []) if (g.opp === b.name && g.stage !== "ncaa") n++;
+		return n;
+	}
+
+	function bracketPenalty(regions) {
+		let cost = 0;
+		for (const r of REGIONS) {
+			const list = regions[r];
+			for (let i = 0; i < list.length; i++) {
+				const A = list[i];
+				if (!A.team.conf || A.team.conf === "Independent") continue;
+				for (let j = i + 1; j < list.length; j++) {
+					const B = list[j];
+					if (B.team.conf !== A.team.conf) continue;
+					// Two top-four seeds from one league in one region.
+					if (A.seed <= 4 && B.seed <= 4) cost += 100;
+					if (POD_OF[A.seed] === POD_OF[B.seed]) {
+						// Could meet in the Round of 64 or 32. Worse still in
+						// the Round of 64, which a swap can almost always fix.
+						cost += A.seed + B.seed === 17 ? 40 : 10;
+					} else if (Math.floor(POD_OF[A.seed] / 2) === Math.floor(POD_OF[B.seed] / 2) &&
+						meetings(A.team, B.team) >= 3) {
+						cost += 10;
+					}
+				}
+			}
+		}
+		return cost;
+	}
+
+	function balanceBracket(regions) {
+		const at = (r, seed) => regions[r].findIndex((x) => x.seed === seed);
+		// Every legal move: one seed line, two regions trading their teams.
+		const moves = [];
+		for (let seed = 16; seed >= 1; seed--) {
+			for (let a = 0; a < REGIONS.length; a++) {
+				for (let b = a + 1; b < REGIONS.length; b++) {
+					if (at(REGIONS[a], seed) >= 0 && at(REGIONS[b], seed) >= 0) {
+						moves.push([seed, REGIONS[a], REGIONS[b]]);
+					}
+				}
+			}
+		}
+		const apply = (m) => {
+			const ia = at(m[1], m[0]);
+			const ib = at(m[2], m[0]);
+			const t = regions[m[1]][ia];
+			regions[m[1]][ia] = regions[m[2]][ib];
+			regions[m[2]][ib] = t;
+		};
+		let cost = bracketPenalty(regions);
+		for (let pass = 0; pass < 40 && cost > 0; pass++) {
+			let improved = false;
+			// Single trades first, lowest seed lines first.
+			for (const m of moves) {
+				apply(m);
+				const next = bracketPenalty(regions);
+				if (next < cost) { cost = next; improved = true; }
+				else apply(m);
+				if (cost === 0) break;
+			}
+			if (improved) continue;
+			/* No single trade helps. A conflict can still need two: the
+			   9 seed that should leave a Big Ten 8 seed's pod can only go
+			   where another Big Ten team sits until THAT one moves too. */
+			outer:
+			for (let i = 0; i < moves.length; i++) {
+				apply(moves[i]);
+				for (let j = i + 1; j < moves.length; j++) {
+					apply(moves[j]);
+					const next = bracketPenalty(regions);
+					if (next < cost) { cost = next; improved = true; break outer; }
+					apply(moves[j]);
+				}
+				apply(moves[i]);
+			}
+			if (!improved) break;
+		}
+		return cost;
+	}
 
 	/* 68 teams -> First Four -> a proper four-region, one-of-each-seed bracket. */
 	function simulate(teams, cfg, rng) {
@@ -173,38 +285,29 @@
 			const order = band % 2 === 0 ? REGIONS : REGIONS.slice().reverse();
 			regions[order[i % 4]].push({ seed, team });
 		});
-		/* The committee does not pair conference rivals in the first round.
-		   A pure S-curve did, about one game in twenty-four: an 8-9 between
-		   two Big Ten teams. Where the s seed and the (17-s) seed of a region
-		   share a league, the lower seed swaps regions with the same seed
-		   line elsewhere, provided that does not create the same problem. */
-		if (full) {
-			const at = (r, seed) => regions[r].find((x) => x.seed === seed);
-			const conflict = (r, seed) => {
-				const a = at(r, seed);
-				const b = at(r, 17 - seed);
-				return !!(a && b && a.team.conf && a.team.conf === b.team.conf);
-			};
-			for (let seed = 9; seed <= 16; seed++) {
-				for (const r of REGIONS) {
-					if (!conflict(r, seed)) continue;
-					for (const r2 of REGIONS) {
-						if (r2 === r) continue;
-						const mine = at(r, seed);
-						const theirs = at(r2, seed);
-						if (!mine || !theirs) continue;
-						mine.__r = r2;
-						theirs.__r = r;
-						regions[r][regions[r].indexOf(mine)] = theirs;
-						regions[r2][regions[r2].indexOf(theirs)] = mine;
-						if (!conflict(r, seed) && !conflict(r2, seed)) break;
-						regions[r][regions[r].indexOf(theirs)] = mine;
-						regions[r2][regions[r2].indexOf(mine)] = theirs;
-					}
-				}
-			}
-			for (const r of REGIONS) for (const x of regions[r]) delete x.__r;
-		}
+		/* THE BRACKETING PRINCIPLES.
+
+		   The committee's rules, not just the first-round one. The old pass
+		   only looked at a seed against its 17-minus partner, so a region
+		   could still hold an 8-9 winner's Round-of-32 game against a
+		   same-league 1 seed — 109 same-conference Round-of-32 games in 80
+		   seasons — and two of a league's top-four seeds shared a region
+		   210 times in the same 80. What the committee actually does:
+
+		   - the top four teams from a conference on the top four seed lines
+		     go to four different regions;
+		   - two teams from one conference do not meet before the Sweet 16
+		     (they are kept out of the same four-team pod), and two that have
+		     already met three or more times this season do not meet before
+		     the Elite Eight (kept out of the same half of the region);
+
+		   and it gets there by moving teams across regions WITHIN a seed
+		   line, so nobody's seed changes and the S-curve's balance holds.
+		   Scored as a penalty over the whole bracket and improved one
+		   same-line swap at a time, lowest seeds first (moving a 12 seed
+		   is the committee's first resort and moving a 1 seed its last),
+		   until no swap helps. */
+		if (full) balanceBracket(regions);
 		// A field too small to fill four regions leaves some empty; the round
 		// loop below already skips an unpaired team, but an empty region has no
 		// champion at all, so the Final Four has to be drawn from what is left.
@@ -381,5 +484,6 @@
 		return { field: pool, rounds, champion: champ };
 	}
 
-	global.Tournament = { apPoll, simulate, selectField, simulateNit, REGIONS, SEED_ORDER };
+	global.Tournament = { apPoll, simulate, selectField, simulateNit, REGIONS, SEED_ORDER,
+		bracketPenalty, balanceBracket };
 })(typeof window !== "undefined" ? window : self);
