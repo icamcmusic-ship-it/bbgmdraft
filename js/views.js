@@ -431,6 +431,8 @@
 		if (!openWhy) return;
 		openWhy.pop.remove();
 		openWhy.btn.setAttribute("aria-expanded", "false");
+		// Closed before the listeners went on: they must never go on.
+		clearTimeout(openWhy.timer);
 		document.removeEventListener("click", openWhy.away, true);
 		document.removeEventListener("keydown", openWhy.esc, true);
 		openWhy = null;
@@ -512,7 +514,7 @@
 			const away = () => closeWhy();
 			const esc = (ev) => { if (ev.key === "Escape") { closeWhy(); btn.focus(); } };
 			openWhy = { btn, pop, away, esc };
-			setTimeout(() => {
+			openWhy.timer = setTimeout(() => {
 				document.addEventListener("click", away, true);
 				document.addEventListener("keydown", esc, true);
 			}, 0);
@@ -3699,7 +3701,7 @@
 		exp.addEventListener("click", () => { A().exportUniverse(false); });
 		bar.appendChild(exp);
 		const expAll = el("button", null, "Export with class files");
-		expAll.disabled = !u.rows.length || !!u.running;
+		expAll.disabled = !u.rows.length || !!u.running || !!u.viewOnly;
 		expAll.title = "The same file with the class exports inlined, so the " +
 			"whole universe is one file to hand somebody. Larger.";
 		expAll.addEventListener("click", () => { A().exportUniverse(true); });
@@ -3709,7 +3711,7 @@
 		   does not, and it takes one array — so the whole universe is one
 		   file. See Engine.universePlayersFile. */
 		const expPlayers = el("button", null, "Export universe players (BBGM)");
-		expPlayers.disabled = !u.rows.length || !!u.running;
+		expPlayers.disabled = !u.rows.length || !!u.running || !!u.viewOnly;
 		expPlayers.title = "One BBGM players file for the whole universe: every " +
 			"class at its own draft year, pids renumbered across the world, the " +
 			"seasons each man actually played, and father/son links. Load it with " +

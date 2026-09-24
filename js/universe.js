@@ -2795,6 +2795,10 @@
 				settings: frozen, segments: [segment], coachTree: null, records: null,
 				engineRev: ENGINE_REV, cancelled: false, broken: null, tail: null,
 				links: {}, programs: {}, registry: {},
+				/* Stamped once, here, so two exports of one world are the
+				   same bytes; an import's replay passes the file's own. */
+				name: spec.name || "Universe",
+				createdAt: spec.createdAt || new Date().toISOString(),
 			};
 		}
 		const seedAt = (k) => seedFor(baseSeed, seedBase + k, runnable[k].season,
@@ -3216,6 +3220,7 @@
 			cfgs: {}, running: false, coachTree: null,
 			broken: json.broken || null, engineRev: json.engineRev || null,
 			viewOnly: true,
+			name: json.name || "Universe", createdAt: json.createdAt || null,
 		};
 	}
 

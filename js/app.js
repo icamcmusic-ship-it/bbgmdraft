@@ -251,6 +251,11 @@
 		const u = state.universe;
 		return {
 			rows: u.rows.slice(-PERSIST_ROWS),
+			/* Whether any bound below dropped something, so an export made
+			   after a reload can say its early history is missing. */
+			truncated: !!u.truncated || u.rows.length > PERSIST_ROWS ||
+				(u.threads || []).length > PERSIST_THREADS ||
+				(u.alumni || []).length > PERSIST_ALUMNI,
 			threads: (u.threads || []).slice(0, PERSIST_THREADS),
 			alumni: (u.alumni || []).slice(-PERSIST_ALUMNI),
 			baseSeed: u.baseSeed,
@@ -281,6 +286,11 @@
 			tail: u.running ? null : (u.tail || null),
 			engineRev: u.engineRev || null,
 			viewOnly: !!u.viewOnly,
+			name: u.name || null,
+			createdAt: u.createdAt || null,
+			/* The imported biographies: a rebuilt season without them draws
+			   different men. Held on state, not on the universe; see 6020. */
+			biography: state.universeBiography || null,
 		};
 	}
 
@@ -557,9 +567,15 @@
 					? saved.universe.tail : null,
 				engineRev: saved.universe.engineRev || null,
 				viewOnly: !!saved.universe.viewOnly,
+				truncated: !!saved.universe.truncated,
+				name: validString(saved.universe.name) || null,
+				createdAt: validString(saved.universe.createdAt) || null,
 				cfgs: {},
 				running: false,
 			};
+			state.universeBiography = saved.universe.biography &&
+				typeof saved.universe.biography === "object"
+				? saved.universe.biography : null;
 		}
 		if (validString(saved.team)) state.team = saved.team;
 		if (validString(saved.game)) state.game = saved.game;
@@ -614,7 +630,9 @@
 		}
 		const sort = validSortStack(saved.sort);
 		if (sort) state.sort = sort;
-		if (saved.pinned && typeof saved.pinned === "object") {
+		// indexSnapshot walks players, and a malformed pin must not stop startup.
+		if (saved.pinned && typeof saved.pinned === "object" &&
+			Array.isArray(saved.pinned.players)) {
 			state.pinned = indexSnapshot(saved.pinned);
 		}
 		// Never land on a tab that has nothing to show. A session saved before
@@ -681,6 +699,8 @@
 			   restore the settings panel without restoring what each file
 			   actually ran with. */
 			fileCfgs: JSON.parse(JSON.stringify(state.fileCfgs || {})),
+			// An input outside cfg too: the biographies decide who is drawn.
+			universeBiography: state.universeBiography || null,
 		};
 	}
 
@@ -702,6 +722,7 @@
 		if (Array.isArray(snap.flavorHistory)) state.flavorHistory = snap.flavorHistory;
 		state.fileCfgs = snap.fileCfgs && typeof snap.fileCfgs === "object"
 			? snap.fileCfgs : {};
+		if (snap.universeBiography !== undefined) state.universeBiography = snap.universeBiography;
 		// A restored class is a different class, so an editor open on somebody
 		// who may not be in it any more has to close.
 		state.editing = null;
@@ -3658,6 +3679,8 @@
 			   patch drawn for somebody else's third file to whatever loads
 			   into that slot now. */
 			state.fileCfgs = {};
+			// Biographies belong to the universe they were imported with.
+			state.universeBiography = null;
 			/* The undo history belongs to the classes it was made on. Undoing
 			   across a replacing load restored the old class's locks — keyed
 			   by pid — onto whoever holds those pids in the new one. */
@@ -5592,6 +5615,8 @@
 			settings: frozen,
 			baseSeed,
 			diags,
+			name: opts.identity ? opts.identity.name : null,
+			createdAt: opts.identity ? opts.identity.createdAt : null,
 			make: (s) => CFG.make(s),
 			runnerFor: (i) => state.runners[i],
 			store: (i, res) => { state.results[i] = res; },
@@ -5722,6 +5747,13 @@
 			setStatus("Build a timeline first.");
 			return;
 		}
+		/* A view has no class results of its own: embedding would write
+		   whatever standalone classes happen to be loaded. */
+		if (embedFiles && u.viewOnly) {
+			setStatus("This universe is a view — load its class files and import it " +
+				"again before exporting it with class files.", true);
+			return;
+		}
 		/* WHAT THE WORLD WAS BUILT UNDER, EVEN AFTER A RELOAD.
 
 		   The settings, the tail, the order and the registry are persisted
@@ -5769,7 +5801,10 @@
 			a.download = name;
 			a.click();
 			setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-			setStatus(note);
+			setStatus(note + (u.truncated ? " Warning: this timeline was reloaded " +
+				"from browser storage, which keeps only the latest seasons, so its " +
+				"early history is missing from the file. Re-run it for a full export." : ""),
+				!!u.truncated);
 		};
 		if (!embedFiles) {
 			done(new Blob([text], { type: "application/json" }), "universe.json",
@@ -5804,6 +5839,11 @@
 	function exportUniversePlayers() {
 		if (!state.universe.rows.length) {
 			setStatus("Build a timeline first.");
+			return;
+		}
+		if (state.universe.viewOnly) {
+			setStatus("This universe is a view — load its class files and import it " +
+				"again before exporting its players.", true);
 			return;
 		}
 		try {
@@ -6077,7 +6117,8 @@
 		const runStep = (i) => {
 			const s = steps[i];
 			const last = i === steps.length - 1;
-			const o = { settings: lockOn(s.settings), replaying: !last };
+			const o = { settings: lockOn(s.settings), replaying: !last,
+				identity: { name: json.name, createdAt: json.createdAt } };
 			if (s.kind === "extend") { o.extend = true; o.only = s.only; }
 			else if (s.kind === "resume") o.resumeFrom = s.from;
 			else if (s.only) o.only = s.only;
@@ -6274,9 +6315,13 @@
 				const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
 				if (!d) return;
 				e.preventDefault();
-				state.tab = TABS[(i + d + TABS.length) % TABS.length][0];
-				persist();
-				render();
+				// Through showTab, for the history entry, and past Compare
+				// when nothing is pinned, as the number keys already were.
+				let j = (i + d + TABS.length) % TABS.length;
+				if (TABS[j][0] === "compare" && !state.pinned) {
+					j = (j + d + TABS.length) % TABS.length;
+				}
+				showTab(TABS[j][0]);
 				const next = tabs.querySelector("button.active");
 				if (next) next.focus();
 			});
@@ -7371,7 +7416,8 @@
 		   retypes the whole column as text. Infinity has the same problem. */
 		if (typeof v === "number" && !Number.isFinite(v)) return "";
 		let s = v === undefined || v === null ? "" : String(v);
-		if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+		/* Strings only: a negative number is data, and "'-3" reads as text. */
+		if (typeof v !== "number" && /^[=+\-@\t\r]/.test(s)) s = "'" + s;
 		return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 	}
 
@@ -8939,7 +8985,16 @@
 		const f = e.target.files[0];
 		if (!f) return;
 		const r = new FileReader();
-		r.onload = () => importLocksCsv(String(r.result));
+		/* The same check the drag-and-drop path makes: with no class result
+		   planLockImport returned null and the import did nothing, silently. */
+		r.onload = () => {
+			const text = String(r.result);
+			if (!state.files.length) {
+				showError(new Error("Load a draft class first — a locks CSV is " +
+					"applied to the class on screen."));
+			} else if (state.results[state.active]) importLocksCsv(text);
+			else run(() => importLocksCsv(text));
+		};
 		r.readAsText(f);
 		e.target.value = "";
 	});
@@ -8949,6 +9004,9 @@
 		state.pinned = indexSnapshot(snapshot(res));
 		state.tab = "compare";
 		setStatus("Pinned seed " + res.seed + " as the comparison baseline.");
+		// Saved at once: the baseline is the one thing meant to outlive the class.
+		pushNav();
+		persist();
 		render();
 	});
 	/* The card layout follows the viewport in "auto" mode, so a rotation or a
@@ -9125,9 +9183,7 @@
 			const t = TABS[(Number(k) + 9) % 10];
 			if (t && (t[0] !== "compare" || state.pinned)) {
 				e.preventDefault();
-				state.tab = t[0];
-				persist();
-				render();
+				showTab(t[0]);
 			}
 			return;
 		}
