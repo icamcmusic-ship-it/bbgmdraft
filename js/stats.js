@@ -1168,7 +1168,8 @@
 		};
 		const roleOf = (m) => {
 			if (m.filler) return 1;
-			const year = m.player && m.player.classYear;
+			// "Redshirt Sophomore" takes the sophomore rate, not the senior one.
+			const year = m.player && String(m.player.classYear || "").replace(/^Redshirt /, "");
 			/* How deep the bench in front of him is. Counted as the talent
 			   surplus of the teammates who clear him, normalized so an
 			   ordinary roster (nobody clearly ahead) gives exactly 1 and a
@@ -3253,7 +3254,6 @@
 		// distinction matters only for overtime, which the log carries and
 		// these season averages do not.
 		box.pace = box.poss;
-		box.gameMinutes = gameMinutes;
 		return box;
 	}
 

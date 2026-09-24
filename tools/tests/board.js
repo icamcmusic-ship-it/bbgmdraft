@@ -92,7 +92,9 @@ module.exports = function (ok, V) {
 	{
 		let seasons = 0;
 		let split = 0;
-		for (let s = 0; s < 6; s++) {
+		// Ten seasons, not six: panels split in roughly a third of seasons,
+		// so six unanimous seasons in a row came up about one run in eight.
+		for (let s = 0; s < 10; s++) {
 			const res = global.Engine.run(V.syntheticClass(s + 41, 50),
 				global.Config.make({ seed: "coy" + s }));
 			const nat = (res.coachHonors || []).filter((h) =>
@@ -102,8 +104,8 @@ module.exports = function (ok, V) {
 			seasons++;
 			if (new Set(nat.map((h) => h.coach)).size > 1) split++;
 		}
-		ok("all three national coaching trophies are awarded", seasons >= 5,
-			seasons + " of 6 seasons");
+		ok("all three national coaching trophies are awarded", seasons >= 8,
+			seasons + " of 10 seasons");
 		ok("the three coaching panels do not always name the same man",
 			split >= 1, split + " of " + seasons + " seasons split");
 	}

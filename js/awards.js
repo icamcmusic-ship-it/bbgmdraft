@@ -419,8 +419,10 @@
 		[/^NCAA National Runner-Up$/, 11.5],
 		[/All-Region Team$/, 11],
 		[/^NCAA All-Tournament Team$/, 12],
-		[/Player of the Year$/, 13],
+		// Defensive first: "…Defensive Player of the Year" also ends in
+		// "Player of the Year" and would otherwise take the POY tier.
 		[/Defensive Player of the Year$/, 14],
+		[/Player of the Year$/, 13],
 		[/Freshman of the Year$/, 15],
 		[/Sixth Man of the Year$/, 16],
 		[/Most Improved Player$/, 17],
@@ -642,7 +644,7 @@
 				const r = rng.child(p.key + "|" + row.season);
 				const score = prod + resume + r.normal(0, 1.4 * noiseScale);
 				const def = fieldDefenseScore(L, defCal) + resume * 0.35 + r.normal(0, 1.2 * noiseScale);
-				const fresh = row.classYear === "Freshman";
+				const fresh = /^(Redshirt )?Freshman$/.test(row.classYear || "");
 				const out = [];
 				const bars = conf && confBars[conf] && teams[row.team] ? confBars[conf] : null;
 				if (bars) {
@@ -705,7 +707,7 @@
 			p.scoreResume = resumeScore(team);
 			p.scoreTotal = p.scoreProd + p.scoreResume + rng.normal(0, 1.4 * noiseScale);
 			p.scoreDefTotal = p.scoreDef + p.scoreResume * 0.35 + rng.normal(0, 1.2 * noiseScale);
-			p.isFreshman = p.classYear === "Freshman";
+			p.isFreshman = /^(Redshirt )?Freshman$/.test(p.classYear || "");
 			/* A newcomer ARRIVED from somewhere. The transfer layer also
 			   carries in-house moves — the walk-on who won a scholarship, the
 			   redshirt who came back — and those have `from: null`, so nine

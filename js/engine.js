@@ -1878,7 +1878,8 @@
 		{
 			name: "lost season", w: 1.2,
 			label: "coming back off a lost season",
-			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman",
+			// Not a Graduate: "Redshirt Graduate" is not a class year.
+			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman" && p.classYear !== "Graduate",
 			apply: (p) => {
 				markRedshirt(p, "medical redshirt");
 				p.lostSeason = true;
@@ -2073,7 +2074,8 @@
 		{
 			name: "academic redshirt", w: 0.9,
 			label: "ineligible as a freshman",
-			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman",
+			// Not a Graduate: "Redshirt Graduate" is not a class year.
+			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman" && p.classYear !== "Graduate",
 			apply: (p) => {
 				markRedshirt(p, "academic redshirt");
 				p.backstory = "was academically ineligible for his freshman season";
@@ -2894,8 +2896,9 @@
 			const hurt = r.random() < Math.min(0.95, 0.55 * rate * build);
 			const table = hurt ? INJURIES : ABSENCES;
 			const pickKind = r.weighted(table);
-			const games = Math.max(1, Math.round(
-				r.uniform(pickKind.lo, pickKind.hi + 0.999)));
+			// int(), not round(uniform(lo, hi + 0.999)): the rounding put a
+			// one-game suspension at two games about half the time.
+			const games = Math.max(1, r.int(pickKind.lo, pickKind.hi));
 			const out = Math.min(games, SEASON_GAMES - 5);
 			// A run of games for an injury; scattered nights for everything
 			// else, which is what "illness" and "a coach's decision" are.
@@ -3951,7 +3954,9 @@
 				p.draftEvent = {
 					kind: "fall",
 					from: i,
-					say: (moved) => "flagged at the combine and slid " + Text.plural(moved, "spot"),
+					say: (moved) => (moved > 0
+						? "flagged at the combine and slid " + Text.plural(moved, "spot")
+						: "was flagged at the combine"),
 					detail: r.pick([
 						"a stress reaction in the foot",
 						"a back issue teams could not agree on",
@@ -3973,7 +3978,9 @@
 				p.draftEvent = {
 					kind: "rise",
 					from: i,
-					say: (moved) => "rose " + Text.plural(-moved, "spot") + " on the workout circuit",
+					say: (moved) => (moved < 0
+						? "rose " + Text.plural(-moved, "spot") + " on the workout circuit"
+						: "impressed on the workout circuit"),
 					detail: r.pick([
 						"measured longer than his listed height",
 						"shot it far better in a gym than he had all season",
@@ -3995,7 +4002,9 @@
 				p.draftEvent = {
 					kind: "trade",
 					from: i,
-					say: (moved) => "a team moved up " + Text.plural(-moved, "spot") + " to take him",
+					say: (moved) => (moved < 0
+						? "a team moved up " + Text.plural(-moved, "spot") + " to take him"
+						: "a team traded up to take him"),
 					detail: "the pick cost a future first",
 				};
 				move(board, i, to);
@@ -4018,8 +4027,9 @@
 				p.draftEvent = {
 					kind: "reach",
 					from: i,
-					say: (moved) => "taken " + Text.plural(-moved, "spot") +
-						" earlier than the board had him",
+					say: (moved) => (moved < 0
+						? "taken " + Text.plural(-moved, "spot") + " earlier than the board had him"
+						: "taken on upside in the late first"),
 					/* Keyed to the player. Two of the three details were
 					   assertions about his age — "a 19-year-old", "the youngest
 					   player in the class" — drawn at random from a pool that
@@ -5991,7 +6001,9 @@
 		const tpa = Math.min(fga, rnd(tpaG * gp));
 		const fta = rnd(ftaG * gp);
 		let tp = Math.min(tpa, rnd(tpa * tpp));
-		let fg = Math.min(fga, Math.max(tp, rnd(fga * fgp)));
+		// Made twos can never exceed two-point attempts.
+		const fgCap = () => tp + (fga - tpa);
+		let fg = Math.min(fgCap(), Math.max(tp, rnd(fga * fgp)));
 		let ft = Math.min(fta, rnd(fta * ftp));
 		// Reconcile to the season scoring total: free throws absorb the
 		// rounding first (worth one point each), twos absorb the rest.
@@ -6000,8 +6012,13 @@
 		const ft2 = Math.max(0, Math.min(fta, ft + diff));
 		diff -= ft2 - ft;
 		ft = ft2;
-		const fg2 = Math.max(tp, Math.min(fga, fg + Math.trunc(diff / 2)));
+		const fg2 = Math.max(tp, Math.min(fgCap(), fg + Math.trunc(diff / 2)));
+		diff -= 2 * (fg2 - fg);
 		fg = fg2;
+		// Whatever the twos could not hold goes to threes: first missed threes
+		// become makes (three points each), then made twos become threes (one).
+		while (diff >= 3 && tp < tpa) { tp++; fg++; diff -= 3; }
+		while (diff > 0 && tp < tpa && fg > tp) { tp++; diff--; }
 		const pts = 2 * (fg - tp) + 3 * tp + ft;
 		const row = {
 			season: seasonYear,
