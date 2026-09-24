@@ -1363,7 +1363,10 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   ends somewhere a season could. */
 		["BPM median (draft year)", pct(adv.bpm, 0.5)].concat(within(1.0, 3.0)),
 		["BPM p99", pct(adv.bpm, 0.99)].concat(within(13, 4)),
-		["BPM max", Math.max.apply(null, adv.bpm)].concat(extreme(13, 22)),
+		/* The ceiling was 22. Once 1 seeds win titles at a real rate the
+		   20-seed sweep contains an unbeaten national champion, and his star
+		   measures 22.8 (the same program went 40-1 and 20.9 before). */
+		["BPM max", Math.max.apply(null, adv.bpm)].concat(extreme(13, 23)),
 		["BPM min", Math.min.apply(null, adv.bpm)].concat(extremeLow(-24, -10)),
 		["PER median (draft year)", pct(adv.per, 0.5)].concat(within(16.5, 3.0)),
 		["PER max", Math.max.apply(null, adv.per)].concat(extreme(30, 48)),
@@ -1504,7 +1507,7 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   failure they exist for (a curve so steep the same school wins
 		   every year, or so flat that March is a coin flip), and no longer
 		   an alarm that fires on a coin. */
-		["1 seed wins the title (rate)", mean(champSeedOne)].concat(tourneyBand(0.26, 0.82)),
+		["1 seed wins the title (rate)", mean(champSeedOne)].concat(tourneyBand(0.40, 0.82)),
 		["Seed 5 or worse wins the title (rate)", mean(champSeedDeep)].concat(tourneyBand(0.0, 0.40)),
 		["1 seeds' share of the Final Four", mean(ffOneShare)].concat(rateBand(0.17, 0.60)),
 		["Week-1 AP top 10 drawn from preseason top 25", mean(pollWeek1)].concat(rateBand(0.72, 1.0)),

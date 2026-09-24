@@ -469,6 +469,13 @@ async function gotoProspects(page) {
 		document.getElementById("grp-batch").open = true;
 		document.getElementById("batchN").value = "3";
 	});
+	/* What the app hands a batch, captured at each click: when the two
+	   batches disagree, the key that differs here is the cause. */
+	const snap = () => page.evaluate(() => { const st = window.App.state;
+		return JSON.stringify({ cfg: st.cfg, overrides: st.overrides, lastSeed: st.lastSeed,
+			pools: st.poolHistory, anomalies: st.anomalyHistory, flavors: st.flavorHistory,
+			active: st.active, busy: document.body.classList.contains("busy") }); });
+	const inputsWorker = await snap();
 	await page.locator("#btnBatch").click();
 	await page.waitForFunction(
 		() => document.getElementById("batchProgress").hidden === true,
@@ -493,6 +500,7 @@ async function gotoProspects(page) {
 	await page.evaluate(() => {
 		window.Worker = function () { throw new Error("workers are blocked"); };
 	});
+	const inputsInline = await snap();
 	await page.locator("#btnBatch").click();
 	await page.waitForFunction(
 		() => document.getElementById("batchProgress").hidden === true,
@@ -504,9 +512,38 @@ async function gotoProspects(page) {
 	// Both paths derive each class's seed from the batch seed the same way, so
 	// the same batch seed has to produce the same table either way.
 	const strip = (t) => t.replace(/batch seed [^\n]*/, "");
+	/* On a disagreement, say where: the first differing lines and both
+	   batch seeds. It failed once on a CI runner and never locally, and
+	   "worker and inline disagree" was all it left to go on. */
+	const batchDiffDetail = () => {
+		const A = strip(withWorker).split("\n");
+		const B = strip(inlineText).split("\n");
+		const out = [];
+		for (let k = 0; k < Math.max(A.length, B.length) && out.length < 6; k++) {
+			if (A[k] !== B[k]) out.push("line " + k + ": worker " + JSON.stringify(A[k]) +
+				" / inline " + JSON.stringify(B[k]));
+		}
+		const seedOf = (t) => (t.match(/batch seed:[^\n·]*/) || ["(none)"])[0];
+		const I = JSON.parse(inputsWorker), J = JSON.parse(inputsInline);
+		const inputDiff = [];
+		for (const k of Object.keys(Object.assign({}, I, J))) {
+			if (k === "cfg") {
+				for (const c of Object.keys(Object.assign({}, I.cfg, J.cfg))) {
+					if (JSON.stringify(I.cfg[c]) !== JSON.stringify(J.cfg[c])) {
+						inputDiff.push("cfg." + c + ": " + JSON.stringify(I.cfg[c]) + " -> " + JSON.stringify(J.cfg[c]));
+					}
+				}
+			} else if (JSON.stringify(I[k]) !== JSON.stringify(J[k])) {
+				inputDiff.push(k + ": " + JSON.stringify(I[k]).slice(0, 120) + " -> " + JSON.stringify(J[k]).slice(0, 120));
+			}
+		}
+		return "worker and inline disagree; seeds " + seedOf(withWorker) + " / " +
+			seedOf(inlineText) + "\n         inputs that differ: " +
+			(inputDiff.join("; ") || "none") + "\n         " + out.join("\n         ");
+	};
 	ok("the fallback produces the same batch the worker does",
 		strip(inlineText) === strip(withWorker),
-		strip(inlineText) === strip(withWorker) ? "" : "worker and inline disagree");
+		strip(inlineText) === strip(withWorker) ? "" : batchDiffDetail());
 
 	console.log("\nSettings coverage");
 	{
