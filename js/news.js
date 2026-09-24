@@ -6904,10 +6904,12 @@
 		   efficiency bar that the recalibration moved away from them is a
 		   condition with nowhere to land. Measured over twenty classes, the
 		   pair below fires in three of them, which is what a notebook item
-		   about deep-board producers should be: uncommon, not impossible. */
+		   about deep-board producers should be: uncommon, not impossible.
+		   (Eased to 11 and .550 when the March model changed the draw and
+		   the row went unseen in 30 classes.) */
 		find: (ctx) => {
 			const cand = ctx.ncaa.filter((p) => (p.boardRank || 999) > 60 &&
-				p.stats && p.stats.gp >= 20 && p.stats.ts >= 0.56 && p.stats.ppg >= 12);
+				p.stats && p.stats.gp >= 20 && p.stats.ts >= 0.55 && p.stats.ppg >= 11);
 			return cand.length >= 2 ? { list: cand.slice(0, 3) } : null;
 		},
 		slots: (f) => ({
