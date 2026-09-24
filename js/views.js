@@ -4868,7 +4868,7 @@
 			.map((k) => k + " " + byLine[k][0] + "-" + byLine[k][1]).join(" · "));
 		lines.push("First-round upsets (seed gap of five or more): " +
 			r64.filter((g) => g.winner.seed - (g.winner === g.a ? g.b : g.a).seed >= 5).length);
-		const strengthOf = (x) => (TS && TS.gameStrength ? TS.gameStrength(x.team.rating) : x.team.rating);
+		const strengthOf = (x) => (TS && TS.gameStrength ? TS.gameStrength(x.team.rating, true, Infinity) : x.team.rating);
 		const lineMean = (seed) => {
 			const v = [];
 			for (const r of Object.keys(t.regions)) for (const x of t.regions[r].seeds) if (x.seed === seed) v.push(strengthOf(x));

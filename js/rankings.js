@@ -248,11 +248,18 @@
 
 		/* Committee score, over the things a committee actually reads: NET
 		   rank, Q1 record, Q1+Q2 wins, bad losses, road record, stretch form,
-		   and winning percentage. No t.rating anywhere. */
+		   and winning percentage. No t.rating anywhere. The linear NET term
+		   (0.16 a rank) made No. 1 and No. 10 less than one Q1 win apart, so
+		   the top seed lines were ordered by schedule-driven Q1 counts; a
+		   real committee's top lines track the metrics closely. The
+		   exponential term is worth 12 points at No. 1, 3 at No. 12 and
+		   nothing by the bubble, so it orders the top without moving the
+		   cut line. */
 		for (const t of list) {
 			const q = t.quads;
 			t.committeeScore =
 				-0.16 * t.netRank +
+				12 * Math.exp(-(t.netRank - 1) / 8) +
 				1.35 * q.q1w + 0.45 * q.q2w -
 				1.2 * q.q3l - 2.0 * q.q4l +
 				0.55 * t.roadW +

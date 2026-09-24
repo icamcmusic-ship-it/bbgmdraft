@@ -1096,10 +1096,15 @@
 				sos: 0, games: 0, quadWins: 0,
 				log: [],
 				// How much better (or worse) this team is in March than in
-				// November. Young rosters improve most.
+				// November. Young rosters improve most. The spread was 4.5
+				// rating points, which moved a top-16 team's March strength
+				// 5.5 points on average from the season the committee seeded
+				// it on — the whole gap between a 1 and a 4 seed — so the
+				// bracket was seeded on a team that no longer existed and 1
+				// seeds won 44% of titles over 300 seasons (real ~62%).
 				// A staff that develops players is a team that is better in
 				// March than in November, which is what `form` means.
-				form: trng.normal(2.0, 4.5) + coach.dev + (coach.formAdj || 0),
+				form: trng.normal(2.0, 2.0) + coach.dev + (coach.formAdj || 0),
 				/* The season's shape, as distinct from its trend.
 
 				   `form` is a straight line from November to March, and a
@@ -1298,8 +1303,21 @@
 	   is the opposite failure. */
 	const TOP_KNEE = 50;
 	const TOP_STRETCH = 0.7;
-	function gameStrength(r) {
-		return r + TOP_STRETCH * Math.max(0, r - TOP_KNEE);
+	/* A second knee for the true elite, in the POSTSEASON and only against
+	   another team above TOP_KNEE — where titles are decided. The real
+	   curve keeps bending above the 1-seed line; applied to every game the
+	   same stretch turned cupcake games into 45-point blowouts and pushed
+	   the plus/minus and VORP maxima out of band, and applied against a
+	   16 seed it only ran up the score. ELITE_KNEE is about the average 1
+	   seed. With the narrower `form` spread and the committee's NET term,
+	   1 seeds win 60% of titles over 300 seasons (44% before) and 5 seeds
+	   or worse 8% (16%); 1v16, 5v12 and 8v9 are unchanged. */
+	const ELITE_KNEE = 56;
+	const ELITE_STRETCH = 1.0;
+	function gameStrength(r, postseason, vsRating) {
+		const base = r + TOP_STRETCH * Math.max(0, r - TOP_KNEE);
+		if (!postseason || !(vsRating > TOP_KNEE)) return base;
+		return base + ELITE_STRETCH * Math.max(0, r - ELITE_KNEE);
 	}
 
 	/* How fast a team plays, on the scoreboard.
@@ -1371,7 +1389,10 @@
 		const share = clamp(homeForA || 0, -1, 1);
 		const home = share === 0 ? 0
 			: share > 0 ? homeEdge(A) * share : -homeEdge(B) * Math.abs(share);
-		const edge = gameStrength(ratingOn(A, when)) - gameStrength(ratingOn(B, when)) + home;
+		const rA = ratingOn(A, when);
+		const rB = ratingOn(B, when);
+		const edge = gameStrength(rA, postseason, rB) -
+			gameStrength(rB, postseason, rA) + home;
 		// ~0.72 points of margin per rating point, plus real game-to-game noise.
 		const margin = edge * 0.72 + rng.normal(0, MARGIN_SD * noise);
 		// Tempo belongs to the fixture, not to one side of it: a game between
