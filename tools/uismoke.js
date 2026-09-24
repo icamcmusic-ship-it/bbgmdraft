@@ -504,9 +504,24 @@ async function gotoProspects(page) {
 	// Both paths derive each class's seed from the batch seed the same way, so
 	// the same batch seed has to produce the same table either way.
 	const strip = (t) => t.replace(/batch seed [^\n]*/, "");
+	/* On a disagreement, say where: the first differing lines and both
+	   batch seeds. It failed once on a CI runner and never locally, and
+	   "worker and inline disagree" was all it left to go on. */
+	const batchDiffDetail = () => {
+		const A = strip(withWorker).split("\n");
+		const B = strip(inlineText).split("\n");
+		const out = [];
+		for (let k = 0; k < Math.max(A.length, B.length) && out.length < 6; k++) {
+			if (A[k] !== B[k]) out.push("line " + k + ": worker " + JSON.stringify(A[k]) +
+				" / inline " + JSON.stringify(B[k]));
+		}
+		const seedOf = (t) => (t.match(/batch seed:[^\n·]*/) || ["(none)"])[0];
+		return "worker and inline disagree; seeds " + seedOf(withWorker) + " / " +
+			seedOf(inlineText) + "\n         " + out.join("\n         ");
+	};
 	ok("the fallback produces the same batch the worker does",
 		strip(inlineText) === strip(withWorker),
-		strip(inlineText) === strip(withWorker) ? "" : "worker and inline disagree");
+		strip(inlineText) === strip(withWorker) ? "" : batchDiffDetail());
 
 	console.log("\nSettings coverage");
 	{
