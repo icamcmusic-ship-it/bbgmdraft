@@ -1519,8 +1519,8 @@
 			n.querySelectorAll("input").forEach((i) => (i.disabled = !curve));
 		}
 		$("ovrModeHint").textContent = curve
-			? "Overalls are re-dealt along a configurable curve; the class can get better or worse."
-			: "Each prospect keeps the overall BBGM gave him. Only his build changes.";
+			? "Rebuild: overalls are re-dealt along a configurable curve, so the class can get better or worse."
+			: "Preserve: each prospect keeps the overall BBGM gave him (never inflated). Only his build changes.";
 		$("awardInteractionHint").textContent = awardInteractionHint();
 		/* The filter reads the labels and hints paintConfig just wrote, so it
 		   runs after it rather than only on a keystroke. */
@@ -1906,7 +1906,26 @@
 			const n = groupKeys(details).filter(
 				(k) => !isDefaultSetting(k, state.cfg[k])).length;
 			btn.hidden = n === 0;
-			btn.textContent = n ? "Reset " + n : "Reset group";
+			/* The count lives in the "changed: N" badge beside it, so the
+			   button itself stays a compact ↺ that still names the count to
+			   a screen reader. */
+			btn.textContent = "↺ Reset";
+			btn.setAttribute("aria-label", n
+				? "Reset " + n + " changed setting" + (n === 1 ? "" : "s") + " in " +
+					(details.querySelector("summary").dataset.label || "this group")
+				: "Reset group");
+			/* A "changed: N" badge beside it, so a collapsed group still
+			   says it has been touched. */
+			const summary = details.querySelector("summary");
+			let badge = summary && summary.querySelector(".grp-changed");
+			if (!badge && summary) {
+				badge = el("span", "grp-changed");
+				summary.insertBefore(badge, btn);
+			}
+			if (badge) {
+				badge.textContent = "changed: " + n;
+				badge.hidden = n === 0;
+			}
 		}
 	}
 
@@ -2837,7 +2856,7 @@
 		const anchor = $("settingSearchBox");
 		if (!anchor || $("settingTier")) return;
 		const ctl = el("div", "ctl");
-		const lbl = el("span", "lbl", "Show");
+		const lbl = el("span", "lbl", "Show settings about:");
 		lbl.id = "settingTierLabel";
 		ctl.appendChild(lbl);
 		const chips = el("div", "chips");
@@ -2845,6 +2864,10 @@
 		chips.setAttribute("role", "radiogroup");
 		chips.setAttribute("aria-labelledby", "settingTierLabel");
 		ctl.appendChild(chips);
+		// How many settings the chosen tier is hiding (applySettingFilter).
+		const hid = el("p", "unit");
+		hid.id = "settingTierHidden";
+		ctl.appendChild(hid);
 		anchor.parentNode.insertBefore(ctl, anchor);
 		paintSettingTier();
 	}
@@ -2903,6 +2926,14 @@
 			grp.classList.toggle("settings-hidden", ctls.length > 0 && any === 0);
 			if ((q || changedOnly) && any > 0) grp.open = true;
 		}
+		const hid = $("settingTierHidden");
+		if (hid) {
+			hid.textContent = tiered ? tiered + " hidden" : "";
+			hid.hidden = !tiered;
+		}
+		// The re-run fine print is for the Model view (or a focused control).
+		const aside = $("settings");
+		if (aside) aside.classList.toggle("tier-model", state.settingTier === "model");
 		if (note) {
 			note.textContent = (q || changedOnly)
 				? shown + " of " + total + " settings" +
@@ -4775,6 +4806,9 @@
 			const b = $(id);
 			if (b) b.setAttribute("aria-busy", "true");
 		}
+		// The view being rebuilt says so, and shows a thin bar (see CSS).
+		const v = $("view");
+		if (v) v.setAttribute("aria-busy", "true");
 	}
 
 	function endBusy() {
@@ -4797,6 +4831,8 @@
 			const b = $(id);
 			if (b) b.removeAttribute("aria-busy");
 		}
+		const v = $("view");
+		if (v) v.removeAttribute("aria-busy");
 	}
 
 	/* Show the busy state, let the browser paint it, then do the work.
@@ -4846,6 +4882,7 @@
 			clearTimeout(Number(pill.dataset.flashTimer));
 			delete pill.dataset.flashTimer;
 		}
+		paintExportLabel();
 		pill.dataset.label = "seed " + res.seed + " · " + classFingerprint(res);
 		pill.textContent = pill.dataset.label;
 		pill.dataset.seed = res.seed;
@@ -4860,6 +4897,22 @@
 				(res.phasesRun && res.phasesRun.length
 					? res.phasesRun.join(" → ") : "nothing to redo") + ")" : "") +
 			strangenessTip(res);
+	}
+
+	/* With several classes loaded, Export JSON names which one it writes. */
+	function paintExportLabel() {
+		const b = $("btnExport");
+		if (!b) return;
+		const f = activeFile();
+		if (state.files.length < 2 || !f) {
+			b.textContent = "Export JSON";
+			b.removeAttribute("title");
+			return;
+		}
+		const base = f.name.replace(/\.json(\.gz)?$|\.gz$/i, "");
+		const yr = f.data && f.data.startingSeason;
+		b.textContent = "Export " + (yr ? yr : base.length > 16 ? base.slice(0, 15) + "…" : base);
+		b.title = "Export " + base + "_customized.json" + (yr ? " (season " + yr + ")" : "");
 	}
 
 	/* Whether the config changed since the universe's last full run is
@@ -7607,6 +7660,7 @@
 	}
 
 	function render() {
+		paintExportLabel();
 		const tabs = $("tabs");
 		tabs.innerHTML = "";
 		tabs.setAttribute("role", "tablist");
@@ -10666,7 +10720,7 @@
 			"and re-runs the current settings over it."],
 		["4. Shape the class with the settings panel", "Each fieldset is one " +
 			"idea. Quality & depth shapes the overall curve (switch to " +
-			"“Rebuild the class curve” to unlock it). Builds decides how " +
+			"“Rebuild class curve” to unlock it). Builds decides how " +
 			"specialized players are, how many archetypes one class draws " +
 			"from, and its flavor — pick a flavor in the dropdown to keep " +
 			"the seed and change what kind of class it is. Class years, " +

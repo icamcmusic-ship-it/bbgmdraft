@@ -4803,7 +4803,8 @@
 			["edit", "Player Edit", "The full prospect table: filters, columns, locks and the editor"],
 		].forEach(([mode, label, title]) => {
 			const on = (st.boardMode || "board") === mode;
-			const b = el("button", on ? "on" : "", label);
+			// Player Edit carries a pencil so the power tool reads as one.
+			const b = el("button", on ? "on" : "", mode === "edit" ? "✎ " + label : label);
 			b.type = "button";
 			b.title = title;
 			b.setAttribute("role", "tab");
@@ -4826,8 +4827,16 @@
 		   clutter this reorganization exists to remove. */
 		if ((st.boardMode || "board") !== "edit") {
 			bar.appendChild(el("span", "pill", res.players.length + " prospects"));
+			/* The flavor pill read as a stray fragment ("a positionless
+			   class") with nothing to say what it was; it is labelled now and
+			   never truncated. */
 			if (res.flavor && res.flavor.label) {
-				bar.appendChild(el("span", "pill", res.flavor.label));
+				const notes = el("span", "classnotes");
+				notes.appendChild(el("span", "lbl", "Class notes:"));
+				const pill = el("span", "pill", res.flavor.label);
+				pill.title = "Class note: " + res.flavor.label;
+				notes.appendChild(pill);
+				bar.appendChild(notes);
 			}
 		}
 		view.appendChild(bar);
@@ -4839,56 +4848,70 @@
 	}
 
 	function viewBoard(view, res) {
+		/* One line up front; the provenance lives in a disclosure for
+		   whoever wants it. */
 		view.appendChild(el("p", "legendline",
+			"The board the simulated season implies, in mock-draft order. Click a name for his page."));
+		const about = el("details", "aboutboard");
+		about.appendChild(el("summary", null, "About this board"));
+		about.appendChild(el("p", "hint",
 			"The file already carries draft.round and draft.pick and the tool " +
 			"used them as nothing but a class-order proxy. This is the board the " +
 			"simulated season implies: a preseason ranking from ratings alone, " +
-			"then what the year actually showed. Click a name for his page."));
-		const cards = el("div", "cards");
-		const mk = (title, list, sign) => {
-			const box = el("div", "card");
-			box.appendChild(el("h4", null, title));
-			const noteBox = el("div", "note");
-			if (!list.length) {
-				noteBox.textContent = "nobody moved";
-			} else {
-				list.forEach((p, i) => {
-					if (i) noteBox.appendChild(document.createTextNode("\n"));
-					noteBox.appendChild(document.createTextNode(
-						(sign && p.stockMove > 0 ? "+" : "") + p.stockMove +
-						"  No. " + p.boardRank + "  "));
-					noteBox.appendChild(playerLink(p));
-					noteBox.appendChild(document.createTextNode(
-						" (" + (p.proClub || p.newCollege) + ")"));
+			"then what the year actually showed. Preseason is that ratings-only " +
+			"rank and ± is how far the season moved him."));
+		view.appendChild(about);
+
+		/* Risers and fallers as a small grid (move, pick, name, school)
+		   rather than monospace lines that wrapped mid-name. Each card
+		   copies its own list. */
+		const cards = el("div", "cards movercards");
+		const mk = (title, list) => {
+			const box = el("div", "card movers");
+			const head = el("div", "cardhead");
+			head.appendChild(el("h4", null, title));
+			if (list.length) {
+				const cp = el("button", "linkish", "Copy as markdown");
+				cp.type = "button";
+				cp.title = "Copy the " + title.toLowerCase() + " as a markdown table";
+				cp.addEventListener("click", () => {
+					A().copyText("**" + title + " — seed " + res.seed + "**\n\n" +
+						markdownTable(["±", "Board", "Player", "School / club"], list.map((p) => [
+							(p.stockMove > 0 ? "+" : "") + p.stockMove, p.boardRank, p.name,
+							p.proClub || p.newCollege])), cp, "Copy as markdown");
 				});
+				head.appendChild(cp);
 			}
-			box.appendChild(noteBox);
+			box.appendChild(head);
+			if (!list.length) {
+				box.appendChild(el("p", "hint", "nobody moved"));
+				return box;
+			}
+			const grid = el("div", "movergrid");
+			grid.setAttribute("role", "list");
+			for (const p of list) {
+				const row = el("div", "moverrow");
+				row.setAttribute("role", "listitem");
+				row.appendChild(el("span", "num " + (p.stockMove > 0 ? "up" : "down"),
+					(p.stockMove > 0 ? "+" : "") + p.stockMove));
+				row.appendChild(el("span", "num dim", "No. " + p.boardRank));
+				const nm = el("span", "ell");
+				nm.appendChild(playerLink(p));
+				row.appendChild(nm);
+				const sch = el("span", "ell dim", p.proClub || p.newCollege);
+				sch.title = p.proClub || p.newCollege;
+				row.appendChild(sch);
+				grid.appendChild(row);
+			}
+			box.appendChild(grid);
 			return box;
 		};
-		cards.appendChild(mk("Risers", res.risers || [], true));
-		cards.appendChild(mk("Fallers", res.fallers || [], true));
+		cards.appendChild(mk("Risers", res.risers || []));
+		cards.appendChild(mk("Fallers", res.fallers || []));
 		view.appendChild(cards);
 
 		const BOARD_HEADS = ["Board", "Rd", "Pick", "Player", "Pos", "Year", "Ovr", "Pot",
 			"School / club", "Preseason", "±", "PPG", "Honors"];
-		/* Copy as markdown, beside the other copy actions in the tool: a
-		   draft board's natural destination is a forum post. */
-		const bar = el("div", "filters");
-		const md = el("button", null, "Copy as markdown");
-		md.title = "Copy the board as a markdown table";
-		md.addEventListener("click", () => {
-			const rows = (res.board || []).map((p) => [
-				p.boardRank, p.mockRound || "", p.mockPick || "", p.name, p.newPos,
-				p.classYear, p.newOvr, p.newPot, p.proClub || p.newCollege,
-				p.preseasonRank, p.stockMove === 0 ? "" : (p.stockMove > 0 ? "+" : "") + p.stockMove,
-				p.stats ? n1(p.stats.ppg) : "", (p.awards || []).slice(0, 3).join("; "),
-			]);
-			A().copyText("**Draft board — seed " + res.seed +
-				(res.flavor && res.flavor.label ? ", " + res.flavor.label : "") + "**\n\n" +
-				markdownTable(BOARD_HEADS, rows), md, "Copy as markdown");
-		});
-		bar.appendChild(md);
-		view.appendChild(bar);
 		if (!(res.board || []).length) {
 			const box = el("div", "card empty-state");
 			box.appendChild(el("h4", null, "No board to show"));
@@ -4902,9 +4925,10 @@
 		   from Duke", "sort by PPG" each meant going to Player Edit. The
 		   filter lives here (not in the prospect table's filter) because the
 		   two views answer different questions and one should not quietly
-		   narrow the other. */
+		   narrow the other. It sits directly above the table and sticks
+		   while the page scrolls the table under it. */
 		const bf = boardFilter;
-		const fbar = el("div", "filters");
+		const fbar = el("div", "filters boardfilters");
 		const q = searchInput("Find a prospect, school or club…", "Search the board",
 			() => bf.q, (v) => { bf.q = v; });
 		fbar.appendChild(q);
@@ -4924,6 +4948,25 @@
 			reset.addEventListener("click", () => { bf.sort = null; A().render(); });
 			fbar.appendChild(reset);
 		}
+		// "12 of 70" — filled in once the list is filtered, below.
+		const count = el("span", "unit boardcount");
+		fbar.appendChild(count);
+		/* Copy as markdown, beside the other copy actions in the tool: a
+		   draft board's natural destination is a forum post. */
+		const md = el("button", null, "Copy as markdown");
+		md.title = "Copy the board as a markdown table";
+		md.addEventListener("click", () => {
+			const rows = (res.board || []).map((p) => [
+				p.boardRank, p.mockRound || "", p.mockPick || "", p.name, p.newPos,
+				p.classYear, p.newOvr, p.newPot, p.proClub || p.newCollege,
+				p.preseasonRank, p.stockMove === 0 ? "" : (p.stockMove > 0 ? "+" : "") + p.stockMove,
+				p.stats ? n1(p.stats.ppg) : "", (p.awards || []).slice(0, 3).join("; "),
+			]);
+			A().copyText("**Draft board — seed " + res.seed +
+				(res.flavor && res.flavor.label ? ", " + res.flavor.label : "") + "**\n\n" +
+				markdownTable(BOARD_HEADS, rows), md, "Copy as markdown");
+		});
+		fbar.appendChild(md);
 		view.appendChild(fbar);
 
 		/* One sort value per heading. Pick is the overall mock slot
@@ -4947,6 +4990,8 @@
 			return (p.name + " " + (p.newCollege || "") + " " + (p.proClub || "") + " " +
 				(p.archetype || "")).toLowerCase().indexOf(needle) !== -1;
 		});
+		const total = (res.board || []).length;
+		count.textContent = list.length === total ? total + " prospects" : list.length + " of " + total;
 		if (bf.sort) {
 			const get = BOARD_SORT[bf.sort.key];
 			if (get) {
@@ -4956,7 +5001,7 @@
 		}
 
 		const wrap = el("div", "scroll");
-		const table = el("table");
+		const table = el("table", "boardtable");
 		const thead = el("thead");
 		const hr = el("tr");
 		for (const h of BOARD_HEADS) {
@@ -5061,6 +5106,15 @@
 			const nameTd = el("td", "sticky");
 			nameTd.appendChild(playerLink(p));
 			nameTd.appendChild(whyButton(p, res));
+			/* Player Edit was a mode toggle nobody found; each row now
+			   offers the editor for its own prospect. */
+			const ed = el("button", "rowedit linky", "✎");
+			ed.appendChild(el("span", "roweditword", " Edit"));
+			ed.type = "button";
+			ed.title = "Edit " + p.name + " in Player Edit";
+			ed.setAttribute("aria-label", "Edit " + p.name);
+			ed.addEventListener("click", () => { A().revealPlayer(p); });
+			nameTd.appendChild(ed);
 			tr.appendChild(nameTd);
 			tr.appendChild(el("td", null, p.newPos));
 			tr.appendChild(el("td", null, p.classYear));
@@ -5076,17 +5130,45 @@
 				p.stockMove === 0 ? "—" : (p.stockMove > 0 ? "+" : "") + p.stockMove));
 			tr.appendChild(mv);
 			tr.appendChild(el("td", "num", p.stats ? n1(p.stats.ppg) : "—"));
-			tr.appendChild(wrapCell(p.stats
-				? (p.awards || []).slice(0, 3).join("; ")
-				: "did not play"));
+			tr.appendChild(honorsCell(p));
 			tb.appendChild(tr);
 		}
 		table.appendChild(tb);
 		wrap.appendChild(table);
 		view.appendChild(wrap);
 		if (!list.length) {
-			view.appendChild(el("p", "hint", "No prospect on the board matches that search."));
+			const none = el("p", "hint boardnone", "No prospect on the board matches that search. ");
+			const clr = el("button", "chip", "Clear filters");
+			clr.type = "button";
+			clr.addEventListener("click", () => { bf.q = ""; bf.pos = ""; A().render(); });
+			none.appendChild(clr);
+			view.appendChild(none);
 		}
+	}
+
+	/* The Honors cell: a count badge and the list clamped to two lines;
+	   the badge expands the cell when there is more than fits. */
+	function honorsCell(p) {
+		if (!p.stats) return wrapCell("did not play");
+		const aw = p.awards || [];
+		const td = el("td", "wrap honors");
+		if (!aw.length) return td;
+		const inner = el("div", "clamp", aw.join("; "));
+		inner.title = aw.join("\n");
+		if (aw.length > 2) {
+			const badge = el("button", "honorcount", String(aw.length));
+			badge.type = "button";
+			badge.title = "Show all " + aw.length + " honors";
+			badge.setAttribute("aria-expanded", "false");
+			badge.addEventListener("click", (e) => {
+				e.stopPropagation();
+				const open = inner.classList.toggle("clamp");
+				badge.setAttribute("aria-expanded", open ? "false" : "true");
+			});
+			td.appendChild(badge);
+		}
+		td.appendChild(inner);
+		return td;
 	}
 	// Disclosure states that should survive a re-render but are not settings.
 	const uiMemo = { classInfoOpen: false, filtersOpen: false };

@@ -2330,6 +2330,12 @@ async function gotoProspects(page) {
 		await page.waitForSelector("table tbody tr", { timeout: 60000 });
 		ok("two classes loaded", (await page.evaluate(() =>
 			window.App.state.files.length)) === 2);
+		const exp = await page.evaluate(() => {
+			const b = document.getElementById("btnExport");
+			return { text: b.textContent, title: b.title };
+		});
+		ok("with several classes loaded, Export names which one it writes",
+			exp.text !== "Export JSON" && /_customized\.json/.test(exp.title), JSON.stringify(exp));
 		ok("the per-file checkbox appears with more than one file loaded",
 			await page.locator("#randomPerFileRow").isVisible());
 
@@ -2454,7 +2460,7 @@ async function gotoProspects(page) {
 		// The group's own reset appears, names how many, and puts them back.
 		const resetBefore = await page.evaluate(() => {
 			const b = document.querySelector("#grp-builds summary .grp-reset");
-			return b ? { hidden: b.hidden, text: b.textContent } : null;
+			return b ? { hidden: b.hidden, text: b.getAttribute("aria-label") || b.textContent } : null;
 		});
 		ok("a group with a modified setting offers a reset",
 			!!resetBefore && !resetBefore.hidden && /\d/.test(resetBefore.text),
@@ -3003,6 +3009,134 @@ async function gotoProspects(page) {
 		}));
 		await page.locator("[data-play-quit]").click();
 		await page.waitForTimeout(150);
+	}
+
+	/* ---------------------------------------------------------------------
+	   THE DRAFT BOARD AND SETTINGS PANEL, audit section 2 (UI 9-18, 20;
+	   QOL 8, 10): short intro, labelled class notes, mover grids, the
+	   sticky filter bar with its count, the honors badge, the per-row Edit,
+	   the tier label and hidden count, quiet re-run costs, the short
+	   #ovrMode options, the "changed: N" badge and the busy bar. */
+	console.log("\nThe draft board and settings, audit section 2");
+	{
+		await page.goto(base);
+		await page.evaluate(() => localStorage.clear());
+		await page.goto(base);
+		await page.setInputFiles("#file", fixture);
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		await page.waitForTimeout(400);
+		const board = await page.evaluate(() => {
+			const v = document.getElementById("view");
+			const intro = v.querySelector("p.legendline");
+			const fb = v.querySelector(".boardfilters");
+			const scroll = v.querySelector(".scroll");
+			const cards = v.querySelector(".cards.movercards");
+			const flavor = window.App.state.results[window.App.state.active].flavor;
+			return {
+				intro: intro ? intro.textContent : "",
+				about: !!v.querySelector("details.aboutboard summary"),
+				notes: v.querySelector(".classnotes .lbl") ? v.querySelector(".classnotes .lbl").textContent : null,
+				hasFlavor: !!(flavor && flavor.label),
+				grids: v.querySelectorAll(".movergrid").length,
+				mono: cards ? getComputedStyle(cards.querySelector(".card")).fontFamily : "",
+				cardCopy: v.querySelectorAll(".cardhead button").length,
+				order: !!(cards && fb && scroll &&
+					(cards.compareDocumentPosition(fb) & 4) && (fb.compareDocumentPosition(scroll) & 4)),
+				sticky: fb ? getComputedStyle(fb).position : "",
+				count: (v.querySelector(".boardcount") || {}).textContent,
+				honors: v.querySelectorAll("td.honors .clamp").length,
+				edits: v.querySelectorAll("button.rowedit").length,
+			};
+		});
+		ok("the board intro is one sentence, with the rest behind \"About this board\"",
+			board.intro.length < 110 && board.about, board.intro);
+		ok("the class notes are labelled", !board.hasFlavor || board.notes === "Class notes:",
+			String(board.notes));
+		ok("risers and fallers are small grids, each with its own copy button",
+			board.grids === 2 && board.cardCopy >= 1, JSON.stringify(board));
+		ok("the search and position filter sit right above the table and stick",
+			board.order && board.sticky === "sticky", JSON.stringify(board));
+		ok("the filter bar counts what it shows", board.count === "70 prospects", board.count);
+		ok("honors are clamped to two lines", board.honors > 0, String(board.honors));
+		ok("each board row offers Edit", board.edits === 70, String(board.edits));
+
+		await page.locator(".boardfilters input[type=search]").fill("zzzz-nobody");
+		await page.waitForTimeout(400);
+		const none = await page.evaluate(() => ({
+			count: (document.querySelector(".boardcount") || {}).textContent,
+			clear: !!document.querySelector(".boardnone button"),
+		}));
+		ok("an empty search reads \"0 of 70\" and offers to clear", none.count === "0 of 70" && none.clear,
+			JSON.stringify(none));
+		await page.locator(".boardnone button").click();
+		await page.waitForTimeout(300);
+		ok("clearing the board filters brings every row back",
+			(await page.locator(".boardcount").textContent()) === "70 prospects");
+
+		const firstKey = await page.evaluate(() =>
+			document.querySelector("#view tbody tr[data-pkey]").dataset.pkey);
+		await page.locator("#view tbody tr[data-pkey] button.rowedit").first().click();
+		await page.waitForTimeout(400);
+		const ed = await page.evaluate(() => ({
+			mode: window.App.state.boardMode, editing: window.App.state.editing,
+			drawer: !!document.querySelector(".editor"),
+		}));
+		ok("a row's Edit opens Player Edit on that prospect",
+			ed.mode === "edit" && ed.editing === firstKey && ed.drawer, JSON.stringify(ed));
+		await page.evaluate(() => {
+			window.App.state.editing = null;
+			window.App.state.boardMode = "board";
+			window.App.render();
+		});
+
+		// Settings panel.
+		await page.locator("#settingTier button", { hasText: "Shape" }).click();
+		await page.waitForTimeout(150);
+		const tier = await page.evaluate(() => {
+			const r = document.querySelector("#settings .ctl .rerun");
+			return {
+				label: document.getElementById("settingTierLabel").textContent,
+				hidden: document.getElementById("settingTierHidden").textContent,
+				rerun: r ? getComputedStyle(r).display : "none",
+			};
+		});
+		ok("the tier chips are labelled and say how many settings they hide",
+			tier.label === "Show settings about:" && /^\d+ hidden$/.test(tier.hidden), JSON.stringify(tier));
+		ok("outside the Model view the re-run cost is hidden", tier.rerun === "none", tier.rerun);
+		await page.locator("#settingTier button", { hasText: "Model" }).click();
+		await page.waitForTimeout(150);
+		ok("the Model view shows the re-run cost", await page.evaluate(() => {
+			const r = document.querySelector("#settings .ctl .rerun");
+			return !!r && getComputedStyle(r).display !== "none";
+		}));
+		ok("#ovrMode options are short enough not to clip", await page.evaluate(() =>
+			[...document.querySelectorAll("#ovrMode option")].every((o) => o.textContent.length <= 20)));
+
+		await page.evaluate(() => {
+			const s = document.getElementById("specialization");
+			s.value = String(Number(s.max));
+			s.dispatchEvent(new Event("input", { bubbles: true }));
+			s.dispatchEvent(new Event("change", { bubbles: true }));
+		});
+		await page.waitForTimeout(300);
+		const badge = await page.evaluate(() => {
+			const b = document.querySelector("#grp-builds summary .grp-changed");
+			const o = document.querySelector("#grp-years summary .grp-changed");
+			return { text: b && b.textContent, hidden: b && b.hidden, other: !o || o.hidden };
+		});
+		ok("a modified group's summary says \"changed: N\"",
+			badge.text === "changed: 1" && !badge.hidden && badge.other, JSON.stringify(badge));
+
+		const busy = await page.evaluate(() => new Promise((resolve) => {
+			window.App.run();
+			const during = document.getElementById("view").getAttribute("aria-busy");
+			setTimeout(() => resolve({ during,
+				after: document.getElementById("view").getAttribute("aria-busy") }), 1500);
+		}));
+		ok("a re-run marks #view aria-busy and clears it after",
+			busy.during === "true" && busy.after === null, JSON.stringify(busy));
+		ok("with one class loaded the export button just says Export JSON",
+			(await page.locator("#btnExport").textContent()) === "Export JSON");
 	}
 
 	console.log("\nNo errors");
