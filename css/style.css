@@ -1463,3 +1463,17 @@ table.proghist td.confmove { box-shadow: inset 3px 0 0 var(--bad); }
 .peoplegrid .pschool { display: block; font-size: 11px; }
 .peoplegrid td.pdetail { color: var(--dim); font-size: 12px; white-space: normal; }
 table.proghist tr.now td:first-child { box-shadow: inset 3px 0 0 var(--accent); font-weight: 600; color: var(--accent); }
+
+/* The replay layer: bingo card, mutators, achievements ledger, toasts. */
+.mutatorlist { display: grid; gap: 3px; }
+.bingogrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; max-width: 420px; margin: 6px 0; }
+.bingosq { border: 1px solid var(--accent-2); border-radius: 3px; padding: 8px 4px; min-height: 48px;
+	font-size: 12px; text-align: center; display: flex; align-items: center; justify-content: center; }
+.bingosq.on { background: var(--accent-2); color: var(--panel-2); font-weight: 600; }
+ul.ledger { list-style: none; padding: 0; margin: 4px 0; }
+ul.ledger li { padding: 2px 0; }
+ul.ledger li.missing { opacity: 0.55; }
+.replaytoasts { position: fixed; right: 16px; bottom: 16px; z-index: 1000; display: grid; gap: 6px;
+	max-width: min(360px, calc(100vw - 32px)); pointer-events: none; }
+.replaytoast { background: var(--panel-2); color: var(--text); border: 1px solid var(--accent-2);
+	border-radius: 4px; padding: 8px 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }

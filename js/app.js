@@ -16,6 +16,8 @@
 	const STORE_KEY = "bbgm-draft-workshop/v1";
 
 	const state = {
+		// Active mutators (js/replaymeta.js), applied in effectiveCfg.
+		mutators: [],
 		mergeIndices: null,
 		/* The league export the loaded classes came out of, if any. Kept in
 		   memory (never persisted — it is megabytes) so a merge back into it
@@ -343,6 +345,7 @@
 			poolHistory: state.poolHistory,
 			anomalyHistory: state.anomalyHistory,
 			flavorHistory: state.flavorHistory,
+			mutators: state.mutators,
 			presetName: state.presetName,
 			presetDirty: state.presetDirty,
 			customPresets: state.customPresets,
@@ -487,6 +490,7 @@
 			state.flavorHistory = saved.flavorHistory
 				.filter((n) => typeof n === "string");
 		}
+		state.mutators = global.ReplayMeta.cleanMutators(saved.mutators);
 		if (validString(saved.presetName)) state.presetName = saved.presetName;
 		state.presetDirty = !!saved.presetDirty;
 		if (saved.customPresets && typeof saved.customPresets === "object" &&
@@ -1443,6 +1447,7 @@
 		paintModifiedMarkerFor("varySize", state.cfg.varySize);
 		paintModifiedMarkerFor("universe", state.cfg.universe);
 		paintModifiedMarkerFor("narrative", state.cfg.narrative);
+		paintFlavorOptions();
 		$("flavorHint").value = state.cfg.flavorHint || "";
 		paintModifiedMarkerFor("flavorHint", state.cfg.flavorHint || "");
 		$("ovrMode").value = state.cfg.ovrMode;
@@ -1507,15 +1512,20 @@
 		const sel = $("era");
 		if (!sel) return;
 		const eras = global.Calibration.ERAS;
-		if (!sel.options.length) {
-			// An era the model is not calibrated to is not a choice: see
-			// `unfitted` in js/calibration.js.
-			for (const name of global.Calibration.fittedEras()) {
-				sel.appendChild(new Option(eras[name].label, name));
+		/* An era the model is not calibrated to is not a choice (see
+		   `unfitted` in js/calibration.js) — unless an achievement unlocked
+		   it. Rebuilt each paint, since an unlock can land mid-session. */
+		const names = pickableEras();
+		if (Array.from(sel.options).map((o) => o.value).join("|") !== names.join("|")) {
+			sel.innerHTML = "";
+			for (const name of names) {
+				sel.appendChild(new Option(eras[name].label +
+					(eras[name].unfitted ? " — unlocked, uncalibrated" : ""), name));
 			}
 		}
 		sel.value = state.cfg.era;
 		const info = eras[state.cfg.era] || eras[global.Calibration.DEFAULT_ERA];
+		paintShowAll(sel);
 		$("eraNote").textContent = info.note + "  Target: " + info.team.pts +
 			" team points per game at offensive rating " + info.rotation.ortg + ".";
 	}
@@ -2227,6 +2237,306 @@
 		}, 0);
 	}
 
+	/* CHAOS DRAFT (audit 4.14): Surprise me with an anomaly shortlist, the
+	   weirdest candidates on it picked automatically. The picks go through
+	   the same anomalyPicks path the shortlist row writes. */
+	function chaosDraft() {
+		if (!state.files.length) { setStatus("Load a class file first."); return; }
+		pushUndo("chaos draft");
+		randomizeSettings("wide", null, true);
+		state.cfg.anomalyChoices = Math.max(4, state.cfg.anomalyChoices || 0);
+		const before = state.results[state.active];
+		setTimeout(() => {
+			reroll({ noUndo: true });
+			let tries = 0;
+			const wait = () => {
+				const res = state.results[state.active];
+				if ((busyDepth > 0 || !res || res === before) && tries++ < 200) {
+					setTimeout(wait, 50);
+					return;
+				}
+				const shortlist = res && res.surprises && res.surprises.shortlist;
+				if (!shortlist || !shortlist.length) return;
+				// The shortlist is the class's own count plus the extra choices.
+				const n = Math.max(1, shortlist.length - (state.cfg.anomalyChoices || 0));
+				state.cfg.anomalyPicks = global.ReplayMeta.chaosPicks(
+					shortlist, n, global.Engine.SURPRISES);
+				paintConfig();
+				persist();
+				run(() => {
+					const now = state.results[state.active];
+					if (!now) return;
+					const list = (now.surprises || []).map((x) => x.label).join("; ");
+					setStatus("Chaos draft: " + className(now) + (list ? " · " + list : "") +
+						" · Ctrl+Z takes all of it back.", true);
+				});
+			};
+			wait();
+		}, 0);
+	}
+
+	/* ------------------------------------------------ the replay layer */
+
+	/* Bingo card, achievements ledger and the "show everything" override
+	   (audit 4.6, 4.10, 4.11). Its own storage key: none of it is a class
+	   setting, and a shared link must not carry anybody's ledger. */
+	const REPLAY_KEY = "bbgm-draft-workshop/replay";
+	let replayState = null;
+	let replayLastKey = null;
+
+	function replayStore() {
+		if (replayState) return replayState;
+		const RM = global.ReplayMeta;
+		let saved = null;
+		try { saved = JSON.parse(localStorage.getItem(REPLAY_KEY) || "null"); } catch (e) { saved = null; }
+		const s = saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+		const ledger = {};
+		if (s.ledger && typeof s.ledger === "object") {
+			for (const id of Object.keys(s.ledger)) {
+				const e = s.ledger[id];
+				if (RM.ACH_BY_ID[id] && e && typeof e === "object") {
+					ledger[id] = { at: String(e.at || ""), seed: String(e.seed || ""),
+						link: typeof e.link === "string" ? e.link : "", name: String(e.name || "") };
+				}
+			}
+		}
+		replayState = {
+			card: RM.validCard(s.card) || RM.drawCard(mintRandomSeed()),
+			ledger,
+			// Gated by default; one tick shows every era and flavor.
+			showAll: !!s.showAll,
+		};
+		return replayState;
+	}
+
+	function saveReplay() {
+		try { localStorage.setItem(REPLAY_KEY, JSON.stringify(replayStore())); } catch (e) { /* storage off: the session keeps it */ }
+	}
+
+	function replayUnlocked(kind, name) {
+		const r = replayStore();
+		return global.ReplayMeta.isUnlocked(kind, name, r.ledger, r.showAll);
+	}
+
+	// The flavor dropdown, minus locked flavors (the one in use always shows).
+	function paintFlavorOptions() {
+		const fh = $("flavorHint");
+		if (!fh) return;
+		const cur = state.cfg.flavorHint || "";
+		const names = RB.CLASS_FLAVORS
+			.filter((f) => f.name === cur || replayUnlocked("flavor", f.name));
+		const sig = names.map((f) => f.name).join("|");
+		if (fh.dataset.sig === sig) return;
+		fh.dataset.sig = sig;
+		fh.innerHTML = "";
+		fh.appendChild(new Option("draw one at random", ""));
+		for (const f of names) fh.appendChild(new Option(f.label || f.name, f.name));
+		fh.value = cur;
+	}
+
+	/* A toast of its own, separate from the status line (which other code
+	   writes constantly). Achievements call it once each, on unlock. */
+	function replayToast(text) {
+		let box = $("replayToasts");
+		if (!box) {
+			box = el("div", "replaytoasts");
+			box.id = "replayToasts";
+			box.setAttribute("role", "status");
+			box.setAttribute("aria-live", "polite");
+			document.body.appendChild(box);
+		}
+		const t = el("div", "replaytoast", text);
+		box.appendChild(t);
+		setTimeout(() => t.remove(), 5000);
+	}
+
+	// A link that replays this result: its settings, its drawn seed, no locks.
+	function replayLinkFor(res) {
+		const p = encodeConfig(true);
+		delete p.overrides;
+		delete p.fp;
+		if (res && res.seed) p.seed = String(res.seed);
+		return "#c=" + encodeURIComponent(JSON.stringify(p));
+	}
+
+	function earn(r, id, res, fresh) {
+		if (r.ledger[id]) return;
+		r.ledger[id] = { at: new Date().toISOString().slice(0, 10),
+			seed: res ? String(res.seed) : "", link: res ? replayLinkFor(res) : "",
+			name: res ? className(res) : "" };
+		fresh.push(id);
+	}
+
+	/* After every run: mark the bingo card and record firsts. Keyed by seed
+	   and fingerprint, so a repaint of the same class does nothing twice. */
+	function replayAfterRun(res) {
+		if (!res || !global.ReplayMeta) return;
+		const RM = global.ReplayMeta;
+		const key = res.seed + ":" + classFingerprint(res);
+		if (key === replayLastKey) return;
+		replayLastKey = key;
+		const r = replayStore();
+		const sc = global.Engine.strangeness(res);
+		const fresh = [];
+		const linesBefore = RM.cardLines(r.card);
+		const marked = RM.markCard(r.card, sc && sc.kinds);
+		for (const id of RM.detect(res, sc)) earn(r, id, res, fresh);
+		if (RM.cardLines(r.card) > 0) earn(r, "bingo-line", res, fresh);
+		if (RM.cardFull(r.card)) earn(r, "bingo-full", res, fresh);
+		if (!marked.length && !fresh.length) return;
+		if (RM.cardLines(r.card) > linesBefore) replayToast("Bingo! A line on card " + r.card.seed + ".");
+		for (const id of fresh) {
+			const a = RM.ACH_BY_ID[id];
+			const opens = RM.UNLOCKS.filter((u) => u.requires === id)
+				.map((u) => (u.kind === "era"
+					? global.Calibration.ERAS[u.name].label + " era"
+					: u.name + " flavor"));
+			replayToast("Achievement: " + a.label + " — " + a.desc +
+				(opens.length && !r.showAll ? ". Unlocked: " + opens.join(", ") : ""));
+		}
+		saveReplay();
+		if (fresh.length) { paintEra(); paintFlavorOptions(); }
+	}
+
+	function replayDialog() {
+		const RM = global.ReplayMeta;
+		const r = replayStore();
+		const box = el("div", "replaybox");
+
+		// Mutators.
+		box.appendChild(el("h4", null, "Mutators (up to " + RM.MAX_MUTATORS + ")"));
+		box.appendChild(el("p", "hint", "Stackable setting patches, shown in the class " +
+			"name and carried in the link. A flavor still only moves settings left alone, " +
+			"and a mutator's settings count as moved."));
+		const mu = el("div", "mutatorlist");
+		for (const m of RM.MUTATORS) {
+			const lab = el("label", "check");
+			lab.title = m.note;
+			const cb = el("input");
+			cb.type = "checkbox";
+			cb.dataset.mutator = m.id;
+			cb.checked = state.mutators.indexOf(m.id) !== -1;
+			cb.addEventListener("change", () => {
+				const next = state.mutators.filter((x) => x !== m.id);
+				if (cb.checked) next.push(m.id);
+				if (next.length > RM.MAX_MUTATORS) {
+					cb.checked = false;
+					setStatus("Three mutators at most.");
+					return;
+				}
+				pushUndo("changed the mutators");
+				state.mutators = RM.cleanMutators(next);
+				markDirty();
+				persist();
+				scheduleRun();
+			});
+			lab.appendChild(cb);
+			lab.appendChild(document.createTextNode(" " + m.label + " — " + m.note));
+			mu.appendChild(lab);
+		}
+		box.appendChild(mu);
+
+		// Bingo.
+		const lines = RM.cardLines(r.card);
+		box.appendChild(el("h4", null, "Strangeness bingo — card " + r.card.seed +
+			(RM.cardFull(r.card) ? " · blackout"
+				: lines ? " · " + lines + " line" + (lines === 1 ? "" : "s") : "")));
+		const grid = el("div", "bingogrid");
+		const labels = {};
+		for (const k of RM.BINGO_KINDS) labels[k.kind] = k.label;
+		r.card.squares.forEach((k, i) => {
+			const sq = el("div", "bingosq" + (r.card.marked[i] ? " on" : ""), labels[k]);
+			sq.dataset.kind = k;
+			grid.appendChild(sq);
+		});
+		box.appendChild(grid);
+		const nb = el("button", null, "New card");
+		nb.type = "button";
+		nb.id = "btnNewBingo";
+		nb.addEventListener("click", () => {
+			r.card = RM.drawCard(mintRandomSeed());
+			saveReplay();
+			closeModal();
+			replayDialog();
+		});
+		box.appendChild(nb);
+
+		// Ledger.
+		const got = Object.keys(r.ledger).length;
+		box.appendChild(el("h4", null, "Achievements — " + got + " of " + RM.ACHIEVEMENTS.length));
+		const list = el("ul", "ledger");
+		for (const a of RM.ACHIEVEMENTS) {
+			const e = r.ledger[a.id];
+			const li = el("li", e ? "got" : "missing");
+			li.dataset.ach = a.id;
+			li.appendChild(el("b", null, a.label));
+			li.appendChild(document.createTextNode(" — " + a.desc));
+			const u = RM.UNLOCKS.filter((x) => x.requires === a.id)[0];
+			if (u) li.appendChild(el("span", "hint", " (unlocks the " + u.name + " " + u.kind + ")"));
+			if (e) {
+				li.appendChild(document.createTextNode(" · " + e.at + " · seed " + e.seed + " "));
+				if (e.link) {
+					const go = el("button", "linkish", "replay");
+					go.type = "button";
+					go.addEventListener("click", () => {
+						closeModal();
+						if (location.hash === e.link) setStatus("That class is the one on screen.");
+						else location.hash = e.link;
+					});
+					li.appendChild(go);
+				}
+			}
+			list.appendChild(li);
+		}
+		box.appendChild(list);
+		modal("Replay: bingo, mutators, achievements", box, null, "Close");
+	}
+
+	function bindReplay() {
+		if ($("btnReplay")) return;
+		const host = $("btnHowTo");
+		if (host) {
+			const b = el("button", "iconbtn", "\u{1F3C5}");
+			b.id = "btnReplay";
+			b.type = "button";
+			b.title = "Bingo card, mutators and the achievements ledger";
+			b.setAttribute("aria-label", "Replay goals");
+			b.addEventListener("click", replayDialog);
+			host.parentNode.insertBefore(b, host);
+		}
+		const sur = $("btnSurprise");
+		if (sur && !$("btnChaos")) {
+			const c = el("button", null, "\u{1F300} Chaos draft");
+			c.id = "btnChaos";
+			c.type = "button";
+			c.title = "Surprise me, plus an anomaly shortlist with the weirdest " +
+				"candidates picked for you. Ctrl+Z takes it all back.";
+			c.addEventListener("click", chaosDraft);
+			sur.parentNode.insertBefore(c, sur.nextSibling);
+		}
+	}
+
+	/* "Show everything": turns off the achievement gating on eras and
+	   flavors, so nothing is locked for anybody who does not want it. */
+	function paintShowAll(sel) {
+		if ($("replayShowAll")) { $("replayShowAll").checked = replayStore().showAll; return; }
+		const lab = el("label", "check");
+		const cb = el("input");
+		cb.type = "checkbox";
+		cb.id = "replayShowAll";
+		cb.checked = replayStore().showAll;
+		cb.addEventListener("change", () => {
+			replayStore().showAll = cb.checked;
+			saveReplay();
+			paintEra();
+			paintFlavorOptions();
+		});
+		lab.appendChild(cb);
+		lab.appendChild(document.createTextNode(" Show everything (no unlocks needed)"));
+		lab.title = "Eras and flavors that achievements unlock are listed from the start";
+		sel.parentNode.insertBefore(lab, $("eraNote"));
+	}
+
 	/* Replay a randomizer draw by its seed. */
 	function randomizeWithSeed() {
 		const box = el("div");
@@ -2590,10 +2900,7 @@
 		/* The class flavor, as a choice rather than a draw. See
 		   Config.DEFAULTS.flavorHint. */
 		const fh = $("flavorHint");
-		fh.appendChild(new Option("draw one at random", ""));
-		for (const f of RB.CLASS_FLAVORS) {
-			fh.appendChild(new Option(f.label || f.name, f.name));
-		}
+		paintFlavorOptions();
 		fh.addEventListener("change", () => {
 			pushUndo("changed the class flavor");
 			state.cfg.flavorHint = fh.value;
@@ -3144,6 +3451,7 @@
 		   thing that reproduces it, and a link without it opened a
 		   different class on another machine. */
 		if (withDrawnSeed && !out.seed && state.lastSeed) out.seed = String(state.lastSeed);
+		if (state.mutators && state.mutators.length) out.mu = state.mutators.slice();
 		if (Object.keys(state.overrides).length) {
 			out.overrides = state.overrides;
 			/* Locks are keyed by pid. Opening a shared link with a DIFFERENT
@@ -3252,8 +3560,19 @@
 	   back to the default here, where the panel is the one reading it. */
 	function fitEra(cfg) {
 		const CAL = global.Calibration;
-		if (cfg && CAL.fittedEras().indexOf(cfg.era) === -1) cfg.era = CAL.DEFAULT_ERA;
+		if (cfg && pickableEras().indexOf(cfg.era) === -1) cfg.era = CAL.DEFAULT_ERA;
 		return cfg;
+	}
+
+	// The fitted eras, plus any unfitted one an achievement has unlocked.
+	function pickableEras() {
+		const CAL = global.Calibration;
+		const out = CAL.fittedEras().slice();
+		for (const u of global.ReplayMeta.UNLOCKS) {
+			if (u.kind === "era" && CAL.ERAS[u.name] && out.indexOf(u.name) === -1 &&
+				replayUnlocked("era", u.name)) out.push(u.name);
+		}
+		return out;
 	}
 
 	function readHash() {
@@ -3277,6 +3596,9 @@
 		state.overrideFingerprint = state.overrides === ov ? (payload.fp || null) : null;
 		delete payload.overrides;
 		delete payload.fp;
+		// A link is the whole state: no `mu` means no mutators.
+		state.mutators = global.ReplayMeta.cleanMutators(payload.mu);
+		delete payload.mu;
 		state.cfg = fitEra(CFG.make(payload));
 		state.presetDirty = true;
 		return true;
@@ -3316,7 +3638,9 @@
 		if (story && (!flavor || story.toLowerCase() !== flavor.toLowerCase())) {
 			tail.push(story);
 		}
-		return bits[0] + (tail.length ? " — " + tail.join(", ") : "");
+		const mu = res.cfg && res.cfg.mutators && res.cfg.mutators.length
+			? " [" + global.ReplayMeta.mutatorLabel(res.cfg.mutators) + "]" : "";
+		return bits[0] + (tail.length ? " — " + tail.join(", ") : "") + mu;
 	}
 
 	function classFingerprint(res) {
@@ -3983,6 +4307,8 @@
 		// flavors and one draw a class repeats sooner than a pool of
 		// forty-six builds does; this is the same memory on that axis.
 		cfg.recentFlavors = (state.flavorHistory || []).slice(0, POOL_HISTORY);
+		// Mutators last: explicit choices, so the flavor treats them as touched.
+		global.ReplayMeta.applyMutators(cfg, state.mutators, RB);
 		return cfg;
 	}
 
@@ -4513,6 +4839,7 @@
 		paintChallenge();
 		paintAnomalyPicks();
 		paintStrangeness();
+		replayAfterRun(res);
 		if (state.history[0] !== res.seed) {
 			state.history.unshift(res.seed);
 			state.history = state.history.slice(0, 12);
@@ -8981,6 +9308,8 @@
 		snapshot, rerollUntilDialog, rerollUntil, restoreSession, randomizeSettings,
 		REROLL_PREDICATES,
 		exportCsv, setStatus, showError, indexSnapshot,
+		// The replay layer, for tools/uismoke.js.
+		replayStore, replayDialog, replayAfterRun, chaosDraft, className,
 	});
 
 	/* AN UNCAUGHT ERROR SAYS SO. A throw inside a listener used to leave
@@ -9048,6 +9377,7 @@
 	bindRandomize();
 	bindSurprise();
 	bindChallenges();
+	bindReplay();
 	bindSettingFilter();
 	bindFiles();
 	applyTheme();

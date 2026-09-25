@@ -4714,38 +4714,40 @@
 		if (!res) return null;
 		const reasons = [];
 		let score = 0;
-		const add = (n, why) => { score += n; reasons.push(why); };
+		const kinds = [];
+		// `kinds` is a stable key per reason, for anything that counts them (bingo).
+		const add = (n, why, kind) => { score += n; reasons.push(why); kinds.push(kind); };
 		const board = res.board || [];
 		const top = board.slice(0, 5);
 		if (top.some((p) => (p.newHgtInches || 0) >= 86)) {
-			add(12, "a 7'2\" or taller prospect in the top five");
+			add(12, "a 7'2\" or taller prospect in the top five", "tallTop5");
 		}
 		if (top.some((p) => (p.newHgtInches || 0) <= 73)) {
-			add(10, "a six-foot-one prospect in the top five");
+			add(10, "a six-foot-one prospect in the top five", "smallTop5");
 		}
 		const champ = res.tourney && res.tourney.champion;
 		if (champ && Number.isFinite(champ.seed) && champ.seed >= 6) {
-			add(champ.seed >= 10 ? 18 : 11, "a No. " + champ.seed + " seed won the title");
+			add(champ.seed >= 10 ? 18 : 11, "a No. " + champ.seed + " seed won the title", "lowSeedChamp");
 		}
 		const ff = (res.tourney && res.tourney.finalFour) || [];
 		const wild = ff.filter((x) => x && Number.isFinite(x.seed) && x.seed >= 11);
 		if (wild.length) {
 			add(9 * wild.length, Text.plural(wild.length, "double-digit seed") +
-				" in the Final Four");
+				" in the Final Four", "cinderellaFF");
 		}
 		const no1 = board[0];
 		if (no1 && Number.isFinite(no1.preseasonRank) && no1.preseasonRank > 20) {
-			add(14, "the No. 1 pick was No. " + no1.preseasonRank + " in the preseason");
+			add(14, "the No. 1 pick was No. " + no1.preseasonRank + " in the preseason", "sleeperNo1");
 		}
-		if (no1 && no1.nonNcaa) add(8, "the No. 1 pick never played college basketball");
+		if (no1 && no1.nonNcaa) add(8, "the No. 1 pick never played college basketball", "nonNcaaNo1");
 		if (no1 && /Senior|Graduate/.test(no1.classYear || "")) {
-			add(7, "the No. 1 pick was a " + no1.classYear.toLowerCase());
+			add(7, "the No. 1 pick was a " + no1.classYear.toLowerCase(), "seniorNo1");
 		}
 		const narrative = res.narrative || [];
-		if (narrative.length >= 3) add(6, "three storylines in one season");
+		if (narrative.length >= 3) add(6, "three storylines in one season", "threeStories");
 		const anomalies = (res.surprises || []).length;
-		if (anomalies >= 6) add(8, anomalies + " anomalies in one class");
-		else if (anomalies >= 5) add(4, anomalies + " anomalies in one class");
+		if (anomalies >= 6) add(8, anomalies + " anomalies in one class", "manyAnomalies");
+		else if (anomalies >= 5) add(4, anomalies + " anomalies in one class", "manyAnomalies");
 		/* The REGULAR season, as the reroll predicate reads it: a team's
 		   final record includes March, so `t.l === 0` only ever fired for the
 		   national champion and missed every unbeaten team that then lost in
@@ -4753,16 +4755,17 @@
 		const unbeaten = Object.values(res.teams || {})
 			.filter((t) => t && t.regSnapshot && t.regSnapshot.l === 0 &&
 				t.regSnapshot.w >= 20);
-		if (unbeaten.length) add(20, unbeaten[0].name + " went unbeaten");
+		if (unbeaten.length) add(20, unbeaten[0].name + " went unbeaten", "unbeaten");
 		/* The class's own shape, against what a draft class usually looks
 		   like: a top-heavy year and a year with no stars in it are both
 		   strange, in opposite directions. */
 		const elite = (res.players || []).filter((p) => p.newOvr >= 55).length;
-		if (elite >= 6) add(9, elite + " prospects at 55+ overall");
-		if (elite === 0) add(9, "nobody in the class reached 55 overall");
+		if (elite >= 6) add(9, elite + " prospects at 55+ overall", "starStudded");
+		if (elite === 0) add(9, "nobody in the class reached 55 overall", "noStars");
 		return {
 			score: Math.min(100, score),
 			reasons,
+			kinds,
 			asked: Number(res.cfg && res.cfg.weirdness) || 0,
 		};
 	}

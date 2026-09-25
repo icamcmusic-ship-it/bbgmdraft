@@ -2620,6 +2620,104 @@ async function gotoProspects(page) {
 			/Found it|No class in 2 tries/.test(fell), fell.slice(0, 120));
 	}
 
+	/* The replay layer: unlock gating, mutators, bingo, the ledger's toast
+	   and the chaos draft (js/replaymeta.js). */
+	{
+		await page.evaluate(() => {
+			const r = window.App.replayStore();
+			r.ledger = {};
+			r.showAll = false;
+			window.App.paintConfig();
+		});
+		ok("the replay and chaos buttons are in the header",
+			(await page.locator("#btnReplay").count()) === 1 &&
+			(await page.locator("#btnChaos").count()) === 1);
+		const opts = () => page.evaluate(() => ({
+			era: Array.from(document.getElementById("era").options).map((o) => o.value),
+			flavor: Array.from(document.getElementById("flavorHint").options).map((o) => o.value),
+		}));
+		const gated = await opts();
+		ok("the third era and the rare flavors are locked by default",
+			gated.era.indexOf("1990s") === -1 && gated.flavor.indexOf("bloodlines") === -1 &&
+			gated.flavor.indexOf("guard-heavy") !== -1, gated.era.join());
+		await page.evaluate(() => document.getElementById("replayShowAll").click());
+		const open = await opts();
+		ok("show everything lists them",
+			open.era.indexOf("1990s") !== -1 && open.flavor.indexOf("bloodlines") !== -1);
+		await page.evaluate(() => document.getElementById("replayShowAll").click());
+		ok("...and unticking hides them again", (await opts()).era.indexOf("1990s") === -1);
+
+		// Mutators from the dialog: the class name and the link carry them.
+		await page.evaluate(() => window.App.replayDialog());
+		ok("the replay dialog shows a 3x3 card", (await page.locator("#modal .bingosq").count()) === 9);
+		const seed0 = await page.evaluate(() => window.App.replayStore().card.seed);
+		await page.locator("#btnNewBingo").click();
+		const seed1 = await page.evaluate(() => window.App.replayStore().card.seed);
+		ok("new card draws a new card", seed0 !== seed1 && (await page.locator("#modal .bingosq").count()) === 9);
+		await page.locator('#modal input[data-mutator="chaos-march"]').check();
+		await page.locator('#modal input[data-mutator="no-bigs"]').check();
+		await page.evaluate(() => window.App.closeModal());
+		await page.waitForFunction(() => {
+			const res = window.App.state.results[window.App.state.active];
+			return res && res.cfg && res.cfg.mutators && res.cfg.mutators.length === 2;
+		}, null, { timeout: 60000 });
+		const mut = await page.evaluate(() => {
+			const res = window.App.state.results[window.App.state.active];
+			return { name: window.App.className(res), hash: decodeURIComponent(location.hash),
+				upset: res.effectiveCfg.upsetFactor };
+		});
+		ok("mutators show in the class name", /Chaos March \+ No bigs/.test(mut.name), mut.name);
+		ok("...ride in the link", /"mu":\["chaos-march","no-bigs"\]/.test(mut.hash));
+		ok("...and reach the run", mut.upset === 2, String(mut.upset));
+		await page.evaluate(() => { window.App.state.mutators = []; window.App.run(); });
+		await page.waitForFunction(() => {
+			const res = window.App.state.results[window.App.state.active];
+			return res && !(res.cfg && res.cfg.mutators);
+		}, null, { timeout: 60000 });
+
+		// Bingo marks what the run had; an achievement toasts once.
+		const bingo = await page.evaluate(() => {
+			const res = window.App.state.results[window.App.state.active];
+			const kinds = window.Engine.strangeness(res).kinds;
+			const card = window.App.replayStore().card;
+			return card.squares.every((k, i) => kinds.indexOf(k) === -1 || card.marked[i]);
+		});
+		ok("the bingo card marks every square the run's strangeness had", bingo);
+		const toasts = await page.evaluate(() => {
+			const App = window.App;
+			const res = App.state.results[App.state.active];
+			App.replayStore().ledger = {};
+			const tall = Object.assign({}, res.board[0], { newHgtInches: 90 });
+			const fake = (s) => Object.assign({}, res, { seed: s, board: [tall].concat(res.board.slice(1)) });
+			App.replayAfterRun(fake("tower-1"));
+			App.replayAfterRun(fake("tower-2"));
+			const e = App.replayStore().ledger["giant-no1"];
+			return { n: Array.from(document.querySelectorAll(".replaytoast"))
+				.filter((t) => /The tower/.test(t.textContent)).length,
+			seed: e && e.seed, link: e && e.link };
+		});
+		ok("an achievement toasts once", toasts.n === 1, String(toasts.n));
+		ok("...and is recorded with its seed and a replay link",
+			toasts.seed === "tower-1" && /^#c=/.test(toasts.link || ""));
+		await page.evaluate(() => window.App.replayDialog());
+		ok("the ledger lists it with a replay button",
+			(await page.locator('#modal li[data-ach="giant-no1"] button').count()) === 1);
+		await page.evaluate(() => window.App.closeModal());
+
+		// Chaos draft: an anomaly shortlist with the picks already made.
+		await page.locator("#btnChaos").click();
+		await page.waitForFunction(() => /Chaos draft:/.test(document.getElementById("status").textContent),
+			null, { timeout: 90000 });
+		const chaos = await page.evaluate(() => ({
+			choices: window.App.state.cfg.anomalyChoices,
+			picks: window.App.state.cfg.anomalyPicks,
+		}));
+		ok("chaos draft turns on the shortlist and picks from it",
+			chaos.choices >= 4 && Array.isArray(chaos.picks) && chaos.picks.length > 0,
+			JSON.stringify(chaos));
+		await page.evaluate(() => { window.App.replayStore().ledger = {}; });
+	}
+
 	console.log("\nNo errors");
 	ok("no console or page errors", errors.length === 0, errors.join("\n         "));
 
