@@ -2181,6 +2181,7 @@
 			weirdest: weirdestSeason(rows),
 			coaches: extra && extra.programs ? coachRecords(extra.programs, extra.tree) : null,
 			hotSeat: extra && extra.carry ? hotSeatPreview(extra.carry, extra.programs) : null,
+			proHall: registry ? proHall(registry, 10) : null,
 		};
 	}
 
@@ -2477,6 +2478,8 @@
 			})),
 		};
 		if (u.broken) out.broken = u.broken;
+		if (u.followed) out.followed = u.followed;
+		if (u.dynasty) out.dynasty = u.dynasty;
 		if (u.biography && Object.keys(u.biography).length) out.biography = u.biography;
 		/* THE CAREERS. Derived from the results, like the threads and the
 		   records book, and travelling with the timeline for the same reason:
@@ -3599,6 +3602,8 @@
 			broken: json.broken || null, engineRev: json.engineRev || null,
 			viewOnly: true,
 			name: json.name || "Universe", createdAt: json.createdAt || null,
+			followed: typeof json.followed === "string" ? json.followed : null,
+			dynasty: json.dynasty && typeof json.dynasty === "object" ? json.dynasty : null,
 		};
 	}
 
@@ -3674,6 +3679,8 @@
 		if (w) out.push(["Weirdest season", 1, w.champion || "", w.season, w.score + ": " + w.reasons.join("; ")]);
 		((rec.coaches && rec.coaches.wins) || []).forEach((c, i) => out.push(["Coaching wins", i + 1,
 			c.schools.join("; "), c.w, c.name + " (" + c.titles + " titles, tree " + c.tree + ")"]));
+		(rec.proHall || []).forEach((m, i) => out.push(["Pro-weighted Hall of Fame", i + 1,
+			m.school, m.name, proText(m.pro)]));
 		return out;
 	}
 
@@ -3684,6 +3691,183 @@
 			if (team && (typeof t === "string" || (t.team !== team && t.other !== team))) return false;
 			return true;
 		});
+	}
+
+	/* UNIVERSE PLAY (audit section 5, items 4, 5, 6 and 10): following a
+	   program, the dynasty goal, a pro career per registry entry and the
+	   per-season detail drawer. Pure reads over rows, program history and
+	   the registry, so the tests can drive them without a browser. */
+
+	/* Whether a timeline row is about this program. */
+	function rowMentions(r, name) {
+		if (!r || !name) return false;
+		const ff = (r.finalFour || []).map((x) => (x && typeof x === "object" ? x.team || x.name : x));
+		return r.champion === name || r.runnerUp === name || r.apOne === name ||
+			!!(r.poy && r.poy.school === name && !r.poy.nonNcaa) ||
+			!!(r.no1 && r.no1.school === name && !r.no1.nonNcaa) ||
+			ff.indexOf(name) !== -1;
+	}
+
+	/* The season-end card for a followed program: its latest played season
+	   against the one before (record, level change, coach). */
+	function followedCard(u, name, results) {
+		if (!name) return null;
+		const hist = programHistory(u, name, results);
+		if (!hist.length) return null;
+		const cur = hist[hist.length - 1];
+		const prev = hist.length > 1 ? hist[hist.length - 2] : null;
+		return {
+			name, season: cur.season, w: cur.w, l: cur.l, conf: cur.conf,
+			level: cur.level,
+			levelChange: prev ? Math.round((cur.level - prev.level) * 10) / 10 : null,
+			coach: cur.coach, prevCoach: prev ? prev.coach : null,
+			newCoach: !!(prev && prev.coach !== cur.coach),
+			ncaa: cur.ncaa, seed: cur.seed, title: !!cur.title, titles: cur.titles,
+			seasons: hist.length,
+		};
+	}
+
+	/* The paper's lead for a followed program, from a season's result.
+	   Plain strings; News.build wraps them. Null when it had no news. */
+	function followedLead(res, name) {
+		const t = res && res.teams && Object.values(res.teams).filter((x) => x && x.name === name)[0];
+		if (!t) return null;
+		const champ = res.tourney && res.tourney.champion ? res.tourney.champion.team.name : null;
+		const coachNew = (res.coachingCarousel || []).some((c) => c && (c.team === name || c.school === name));
+		const rank = (res.poll || []).findIndex((x) => x && x.name === name);
+		if (!(champ === name || t.ncaaResult || rank >= 0 || coachNew)) return null;
+		const rec = (t.w || 0) + "-" + (t.l || 0);
+		const what = champ === name ? "won the national title at " + rec
+			: t.ncaaResult ? "went " + rec + " (NCAA: " + t.ncaaResult + ")"
+			: rank >= 0 ? "finished No. " + (rank + 1) + " in the final poll at " + rec
+			: "went " + rec;
+		return { kind: "followed program", team: name, record: rec, text: what,
+			coachChange: coachNew, title: champ === name };
+	}
+
+	/* THE DYNASTY GOAL. A program, a target (reach a level, or win a title)
+	   and a window of N played seasons from the first. `moved` is how many
+	   dials have moved from the goal's starting settings; the app counts
+	   them with the same diff the challenges use. */
+	function dynastyProgress(goal, hist, moved) {
+		if (!goal || !goal.program) return null;
+		const window = Math.max(1, goal.seasons || 1);
+		const played = (hist || []).filter((r) => r && Number.isFinite(r.season))
+			.slice().sort((a, b) => a.season - b.season);
+		const inWin = played.slice(0, window);
+		let achievedAt = null;
+		let best = null;
+		for (const r of inWin) {
+			if (Number.isFinite(r.level) && (best === null || r.level > best)) best = r.level;
+			const hit = goal.kind === "title" ? !!r.title
+				: Number.isFinite(r.level) && r.level >= (goal.level || 0);
+			if (hit && achievedAt === null) achievedAt = r.season;
+		}
+		const budget = Number.isFinite(goal.budget) ? goal.budget : 3;
+		const over = Math.max(0, (moved || 0) - budget);
+		const status = over ? "over budget"
+			: achievedAt !== null ? "won"
+			: inWin.length >= window ? "failed" : "in progress";
+		return {
+			program: goal.program, kind: goal.kind, target: goal.level || null,
+			window, played: inWin.length, bestLevel: best,
+			titles: inWin.filter((r) => r.title).length,
+			achievedAt, moved: moved || 0, budget, overBudget: over, status,
+			startLevel: inWin.length ? inWin[0].level : null,
+		};
+	}
+
+	/* The weakest programs on record: the dynasty picker's suggestions. */
+	function lowPrestige(u, results, n) {
+		const all = programHistory(u, null, results);
+		return Object.keys(all).map((name) => {
+			const h = all[name];
+			return { name, level: h.length ? h[0].level : NaN };
+		}).filter((x) => Number.isFinite(x.level))
+			.sort((a, b) => a.level - b.level || (a.name < b.name ? -1 : 1))
+			.slice(0, n || 40);
+	}
+
+	/* THE PRO CAREER TAIL. Seeded from the player id, so the same man has
+	   the same pro career on every machine; pot sets the odds and the draft
+	   slot nudges them. Not a simulation: a plausible epilogue. */
+	const PRO_TIERS = [
+		[72, "superstar", [12, 18], [6, 12]],
+		[64, "star", [9, 15], [2, 7]],
+		[55, "starter", [6, 12], [0, 1]],
+		[47, "role player", [3, 8], [0, 0]],
+		[-Infinity, "bust", [0, 3], [0, 0]],
+	];
+	function proOutcome(entry) {
+		const d = entry && entry.draft;
+		if (!entry || !entry.id || !d || !Number.isFinite(d.pot)) return null;
+		const rng = new global.BBGMRng.Rng("pro|" + entry.id);
+		const slot = Number.isFinite(d.slot) && d.slot > 0 ? d.slot : null;
+		const nudge = slot ? Math.max(0, 61 - slot) / 60 * 4 : -3;
+		const x = d.pot + nudge + (rng.random() + rng.random() + rng.random() - 1.5) * 12;
+		const t = PRO_TIERS.filter((row) => x >= row[0])[0];
+		const span = (r) => r[0] + Math.floor(rng.random() * (r[1] - r[0] + 1));
+		const years = span(t[2]);
+		const allStars = Math.min(years, span(t[3]));
+		const score = years + allStars * 3 + (t[1] === "superstar" ? 10 : t[1] === "star" ? 5 : 0);
+		return { tier: t[1], years, allStars, score,
+			bust: t[1] === "bust", star: t[1] === "star" || t[1] === "superstar" };
+	}
+	function proText(o) {
+		if (!o) return "—";
+		return o.tier + ", " + o.years + " season" + (o.years === 1 ? "" : "s") +
+			(o.allStars ? ", " + o.allStars + "x All-Star" : "");
+	}
+
+	/* The Hall of Fame weighted toward what a man did after college: the
+	   college record (honors, span) plus one and a half times the pro tail. */
+	function proHall(registry, n) {
+		const out = [];
+		for (const id of Object.keys(registry || {})) {
+			const x = registry[id];
+			if (!x || !x.id || !x.draft) continue;
+			const pro = proOutcome(x);
+			if (!pro) continue;
+			const college = (x.honors || []).length * 2 + (x.span || 0);
+			out.push({ id: x.id, name: x.name, school: x.draft.school || null,
+				season: x.draft.season, pro, college, score: college + pro.score * 1.5 });
+		}
+		out.sort((a, b) => b.score - a.score || String(a.name).localeCompare(String(b.name)));
+		return out.slice(0, n || 10);
+	}
+
+	/* THE SEASON DRAWER. What the world held about one row: the row, the
+	   config it ran under (u.cfgs by file index), a summary of the carry it
+	   was handed, and the threads that touch its season. */
+	function seasonDetail(u, i) {
+		const r = u && u.rows && u.rows[i];
+		if (!r) return null;
+		const d = Number.isFinite(r.position) && u.order ? u.order[r.position] : null;
+		const cfg = d && u.cfgs ? u.cfgs[d.index] || null : null;
+		const carry = cfg && cfg.carryOver;
+		const levels = (carry && carry.levels) || {};
+		const top = Object.keys(levels).sort((a, b) => levels[b] - levels[a]).slice(0, 5)
+			.map((k) => ({ team: k, level: Math.round(levels[k] * 10) / 10 }));
+		const count = (x) => (Array.isArray(x) ? x.length : x && typeof x === "object"
+			? Object.keys(x).length : 0);
+		return {
+			row: r,
+			cfg: cfg ? {
+				seed: cfg.seed, position: cfg.position,
+				settings: cfg.settings || null,
+				returners: count(cfg.returners),
+				pastRoster: count(cfg.pastRoster),
+				alumni: count(cfg.universeAlumni),
+			} : null,
+			carry: carry ? {
+				programs: Object.keys(levels).length,
+				coaches: count(carry.coaches),
+				titles: carry.titles || {},
+				topLevels: top,
+			} : null,
+			threads: (u.threads || []).filter((t) => t && typeof t === "object" &&
+				Array.isArray(t.seasons) && t.seasons.indexOf(r.season) !== -1),
+		};
 	}
 
 	global.Universe = {
@@ -3702,5 +3886,7 @@
 		randomName, exportBaseName, timelineTable, recordsTable, filterThreads,
 		synthFile, synthFiles, synthFromOrder, synthFingerprint, returnerEntrants, applyEntrants,
 		SYNTH_SIZE,
+		rowMentions, followedCard, followedLead, dynastyProgress, lowPrestige,
+		proOutcome, proText, proHall, seasonDetail,
 	};
 })(typeof window !== "undefined" ? window : self);

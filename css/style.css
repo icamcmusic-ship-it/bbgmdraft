@@ -1485,3 +1485,11 @@ ul.ledger li.missing { opacity: 0.55; }
 .playtab .playpicks li { margin: 2px 0; }
 .playtab .playresult { margin-top: 10px; }
 .playtab table.playscout tbody tr:hover { background: rgba(127,127,127,.12); }
+
+/* Universe play: a followed program's rows, its card, the dynasty card. */
+tr.followed td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+tr.followed td { background: var(--surface-hover); }
+tr.followed .pill { margin-left: 6px; }
+.followed-card, .dynasty-card { margin: 6px 0; }
+.dynasty-won { box-shadow: inset 3px 0 0 var(--accent); }
+.dynasty-failed, .dynasty-over-budget { box-shadow: inset 3px 0 0 var(--accent-2); }

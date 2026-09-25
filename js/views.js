@@ -2707,7 +2707,9 @@
 	/* The season as dated articles (see js/news.js), replacing the four
 	   ·-joined strips that used to sit above the prospect table. */
 	function viewNews(view, res) {
-		const articles = global.News ? global.News.build(res) : [];
+		const stN = A().state;
+		const followed = stN.cfg.universe && stN.universe ? stN.universe.followed : null;
+		const articles = global.News ? global.News.build(res, { followed }) : [];
 		view.appendChild(el("h3", null, "The season, as it happened"));
 		view.appendChild(el("p", "legendline",
 			"Every article is read off results the sim actually produced — " +
@@ -3046,7 +3048,7 @@
 		const table = el("table");
 		const thead = el("thead");
 		const hr = el("tr");
-		for (const h of ["Player", "Seasons", "Span", "Drafted", "Honors", "What happened"]) {
+		for (const h of ["Player", "Seasons", "Span", "Drafted", "Honors", "What happened", "Pro career"]) {
 			hr.appendChild(el("th", ["Seasons", "Span", "Drafted", "Honors"].indexOf(h) >= 0
 				? "num" : "", h));
 		}
@@ -3072,6 +3074,7 @@
 			tr.appendChild(el("td", "num", String(x.honors.length)));
 			tr.appendChild(wrapCell(x.seasons
 				.map((s) => s.season + " " + s.as).join(" · ")));
+			tr.appendChild(el("td", "pro-career", global.Universe.proText(global.Universe.proOutcome(x))));
 			tb.appendChild(tr);
 		}
 		table.appendChild(tb);
@@ -3243,6 +3246,17 @@
 			view.appendChild(el("div", "note", rec.hall.map((m) =>
 				m.name + " (" + m.school + ", " + m.seasons.join(", ") + ") — " +
 				m.reasons.join("; ")).join("\n")));
+		}
+		/* The pro-weighted Hall of Fame (seeded pro tails, Universe.proHall). */
+		let proHall = rec.proHall;
+		if (!proHall && u && u.registry && global.Universe && global.Universe.proHall) {
+			try { proHall = global.Universe.proHall(u.registry, 10); } catch (e) { proHall = null; }
+		}
+		if (proHall && proHall.length) {
+			view.appendChild(el("h5", null, "Hall of Fame, pro-weighted"));
+			view.appendChild(el("div", "note pro-hall", proHall.map((m, i) =>
+				(i + 1) + ". " + m.name + " (" + (m.school || "?") + ", " + m.season + ") — " +
+				global.Universe.proText(m.pro)).join("\n")));
 		}
 		/* The registry's record book. An export from before it existed has
 		   records without it; derive it when the registry is here. */
@@ -3721,6 +3735,95 @@
 		}
 	}
 
+	/* UNIVERSE PLAY: follow a program (its season-end card) and the dynasty
+	   goal (progress and result). See js/app.js "universe play". */
+	function universePlay(view, u) {
+		const U = global.Universe;
+		const all = programHistoryAll();
+		const names = Object.keys(all).sort((a, b) => a.localeCompare(b));
+		if (!names.length) {
+			for (const r of u.rows) {
+				for (const n of [r && r.champion, r && r.runnerUp, r && r.apOne]) {
+					if (n && names.indexOf(n) < 0) names.push(n);
+				}
+			}
+			names.sort((a, b) => a.localeCompare(b));
+		}
+		const bar = el("div", "filters universe-play");
+		const sel = el("select");
+		sel.setAttribute("aria-label", "Follow a program");
+		sel.appendChild(new Option("follow a program…", ""));
+		for (const n of names) sel.appendChild(new Option(n, n));
+		if (u.followed && names.indexOf(u.followed) < 0) sel.appendChild(new Option(u.followed, u.followed));
+		sel.value = u.followed || "";
+		sel.disabled = !!u.running;
+		sel.addEventListener("change", () => { A().followProgram(sel.value || null); });
+		bar.appendChild(sel);
+		const dyn = el("button", null, u.dynasty ? "New dynasty goal…" : "Dynasty goal…");
+		dyn.disabled = !!u.running;
+		dyn.title = "Take a program to a level or a title within N seasons, inside a settings budget.";
+		dyn.addEventListener("click", () => { A().dynastyDialog(); });
+		bar.appendChild(dyn);
+		view.appendChild(bar);
+
+		/* The season-end card. */
+		if (u.followed && !u.running) {
+			let c = null;
+			try { c = U.followedCard(u, u.followed, (A().state.results || []).filter(Boolean)); }
+			catch (e) { c = null; }
+			const card = el("div", "note followed-card");
+			const head = el("div");
+			head.appendChild(el("b", null, "Following "));
+			head.appendChild(programLink(u.followed));
+			card.appendChild(head);
+			if (c) {
+				const lc = c.levelChange;
+				card.appendChild(el("div", null, c.season + ": " + c.w + "-" + c.l +
+					(c.conf ? " in the " + c.conf : "") +
+					(c.title ? ", national champions" : c.ncaa ? ", NCAA: " + c.ncaa : ", no NCAA bid") +
+					(c.seed ? " (No. " + c.seed + " seed)" : "")));
+				card.appendChild(el("div", null, "Level " + c.level + (lc === null ? ""
+					: " (" + (lc > 0 ? "+" : "") + lc + " on the season before)") +
+					" · " + c.titles + " title" + (c.titles === 1 ? "" : "s") + " in " +
+					c.seasons + " season" + (c.seasons === 1 ? "" : "s")));
+				card.appendChild(el("div", null, "Coach: " + (c.coach || "—") +
+					(c.newCoach ? " (new; replaced " + (c.prevCoach || "?") + ")" : "")));
+			} else {
+				card.appendChild(el("div", "hint", "No played season on record for this program " +
+					"yet (its history rebuilds when the chain runs)."));
+			}
+			view.appendChild(card);
+		}
+
+		/* The dynasty goal: progress and result. */
+		const st = A().dynastyStatus ? A().dynastyStatus() : null;
+		if (u.dynasty && st) {
+			const g = u.dynasty;
+			const box = el("div", "note dynasty-card dynasty-" + st.status.replace(/ /g, "-"));
+			const head = el("div");
+			head.appendChild(el("b", null, "Dynasty: "));
+			head.appendChild(programLink(g.program));
+			head.appendChild(document.createTextNode(" — " + (g.kind === "title"
+				? "win a national title" : "reach level " + g.level) + " within " + g.seasons +
+				" season" + (g.seasons === 1 ? "" : "s")));
+			box.appendChild(head);
+			box.appendChild(el("div", null, "Seasons " + st.played + "/" + st.window +
+				" · best level " + (st.bestLevel === null ? "—" : st.bestLevel) +
+				(st.startLevel !== null ? " (from " + st.startLevel + ")" : "") +
+				" · titles " + st.titles + " · settings " + st.moved + "/" + st.budget));
+			box.appendChild(el("div", st.status === "won" ? "goal met" : "unit",
+				st.status === "won" ? "Won in " + st.achievedAt + "."
+					: st.status === "failed" ? "Failed: the window closed without it. Tune and rebuild."
+					: st.status === "over budget" ? st.overBudget + " setting" +
+						(st.overBudget === 1 ? "" : "s") + " over budget."
+					: "In progress: add seasons or rebuild."));
+			const give = el("button", "linky", "abandon");
+			give.addEventListener("click", () => { A().abandonDynasty(); });
+			box.appendChild(give);
+			view.appendChild(box);
+		}
+	}
+
 	function viewUniverse(view, res) {
 		const st = A().state;
 		const u = st.universe || { rows: [] };
@@ -3741,6 +3844,20 @@
 			rn.addEventListener("click", () => { A().randomizeUniverseName(); });
 			nm.appendChild(rn);
 			view.appendChild(nm);
+			universePlay(view, u);
+		}
+		/* Save slots work with or without a timeline (a slot can be loaded). */
+		{
+			const sb = el("div", "filters");
+			const slots = el("button", null, "Save slots\u2026");
+			const info = A().universeStorageInfo ? A().universeStorageInfo() : {};
+			slots.disabled = !!u.running || info.idb === false;
+			slots.title = info.idb === false
+				? "IndexedDB is not available in this browser; the universe is kept (bounded) in localStorage."
+				: "Save the whole universe to a named slot, or load or delete one.";
+			slots.addEventListener("click", () => { A().universeSlotsDialog(); });
+			sb.appendChild(slots);
+			view.appendChild(sb);
 		}
 
 		const bar = el("div", "filters");
@@ -3919,7 +4036,9 @@
 		};
 		const guessedSeasons = new Set(u.rows.filter((r) => r && r.extrapolated)
 			.map((r) => r.season));
-		for (const r of u.rows) {
+		const followed = u.followed || null;
+		const UU = global.Universe;
+		u.rows.forEach((r, rowIndex) => {
 			/* A GAP IS A ROW. The status line named the seasons that were
 			   not played and the table did not, so 2030 followed 2027 as if
 			   nothing had happened. One greyed row per missing season says
@@ -3943,19 +4062,27 @@
 			   because the whole point is that it is NOT one: the champion and
 			   the player of the year are inferred from the world either side
 			   of the gap. */
-			const tr = el("tr", r.extrapolated ? "gaprow" : null);
+			const mine = followed && UU.rowMentions(r, followed);
+			const tr = el("tr", [r.extrapolated ? "gaprow" : "", mine ? "followed" : ""]
+				.filter(Boolean).join(" ") || null);
 			/* “*” is an extrapolated season (no class file); “†” is a season
 			   restored from an imported universe because the replay of it
 			   diverged. Both are rows the tool is telling you it did not
-			   simulate on this machine. */
-			tr.appendChild(el("td", null, String(r.season || "?") +
-				(r.extrapolated ? " *" : "") + (r.restored ? " †" : "")));
+			   simulate on this machine. The season opens its drawer. */
+			const seasonTd = el("td");
+			const open = el("button", "linky season-open", String(r.season || "?") +
+				(r.extrapolated ? " *" : "") + (r.restored ? " †" : ""));
+			open.title = "Open this season's detail: its config, carry and threads";
+			open.addEventListener("click", () => { A().seasonDrawer(rowIndex); });
+			seasonTd.appendChild(open);
+			if (mine) seasonTd.appendChild(el("span", "pill", followed));
+			tr.appendChild(seasonTd);
 			if (r.error) {
 				const td = el("td", null, "failed: " + r.error);
 				td.colSpan = 7;
 				tr.appendChild(td);
 				tb.appendChild(tr);
-				continue;
+				return;
 			}
 			const flTd = el("td", null, (r.flavor || "—") +
 				(r.partial ? " · partial class, honours topped up" : "") +
@@ -3990,7 +4117,7 @@
 				? r.futureOnRosters + (r.futureHonors ? " (" + r.futureHonors + " honors)" : "")
 				: "0"));
 			tb.appendChild(tr);
-		}
+		});
 		table.appendChild(tb);
 		wrap.appendChild(table);
 		view.appendChild(wrap);
@@ -4110,7 +4237,12 @@
 		}
 		/* What a reload keeps. See universeForStorage in js/app.js. */
 		const caps = A().PERSIST_CAPS;
-		if (caps) {
+		const store = A().universeStorageInfo ? A().universeStorageInfo() : {};
+		if (store.idb) {
+			view.appendChild(el("p", "hint universe-persist",
+				"Saved in full to this browser's IndexedDB (autosave, plus " + store.slots +
+				" named slots under Save slots). Nothing is dropped on a reload."));
+		} else if (caps) {
 			// Only multi-season careers are stored, so one-season entries always go.
 			const regAll = u.registry ? Object.values(u.registry) : [];
 			const regKept = Math.min(caps.registry, regAll.filter((x) => x && x.span >= 2).length);
@@ -5748,6 +5880,20 @@
 		if (p.transfer) row("Path", p.transfer.kind +
 			(p.transfer.from ? " — from " + p.transfer.from : ""));
 		if (p.backstory) row("Story", p.backstory);
+		/* The seeded pro tail, universe mode only (Universe.proOutcome). */
+		{
+			const stP = A().state;
+			const UP = global.Universe;
+			if (UP && stP.cfg.universe && stP.universe && (stP.universe.rows || []).length) {
+				const fi = Number.isFinite(res.fileIndex) ? res.fileIndex : stP.active;
+				const f = stP.files[fi];
+				const id = UP.playerId(f && f.fingerprint, p.key);
+				const entry = (stP.universe.registry && stP.universe.registry[id]) ||
+					{ id, draft: { pot: p.newPot, slot: p.draftSlot || null } };
+				const pro = UP.proOutcome(entry);
+				if (pro) row("Pro career", UP.proText(pro) + " (projected)");
+			}
+		}
 		if (p.awards && p.awards.length) row("Honors", p.awards.join("; "));
 		if (p.priorAwards && p.priorAwards.length) {
 			row("Earlier honors", p.priorAwards.slice()

@@ -317,7 +317,7 @@ module.exports = function (ok, V) {
 	{
 		const app = fs.readFileSync(path.join(ROOT, "js", "app.js"), "utf8");
 		ok("the persisted career registry is restored on reload",
-			/registry: saved\.universe\.registry/.test(app));
+			/registry: (saved\.universe|su)\.registry/.test(app) && /universeFromSaved\(saved\.universe\)/.test(app));
 		/* The chain moved to js/universe.js (Universe.beginChain), so the
 		   two checks below read both files. */
 		const chainSrc = app + fs.readFileSync(path.join(ROOT, "js", "universe.js"), "utf8");
