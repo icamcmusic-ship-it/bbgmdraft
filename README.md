@@ -1700,6 +1700,7 @@ js/sample.js        the synthetic class behind "Try a sample class"
 js/batch.js         what a batch run measures (shared with the worker)
 js/worker.js        batch mode off the main thread
 js/views.js         the tab views
+js/replaymeta.js    bingo, mutators, achievements and what they unlock
 js/app.js           state, settings, editing, persistence, export
 tools/validate.js   calibration bands against the empirical anchors
 tools/rolefit.js    fits the derived role-usage model and reports per-build residuals
@@ -2815,6 +2816,22 @@ dial — is declared with its reason, and a narrowing without a reason fails too
   in, because an anomaly can change who is eligible for the next one.
 - **A name, not a hash.** "The 2027 class — the year of the stretch bigs, a
   wide-open year" in the tab title, the run history and the exported picture.
+- **Strangeness bingo, mutators, achievements, unlocks, chaos draft**
+  (`js/replaymeta.js`, the 🏅 button). The strangeness readout now returns a
+  `kinds` key beside each reason. A seeded 3×3 card of those kinds marks a
+  square whenever a run has it, across rerolls, and reports lines and a
+  blackout. Mutators are named patches of existing settings ("No bigs",
+  "Chaos March", "Portal era", seven more); up to three stack, later ones
+  win a clash, and they appear in the class name and in the link (`mu`).
+  A mutator writes a setting outright, so a flavor treats it as touched and
+  leaves it alone. The achievements ledger holds eighteen firsts (a 16 over
+  a 1, an unbeaten champion, a 7'4" No. 1 pick, strangeness 70 and more),
+  each stored with its seed and a replay link, and toasts once on unlock.
+  Some achievements unlock the 1990s era and three rare flavors in the
+  pickers. **Show everything**, beside the era picker, turns the gating off.
+  Chaos draft is Surprise me with an anomaly shortlist, and it picks the
+  rarest candidates on that shortlist. The card, the ledger and the override
+  are kept under their own storage key and never go into a link.
 
 ### Universe
 
