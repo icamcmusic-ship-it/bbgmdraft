@@ -1466,7 +1466,13 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   three decimals, so the seeds are the same teams playing the same
 		   season in a different order of draws. */
 		["1 seed beats 16 seed (rate)", lineRate(seedLine["1v16"])].concat(rateBand(0.88, 1.0)),
-		["2 seed beats 15 seed (rate)", lineRate(seedLine["2v15"])].concat(rateBand(0.82, 0.98)),
+		/* The same eighty trials on the 2/15 line. The model sits at 0.94-0.95
+		   (sixty tournaments, modern/realistic, either side of the one-game
+		   absence fix), and at that rate eighty games reach 79 wins about one
+		   run in eleven: a ceiling of 0.98 failed on a change that moved the
+		   sixty-seed rate by 0.01. 0.99 still fails a model that never loses
+		   the line. */
+		["2 seed beats 15 seed (rate)", lineRate(seedLine["2v15"])].concat(rateBand(0.82, 0.99)),
 		/* The model sits at 0.72 on this line — measured over forty
 		   tournaments on each fixture, and unchanged by the archetype table
 		   growing from 145 builds to 205 (0.72/0.72 against 0.72/0.68) —
