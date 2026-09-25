@@ -2598,6 +2598,51 @@ async function gotoProspects(page) {
 		ok("and an out-of-range number is clamped when the box is left",
 			clamped[0] === 82 && clamped[1] === "82", clamped.join(" / "));
 
+		// Replayability (js/replay.js): daily, par, codes, rival, campaign, puzzle.
+		await page.evaluate(() => window.App.startDaily("2026-09-25"));
+		await page.waitForFunction(() => document.getElementById("challengeScore") &&
+			window.App.state.challenge === "daily-2026-09-25", null, { timeout: 30000 });
+		const daily = await page.evaluate(() => [document.getElementById("challengeBar").textContent,
+			decodeURIComponent(location.hash), window.App.state.cfg.seed]);
+		ok("the daily challenge starts on its date's seed with par on the bar",
+			/par \d/.test(daily[0]) && daily[2] === "daily-2026-09-25", daily[0]);
+		ok("...and the date rides in the link", /"ch":"daily-2026-09-25"/.test(daily[1]), daily[1]);
+		const code = await page.evaluate(() => window.App.resultCode());
+		ok("a result code is short base32", /^BB1-[0-9A-Z-]+$/.test(code) && code.length < 200, code);
+		await page.evaluate(() => { window.App.state.cfg.variation = 5; });
+		await page.evaluate((c) => window.App.applyCode(c), code);
+		await page.waitForTimeout(800);
+		const back = await page.evaluate(() => [window.App.state.cfg.variation,
+			window.App.state.cfg.seed, window.App.state.challenge]);
+		ok("loading a code restores its settings and challenge",
+			back[0] === 0 && back[1] === "daily-2026-09-25" && back[2] === "daily-2026-09-25",
+			back.join(" / "));
+		await page.evaluate((c) => window.App.importGhost(c), code);
+		await page.waitForTimeout(200);
+		const ghost = await page.evaluate(() => {
+			const g = document.getElementById("challengeGhost");
+			return g ? g.textContent : "";
+		});
+		ok("a rival's code shows beside yours on the bar", /^Rival:/.test(ghost), ghost);
+		const locked = await page.evaluate(() => {
+			window.App.startCampaign(1);
+			return window.App.state.challenge;
+		});
+		ok("a locked campaign tier does not start", locked === "daily-2026-09-25", locked);
+		await page.evaluate(() => window.App.startPuzzle("smoke"));
+		await page.waitForFunction(() => window.App.state.challenge === "puzzle:smoke" &&
+			document.getElementById("challengeScore"), null, { timeout: 30000 });
+		const puz = await page.evaluate(() => {
+			const ch = window.App.findChallenge("puzzle:smoke");
+			return [ch.goals.length, window.App.state.cfg.seed,
+				Object.keys(ch.hidden).some((k) => window.App.state.cfg[k] === ch.hidden[k]),
+				document.getElementById("challengeBar").textContent];
+		});
+		ok("the puzzle starts at defaults on its seed, grading four headlines",
+			puz[0] === 4 && puz[1] === "puzzle-smoke" && !puz[2], puz.join(" / "));
+		await page.locator("#challengeBar button", { hasText: "give up" }).click();
+		await page.waitForTimeout(200);
+
 		// Reroll until, with the worker refused: the inline fallback runs.
 		await page.evaluate(() => {
 			window.__RealWorker = window.Worker;
