@@ -8150,7 +8150,7 @@
 		for (const c of candidates.slice(0, DESK_BUDGET)) articles.push(c.article);
 	}
 
-	function build(res) {
+	function build(res, opts) {
 		if (!res || !res.players) return [];
 		const rng = new Rng("news|" + ((res.cfg && res.cfg.seed) || ""));
 		const teams = res.teams || {};
@@ -9571,6 +9571,28 @@
 			const year = yearOf(a.when, season);
 			a.year = year;
 			a.dateline = dateline(a.when) + (year ? " " + year : "");
+		}
+		/* A FOLLOWED PROGRAM LEADS THE PAPER (universe mode). Added after the
+		   voice pass and with no draw from the shared rng, so following a
+		   program changes nothing else in the feed. */
+		const followed = opts && opts.followed;
+		const lead = followed && global.Universe && global.Universe.followedLead
+			? global.Universe.followedLead(res, followed) : null;
+		if (lead) {
+			const banners = ((res.cfg && res.cfg.universeTitles) || {})[followed] || 0;
+			const body = [TM(followed), T(" " + lead.text + ".")];
+			if (lead.coachChange) body.push(T(" The sideline changes hands this April."));
+			if (banners) {
+				body.push(T(" It came in with " + banners + " banner" +
+					(banners === 1 ? "" : "s") + " in this universe."));
+			}
+			articles.unshift({
+				when: -1, kind: "followed program", group: "the season", lead: true,
+				headline: fill(lead.title ? "{school} are national champions"
+					: "Your program: {school}, " + lead.record, { school: TM(followed) }),
+				body, year: season || null,
+				dateline: "Your program" + (season ? " " + season : ""),
+			});
 		}
 		return articles;
 	}

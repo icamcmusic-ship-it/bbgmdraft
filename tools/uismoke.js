@@ -18,7 +18,7 @@ const path = require("path");
 const os = require("os");
 
 const ROOT = path.join(__dirname, "..");
-const PORT = 8791;
+const PORT = Number(process.env.UISMOKE_PORT) || 8791; // overridable for parallel runs
 const TYPES = {
 	".html": "text/html", ".js": "text/javascript",
 	".css": "text/css", ".json": "application/json",
@@ -1847,6 +1847,99 @@ async function gotoProspects(page) {
 		ok("the universe exports as one players file with unique pids",
 			uni.players > 100 && uni.players === uni.uniquePids,
 			uni.players + " players, " + uni.uniquePids + " pids");
+
+		/* UNIVERSE PLAY (audit section 5, items 4, 5, 6, 8, 10): follow a
+		   program, a dynasty goal, the pro tail, the season drawer and the
+		   IndexedDB save slots. */
+		const play = await page.evaluate(async () => {
+			const A = window.App;
+			const st = A.state;
+			const u = st.universe;
+			const f = st.files[st.active];
+			const row = u.rows.filter((r) => r.fingerprint === (f && f.fingerprint))[0] || u.rows[0];
+			const name = row.champion;
+			st.tab = "universe";
+			A.followProgram(name);
+			const out = { name };
+			out.marked = document.querySelectorAll("#view tr.followed").length;
+			out.card = !!document.querySelector("#view .followed-card") &&
+				document.querySelector("#view .followed-card").textContent.indexOf("Coach:") !== -1;
+			out.persisted = (localStorage.getItem(Object.keys(localStorage)
+				.filter((k) => /bbgm/i.test(k))[0] || "") || "").indexOf("\"followed\":" + JSON.stringify(name)) !== -1 ||
+				JSON.stringify(localStorage).indexOf(JSON.stringify(name)) !== -1;
+			out.proHall = !!document.querySelector("#view .pro-hall");
+			out.proCol = document.querySelectorAll("#view td.pro-career").length;
+			out.careers = u.registry ? Object.values(u.registry).filter((x) => x && x.span >= 2).length : 0;
+			// The paper leads with it.
+			st.tab = "news";
+			A.render();
+			const kinds = Array.from(document.querySelectorAll("#view .newsitem .newskind"))
+				.map((x) => x.textContent);
+			out.lead = kinds[0] || "";
+			st.tab = "universe";
+			A.render();
+			// A dynasty goal through its dialog.
+			A.dynastyDialog();
+			document.getElementById("modalOk").click();
+			out.dynasty = !!document.querySelector("#view .dynasty-card");
+			out.dynStatus = A.dynastyStatus() ? A.dynastyStatus().status : null;
+			// The season drawer.
+			const open = document.querySelector("#view button.season-open");
+			if (open) open.click();
+			const body = document.getElementById("modalBody").textContent;
+			out.drawer = /What the season was handed/.test(body) && /Chain position/.test(body) &&
+				/Threads touching/.test(body);
+			A.closeModal();
+			// IndexedDB slots: save, list, load, delete.
+			out.idbGlobal = typeof indexedDB !== "undefined";
+			out.saved = await A.saveUniverseSlot("slot2", "smoke world");
+			const listed = await A.listUniverseSlots();
+			out.slots = listed.length;
+			out.listed = listed.filter((x) => x.slot === "slot2")[0];
+			out.idb = A.universeStorageInfo().idb;
+			const rows = u.rows.length;
+			const following = st.universe.followed;
+			out.loaded = await A.loadUniverseSlot("slot2");
+			out.sameRows = st.universe.rows.length === rows &&
+				st.universe.followed === following && !!st.universe.dynasty;
+			out.footer = (document.querySelector("#view .universe-persist") || {}).textContent || "";
+			await A.deleteUniverseSlot("slot2");
+			out.afterDelete = (await A.listUniverseSlots()).filter((x) => x.slot === "slot2")[0];
+			// The autosave lands a moment after persist().
+			await new Promise((r) => setTimeout(r, 1200));
+			out.autosave = await new Promise((resolve) => {
+				try {
+					const req = indexedDB.open("bbgm-draft-workshop", 1);
+					req.onsuccess = () => {
+						const g = req.result.transaction("universes").objectStore("universes").get("autosave");
+						g.onsuccess = () => resolve(g.result ? g.result.seasons : 0);
+						g.onerror = () => resolve(-1);
+					};
+					req.onerror = () => resolve(-1);
+				} catch (e) { resolve(-1); }
+			});
+			out.rows = rows;
+			return out;
+		});
+		ok("following a program marks its timeline rows and shows its card",
+			play.marked >= 1 && play.card, JSON.stringify(play).slice(0, 200));
+		ok("...and it is persisted", play.persisted);
+		ok("...and the paper leads with it", /^followed program/.test(play.lead), play.lead);
+		ok("a dynasty goal starts from its dialog and shows progress",
+			play.dynasty && !!play.dynStatus, String(play.dynStatus));
+		ok("the records book has a pro-weighted Hall of Fame", play.proHall);
+		ok("the careers table shows a pro career per man",
+			play.proCol === Math.min(40, play.careers), play.proCol + " of " + play.careers);
+		ok("a timeline season opens its drawer with config, carry and threads", play.drawer);
+		ok("IndexedDB is available in Chromium and the universe saves to a slot",
+			play.idbGlobal && play.idb === true && play.saved === true, JSON.stringify(play.listed));
+		ok("...five named slots, the saved one listed by name",
+			play.slots === 5 && play.listed && play.listed.name === "smoke world");
+		ok("...a slot loads the full universe back", play.loaded && play.sameRows);
+		ok("...the footer says nothing is dropped", /IndexedDB/.test(play.footer), play.footer);
+		ok("...a slot deletes", play.afterDelete && play.afterDelete.empty);
+		ok("...and persist() autosaves the whole universe", play.autosave === play.rows,
+			play.autosave + " vs " + play.rows);
 
 		/* Turning the setting off drops the chain's configs, so the tabs go
 		   back to standalone runs rather than silently keeping a world the

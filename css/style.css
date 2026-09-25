@@ -1463,3 +1463,11 @@ table.proghist td.confmove { box-shadow: inset 3px 0 0 var(--bad); }
 .peoplegrid .pschool { display: block; font-size: 11px; }
 .peoplegrid td.pdetail { color: var(--dim); font-size: 12px; white-space: normal; }
 table.proghist tr.now td:first-child { box-shadow: inset 3px 0 0 var(--accent); font-weight: 600; color: var(--accent); }
+
+/* Universe play: a followed program's rows, its card, the dynasty card. */
+tr.followed td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+tr.followed td { background: var(--surface-hover); }
+tr.followed .pill { margin-left: 6px; }
+.followed-card, .dynasty-card { margin: 6px 0; }
+.dynasty-won { box-shadow: inset 3px 0 0 var(--accent); }
+.dynasty-failed, .dynasty-over-budget { box-shadow: inset 3px 0 0 var(--accent-2); }

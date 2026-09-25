@@ -288,6 +288,8 @@
 			viewOnly: !!u.viewOnly,
 			name: u.name || null,
 			createdAt: u.createdAt || null,
+			followed: u.followed || null,
+			dynasty: u.dynasty || null,
 			/* The imported biographies: a rebuilt season without them draws
 			   different men. Held on state, not on the universe; see 6020. */
 			biography: state.universeBiography || null,
@@ -309,6 +311,7 @@
 	}
 
 	function persist() {
+		scheduleAutosave();
 		try {
 			localStorage.setItem(STORE_KEY, JSON.stringify(payload()));
 		} catch (e) {
@@ -447,6 +450,66 @@
 		return typeof v === "string" && (!allowed || allowed.indexOf(v) !== -1) ? v : null;
 	}
 
+	/* A stored universe (localStorage's bounded copy or an IndexedDB slot's
+	   full one) back into state.universe's shape. */
+	function universeFromSaved(su) {
+		return {
+			rows: su.rows,
+			/* Threads used to be sentences and are objects now (see
+			   Universe.threads). A stored timeline from before that is
+			   still readable — the view renders either — so it is kept
+			   rather than thrown away on a shape change that costs
+			   nothing to tolerate. */
+			threads: Array.isArray(su.threads) ? su.threads : [],
+			alumni: Array.isArray(su.alumni) ? su.alumni : [],
+			baseSeed: validString(su.baseSeed) || "",
+			records: su.records && typeof su.records === "object"
+				? su.records : null,
+			coachTree: su.coachTree &&
+				typeof su.coachTree === "object"
+				? su.coachTree : null,
+			/* THE REGISTRY WAS WRITTEN AND NEVER READ BACK.
+
+			   universeForStorage() persists it — deliberately bounded to
+			   the longest careers, for exactly the reason a persisted
+			   payload is bounded — and this rebuilt state.universe
+			   without the field, so every reload dropped it. The Careers
+			   section renders off u.registry and returns early when it is
+			   missing, so the one view in the tool that is about PEOPLE
+			   rather than about programmes was empty after every refresh,
+			   silently, while the data sat in localStorage. */
+			registry: su.registry &&
+				typeof su.registry === "object" &&
+				!Array.isArray(su.registry)
+				? su.registry : null,
+			broken: su.broken || null,
+			/* What universeForStorage now keeps so that an export after a
+			   reload writes the world's own settings rather than the
+			   panel's, and a later class extends the chain rather than
+			   rebuilding it. Each is optional: an older payload has none. */
+			settings: su.settings && typeof su.settings === "object"
+				? su.settings : null,
+			segments: Array.isArray(su.segments) ? su.segments : [],
+			order: Array.isArray(su.order) ? su.order : [],
+			tail: su.tail && typeof su.tail === "object"
+				? su.tail : null,
+			engineRev: su.engineRev || null,
+			viewOnly: !!su.viewOnly,
+			truncated: !!su.truncated,
+			name: validString(su.name) || null,
+			createdAt: validString(su.createdAt) || null,
+			cfgs: {},
+			running: false,
+			/* Universe play (audit section 5): persisted and exported. */
+			followed: validString(su.followed) || null,
+			dynasty: su.dynasty && typeof su.dynasty === "object" &&
+				validString(su.dynasty.program) ? su.dynasty : null,
+			/* Only a full (IndexedDB) save carries these. */
+			programs: su.programs && typeof su.programs === "object" ? su.programs : {},
+			recruiting: Array.isArray(su.recruiting) ? su.recruiting : null,
+		};
+	}
+
 	function restore() {
 		let saved = null;
 		try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) { saved = null; }
@@ -525,54 +588,7 @@
 		if (validString(saved.player)) state.player = saved.player;
 		if (saved.universe && typeof saved.universe === "object" &&
 			Array.isArray(saved.universe.rows)) {
-			state.universe = {
-				rows: saved.universe.rows,
-				/* Threads used to be sentences and are objects now (see
-				   Universe.threads). A stored timeline from before that is
-				   still readable — the view renders either — so it is kept
-				   rather than thrown away on a shape change that costs
-				   nothing to tolerate. */
-				threads: Array.isArray(saved.universe.threads) ? saved.universe.threads : [],
-				alumni: Array.isArray(saved.universe.alumni) ? saved.universe.alumni : [],
-				baseSeed: validString(saved.universe.baseSeed) || "",
-				records: saved.universe.records && typeof saved.universe.records === "object"
-					? saved.universe.records : null,
-				coachTree: saved.universe.coachTree &&
-					typeof saved.universe.coachTree === "object"
-					? saved.universe.coachTree : null,
-				/* THE REGISTRY WAS WRITTEN AND NEVER READ BACK.
-
-				   universeForStorage() persists it — deliberately bounded to
-				   the longest careers, for exactly the reason a persisted
-				   payload is bounded — and this rebuilt state.universe
-				   without the field, so every reload dropped it. The Careers
-				   section renders off u.registry and returns early when it is
-				   missing, so the one view in the tool that is about PEOPLE
-				   rather than about programmes was empty after every refresh,
-				   silently, while the data sat in localStorage. */
-				registry: saved.universe.registry &&
-					typeof saved.universe.registry === "object" &&
-					!Array.isArray(saved.universe.registry)
-					? saved.universe.registry : null,
-				broken: saved.universe.broken || null,
-				/* What universeForStorage now keeps so that an export after a
-				   reload writes the world's own settings rather than the
-				   panel's, and a later class extends the chain rather than
-				   rebuilding it. Each is optional: an older payload has none. */
-				settings: saved.universe.settings && typeof saved.universe.settings === "object"
-					? saved.universe.settings : null,
-				segments: Array.isArray(saved.universe.segments) ? saved.universe.segments : [],
-				order: Array.isArray(saved.universe.order) ? saved.universe.order : [],
-				tail: saved.universe.tail && typeof saved.universe.tail === "object"
-					? saved.universe.tail : null,
-				engineRev: saved.universe.engineRev || null,
-				viewOnly: !!saved.universe.viewOnly,
-				truncated: !!saved.universe.truncated,
-				name: validString(saved.universe.name) || null,
-				createdAt: validString(saved.universe.createdAt) || null,
-				cfgs: {},
-				running: false,
-			};
+			state.universe = universeFromSaved(saved.universe);
 			state.universeBiography = saved.universe.biography &&
 				typeof saved.universe.biography === "object"
 				? saved.universe.biography : null;
@@ -5631,7 +5647,11 @@
 			fullClass: UNIVERSE_FULL_CLASS,
 			anomalyHistory: ANOMALY_HISTORY,
 		});
+		const keepPlay = { followed: state.universe.followed || null,
+			dynasty: state.universe.dynasty || null };
 		state.universe = chain.universe;
+		if (!state.universe.followed) state.universe.followed = keepPlay.followed;
+		if (!state.universe.dynasty) state.universe.dynasty = keepPlay.dynasty;
 		render();
 		const total = chain.runnable.length;
 		const started = Date.now();
@@ -5864,6 +5884,390 @@
 		persist();
 		render();
 	}
+
+	/* ------------------------------------------ universe play (audit §5)
+
+	   Item 4, following a program; item 5, the dynasty goal; item 8, the
+	   IndexedDB saves; item 10, the season drawer. The pure parts live in
+	   js/universe.js (followedCard, dynastyProgress, seasonDetail). */
+
+	function followProgram(name) {
+		state.universe.followed = name || null;
+		persist();
+		render();
+		setStatus(name ? "Following " + name + ": its seasons are marked on the " +
+			"timeline and it leads the paper when it has news." : "No longer following a program.");
+	}
+
+	/* DYNASTY GOAL. The budget counts dials moved from the settings the
+	   goal started on, with the challenges' diff; the universe switch and
+	   the seed are not dials. */
+	function dynastyMoved(goal) {
+		if (!goal || !goal.startCfg) return 0;
+		return diffConfigs(CFG.make(goal.startCfg), CFG.make(state.cfg))
+			.filter((line) => !/^(universe|seed) /.test(line)).length;
+	}
+
+	function dynastyStatus() {
+		const U = global.Universe;
+		const u = state.universe;
+		const g = u && u.dynasty;
+		if (!g || !U) return null;
+		let hist = [];
+		try { hist = U.programHistory(u, g.program, (state.results || []).filter(Boolean)); }
+		catch (e) { hist = []; }
+		return U.dynastyProgress(g, hist, dynastyMoved(g));
+	}
+
+	function dynastyDialog() {
+		const U = global.Universe;
+		const u = state.universe;
+		const box = el("div");
+		box.appendChild(el("p", null,
+			"Take a program to a level, or to a title, within a number of seasons " +
+			"— moving at most a budget of settings from where you start. Rebuild " +
+			"the universe as you tune; the goal is scored off its program history."));
+		const results = (state.results || []).filter(Boolean);
+		let low = [];
+		try { low = U.lowPrestige(u, results, 60); } catch (e) { low = []; }
+		const prog = el("select");
+		prog.setAttribute("aria-label", "Program");
+		for (const x of low) prog.appendChild(new Option(x.name + " (level " + x.level + ")", x.name));
+		if (!low.length) {
+			box.appendChild(el("p", "hint", "Build a timeline first: the program list " +
+				"comes from its history."));
+		}
+		const kind = el("select");
+		kind.setAttribute("aria-label", "Goal");
+		kind.appendChild(new Option("reach a level", "level"));
+		kind.appendChild(new Option("win a national title", "title"));
+		const num = (label, v, lo, hi) => {
+			const lab = el("label", "check", label + " ");
+			const inp = el("input");
+			inp.type = "number";
+			inp.min = String(lo);
+			inp.max = String(hi);
+			inp.value = String(v);
+			lab.appendChild(inp);
+			return [lab, inp];
+		};
+		const [levLab, lev] = num("level", 70, 10, 99);
+		const [seaLab, sea] = num("within seasons", 5, 1, 60);
+		const [budLab, bud] = num("settings budget", 3, 0, 20);
+		for (const n of [prog, kind, levLab, seaLab, budLab]) {
+			const row = el("div", "filters");
+			row.appendChild(n);
+			box.appendChild(row);
+		}
+		modal("Dynasty goal", box, () => {
+			closeModal();
+			if (!prog.value) return;
+			const clamp = (x, lo, hi, d) => (Number.isFinite(x) ? Math.max(lo, Math.min(hi, x)) : d);
+			startDynasty({
+				program: prog.value, kind: kind.value,
+				level: clamp(Number(lev.value), 10, 99, 70),
+				seasons: clamp(Math.round(Number(sea.value)), 1, 60, 5),
+				budget: clamp(Math.round(Number(bud.value)), 0, 20, 3),
+			});
+		}, "Start");
+	}
+
+	function startDynasty(goal) {
+		pushUndo("started a dynasty goal");
+		goal.startCfg = JSON.parse(JSON.stringify(CFG.make(state.cfg)));
+		goal.startedAt = new Date().toISOString();
+		state.universe.dynasty = goal;
+		state.universe.followed = goal.program;
+		persist();
+		render();
+		const st = dynastyStatus();
+		setStatus("Dynasty goal: " + goal.program + " — " + (goal.kind === "title"
+			? "a national title" : "level " + goal.level) + " within " + goal.seasons +
+			" seasons, " + goal.budget + " settings to move." + (st ? " Now: " + st.status + "." : ""));
+	}
+
+	function abandonDynasty() {
+		state.universe.dynasty = null;
+		persist();
+		render();
+		setStatus("Dynasty goal abandoned.");
+	}
+
+	/* THE SEASON DRAWER: one timeline row, its config and carry snapshot,
+	   and the threads that touch it. */
+	function seasonDrawer(i) {
+		const U = global.Universe;
+		const d = U.seasonDetail(state.universe, i);
+		if (!d) return;
+		const r = d.row;
+		const box = el("div", "season-drawer");
+		const dl = el("div", "note");
+		const line = (k, v) => dl.appendChild(el("div", null, k + ": " + v));
+		line("Champion", (r.champion || "—") + (r.champSeed ? " (No. " + r.champSeed + ")" : "") +
+			(r.runnerUp ? ", over " + r.runnerUp : ""));
+		line("AP No. 1", r.apOne || "—");
+		if (r.finalFour && r.finalFour.length) {
+			line("Final Four", r.finalFour.map((x) => (x && typeof x === "object" ? x.team || x.name : x)).join(", "));
+		}
+		line("Player of the year", r.poy ? r.poy.name + " (" + (r.poy.school || r.poy.club || "?") + ")" : "—");
+		line("No. 1 pick", r.no1 ? r.no1.name + " (" + (r.no1.school || r.no1.club || "?") + ")" : "—");
+		line("Flavor", r.flavor || "—");
+		line("Sideline changes", String(r.coachChanges || 0));
+		if (r.realignment && r.realignment.length) line("Realignment", r.realignment.join("; "));
+		line("Seed", String(r.seed || "—") + (r.fileName ? " · " + r.fileName : ""));
+		if (r.extrapolated) line("Note", "extrapolated: no class file for this season");
+		box.appendChild(dl);
+		box.appendChild(el("h5", null, "What the season was handed"));
+		if (d.cfg) {
+			const c = el("div", "note");
+			c.appendChild(el("div", null, "Chain position " + d.cfg.position + ", seed " + d.cfg.seed));
+			c.appendChild(el("div", null, d.cfg.returners + " returner sources, " +
+				d.cfg.pastRoster + " past-roster entries, " + d.cfg.alumni + " alumni in memory"));
+			if (d.carry) {
+				c.appendChild(el("div", null, "Carry: " + d.carry.programs + " programs, " +
+					d.carry.coaches + " coaches"));
+				c.appendChild(el("div", null, "Strongest going in: " + d.carry.topLevels
+					.map((x) => x.team + " " + x.level).join(", ")));
+				const t = Object.keys(d.carry.titles).sort((a, b) => d.carry.titles[b] - d.carry.titles[a]);
+				if (t.length) {
+					c.appendChild(el("div", null, "Banners going in: " + t.slice(0, 6)
+						.map((k) => k + " " + d.carry.titles[k]).join(", ")));
+				}
+			} else c.appendChild(el("div", null, "First season: no carry-over."));
+			if (d.cfg.settings) {
+				const moved = diffConfigs(CFG.make({}), CFG.make(d.cfg.settings));
+				c.appendChild(el("div", null, "Settings vs defaults: " +
+					(moved.length ? moved.slice(0, 12).join("; ") + (moved.length > 12 ? "; …" : "")
+						: "all defaults")));
+			}
+			box.appendChild(c);
+		} else {
+			box.appendChild(el("p", "hint", r.extrapolated
+				? "An extrapolated season has no config: nothing was simulated."
+				: "The config snapshot is held for the session only; re-run the universe to see it."));
+		}
+		box.appendChild(el("h5", null, "Threads touching " + r.season));
+		box.appendChild(d.threads.length
+			? el("div", "note", d.threads.map((t) => t.text).join("\n"))
+			: el("p", "hint", "None."));
+		modal("Season " + r.season, box);
+	}
+
+	/* INDEXEDDB SAVES (item 8).
+
+	   The whole universe, untruncated, in IndexedDB: an autosave written
+	   whenever persist() runs, and UNIVERSE_SLOTS named slots. Settings stay
+	   in localStorage, and so does the bounded universe copy, which is what
+	   a browser without IndexedDB (or with it blocked) falls back to. Every
+	   access is wrapped; a failure resolves to null rather than throwing. */
+	const IDB_NAME = "bbgm-draft-workshop";
+	const IDB_STORE = "universes";
+	const UNIVERSE_SLOTS = 5;
+	const AUTO_SLOT = "autosave";
+	let idbPromise = null;
+	let idbOk = null;
+	let autosaveReady = false;
+	let autosaveTimer = null;
+
+	function idbOpen() {
+		if (idbPromise) return idbPromise;
+		idbPromise = new Promise((resolve) => {
+			try {
+				if (typeof indexedDB === "undefined" || !indexedDB) { resolve(null); return; }
+				const req = indexedDB.open(IDB_NAME, 1);
+				req.onupgradeneeded = () => {
+					try { req.result.createObjectStore(IDB_STORE, { keyPath: "slot" }); } catch (e) { /* exists */ }
+				};
+				req.onsuccess = () => resolve(req.result);
+				req.onerror = () => resolve(null);
+				req.onblocked = () => resolve(null);
+			} catch (e) { resolve(null); }
+		}).then((db) => { idbOk = !!db; return db; });
+		return idbPromise;
+	}
+
+	// One request in its own transaction; resolves with its result, or null.
+	function idbRequest(mode, make) {
+		return idbOpen().then((db) => new Promise((resolve) => {
+			if (!db) { resolve(null); return; }
+			try {
+				const tx = db.transaction(IDB_STORE, mode);
+				const req = make(tx.objectStore(IDB_STORE));
+				tx.oncomplete = () => resolve(req && req.result !== undefined ? req.result : null);
+				tx.onerror = () => resolve(null);
+				tx.onabort = () => resolve(null);
+			} catch (e) { resolve(null); }
+		})).catch(() => null);
+	}
+
+	// The universe in full: no row, thread, alumni or registry cap.
+	function universeFull() {
+		const u = state.universe;
+		return JSON.parse(JSON.stringify(Object.assign(universeForStorage(), {
+			rows: u.rows.slice(),
+			threads: (u.threads || []).slice(),
+			alumni: (u.alumni || []).slice(),
+			registry: u.registry || null,
+			programs: u.programs || null,
+			recruiting: u.recruiting || null,
+			truncated: !!u.truncated,
+			tail: u.running ? null : (u.tail || null),
+		})));
+	}
+
+	function slotRecord(slot, name) {
+		const u = state.universe;
+		return { slot, name: name || u.name || "Universe", savedAt: new Date().toISOString(),
+			seasons: u.rows.length, universe: universeFull() };
+	}
+
+	function applyUniverseSave(su) {
+		state.universe = universeFromSaved(su);
+		state.universeBiography = su.biography && typeof su.biography === "object"
+			? su.biography : null;
+	}
+
+	function scheduleAutosave() {
+		if (!autosaveReady || idbOk === false) return;
+		clearTimeout(autosaveTimer);
+		autosaveTimer = setTimeout(() => {
+			try {
+				const u = state.universe;
+				if (u.running) return;
+				if (!u.rows.length) {
+					idbRequest("readwrite", (s) => s.delete(AUTO_SLOT));
+					return;
+				}
+				idbRequest("readwrite", (s) => s.put(slotRecord(AUTO_SLOT)));
+			} catch (e) { /* the localStorage copy still stands */ }
+		}, 600);
+	}
+
+	/* At startup: the autosave replaces the bounded localStorage copy. No
+	   autosave is written until this has run, so a truncated copy never
+	   overwrites a full one. */
+	function loadAutosave() {
+		return idbRequest("readonly", (s) => s.get(AUTO_SLOT)).then((rec) => {
+			try {
+				if (rec && rec.universe && Array.isArray(rec.universe.rows) &&
+					!state.universe.running && !(state.universe.cfgs &&
+						Object.keys(state.universe.cfgs).length)) {
+					applyUniverseSave(rec.universe);
+				}
+			} catch (e) { /* keep the localStorage copy */ }
+			autosaveReady = true;
+			render();
+		});
+	}
+
+	function listUniverseSlots() {
+		return idbRequest("readonly", (s) => s.getAll()).then((all) => {
+			const out = [];
+			for (let i = 1; i <= UNIVERSE_SLOTS; i++) {
+				const r = (all || []).filter((x) => x && x.slot === "slot" + i)[0];
+				out.push(r ? { slot: r.slot, name: r.name, savedAt: r.savedAt, seasons: r.seasons }
+					: { slot: "slot" + i, empty: true });
+			}
+			return out;
+		});
+	}
+
+	function saveUniverseSlot(slot, name) {
+		if (!/^slot[1-9]$/.test(slot) || Number(slot.slice(4)) > UNIVERSE_SLOTS) {
+			return Promise.resolve(false);
+		}
+		if (!state.universe.rows.length || state.universe.running) {
+			setStatus("Build a timeline first.");
+			return Promise.resolve(false);
+		}
+		let rec;
+		try { rec = slotRecord(slot, name); } catch (e) { showError(e); return Promise.resolve(false); }
+		return idbRequest("readwrite", (s) => s.put(rec)).then((ok) => {
+			setStatus(ok ? "Saved “" + rec.name + "” (" + rec.seasons + " seasons, in full) to " + slot + "."
+				: "Could not save: IndexedDB is not available in this browser.", !ok);
+			return !!ok;
+		});
+	}
+
+	function loadUniverseSlot(slot) {
+		if (state.universe.running) return Promise.resolve(false);
+		return idbRequest("readonly", (s) => s.get(slot)).then((rec) => {
+			if (!rec || !rec.universe || !Array.isArray(rec.universe.rows)) {
+				setStatus("That slot is empty.");
+				return false;
+			}
+			try {
+				pushUndo("loaded a saved universe");
+				applyUniverseSave(rec.universe);
+			} catch (e) { showError(e); return false; }
+			state.tab = "universe";
+			persist();
+			render();
+			setStatus("Loaded “" + rec.name + "” (" + rec.seasons + " seasons). Load its " +
+				"class files and rebuild to open its seasons on the other tabs.");
+			return true;
+		});
+	}
+
+	function deleteUniverseSlot(slot) {
+		return idbRequest("readwrite", (s) => s.delete(slot)).then(() => {
+			setStatus("Cleared " + slot + ".");
+			return true;
+		});
+	}
+
+	function universeStorageInfo() {
+		return { idb: idbOk, slots: UNIVERSE_SLOTS };
+	}
+
+	function universeSlotsDialog() {
+		const box = el("div");
+		const list = el("div", "note universe-slots");
+		box.appendChild(el("p", null, "Saved universes are stored in full in this " +
+			"browser's IndexedDB — no season, thread or career cap."));
+		box.appendChild(list);
+		const bar = el("div", "filters");
+		const sel = el("select");
+		sel.setAttribute("aria-label", "Slot");
+		const nm = el("input");
+		nm.type = "text";
+		nm.placeholder = "name";
+		nm.value = state.universe.name || "";
+		bar.appendChild(sel);
+		bar.appendChild(nm);
+		box.appendChild(bar);
+		const paint = () => listUniverseSlots().then((slots) => {
+			list.innerHTML = "";
+			sel.innerHTML = "";
+			if (idbOk === false) {
+				list.appendChild(el("div", "hint", "IndexedDB is not available here; the " +
+					"universe is kept (bounded) in localStorage only."));
+			}
+			for (const x of slots) {
+				sel.appendChild(new Option(x.slot + (x.empty ? " (empty)" : " — " + x.name), x.slot));
+				const row = el("div", "rowflex");
+				row.appendChild(el("span", null, x.slot + ": " + (x.empty ? "empty"
+					: x.name + " · " + x.seasons + " seasons · " + String(x.savedAt || "").slice(0, 16).replace("T", " "))));
+				if (!x.empty) {
+					const ld = el("button", "tiny", "Load");
+					ld.addEventListener("click", () => { closeModal(); loadUniverseSlot(x.slot); });
+					const del = el("button", "tiny warn", "Delete");
+					del.addEventListener("click", () => { deleteUniverseSlot(x.slot).then(paint); });
+					row.appendChild(ld);
+					row.appendChild(del);
+				}
+				list.appendChild(row);
+			}
+		});
+		paint();
+		modal("Universe save slots", box, () => {
+			const slot = sel.value;
+			const name = nm.value.trim();
+			closeModal();
+			saveUniverseSlot(slot, name);
+		}, "Save current to slot");
+	}
+
 
 	/* What a reload keeps: the caps universeForStorage writes under. */
 	const PERSIST_CAPS = { rows: PERSIST_ROWS, threads: PERSIST_THREADS,
@@ -6156,6 +6560,8 @@
 		} else {
 			setStatus("Replaying " + played.length + " seasons." + note);
 		}
+		state.universe.followed = typeof json.followed === "string" ? json.followed : null;
+		state.universe.dynasty = json.dynasty && typeof json.dynasty === "object" ? json.dynasty : null;
 		const steps = plan.steps;
 		const runStep = (i) => {
 			const s = steps[i];
@@ -8836,6 +9242,9 @@
 		clearLock, showPlayer, showTeam, showGame,
 		runUniverse, cancelUniverse, resumeUniverseDialog, exportUniverse, exportUniversePlayers,
 		exportUniverseCsv, randomizeUniverseName, PERSIST_CAPS,
+		followProgram, dynastyDialog, dynastyStatus, abandonDynasty, seasonDrawer,
+		universeSlotsDialog, saveUniverseSlot, loadUniverseSlot, deleteUniverseSlot,
+		listUniverseSlots, universeStorageInfo,
 		importUniverse, showPlayerInFile, universeCareers, liveResults,
 		// Exposed for tools/uismoke.js, which loads files without a file input.
 		installFiles, paintConfig,
@@ -8917,6 +9326,7 @@
 	paintHistory();
 	paintUndo();
 	if (saved) applyOpenGroups(saved.open);
+	loadAutosave();
 
 	$("errClose").addEventListener("click", clearError);
 	$("warnClose").addEventListener("click", () => { $("warnBanner").hidden = true; });
