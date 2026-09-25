@@ -347,6 +347,41 @@ async function gotoProspects(page) {
 	});
 	await page.waitForTimeout(800);
 
+	// The efficiency dial, which did not exist: pace and scoringEnv are both
+	// possession dials and left true shooting unmoved in every configuration.
+	const fieldTs = async () => page.evaluate(() => {
+		const res = window.App.state.results[window.App.state.active];
+		const ps = res.players.filter((p) => p.stats);
+		return ps.reduce((a, p) => a + p.stats.ts, 0) / ps.length;
+	});
+	// Measured from one end of the dial to the other: from the default, +3
+	// moved the field between 0.7 and 2.6 points depending on the class, so
+	// a one-point bar failed on an unlucky draw.
+	const setEff = (v) => page.evaluate((v) => {
+		const i = document.getElementById("efficiencyEnv");
+		i.value = v;
+		i.dispatchEvent(new Event("input", { bubbles: true }));
+	}, v);
+	await setEff("-3");
+	await page.waitForTimeout(800);
+	const tsBefore = await fieldTs();
+	await page.evaluate(() => {
+		const i = document.getElementById("efficiencyEnv");
+		i.value = "3";
+		i.dispatchEvent(new Event("input", { bubbles: true }));
+	});
+	await page.waitForTimeout(800);
+	const tsAfter = await fieldTs();
+	ok("the efficiency dial moves true shooting",
+		tsAfter - tsBefore > 0.01,
+		(tsBefore * 100).toFixed(1) + " -> " + (tsAfter * 100).toFixed(1));
+	await page.evaluate(() => {
+		const i = document.getElementById("efficiencyEnv");
+		i.value = "0";
+		i.dispatchEvent(new Event("input", { bubbles: true }));
+	});
+	await page.waitForTimeout(800);
+
 	/* The team page and the conference standings, both of which are new views
 	   over data the sim has always produced. */
 	await page.locator("#tabs button", { hasText: "AP Poll" }).first().click();
@@ -519,44 +554,6 @@ async function gotoProspects(page) {
 	ok("the fallback produces the same batch the worker does",
 		strip(inlineText) === strip(withWorker),
 		strip(inlineText) === strip(withWorker) ? "" : batchDiffDetail());
-
-	/* After the batch, not before: the batch compares a worker run with an
-	   inline one on the page's current state, and the three extra re-runs
-	   this block makes preceded both failures of that check on CI. */
-	// The efficiency dial, which did not exist: pace and scoringEnv are both
-	// possession dials and left true shooting unmoved in every configuration.
-	const fieldTs = async () => page.evaluate(() => {
-		const res = window.App.state.results[window.App.state.active];
-		const ps = res.players.filter((p) => p.stats);
-		return ps.reduce((a, p) => a + p.stats.ts, 0) / ps.length;
-	});
-	// Measured from one end of the dial to the other: from the default, +3
-	// moved the field between 0.7 and 2.6 points depending on the class, so
-	// a one-point bar failed on an unlucky draw.
-	const setEff = (v) => page.evaluate((v) => {
-		const i = document.getElementById("efficiencyEnv");
-		i.value = v;
-		i.dispatchEvent(new Event("input", { bubbles: true }));
-	}, v);
-	await setEff("-3");
-	await page.waitForTimeout(800);
-	const tsBefore = await fieldTs();
-	await page.evaluate(() => {
-		const i = document.getElementById("efficiencyEnv");
-		i.value = "3";
-		i.dispatchEvent(new Event("input", { bubbles: true }));
-	});
-	await page.waitForTimeout(800);
-	const tsAfter = await fieldTs();
-	ok("the efficiency dial moves true shooting",
-		tsAfter - tsBefore > 0.01,
-		(tsBefore * 100).toFixed(1) + " -> " + (tsAfter * 100).toFixed(1));
-	await page.evaluate(() => {
-		const i = document.getElementById("efficiencyEnv");
-		i.value = "0";
-		i.dispatchEvent(new Event("input", { bubbles: true }));
-	});
-	await page.waitForTimeout(800);
 
 	console.log("\nSettings coverage");
 	{
