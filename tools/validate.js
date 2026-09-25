@@ -34,7 +34,7 @@ function loadEngine() {
 			"text", "rng", "bbgm", "bbgmstats", "colleges", "config", "calibration", "ratings",
 			"traits",
 			"teams", "stats", "rankings", "tournament", "awards", "engine", "batch",
-			"sample", "news", "universe", "almanac", "site",
+			"sample", "news", "universe", "almanac", "site", "play",
 		]) require(path.join(__dirname, "..", "js", f + ".js"));
 	}
 	return global;

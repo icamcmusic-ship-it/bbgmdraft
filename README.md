@@ -772,6 +772,17 @@ imports directly — every player is re-solved against BBGM's own `ovr` formula,
 so what you see here is what the game computes. *More ▾* has CSV, season data,
 locked prospects and the settings on their own.
 
+**9. Play.** The *Play* tab has three games against the loaded class and
+seed. *Prediction*: pick the champion, the player of the year and the No. 1
+pick, graded out of 11. *Bracket pool*: fill in the 64-team bracket (with
+*Auto-fill by seed* and *Random* helpers) and score it ESPN-style,
+10/20/40/80/160/320; the upset factor is shown as the difficulty. *Blind
+scout*: rank a top 10 from bios and box scores with ovr, pot and board rank
+hidden, scored out of 100 against the final board and beside the preseason
+consensus. While a game is open every other tab is gated, so the answers
+stay hidden until you reveal them. A per-browser record is kept. The *Blind*
+column preset gives the board the same view.
+
 ---
 
 ## Recruiting

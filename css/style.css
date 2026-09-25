@@ -1463,3 +1463,11 @@ table.proghist td.confmove { box-shadow: inset 3px 0 0 var(--bad); }
 .peoplegrid .pschool { display: block; font-size: 11px; }
 .peoplegrid td.pdetail { color: var(--dim); font-size: 12px; white-space: normal; }
 table.proghist tr.now td:first-child { box-shadow: inset 3px 0 0 var(--accent); font-weight: 600; color: var(--accent); }
+
+/* The Play tab (js/play.js). */
+.playtab .playcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.playtab .playgame { padding: 3px 0; }
+.playtab .playgame .chip:disabled { opacity: .5; cursor: default; }
+.playtab .playpicks li { margin: 2px 0; }
+.playtab .playresult { margin-top: 10px; }
+.playtab table.playscout tbody tr:hover { background: rgba(127,127,127,.12); }

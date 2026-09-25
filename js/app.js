@@ -5304,6 +5304,8 @@
 		["gamelog", "Game logs", "Season"],
 		["notes", "Player notes", "Season"],
 		["universe", "Universe", "Universe"],
+		// Prediction, bracket pool and blind scout; see js/play.js.
+		["play", "Play", "Play"],
 	];
 
 	/* ----------------------------------------------------------- universe */
@@ -6578,6 +6580,8 @@
 		// The archetype editor reports what the last run actually produced, so
 		// it has to be repainted when there is a new run to report.
 		paintArchWeights();
+		// An open Play game hides every results tab until it is revealed.
+		if (global.Play && global.Play.gated(state, res)) { global.Play.gateView(view); return; }
 		(V[state.tab] || V.players)(view, res);
 		restoreScroll(view, scrolls);
 		restoreFocus(view, focus);
