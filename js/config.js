@@ -426,8 +426,11 @@
 		// Conference honors are their own dial: 32 conferences hand out far
 		// more hardware than the national voters do, and wanting a realistic
 		// number of one is not wanting fewer of the other.
+		// Independent of awardStrictness by design (it does not follow the
+		// main dial); only a config built without make() falls back to it.
 		confAwardStrictness: 1.0,
 		// The bar a prospect abroad has to clear for a pro-league honor.
+		// Also independent of the main dial.
 		proAwardStrictness: 1.0,
 		/* How far the voters stray from the arithmetic. 0 hands every trophy to
 		   whoever the production model ranks first, which is a list nobody
@@ -674,7 +677,10 @@
 			const band = sliderRange(key);
 			const v = Number(cfg[key]);
 			if (!Number.isFinite(v)) { cfg[key] = DEFAULTS[key]; continue; }
-			cfg[key] = v < band.min ? band.min : v > band.max ? band.max : v;
+			// A count arrives whole: eliteCount 2.5 is not a class anybody
+			// can build, and classCurve read it as half a third star.
+			const w = isCount(key) ? Math.round(v) : v;
+			cfg[key] = w < band.min ? band.min : w > band.max ? band.max : w;
 		}
 		return cfg;
 	}
@@ -788,7 +794,11 @@
 		buildNoise: { lo: 0, hi: 14 },
 		classFlavor: { lo: 0, hi: 2 },
 		flavorBlend: { lo: 0, hi: 1 },
-		archetypePool: { lo: 0, hi: 385 },
+		/* The ceiling is the build table's size, read lazily: config.js
+		   loads before ratings.js, and a literal here went stale once. */
+		archetypePool: { lo: 0, get hi() {
+			return global.RatingsBuilder ? global.RatingsBuilder.ARCHETYPES.length : 385;
+		} },
 		weirdness: { lo: -2, hi: 3 },
 		anomalyChoices: { lo: 0, hi: 8 },
 		traitCount: { lo: 0, hi: 6 },

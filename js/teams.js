@@ -1797,7 +1797,8 @@
 		   gates on the result-driven kinds were loosened to match, so no kind
 		   fires in much more than two thirds of seasons. */
 		const setting = clamp(
-			cfg && cfg.seasonEvents !== undefined ? cfg.seasonEvents : 7, 0, 20);
+			cfg && cfg.seasonEvents !== undefined ? cfg.seasonEvents : global.Config.DEFAULTS.seasonEvents,
+			global.Config.sliderRange("seasonEvents").min, global.Config.sliderRange("seasonEvents").max);
 		let budget = 0;
 		if (setting > 0) {
 			// Knuth, on a mean of 0.7 of the setting: five at the default.

@@ -136,7 +136,8 @@ module.exports = function (ok, V) {
 			const ws40 = ((a.ows + a.dws) * 40) / ps.min;
 			if (Math.abs(bpm) > 26) note("BPM", bpm);
 			if (a.per > 55 || a.per < -10) note("PER", a.per);
-			if (Math.abs(a.vorp) > 13) note("VORP", a.vorp);
+			// 13 per 82 games; VORP is scaled by the team's own schedule now.
+			if (Math.abs(a.vorp) > 13 * 82 / (c.t.numGames || 82)) note("VORP", a.vorp);
 			if (ws40 > 0.65 || ws40 < -0.35) note("WS/40", ws40);
 			if (Math.abs(a.onOff100) > 75) note("on/off per 100", a.onOff100);
 			if (Math.abs(a.pm100) > 65) note("plus/minus per 100", a.pm100);
@@ -161,7 +162,7 @@ module.exports = function (ok, V) {
 			if (!ps || ps.min < 200 || !(t.min > 0)) continue;
 			const bpm = c.adv.obpm + c.adv.dbpm;
 			const minp = (ps.min + 1e-9) / (t.min / 5);
-			const vExp = ((bpm + 2) * minp * t.gp) / 82;
+			const vExp = ((bpm + 2) * minp * t.gp) / (c.t.numGames || 82);
 			vWorst = Math.max(vWorst, Math.abs(c.adv.vorp - vExp));
 			const eExp = BS.getEWA(c.adv.per, ps.min, c.p.pos,
 				(t.gameMinutes || 40) / 48);

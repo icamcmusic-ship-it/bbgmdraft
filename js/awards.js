@@ -678,15 +678,17 @@
 	}
 
 	function assign(prospects, teams, tourney, cfg, rng) {
-		const strict = clamp(cfg.awardStrictness, 0.2, 3);
+		const band = global.Config.sliderRange("awardStrictness");
+		const strict = clamp(
+			cfg.awardStrictness == null ? 1 : cfg.awardStrictness, band.min, band.max);
 		// Conference hardware is its own dial. 32 conferences hand out far more
 		// of it than the national voters do, and wanting a realistic number of
 		// one was never a reason to get fewer of the other — but one slider
 		// used to drive both, plus the pro-league score bar on top.
 		const confStrict = clamp(
-			cfg.confAwardStrictness === undefined ? strict : cfg.confAwardStrictness, 0.2, 3);
+			cfg.confAwardStrictness == null ? strict : cfg.confAwardStrictness, band.min, band.max);
 		const proStrict = clamp(
-			cfg.proAwardStrictness === undefined ? strict : cfg.proAwardStrictness, 0.2, 3);
+			cfg.proAwardStrictness == null ? strict : cfg.proAwardStrictness, band.min, band.max);
 		/* How much the voters disagree with the arithmetic. The model already
 		   carried a fixed amount of this; it was not adjustable and there was
 		   no way to ask for the year where the award list is exactly what the

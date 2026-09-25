@@ -581,7 +581,7 @@ pixels the table becomes one card per prospect.
 | Group | What it controls |
 | --- | --- |
 | **Overall ratings** | `Preserve` keeps each prospect's original ovr (nothing inflates — only builds change). `Rebuild the class curve` re-deals overalls along a curve you shape. |
-| **Class quality / depth / elite prospects** | The shape of that curve. |
+| **Class quality / depth / elite prospects** | The shape of that curve. Dimmed and disabled while overalls are preserved, since they do nothing then. |
 | **Potential bias / spread** | How far pot sits above ovr, and how much it varies. These do not re-play the season — potential is computed after it — but they are not cosmetic: the mock draft board scores `(pot − ovr) × 0.65`, so moving them moves the board. |
 | **Specialization** | 0 = BBGM's fairly uniform builds, 2.5 = extreme specialists. |
 | **Archetype diversity** | Exactly `100 − v`% of the class stays Balanced. |
@@ -597,7 +597,7 @@ pixels the table becomes one card per prospect.
 | **Build noise** | Per-rating jitter. |
 | **Vary size** | Lets listed height and weight drift with the build. |
 | **Keep imported heights** | On by default. Pins every player's height rating and listed height to the value his file carried, so nothing the tool draws — a reroll, the variation dial, the size drift above, the 7'4" physical-outlier anomaly — can move either. A height you set by hand on a player still moves it: that is you saying how tall he is, not a draw. Off restores the old behavior, where heights are part of what a reroll redraws. |
-| **Freshmen / transfers / redshirts / reclassified** | Who is in what year, and how they got there. |
+| **Freshmen / transfers / redshirts / reclassified** | Who is in what year, and how they got there. Freshmen reaches 100 (the draw's lean toward freshmen at the top of the board flattens out above 50). Transfers is the share of upperclassmen who arrived from another program — seniors most, sophomores least; at the default mix 34 now gives about a third (it gave about half before the year weights were renormalized). |
 | **Destination weights** | Where blank-college prospects go, per league — grouped by region, each group collapsible with its own ×2 / ×½, because what anybody actually wants from thirty-odd number boxes is "more Europe". The grouping is derived from each league's own birthplace multipliers, so adding a league to `js/colleges.js` files it correctly with no second edit. |
 | **Scouting traits per prospect** | How many traits from the ~227-row table each prospect carries (see above). 0 turns the layer off, along with the per-player volatility, the offensive-glass bias and the medical file. |
 | **Avoid repeating recent anomalies** | The same memory the build pool has, one layer down. Thirty-two kinds and four draws a class is not enough separation on its own. |
@@ -616,7 +616,7 @@ pixels the table becomes one card per prospect.
 | **Events during the season** | A top-ten upset, the game of the year, a coach fired in January, a fourteen-game winning streak, a snowstorm postponement. All of them are read off results the simulation already produced, so none of them can contradict a box score. |
 | **Draft-day events** | What happens between the last game and the pick: a medical flag, a workout riser, a team trading up, a late-first reach, a green-room slide. 0 leaves the board as a plain ranking. |
 | **Voter disagreement** | How far the award voters stray from the arithmetic. The six player-of-the-year trophies have their own electorates, each weighting the team's resume differently — the coaches' and broadcasters' panels lean on it, the writers' lean away — scaled by a mood drawn once per class, so some years the argument is about the best player and some years about the best team. |
-| **National / conference / abroad award strictness** | Three separate dials. This used to be one slider driving three different mechanisms. |
+| **National / conference / abroad award strictness** | Three separate, independent dials — moving the national one does not move the other two. This used to be one slider driving three different mechanisms. |
 | **Archetype frequencies** | Per-build rarity weights for every archetype, grouped by guards / wings / bigs / any size with a ×2 and ×½ per group, and showing what share of the last generated class each build actually came out as. Searchable by name or by tag ("shooting" finds the twenty builds that shoot, not the one called it), filterable by the height a build is eligible at ("make this a rim-protector-heavy class" starts with the builds a seven-footer can draw) and by whether it is in the current class's pool, and each group folds. Hover a name to see its offset vector. The count and weight span in the hint are read off the table, not typed. |
 | **Note template** | Which lines are written into each player's exported note. |
 

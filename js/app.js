@@ -1100,9 +1100,9 @@
 		awardStrictness: (v) => v > 1.2 ? "fewer national honors reach this class"
 			: v < 0.9 ? "more national honors reach this class" : "realistic national award volume",
 		confAwardStrictness: (v) => v > 1.2 ? "fewer conference honors"
-			: v < 0.9 ? "more conference honors" : "realistic conference award volume",
+			: v < 0.9 ? "more conference honors" : "realistic conference award volume (independent of the national dial)",
 		proAwardStrictness: (v) => v > 1.2 ? "a higher bar for honors abroad"
-			: v < 0.9 ? "a lower bar for honors abroad" : "a realistic bar abroad",
+			: v < 0.9 ? "a lower bar for honors abroad" : "a realistic bar abroad (independent of the national dial)",
 		anomalyMemory: (v) => (v <= 0
 			? "each class draws its anomalies with no memory of the last"
 			: "an anomaly used last class is " + Math.round(Math.pow(3, v)) +
@@ -1517,6 +1517,7 @@
 		for (const n of document.querySelectorAll("[data-curve]")) {
 			n.style.opacity = curve ? "1" : ".38";
 			n.querySelectorAll("input").forEach((i) => (i.disabled = !curve));
+			n.title = curve ? "" : "Unused while overalls are preserved; pick Rebuild class curve";
 		}
 		$("ovrModeHint").textContent = curve
 			? "Rebuild: overalls are re-dealt along a configurable curve, so the class can get better or worse."
