@@ -3295,6 +3295,115 @@ async function gotoProspects(page) {
 			(await page.locator("#btnExport").textContent()) === "Export JSON");
 	}
 
+	console.log("\nHeader, tabs and the empty state");
+	{
+		// Undo and Redo read the same way and name the action.
+		ok("undo and redo are words, not a word and an arrow",
+			/^Undo/.test(await page.locator("#btnUndo").textContent()) &&
+			/^Redo/.test(await page.locator("#btnRedo").textContent()));
+		ok("an icon-only tool carries its name as a focus tooltip",
+			await page.evaluate(() => [...document.querySelectorAll("#headerTools .iconbtn[aria-label]")]
+				.every((b) => b.getAttribute("data-tip") === b.getAttribute("aria-label"))));
+		ok("the theme picker is in the settings panel, not the header",
+			await page.evaluate(() => !!document.querySelector("#settings #themeSelect") &&
+				!document.querySelector("header #themeSelect")));
+		ok("tab group captions are not tabs, and each group wraps as one",
+			await page.evaluate(() => document.querySelectorAll("#tabs .tabset").length >= 2 &&
+				[...document.querySelectorAll("#tabs .tabgroup")].every((g) => g.getAttribute("aria-hidden") === "true")));
+		await page.locator("#tabs button", { hasText: "Draft board" }).first().click();
+		await page.waitForTimeout(250);
+		const small = await page.evaluate(() => {
+			const bad = [];
+			for (const b of document.querySelectorAll("#view button.linky, #view .whybtn")) {
+				const r = b.getBoundingClientRect();
+				if (r.width && r.height < 23.5) bad.push(b.className + " " + r.height);
+			}
+			return bad;
+		});
+		ok("name links and ? buttons are at least 24px tall", small.length === 0, small.slice(0, 4).join(", "));
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.waitForTimeout(400);
+		const phone = await page.evaluate(() => {
+			const tools = document.getElementById("headerTools");
+			const fab = document.getElementById("btnSettingsFab");
+			const tabs = document.getElementById("tabs");
+			return {
+				h: Math.round(document.querySelector("header").getBoundingClientRect().height),
+				sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth,
+				tools: getComputedStyle(tools).display,
+				fab: getComputedStyle(fab).display,
+				cue: tabs.classList.contains("more-r") || tabs.classList.contains("more-l"),
+				// What sits where, for when the height check fails.
+				rows: [...document.querySelectorAll("header > *, header .btngroup > *")]
+					.filter((c) => c.getBoundingClientRect().height)
+					.map((c) => (c.id || c.className) + "@" + Math.round(c.getBoundingClientRect().top)).join(" "),
+			};
+		});
+		ok("the phone header is at most 180px tall", phone.h <= 180, JSON.stringify(phone));
+		ok("nothing scrolls the page sideways at 390px", phone.sw <= phone.cw + 1, JSON.stringify(phone));
+		ok("the tools fold behind ⋯ on a phone", phone.tools === "none");
+		await page.locator("#btnHeaderMore").click();
+		await page.waitForTimeout(150);
+		ok("and ⋯ shows them", (await page.evaluate(() =>
+			getComputedStyle(document.getElementById("headerTools")).display)) !== "none");
+		await page.locator("#btnHeaderMore").click();
+		ok("the tab strip fades at an edge with more tabs past it", phone.cue);
+		ok("a floating Settings button shows on a phone", phone.fab !== "none");
+		await page.locator("#btnSettingsFab").click();
+		await page.waitForTimeout(300);
+		ok("and it opens the settings panel",
+			await page.evaluate(() => getComputedStyle(document.getElementById("settings")).display !== "none"));
+		await page.locator("#btnSettings").click();
+		await page.setViewportSize({ width: 1500, height: 980 });
+		await page.waitForTimeout(300);
+
+		// A fresh page: the empty state.
+		const p2 = await browser.newPage({ viewport: { width: 390, height: 844 } });
+		p2.on("pageerror", (e) => errors.push("pageerror (empty state): " + e.message));
+		await p2.goto(base);
+		await p2.waitForTimeout(300);
+		const empty = await p2.evaluate(() => ({
+			presetShown: getComputedStyle(document.getElementById("preset").closest(".ctl")).display !== "none",
+			primary: document.getElementById("btnSample").classList.contains("primary"),
+			universe: !!document.getElementById("btnSynthUniverse"),
+			copy: document.querySelector("#empty h2").textContent,
+			inline: document.querySelectorAll("#empty [style]").length,
+			h: Math.round(document.querySelector("header").getBoundingClientRect().height),
+			sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth,
+		}));
+		ok("the empty state hides the settings until a class is loaded", !empty.presetShown);
+		ok("Try a sample class is the primary button, the universe one still there",
+			empty.primary && empty.universe);
+		ok("the empty state says choose, or drop, with no inline styles",
+			/^Choose a file/.test(empty.copy) && empty.inline === 0, JSON.stringify(empty));
+		ok("the empty-state phone header is short and does not scroll sideways",
+			empty.h <= 180 && empty.sw <= empty.cw + 1, JSON.stringify(empty));
+		const chooser = p2.waitForEvent("filechooser", { timeout: 3000 }).then(() => true, () => false);
+		await p2.locator("#empty h2").click();
+		ok("clicking anywhere in the empty box opens the file picker", await chooser);
+		// Pasting a class reads it through the same validation as a file.
+		const bad = JSON.stringify({ nope: 1 });
+		await p2.evaluate((t) => {
+			const dt = new DataTransfer();
+			dt.setData("text/plain", t);
+			document.body.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true }));
+		}, bad);
+		await p2.waitForTimeout(800);
+		ok("a pasted non-class is rejected with a message",
+			await p2.evaluate(() => !document.getElementById("empty").hidden &&
+				(!document.getElementById("errBanner").hidden || !document.getElementById("status").hidden)));
+		await p2.evaluate((t) => {
+			const dt = new DataTransfer();
+			dt.setData("text/plain", t);
+			document.body.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true }));
+		}, fs.readFileSync(fixture, "utf8"));
+		await p2.waitForSelector("table tbody tr", { timeout: 30000 }).catch(() => {});
+		ok("a pasted class loads", await p2.evaluate(() => document.getElementById("empty").hidden &&
+			!document.getElementById("app").hidden));
+		await p2.close();
+	}
+
 	console.log("\nNo errors");
 	ok("no console or page errors", errors.length === 0, errors.join("\n         "));
 
