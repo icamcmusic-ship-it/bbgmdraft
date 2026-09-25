@@ -281,7 +281,7 @@
 			})),
 			order: (u.order || []).map((d) => ({
 				index: d.index, name: d.name || null, season: d.season,
-				fingerprint: d.fingerprint || null, seed: d.seed || null,
+				fingerprint: d.fingerprint || null, seed: d.seed || null, synth: d.synth || undefined,
 			})),
 			tail: u.running ? null : (u.tail || null),
 			engineRev: u.engineRev || null,
@@ -3657,7 +3657,7 @@
 
 	function installFiles(loaded, problems, opts) {
 		const append = !!(opts && opts.append) && state.files.length > 0;
-		if (append) { appendFiles(loaded, problems); return; }
+		if (append) { appendFiles(loaded, problems, opts); return; }
 		{
 			$("empty").classList.remove("busy");
 			const ok = loaded.filter(Boolean);
@@ -3670,7 +3670,8 @@
 			   merge does not have to ask the user to find the same file on
 			   disk a second time. */
 			state.leagueSource = (ok.filter((f) => f.league)[0] || {}).league || null;
-			for (const f of state.files) f.fingerprint = fingerprint(f);
+			// A synthetic file keeps its seed-derived fingerprint.
+			for (const f of state.files) if (!f.synthetic) f.fingerprint = fingerprint(f);
 			state.runners = state.files.map((f) => global.Engine.createRunner(f.data));
 			state.results = [];
 			state.active = 0;
@@ -3709,7 +3710,7 @@
 				.map((w) => f.name + ": " + w));
 			if (warns.length) showWarning(warns.join("\n"));
 			setStatus("");
-			run();
+			if (!(opts && opts.noRun)) run();
 		}
 	}
 
@@ -3723,7 +3724,7 @@
 	   the chain has to be rebuilt, because a class inserted at 2031 changes
 	   the pool memory and the carry for every season after it, and that is
 	   said out loud rather than done silently. */
-	function appendFiles(loaded, problems) {
+	function appendFiles(loaded, problems, opts) {
 		$("empty").classList.remove("busy");
 		const ok = loaded.filter(Boolean);
 		if (problems && problems.length) showError(new Error(problems.join("\n")));
@@ -3790,6 +3791,8 @@
 		}
 		if (warns.length) showWarning(warns.join("\n"));
 		const added = fresh.length + " class" + (fresh.length === 1 ? "" : "es") + " added";
+		// The caller runs the chain itself (a synthetic extension or an import).
+		if (opts && opts.noRun) { setStatus(added + "."); return; }
 		if (state.cfg.universe && state.universe.rows.length && canExtendUniverse()) {
 			setStatus(added + " — extending the universe from " +
 				state.universe.tail.lastSeason + "…", true);
@@ -3876,6 +3879,7 @@
 	function bindFiles() {
 		$("btnLoad").addEventListener("click", () => $("file").click());
 		if ($("btnSample")) $("btnSample").addEventListener("click", loadSample);
+		if ($("btnSynthUniverse")) $("btnSynthUniverse").addEventListener("click", syntheticUniverseDialog);
 		$("file").addEventListener("change", (e) => {
 			/* Copied before the reset: a FileList is live, and a value left
 			   in place meant picking the same file again (after fixing it on
@@ -5477,7 +5481,8 @@
 		opts = opts || {};
 		const U = global.Universe;
 		if (!state.files.length) {
-			setStatus("Load two or more class files to run a universe.");
+			setStatus("Load two or more class files to run a universe, or start a " +
+				"synthetic one (Universe tab → New synthetic universe).");
 			return;
 		}
 		if (state.universe.running) return;
@@ -5627,6 +5632,11 @@
 			make: (s) => CFG.make(s),
 			runnerFor: (i) => state.runners[i],
 			store: (i, res) => { state.results[i] = res; },
+			// A synthetic class gained or lost named returners: a fresh runner.
+			dataChanged: (i) => {
+				state.runners[i] = global.Engine.createRunner(state.files[i].data);
+				state.results[i] = null;
+			},
 			biographyFor: (fp) => U.biographyForFile(state.universeBiography, fp),
 			extrapolateGaps: state.cfg.extrapolateGaps !== false,
 			fullClass: UNIVERSE_FULL_CLASS,
@@ -5752,6 +5762,119 @@
 			}
 			runUniverse(null, { resumeFrom: from });
 		}, "Re-run");
+	}
+
+	/* A UNIVERSE FROM NOTHING. N consecutive synthetic classes, each drawn
+	   from hash(seed + season) (Universe.synthFile), run through the same
+	   cold chain as real files. Nothing is stored but the seed: a reload or
+	   an import regenerates the classes (see restoreSyntheticUniverse). */
+	const SYNTH_MAX_SEASONS = 60;
+	function newSyntheticUniverse(n, first) {
+		const U = global.Universe;
+		n = Math.max(2, Math.min(SYNTH_MAX_SEASONS, Math.round(Number(n) || 10)));
+		first = Number.isFinite(Number(first)) && Number(first) > 1900
+			? Math.round(Number(first)) : new Date().getFullYear() + 1;
+		if (state.universe.running) return;
+		pushUndo("started a synthetic universe");
+		const seed = state.cfg.seed && state.cfg.seed.trim()
+			? state.cfg.seed.trim() : "synth-" + Math.floor(Math.random() * 1e9);
+		state.cfg.seed = seed;
+		state.cfg.universe = true;
+		if ($("seed")) $("seed").value = seed;
+		paintConfig();
+		state.universeBiography = null;
+		installFiles(U.synthFiles(seed, first, n), [], { noRun: true });
+		state.tab = "universe";
+		runUniverse();
+	}
+
+	function syntheticUniverseDialog() {
+		const box = el("div");
+		box.appendChild(el("p", null,
+			"Start a universe with no class files: each season is a synthetic " +
+			"class drawn from the seed, so the same seed and settings rebuild the " +
+			"same world. The panel's seed is used when set."));
+		const mk = (label, value, min, max) => {
+			const row = el("label", "ctl", label + " ");
+			const inp = el("input");
+			inp.type = "number";
+			inp.min = String(min);
+			inp.max = String(max);
+			inp.value = String(value);
+			row.appendChild(inp);
+			box.appendChild(row);
+			return inp;
+		};
+		const nIn = mk("Seasons", 10, 2, SYNTH_MAX_SEASONS);
+		nIn.id = "synthSeasons";
+		const yIn = mk("First season", new Date().getFullYear() + 1, 1950, 2200);
+		yIn.id = "synthFirst";
+		modal("New synthetic universe", box, () => {
+			const n = Number(nIn.value);
+			const y = Number(yIn.value);
+			closeModal();
+			newSyntheticUniverse(n, y);
+		}, "Start");
+	}
+
+	/* REAL FORWARD SIMULATION. N more seasons past the last one played, as
+	   synthetic classes appended to the chain (an extension, so everything
+	   before stays put). Keyed on the world's own seed, so the same world
+	   simulated forward twice is the same future. extrapolateYears remains
+	   the cheap guess for when this is not wanted. */
+	function simulateForward(n) {
+		const U = global.Universe;
+		const u = state.universe;
+		const tail = universeTail();
+		if (!tail || u.running || !Number.isFinite(tail.lastSeason)) {
+			setStatus("Run a universe first — there is no finished season to continue from.");
+			return;
+		}
+		n = Math.max(1, Math.min(SYNTH_MAX_SEASONS, Math.round(Number(n) || 5)));
+		const files = U.synthFiles(tail.baseSeed || u.baseSeed, tail.lastSeason + 1, n);
+		state.cfg.universe = true;
+		if (state.files.length) installFiles(files, [], { append: true, noRun: true });
+		else installFiles(files, [], { noRun: true });
+		state.tab = "universe";
+		runUniverse(null, { extend: true });
+	}
+
+	function simulateForwardDialog() {
+		const box = el("div");
+		box.appendChild(el("p", null,
+			"Play more seasons past the last one, each on a synthetic class " +
+			"drawn from this world's seed — real games, not the extrapolated " +
+			"guesses of “Years past the last class”. The seasons already played " +
+			"are kept as they are."));
+		const row = el("label", "ctl", "Seasons ");
+		const inp = el("input");
+		inp.type = "number";
+		inp.id = "synthForward";
+		inp.min = "1";
+		inp.max = String(SYNTH_MAX_SEASONS);
+		inp.value = "5";
+		row.appendChild(inp);
+		box.appendChild(row);
+		modal("Simulate more seasons", box, () => {
+			const n = Number(inp.value);
+			closeModal();
+			simulateForward(n);
+		}, "Simulate");
+	}
+
+	/* Regenerate a saved synthetic universe's classes and replay it run by
+	   run, exactly as an import does, so a reload gets back the same world
+	   (with its results, not only its timeline). Only when every season in
+	   it is synthetic; a world with real classes waits for them. */
+	function restoreSyntheticUniverse() {
+		const U = global.Universe;
+		const u = state.universe;
+		if (state.files.length || !u || u.running || !Array.isArray(u.order) ||
+			!u.order.length || !u.order.every((o) => o && o.synth) || !u.settings) return false;
+		importUniverse(U.exportUniverse(Object.assign({}, u, {
+			biography: state.universeBiography || null,
+		})));
+		return true;
 	}
 
 	function exportUniverse(embedFiles) {
@@ -6029,6 +6152,18 @@
 				}
 			}
 			if (loaded.length) installFiles(loaded, problems);
+		}
+		/* A synthetic season needs no file: it is regenerated from the seed
+		   its order entry records. Installed without a run; the replay
+		   below is the run. */
+		{
+			const loadedFps = new Set(state.files.map((f) => f.fingerprint));
+			const syn = (Array.isArray(json.order) ? json.order : [])
+				.filter((o) => o && o.synth && !loadedFps.has(o.fingerprint))
+				.map((o) => U.synthFromOrder(o)).filter(Boolean);
+			if (syn.length) {
+				installFiles(syn, [], { append: state.files.length > 0, noRun: true });
+			}
 		}
 		const have = new Set(state.files.map((f) => f.fingerprint));
 		const seasons = json.seasons || [];
@@ -8836,6 +8971,8 @@
 		editorPanel, modal, closeModal,
 		clearLock, showPlayer, showTeam, showGame,
 		runUniverse, cancelUniverse, resumeUniverseDialog, exportUniverse, exportUniversePlayers,
+		newSyntheticUniverse, syntheticUniverseDialog, simulateForward, simulateForwardDialog,
+		restoreSyntheticUniverse,
 		exportUniverseCsv, randomizeUniverseName, PERSIST_CAPS,
 		importUniverse, showPlayerInFile, universeCareers, liveResults,
 		// Exposed for tools/uismoke.js, which loads files without a file input.
@@ -8918,6 +9055,10 @@
 	paintHistory();
 	paintUndo();
 	if (saved) applyOpenGroups(saved.open);
+	// A saved synthetic universe has no files to re-drop: rebuild it from its seed.
+	setTimeout(() => {
+		try { restoreSyntheticUniverse(); } catch (e) { showError(e); }
+	}, 0);
 
 	$("errClose").addEventListener("click", clearError);
 	$("warnClose").addEventListener("click", () => { $("warnBanner").hidden = true; });

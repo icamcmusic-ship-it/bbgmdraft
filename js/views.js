@@ -3769,6 +3769,22 @@
 			part.addEventListener("click", () => { A().resumeUniverseDialog(); });
 			bar.appendChild(part);
 		}
+		/* Past the last season: real games on synthetic classes. */
+		if (!u.running && u.rows.length && u.tail && !u.broken) {
+			const fwd = el("button", null, "Simulate more seasons…");
+			fwd.id = "btnSimForward";
+			fwd.title = "Play N more seasons past " + u.tail.lastSeason +
+				" on synthetic classes drawn from this world's seed.";
+			fwd.addEventListener("click", () => { A().simulateForwardDialog(); });
+			bar.appendChild(fwd);
+		}
+		if (!u.running) {
+			const syn = el("button", null, "New synthetic universe…");
+			syn.id = "btnSynthUniverseTab";
+			syn.title = "Start a new world of N synthetic seasons (replaces the loaded classes).";
+			syn.addEventListener("click", () => { A().syntheticUniverseDialog(); });
+			bar.appendChild(syn);
+		}
 		/* A way out. Fifty seasons is close to a minute of work and the chain
 		   had `running` and no stop — the batch runner has had one since it
 		   existed. The seasons already finished are kept, exactly as a
