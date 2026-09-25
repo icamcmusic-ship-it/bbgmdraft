@@ -1830,6 +1830,44 @@ async function gotoProspects(page) {
 			qw.got.join(" | "));
 		ok("the threads list filters by kind", qw.filtered, qw.kinds.join(","));
 		ok("the tab says what a reload keeps", qw.footer);
+		/* UNIVERSE HISTORY (audit 5.3/7/9/13/14): strangeness on each row,
+		   the weirdest season, the coaches' table and hot seat, the rivalry
+		   table by heat. The hot seat and the rivalries are synthesised, as
+		   above, because two seasons rarely produce either. */
+		const uh = await page.evaluate(() => {
+			const st = window.App.state;
+			const u = st.universe;
+			const rec = u.records;
+			const savedHot = rec.hotSeat;
+			const savedTail = u.tail;
+			rec.hotSeat = [{ school: "Duke", coach: "Test Coach", tenure: 5, margin: 3.2, record: "12-19" }];
+			u.tail = Object.assign({}, savedTail, { lastSeason: 2030, carry: Object.assign({},
+				savedTail && savedTail.carry, { rivalries: {
+					"Duke|Kansas": { a: "Duke", b: "Kansas", games: 4, aw: 3, bw: 1, march: [2010, 2011, 2012] },
+					"Iowa|Ohio State": { a: "Iowa", b: "Ohio State", games: 2, aw: 1, bw: 1, march: [2029, 2030] },
+				} }) });
+			window.App.render();
+			const v = document.getElementById("view");
+			const out = {
+				strange: v.querySelectorAll(".strange-score").length,
+				rows: u.rows.filter((r) => r && !r.error).length,
+				weird: !!v.querySelector(".weirdest-season"),
+				coaches: v.querySelectorAll("table.coach-records tbody tr").length,
+				hot: /Test Coach/.test((v.querySelector(".hot-seat") || {}).textContent || ""),
+				firstRivalry: (v.querySelector("table.rivalry-table tbody tr td") || {}).textContent || "",
+			};
+			rec.hotSeat = savedHot;
+			u.tail = savedTail;
+			window.App.render();
+			return out;
+		});
+		ok("every timeline row shows its strangeness", uh.strange === uh.rows && uh.rows > 0,
+			JSON.stringify(uh));
+		ok("the records book names the weirdest season and the coaches",
+			uh.weird && uh.coaches > 0, JSON.stringify(uh));
+		ok("the hot-seat preview renders", uh.hot, JSON.stringify(uh));
+		ok("the rivalries table puts the hot pair above the old one",
+			/^Iowa vs Ohio State/.test(uh.firstRivalry), uh.firstRivalry);
 		if (hist.name) {
 			await page.evaluate((n) => window.App.showTeam(n), hist.name);
 			await page.waitForTimeout(150);
