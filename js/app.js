@@ -4078,6 +4078,7 @@
 		cfg.universeRecruiting = saved.universeRecruiting || null;
 		cfg.universeAlumni = saved.universeAlumni || null;
 		cfg.universeTitles = saved.universeTitles || null;
+		cfg.universeDigest = saved.universeDigest || null;
 		cfg.biography = global.Universe.biographyForFile(state.universeBiography,
 			state.files[i] && state.files[i].fingerprint);
 		return cfg;

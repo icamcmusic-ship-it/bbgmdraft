@@ -1215,7 +1215,17 @@ working the season before, so after a decade a name has a **coaching tree**.
 And the Universe tab carries a **records book**: all-time titles, title games,
 seasons at AP No. 1, players of the year and No. 1 picks; the longest unbroken
 run at No. 1; the best single season anybody had; a player of the decade; and a
-hall of fame drawn from the alumni index. Continuity threads are structured
+hall of fame drawn from the alumni index; the **weirdest season** (every
+timeline row carries the engine's strangeness score, reasons on hover); and a
+**coaches' table** — wins, titles, tree size, longest tenure — with a hot-seat
+preview of who starts next season under pressure. The Rivalries table ranks by
+**heat** (a March meeting is worth 3, any other season the pair met 1, halving
+every four years), and a pair that meets in March after six or more years apart
+is a "rivalry renewed" thread. A man the registry (one identity per file and
+pid) saw honoured in two seasons, or back undrafted and honoured, is a "he came
+back" thread. Each program's last title, Final Four and player of the year ride
+in the carry as a digest, so the paper can write "first title in nine years" and
+"ends a ten-year Final Four drought". Continuity threads are structured
 data now (`{kind, team, seasons, count, text}`), so a program in one is a link
 to its team page rather than a word in a sentence.
 

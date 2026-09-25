@@ -8235,6 +8235,51 @@
 			}
 		}
 
+		/* --- droughts ending (universe mode only) -------------------------
+
+		   The program digest (see digestStep in js/universe.js) says when a
+		   program last won it all and last reached a Final Four, as of the
+		   season before this one. A title after five years or more without
+		   one, and a Final Four after eight, are the stories a fanbase
+		   tells. No draws: the headline is picked off the season, so the
+		   rest of the paper's seeded stream is untouched. */
+		{
+			const digest = (res.cfg && res.cfg.universeDigest) || null;
+			const t = res.tourney;
+			if (digest && t && Number.isFinite(season)) {
+				const champ = t.champion ? t.champion.team.name : null;
+				const d = champ ? digest[champ] : null;
+				const n = d && Number.isFinite(d.title) ? season - d.title : 0;
+				if (n >= 5) {
+					articles.push({
+						when: 1.195, kind: "title drought ended",
+						headline: fill(["{school}'s first title in {n} years",
+							"{school} ends a {n}-year wait for a title"][season % 2],
+						{ school: TM(champ), n: T(String(n)) }),
+						body: [TM(champ), T(" had not won a national title since " + d.title +
+							". That is " + n + " years" + (Number.isFinite(d.poy) && d.poyName
+								? ", and the last player of the year it had was " + d.poyName +
+									" in " + d.poy : "") + ".")],
+					});
+				}
+				const ff = ((t.finalFour || []).map((x) => x && x.team ? x.team.name : x && x.name)
+					.filter((x) => x && x !== champ));
+				for (const name of ff) {
+					const e = digest[name];
+					const gap = e && Number.isFinite(e.ff) ? season - e.ff : 0;
+					if (gap < 8) continue;
+					articles.push({
+						when: 1.15, kind: "final four drought ended",
+						headline: fill("{school} ends a {n}-year Final Four drought",
+							{ school: TM(name), n: T(String(gap)) }),
+						body: [TM(name), T(" is back in a Final Four for the first time since " +
+							e.ff + ".")],
+					});
+					break;
+				}
+			}
+		}
+
 		// --- realignment (an offseason story) -----------------------------
 		/* One move is a story; a raid of four is one story too. Six
 		   near-identical "Realignment again" articles in a row read like a

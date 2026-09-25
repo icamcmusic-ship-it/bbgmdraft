@@ -3224,6 +3224,11 @@
 				(b.no1 ? ", the No. 1 pick" : "")));
 			notes.appendChild(line);
 		}
+		if (rec.weirdest) {
+			const w = rec.weirdest;
+			notes.appendChild(el("div", "weirdest-season", "Weirdest season: " + w.season +
+				", strangeness " + w.score + (w.reasons.length ? " — " + w.reasons.join("; ") : "")));
+		}
 		for (const d of rec.playersOfTheDecade || []) {
 			if (!d.player) continue;
 			notes.appendChild(el("div", null, "Player of the " + d.decade + "s: " +
@@ -3243,6 +3248,76 @@
 			try { people = global.Universe.peopleRecords(u.registry); } catch (e) { people = null; }
 		}
 		peopleRecordsSection(view, people, u && u.registry);
+		coachRecordsSection(view, rec);
+	}
+
+	/* THE COACHES' RECORD BOOK (Universe.coachRecords) and the hot-seat
+	   preview (Universe.hotSeatPreview): wins, titles, tree size and the
+	   longest run at one school, then who the next season starts under
+	   pressure. Both ride in the records book, so a reload keeps them. */
+	function coachRecordsSection(view, rec) {
+		const c = rec && rec.coaches;
+		if (c && c.wins && c.wins.length) {
+			view.appendChild(el("h5", null, "Coaches"));
+			const wrap = el("div", "scroll");
+			const table = el("table");
+			table.className = "coach-records";
+			const hr = el("tr");
+			for (const h of ["Coach", "W-L", "Titles", "Tree", "Longest tenure", "Schools"]) {
+				hr.appendChild(el("th", /W-L|Titles|Tree/.test(h) ? "num" : "", h));
+			}
+			const thead = el("thead");
+			thead.appendChild(hr);
+			table.appendChild(thead);
+			const tb = el("tbody");
+			for (const x of c.wins) {
+				const tr = el("tr");
+				tr.appendChild(el("td", null, x.name));
+				tr.appendChild(el("td", "num", x.w + "-" + x.l));
+				tr.appendChild(el("td", "num", String(x.titles)));
+				tr.appendChild(el("td", "num", String(x.tree)));
+				tr.appendChild(el("td", null, x.tenureAt ? x.tenure + " at " + x.tenureAt.school +
+					" (" + x.tenureAt.from + "–" + x.tenureAt.to + ")" : ""));
+				const td = el("td");
+				x.schools.forEach((sc, i) => {
+					if (i) td.appendChild(document.createTextNode(", "));
+					td.appendChild(programLink(sc));
+				});
+				tr.appendChild(td);
+				tb.appendChild(tr);
+			}
+			table.appendChild(tb);
+			wrap.appendChild(table);
+			view.appendChild(wrap);
+			const notes = el("div", "note");
+			const lead = (list, what) => {
+				const x = (list || [])[0];
+				if (x) notes.appendChild(el("div", null, what(x)));
+			};
+			lead(c.titles, (x) => "Most titles: " + x.name + ", " + x.titles);
+			lead(c.trees, (x) => "Biggest tree: " + x.name + ", " + x.tree + " head jobs");
+			lead(c.tenure, (x) => "Longest tenure: " + x.name + ", " + x.tenure + " seasons at " +
+				x.tenureAt.school);
+			if (notes.childNodes.length) view.appendChild(notes);
+		}
+		const hot = rec && rec.hotSeat;
+		if (hot && hot.length) {
+			view.appendChild(el("h5", null, "Hot seat preview"));
+			view.appendChild(el("p", "legendline",
+				"Coaches whose program ends the season more than twelve levels under its " +
+				"prestige — the test next season's hot-seat draw uses. A preview, not the draw."));
+			const box = el("div", "note hot-seat");
+			for (const h of hot) {
+				const line = el("div");
+				line.appendChild(document.createTextNode((h.coach || "?") + ", "));
+				line.appendChild(programLink(h.school));
+				line.appendChild(document.createTextNode(" — " + h.margin + " under" +
+					(h.record ? ", " + h.record + " last season" : "") +
+					(h.tenure ? ", year " + h.tenure : "")));
+				box.appendChild(line);
+			}
+			view.appendChild(box);
+		}
 	}
 
 	/* THE COACHING TREE.
@@ -3534,22 +3609,23 @@
 	   is the answer to "who keeps running into whom in March". */
 	function rivalriesSection(view, u) {
 		const riv = u.tail && u.tail.carry ? u.tail.carry.rivalries : null;
-		const list = Object.keys(riv || {}).map((k) => riv[k])
-			.filter((e) => e && e.a && e.b && (e.march || []).length >= 2)
-			.sort((x, y) => y.march.length - x.march.length || y.games - x.games ||
-				Math.max.apply(null, y.march) - Math.max.apply(null, x.march) ||
-				String(x.a + x.b).localeCompare(String(y.a + y.b)))
+		/* Hottest first (Universe.rivalryHeat): recent meetings count, old
+		   ones fade, so the table is the rivalries of now and not of 2031. */
+		const list = global.Universe.rivalryTable(riv, u.tail ? u.tail.lastSeason : null)
 			.slice(0, 10);
 		if (!list.length) return;
 		view.appendChild(el("h4", null, "Rivalries"));
 		view.appendChild(el("p", "legendline",
-			"Pairs that met in the NCAA tournament more than once. Once a pair " +
-			"has met in March, every later game between them counts toward the series."));
+			"Pairs that met in the NCAA tournament more than once, hottest first. Heat " +
+			"counts a March meeting as 3 and any other season they met as 1, halving every " +
+			global.Universe.RIVALRY_HALF_LIFE + " years. Once a pair has met in March, " +
+			"every later game between them counts toward the series."));
 		const wrap = el("div", "scroll");
 		const table = el("table");
+		table.className = "rivalry-table";
 		const hr = el("tr");
-		for (const h of ["Rivalry", "March meetings", "Seasons", "Series"]) {
-			hr.appendChild(el("th", h === "March meetings" ? "num" : "", h));
+		for (const h of ["Rivalry", "Heat", "March meetings", "Seasons", "Series"]) {
+			hr.appendChild(el("th", h === "March meetings" || h === "Heat" ? "num" : "", h));
 		}
 		const thead = el("thead");
 		thead.appendChild(hr);
@@ -3562,6 +3638,7 @@
 			td.appendChild(document.createTextNode(" vs "));
 			td.appendChild(programLink(e.b));
 			tr.appendChild(td);
+			tr.appendChild(el("td", "num", e.heat.toFixed(1)));
 			tr.appendChild(el("td", "num", String(e.march.length)));
 			tr.appendChild(el("td", null, e.march.slice().sort((a, b) => a - b).join(", ")));
 			tr.appendChild(el("td", null, e.aw === e.bw ? "level " + e.aw + "-" + e.bw
@@ -3861,9 +3938,16 @@
 				tb.appendChild(tr);
 				continue;
 			}
-			tr.appendChild(el("td", null, (r.flavor || "—") +
+			const flTd = el("td", null, (r.flavor || "—") +
 				(r.partial ? " · partial class, honours topped up" : "") +
-				(r.restored ? " · restored from the imported universe" : "")));
+				(r.restored ? " · restored from the imported universe" : ""));
+			/* The season's strangeness (Engine.strangeness), reasons on hover. */
+			if (r.strange && Number.isFinite(r.strange.score)) {
+				const sp = el("span", "strange-score", " · strangeness " + r.strange.score);
+				sp.title = (r.strange.reasons || []).join("; ") || "nothing unusual";
+				flTd.appendChild(sp);
+			}
+			tr.appendChild(flTd);
 			tr.appendChild(el("td", null, r.apOne || "—"));
 			const champTd = el("td");
 			champTd.appendChild(r.champion ? programLink(r.champion) : document.createTextNode("—"));
