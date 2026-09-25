@@ -1493,3 +1493,93 @@ tr.followed .pill { margin-left: 6px; }
 .followed-card, .dynasty-card { margin: 6px 0; }
 .dynasty-won { box-shadow: inset 3px 0 0 var(--accent); }
 .dynasty-failed, .dynasty-over-budget { box-shadow: inset 3px 0 0 var(--accent-2); }
+
+/* ---- header, tabs and the empty state (audit 2026-09-24, UI 1-8, 19) ------ */
+/* The "⋯" toggle only exists on a phone; see bindHeaderMore. */
+.headmore { display: none; }
+@media (max-width: 560px) {
+	/* Brand, Settings and Load share the first row instead of the title
+	   taking a row of its own. */
+	header h1 { width: auto; }
+	header .brand { margin-right: auto; }
+	.headmore { display: inline-flex; border-color: var(--line); font-size: 18px; line-height: 1; }
+	header:not(.toolsopen) #headerTools,
+	header:not(.toolsopen) .btngroup[aria-label="Seed"] select { display: none; }
+	header .btngroup { flex: 0 1 auto; }
+	header { gap: 6px; padding: 8px 12px; }
+	header button, header select { padding: 5px 8px; font-size: 13px; }
+	/* "⋯" rides on the seed row; Reroll and Export share the next one. */
+	header > .btngroup[aria-label="Generate"], header > .btngroup[aria-label="Export"],
+	header > #headerTools { order: 2; }
+	header > #headerTools { flex-basis: 100%; }
+}
+/* Icon-only tools carry their name in data-tip (from aria-label); it shows on
+   keyboard focus and hover, since a title never appears on touch or focus. */
+.iconbtn[data-tip] { position: relative; }
+.iconbtn[data-tip]:focus-visible::after, .iconbtn[data-tip]:hover::after {
+	content: attr(data-tip); position: absolute; top: calc(100% + 6px); left: 50%;
+	transform: translateX(-50%); z-index: 70; white-space: nowrap; pointer-events: none;
+	padding: 3px 8px; border-radius: 6px; font-size: 12px; font-weight: 400;
+	background: var(--text); color: var(--bg); box-shadow: var(--shadow-1);
+}
+/* Wide enough for words: the tools say what they are, inline. */
+@media (min-width: 1700px) {
+	.btngroup.tools .iconbtn[data-tip]::after,
+	.btngroup.tools .iconbtn[data-tip]:hover::after,
+	.btngroup.tools .iconbtn[data-tip]:focus-visible::after {
+		content: attr(data-tip); position: static; transform: none; padding: 0;
+		background: none; color: inherit; box-shadow: none; font-size: 12px;
+	}
+}
+/* Undo and Redo name the action in the same form; both are capped. */
+#btnRedo {
+	max-width: 17ch; overflow: hidden; text-overflow: ellipsis;
+	white-space: nowrap; display: inline-block;
+}
+/* Tab groups: a group's tabs wrap together, and the label is a caption on a
+   divider rather than a pill-shaped thing that looks clickable. */
+.tabset { display: inline-flex; align-items: center; gap: 3px; flex-wrap: nowrap; }
+.tabset + .tabset { border-left: 1px solid var(--line); padding-left: 6px; margin-left: 3px; }
+.tabs .tabgroup {
+	border-left: none; padding: 0 2px 0 4px; font-size: 9px; letter-spacing: .12em;
+	opacity: .8; cursor: default; user-select: none;
+}
+/* Narrow screens: one sideways row, faded at whichever edge has more. */
+@media (max-width: 700px) {
+	.tabset { flex: none; }
+	.tabs.more-r { -webkit-mask-image: linear-gradient(to right, #000 85%, transparent); mask-image: linear-gradient(to right, #000 85%, transparent); }
+	.tabs.more-l { -webkit-mask-image: linear-gradient(to left, #000 85%, transparent); mask-image: linear-gradient(to left, #000 85%, transparent); }
+	.tabs.more-l.more-r { -webkit-mask-image: linear-gradient(to right, transparent, #000 12%, #000 88%, transparent); mask-image: linear-gradient(to right, transparent, #000 12%, #000 88%, transparent); }
+}
+/* The empty state: the whole box is the file picker. */
+#empty { cursor: pointer; }
+#empty:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#empty:hover { border-color: var(--accent); }
+#empty h2 { margin: 0 0 8px; font-size: 18px; color: var(--text); }
+#empty > p { margin: 0; }
+#empty > p.hint { margin-top: 4px; }
+#empty .emptyacts { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; }
+@media (max-width: 560px) { .drop { padding: 24px 16px; margin: 16px auto; } }
+/* Until a class is loaded the settings have nothing to act on: only the theme
+   shows, with a line saying the rest will appear. */
+.noclassnote { display: none; }
+body.noclass #settings > :not(.themerow):not(.noclassnote) { display: none; }
+body.noclass #settings .noclassnote { display: block; }
+body.noclass #settings { height: auto; }
+/* A Settings button that stays in reach on a phone once a class is loaded.
+   Bottom-left and above .replaytoasts, which stack bottom-right. */
+.fab {
+	position: fixed; left: 16px; bottom: 16px; z-index: 1001; min-height: 44px;
+	padding: 8px 16px; border-radius: 999px; font-weight: 600;
+	background: var(--accent); color: var(--on-accent, #fff); border-color: var(--accent);
+	box-shadow: var(--shadow-1);
+}
+/* button:hover sets position: relative; the FAB must stay fixed. */
+button.fab:hover:not(:disabled) { position: fixed; z-index: 1001; }
+@media (min-width: 861px) { .fab { display: none !important; } }
+body.settings-open .fab { display: none; }
+/* WCAG 2.5.8: name links and the small "?" are at least 24px tall. */
+button.linky { min-height: 24px; }
+.whybtn { min-width: 24px; min-height: 24px; }
+body.noclass .fab { display: none; }
+@media print { .fab { display: none !important; } }

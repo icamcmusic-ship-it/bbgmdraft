@@ -788,7 +788,7 @@
 		// pushUndo("imported locks from a CSV") wrote a label that nothing ever
 		// displayed. The button says what it will undo.
 		b.textContent = state.undo.length
-			? "Undo " + short(state.undo[state.undo.length - 1].label)
+			? "Undo: " + short(state.undo[state.undo.length - 1].label)
 			: "Undo";
 		b.title = state.undo.length
 			? "Undo: " + state.undo[state.undo.length - 1].label + " (Ctrl+Z)"
@@ -796,6 +796,10 @@
 		const r = $("btnRedo");
 		if (!r) return;
 		r.disabled = !state.redo.length;
+		// The same form as Undo: a word and the action, not a bare ↷.
+		r.textContent = state.redo.length
+			? "Redo: " + short(state.redo[state.redo.length - 1].label)
+			: "Redo";
 		r.title = state.redo.length
 			? "Redo: " + state.redo[state.redo.length - 1].label + " (Ctrl+Shift+Z)"
 			: "Nothing to redo";
@@ -4283,8 +4287,78 @@
 				: " They were probably made against a file with different player ids."));
 	}
 
+	/* The tab strip scrolls sideways on a phone; fade whichever edge has more. */
+	function tabEdgeCue() {
+		const tabs = $("tabs");
+		if (!tabs) return;
+		const max = tabs.scrollWidth - tabs.clientWidth;
+		tabs.classList.toggle("more-l", max > 2 && tabs.scrollLeft > 2);
+		tabs.classList.toggle("more-r", max > 2 && tabs.scrollLeft < max - 2);
+	}
+
+	/* Icon-only buttons: the aria-label becomes a focus/hover tooltip and, on a
+	   wide screen, a visible word (both CSS, so textContent is untouched).
+	   Idempotent; re-run as buttons are added. */
+	function labelIconButtons() {
+		document.querySelectorAll("header .iconbtn[aria-label]:not([data-tip])").forEach((b) => {
+			const name = b.getAttribute("aria-label");
+			b.setAttribute("data-tip", name);
+		});
+	}
+
+	/* Below 560px the tools fold behind "⋯". */
+	function bindHeaderMore() {
+		const btn = $("btnHeaderMore");
+		if (!btn) return;
+		btn.addEventListener("click", () => {
+			const open = document.querySelector("header").classList.toggle("toolsopen");
+			btn.setAttribute("aria-expanded", open ? "true" : "false");
+		});
+	}
+
+	/* Pasted class JSON goes through readFiles like a chosen file, so it is
+	   validated the same way. */
+	function readPasted(text) {
+		text = String(text || "").trim();
+		if (!text) { setStatus("The clipboard is empty."); return; }
+		if (!/^[\[{]/.test(text)) { setStatus("That paste is not JSON — copy the whole exported file."); return; }
+		readFiles([new File([text], "pasted.json", { type: "application/json" })],
+			state.files.length ? { append: true } : null);
+	}
+
 	function bindFiles() {
 		$("btnLoad").addEventListener("click", () => $("file").click());
+		// The whole empty-state box opens the picker; its own buttons do not.
+		const empty = $("empty");
+		empty.addEventListener("click", (e) => {
+			if (e.target.closest("button, a, input")) return;
+			$("file").click();
+		});
+		empty.addEventListener("keydown", (e) => {
+			if (e.target !== empty || (e.key !== "Enter" && e.key !== " ")) return;
+			e.preventDefault();
+			$("file").click();
+		});
+		if ($("btnPasteClass")) {
+			$("btnPasteClass").addEventListener("click", () => {
+				if (!navigator.clipboard || !navigator.clipboard.readText) {
+					setStatus("This browser will not hand over the clipboard — press Ctrl+V (⌘V) instead.");
+					return;
+				}
+				navigator.clipboard.readText().then(readPasted,
+					() => setStatus("Clipboard access was refused — press Ctrl+V (⌘V) instead."));
+			});
+		}
+		document.addEventListener("paste", (e) => {
+			if (empty.hidden) return;
+			const t = e.target;
+			if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
+			if (!$("modal").hidden) return;
+			const text = e.clipboardData && e.clipboardData.getData("text");
+			if (!text) return;
+			e.preventDefault();
+			readPasted(text);
+		});
 		if ($("btnSample")) $("btnSample").addEventListener("click", loadSample);
 		if ($("btnSynthUniverse")) $("btnSynthUniverse").addEventListener("click", syntheticUniverseDialog);
 		$("file").addEventListener("change", (e) => {
@@ -7611,9 +7685,16 @@
 		tabs.innerHTML = "";
 		tabs.setAttribute("role", "tablist");
 		let lastGroup = null;
+		// One span per group, so the strip wraps between groups, not inside one.
+		let set = null;
 		TABS.forEach(([key, label, group], i) => {
 			if (group !== lastGroup) {
-				tabs.appendChild(el("span", "tabgroup", group));
+				set = el("span", "tabset");
+				set.setAttribute("role", "presentation");
+				const cap = el("span", "tabgroup", group);
+				cap.setAttribute("aria-hidden", "true");
+				set.appendChild(cap);
+				tabs.appendChild(set);
 				lastGroup = group;
 			}
 			const b = el("button", key === state.tab ? "active" : "", label);
@@ -7635,7 +7716,7 @@
 				const next = tabs.querySelector("button.active");
 				if (next) next.focus();
 			});
-			tabs.appendChild(b);
+			set.appendChild(b);
 		});
 		/* On a phone the tab strip is one sideways-scrolling row; keep the
 		   active tab in it rather than off the right edge. */
@@ -7649,6 +7730,7 @@
 				}
 			}
 		}
+		tabEdgeCue();
 		const view = $("view");
 		/* Every interaction rebuilds this view from scratch — clicking a row to
 		   open the editor, ticking a sort level, typing in a filter. With a
@@ -10191,6 +10273,24 @@
 	bindSurprise();
 	bindChallenges();
 	bindReplay();
+	bindHeaderMore();
+	labelIconButtons();
+	// Buttons added to the tools group later (replay, daily…) get labelled too.
+	if ($("headerTools") && typeof MutationObserver !== "undefined") {
+		new MutationObserver(labelIconButtons).observe($("headerTools"), { childList: true });
+	}
+	/* body.noclass while the empty state shows (CSS collapses the settings
+	   and hides the Settings button). A class, not body:has(): :has on body
+	   re-checks on every mutation of a forty-column table. */
+	{
+		const syncNoClass = () => document.body.classList.toggle("noclass", !$("empty").hidden);
+		syncNoClass();
+		if (typeof MutationObserver !== "undefined") {
+			new MutationObserver(syncNoClass).observe($("empty"), { attributes: true, attributeFilter: ["hidden"] });
+		}
+	}
+	$("tabs").addEventListener("scroll", tabEdgeCue, { passive: true });
+	window.addEventListener("resize", tabEdgeCue);
 	bindSettingFilter();
 	bindFiles();
 	applyTheme();
@@ -10251,6 +10351,11 @@
 			apply();
 		};
 		btn.addEventListener("click", toggle);
+		const fab = $("btnSettingsFab");
+		if (fab) fab.addEventListener("click", () => {
+			if (!isOpen()) toggle();
+			$("settings").scrollIntoView({ behavior: "smooth", block: "start" });
+		});
 		document.addEventListener("keydown", (e) => {
 			if (e.key !== "s" || e.ctrlKey || e.metaKey || e.altKey) return;
 			const tag = (e.target && e.target.tagName) || "";
