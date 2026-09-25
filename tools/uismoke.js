@@ -2772,6 +2772,100 @@ async function gotoProspects(page) {
 		await page.evaluate(() => { window.App.replayStore().ledger = {}; });
 	}
 
+	/* The Play tab (js/play.js): each game starts, gates the other tabs
+	   without their answers in the DOM, and reveals a score. A fresh page,
+	   so nothing an earlier section left on is in the way. */
+	{
+		console.log("\nPlay");
+		await page.goto(base);
+		await page.evaluate(() => localStorage.clear());
+		await page.goto(base);
+		await page.setInputFiles("#file", fixture);
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		const playTab = async () => {
+			await page.locator("#tabs button", { hasText: /^Play$/ }).first().click();
+			await page.waitForTimeout(200);
+		};
+		const answers = await page.evaluate(() => {
+			const res = window.App.state.results[window.App.state.active];
+			return { champ: res.tourney.champion.team.name, no1: res.board[0].name };
+		});
+		await playTab();
+		ok("the Play tab offers three games",
+			(await page.locator("[data-play]").count()) === 3);
+
+		// Prediction.
+		await page.locator('[data-play="predict"]').click();
+		await page.waitForTimeout(200);
+		ok("a prediction game is open with a spoiler note",
+			(await page.locator(".playspoiler").count()) === 1);
+		await page.locator("#tabs button", { hasText: "March Madness" }).first().click();
+		await page.waitForTimeout(200);
+		const gated = await page.locator("#view").innerText();
+		ok("other tabs are gated while a game is open",
+			(await page.locator(".playgate").count()) === 1 && gated.indexOf(answers.champ) === -1);
+		await playTab();
+		ok("the reveal waits for all three picks",
+			await page.locator("[data-play-reveal]").isDisabled());
+		for (const k of ["champion", "poy", "no1"]) {
+			await page.selectOption('[data-play-pick="' + k + '"]', { index: 2 });
+			await page.waitForTimeout(80);
+		}
+		await page.locator("[data-play-reveal]").click();
+		await page.waitForTimeout(200);
+		const pr = await page.locator(".playresult").innerText();
+		ok("the prediction reveals the champion and a score",
+			/Score: \d+ \/ 11/.test(pr) && pr.indexOf(answers.champ) !== -1, pr.slice(0, 160));
+		await page.locator("#tabs button", { hasText: "March Madness" }).first().click();
+		await page.waitForTimeout(200);
+		ok("...and a revealed game no longer gates", (await page.locator(".playgate").count()) === 0);
+		await playTab();
+		await page.locator("[data-play-quit]").click();
+		await page.waitForTimeout(150);
+
+		// Bracket pool.
+		await page.locator('[data-play="bracket"]').click();
+		await page.waitForTimeout(200);
+		ok("the bracket shows its difficulty", /Difficulty: /.test(await page.locator("#view").innerText()));
+		await page.locator("[data-play-random]").click();
+		await page.waitForTimeout(150);
+		const rnd = await page.evaluate(() => JSON.stringify(window.App.state.play.picks));
+		await page.locator("[data-play-auto]").click();
+		await page.waitForTimeout(150);
+		ok("random fills the bracket and auto-fill keeps a full bracket",
+			!/null/.test(rnd) && !(await page.locator("[data-play-reveal]").isDisabled()));
+		await page.locator('[data-play-round="5"]').click();
+		await page.waitForTimeout(120);
+		ok("the rounds are navigable", (await page.locator(".playgame").count()) === 1);
+		await page.locator("[data-play-reveal]").click();
+		await page.waitForTimeout(200);
+		ok("the bracket reveals an ESPN score",
+			/Score: \d+ \/ 1920/.test(await page.locator(".playresult").innerText()));
+		await page.locator("[data-play-quit]").click();
+		await page.waitForTimeout(150);
+
+		// Blind scout.
+		await page.locator('[data-play="scout"]').click();
+		await page.waitForTimeout(200);
+		ok("the blind table has no ratings column",
+			!/\bOvr\b|\bPot\b/i.test(await page.locator("table.playscout thead").innerText()));
+		for (let i = 0; i < 10; i++) {
+			await page.locator("table.playscout tbody tr").first().click();
+			await page.waitForTimeout(60);
+		}
+		ok("ten clicks make a top 10", (await page.locator(".playpicks li").count()) === 10);
+		await page.locator("[data-play-reveal]").click();
+		await page.waitForTimeout(200);
+		ok("the scout reveals a score against the board and the preseason reference",
+			/Score: \d+ \/ 100[\s\S]*preseason/.test(await page.locator(".playresult").innerText()));
+		ok("the record is kept per browser", await page.evaluate(() => {
+			const r = JSON.parse(localStorage.getItem("bbgm-play-record") || "{}");
+			return r.predict && r.bracket && r.scout && r.scout.played === 1;
+		}));
+		await page.locator("[data-play-quit]").click();
+		await page.waitForTimeout(150);
+	}
+
 	console.log("\nNo errors");
 	ok("no console or page errors", errors.length === 0, errors.join("\n         "));
 

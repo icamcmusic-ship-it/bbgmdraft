@@ -1297,6 +1297,9 @@
 			"deflpg", "chgpg", "drtg", "pfpg", "awards"] },
 		{ name: "Team context", keys: ["pos", "college", "conf", "record", "apRank", "seed",
 			"newOvr", "mpg", "ppg", "usg", "ts", "awards"] },
+		// Blind scout: bio and box score, no ovr/pot/board (see js/play.js).
+		{ name: "Blind", keys: ["pos", "year", "archetype", "college", "conf", "hgtInches",
+			"weight", "mpg", "ppg", "rpg", "apg", "ts"] },
 		{ name: "Export", keys: ["pos", "year", "newOvr", "newPot", "archetype", "college",
 			"hgtInches", "weight", "board", "awards"] },
 	];

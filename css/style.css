@@ -1477,3 +1477,11 @@ ul.ledger li.missing { opacity: 0.55; }
 	max-width: min(360px, calc(100vw - 32px)); pointer-events: none; }
 .replaytoast { background: var(--panel-2); color: var(--text); border: 1px solid var(--accent-2);
 	border-radius: 4px; padding: 8px 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+
+/* The Play tab (js/play.js). */
+.playtab .playcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.playtab .playgame { padding: 3px 0; }
+.playtab .playgame .chip:disabled { opacity: .5; cursor: default; }
+.playtab .playpicks li { margin: 2px 0; }
+.playtab .playresult { margin-top: 10px; }
+.playtab table.playscout tbody tr:hover { background: rgba(127,127,127,.12); }
