@@ -1284,6 +1284,13 @@
 	   The dial says what was asked for; this says what happened, with the
 	   reasons beside it. See Engine.strangeness — a score with no ingredients
 	   listed is a number nobody can act on. */
+	function strangenessTip(res) {
+		const sc = res && global.Engine.strangeness ? global.Engine.strangeness(res) : null;
+		if (!sc) return "";
+		return "\nStrangeness " + sc.score + "/100" +
+			(sc.reasons.length ? ":\n· " + sc.reasons.join("\n· ") : " — nothing unusual.");
+	}
+
 	function paintStrangeness() {
 		const host = $("weirdness");
 		if (!host) return;
@@ -1303,6 +1310,24 @@
 				(sc.reasons.length > 3 ? "; +" + (sc.reasons.length - 3) + " more" : "")
 				: " — nothing unusual happened.");
 		box.title = sc.reasons.join("\n") || "Nothing unusual happened.";
+	}
+
+	/* A line in the status bar when a run comes out remarkable — once per
+	   class, keyed by its fingerprint, so a repaint does not repeat it. */
+	let lastAchievement = null;
+	function noteAchievement(res) {
+		if (!res || !global.Engine.strangeness) return;
+		const key = res.seed + "|" + classFingerprint(res);
+		if (key === lastAchievement) return;
+		lastAchievement = key;
+		const sc = global.Engine.strangeness(res);
+		const champ = res.tourney && res.tourney.champion && res.tourney.champion.team;
+		const perfect = champ && champ.regSnapshot && champ.regSnapshot.l === 0 &&
+			champ.regSnapshot.w >= 20;
+		const bits = [];
+		if (perfect) bits.push(champ.name + " went unbeaten and won it all");
+		if (sc && sc.score >= 50) bits.push("strangeness " + sc.score + "/100");
+		if (bits.length) setStatus("\u2605 Achievement: " + bits.join(" · ") + ".");
 	}
 
 	function awardInteractionHint() {
@@ -2227,6 +2252,27 @@
 		}, 0);
 	}
 
+	/* Today's seed: the same class for everyone on the same settings and
+	   date, which is what makes a class something to compare notes on. */
+	function dailySeed(d) {
+		d = d || new Date();
+		const pad = (n) => String(n).padStart(2, "0");
+		return "daily-" + d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+	}
+
+	function dailyReroll() {
+		if (!state.files.length) { setStatus("Load a class file first."); return; }
+		const seed = dailySeed();
+		pushUndo("rolled the daily seed " + seed);
+		rememberSession();
+		state.cfg.seed = seed;
+		state.cfg.anomalyPicks = null;
+		$("seed").value = seed;
+		state.editing = null;
+		state.selected = {};
+		run(() => setStatus("Today's class: seed " + seed + "."));
+	}
+
 	/* Replay a randomizer draw by its seed. */
 	function randomizeWithSeed() {
 		const box = el("div");
@@ -2327,6 +2373,13 @@
 			"Ctrl+Z takes all of it back in one step.";
 		b.addEventListener("click", surpriseMe);
 		host.parentNode.insertBefore(b, host.nextSibling);
+		const d = el("button", null, "📅 Daily seed");
+		d.id = "btnDaily";
+		d.type = "button";
+		d.title = "Roll today's seed (daily-YYYY-MM-DD) on the current settings — " +
+			"the same class for anyone with the same settings today.";
+		d.addEventListener("click", dailyReroll);
+		b.parentNode.insertBefore(d, b.nextSibling);
 	}
 
 	/* The "draw separately for each loaded class" checkbox: shown only when
@@ -4442,7 +4495,8 @@
 			"Click to copy the seed, shift-click or right-click to paste one" +
 			(Number.isFinite(ms) ? " · " + Math.round(ms) + "ms (" +
 				(res.phasesRun && res.phasesRun.length
-					? res.phasesRun.join(" → ") : "nothing to redo") + ")" : "");
+					? res.phasesRun.join(" → ") : "nothing to redo") + ")" : "") +
+			strangenessTip(res);
 	}
 
 	/* Whether the config changed since the universe's last full run is
@@ -4513,6 +4567,7 @@
 		paintChallenge();
 		paintAnomalyPicks();
 		paintStrangeness();
+		noteAchievement(res);
 		if (state.history[0] !== res.seed) {
 			state.history.unshift(res.seed);
 			state.history = state.history.slice(0, 12);
@@ -5103,6 +5158,27 @@
 			budget: 3,
 			forbid: ["midMajorLift"],
 		},
+		{
+			key: "strange",
+			name: "A very strange year",
+			blurb: "Make the world score 50 or more for strangeness, moving " +
+				"no more than two settings.",
+			seed: "challenge-weird",
+			cfg: {},
+			goals: ["strangeness:50"],
+			budget: 2,
+		},
+		{
+			key: "perfect",
+			name: "The perfect season",
+			blurb: "A team goes unbeaten in the regular season and no " +
+				"double-digit seed reaches the Final Four — without a mid-major surge.",
+			seed: "undefeated",
+			cfg: {},
+			goals: ["unbeaten", "!cinderella"],
+			budget: 3,
+			forbid: ["midMajorLift"],
+		},
 	];
 
 	/* How a challenge attempt stands right now: which goals the class on
@@ -5118,14 +5194,17 @@
 			return { label: clause ? clause.label : key, met };
 		});
 		const start = CFG.make(Object.assign({}, ch.cfg, { seed: ch.seed }));
-		const moved = Object.keys(diffConfigs(start, CFG.make(state.cfg)))
-			.filter((k) => k !== "seed");
+		// diffConfigs returns "key old → new" lines, not an object; Object.keys
+		// of it gave indices, so `forbid` never matched.
+		const changes = diffConfigs(start, CFG.make(state.cfg));
+		const moved = changes.map((line) => line.split(" ")[0]);
 		const broke = (ch.forbid || []).filter((k) => moved.indexOf(k) !== -1);
 		return {
 			goals,
 			met: goals.filter((g) => g.met).length,
 			total: goals.length,
 			moved,
+			changes,
 			budget: ch.budget,
 			overBudget: Math.max(0, moved.length - ch.budget),
 			broke,
@@ -5248,6 +5327,20 @@
 			setStatus("Challenge abandoned; the settings stay where you left them.");
 		});
 		bar.appendChild(give);
+		const copy = el("button", "linky", "copy result");
+		copy.id = "btnCopyChallenge";
+		copy.type = "button";
+		copy.addEventListener("click", () => copyText(challengeResultText(ch, sc), copy));
+		bar.appendChild(copy);
+	}
+
+	/* One line to paste into a chat: the challenge, how it stands, and
+	   which dials moved from where the challenge started them. */
+	function challengeResultText(ch, sc) {
+		return ch.name + ": " + (sc.solved ? "solved" : "not solved") + " · " +
+			sc.met + "/" + sc.total + " goals · " + sc.moved.length + "/" + sc.budget +
+			" settings" + (sc.changes.length ? " (" + sc.changes.join(", ") + ")" : "") +
+			" · seed " + ch.seed;
 	}
 
 	function reroll(opts) {
@@ -8978,7 +9071,8 @@
 		// Exposed for tools/uismoke.js, which loads files without a file input.
 		installFiles, paintConfig,
 		copyText, announce, bulkApply, bulkShiftOvr, bulkLockAsIs, bulkClear, refreshBulkBar,
-		snapshot, rerollUntilDialog, rerollUntil, restoreSession, randomizeSettings,
+		snapshot, rerollUntilDialog, rerollUntil, dailySeed, CHALLENGES, startChallenge,
+		challengeResultText, scoreChallenge, restoreSession, randomizeSettings,
 		REROLL_PREDICATES,
 		exportCsv, setStatus, showError, indexSnapshot,
 	});
