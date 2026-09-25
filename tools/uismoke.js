@@ -1860,6 +1860,77 @@ async function gotoProspects(page) {
 				Object.keys(window.App.state.universe.cfgs).length)) === 0);
 	}
 
+	console.log("\nA synthetic universe from nothing");
+	{
+		/* The empty screen's button, the dialog, a three-season world with no
+		   files dropped, two more seasons simulated forward, and a reload that
+		   rebuilds the same world from its seed. */
+		await page.goto(base);
+		await page.evaluate(() => localStorage.clear());
+		await page.goto(base);
+		await page.waitForFunction(() => window.App && window.App.state);
+		await page.evaluate(() => { window.App.state.cfg.seed = "smoke-synth"; });
+		await page.click("#btnSynthUniverse");
+		await page.waitForSelector("#synthSeasons", { timeout: 5000 });
+		await page.fill("#synthSeasons", "3");
+		await page.fill("#synthFirst", "2030");
+		await page.click("#modalOk");
+		await page.waitForFunction(() => !window.App.state.universe.running &&
+			window.App.state.universe.rows.length >= 3, null, { timeout: 90000 });
+		const first = await page.evaluate(() => {
+			const st = window.App.state;
+			return {
+				files: st.files.length, synth: st.files.every((f) => f.synthetic),
+				rows: st.universe.rows.map((r) => r.season + ":" + (r.error ? "ERR" : r.result)),
+				baseSeed: st.universe.baseSeed, tab: st.tab,
+				fwd: !!document.querySelector("#btnSimForward"),
+			};
+		});
+		ok("the empty screen starts a synthetic universe of N seasons",
+			first.files === 3 && first.synth && first.rows.length === 3 &&
+			first.rows.every((r) => !/ERR/.test(r)) && first.baseSeed === "smoke-synth" &&
+			first.tab === "universe", JSON.stringify(first));
+		ok("...and the Universe tab offers to simulate further", first.fwd);
+		await page.click("#btnSimForward");
+		await page.waitForSelector("#synthForward", { timeout: 5000 });
+		await page.fill("#synthForward", "2");
+		await page.click("#modalOk");
+		await page.waitForFunction(() => !window.App.state.universe.running &&
+			window.App.state.universe.rows.length >= 5, null, { timeout: 90000 });
+		const fwd = await page.evaluate(() => {
+			const u = window.App.state.universe;
+			return {
+				seasons: u.rows.map((r) => r.season).join(","),
+				guessed: u.rows.some((r) => r.extrapolated),
+				segs: u.segments.map((g) => g.kind).join(","),
+				rows: u.rows.map((r) => r.season + ":" + r.result),
+			};
+		});
+		ok("forward simulation plays real seasons on synthetic classes",
+			fwd.seasons === "2030,2031,2032,2033,2034" && !fwd.guessed &&
+			fwd.segs === "cold,extend" && fwd.rows.slice(0, 3).join() === first.rows.join(),
+			JSON.stringify(fwd));
+		await page.evaluate(() => window.App.persist());
+		await page.reload();
+		await page.waitForFunction(() => window.App && window.App.state &&
+			window.App.state.files.length === 5 && !window.App.state.universe.running &&
+			window.App.state.universe.rows.length >= 5 && !window.App.state.universeExpect,
+			null, { timeout: 120000 });
+		const back = await page.evaluate(() => {
+			const st = window.App.state;
+			return {
+				rows: st.universe.rows.map((r) => r.season + ":" + r.result),
+				err: !document.getElementById("errBanner").hidden
+					? document.querySelector("#errBanner .bannertext").textContent : "",
+				live: st.results.filter(Boolean).length,
+			};
+		});
+		ok("a reload regenerates the classes and replays the same world",
+			back.rows.join() === fwd.rows.join() && !back.err && back.live > 0,
+			JSON.stringify(back));
+		await page.evaluate(() => localStorage.clear());
+	}
+
 	console.log("\nSaved column visibility");
 	{
 		/* An empty hidden-columns map saved by a build before the

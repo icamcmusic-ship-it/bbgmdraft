@@ -2236,7 +2236,7 @@
 			})),
 			order: (u.order || []).map((d) => ({
 				season: d.season, name: d.name || null,
-				fingerprint: d.fingerprint || null, seed: d.seed || null,
+				fingerprint: d.fingerprint || null, seed: d.seed || null, synth: d.synth || undefined,
 			})),
 		};
 		if (u.broken) out.broken = u.broken;
@@ -2416,7 +2416,11 @@
 				   the result came out of, and the one the roster entry was
 				   built from. Mixing a file index with an array position here
 				   is exactly what fileIndexOf exists to stop. */
-				const home = fp.past ? self : fp.fileIndex;
+				/* A returner's roster entry carries the file he was drafted
+				   OUT of (pastRosterFor's fileIndex), which is his identity;
+				   keying him on this season's file merged him with whoever
+				   holds his pid in it. */
+				const home = Number.isFinite(fp.fileIndex) ? fp.fileIndex : self;
 				const key = fp.past ? fp.homeKey || fp.key : fp.homeKey;
 				if (!Number.isFinite(home) || !key) continue;
 				const e = touch(playerId(fpOf(home), key), fp.name);
@@ -2654,6 +2658,104 @@
 		return out;
 	}
 
+	/* SYNTHETIC SEASONS.
+
+	   A universe with no class files: each season is a Sample.makeClass class
+	   drawn from hash(seed + season), so its fingerprint is stable and the
+	   file is regenerable from the seed rather than stored. `base` is the
+	   drawn class; `data` may also carry named returners (see
+	   applyEntrants), and is what the runner runs. */
+	const SYNTH_SIZE = 70;
+	function synthFingerprint(seed, season) {
+		return "syn" + hashString(String(seed) + "|" + season) +
+			hashString(season + "|" + String(seed));
+	}
+	function synthFile(seed, season, size) {
+		const n = Number.isFinite(size) ? size : SYNTH_SIZE;
+		const data = global.Sample.makeClass(hashString(String(seed) + "|" + season), n, season);
+		return {
+			name: "synthetic-" + season + ".json", data, base: data,
+			fingerprint: synthFingerprint(seed, season),
+			synthetic: { seed: String(seed), season, size: n },
+		};
+	}
+	function synthFiles(seed, first, count, size) {
+		const out = [];
+		for (let i = 0; i < count; i++) out.push(synthFile(seed, first + i, size));
+		return out;
+	}
+	// The file an order entry names, regenerated; null for a real file.
+	function synthFromOrder(o) {
+		const s = o && o.synth;
+		if (!s || !Number.isFinite(s.season) || s.seed === undefined) return null;
+		const f = synthFile(s.seed, s.season, s.size);
+		return !o.fingerprint || f.fingerprint === o.fingerprint ? f : null;
+	}
+
+	/* NAMED RETURNERS INTO THE NEXT SYNTHETIC CLASS.
+
+	   A man who went undrafted, came back (pastRoster) and has now played
+	   his senior year is out of eligibility, so the pastRoster window drops
+	   him. The registry says who he is; when next season's class is
+	   SYNTHETIC he re-enters that draft by name, at his school, on the
+	   ratings he finished the season with. A real imported class is never
+	   touched. Returns small entrant records (kept in cfgs and the tail). */
+	const ENTRANT_MAX = 12;
+	function returnerEntrants(res, registry, files) {
+		const out = [];
+		if (!res || !Number.isFinite(res.season)) return out;
+		const fpOf = (i) => (files && files[i] && files[i].fingerprint) || String(i);
+		for (const fp of res.futurePlayers || []) {
+			if (!fp || !fp.past || fp.classYear !== "Senior" || !fp.newRatings) continue;
+			const id = playerId(fpOf(fp.fileIndex), fp.homeKey || fp.key);
+			const e = registry && registry[id];
+			if (!e || (e.returned || []).indexOf(res.season) === -1) continue;
+			const r = {};
+			for (const k of global.BBGM.RATING_KEYS) {
+				const v = Number(fp.newRatings[k]);
+				r[k] = Number.isFinite(v) ? Math.round(v) : 40;
+			}
+			out.push({ id, name: e.name || fp.name, school: fp.newCollege, ratings: r,
+				pot: Math.round(fp.newPot || fp.newOvr || 0), from: res.season });
+			if (out.length >= ENTRANT_MAX) break;
+		}
+		return out;
+	}
+	function entrantSig(list) {
+		return (list || []).map((x) => x.id).join(",");
+	}
+	/* A synthetic file's class for this run: its base plus the entrants as
+	   BBGM-shaped rows. Returns whether the data changed (the caller then
+	   needs a fresh runner). */
+	function applyEntrants(file, list, season) {
+		if (!file || !file.synthetic || !file.base) return false;
+		const sig = entrantSig(list);
+		if ((file.entrantSig || "") === sig) return false;
+		const BB = global.BBGM;
+		const extra = (list || []).map((x, i) => {
+			const sp = String(x.name || "Returning Senior").split(" ");
+			const r = Object.assign({ season, fuzz: 0 }, x.ratings);
+			r.ovr = BB.ovr(r);
+			r.pot = Math.max(r.ovr, x.pot || r.ovr);
+			r.pos = BB.pos(r);
+			r.skills = [];
+			return {
+				pid: 1000 + i, firstName: sp[0], lastName: sp.slice(1).join(" ") || sp[0],
+				born: { year: season - 22, loc: "USA" },
+				hgt: 66 + Math.round((r.hgt / 100) * 27), weight: Math.round(165 + r.hgt * 0.9),
+				college: x.school || "", tid: -2,
+				draft: { year: season, round: 0, pick: 0, tid: -1, originalTid: -1 },
+				injury: { type: "Healthy", gamesRemaining: 0 },
+				ratings: [r],
+			};
+		});
+		file.data = extra.length
+			? Object.assign({}, file.base, { players: file.base.players.concat(extra) })
+			: file.base;
+		file.entrantSig = sig;
+		return true;
+	}
+
 	/* spec: {
 	     mode: "cold" | "extend" | "resume", from (resume position),
 	     universe: the existing universe (extend / resume),
@@ -2661,6 +2763,7 @@
 	     settings (the frozen config), baseSeed, make (settings -> fresh cfg),
 	     runnerFor(index), store(index, res), biographyFor(fingerprint),
 	     extrapolateGaps, fullClass, anomalyHistory, diags,
+	     dataChanged(index): a synthetic file's class changed; rebuild its runner,
 	   } */
 	function beginChain(spec) {
 		const E = global.Engine;
@@ -2674,9 +2777,15 @@
 		const anomalyHistory = spec.anomalyHistory || 4;
 		const copyPools = (list) => (list || []).map((a) => a.slice());
 		const fpAt = (index) => (files[index] && files[index].fingerprint) || null;
-		const runnable = (spec.runnable || []).map((d) => ({
-			index: d.index, name: d.name, season: d.season, fingerprint: fpAt(d.index),
-		}));
+		const runnable = (spec.runnable || []).map((d) => {
+			const syn = files[d.index] && files[d.index].synthetic;
+			const o = { index: d.index, name: d.name, season: d.season, fingerprint: fpAt(d.index) };
+			// A synthetic season records how to regenerate its file.
+			if (syn) o.synth = { seed: syn.seed, season: syn.season, size: syn.size };
+			return o;
+		});
+		// Previews read the drawn class, never the returners added to it.
+		const baseOf = (index) => files[index].base || files[index].data;
 		const indexOf = (d) => {
 			if (d && Number.isFinite(d.index) && files[d.index] &&
 				(!d.fingerprint || files[d.index].fingerprint === d.fingerprint)) return d.index;
@@ -2694,6 +2803,8 @@
 		let sources = [];
 		let tree = null;
 		let seedBase = 0;
+		// Named returners handed to the next season (synthetic classes only).
+		let entrants = [];
 		let u;
 		let segment;
 		if (mode === "extend") {
@@ -2708,6 +2819,7 @@
 			recentPools = copyPools(tail.recentPools);
 			recentAnomalies = copyPools(tail.recentAnomalies);
 			sources = (tail.returners || []).slice();
+			entrants = (tail.entrants || []).slice();
 			tree = prior.coachTree || null;
 			seedBase = Number.isFinite(tail.count) ? tail.count : held.length;
 			/* THE LAST RUN'S GUESSED TAIL COMES OFF BEFORE ANYTHING IS
@@ -2740,6 +2852,7 @@
 			recentPools = copyPools(saved.recentPools);
 			recentAnomalies = copyPools(saved.recentAnomalies);
 			sources = (saved.returners || []).slice();
+			entrants = (saved.entrants || []).slice();
 			lastSeason = held.length ? held[held.length - 1].season : null;
 			seedBase = from;
 			tree = pruneCoachTree(prior.coachTree, lastSeason);
@@ -2826,7 +2939,7 @@
 						c.seed = seed;
 						c.overrides = {};
 						c.recentPools = copyPools(use);
-						pv = E.previewClass(files[idx].data, c);
+						pv = E.previewClass(baseOf(idx), c);
 					} catch (e) { pv = null; }
 				}
 				heldPreviews.push(pv);
@@ -2847,7 +2960,7 @@
 					c.seed = seedAt(k);
 					c.overrides = {};
 					c.recentPools = copyPools(pools);
-					pv = E.previewClass(files[runnable[k].index].data, c);
+					pv = E.previewClass(baseOf(runnable[k].index), c);
 				} catch (e) { pv = null; }
 				previews.push(pv);
 				if (pv && pv.archetypePool) {
@@ -2905,6 +3018,14 @@
 				u.alumni = u.alumni.concat(extrapolatedAlumni(guessed));
 			}
 			if (gap > 0) carry = ageCarry(carry, gap);
+			/* Last season's out-of-eligibility returners go into THIS class
+			   only when it is synthetic and directly follows them. */
+			const handed = files[d.index] && files[d.index].synthetic &&
+				entrants.length && entrants[0].from === d.season - 1 ? entrants : [];
+			entrants = [];
+			if (applyEntrants(files[d.index], handed, d.season) && spec.dataChanged) {
+				spec.dataChanged(d.index);
+			}
 			let res = null;
 			try {
 				const cfg = make(frozen);
@@ -2952,6 +3073,7 @@
 					universeAlumni: cfg.universeAlumni,
 					universeTitles: cfg.universeTitles,
 					returners: sourcesIn,
+					entrants: handed,
 				};
 				if (u.order[position]) u.order[position].seed = cfg.seed;
 				const src = returnerSource(res, d.index);
@@ -2972,6 +3094,14 @@
 				captureLinks(res, d, position);
 				try { mergeRegistry(u.registry, registryOf([res], files, null)); }
 				catch (e) { /* the registry is a view; the season stands */ }
+				// The returner's own career row says he came back to the draft.
+				for (const x of handed) {
+					if (!u.registry[x.id]) continue;
+					mergeRegistry(u.registry, { [x.id]: { id: x.id, name: x.name, draft: null,
+						seasons: [{ season: d.season, as: "re-entered the draft", school: x.school }],
+						honors: [], returned: [] } });
+				}
+				entrants = returnerEntrants(res, u.registry, files);
 				carry = harvest(res, prevCarry);
 				addProgramRows(u.programs, programRowsOf(res, carry));
 				lastSeason = d.season;
@@ -3053,6 +3183,7 @@
 				returners: sources.filter((s) => !Number.isFinite(lastSeason) ||
 					s.until > lastSeason),
 				fingerprints: u.order.map((d) => d.fingerprint).filter(Boolean),
+				entrants: entrants.slice(),
 			};
 			u.threads = threads(u.rows, u.alumni, { rivalries: carry && carry.rivalries });
 			u.records = records(u.rows, u.alumni, u.registry || null);
@@ -3216,7 +3347,8 @@
 			settings: json.settings || null,
 			segments: (json.segments || []).slice(),
 			order: (json.order || []).map((o) => ({ index: -1, name: o.name || null,
-				season: o.season, fingerprint: o.fingerprint || null, seed: o.seed || null })),
+				season: o.season, fingerprint: o.fingerprint || null, seed: o.seed || null,
+				synth: o.synth || undefined })),
 			cfgs: {}, running: false, coachTree: null,
 			broken: json.broken || null, engineRev: json.engineRev || null,
 			viewOnly: true,
@@ -3315,5 +3447,7 @@
 		restoreImported, viewOnlyUniverse, segmentSettings, mergeRegistry, pruneRegistry,
 		PRESTIGE_CAP, RIVALRY_MAX,
 		randomName, exportBaseName, timelineTable, recordsTable, filterThreads,
+		synthFile, synthFiles, synthFromOrder, synthFingerprint, returnerEntrants, applyEntrants,
+		SYNTH_SIZE,
 	};
 })(typeof window !== "undefined" ? window : self);
