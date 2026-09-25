@@ -354,6 +354,16 @@ async function gotoProspects(page) {
 		const ps = res.players.filter((p) => p.stats);
 		return ps.reduce((a, p) => a + p.stats.ts, 0) / ps.length;
 	});
+	// Measured from one end of the dial to the other: from the default, +3
+	// moved the field between 0.7 and 2.6 points depending on the class, so
+	// a one-point bar failed on an unlucky draw.
+	const setEff = (v) => page.evaluate((v) => {
+		const i = document.getElementById("efficiencyEnv");
+		i.value = v;
+		i.dispatchEvent(new Event("input", { bubbles: true }));
+	}, v);
+	await setEff("-3");
+	await page.waitForTimeout(800);
 	const tsBefore = await fieldTs();
 	await page.evaluate(() => {
 		const i = document.getElementById("efficiencyEnv");
