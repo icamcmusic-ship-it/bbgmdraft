@@ -129,6 +129,14 @@ async function gotoProspects(page) {
 		String(e.stack || e.message).split("\n").slice(0, 4).join(" | ")));
 	page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
 	page.on("response", (r) => { if (r.status() >= 400) errors.push("http " + r.status() + " " + r.url()); });
+	/* The unsaved-work warning: the reloads below are deliberate, so leave.
+	   Counted, so the section that tests the warning can see it asked. */
+	let beforeUnloads = 0;
+	page.on("dialog", (d) => {
+		if (d.type() !== "beforeunload") return;
+		beforeUnloads++;
+		d.accept();
+	});
 
 	const base = "http://127.0.0.1:" + PORT + "/index.html";
 	await page.goto(base);
@@ -678,8 +686,14 @@ async function gotoProspects(page) {
 		// Saved column layouts.
 		await page.locator(".filters button", { hasText: "Columns…" }).click();
 		await page.waitForSelector(".colpicker", { timeout: 5000 });
-		page.once("dialog", (d) => d.accept("my view"));
+		// Named inline in the picker now, not through window.prompt.
 		await page.locator("button", { hasText: "Save this layout…" }).click();
+		await page.waitForTimeout(150);
+		ok("an unnamed layout is refused with a message, the picker stays open",
+			(await page.locator(".colpicker").count()) >= 1 &&
+			/name/i.test(await page.locator("#modal [role=alert]").first().innerText()));
+		await page.locator("input.layoutname").fill("my view");
+		await page.locator("input.layoutname").press("Enter");
 		await page.waitForTimeout(400);
 		ok("a column layout can be saved and comes back by name",
 			(await page.locator("button", { hasText: "my view" }).count()) >= 1);
@@ -713,6 +727,140 @@ async function gotoProspects(page) {
 		ok("undo brings the rerolled class back",
 			(await page.evaluate(() => window.App.state.lastSeed)) === seedBefore,
 			seedBefore + " -> " + (await page.evaluate(() => window.App.state.lastSeed)));
+	}
+
+	console.log("\nInteraction layer: prompts, unsaved work, seed, undo history, toasts");
+	{
+		// 1. No native dialogs left anywhere in the app.
+		const js = ["app.js", "views.js"].map((f) =>
+			fs.readFileSync(path.join(__dirname, "..", "js", f), "utf8")).join("\n");
+		ok("no window.prompt / confirm / alert remains",
+			!/window\.(prompt|confirm|alert)\s*\(/.test(js));
+		let native = 0;
+		const onDialog = (d) => { if (d.type() !== "beforeunload") { native++; d.dismiss(); } };
+		page.on("dialog", onDialog);
+		await page.evaluate(() => {
+			window.__promptGot = null;
+			window.App.promptModal("Name it", "Name", "", (v) => { window.__promptGot = v; },
+				{ check: (v) => v ? "" : "Type a name." });
+		});
+		await page.waitForTimeout(150);
+		ok("the themed prompt focuses its box",
+			await page.evaluate(() => document.activeElement &&
+				document.activeElement.id === "modalPrompt"));
+		await page.keyboard.press("Enter");
+		await page.waitForTimeout(100);
+		ok("an empty value is refused inline and the dialog stays open",
+			!(await page.locator("#modal").isHidden()) &&
+			/Type a name/.test(await page.locator(".promptError").innerText()));
+		await page.locator("#modalPrompt").fill("B side");
+		await page.keyboard.press("Enter");
+		await page.waitForTimeout(100);
+		ok("Enter submits a valid value and closes it",
+			(await page.locator("#modal").isHidden()) &&
+			(await page.evaluate(() => window.__promptGot)) === "B side");
+		await page.evaluate(() => window.App.promptModal("Again", "Name", "x", () => {
+			window.__promptGot = "wrong"; }));
+		await page.waitForTimeout(100);
+		await page.keyboard.press("Escape");
+		await page.waitForTimeout(100);
+		ok("Escape cancels without calling back",
+			(await page.locator("#modal").isHidden()) &&
+			(await page.evaluate(() => window.__promptGot)) === "B side");
+
+		// 2. Unsaved work: nothing on a clean class, a lock makes it, a write clears it.
+		const uw = await page.evaluate(() => {
+			const A = window.App, S = A.state;
+			const keep = JSON.stringify(S.overrides);
+			S.overrides = {};
+			A.markExported();
+			const clean = A.unsavedWork();
+			S.overrides = { zz: { ovr: 50 } };
+			const dirty = A.unsavedWork();
+			A.markExported();
+			const after = A.unsavedWork();
+			S.overrides = JSON.parse(keep);
+			A.markExported();
+			return { clean, dirty, after };
+		});
+		ok("unsaved work: clean, then a lock, then written",
+			!uw.clean && uw.dirty && !uw.after, JSON.stringify(uw));
+
+		// 9 + 3. Copying the seed names it in the toast; the pill edits in place.
+		const toastText = await page.evaluate(async () => {
+			const real = navigator.clipboard && navigator.clipboard.writeText;
+			if (real) navigator.clipboard.writeText = () => Promise.resolve();
+			document.getElementById("seedPill").click();
+			await new Promise((r) => setTimeout(r, 50));
+			if (real) navigator.clipboard.writeText = real;
+			const t = Array.from(document.querySelectorAll(".replaytoast")).pop();
+			const box = document.getElementById("replayToasts");
+			return (t ? t.textContent : "") + "|" + (box ? box.getAttribute("aria-live") : "");
+		});
+		ok("a copy shows one toast naming what was copied, in a live region",
+			/^Copied seed .+\|polite$/.test(toastText), toastText);
+		const seed0 = await page.evaluate(() => document.getElementById("seedPill").dataset.seed);
+		await page.locator("#seedPill").dblclick();
+		await page.waitForTimeout(100);
+		ok("double-clicking the seed pill opens an inline editor",
+			(await page.locator("#seedPillEdit").count()) === 1);
+		await page.locator("#seedPillEdit").fill("zzz");
+		await page.keyboard.press("Escape");
+		await page.waitForTimeout(200);
+		ok("Escape cancels the inline seed edit",
+			(await page.locator("#seedPillEdit").count()) === 0 &&
+			(await page.evaluate(() => document.getElementById("seedPill").dataset.seed)) === seed0);
+		await page.locator("#seedPill").dblclick();
+		await page.waitForTimeout(100);
+		await page.locator("#seedPillEdit").fill("inline-seed-7");
+		await page.keyboard.press("Enter");
+		await page.waitForFunction(() =>
+			document.getElementById("seedPill").dataset.seed === "inline-seed-7", null, { timeout: 30000 });
+		ok("Enter applies the typed seed through the seed path",
+			(await page.evaluate(() => window.App.state.cfg.seed)) === "inline-seed-7");
+
+		// 6. Undo history: jump back two steps; redo walks forward again.
+		await page.evaluate(() => {
+			const A = window.App;
+			document.getElementById("seed").value = "";
+		});
+		await page.locator("#btnReroll").click();
+		await page.waitForTimeout(900);
+		const before = await page.evaluate(() => ({
+			u: window.App.state.undo.length, r: window.App.state.redo.length }));
+		await page.locator("#btnUndoHistory").click();
+		await page.waitForTimeout(150);
+		const items = await page.locator("#modal ol.undohistory li button").count();
+		ok("the undo history lists the stack, newest first", items === before.u,
+			items + " vs " + before.u);
+		await page.locator("#modal ol.undohistory li button").nth(1).click();
+		await page.waitForTimeout(1200);
+		const after = await page.evaluate(() => ({
+			u: window.App.state.undo.length, r: window.App.state.redo.length,
+			seed: window.App.state.cfg.seed }));
+		ok("picking the second entry undoes two steps",
+			after.u === before.u - 2 && after.r === before.r + 2, JSON.stringify([before, after]));
+		await page.locator("#btnRedo").click();
+		await page.waitForTimeout(1000);
+		ok("redo steps forward one at a time after a jump",
+			(await page.evaluate(() => window.App.state.redo.length)) === before.r + 1);
+
+		// 4 + 5 (already present): the tab and board mode persist; the sheet lists row keys.
+		const stored = await page.evaluate(() => {
+			try { return JSON.parse(localStorage.getItem("bbgm-draft-workshop/v1")); }
+			catch (e) { return null; }
+		});
+		ok("the last tab and board mode are stored",
+			!!stored && typeof stored.tab === "string" && typeof stored.boardMode === "string");
+		await page.locator("#btnKeys").click();
+		await page.waitForTimeout(150);
+		const sheet = await page.locator("#modalBody").innerText();
+		ok("the shortcut sheet lists j/k, Enter and l for Player Edit",
+			/j \/ ↓/.test(sheet) && /Enter/.test(sheet) && /\bl\b/.test(sheet));
+		await page.keyboard.press("Escape");
+		await page.waitForTimeout(100);
+		page.off("dialog", onDialog);
+		ok("no native dialog opened in this section", native === 0, String(native));
 	}
 
 	console.log("\nNarrow viewport");
@@ -2043,7 +2191,11 @@ async function gotoProspects(page) {
 			fwd.segs === "cold,extend" && fwd.rows.slice(0, 3).join() === first.rows.join(),
 			JSON.stringify(fwd));
 		await page.evaluate(() => window.App.persist());
+		const unsavedNow = await page.evaluate(() => window.App.unsavedWork());
+		const askedBefore = beforeUnloads;
 		await page.reload();
+		ok("leaving with an unexported universe asks first",
+			unsavedNow && beforeUnloads === askedBefore + 1, unsavedNow + " " + beforeUnloads);
 		await page.waitForFunction(() => window.App && window.App.state &&
 			window.App.state.files.length === 5 && !window.App.state.universe.running &&
 			window.App.state.universe.rows.length >= 5 && !window.App.state.universeExpect,
@@ -2070,6 +2222,10 @@ async function gotoProspects(page) {
 		   restores as the defaults. The same empty map saved WITH the scheme
 		   marker is a user who asked for every column, and is kept. */
 		const restored = async (mutate) => {
+			/* A reload replays the stored universe, and that replay persists
+			   as it goes — over the map written below, if it is still running. */
+			await page.waitForFunction(() => !window.App.state.universe.running,
+				null, { timeout: 120000 });
 			await page.evaluate((m) => {
 				window.App.persist();
 				const key = "bbgm-draft-workshop/v1";
