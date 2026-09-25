@@ -1786,6 +1786,50 @@ async function gotoProspects(page) {
 			hist.tab.programs && hist.tab.people, JSON.stringify(hist.tab));
 		ok("a rivalry thread renders with both programs linked",
 			hist.rivalry && hist.kinds[0] === "rivalry", JSON.stringify(hist));
+		/* THE TAB'S QUICK WINS: jump links, name, CSV files, thread filters
+		   and the persistence footer. Downloads are caught at the anchor. */
+		const qw = await page.evaluate(async () => {
+			const st = window.App.state;
+			const u = st.universe;
+			const table = document.querySelector("#view table");
+			const linkCells = table ? table.querySelectorAll("tbody tr td button.linky").length : 0;
+			const before = u.name;
+			window.App.randomizeUniverseName();
+			const saved = JSON.stringify(localStorage);
+			const named = u.name !== before &&
+				saved.indexOf(JSON.stringify(u.name).slice(1, -1)) !== -1 &&
+				document.getElementById("view").textContent.indexOf("World: " + u.name) !== -1;
+			const got = [];
+			const click = HTMLAnchorElement.prototype.click;
+			HTMLAnchorElement.prototype.click = function () { got.push(this.download); };
+			try {
+				window.App.exportUniverseCsv("timeline");
+				window.App.exportUniverseCsv("records");
+			} finally { HTMLAnchorElement.prototype.click = click; }
+			const kinds = Array.from(new Set((u.threads || []).map((t) => t && t.kind).filter(Boolean)));
+			let filtered = true;
+			if (kinds.length) {
+				st.universeThreadKind = kinds[0];
+				window.App.render();
+				const want = u.threads.filter((t) => t && t.kind === kinds[0]).length;
+				const sel = document.querySelector('#view select[aria-label="kind"]');
+				filtered = !!sel && sel.value === kinds[0] &&
+					want === window.Universe.filterThreads(u.threads, kinds[0], "").length;
+				st.universeThreadKind = "";
+				window.App.render();
+			}
+			return { linkCells, named, name: u.name, got, filtered, kinds,
+				footer: !!document.querySelector("#view .universe-persist") };
+		});
+		ok("the timeline links its champion, POY and No. 1 pick", qw.linkCells >= 2,
+			String(qw.linkCells));
+		ok("the world name randomizes, shows and persists", qw.named, qw.name);
+		ok("the timeline and records export as CSV named for the world",
+			qw.got.length === 2 && qw.got.every((n) =>
+				/^universe_[a-z0-9_-]+-(timeline|records)\.csv$/.test(n) && /smoke-universe/.test(n)),
+			qw.got.join(" | "));
+		ok("the threads list filters by kind", qw.filtered, qw.kinds.join(","));
+		ok("the tab says what a reload keeps", qw.footer);
 		if (hist.name) {
 			await page.evaluate((n) => window.App.showTeam(n), hist.name);
 			await page.waitForTimeout(150);

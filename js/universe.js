@@ -757,9 +757,9 @@
 			   picks" against a club with no team page, and "back-to-back
 			   players of the year" matched two pro clubs. The club rides
 			   beside it so the timeline can still say where he played. */
-			poy: poy ? { name: poy.name, school: poy.newCollege,
+			poy: poy ? { name: poy.name, school: poy.newCollege, key: poy.key,
 				club: poy.proClub || null, nonNcaa: !!poy.nonNcaa } : null,
-			no1: no1 ? { name: no1.name, school: no1.newCollege,
+			no1: no1 ? { name: no1.name, school: no1.newCollege, key: no1.key,
 				club: no1.proClub || null, nonNcaa: !!no1.nonNcaa } : null,
 			apOne: res.poll && res.poll[0] ? res.poll[0].name : null,
 			realignment: (res.realignment || [])
@@ -3224,6 +3224,85 @@
 		};
 	}
 
+	/* SMALL HELPERS FOR THE UNIVERSE TAB: a world name, export file names,
+	   the CSV tables and the threads filter. Pure, so the tests can read them. */
+
+	/* A world name drawn from the programs and class flavors in the code.
+	   Deterministic for one (seed, n). */
+	const NAME_SHAPES = [
+		(s, f) => "The " + s + " Years",
+		(s, f) => "The " + cap(f) + " Era",
+		(s, f) => s + " Rising",
+		(s, f) => "A " + cap(f) + " World",
+		(s, f) => "After " + s,
+	];
+	function cap(x) { x = String(x || ""); return x.charAt(0).toUpperCase() + x.slice(1); }
+	function randomName(seed, schools, flavors) {
+		const rng = new global.BBGMRng.Rng("world-name|" + seed);
+		const pick = (a, d) => (a && a.length ? a[Math.floor(rng.random() * a.length)] : d);
+		const s = pick(schools, "Midwest");
+		const f = pick((flavors || []).filter((x) => x && !/no strong/.test(x)), "strange");
+		return pick(NAME_SHAPES, NAME_SHAPES[0])(s, f);
+	}
+
+	/* "universe-<name>-<first>-<last>-<seed>", safe as a file name. */
+	function exportBaseName(u) {
+		const slug = (x) => String(x || "").toLowerCase()
+			.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+		const seasons = (u.rows || []).map((r) => r && r.season).filter(Number.isFinite);
+		const range = seasons.length ? seasons[0] + (seasons.length > 1
+			? "-" + seasons[seasons.length - 1] : "") : "";
+		const name = slug(u.name) === "universe" ? "" : slug(u.name);
+		return ["universe", name, range, slug(u.baseSeed)]
+			.filter(Boolean).join("_");
+	}
+
+	const TIMELINE_CSV_COLS = ["season", "flavor", "apOne", "champion", "champSeed",
+		"runnerUp", "poy", "poySchool", "no1", "no1School", "realignment",
+		"coachChanges", "futureOnRosters", "extrapolated", "error"];
+	function timelineTable(rows) {
+		const out = [TIMELINE_CSV_COLS];
+		for (const r of rows || []) {
+			if (!r) continue;
+			out.push([r.season, r.flavor, r.apOne, r.champion, r.champSeed, r.runnerUp,
+				r.poy ? r.poy.name : "", r.poy ? r.poy.school : "",
+				r.no1 ? r.no1.name : "", r.no1 ? r.no1.school : "",
+				(r.realignment || []).join("; "), r.coachChanges || 0,
+				r.futureOnRosters || 0, r.extrapolated ? 1 : 0, r.error || ""]);
+		}
+		return out;
+	}
+	function recordsTable(rec) {
+		const out = [["record", "rank", "team", "value", "detail"]];
+		if (!rec) return out;
+		for (const [label, list] of [["National titles", rec.titles],
+			["Title games", rec.finals], ["Seasons at AP No. 1", rec.apOnes],
+			["Players of the year", rec.poys], ["No. 1 picks", rec.no1s]]) {
+			(list || []).forEach((x, i) => out.push([label, i + 1, x.team, x.count, ""]));
+		}
+		const run = rec.longestApRun;
+		if (run) out.push(["Longest run at AP No. 1", 1, run.team, run.length, run.from + "-" + run.to]);
+		const b = rec.bestSeason;
+		if (b) out.push(["Best single season", 1, b.team, b.season, [b.apOne ? "AP No. 1" : "",
+			b.poy ? "player of the year" : "", b.no1 ? "No. 1 pick" : ""].filter(Boolean).join("; ")]);
+		for (const d of rec.playersOfTheDecade || []) {
+			if (d.player) out.push(["Player of the " + d.decade + "s", 1, d.player.school, d.player.name, ""]);
+		}
+		for (const m of rec.hall || []) {
+			out.push(["Hall of fame", "", m.school, m.name, (m.reasons || []).join("; ")]);
+		}
+		return out;
+	}
+
+	/* Threads by kind and program; a string thread (an old save) has neither. */
+	function filterThreads(threads, kind, team) {
+		return (threads || []).filter((t) => {
+			if (kind && (typeof t === "string" || (t.kind || "") !== kind)) return false;
+			if (team && (typeof t === "string" || (t.team !== team && t.other !== team))) return false;
+			return true;
+		});
+	}
+
 	global.Universe = {
 		VERSION, ENGINE_REV, validate, harvest, returnersOf, alumniOf, summarize,
 		playerId, biographyForFile, registryOf,
@@ -3235,5 +3314,6 @@
 		returnerSource, pastRosterFrom, beginChain, rowKeys, replayPlan,
 		restoreImported, viewOnlyUniverse, segmentSettings, mergeRegistry, pruneRegistry,
 		PRESTIGE_CAP, RIVALRY_MAX,
+		randomName, exportBaseName, timelineTable, recordsTable, filterThreads,
 	};
 })(typeof window !== "undefined" ? window : self);

@@ -5467,6 +5467,10 @@
 	   chain, and the replay's next run then finds THAT running and stops —
 	   a world that is neither. Held until the last run of the replay ends. */
 	let universeReplay = false;
+	/* Measured ms per season of the last chain, for the estimate below. */
+	let universeSeasonMs = 0;
+	// At most one render per this many ms while a chain runs.
+	const UNIVERSE_RENDER_MS = 300;
 
 	function runUniverse(after, opts) {
 		opts = opts || {};
@@ -5566,7 +5570,9 @@
 		/* SAY HOW LONG THIS WILL TAKE, BEFORE IT STARTS. Not a confirmation
 		   dialog: the chain is cancellable (see cancelUniverse). */
 		if (runnable.length >= UNIVERSE_SLOW_SEASONS) {
-			const secs = Math.max(1, Math.round(runnable.length * SEASON_MS / 1000));
+			// The last chain's measured pace when there is one.
+			const secs = Math.max(1, Math.round(runnable.length *
+				(universeSeasonMs || SEASON_MS) / 1000));
 			setStatus((extend ? "Extending" : "Running") + " " + runnable.length +
 				" seasons — about " + (secs >= 90
 					? Math.round(secs / 60) + " minutes" : secs + " seconds") +
@@ -5615,7 +5621,7 @@
 			settings: frozen,
 			baseSeed,
 			diags,
-			name: opts.identity ? opts.identity.name : null,
+			name: opts.identity ? opts.identity.name : state.universe.name || null,
 			createdAt: opts.identity ? opts.identity.createdAt : null,
 			make: (s) => CFG.make(s),
 			runnerFor: (i) => state.runners[i],
@@ -5628,11 +5634,14 @@
 		state.universe = chain.universe;
 		render();
 		const total = chain.runnable.length;
+		const started = Date.now();
+		let lastRender = 0;
 		const finish = (cancelled) => {
 			const out = chain.finish({
 				cancelled, extrapolateYears: state.cfg.extrapolateYears || 0,
 			});
 			const u = state.universe;
+			if (total > 0) universeSeasonMs = (Date.now() - started) / total;
 			/* PASS THREE: the seasons a player actually played, on his own
 			   page — for the results that are live; an evicted one is linked
 			   when it is rebuilt. See linkCareers. */
@@ -5693,7 +5702,11 @@
 			evictUniverseResults(chain.runnable.slice(Math.max(0, k - UNIVERSE_LIVE_RESULTS + 1), k + 1)
 				.map((x) => x.index));
 			setStatus("Universe: season " + (k + 1) + " of " + total + "…", true);
-			render();
+			// finish() always renders, so the last season is never skipped.
+			if (Date.now() - lastRender >= UNIVERSE_RENDER_MS) {
+				render();
+				lastRender = Date.now();
+			}
 			setTimeout(() => step(k + 1), 0);
 		};
 		setTimeout(() => step(0), 0);
@@ -5795,6 +5808,7 @@
 		   which is every browser this tool supports except older Safari, where
 		   it falls back to the plain file rather than failing. */
 		const text = JSON.stringify(payload, null, embedFiles ? 0 : "\t");
+		const base = U.exportBaseName(u);
 		const done = (blob, name, note) => {
 			const a = document.createElement("a");
 			a.href = URL.createObjectURL(blob);
@@ -5807,24 +5821,53 @@
 				!!u.truncated);
 		};
 		if (!embedFiles) {
-			done(new Blob([text], { type: "application/json" }), "universe.json",
+			done(new Blob([text], { type: "application/json" }), base + ".json",
 				"Exported the universe (seeds and settings; load the class files beside it).");
 			return;
 		}
 		const plain = () => done(
-			new Blob([text], { type: "application/json" }), "universe-with-classes.json",
+			new Blob([text], { type: "application/json" }), base + "-with-classes.json",
 			"Exported the universe with its class files embedded.");
 		if (typeof CompressionStream !== "function") { plain(); return; }
 		try {
 			new Response(new Blob([text]).stream()
 				.pipeThrough(new CompressionStream("gzip"))).blob()
-				.then((gz) => done(gz, "universe-with-classes.json.gz",
+				.then((gz) => done(gz, base + "-with-classes.json.gz",
 					"Exported the universe with its class files embedded, gzipped (" +
 					Math.round(gz.size / 1024) + " KB from " +
 					Math.round(text.length / 1024) + " KB)."))
 				.catch(plain);
 		} catch (e) { plain(); }
 	}
+
+	/* The timeline or the records book as CSV, through esc() and its
+	   formula guard. */
+	function exportUniverseCsv(what) {
+		const U = global.Universe;
+		const u = state.universe;
+		if (!u.rows.length) { setStatus("Build a timeline first."); return; }
+		const records = what === "records";
+		const table = records ? U.recordsTable(u.records) : U.timelineTable(u.rows);
+		download(U.exportBaseName(u) + (records ? "-records.csv" : "-timeline.csv"),
+			csvJoin(table.map((r) => r.map(esc).join(","))), "text/csv");
+	}
+
+	/* A new world name, drawn from the programs and flavors in the code. */
+	let worldNameDraws = 0;
+	function randomizeUniverseName() {
+		const u = state.universe;
+		const flavors = (global.RatingsBuilder && global.RatingsBuilder.CLASS_FLAVORS || [])
+			.map((f) => f.label);
+		const schools = (u.rows || []).map((r) => r && r.champion).filter(Boolean);
+		u.name = global.Universe.randomName((u.baseSeed || "world") + "|" + (++worldNameDraws),
+			schools.length ? schools : (global.Colleges && global.Colleges.names) || [], flavors);
+		persist();
+		render();
+	}
+
+	/* What a reload keeps: the caps universeForStorage writes under. */
+	const PERSIST_CAPS = { rows: PERSIST_ROWS, threads: PERSIST_THREADS,
+		alumni: PERSIST_ALUMNI, registry: PERSIST_REGISTRY };
 
 	/* THE WHOLE UNIVERSE AS ONE PLAYERS FILE.
 
@@ -5860,7 +5903,7 @@
 				{ type: "application/json" });
 			const a = document.createElement("a");
 			a.href = URL.createObjectURL(blob);
-			a.download = "universe-players.json";
+			a.download = global.Universe.exportBaseName(state.universe) + "-players.json";
 			a.click();
 			setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 			setStatus("Exported " + out.file.players.length + " players across " +
@@ -8792,6 +8835,7 @@
 		editorPanel, modal, closeModal,
 		clearLock, showPlayer, showTeam, showGame,
 		runUniverse, cancelUniverse, resumeUniverseDialog, exportUniverse, exportUniversePlayers,
+		exportUniverseCsv, randomizeUniverseName, PERSIST_CAPS,
 		importUniverse, showPlayerInFile, universeCareers, liveResults,
 		// Exposed for tools/uismoke.js, which loads files without a file input.
 		installFiles, paintConfig,

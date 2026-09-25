@@ -3652,6 +3652,16 @@
 			"redrawn, a fired coach is replaced by a named first-year hire, and " +
 			"the build-pool memory spans the whole timeline. A universe re-runs " +
 			"from its seeds — the export stores seeds, not simulated output."));
+		if (u.rows.length) {
+			const nm = el("div", "filters");
+			nm.appendChild(el("span", "pill", "World: " + (u.name || "Universe")));
+			const rn = el("button", null, "Randomize world name");
+			rn.disabled = !!u.running;
+			rn.title = "Draw a new name for this world. It is saved and written into the export.";
+			rn.addEventListener("click", () => { A().randomizeUniverseName(); });
+			nm.appendChild(rn);
+			view.appendChild(nm);
+		}
 
 		const bar = el("div", "filters");
 		/* Universe mode is a setting now (see the "The world" group in the
@@ -3718,6 +3728,12 @@
 			"Tools → Import players and tick “include stats”.";
 		expPlayers.addEventListener("click", () => { A().exportUniversePlayers(); });
 		bar.appendChild(expPlayers);
+		for (const [what, label] of [["timeline", "Timeline CSV"], ["records", "Records CSV"]]) {
+			const b = el("button", null, label);
+			b.disabled = !u.rows.length || !!u.running || (what === "records" && !u.records);
+			b.addEventListener("click", () => { A().exportUniverseCsv(what); });
+			bar.appendChild(b);
+		}
 		const impBtn = el("button", null, "Import universe…");
 		impBtn.disabled = !!u.running;
 		const impInput = el("input");
@@ -3788,6 +3804,23 @@
 		   NCAA program (see Universe.summarize); a prospect abroad shows
 		   his club instead, since that is where the season happened. */
 		const where = (m) => m.nonNcaa && m.club ? m.club : (m.school || m.club || "?");
+		/* A POY or No. 1 pick opens his page in the season's file when that
+		   file is loaded and the row recorded his key. */
+		const fileOf = (r) => A().state.files.findIndex((f) =>
+			f && r.fingerprint && f.fingerprint === r.fingerprint);
+		const manCell = (m, r) => {
+			const td = el("td");
+			if (!m) { td.textContent = "—"; return td; }
+			const fi = m.key !== undefined && !r.extrapolated ? fileOf(r) : -1;
+			if (fi >= 0) {
+				const go = el("button", "linky", m.name);
+				go.title = "Open his page in the " + r.season + " class";
+				go.addEventListener("click", () => { A().showPlayerInFile(fi, m.key); });
+				td.appendChild(go);
+			} else td.appendChild(document.createTextNode(m.name));
+			td.appendChild(document.createTextNode(" (" + where(m) + ")"));
+			return td;
+		};
 		const guessedSeasons = new Set(u.rows.filter((r) => r && r.extrapolated)
 			.map((r) => r.season));
 		for (const r of u.rows) {
@@ -3832,12 +3865,12 @@
 				(r.partial ? " · partial class, honours topped up" : "") +
 				(r.restored ? " · restored from the imported universe" : "")));
 			tr.appendChild(el("td", null, r.apOne || "—"));
-			tr.appendChild(el("td", null, (r.champion || "—") +
-				(r.champSeed ? " (No. " + r.champSeed + ")" : "")));
-			tr.appendChild(el("td", null, r.poy
-				? r.poy.name + " (" + where(r.poy) + ")" : "—"));
-			tr.appendChild(el("td", null, r.no1
-				? r.no1.name + " (" + where(r.no1) + ")" : "—"));
+			const champTd = el("td");
+			champTd.appendChild(r.champion ? programLink(r.champion) : document.createTextNode("—"));
+			if (r.champSeed) champTd.appendChild(document.createTextNode(" (No. " + r.champSeed + ")"));
+			tr.appendChild(champTd);
+			tr.appendChild(manCell(r.poy, r));
+			tr.appendChild(manCell(r.no1, r));
 			tr.appendChild(el("td", null, r.realignment && r.realignment.length
 				? r.realignment.join("; ") : "—"));
 			/* Fired / retired / hired away, rather than one number that used
@@ -3906,8 +3939,31 @@
 			   so the program in one is a link to its team page rather than a
 			   word in a sentence. A timeline stored before that change is a
 			   list of strings and still renders. */
+			/* Filter by kind and by program; the choice lives on state for the session. */
+			const st2 = A().state;
+			const fbar = el("div", "filters");
+			const mk = (label, opts, cur, set) => {
+				const sel = el("select");
+				sel.setAttribute("aria-label", label);
+				sel.appendChild(new Option("any " + label, ""));
+				for (const o of opts) sel.appendChild(new Option(o, o));
+				sel.value = opts.indexOf(cur) >= 0 ? cur : "";
+				sel.addEventListener("change", () => { set(sel.value); A().render(); });
+				fbar.appendChild(sel);
+			};
+			const objs = u.threads.filter((t) => t && typeof t === "object");
+			const kinds = Array.from(new Set(objs.map((t) => t.kind).filter(Boolean))).sort();
+			const teams = Array.from(new Set(objs.flatMap((t) => [t.team, t.other])
+				.filter(Boolean))).sort();
+			mk("kind", kinds, st2.universeThreadKind, (v) => { st2.universeThreadKind = v; });
+			mk("program", teams, st2.universeThreadTeam, (v) => { st2.universeThreadTeam = v; });
+			view.appendChild(fbar);
+			const shown = global.Universe.filterThreads(u.threads,
+				kinds.indexOf(st2.universeThreadKind) >= 0 ? st2.universeThreadKind : "",
+				teams.indexOf(st2.universeThreadTeam) >= 0 ? st2.universeThreadTeam : "");
 			const tl = el("div", "note");
-			for (const t of u.threads) {
+			if (!shown.length) tl.appendChild(el("div", "hint", "No threads match these filters."));
+			for (const t of shown) {
 				const line = el("div");
 				if (typeof t === "string") {
 					line.appendChild(document.createTextNode(t));
@@ -3948,6 +4004,26 @@
 			view.appendChild(el("div", "note", u.alumni.map((a) =>
 				a.season + "  " + a.name + " (" + a.school +
 				(a.club ? ", then " + a.club : "") + ") — " + a.why).join("\n")));
+		}
+		/* What a reload keeps. See universeForStorage in js/app.js. */
+		const caps = A().PERSIST_CAPS;
+		if (caps) {
+			// Only multi-season careers are stored, so one-season entries always go.
+			const regAll = u.registry ? Object.values(u.registry) : [];
+			const regKept = Math.min(caps.registry, regAll.filter((x) => x && x.span >= 2).length);
+			const drop = [
+				[u.rows.length, caps.rows, "the oldest ", " seasons"],
+				[(u.threads || []).length, caps.threads, "", " threads"],
+				[(u.alumni || []).length, caps.alumni, "the oldest ", " alumni"],
+				[regAll.length, regKept, "", " career-index entries"],
+			].filter((x) => x[0] > x[1])
+				.map((x) => x[2] + (x[0] - x[1]) + x[3]);
+			view.appendChild(el("p", "hint universe-persist",
+				"Browser storage keeps up to " + caps.rows + " seasons, " + caps.threads +
+				" threads, " + caps.alumni + " alumni and " + caps.registry +
+				" career entries. " + (drop.length
+					? "A reload now would drop " + drop.join(", ") + " — re-run from the seeds to get them back."
+					: "A reload now keeps everything.")));
 		}
 	}
 
