@@ -1370,7 +1370,13 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		["BPM min", Math.min.apply(null, adv.bpm)].concat(extremeLow(-24, -10)),
 		["PER median (draft year)", pct(adv.per, 0.5)].concat(within(16.5, 3.0)),
 		["PER max", Math.max.apply(null, adv.per)].concat(extreme(30, 48)),
-		["VORP max", Math.max.apply(null, adv.vorp)].concat(extreme(4.5, 11)),
+		/* VORP is scaled by the college schedule now, not by 82 games
+		   (BBGM scales by the league's own numGames), so the old [4.5, 11]
+		   band is carried over multiplied by 82 / the schedule length:
+		   the same band, in the new unit, not a looser one. */
+		["VORP max", Math.max.apply(null, adv.vorp)].concat(extreme(
+			4.5 * 82 / (global.TeamsSim.CONF_GAMES + global.TeamsSim.NON_CONF_GAMES),
+			11 * 82 / (global.TeamsSim.CONF_GAMES + global.TeamsSim.NON_CONF_GAMES))),
 		["WS per 40 max", Math.max.apply(null, adv.ws40)].concat(extreme(0.28, 0.58)),
 		["ORtg median", pct(adv.ortg, 0.5)].concat(within(108, 6)),
 		["USG% max (BBGM advanced)", Math.max.apply(null, adv.usgp)].concat(extreme(33, 42)),

@@ -138,7 +138,7 @@
 
 	function assignClassYears(players, cfg, rng, ageIsInformative) {
 		const share = clamp(
-			(cfg.freshmanShare === undefined ? 46 : cfg.freshmanShare) / 100, 0, 1);
+			(cfg.freshmanShare === undefined ? global.Config.DEFAULTS.freshmanShare : cfg.freshmanShare) / 100, 0, 1);
 		const transferShare = clamp(
 			(cfg.transferShare === undefined ? 34 : cfg.transferShare) / 100, 0, 1);
 		const redshirtShare = clamp(
@@ -192,8 +192,11 @@
 			if (ageIsInformative) {
 				p.classYear = classYear(p.age);
 			} else {
-				// Freshman odds fall off steeply down the board.
-				const pFresh = clamp(share * (1.75 - 1.45 * rank), 0, 0.96);
+				// Freshman odds fall off steeply down the board. The tilt
+				// flattens above a 50% share so 100 can mean (nearly) all
+				// freshmen; the old 0.96 cap and full tilt stopped at ~80%.
+				const tilt = clamp(2 * (1 - share), 0, 1);
+				const pFresh = clamp(share * (1 + tilt * (0.75 - 1.45 * rank)), 0, 1);
 				const rest = 1 - pFresh;
 				// The remainder splits toward the upperclassmen as rank drops.
 				const w = [pFresh, rest * (0.46 - 0.10 * rank), rest * (0.30 + 0.02 * rank),
@@ -227,7 +230,10 @@
 
 			// Transfers. Freshmen do not transfer; the rest increasingly do.
 			p.transfer = null;
-			if (yearIdx >= 1 && r.random() < transferShare * (0.55 + 0.55 * yearIdx)) {
+			/* The year weights 0.8/1.2/1.6 average about 1 over the default
+			   upperclass mix, so the setting reads as the share of upperclassmen
+			   who transferred (they were 1.1/1.65/2.2: 34 gave ~48%). */
+			if (yearIdx >= 1 && r.random() < transferShare * (0.4 + 0.4 * yearIdx)) {
 				/* A fifth-year or graduate transfer is by definition a man
 				   who has used four years, so those kinds are only open to a
 				   senior. Drawing from the full list made them force
@@ -6297,7 +6303,10 @@
 
 		/* One team-season: the rotation that played it, and which of its
 		   players this export needs a row for. */
-		const addTeam = (box, lines, margin, wanted) => {
+		/* `numGames` is the schedule that team-season was played to, which
+		   scales VORP the way BBGM's own numGames does (it was a flat 82, so
+		   a 31-game college season read at about 38% of its value). */
+		const addTeam = (box, lines, margin, wanted, numGames) => {
 			if (!box || !lines || !lines.length) return;
 			const gp = Math.max(1, box.gp);
 			const players = [];
@@ -6316,7 +6325,7 @@
 				});
 			}
 			rosters.push({
-				box, gp, margin,
+				box, gp, margin, numGames,
 				stats: null,        // filled in the second pass
 				players,
 			});
@@ -6349,7 +6358,7 @@
 				? team.log.reduce((a, g) => a + ((g.teamPts || 0) - (g.oppPts || 0)), 0) /
 					team.log.length
 				: null;
-			addTeam(team.box, items, margin, wanted);
+			addTeam(team.box, items, margin, wanted, SEASON_GAMES);
 		}
 
 		/* The clubs abroad and in the G League, the same way. A prospect at
@@ -6375,7 +6384,7 @@
 				const margin = club.log && club.log.length
 					? club.log.reduce((a, g) => a + ((g.teamPts || 0) - (g.oppPts || 0)), 0) / club.log.length
 					: null;
-				addTeam(club.box, items, margin, wanted);
+				addTeam(club.box, items, margin, wanted, PRO_GAMES[lgName] || 30);
 			}
 		}
 
@@ -6407,7 +6416,7 @@
 				addTeam(row.box, items, pm, [{
 					key, player: p, season: row.season, team: row.team,
 					draftYear: false, prior: row,
-				}]);
+				}], SEASON_GAMES);
 			}
 		}
 
