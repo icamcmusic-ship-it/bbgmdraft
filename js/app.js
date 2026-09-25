@@ -745,15 +745,7 @@
 	}
 
 	function applySnapshot(snap, verb) {
-		state.cfg = CFG.make(snap.cfg);
-		state.overrides = snap.overrides;
-		if (snap.lastSeed !== undefined) state.lastSeed = snap.lastSeed;
-		if (Array.isArray(snap.poolHistory)) state.poolHistory = snap.poolHistory;
-		if (Array.isArray(snap.anomalyHistory)) state.anomalyHistory = snap.anomalyHistory;
-		if (Array.isArray(snap.flavorHistory)) state.flavorHistory = snap.flavorHistory;
-		state.fileCfgs = snap.fileCfgs && typeof snap.fileCfgs === "object"
-			? snap.fileCfgs : {};
-		if (snap.universeBiography !== undefined) state.universeBiography = snap.universeBiography;
+		setSnapshot(snap);
 		// A restored class is a different class, so an editor open on somebody
 		// who may not be in it any more has to close.
 		state.editing = null;
@@ -764,6 +756,19 @@
 		run(() => setStatus(verb + ": " + snap.label));
 	}
 
+	// The state half of applySnapshot, with no re-run: undoTo steps several.
+	function setSnapshot(snap) {
+		state.cfg = CFG.make(snap.cfg);
+		state.overrides = snap.overrides;
+		if (snap.lastSeed !== undefined) state.lastSeed = snap.lastSeed;
+		if (Array.isArray(snap.poolHistory)) state.poolHistory = snap.poolHistory;
+		if (Array.isArray(snap.anomalyHistory)) state.anomalyHistory = snap.anomalyHistory;
+		if (Array.isArray(snap.flavorHistory)) state.flavorHistory = snap.flavorHistory;
+		state.fileCfgs = snap.fileCfgs && typeof snap.fileCfgs === "object"
+			? snap.fileCfgs : {};
+		if (snap.universeBiography !== undefined) state.universeBiography = snap.universeBiography;
+	}
+
 	function undo() {
 		const prev = state.undo.pop();
 		if (!prev) return;
@@ -772,6 +777,47 @@
 		state.redo.push(undoSnapshot(prev.label));
 		if (state.redo.length > 40) state.redo.shift();
 		applySnapshot(prev, "Undid");
+	}
+
+	/* Jump back `n` steps in one re-run. Each step pushes onto redo exactly
+	   as undo() would, so Redo walks forward through them one at a time. */
+	function undoTo(n) {
+		n = Math.min(Math.max(1, n | 0), state.undo.length);
+		if (!n) return;
+		let prev = null;
+		for (let i = 0; i < n; i++) {
+			prev = state.undo.pop();
+			state.redo.push(undoSnapshot(prev.label));
+			if (state.redo.length > 40) state.redo.shift();
+			setSnapshot(prev);
+		}
+		applySnapshot(prev, n > 1 ? "Undid " + n + " steps, back to before" : "Undid");
+	}
+
+	/* The undo history: every label on the stack, newest first; a click jumps
+	   back to just before that change. */
+	function undoHistoryDialog() {
+		const box = el("div");
+		if (!state.undo.length) {
+			box.appendChild(el("p", "hint", "Nothing to undo yet."));
+			modal("Undo history", box);
+			return;
+		}
+		box.appendChild(el("p", "hint", "Pick a change to go back to just before it. " +
+			"Redo steps forward again, one change at a time."));
+		const list = el("ol", "undohistory");
+		for (let i = state.undo.length - 1, n = 1; i >= 0; i--, n++) {
+			const li = el("li");
+			const b = el("button", "tiny", state.undo[i].label);
+			b.dataset.steps = String(n);
+			b.title = "Undo " + n + (n === 1 ? " step" : " steps");
+			const steps = n;
+			b.addEventListener("click", () => { closeModal(); undoTo(steps); });
+			li.appendChild(b);
+			list.appendChild(li);
+		}
+		box.appendChild(list);
+		modal("Undo history", box);
 	}
 
 	function redo() {
@@ -792,6 +838,22 @@
 			: "Undo";
 		b.title = state.undo.length
 			? "Undo: " + state.undo[state.undo.length - 1].label + " (Ctrl+Z)"
+			: "Nothing to undo";
+		// The history dropdown beside it, made here so the header markup
+		// stays as it is.
+		let h = $("btnUndoHistory");
+		if (!h) {
+			h = el("button", "iconbtn", "▾");
+			h.id = "btnUndoHistory";
+			h.setAttribute("aria-label", "Undo history");
+			h.setAttribute("aria-haspopup", "dialog");
+			h.addEventListener("click", undoHistoryDialog);
+			b.after(h);
+		}
+		h.disabled = !state.undo.length;
+		h.title = state.undo.length
+			? "Undo history — " + state.undo.length + " step" +
+				(state.undo.length === 1 ? "" : "s") + " (right-click Undo too)"
 			: "Nothing to undo";
 		const r = $("btnRedo");
 		if (!r) return;
@@ -2407,9 +2469,11 @@
 		fh.value = cur;
 	}
 
-	/* A toast of its own, separate from the status line (which other code
-	   writes constantly). Achievements call it once each, on unlock. */
-	function replayToast(text) {
+	/* THE toast: separate from the status line (which other code writes
+	   constantly). Achievements use it on unlock, and every copy action
+	   names what it copied through it (see copyText). One polite live
+	   region, so a screen reader hears each once. */
+	function toast(text) {
 		let box = $("replayToasts");
 		if (!box) {
 			box = el("div", "replaytoasts");
@@ -2421,7 +2485,9 @@
 		const t = el("div", "replaytoast", text);
 		box.appendChild(t);
 		setTimeout(() => t.remove(), 5000);
+		return t;
 	}
+	const replayToast = toast;
 
 	// A link that replays this result: its settings, its drawn seed, no locks.
 	function replayLinkFor(res) {
@@ -4855,7 +4921,7 @@
 			" — BBGM Draft Class Workshop";
 		$("seedPill").title = "Seed and class fingerprint — two people with the same " +
 			"fingerprint are looking at the same seventy players. " +
-			"Click to copy the seed, shift-click or right-click to paste one" +
+			"Click to copy the seed, double-click to type one, shift-click or right-click to paste one" +
 			(Number.isFinite(ms) ? " · " + Math.round(ms) + "ms (" +
 				(res.phasesRun && res.phasesRun.length
 					? res.phasesRun.join(" → ") : "nothing to redo") + ")" : "") +
@@ -5698,7 +5764,7 @@
 		const copy = el("button", "linky", "copy result");
 		copy.id = "btnCopyChallenge";
 		copy.type = "button";
-		copy.addEventListener("click", () => copyText(challengeResultText(ch, sc), copy));
+		copy.addEventListener("click", () => copyText(challengeResultText(ch, sc), copy, null, "challenge result"));
 		bar.appendChild(copy);
 	}
 
@@ -5835,7 +5901,7 @@
 		const code = el("button", "linky", "code");
 		code.type = "button";
 		code.title = "Copy a short code for this attempt (settings, dials and score)";
-		code.addEventListener("click", () => copyText(resultCode(), code));
+		code.addEventListener("click", () => copyText(resultCode(), code, null, "result code"));
 		bar.appendChild(code);
 	}
 
@@ -5978,7 +6044,7 @@
 		codes.appendChild(button("replayRival", "Set as rival", () => {
 			if (importGhost(paste.value)) closeModal();
 		}));
-		codes.appendChild(button("replayCopy", "Copy mine", (e) => copyText(resultCode(), e.target)));
+		codes.appendChild(button("replayCopy", "Copy mine", (e) => copyText(resultCode(), e.target, null, "result code")));
 		return box;
 	}
 
@@ -6675,6 +6741,7 @@
 			const a = document.createElement("a");
 			a.href = URL.createObjectURL(blob);
 			a.download = name;
+			markExported();
 			a.click();
 			setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 			setStatus(note + (u.truncated ? " Warning: this timeline was reloaded " +
@@ -7157,6 +7224,7 @@
 			const a = document.createElement("a");
 			a.href = URL.createObjectURL(blob);
 			a.download = global.Universe.exportBaseName(state.universe) + "-players.json";
+			markExported();
 			a.click();
 			setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 			setStatus("Exported " + out.file.players.length + " players across " +
@@ -8466,6 +8534,7 @@
 	let modalOk = null;
 	let modalTrigger = null;      // the element that opened the modal
 	let modalTrapCleanup = null;  // focus-trap teardown
+	let modalValidate = null;     // returns false to keep the dialog open
 
 	/* `opts.focusCancel`: a destructive confirmation starts on Cancel, so an
 	   Enter pressed out of habit does not throw the work away. */
@@ -8477,6 +8546,7 @@
 		b.appendChild(body);
 		$("modalOk").textContent = okLabel || (onOk ? "OK" : "Close");
 		modalOk = onOk;
+		modalValidate = opts && opts.validate || null;
 		/* An information dialog has one way out. Showing "Close" beside a
 		   "Cancel" that did the same thing asked a question there was no
 		   answer to. */
@@ -8517,9 +8587,38 @@
 		modal(title, box, onOk, okLabel, { focusCancel: true });
 	}
 
+	/* The themed stand-in for window.prompt: one text box, a label, an inline
+	   error. `check(value)` returns an error sentence or "" — the dialog stays
+	   open until it passes. onOk gets the trimmed value. */
+	function promptModal(title, label, value, onOk, opts) {
+		const o = opts || {};
+		const box = el("div");
+		const lab = el("label", "promptlabel", label);
+		const input = el("input");
+		input.type = "text";
+		input.id = "modalPrompt";
+		input.value = value || "";
+		if (o.placeholder) input.placeholder = o.placeholder;
+		lab.htmlFor = "modalPrompt";
+		const err = el("p", "hint promptError");
+		err.setAttribute("role", "alert");
+		box.appendChild(lab);
+		box.appendChild(input);
+		box.appendChild(err);
+		const check = () => {
+			const msg = o.check ? o.check(input.value.trim()) : "";
+			err.textContent = msg || "";
+			if (msg) input.focus();
+			return !msg;
+		};
+		modal(title, box, () => onOk(input.value.trim()), o.okLabel || "OK", { validate: check });
+		setTimeout(() => { input.focus(); input.select(); }, 0);
+	}
+
 	function closeModal() {
 		$("modal").hidden = true;
 		modalOk = null;
+		modalValidate = null;
 		if (modalTrapCleanup) { modalTrapCleanup(); modalTrapCleanup = null; }
 		// Restore focus to the element that triggered the modal
 		if (modalTrigger && typeof modalTrigger.focus === "function") {
@@ -8530,7 +8629,9 @@
 
 	/* ------------------------------------------------------------- clipboard */
 
-	function copyText(text, button, restore) {
+	/* `what` names the thing copied for the toast ("seed", "link"); without
+	   it the button's resting label stands in. */
+	function copyText(text, button, restore, what) {
 		/* The label to put back is the one the button HAS, not one the caller
 		   remembered: the header's copy-link button is an icon (🔗) and the
 		   call site passed the word "Link", so one copy replaced the icon with
@@ -8550,7 +8651,10 @@
 			   confirmation at all — and the pill itself is not a button, so
 			   there was not even that. announce() is the tool's own live
 			   region and costs nothing. */
-			announce("Copied: " + String(text).slice(0, 60));
+			const name = what || (button && (button.getAttribute("aria-label") ||
+				button.dataset.restLabel || "").replace(/^Copy\s*/i, "").trim()) || "text";
+			// The toast carries its own live region; no second announcement.
+			toast("Copied " + name + " to the clipboard.");
 			if (!button) return;
 			button.textContent = "Copied ✓";
 			clearTimeout(Number(button.dataset.copyTimer) || 0);
@@ -8559,16 +8663,42 @@
 			}, 1400));
 		};
 		function fallback() {
+			// Put focus back afterwards: the textarea took it, and an async
+			// fallback could pull it out of whatever opened in the meantime.
+			const had = document.activeElement;
 			const ta = document.createElement("textarea");
 			ta.value = text;
 			document.body.appendChild(ta);
 			ta.select();
 			try { document.execCommand("copy"); done(); } catch (e) { /* nothing to do */ }
 			ta.remove();
+			if (had && had !== document.body && had.isConnected && had.focus) had.focus();
 		}
 		if (navigator.clipboard && navigator.clipboard.writeText) {
 			navigator.clipboard.writeText(text).then(done, fallback);
 		} else fallback();
+	}
+
+	/* UNSAVED WORK, conservatively: locks and player edits (state.overrides)
+	   or universe seasons that changed since the last file this tab wrote —
+	   or since the page loaded, since what storage restored is not new. A
+	   fresh sample with no locks and no universe is never "unsaved". */
+	let exportedSig = null;
+	function workSig() {
+		const u = state.universe;
+		/* The universe by its LAST season and name, not its row count: a
+		   reload replays the stored timeline and rebuilds rows it already
+		   had, which is not new work. */
+		const last = u && u.rows && u.rows.length ? u.rows[u.rows.length - 1] : null;
+		return JSON.stringify(state.overrides || {}) + "|" +
+			(last ? last.season : "") + "|" + (u && u.name || "");
+	}
+	function markExported() { exportedSig = workSig(); }
+	function unsavedWork() {
+		const u = state.universe;
+		const any = Object.keys(state.overrides || {}).length > 0 ||
+			!!(u && u.rows && u.rows.length);
+		return any && workSig() !== exportedSig;
 	}
 
 	/* --------------------------------------------------------------- export */
@@ -8655,6 +8785,7 @@
 		   ever naming the file — so "which of these four JSONs is the one I
 		   just made" was unanswerable from inside the tool. */
 		lastDownload = name;
+		markExported();
 		setStatus("Wrote " + name + ".");
 		return name;
 	}
@@ -9830,15 +9961,15 @@
 		}
 		hold.addEventListener("click", () => {
 			const suggested = String.fromCharCode(65 + heldBatches.length);
-			const name = window.prompt("Name this batch:", suggested);
-			if (name === null) return;
-			const label = (name.trim() || suggested);
-			heldBatches = heldBatches.filter((h) => h.label !== label);
-			heldBatches.push({
-				label, rows: rows.slice(), seed: batchBaseSeed, cfg: effectiveCfg(),
-			});
-			setStatus("Batch held as “" + label + "”. Change a setting and run another.");
-			renderBatch(rows);
+			promptModal("Hold this batch", "Name this batch", suggested, (name) => {
+				const label = name || suggested;
+				heldBatches = heldBatches.filter((h) => h.label !== label);
+				heldBatches.push({
+					label, rows: rows.slice(), seed: batchBaseSeed, cfg: effectiveCfg(),
+				});
+				setStatus("Batch held as “" + label + "”. Change a setting and run another.");
+				renderBatch(rows);
+			}, { okLabel: "Hold", check: (v) => v.length > 40 ? "Keep the name under 40 characters." : "" });
 		});
 		head.appendChild(hold);
 		for (const h of heldBatches) {
@@ -10113,7 +10244,8 @@
 		importUniverse, showPlayerInFile, universeCareers, liveResults,
 		// Exposed for tools/uismoke.js, which loads files without a file input.
 		installFiles, paintConfig,
-		copyText, announce, bulkApply, bulkShiftOvr, bulkLockAsIs, bulkClear, refreshBulkBar,
+		copyText, announce, toast, promptModal, undoTo, undoHistoryDialog,
+		unsavedWork, markExported, editSeedInline, applySeed, bulkApply, bulkShiftOvr, bulkLockAsIs, bulkClear, refreshBulkBar,
 		snapshot, rerollUntilDialog, rerollUntil, dailySeed, CHALLENGES, startChallenge,
 		challengeResultText, scoreChallenge, restoreSession, randomizeSettings,
 		REROLL_PREDICATES,
@@ -10152,6 +10284,13 @@
 
 	const saved = restore();
 	readHash();
+	// What came back from storage is not new work; only changes after this do.
+	markExported();
+	window.addEventListener("beforeunload", (e) => {
+		if (!unsavedWork()) return;
+		e.preventDefault();
+		e.returnValue = "";
+	});
 	lastWrittenHash = location.hash || "";
 	/* A link pasted into a tab that is already open changes only the hash,
 	   which reloads nothing — so the page went on showing the old class. The
@@ -10280,6 +10419,7 @@
 	// would pass it the click event.
 	$("btnRerun").addEventListener("click", () => run());
 	$("btnUndo").addEventListener("click", undo);
+	$("btnUndo").addEventListener("contextmenu", (e) => { e.preventDefault(); undoHistoryDialog(); });
 	$("btnExport").addEventListener("click", () => {
 		exportActive(currentExportOpts());
 	});
@@ -10379,7 +10519,7 @@
 	$("seedPill").addEventListener("click", (e) => {
 		// Shift-click pastes (below); copying as well overwrote the clipboard.
 		if (e.shiftKey) return;
-		copyText($("seedPill").dataset.seed || "", null, "");
+		copyText($("seedPill").dataset.seed || "", null, "", "seed " + ($("seedPill").dataset.seed || ""));
 		const p = $("seedPill");
 		if (p.dataset.flashTimer) clearTimeout(Number(p.dataset.flashTimer));
 		p.textContent = "seed copied ✓";
@@ -10394,19 +10534,61 @@
 	   right-click) the pill and paste. */
 	const pasteSeed = (e) => {
 		e.preventDefault();
-		const take = (text) => {
-			const seed = String(text || "").trim();
-			if (!seed) return;
-			pushUndo("pasted a seed");
-			state.cfg.seed = seed;
-			$("seed").value = seed;
-			state.presetDirty = true;
-			run();
-		};
+		const take = (text) => applySeed(text, "pasted a seed");
 		if (navigator.clipboard && navigator.clipboard.readText) {
 			navigator.clipboard.readText().then(take, () => promptSeed(take));
 		} else promptSeed(take);
 	};
+	/* The one path a seed typed or pasted into the header takes. */
+	function applySeed(text, label) {
+		const seed = String(text || "").trim();
+		if (!seed) return false;
+		pushUndo(label);
+		state.cfg.seed = seed;
+		$("seed").value = seed;
+		state.presetDirty = true;
+		run();
+		return true;
+	}
+	/* Edit the seed in place: double-click (or F2 on) the pill swaps it for a
+	   text box. Enter applies through applySeed, Escape or blur cancels. */
+	function editSeedInline() {
+		const pill = $("seedPill");
+		if (pill.hidden || $("seedPillEdit")) return;
+		const input = el("input", "pill seedpill");
+		input.type = "text";
+		input.id = "seedPillEdit";
+		input.value = pill.dataset.seed || "";
+		input.setAttribute("aria-label", "Seed — Enter applies, Escape cancels");
+		input.size = Math.max(8, input.value.length + 2);
+		let done = false;
+		const finish = (apply) => {
+			if (done) return;
+			done = true;
+			const v = input.value.trim();
+			input.remove();
+			pill.hidden = false;
+			pill.focus();
+			if (apply && v && v !== String(pill.dataset.seed || "")) applySeed(v, "typed a seed");
+		};
+		input.addEventListener("keydown", (e) => {
+			e.stopPropagation();
+			if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); finish(true); }
+			else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+		});
+		// Deferred: a copy fallback borrows focus for a moment and gives it back.
+		input.addEventListener("blur", () => setTimeout(() => {
+			if (document.activeElement !== input) finish(false);
+		}, 0));
+		pill.hidden = true;
+		pill.after(input);
+		input.focus();
+		input.select();
+	}
+	$("seedPill").addEventListener("dblclick", (e) => { e.preventDefault(); editSeedInline(); });
+	$("seedPill").addEventListener("keydown", (e) => {
+		if (e.key === "F2") { e.preventDefault(); editSeedInline(); }
+	});
 	$("seedPill").addEventListener("contextmenu", pasteSeed);
 	$("seedPill").addEventListener("click", (e) => { if (e.shiftKey) pasteSeed(e); }, true);
 
@@ -10428,12 +10610,12 @@
 		writeHash(true);
 		// Shift-click copies the settings as prose instead of as a URL, for
 		// the forums and chat clients that eat links. Advertised in the title.
-		if (e.shiftKey) copyText(configAsText(), $("btnCopyLink"));
-		else copyText(location.href, $("btnCopyLink"));
+		if (e.shiftKey) copyText(configAsText(), $("btnCopyLink"), null, "settings as text");
+		else copyText(location.href, $("btnCopyLink"), null, "link to these settings");
 	});
 	$("btnCopyText").addEventListener("click", () => {
 		writeHash(true);
-		copyText(configAsText(), $("btnCopyText"));
+		copyText(configAsText(), $("btnCopyText"), null, "settings as text");
 	});
 	$("btnBatch").addEventListener("click", () => {
 		if (!state.files.length) return;
@@ -10444,6 +10626,7 @@
 	$("btnKeys").addEventListener("click", shortcutSheet);
 	$("btnHowTo").addEventListener("click", howToSheet);
 	$("modalOk").addEventListener("click", () => {
+		if (modalValidate && !modalValidate()) return;
 		const fn = modalOk;
 		closeModal();
 		if (fn) fn();

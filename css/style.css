@@ -1478,6 +1478,16 @@ ul.ledger li.missing { opacity: 0.55; }
 .replaytoast { background: var(--panel-2); color: var(--text); border: 1px solid var(--accent-2);
 	border-radius: 4px; padding: 8px 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
 
+/* The themed prompt (promptModal), the undo history, the inline seed box. */
+.promptlabel { display: block; margin-bottom: 4px; }
+#modalPrompt { width: 100%; box-sizing: border-box; }
+.promptError { color: var(--bad); min-height: 1em; }
+ol.undohistory { margin: 4px 0; padding-left: 24px; max-height: 50vh; overflow-y: auto; }
+ol.undohistory li { padding: 2px 0; }
+ol.undohistory button { text-align: left; }
+input.layoutname { width: 12em; }
+#seedPillEdit { cursor: text; }
+
 /* The Play tab (js/play.js). */
 .playtab .playcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
 .playtab .playgame { padding: 3px 0; }

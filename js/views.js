@@ -1436,16 +1436,35 @@
 			});
 			savedRow.appendChild(x);
 		}
+		/* Named inline rather than through window.prompt: this is already
+		   inside the themed dialog, so the name box lives here too. Enter
+		   saves; it does not reach the dialog's own OK. */
+		const nameIn = el("input");
+		nameIn.type = "text";
+		nameIn.className = "layoutname";
+		nameIn.placeholder = "Layout name";
+		nameIn.setAttribute("aria-label", "Name this column layout");
+		const nameErr = el("span", "hint");
+		nameErr.setAttribute("role", "alert");
 		const saveBtn = el("button", "tiny", "Save this layout…");
-		saveBtn.addEventListener("click", () => {
-			const name = window.prompt("Name this column layout:", "");
-			if (!name || !name.trim()) return;
-			saved[name.trim()] = Object.assign({}, draft);
+		const save = () => {
+			const name = nameIn.value.trim();
+			if (!name) { nameErr.textContent = "Type a name first."; nameIn.focus(); return; }
+			saved[name] = Object.assign({}, draft);
 			A().persist();
-			A().setStatus("Saved the column layout “" + name.trim() + "”.");
+			A().setStatus("Saved the column layout “" + name + "”.");
 			columnPicker(draft);
+		};
+		saveBtn.addEventListener("click", save);
+		nameIn.addEventListener("keydown", (e) => {
+			if (e.key !== "Enter" || e.isComposing) return;
+			e.preventDefault();
+			e.stopPropagation();
+			save();
 		});
+		savedRow.appendChild(nameIn);
 		savedRow.appendChild(saveBtn);
+		savedRow.appendChild(nameErr);
 		box.appendChild(savedRow);
 
 		const presets = el("div", "rowflex");
@@ -4885,7 +4904,7 @@
 			]);
 			A().copyText("**Draft board — seed " + res.seed +
 				(res.flavor && res.flavor.label ? ", " + res.flavor.label : "") + "**\n\n" +
-				markdownTable(BOARD_HEADS, rows), md, "Copy as markdown");
+				markdownTable(BOARD_HEADS, rows), md, "Copy as markdown", "the draft board as markdown");
 		});
 		bar.appendChild(md);
 		view.appendChild(bar);
@@ -5270,7 +5289,7 @@
 		const copy = el("button", null, "Copy all notes");
 		copy.addEventListener("click", () => {
 			A().copyText(res.players.slice().sort((a, b) => b.newOvr - a.newOvr)
-				.map((p) => p.name + "\n" + p.note).join("\n\n"), copy, "Copy all notes");
+				.map((p) => p.name + "\n" + p.note).join("\n\n"), copy, "Copy all notes", "all scouting notes");
 		});
 		bar.appendChild(copy);
 		const tsv = el("button", null, "Copy as spreadsheet rows");
@@ -5278,7 +5297,7 @@
 			const rows = res.players.slice().sort((a, b) => b.newOvr - a.newOvr)
 				.map((p) => [p.name, (p.note || "").replace(/\n/g, " · ")].join("\t"));
 			A().copyText(["name\tnote"].concat(rows).join("\n"), tsv,
-				"Copy as spreadsheet rows");
+				"Copy as spreadsheet rows", "notes as spreadsheet rows");
 		});
 		bar.appendChild(tsv);
 		const md = el("button", null, "Copy as markdown");
@@ -5290,7 +5309,7 @@
 					String(p.note || "").split("\n").map((l) => l.trim()).filter(Boolean)
 						.map((l) => "- " + l).join("\n"))
 				.join("\n\n");
-			A().copyText(text, md, "Copy as markdown");
+			A().copyText(text, md, "Copy as markdown", "notes as markdown");
 		});
 		bar.appendChild(md);
 		view.appendChild(bar);
@@ -5311,7 +5330,7 @@
 			one.title = "Copy this note to the clipboard";
 			one.setAttribute("aria-label", "Copy the note for " + p.name);
 			one.addEventListener("click", () => {
-				A().copyText(p.name + "\n" + p.note, one, "Copy");
+				A().copyText(p.name + "\n" + p.note, one, "Copy", "the note on " + p.name);
 			});
 			head.appendChild(one);
 			c.appendChild(head);
