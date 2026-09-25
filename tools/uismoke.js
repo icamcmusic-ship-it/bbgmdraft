@@ -18,7 +18,7 @@ const path = require("path");
 const os = require("os");
 
 const ROOT = path.join(__dirname, "..");
-const PORT = 8791;
+const PORT = Number(process.env.UISMOKE_PORT) || 8791;
 const TYPES = {
 	".html": "text/html", ".js": "text/javascript",
 	".css": "text/css", ".json": "application/json",
@@ -2465,6 +2465,60 @@ async function gotoProspects(page) {
 		});
 		ok("reroll until falls back to searching inline when the worker fails",
 			/Found it|No class in 2 tries/.test(fell), fell.slice(0, 120));
+	}
+
+	console.log("\nDaily seed, challenges and strangeness");
+	{
+		const today = await page.evaluate(() => window.App.dailySeed(new Date(2026, 0, 5)));
+		ok("the daily seed is the local date", today === "daily-2026-01-05", today);
+		await page.locator("#btnDaily").click();
+		await page.waitForFunction(() => /^daily-\d{4}-\d\d-\d\d$/.test(
+			(document.getElementById("seedPill").dataset.seed || "")), null, { timeout: 30000 });
+		const tip = await page.evaluate(() => document.getElementById("seedPill").title);
+		ok("the class header's tooltip lists the strangeness score", /Strangeness \d+\/100/.test(tip),
+			tip.slice(-120));
+		const ch = await page.evaluate(() => {
+			const A = window.App;
+			const keys = A.CHALLENGES.map((c) => c.key);
+			const bad = A.CHALLENGES.filter((c) => c.goals.some((g) =>
+				!global_parse(g)));
+			function global_parse(g) {
+				const bare = g.replace(/^!/, "");
+				return A.REROLL_PREDICATES.some((p) => p.key === bare);
+			}
+			return { keys, bad: bad.map((c) => c.key) };
+		});
+		ok("the new challenges are listed and every goal is a known clause",
+			ch.keys.indexOf("strange") !== -1 && ch.keys.indexOf("perfect") !== -1 &&
+			!ch.bad.length, ch.bad.join(", "));
+		await page.evaluate(() => {
+			const A = window.App;
+			A.startChallenge(A.CHALLENGES.filter((c) => c.key === "perfect")[0]);
+		});
+		await page.waitForSelector("#btnCopyChallenge", { timeout: 30000 });
+		const line = await page.evaluate(() => {
+			const A = window.App;
+			const c = A.CHALLENGES.filter((x) => x.key === "perfect")[0];
+			A.state.cfg.weirdness = 2;
+			return A.challengeResultText(c, A.scoreChallenge(c, A.state.results[A.state.active]));
+		});
+		ok("the challenge result line names the challenge, the dials moved and the seed",
+			/^The perfect season: (not )?solved · \d\/2 goals · 1\/3 settings \(weirdness 0 → 2\) · seed undefeated$/
+				.test(line), line);
+		const forbidden = await page.evaluate(() => {
+			const A = window.App;
+			const c = A.CHALLENGES.filter((x) => x.key === "perfect")[0];
+			A.state.cfg.midMajorLift = 3;
+			const sc = A.scoreChallenge(c, A.state.results[A.state.active]);
+			A.state.cfg.midMajorLift = 0;
+			return sc.broke.join(",");
+		});
+		ok("a forbidden dial is caught by the challenge score", forbidden === "midMajorLift", forbidden);
+		await page.locator("#btnCopyChallenge").click();
+		await page.evaluate(() => {
+			window.App.state.cfg.weirdness = 0;
+			window.App.state.challenge = null;
+		});
 	}
 
 	console.log("\nNo errors");
