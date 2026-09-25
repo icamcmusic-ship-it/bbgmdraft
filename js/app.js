@@ -151,6 +151,13 @@
 		   a fixed seed and a settings budget, which is the inverse of
 		   "Reroll until…". */
 		challenge: null,
+		/* Replayability (see js/replay.js): the campaign's cleared tiers and
+		   the dials that cleared each, the reruns of the current attempt, an
+		   imported rival's result, and the active puzzle's target headlines. */
+		challengeProgress: { cleared: {} },
+		replayRun: null,
+		ghost: null,
+		puzzle: null,
 		/* Which season's carry-over the Universe tab's world table is showing.
 		   See worldSection in js/views.js. */
 		worldSeason: null,
@@ -375,6 +382,10 @@
 			settingLocks: state.settingLocks,
 			settingTier: state.settingTier,
 			challenge: state.challenge,
+			challengeProgress: state.challengeProgress,
+			replayRun: state.replayRun,
+			ghost: state.ghost,
+			puzzle: state.puzzle,
 			lastUntil: state.lastUntil,
 			sessions: state.sessions.slice(0, SESSIONS_MAX),
 			// The branch point, so a reload continues the lineage rather than
@@ -628,8 +639,8 @@
 				state.lastSessionId = saved.lastSessionId;
 			}
 		}
-		if (typeof saved.challenge === "string" &&
-			CHALLENGES.some((c) => c.key === saved.challenge)) {
+		restoreReplay(saved);
+		if (typeof saved.challenge === "string" && findChallenge(saved.challenge)) {
 			state.challenge = saved.challenge;
 		}
 		/* Checked against the live predicate table, not trusted: a clause
@@ -3600,6 +3611,8 @@
 	function writeHash(withDrawnSeed) {
 		try {
 			const payload = encodeConfig(withDrawnSeed);
+			// The challenge being played (a daily's date is in its key) and its score.
+			Object.assign(payload, challengeHashFields());
 			let body = Object.keys(payload).length
 				? encodeURIComponent(JSON.stringify(payload))
 				: "";
@@ -3660,6 +3673,7 @@
 		/* A LINK IS THE WHOLE STATE IT DESCRIBES. A link without locks is a
 		   class with no locks — keeping the ones localStorage remembered from
 		   some other session applied them to the linked class, silently. */
+		readChallengeHashFields(payload);
 		const ov = payload.overrides;
 		state.overrides = ov && typeof ov === "object" && !Array.isArray(ov) ? ov : {};
 		state.overrideFingerprint = state.overrides === ov ? (payload.fp || null) : null;
@@ -4376,6 +4390,13 @@
 		// flavors and one draw a class repeats sooner than a pool of
 		// forty-six builds does; this is the same memory on that axis.
 		cfg.recentFlavors = (state.flavorHistory || []).slice(0, POOL_HISTORY);
+		/* A challenge is the same class for everybody, so this browser's
+		   memory of its last few classes stays out of it. */
+		if (state.challenge) {
+			cfg.recentPools = [];
+			cfg.recentAnomalies = [];
+			cfg.recentFlavors = [];
+		}
 		// Mutators last: explicit choices, so the flavor treats them as touched.
 		global.ReplayMeta.applyMutators(cfg, state.mutators, RB);
 		return cfg;
@@ -5531,15 +5552,16 @@
 	function scoreChallenge(ch, res) {
 		if (!ch || !res) return null;
 		const goals = ch.goals.map((key) => {
-			const clause = parseClause(key);
+			// A goal is a predicate key, or (a puzzle's headlines) a {label, test}.
+			const clause = key && typeof key === "object" ? key : parseClause(key);
 			let met = false;
 			try { met = !!(clause && clause.test(res)); } catch (e) { met = false; }
 			return { label: clause ? clause.label : key, met };
 		});
 		const start = CFG.make(Object.assign({}, ch.cfg, { seed: ch.seed }));
-		// diffConfigs returns "key old → new" lines, not an object; Object.keys
-		// of it gave indices, so `forbid` never matched.
-		const changes = diffConfigs(start, CFG.make(state.cfg));
+		// diffConfigs returns "key was → is" lines; the setting is the first word.
+		const changes = diffConfigs(start, CFG.make(state.cfg))
+			.filter((line) => line.split(" ")[0] !== "seed");
 		const moved = changes.map((line) => line.split(" ")[0]);
 		const broke = (ch.forbid || []).filter((k) => moved.indexOf(k) !== -1);
 		return {
@@ -5613,6 +5635,7 @@
 		sel.addEventListener("change", paint);
 		paint();
 		box.appendChild(detail);
+		box.appendChild(replayPanel());
 		modal("Challenges", box, () => {
 			const ch = CHALLENGES.filter((c) => c.key === sel.value)[0];
 			closeModal();
@@ -5624,6 +5647,7 @@
 	function startChallenge(ch) {
 		pushUndo("started the " + ch.name + " challenge");
 		state.challenge = ch.key;
+		state.replayRun = { key: ch.key, runs: 0 };
 		Object.assign(state.cfg, CFG.make(Object.assign({}, ch.cfg)));
 		state.cfg.seed = ch.seed;
 		state.lastSeed = ch.seed;
@@ -5647,7 +5671,7 @@
 		const host = $("presetDiff");
 		if (!host) return;
 		let bar = $("challengeBar");
-		const ch = CHALLENGES.filter((c) => c.key === state.challenge)[0];
+		const ch = findChallenge(state.challenge);
 		const res = state.results[state.active];
 		if (!ch || !res) { if (bar) bar.remove(); return; }
 		if (!bar) {
@@ -5661,6 +5685,7 @@
 		bar.appendChild(el("span", sc.solved ? "goal met" : "unit",
 			" " + sc.met + "/" + sc.total + " goals · " + sc.moved.length + "/" +
 			sc.budget + " settings" + (sc.solved ? " · solved" : "")));
+		paintReplayBar(bar, ch, sc, res);
 		const give = el("button", "linky", "give up");
 		give.type = "button";
 		give.addEventListener("click", () => {
@@ -5684,6 +5709,277 @@
 			sc.met + "/" + sc.total + " goals · " + sc.moved.length + "/" + sc.budget +
 			" settings" + (sc.changes.length ? " (" + sc.changes.join(", ") + ")" : "") +
 			" · seed " + ch.seed;
+	}
+
+	/* ------------------------------------------------------- replayability
+
+	   Audit section 4, ideas 1, 2, 3, 7, 12 and 13. The rules live in
+	   js/replay.js (pure, tested in tools/tests/replaychallenge.js); this is
+	   the wiring. Everything here is its own function so the challenge bar
+	   and dialog each gain one line. */
+	const RP = global.Replay;
+	const BEST_KEY = "bbgm-draft-workshop/challenge-best";
+	let lastCountedRes = null;
+
+	/* Any challenge by key: the static table, a daily ("daily-YYYY-MM-DD"),
+	   a campaign tier ("campaign:<key>", null while locked) or the puzzle in
+	   progress ("puzzle:<id>", which needs its target from state.puzzle). */
+	function findChallenge(key) {
+		if (typeof key !== "string") return null;
+		const fixed = CHALLENGES.filter((c) => c.key === key)[0];
+		if (fixed) return fixed;
+		if (/^daily-/.test(key)) return RP.dailyChallenge(key.slice(6));
+		if (/^campaign:/.test(key)) {
+			const i = CHALLENGES.findIndex((c) => "campaign:" + c.key === key);
+			return i < 0 ? null : RP.campaignTier(CHALLENGES, i, state.challengeProgress);
+		}
+		if (/^puzzle:/.test(key) && state.puzzle && "puzzle:" + state.puzzle.id === key) {
+			const p = RP.puzzle(state.puzzle.id);
+			p.goals = RP.puzzleGoals(state.puzzle.target);
+			return p;
+		}
+		return null;
+	}
+
+	function readBest() {
+		try {
+			const b = JSON.parse(localStorage.getItem(BEST_KEY) || "{}");
+			return b && typeof b === "object" ? b : {};
+		} catch (e) { return {}; }
+	}
+	function writeBest(key, score) {
+		try {
+			const b = readBest();
+			if (!RP.betterScore(score, b[key])) return false;
+			b[key] = score;
+			localStorage.setItem(BEST_KEY, JSON.stringify(b));
+			return true;
+		} catch (e) { return false; }
+	}
+
+	// The current attempt's score, or null while it is unsolved.
+	function attemptScore(ch, sc) {
+		if (!sc || !sc.solved) return null;
+		const runs = state.replayRun && state.replayRun.key === ch.key ? state.replayRun.runs : 1;
+		return RP.parScore(sc.moved.length, ch.budget, runs);
+	}
+
+	function challengeHashFields() {
+		const ch = findChallenge(state.challenge);
+		if (!ch || /^puzzle:/.test(ch.key)) return {};
+		const sc = scoreChallenge(ch, state.results[state.active]);
+		const score = attemptScore(ch, sc);
+		return score === null ? { ch: ch.key } : { ch: ch.key, sc: score };
+	}
+	// Takes the challenge fields out of a link payload; they are not settings.
+	function readChallengeHashFields(payload) {
+		const key = payload.ch;
+		delete payload.ch;
+		delete payload.sc;
+		if (typeof key === "string" && findChallenge(key) && key !== state.challenge) {
+			state.challenge = key;
+			state.replayRun = { key, runs: 0 };
+		}
+	}
+
+	function restoreReplay(saved) {
+		const pr = saved.challengeProgress;
+		if (pr && pr.cleared && typeof pr.cleared === "object") {
+			state.challengeProgress = { cleared: pr.cleared };
+		}
+		const rr = saved.replayRun;
+		if (rr && typeof rr.key === "string" && Number.isFinite(rr.runs)) state.replayRun = rr;
+		const pz = saved.puzzle;
+		if (pz && typeof pz.id === "string" && pz.target && typeof pz.target === "object") {
+			state.puzzle = pz;
+		}
+		if (saved.ghost && typeof saved.ghost === "object") state.ghost = saved.ghost;
+	}
+
+	/* The bar's second line: par and score, the campaign, and the rival. */
+	function paintReplayBar(bar, ch, sc, res) {
+		if (!state.replayRun || state.replayRun.key !== ch.key) {
+			state.replayRun = { key: ch.key, runs: 0 };
+		}
+		if (res !== lastCountedRes) { lastCountedRes = res; state.replayRun.runs++; }
+		const runs = state.replayRun.runs;
+		const score = attemptScore(ch, sc);
+		if (score !== null) {
+			writeBest(ch.key, score);
+			if (Number.isFinite(ch.tier) &&
+				!state.challengeProgress.cleared[ch.baseKey]) {
+				state.challengeProgress.cleared[ch.baseKey] = sc.moved.slice();
+			}
+		}
+		const best = readBest()[ch.key];
+		const line = el("span", "unit replayscore",
+			" · par " + ch.budget + " · " + runs + " run" + (runs === 1 ? "" : "s") +
+			(score !== null ? " · score " + score : "") +
+			(Number.isFinite(best) ? " · best " + best : ""));
+		line.id = "challengeScore";
+		bar.appendChild(line);
+		if (ch.forbid && ch.forbid.length && Number.isFinite(ch.tier)) {
+			bar.appendChild(el("span", "unit", " · off limits: " + ch.forbid.join(", ")));
+		}
+		const g = state.ghost;
+		if (g && g.challenge === ch.key) {
+			const cmp = RP.ghostCompare(sc.moved, g.moved);
+			const rival = el("div", "unit replayghost",
+				"Rival: " + (g.moved.length ? g.moved.join(", ") : "no settings moved") +
+				(Number.isFinite(g.score) ? " · score " + g.score : g.solved ? "" : " · unsolved") +
+				(cmp.shared.length ? " · same dials: " + cmp.shared.join(", ") : "") +
+				(cmp.onlyMine.length ? " · only you: " + cmp.onlyMine.join(", ") : ""));
+			rival.id = "challengeGhost";
+			bar.appendChild(rival);
+		}
+		const code = el("button", "linky", "code");
+		code.type = "button";
+		code.title = "Copy a short code for this attempt (settings, dials and score)";
+		code.addEventListener("click", () => copyText(resultCode(), code));
+		bar.appendChild(code);
+	}
+
+	/* A short code for the class on screen: the link's settings (seed and
+	   variation included) plus the attempt, when a challenge is on. */
+	function resultCode() {
+		const payload = encodeConfig(true);
+		delete payload.overrides;
+		delete payload.fp;
+		const ch = findChallenge(state.challenge);
+		if (!ch) return RP.makeResult(payload);
+		const sc = scoreChallenge(ch, state.results[state.active]);
+		return RP.makeResult(payload, { challenge: ch.key, moved: sc ? sc.moved : [],
+			score: attemptScore(ch, sc), solved: !!(sc && sc.solved) });
+	}
+
+	function applyCode(code) {
+		const r = RP.readResult(code);
+		if (!r) { setStatus("That code did not read — check it was copied whole."); return false; }
+		pushUndo("loaded a share code");
+		state.cfg = fitEra(CFG.make(r.payload));
+		state.overrides = {};
+		state.overrideFingerprint = null;
+		state.presetDirty = true;
+		if (r.challenge && findChallenge(r.challenge)) {
+			state.challenge = r.challenge;
+			state.replayRun = { key: r.challenge, runs: 0 };
+		}
+		state.lastSeed = state.cfg.seed || state.lastSeed;
+		$("seed").value = state.cfg.seed || "";
+		markDirty();
+		paintConfig();
+		persist();
+		run(() => setStatus("Loaded the code."));
+		return true;
+	}
+
+	function importGhost(code) {
+		const r = RP.readResult(code);
+		if (!r || !r.challenge) {
+			setStatus("A rival needs a code copied from a challenge attempt.");
+			return false;
+		}
+		state.ghost = { challenge: r.challenge, moved: r.moved, score: r.score, solved: r.solved };
+		persist();
+		paintChallenge();
+		setStatus("Rival loaded for " + r.challenge + ".");
+		return true;
+	}
+
+	function startDaily(date) {
+		const ch = RP.dailyChallenge(date || RP.dateKey(new Date()));
+		if (ch) startChallenge(ch);
+	}
+
+	function startCampaign(i) {
+		const ch = RP.campaignTier(CHALLENGES, i, state.challengeProgress);
+		if (!ch) { setStatus("Clear the previous tier first."); return; }
+		startChallenge(ch);
+	}
+
+	/* The target is run once, from the runner directly, so the hidden
+	   settings never reach the panel, the hash or the history. */
+	function startPuzzle(id) {
+		if (!state.files.length) { setStatus("Load a class file first."); return; }
+		const p = RP.puzzle(id || RP.dateKey(new Date()));
+		const was = state.challenge;
+		state.challenge = p.key;   // blanks the class memory; see effectiveCfg
+		let target;
+		try {
+			const cfg = effectiveCfg();
+			Object.assign(cfg, CFG.make(Object.assign({}, p.hidden, { seed: p.seed })));
+			cfg.overrides = {};
+			target = RP.headlines(state.runners[state.active].run(cfg));
+		} catch (e) {
+			state.challenge = was;
+			showError(e);
+			return;
+		}
+		state.puzzle = { id: p.key.slice(7), target };
+		p.goals = RP.puzzleGoals(target);
+		startChallenge(p);
+	}
+
+	function replayPanel() {
+		const box = el("div", "replaypanel");
+		const row = (label) => {
+			const r = el("div", "filters");
+			if (label) r.appendChild(el("span", "unit", label));
+			box.appendChild(r);
+			return r;
+		};
+		const button = (id, text, fn) => {
+			const b = el("button", null, text);
+			b.type = "button";
+			b.id = id;
+			b.addEventListener("click", fn);
+			return b;
+		};
+		const today = RP.dateKey(new Date());
+		const daily = RP.dailyChallenge(today);
+		row("Daily (" + today + ", budget " + daily.budget + "):")
+			.appendChild(button("replayDaily", "Play today's", () => {
+				closeModal(); startDaily(today);
+			}));
+		const unlocked = RP.campaignUnlocked(CHALLENGES, state.challengeProgress);
+		const tier = el("select");
+		tier.id = "replayTier";
+		tier.setAttribute("aria-label", "Campaign tier");
+		CHALLENGES.forEach((c, i) => {
+			const o = new Option((i + 1) + ". " + c.name +
+				(state.challengeProgress.cleared[c.key] ? " ✓" : i >= unlocked ? " (locked)" : ""), i);
+			o.disabled = i >= unlocked;
+			tier.appendChild(o);
+		});
+		tier.value = String(Math.min(unlocked, CHALLENGES.length) - 1);
+		const camp = row("Campaign:");
+		camp.appendChild(tier);
+		camp.appendChild(button("replayCampaign", "Play tier", () => {
+			closeModal(); startCampaign(Number(tier.value));
+		}));
+		const pid = el("input");
+		pid.id = "replayPuzzleId";
+		pid.value = today;
+		pid.setAttribute("aria-label", "Puzzle name");
+		const puz = row("Find the settings (≤3 dials, seed fixed):");
+		puz.appendChild(pid);
+		puz.appendChild(button("replayPuzzle", "Start puzzle", () => {
+			closeModal(); startPuzzle(pid.value.trim() || today);
+		}));
+		const paste = el("input");
+		paste.id = "replayPaste";
+		paste.placeholder = "BB1-…";
+		paste.setAttribute("aria-label", "Share code");
+		const codes = row("Code:");
+		codes.appendChild(paste);
+		codes.appendChild(button("replayLoad", "Load", () => {
+			if (applyCode(paste.value)) closeModal();
+		}));
+		codes.appendChild(button("replayRival", "Set as rival", () => {
+			if (importGhost(paste.value)) closeModal();
+		}));
+		codes.appendChild(button("replayCopy", "Copy mine", (e) => copyText(resultCode(), e.target)));
+		return box;
 	}
 
 	function reroll(opts) {
@@ -9824,6 +10120,9 @@
 		exportCsv, setStatus, showError, indexSnapshot,
 		// The replay layer, for tools/uismoke.js.
 		replayStore, replayDialog, replayAfterRun, chaosDraft, className,
+		// Replayability (js/replay.js), for tools/uismoke.js.
+		findChallenge, resultCode, applyCode, importGhost, startDaily, startCampaign,
+		startPuzzle,
 	});
 
 	/* AN UNCAUGHT ERROR SAYS SO. A throw inside a listener used to leave

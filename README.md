@@ -2798,6 +2798,17 @@ dial — is declared with its reason, and a narrowing without a reason fails too
   available, and the only way to hit the target is to work out which settings
   produce it — inside a budget of how many you may move. Four to start with,
   scored live in the panel.
+- **Daily, campaign, puzzle, codes and rivals** (`js/replay.js`). The
+  Challenges dialog adds a **daily** challenge (seed `daily-YYYY-MM-DD`, goals
+  drawn from the reroll predicates by the date, budget 3–5); a **campaign**
+  over the fixed challenges, where clearing a tier opens the next and forbids
+  the dials that cleared it; a **find-the-settings** puzzle (match a hidden
+  config's champion, player of the year, No. 1 pick and flavor with at most
+  three dials); and **share codes** (`BB1-…`, base32 with a check character)
+  that load a class or set a **rival** whose dials and score show on the
+  challenge bar. Every attempt has a **par** (the budget) and a score — 100,
+  ±10 per dial under or over par, −1 per rerun after the first — and the best
+  per challenge is kept in the browser.
 - **Compound and negated reroll conditions.** Every condition was a tick box
   meaning "must be true", so half the interesting searches — a class with no
   seven-footer at the top, a year the mid-majors did not win — were
