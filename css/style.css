@@ -1463,3 +1463,202 @@ table.proghist td.confmove { box-shadow: inset 3px 0 0 var(--bad); }
 .peoplegrid .pschool { display: block; font-size: 11px; }
 .peoplegrid td.pdetail { color: var(--dim); font-size: 12px; white-space: normal; }
 table.proghist tr.now td:first-child { box-shadow: inset 3px 0 0 var(--accent); font-weight: 600; color: var(--accent); }
+
+/* The replay layer: bingo card, mutators, achievements ledger, toasts. */
+.mutatorlist { display: grid; gap: 3px; }
+.bingogrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; max-width: 420px; margin: 6px 0; }
+.bingosq { border: 1px solid var(--accent-2); border-radius: 3px; padding: 8px 4px; min-height: 48px;
+	font-size: 12px; text-align: center; display: flex; align-items: center; justify-content: center; }
+.bingosq.on { background: var(--accent-2); color: var(--panel-2); font-weight: 600; }
+ul.ledger { list-style: none; padding: 0; margin: 4px 0; }
+ul.ledger li { padding: 2px 0; }
+ul.ledger li.missing { opacity: 0.55; }
+.replaytoasts { position: fixed; right: 16px; bottom: 16px; z-index: 1000; display: grid; gap: 6px;
+	max-width: min(360px, calc(100vw - 32px)); pointer-events: none; }
+.replaytoast { background: var(--panel-2); color: var(--text); border: 1px solid var(--accent-2);
+	border-radius: 4px; padding: 8px 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+
+/* The themed prompt (promptModal), the undo history, the inline seed box. */
+.promptlabel { display: block; margin-bottom: 4px; }
+#modalPrompt { width: 100%; box-sizing: border-box; }
+.promptError { color: var(--bad); min-height: 1em; }
+ol.undohistory { margin: 4px 0; padding-left: 24px; max-height: 50vh; overflow-y: auto; }
+ol.undohistory li { padding: 2px 0; }
+ol.undohistory button { text-align: left; }
+input.layoutname { width: 12em; }
+#seedPillEdit { cursor: text; }
+
+/* The Play tab (js/play.js). */
+.playtab .playcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.playtab .playgame { padding: 3px 0; }
+.playtab .playgame .chip:disabled { opacity: .5; cursor: default; }
+.playtab .playpicks li { margin: 2px 0; }
+.playtab .playresult { margin-top: 10px; }
+.playtab table.playscout tbody tr:hover { background: rgba(127,127,127,.12); }
+
+/* Universe play: a followed program's rows, its card, the dynasty card. */
+tr.followed td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+tr.followed td { background: var(--surface-hover); }
+tr.followed .pill { margin-left: 6px; }
+.followed-card, .dynasty-card { margin: 6px 0; }
+.dynasty-won { box-shadow: inset 3px 0 0 var(--accent); }
+.dynasty-failed, .dynasty-over-budget { box-shadow: inset 3px 0 0 var(--accent-2); }
+
+/* ---- draft board: notes, movers, sticky filters, honors, row edit -------- */
+.classnotes { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.classnotes .lbl { font-size: 11px; color: var(--dim); }
+.classnotes .pill { white-space: normal; }
+details.aboutboard { margin: -4px 0 10px; font-size: 11.5px; }
+details.aboutboard > summary { cursor: pointer; color: var(--accent); width: max-content; }
+details.aboutboard .hint { margin: 6px 0 0; max-width: 72ch; }
+.cardhead { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px; }
+.cardhead h4 { margin: 0; }
+.cardhead button.linkish {
+	margin-left: auto; background: none; border: 0; padding: 2px 0; font: inherit;
+	font-size: 11px; color: var(--accent); cursor: pointer;
+}
+.cardhead button.linkish:hover, .cardhead button.linkish:focus-visible { text-decoration: underline; }
+.movergrid { display: grid; grid-template-columns: auto auto minmax(0, 1.2fr) minmax(0, 1fr); gap: 2px 10px; font-size: 12px; }
+.moverrow { display: contents; }
+.movergrid .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.movergrid .dim { color: var(--dim); }
+.movergrid .ell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.boardfilters {
+	position: sticky; top: var(--stickyTop); z-index: 9; background: var(--bg);
+	padding: 8px 0; margin: 8px 0 0;
+}
+.boardfilters .boardcount { margin: 0; white-space: nowrap; }
+.boardnone { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cards.movercards { grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); }
+td.honors { min-width: 180px; max-width: 240px; }
+td.honors .honorcount {
+	float: left; margin: 1px 6px 2px 0; font-size: 10px; line-height: 1.4; padding: 0 6px;
+	border-radius: 999px; border: 1px solid var(--line); background: var(--chip); color: var(--dim); cursor: pointer;
+}
+td.honors .honorcount[aria-expanded="true"] { color: var(--text); border-color: var(--accent); }
+button.rowedit { margin-left: 6px; font-size: 11px; color: var(--dim); opacity: 0; }
+tr:hover button.rowedit, tr:focus-within button.rowedit, button.rowedit:focus-visible { opacity: 1; }
+@media (hover: none) { button.rowedit { opacity: 1; } }
+/* The board fits its container on a wide screen, so Honors wraps inside
+   the table instead of running off its right edge. */
+@media (min-width: 1100px) { table.boardtable { width: 100%; } table.boardtable td.honors { max-width: none; } }
+/* The phone's sticky name column is too narrow to hold it; the ✎ Player
+   Edit toggle above the board stands in there. */
+@media (max-width: 520px) { button.rowedit { display: none; } }
+
+/* ---- settings panel: tier label, changed badge, quiet re-run cost -------- */
+#settingTierHidden { margin: 4px 0 0; }
+details.grp > summary { flex-wrap: wrap; row-gap: 4px; }
+details.grp > summary .grp-changed {
+	margin-left: auto; font-size: 10px; letter-spacing: .04em; text-transform: none;
+	color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 0 7px;
+	flex-shrink: 0;
+}
+details.grp > summary .grp-changed[hidden] { display: none; }
+details.grp > summary .grp-changed:not([hidden]) + .grp-reset { margin-left: 6px; }
+/* "re-runs: …" is for the Model view; elsewhere it appears on hover or focus. */
+#settings:not(.tier-model) .ctl .rerun { display: none; }
+#settings:not(.tier-model) .ctl:hover .rerun,
+#settings:not(.tier-model) .ctl:focus-within .rerun { display: block; }
+
+/* ---- busy: a thin bar over the view while a re-run is in flight ---------- */
+#view { position: relative; }
+#view[aria-busy="true"]::before {
+	content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; z-index: 20;
+	background: linear-gradient(90deg, transparent, var(--accent), transparent) 0 0 / 40% 100% no-repeat;
+	animation: viewbusy 1s linear infinite; pointer-events: none;
+}
+@keyframes viewbusy { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+@media (prefers-reduced-motion: reduce) {
+	#view[aria-busy="true"]::before { animation: none; background: var(--accent); opacity: .5; }
+}
+
+/* ---- header, tabs and the empty state (audit 2026-09-24, UI 1-8, 19) ------ */
+/* The "⋯" toggle only exists on a phone; see bindHeaderMore. */
+.headmore { display: none; }
+@media (max-width: 560px) {
+	/* Brand, Settings and Load share the first row instead of the title
+	   taking a row of its own. */
+	header h1 { width: auto; }
+	header .brand { margin-right: auto; }
+	.headmore { display: inline-flex; border-color: var(--line); font-size: 18px; line-height: 1; }
+	header:not(.toolsopen) #headerTools,
+	header:not(.toolsopen) .btngroup[aria-label="Seed"] select { display: none; }
+	header .btngroup { flex: 0 1 auto; }
+	header { gap: 6px; padding: 8px 12px; }
+	header button, header select { padding: 5px 8px; font-size: 13px; }
+	/* "⋯" rides on the seed row; Reroll and Export share the next one. */
+	header > .btngroup[aria-label="Generate"], header > .btngroup[aria-label="Export"],
+	header > #headerTools { order: 2; }
+	header > #headerTools { flex-basis: 100%; }
+}
+/* Icon-only tools carry their name in data-tip (from aria-label); it shows on
+   keyboard focus and hover, since a title never appears on touch or focus. */
+.iconbtn[data-tip] { position: relative; }
+.iconbtn[data-tip]:focus-visible::after, .iconbtn[data-tip]:hover::after {
+	content: attr(data-tip); position: absolute; top: calc(100% + 6px); left: 50%;
+	transform: translateX(-50%); z-index: 70; white-space: nowrap; pointer-events: none;
+	padding: 3px 8px; border-radius: 6px; font-size: 12px; font-weight: 400;
+	background: var(--text); color: var(--bg); box-shadow: var(--shadow-1);
+}
+/* Wide enough for words: the tools say what they are, inline. */
+@media (min-width: 1700px) {
+	.btngroup.tools .iconbtn[data-tip]::after,
+	.btngroup.tools .iconbtn[data-tip]:hover::after,
+	.btngroup.tools .iconbtn[data-tip]:focus-visible::after {
+		content: attr(data-tip); position: static; transform: none; padding: 0;
+		background: none; color: inherit; box-shadow: none; font-size: 12px;
+	}
+}
+/* Undo and Redo name the action in the same form; both are capped. */
+#btnRedo {
+	max-width: 17ch; overflow: hidden; text-overflow: ellipsis;
+	white-space: nowrap; display: inline-block;
+}
+/* Tab groups: a group's tabs wrap together, and the label is a caption on a
+   divider rather than a pill-shaped thing that looks clickable. */
+.tabset { display: inline-flex; align-items: center; gap: 3px; flex-wrap: nowrap; }
+.tabset + .tabset { border-left: 1px solid var(--line); padding-left: 6px; margin-left: 3px; }
+.tabs .tabgroup {
+	border-left: none; padding: 0 2px 0 4px; font-size: 9px; letter-spacing: .12em;
+	opacity: .8; cursor: default; user-select: none;
+}
+/* Narrow screens: one sideways row, faded at whichever edge has more. */
+@media (max-width: 700px) {
+	.tabset { flex: none; }
+	.tabs.more-r { -webkit-mask-image: linear-gradient(to right, #000 85%, transparent); mask-image: linear-gradient(to right, #000 85%, transparent); }
+	.tabs.more-l { -webkit-mask-image: linear-gradient(to left, #000 85%, transparent); mask-image: linear-gradient(to left, #000 85%, transparent); }
+	.tabs.more-l.more-r { -webkit-mask-image: linear-gradient(to right, transparent, #000 12%, #000 88%, transparent); mask-image: linear-gradient(to right, transparent, #000 12%, #000 88%, transparent); }
+}
+/* The empty state: the whole box is the file picker. */
+#empty { cursor: pointer; }
+#empty:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#empty:hover { border-color: var(--accent); }
+#empty h2 { margin: 0 0 8px; font-size: 18px; color: var(--text); }
+#empty > p { margin: 0; }
+#empty > p.hint { margin-top: 4px; }
+#empty .emptyacts { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; }
+@media (max-width: 560px) { .drop { padding: 24px 16px; margin: 16px auto; } }
+/* Until a class is loaded the settings have nothing to act on: only the theme
+   shows, with a line saying the rest will appear. */
+.noclassnote { display: none; }
+body.noclass #settings > :not(.themerow):not(.noclassnote) { display: none; }
+body.noclass #settings .noclassnote { display: block; }
+body.noclass #settings { height: auto; }
+/* A Settings button that stays in reach on a phone once a class is loaded.
+   Bottom-left and above .replaytoasts, which stack bottom-right. */
+.fab {
+	position: fixed; left: 16px; bottom: 16px; z-index: 1001; min-height: 44px;
+	padding: 8px 16px; border-radius: 999px; font-weight: 600;
+	background: var(--accent); color: var(--on-accent, #fff); border-color: var(--accent);
+	box-shadow: var(--shadow-1);
+}
+/* button:hover sets position: relative; the FAB must stay fixed. */
+button.fab:hover:not(:disabled) { position: fixed; z-index: 1001; }
+@media (min-width: 861px) { .fab { display: none !important; } }
+body.settings-open .fab { display: none; }
+/* WCAG 2.5.8: name links and the small "?" are at least 24px tall. */
+button.linky { min-height: 24px; }
+.whybtn { min-width: 24px; min-height: 24px; }
+body.noclass .fab { display: none; }
+@media print { .fab { display: none !important; } }

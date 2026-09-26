@@ -218,8 +218,9 @@
 	   Deviations from src/worker/util/advStats.basketball.ts, both because a
 	   college game is 40 minutes and BBGM's is 48:
 	     - `gameMinutes` replaces the hardcoded 48 in BPM's possession estimate
-	     - `numGames` (the length of a BBGM season) still scales VORP, because
-	       VORP is defined per 82-game season wherever the games were played */
+	     - VORP is scaled by the schedule the team played, as BBGM scales it by
+	       the league's numGames: a team's own `numGames` wins, then
+	       opts.numGames, then 82 */
 	function leagueAdvanced(teams, opts) {
 		const o = opts || {};
 		const gameMinutes = o.gameMinutes || 48;
@@ -540,7 +541,8 @@
 				const obpm = OBPM[i] + ta.teamAdjOBPM;
 				out[i].obpm = fix(obpm);
 				out[i].dbpm = fix(bpm - obpm);
-				out[i].vorp = fix(((bpm + 2) * playerMin[i] * players[i].t.stats.gp) / numGames);
+				out[i].vorp = fix(((bpm + 2) * playerMin[i] * players[i].t.stats.gp) /
+					(players[i].t.numGames || numGames));
 			}
 		}
 

@@ -1591,8 +1591,9 @@
 		const perMinute = stats.mpg > 0 ? (stats.ppg + 1.2 * stats.rpg + 1.6 * stats.apg) / stats.mpg : 0;
 		// Efficient production on modest usage, from a young player, is the
 		// breakout signal. The same line from a senior is just a good senior.
-		const youth = classYear === "Freshman" ? 1 : classYear === "Sophomore" ? 0.6
-			: classYear === "Junior" ? 0.25 : 0;
+		const cy = String(classYear || "").replace(/^Redshirt /, "");
+		const youth = cy === "Freshman" ? 1 : cy === "Sophomore" ? 0.6
+			: cy === "Junior" ? 0.25 : 0;
 		const efficiency = clamp((stats.ts - Cal.DRAFT_YEAR.ts.mean) * 26, -2.5, 3);
 		const reference = Number.isFinite(usageReference)
 			? clamp(usageReference, 0.16, 0.33) : ROLE_USG_CENTER;

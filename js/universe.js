@@ -321,11 +321,48 @@
 	   resume reads back. */
 	const RIVALRY_MAX = 400;
 
+	/* HEAT, NOT HISTORY.
+
+	   The book never ages — the pair that met in March four times twenty
+	   years ago outranked the pair that met in the last two tournaments.
+	   Heat is the book read from a season: every March meeting is worth 3
+	   and every other season the two met is worth 1, each halving every
+	   RIVALRY_HALF_LIFE years. Derived from the entry, never stored, so an
+	   older save's book (no `seen`) still has a heat — from March alone. */
+	const RIVALRY_SEEN_MAX = 12;
+	const RIVALRY_HALF_LIFE = 4;
+	const RIVALRY_RENEW_GAP = 6;
+
+	function rivalryHeat(e, now) {
+		if (!e) return 0;
+		const march = e.march || [];
+		const last = Math.max.apply(null, march.concat(e.seen || []).concat([-Infinity]));
+		if (!Number.isFinite(now)) now = last;
+		if (!Number.isFinite(now)) return 0;
+		const w = (s) => Math.pow(0.5, Math.max(0, now - s) / RIVALRY_HALF_LIFE);
+		let h = 0;
+		for (const s of march) h += 3 * w(s);
+		for (const s of e.seen || []) if (march.indexOf(s) === -1) h += w(s);
+		return Math.round(h * 100) / 100;
+	}
+
+	/* The book as a table, hottest first. `now` is the last season played. */
+	function rivalryTable(riv, now, min) {
+		return Object.keys(riv || {}).map((k) => riv[k])
+			.filter((e) => e && e.a && e.b && (e.march || []).length >= (min || 2))
+			.map((e) => Object.assign({}, e, { heat: rivalryHeat(e, now) }))
+			.sort((x, y) => y.heat - x.heat || y.march.length - x.march.length ||
+				y.games - x.games || String(x.a + x.b).localeCompare(String(y.a + y.b)));
+	}
+
 	function rivalriesStep(prev, res) {
 		const out = {};
 		for (const k of Object.keys(prev || {})) {
 			const e = prev[k];
-			if (e) out[k] = Object.assign({}, e, { march: (e.march || []).slice() });
+			if (e) {
+				out[k] = Object.assign({}, e, { march: (e.march || []).slice() });
+				if (e.seen) out[k].seen = e.seen.slice();
+			}
 		}
 		const season = res && Number.isFinite(res.season) ? res.season : null;
 		const teams = Object.values((res && res.teams) || {})
@@ -347,6 +384,13 @@
 				if (!e) continue;
 				e.games++;
 				if (g.won) e.aw++; else e.bw++;
+				/* The seasons they met at all, for the heat (see rivalryHeat).
+				   Bounded: a season older than the last dozen is worth nothing. */
+				if (Number.isFinite(season)) {
+					const seen = e.seen || (e.seen = []);
+					if (seen[seen.length - 1] !== season) seen.push(season);
+					if (seen.length > RIVALRY_SEEN_MAX) seen.splice(0, seen.length - RIVALRY_SEEN_MAX);
+				}
 			}
 		}
 		const keys = Object.keys(out);
@@ -414,6 +458,7 @@
 			carry.champion = res.tourney.champion.team.name;
 			carry.titles[carry.champion] = (carry.titles[carry.champion] || 0) + 1;
 		}
+		carry.digest = digestStep(prev && prev.digest, res);
 		/* Which programs have a vacancy. Read from the April carousel (a
 		   per-program draw over record, prestige, situation, tenure and age),
 		   not from the news feed: the feed carried at most one "coaching
@@ -476,6 +521,39 @@
 		return carry;
 	}
 
+	/* THE PROGRAM DIGEST: what the news desk remembers about each program.
+
+	   The newsroom had a banner count and a few names; it could not say
+	   "first title in eleven years" because nothing kept WHEN. One small
+	   entry per program that has done something — its last title, its last
+	   Final Four, its last national player of the year — carried like the
+	   titles, so it survives a resume (the saved carry), an extension (the
+	   tail) and an export (the tail again). Read BEFORE this season is
+	   folded in, as cfg.universeDigest, so a drought is measured to the
+	   season that ends it. Seasons played only; a guessed year adds nothing. */
+	function digestStep(prev, res) {
+		const out = {};
+		for (const k of Object.keys(prev || {})) out[k] = Object.assign({}, prev[k]);
+		const season = res && Number.isFinite(res.season) ? res.season
+			: res && res.leagueFile ? res.leagueFile.startingSeason : null;
+		if (!Number.isFinite(season)) return out;
+		const at = (name) => out[name] || (out[name] = {});
+		const t = res.tourney;
+		if (t && t.champion) at(t.champion.team.name).title = season;
+		for (const x of (t && t.finalFour) || []) {
+			const name = x && x.team ? x.team.name : x && x.name;
+			if (name) at(name).ff = season;
+		}
+		const set = nationalPOYSet();
+		const poy = (res.players || []).filter((p) => isNationalPOY(p, set))[0];
+		if (poy && poy.newCollege && !poy.nonNcaa) {
+			const e = at(poy.newCollege);
+			e.poy = season;
+			e.poyName = poy.name;
+		}
+		return out;
+	}
+
 	/* CARRY-OVER ACROSS A GAP, AND ACROSS A FAILURE.
 
 	   Two cases produce a season that was never played and a next season that
@@ -516,6 +594,7 @@
 			   rivalry book is history and does not age at all. */
 			prestigeDelta: {},
 			rivalries: carry.rivalries || {},
+			digest: carry.digest || {},
 		};
 		if (carry.extrapolatedTitles) {
 			out.extrapolatedTitles = Object.assign({}, carry.extrapolatedTitles);
@@ -757,9 +836,9 @@
 			   picks" against a club with no team page, and "back-to-back
 			   players of the year" matched two pro clubs. The club rides
 			   beside it so the timeline can still say where he played. */
-			poy: poy ? { name: poy.name, school: poy.newCollege,
+			poy: poy ? { name: poy.name, school: poy.newCollege, key: poy.key,
 				club: poy.proClub || null, nonNcaa: !!poy.nonNcaa } : null,
-			no1: no1 ? { name: no1.name, school: no1.newCollege,
+			no1: no1 ? { name: no1.name, school: no1.newCollege, key: no1.key,
 				club: no1.proClub || null, nonNcaa: !!no1.nonNcaa } : null,
 			apOne: res.poll && res.poll[0] ? res.poll[0].name : null,
 			realignment: (res.realignment || [])
@@ -776,7 +855,18 @@
 			futureOnRosters: (res.futurePlayers || []).length,
 			futureHonors: (res.futurePlayers || [])
 				.reduce((a, p) => a + ((p.awards || []).length), 0),
+			strange: strangeOf(res),
 		}, extraTracking(res, poy, no1));
+	}
+
+	/* The engine's strangeness score for the season, with its first three
+	   reasons — small, and what the "weirdest season" record reads. */
+	function strangeOf(res) {
+		const E = global.Engine;
+		if (!E || typeof E.strangeness !== "function") return null;
+		let sc = null;
+		try { sc = E.strangeness(res); } catch (e) { sc = null; }
+		return sc ? { score: sc.score, reasons: (sc.reasons || []).slice(0, 3) } : null;
 	}
 
 	/* WHAT ELSE A ROW HAS TO CARRY.
@@ -949,8 +1039,68 @@
 		}
 		out.push.apply(out, moreThreads(rows, alumni));
 		out.push.apply(out, rivalryThreads(extra && extra.rivalries));
+		out.push.apply(out, renewedThreads(extra && extra.rivalries));
+		out.push.apply(out, comebackThreads(extra && extra.registry));
 		return out;
 	}
+
+	/* RIVALRY RENEWED: a pair gone cold — no March meeting in
+	   RIVALRY_RENEW_GAP years or more — that meets in March again. The
+	   latest renewal per pair, most recent first. */
+	function renewedThreads(riv) {
+		const out = [];
+		for (const k of Object.keys(riv || {}).sort()) {
+			const e = riv[k];
+			if (!e || !e.a || !e.b) continue;
+			const ss = (e.march || []).slice().sort((a, b) => a - b);
+			for (let i = ss.length - 1; i >= 1; i--) {
+				if (ss[i] - ss[i - 1] < RIVALRY_RENEW_GAP) continue;
+				out.push({ kind: "rivalryRenewed", team: e.a, other: e.b,
+					seasons: [ss[i - 1], ss[i]], count: ss[i] - ss[i - 1],
+					text: e.a + " and " + e.b + " met in March again in " + ss[i] +
+						", their first tournament meeting since " + ss[i - 1] });
+				break;
+			}
+		}
+		out.sort((x, y) => y.seasons[1] - x.seasons[1] || y.count - x.count ||
+			String(x.team + x.other).localeCompare(String(y.team + y.other)));
+		return out.slice(0, 4);
+	}
+
+	/* HE CAME BACK — the thread moreThreads could not write (see THE ONE
+	   THREAD THAT IS NOT HERE). Built on the registry's scoped identity,
+	   never on a name or a pid: a man who went back to school undrafted, or
+	   who was honoured in more than one season, is one entry, so the claim
+	   cannot join two different people. */
+	function comebackThreads(registry) {
+		const out = [];
+		for (const id of Object.keys(registry || {}).sort()) {
+			const x = registry[id];
+			if (!x || !x.name) continue;
+			const honorSeasons = Array.from(new Set((x.honors || []).map((h) => h.season)
+				.filter(Number.isFinite))).sort((a, b) => a - b);
+			const back = (x.returned || []).filter(Number.isFinite);
+			if (!back.length && honorSeasons.length < 2) continue;
+			const backHonors = (x.honors || []).filter((h) => back.indexOf(h.season) !== -1).length;
+			/* A returner nobody honoured is a roster line, not a story. */
+			if (back.length && !backHonors && honorSeasons.length < 2) continue;
+			const last = (x.seasons || []).filter((s) => s && s.school).slice(-1)[0];
+			const school = last ? last.school : x.draft ? x.draft.school || null : null;
+			const text = back.length
+				? x.name + " went undrafted, came back in " + back.join(", ") +
+					(school ? " at " + school : "") + " and was honoured " +
+					countOf(backHonors, "time") + " after it"
+				: x.name + " was honoured in " + honorSeasons.join(" and ") +
+					" — he came back";
+			out.push({ kind: "cameBack", team: school, id: x.id,
+				seasons: back.length ? back : honorSeasons,
+				count: honorSeasons.length + back.length, text,
+				score: back.length * 4 + backHonors * 3 + honorSeasons.length * 5 });
+		}
+		out.sort((a, b) => b.score - a.score || String(a.text).localeCompare(String(b.text)));
+		return out.slice(0, 6).map((t) => { delete t.score; return t; });
+	}
+	function countOf(n, w) { return n + " " + w + (n === 1 ? "" : "s"); }
 
 	/* RIVALRIES AS THREADS.
 
@@ -1488,7 +1638,8 @@
 			   It needs the persistent player registry — an identity that
 			   survives a file boundary — and when that exists this is the
 			   first thing to build on it. Recorded here rather than shipped
-			   wrong. */
+			   wrong. The registry exists now, and the thread is built on it:
+			   see comebackThreads. */
 			/* The drought: a programme that produced somebody the world
 			   remembers, then went years without. A tally cannot say this and
 			   it is the thing every fanbase actually talks about. */
@@ -1907,7 +2058,7 @@
 	   costs a re-simulation.
 
 	   Everything here is structured for the same reason threads() is. */
-	function records(rows, alumni, registry) {
+	function records(rows, alumni, registry, extra) {
 		rows = (rows || []).filter((r) => r && !r.error);
 		alumni = alumni || [];
 		const titles = {};
@@ -2027,7 +2178,94 @@
 				.map((d) => ({ decade: Number(d), player: decades[d] })),
 			hall,
 			people: registry ? peopleRecords(registry) : null,
+			weirdest: weirdestSeason(rows),
+			coaches: extra && extra.programs ? coachRecords(extra.programs, extra.tree) : null,
+			hotSeat: extra && extra.carry ? hotSeatPreview(extra.carry, extra.programs) : null,
+			proHall: registry ? proHall(registry, 10) : null,
 		};
+	}
+
+	/* THE WEIRDEST SEASON: the played row with the highest strangeness
+	   (see strangeOf), earliest first on a tie. A row from before the
+	   field existed simply does not compete. */
+	function weirdestSeason(rows) {
+		let best = null;
+		for (const r of rows || []) {
+			if (!r || r.extrapolated || !r.strange || !Number.isFinite(r.strange.score)) continue;
+			if (!best || r.strange.score > best.score) {
+				best = { season: r.season, score: r.strange.score,
+					reasons: (r.strange.reasons || []).slice(), champion: r.champion || null };
+			}
+		}
+		return best;
+	}
+
+	/* THE COACHES' RECORD BOOK, off the program rows: every season a man
+	   was on a sideline, his wins, his titles, the longest run he had at
+	   one school, and the size of his tree (see coachTreeStep). Keyed on
+	   the name, which is how the carousel and the tree already know him. */
+	function coachRecords(programs, tree) {
+		const by = {};
+		for (const school of Object.keys(programs || {})) {
+			const list = (programs[school] || []).slice().sort((a, b) => a.season - b.season);
+			let run = 0;
+			let prev = null;
+			for (const r of list) {
+				if (!r || !r.coach) { prev = null; run = 0; continue; }
+				const c = by[r.coach] || (by[r.coach] = { name: r.coach, w: 0, l: 0,
+					titles: 0, seasons: 0, schools: [], tenure: 0, tenureAt: null });
+				c.w += r.w || 0;
+				c.l += r.l || 0;
+				if (r.title) c.titles++;
+				c.seasons++;
+				if (c.schools.indexOf(school) === -1) c.schools.push(school);
+				run = prev && prev.coach === r.coach && r.season - prev.season === 1 ? run + 1 : 1;
+				if (run > c.tenure) {
+					c.tenure = run;
+					c.tenureAt = { school, from: r.season - run + 1, to: r.season };
+				}
+				prev = r;
+			}
+		}
+		const men = Object.keys(by).map((k) => by[k]);
+		for (const c of men) {
+			c.tree = tree && tree.by && tree.by[c.name] ? tree.by[c.name].length : 0;
+			c.schools.sort();
+		}
+		const byName = (a, b) => String(a.name).localeCompare(String(b.name));
+		const top = (key, min) => men.filter((c) => c[key] >= (min || 1))
+			.sort((a, b) => b[key] - a[key] || b.w - a.w || byName(a, b)).slice(0, 10);
+		return {
+			wins: top("w"),
+			titles: top("titles"),
+			trees: top("tree"),
+			tenure: top("tenure", 2),
+			count: men.length,
+		};
+	}
+
+	/* WHO IS ON THE HOT SEAT NEXT SEASON: the same test buildPrograms draws
+	   the situation from (js/teams.js — a program level more than twelve
+	   under its prestige), read off the carry the next season will be
+	   handed, so it is a preview of the draw rather than the draw. A man
+	   just hired, or on his way out, is not on a seat. */
+	function hotSeatPreview(carry, programs) {
+		const out = [];
+		for (const name of Object.keys((carry && carry.coaches) || {}).sort()) {
+			const rec = carry.coaches[name];
+			const lvl = carry.levels ? carry.levels[name] : null;
+			if (!rec || !rec.coach || rec.fired || rec.reason === "hired" ||
+				!Number.isFinite(lvl)) continue;
+			const margin = priorPrestige(name) - 12 - lvl;
+			if (margin <= 0) continue;
+			const rows = programs && programs[name] ? programs[name] : [];
+			const last = rows[rows.length - 1] || null;
+			out.push({ school: name, coach: rec.coach.name || null,
+				tenure: rec.coach.tenure || null, margin: Math.round(margin * 10) / 10,
+				record: last ? last.w + "-" + last.l : null });
+		}
+		out.sort((a, b) => b.margin - a.margin || (a.school < b.school ? -1 : 1));
+		return out.slice(0, 10);
 	}
 
 	/* THE RECORD BOOK FOR PEOPLE.
@@ -2236,10 +2474,12 @@
 			})),
 			order: (u.order || []).map((d) => ({
 				season: d.season, name: d.name || null,
-				fingerprint: d.fingerprint || null, seed: d.seed || null,
+				fingerprint: d.fingerprint || null, seed: d.seed || null, synth: d.synth || undefined,
 			})),
 		};
 		if (u.broken) out.broken = u.broken;
+		if (u.followed) out.followed = u.followed;
+		if (u.dynasty) out.dynasty = u.dynasty;
 		if (u.biography && Object.keys(u.biography).length) out.biography = u.biography;
 		/* THE CAREERS. Derived from the results, like the threads and the
 		   records book, and travelling with the timeline for the same reason:
@@ -2416,7 +2656,11 @@
 				   the result came out of, and the one the roster entry was
 				   built from. Mixing a file index with an array position here
 				   is exactly what fileIndexOf exists to stop. */
-				const home = fp.past ? self : fp.fileIndex;
+				/* A returner's roster entry carries the file he was drafted
+				   OUT of (pastRosterFor's fileIndex), which is his identity;
+				   keying him on this season's file merged him with whoever
+				   holds his pid in it. */
+				const home = Number.isFinite(fp.fileIndex) ? fp.fileIndex : self;
 				const key = fp.past ? fp.homeKey || fp.key : fp.homeKey;
 				if (!Number.isFinite(home) || !key) continue;
 				const e = touch(playerId(fpOf(home), key), fp.name);
@@ -2654,6 +2898,104 @@
 		return out;
 	}
 
+	/* SYNTHETIC SEASONS.
+
+	   A universe with no class files: each season is a Sample.makeClass class
+	   drawn from hash(seed + season), so its fingerprint is stable and the
+	   file is regenerable from the seed rather than stored. `base` is the
+	   drawn class; `data` may also carry named returners (see
+	   applyEntrants), and is what the runner runs. */
+	const SYNTH_SIZE = 70;
+	function synthFingerprint(seed, season) {
+		return "syn" + hashString(String(seed) + "|" + season) +
+			hashString(season + "|" + String(seed));
+	}
+	function synthFile(seed, season, size) {
+		const n = Number.isFinite(size) ? size : SYNTH_SIZE;
+		const data = global.Sample.makeClass(hashString(String(seed) + "|" + season), n, season);
+		return {
+			name: "synthetic-" + season + ".json", data, base: data,
+			fingerprint: synthFingerprint(seed, season),
+			synthetic: { seed: String(seed), season, size: n },
+		};
+	}
+	function synthFiles(seed, first, count, size) {
+		const out = [];
+		for (let i = 0; i < count; i++) out.push(synthFile(seed, first + i, size));
+		return out;
+	}
+	// The file an order entry names, regenerated; null for a real file.
+	function synthFromOrder(o) {
+		const s = o && o.synth;
+		if (!s || !Number.isFinite(s.season) || s.seed === undefined) return null;
+		const f = synthFile(s.seed, s.season, s.size);
+		return !o.fingerprint || f.fingerprint === o.fingerprint ? f : null;
+	}
+
+	/* NAMED RETURNERS INTO THE NEXT SYNTHETIC CLASS.
+
+	   A man who went undrafted, came back (pastRoster) and has now played
+	   his senior year is out of eligibility, so the pastRoster window drops
+	   him. The registry says who he is; when next season's class is
+	   SYNTHETIC he re-enters that draft by name, at his school, on the
+	   ratings he finished the season with. A real imported class is never
+	   touched. Returns small entrant records (kept in cfgs and the tail). */
+	const ENTRANT_MAX = 12;
+	function returnerEntrants(res, registry, files) {
+		const out = [];
+		if (!res || !Number.isFinite(res.season)) return out;
+		const fpOf = (i) => (files && files[i] && files[i].fingerprint) || String(i);
+		for (const fp of res.futurePlayers || []) {
+			if (!fp || !fp.past || fp.classYear !== "Senior" || !fp.newRatings) continue;
+			const id = playerId(fpOf(fp.fileIndex), fp.homeKey || fp.key);
+			const e = registry && registry[id];
+			if (!e || (e.returned || []).indexOf(res.season) === -1) continue;
+			const r = {};
+			for (const k of global.BBGM.RATING_KEYS) {
+				const v = Number(fp.newRatings[k]);
+				r[k] = Number.isFinite(v) ? Math.round(v) : 40;
+			}
+			out.push({ id, name: e.name || fp.name, school: fp.newCollege, ratings: r,
+				pot: Math.round(fp.newPot || fp.newOvr || 0), from: res.season });
+			if (out.length >= ENTRANT_MAX) break;
+		}
+		return out;
+	}
+	function entrantSig(list) {
+		return (list || []).map((x) => x.id).join(",");
+	}
+	/* A synthetic file's class for this run: its base plus the entrants as
+	   BBGM-shaped rows. Returns whether the data changed (the caller then
+	   needs a fresh runner). */
+	function applyEntrants(file, list, season) {
+		if (!file || !file.synthetic || !file.base) return false;
+		const sig = entrantSig(list);
+		if ((file.entrantSig || "") === sig) return false;
+		const BB = global.BBGM;
+		const extra = (list || []).map((x, i) => {
+			const sp = String(x.name || "Returning Senior").split(" ");
+			const r = Object.assign({ season, fuzz: 0 }, x.ratings);
+			r.ovr = BB.ovr(r);
+			r.pot = Math.max(r.ovr, x.pot || r.ovr);
+			r.pos = BB.pos(r);
+			r.skills = [];
+			return {
+				pid: 1000 + i, firstName: sp[0], lastName: sp.slice(1).join(" ") || sp[0],
+				born: { year: season - 22, loc: "USA" },
+				hgt: 66 + Math.round((r.hgt / 100) * 27), weight: Math.round(165 + r.hgt * 0.9),
+				college: x.school || "", tid: -2,
+				draft: { year: season, round: 0, pick: 0, tid: -1, originalTid: -1 },
+				injury: { type: "Healthy", gamesRemaining: 0 },
+				ratings: [r],
+			};
+		});
+		file.data = extra.length
+			? Object.assign({}, file.base, { players: file.base.players.concat(extra) })
+			: file.base;
+		file.entrantSig = sig;
+		return true;
+	}
+
 	/* spec: {
 	     mode: "cold" | "extend" | "resume", from (resume position),
 	     universe: the existing universe (extend / resume),
@@ -2661,6 +3003,7 @@
 	     settings (the frozen config), baseSeed, make (settings -> fresh cfg),
 	     runnerFor(index), store(index, res), biographyFor(fingerprint),
 	     extrapolateGaps, fullClass, anomalyHistory, diags,
+	     dataChanged(index): a synthetic file's class changed; rebuild its runner,
 	   } */
 	function beginChain(spec) {
 		const E = global.Engine;
@@ -2674,9 +3017,15 @@
 		const anomalyHistory = spec.anomalyHistory || 4;
 		const copyPools = (list) => (list || []).map((a) => a.slice());
 		const fpAt = (index) => (files[index] && files[index].fingerprint) || null;
-		const runnable = (spec.runnable || []).map((d) => ({
-			index: d.index, name: d.name, season: d.season, fingerprint: fpAt(d.index),
-		}));
+		const runnable = (spec.runnable || []).map((d) => {
+			const syn = files[d.index] && files[d.index].synthetic;
+			const o = { index: d.index, name: d.name, season: d.season, fingerprint: fpAt(d.index) };
+			// A synthetic season records how to regenerate its file.
+			if (syn) o.synth = { seed: syn.seed, season: syn.season, size: syn.size };
+			return o;
+		});
+		// Previews read the drawn class, never the returners added to it.
+		const baseOf = (index) => files[index].base || files[index].data;
 		const indexOf = (d) => {
 			if (d && Number.isFinite(d.index) && files[d.index] &&
 				(!d.fingerprint || files[d.index].fingerprint === d.fingerprint)) return d.index;
@@ -2694,6 +3043,8 @@
 		let sources = [];
 		let tree = null;
 		let seedBase = 0;
+		// Named returners handed to the next season (synthetic classes only).
+		let entrants = [];
 		let u;
 		let segment;
 		if (mode === "extend") {
@@ -2708,6 +3059,7 @@
 			recentPools = copyPools(tail.recentPools);
 			recentAnomalies = copyPools(tail.recentAnomalies);
 			sources = (tail.returners || []).slice();
+			entrants = (tail.entrants || []).slice();
 			tree = prior.coachTree || null;
 			seedBase = Number.isFinite(tail.count) ? tail.count : held.length;
 			/* THE LAST RUN'S GUESSED TAIL COMES OFF BEFORE ANYTHING IS
@@ -2740,6 +3092,7 @@
 			recentPools = copyPools(saved.recentPools);
 			recentAnomalies = copyPools(saved.recentAnomalies);
 			sources = (saved.returners || []).slice();
+			entrants = (saved.entrants || []).slice();
 			lastSeason = held.length ? held[held.length - 1].season : null;
 			seedBase = from;
 			tree = pruneCoachTree(prior.coachTree, lastSeason);
@@ -2795,6 +3148,10 @@
 				settings: frozen, segments: [segment], coachTree: null, records: null,
 				engineRev: ENGINE_REV, cancelled: false, broken: null, tail: null,
 				links: {}, programs: {}, registry: {},
+				/* Stamped once, here, so two exports of one world are the
+				   same bytes; an import's replay passes the file's own. */
+				name: spec.name || "Universe",
+				createdAt: spec.createdAt || new Date().toISOString(),
 			};
 		}
 		const seedAt = (k) => seedFor(baseSeed, seedBase + k, runnable[k].season,
@@ -2822,7 +3179,7 @@
 						c.seed = seed;
 						c.overrides = {};
 						c.recentPools = copyPools(use);
-						pv = E.previewClass(files[idx].data, c);
+						pv = E.previewClass(baseOf(idx), c);
 					} catch (e) { pv = null; }
 				}
 				heldPreviews.push(pv);
@@ -2843,7 +3200,7 @@
 					c.seed = seedAt(k);
 					c.overrides = {};
 					c.recentPools = copyPools(pools);
-					pv = E.previewClass(files[runnable[k].index].data, c);
+					pv = E.previewClass(baseOf(runnable[k].index), c);
 				} catch (e) { pv = null; }
 				previews.push(pv);
 				if (pv && pv.archetypePool) {
@@ -2901,6 +3258,14 @@
 				u.alumni = u.alumni.concat(extrapolatedAlumni(guessed));
 			}
 			if (gap > 0) carry = ageCarry(carry, gap);
+			/* Last season's out-of-eligibility returners go into THIS class
+			   only when it is synthetic and directly follows them. */
+			const handed = files[d.index] && files[d.index].synthetic &&
+				entrants.length && entrants[0].from === d.season - 1 ? entrants : [];
+			entrants = [];
+			if (applyEntrants(files[d.index], handed, d.season) && spec.dataChanged) {
+				spec.dataChanged(d.index);
+			}
 			let res = null;
 			try {
 				const cfg = make(frozen);
@@ -2921,6 +3286,7 @@
 				   because it rides in a config that is kept per file. */
 				cfg.universeAlumni = u.alumni.slice(-120);
 				cfg.universeTitles = (carry && carry.titles) || {};
+				cfg.universeDigest = (carry && carry.digest) || {};
 				const prevCarry = carry;
 				res = spec.runnerFor(d.index).run(cfg);
 				const heavy = (res.phasesRun || [])
@@ -2947,7 +3313,9 @@
 					universeRecruiting: cfg.universeRecruiting,
 					universeAlumni: cfg.universeAlumni,
 					universeTitles: cfg.universeTitles,
+					universeDigest: cfg.universeDigest,
 					returners: sourcesIn,
+					entrants: handed,
 				};
 				if (u.order[position]) u.order[position].seed = cfg.seed;
 				const src = returnerSource(res, d.index);
@@ -2968,6 +3336,14 @@
 				captureLinks(res, d, position);
 				try { mergeRegistry(u.registry, registryOf([res], files, null)); }
 				catch (e) { /* the registry is a view; the season stands */ }
+				// The returner's own career row says he came back to the draft.
+				for (const x of handed) {
+					if (!u.registry[x.id]) continue;
+					mergeRegistry(u.registry, { [x.id]: { id: x.id, name: x.name, draft: null,
+						seasons: [{ season: d.season, as: "re-entered the draft", school: x.school }],
+						honors: [], returned: [] } });
+				}
+				entrants = returnerEntrants(res, u.registry, files);
 				carry = harvest(res, prevCarry);
 				addProgramRows(u.programs, programRowsOf(res, carry));
 				lastSeason = d.season;
@@ -3049,9 +3425,12 @@
 				returners: sources.filter((s) => !Number.isFinite(lastSeason) ||
 					s.until > lastSeason),
 				fingerprints: u.order.map((d) => d.fingerprint).filter(Boolean),
+				entrants: entrants.slice(),
 			};
-			u.threads = threads(u.rows, u.alumni, { rivalries: carry && carry.rivalries });
-			u.records = records(u.rows, u.alumni, u.registry || null);
+			u.threads = threads(u.rows, u.alumni, { rivalries: carry && carry.rivalries,
+				registry: u.registry || null });
+			u.records = records(u.rows, u.alumni, u.registry || null,
+				{ programs: u.programs, tree, carry });
 			return { guessed, resimulated: stats.resimulated, touched: stats.touched };
 		}
 
@@ -3187,8 +3566,11 @@
 		if ((out.restored || out.missing) && imported.tail) u.tail = imported.tail;
 		if (out.restored || out.missing || out.alumni || out.registry) {
 			const riv = u.tail && u.tail.carry ? u.tail.carry.rivalries : null;
-			u.threads = threads(u.rows, u.alumni, { rivalries: riv });
-			u.records = records(u.rows, u.alumni, u.registry || null);
+			u.threads = threads(u.rows, u.alumni, { rivalries: riv, registry: u.registry || null });
+			u.records = records(u.rows, u.alumni, u.registry || null,
+				u.programs && Object.keys(u.programs).length
+					? { programs: u.programs, tree: u.coachTree, carry: u.tail && u.tail.carry }
+					: null);
 		}
 		return out;
 	}
@@ -3206,16 +3588,285 @@
 		return {
 			rows, alumni, registry, tail,
 			threads: Array.isArray(json.threads) && json.threads.length ? json.threads
-				: threads(rows, alumni, { rivalries: tail && tail.carry ? tail.carry.rivalries : null }),
-			records: json.records || records(rows, alumni, registry),
+				: threads(rows, alumni, { rivalries: tail && tail.carry ? tail.carry.rivalries : null,
+					registry }),
+			records: json.records || records(rows, alumni, registry,
+				tail && tail.carry ? { carry: tail.carry } : null),
 			baseSeed: json.baseSeed || "",
 			settings: json.settings || null,
 			segments: (json.segments || []).slice(),
 			order: (json.order || []).map((o) => ({ index: -1, name: o.name || null,
-				season: o.season, fingerprint: o.fingerprint || null, seed: o.seed || null })),
+				season: o.season, fingerprint: o.fingerprint || null, seed: o.seed || null,
+				synth: o.synth || undefined })),
 			cfgs: {}, running: false, coachTree: null,
 			broken: json.broken || null, engineRev: json.engineRev || null,
 			viewOnly: true,
+			name: json.name || "Universe", createdAt: json.createdAt || null,
+			followed: typeof json.followed === "string" ? json.followed : null,
+			dynasty: json.dynasty && typeof json.dynasty === "object" ? json.dynasty : null,
+		};
+	}
+
+	/* SMALL HELPERS FOR THE UNIVERSE TAB: a world name, export file names,
+	   the CSV tables and the threads filter. Pure, so the tests can read them. */
+
+	/* A world name drawn from the programs and class flavors in the code.
+	   Deterministic for one (seed, n). */
+	const NAME_SHAPES = [
+		(s, f) => "The " + s + " Years",
+		(s, f) => "The " + cap(f) + " Era",
+		(s, f) => s + " Rising",
+		(s, f) => "A " + cap(f) + " World",
+		(s, f) => "After " + s,
+	];
+	function cap(x) { x = String(x || ""); return x.charAt(0).toUpperCase() + x.slice(1); }
+	function randomName(seed, schools, flavors) {
+		const rng = new global.BBGMRng.Rng("world-name|" + seed);
+		const pick = (a, d) => (a && a.length ? a[Math.floor(rng.random() * a.length)] : d);
+		const s = pick(schools, "Midwest");
+		const f = pick((flavors || []).filter((x) => x && !/no strong/.test(x)), "strange");
+		return pick(NAME_SHAPES, NAME_SHAPES[0])(s, f);
+	}
+
+	/* "universe-<name>-<first>-<last>-<seed>", safe as a file name. */
+	function exportBaseName(u) {
+		const slug = (x) => String(x || "").toLowerCase()
+			.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+		const seasons = (u.rows || []).map((r) => r && r.season).filter(Number.isFinite);
+		const range = seasons.length ? seasons[0] + (seasons.length > 1
+			? "-" + seasons[seasons.length - 1] : "") : "";
+		const name = slug(u.name) === "universe" ? "" : slug(u.name);
+		return ["universe", name, range, slug(u.baseSeed)]
+			.filter(Boolean).join("_");
+	}
+
+	const TIMELINE_CSV_COLS = ["season", "flavor", "apOne", "champion", "champSeed",
+		"runnerUp", "poy", "poySchool", "no1", "no1School", "realignment",
+		"coachChanges", "futureOnRosters", "extrapolated", "error", "strangeness"];
+	function timelineTable(rows) {
+		const out = [TIMELINE_CSV_COLS];
+		for (const r of rows || []) {
+			if (!r) continue;
+			out.push([r.season, r.flavor, r.apOne, r.champion, r.champSeed, r.runnerUp,
+				r.poy ? r.poy.name : "", r.poy ? r.poy.school : "",
+				r.no1 ? r.no1.name : "", r.no1 ? r.no1.school : "",
+				(r.realignment || []).join("; "), r.coachChanges || 0,
+				r.futureOnRosters || 0, r.extrapolated ? 1 : 0, r.error || "",
+				r.strange ? r.strange.score : ""]);
+		}
+		return out;
+	}
+	function recordsTable(rec) {
+		const out = [["record", "rank", "team", "value", "detail"]];
+		if (!rec) return out;
+		for (const [label, list] of [["National titles", rec.titles],
+			["Title games", rec.finals], ["Seasons at AP No. 1", rec.apOnes],
+			["Players of the year", rec.poys], ["No. 1 picks", rec.no1s]]) {
+			(list || []).forEach((x, i) => out.push([label, i + 1, x.team, x.count, ""]));
+		}
+		const run = rec.longestApRun;
+		if (run) out.push(["Longest run at AP No. 1", 1, run.team, run.length, run.from + "-" + run.to]);
+		const b = rec.bestSeason;
+		if (b) out.push(["Best single season", 1, b.team, b.season, [b.apOne ? "AP No. 1" : "",
+			b.poy ? "player of the year" : "", b.no1 ? "No. 1 pick" : ""].filter(Boolean).join("; ")]);
+		for (const d of rec.playersOfTheDecade || []) {
+			if (d.player) out.push(["Player of the " + d.decade + "s", 1, d.player.school, d.player.name, ""]);
+		}
+		for (const m of rec.hall || []) {
+			out.push(["Hall of fame", "", m.school, m.name, (m.reasons || []).join("; ")]);
+		}
+		const w = rec.weirdest;
+		if (w) out.push(["Weirdest season", 1, w.champion || "", w.season, w.score + ": " + w.reasons.join("; ")]);
+		((rec.coaches && rec.coaches.wins) || []).forEach((c, i) => out.push(["Coaching wins", i + 1,
+			c.schools.join("; "), c.w, c.name + " (" + c.titles + " titles, tree " + c.tree + ")"]));
+		(rec.proHall || []).forEach((m, i) => out.push(["Pro-weighted Hall of Fame", i + 1,
+			m.school, m.name, proText(m.pro)]));
+		return out;
+	}
+
+	/* Threads by kind and program; a string thread (an old save) has neither. */
+	function filterThreads(threads, kind, team) {
+		return (threads || []).filter((t) => {
+			if (kind && (typeof t === "string" || (t.kind || "") !== kind)) return false;
+			if (team && (typeof t === "string" || (t.team !== team && t.other !== team))) return false;
+			return true;
+		});
+	}
+
+	/* UNIVERSE PLAY (audit section 5, items 4, 5, 6 and 10): following a
+	   program, the dynasty goal, a pro career per registry entry and the
+	   per-season detail drawer. Pure reads over rows, program history and
+	   the registry, so the tests can drive them without a browser. */
+
+	/* Whether a timeline row is about this program. */
+	function rowMentions(r, name) {
+		if (!r || !name) return false;
+		const ff = (r.finalFour || []).map((x) => (x && typeof x === "object" ? x.team || x.name : x));
+		return r.champion === name || r.runnerUp === name || r.apOne === name ||
+			!!(r.poy && r.poy.school === name && !r.poy.nonNcaa) ||
+			!!(r.no1 && r.no1.school === name && !r.no1.nonNcaa) ||
+			ff.indexOf(name) !== -1;
+	}
+
+	/* The season-end card for a followed program: its latest played season
+	   against the one before (record, level change, coach). */
+	function followedCard(u, name, results) {
+		if (!name) return null;
+		const hist = programHistory(u, name, results);
+		if (!hist.length) return null;
+		const cur = hist[hist.length - 1];
+		const prev = hist.length > 1 ? hist[hist.length - 2] : null;
+		return {
+			name, season: cur.season, w: cur.w, l: cur.l, conf: cur.conf,
+			level: cur.level,
+			levelChange: prev ? Math.round((cur.level - prev.level) * 10) / 10 : null,
+			coach: cur.coach, prevCoach: prev ? prev.coach : null,
+			newCoach: !!(prev && prev.coach !== cur.coach),
+			ncaa: cur.ncaa, seed: cur.seed, title: !!cur.title, titles: cur.titles,
+			seasons: hist.length,
+		};
+	}
+
+	/* The paper's lead for a followed program, from a season's result.
+	   Plain strings; News.build wraps them. Null when it had no news. */
+	function followedLead(res, name) {
+		const t = res && res.teams && Object.values(res.teams).filter((x) => x && x.name === name)[0];
+		if (!t) return null;
+		const champ = res.tourney && res.tourney.champion ? res.tourney.champion.team.name : null;
+		const coachNew = (res.coachingCarousel || []).some((c) => c && (c.team === name || c.school === name));
+		const rank = (res.poll || []).findIndex((x) => x && x.name === name);
+		if (!(champ === name || t.ncaaResult || rank >= 0 || coachNew)) return null;
+		const rec = (t.w || 0) + "-" + (t.l || 0);
+		const what = champ === name ? "won the national title at " + rec
+			: t.ncaaResult ? "went " + rec + " (NCAA: " + t.ncaaResult + ")"
+			: rank >= 0 ? "finished No. " + (rank + 1) + " in the final poll at " + rec
+			: "went " + rec;
+		return { kind: "followed program", team: name, record: rec, text: what,
+			coachChange: coachNew, title: champ === name };
+	}
+
+	/* THE DYNASTY GOAL. A program, a target (reach a level, or win a title)
+	   and a window of N played seasons from the first. `moved` is how many
+	   dials have moved from the goal's starting settings; the app counts
+	   them with the same diff the challenges use. */
+	function dynastyProgress(goal, hist, moved) {
+		if (!goal || !goal.program) return null;
+		const window = Math.max(1, goal.seasons || 1);
+		const played = (hist || []).filter((r) => r && Number.isFinite(r.season))
+			.slice().sort((a, b) => a.season - b.season);
+		const inWin = played.slice(0, window);
+		let achievedAt = null;
+		let best = null;
+		for (const r of inWin) {
+			if (Number.isFinite(r.level) && (best === null || r.level > best)) best = r.level;
+			const hit = goal.kind === "title" ? !!r.title
+				: Number.isFinite(r.level) && r.level >= (goal.level || 0);
+			if (hit && achievedAt === null) achievedAt = r.season;
+		}
+		const budget = Number.isFinite(goal.budget) ? goal.budget : 3;
+		const over = Math.max(0, (moved || 0) - budget);
+		const status = over ? "over budget"
+			: achievedAt !== null ? "won"
+			: inWin.length >= window ? "failed" : "in progress";
+		return {
+			program: goal.program, kind: goal.kind, target: goal.level || null,
+			window, played: inWin.length, bestLevel: best,
+			titles: inWin.filter((r) => r.title).length,
+			achievedAt, moved: moved || 0, budget, overBudget: over, status,
+			startLevel: inWin.length ? inWin[0].level : null,
+		};
+	}
+
+	/* The weakest programs on record: the dynasty picker's suggestions. */
+	function lowPrestige(u, results, n) {
+		const all = programHistory(u, null, results);
+		return Object.keys(all).map((name) => {
+			const h = all[name];
+			return { name, level: h.length ? h[0].level : NaN };
+		}).filter((x) => Number.isFinite(x.level))
+			.sort((a, b) => a.level - b.level || (a.name < b.name ? -1 : 1))
+			.slice(0, n || 40);
+	}
+
+	/* THE PRO CAREER TAIL. Seeded from the player id, so the same man has
+	   the same pro career on every machine; pot sets the odds and the draft
+	   slot nudges them. Not a simulation: a plausible epilogue. */
+	const PRO_TIERS = [
+		[72, "superstar", [12, 18], [6, 12]],
+		[64, "star", [9, 15], [2, 7]],
+		[55, "starter", [6, 12], [0, 1]],
+		[47, "role player", [3, 8], [0, 0]],
+		[-Infinity, "bust", [0, 3], [0, 0]],
+	];
+	function proOutcome(entry) {
+		const d = entry && entry.draft;
+		if (!entry || !entry.id || !d || !Number.isFinite(d.pot)) return null;
+		const rng = new global.BBGMRng.Rng("pro|" + entry.id);
+		const slot = Number.isFinite(d.slot) && d.slot > 0 ? d.slot : null;
+		const nudge = slot ? Math.max(0, 61 - slot) / 60 * 4 : -3;
+		const x = d.pot + nudge + (rng.random() + rng.random() + rng.random() - 1.5) * 12;
+		const t = PRO_TIERS.filter((row) => x >= row[0])[0];
+		const span = (r) => r[0] + Math.floor(rng.random() * (r[1] - r[0] + 1));
+		const years = span(t[2]);
+		const allStars = Math.min(years, span(t[3]));
+		const score = years + allStars * 3 + (t[1] === "superstar" ? 10 : t[1] === "star" ? 5 : 0);
+		return { tier: t[1], years, allStars, score,
+			bust: t[1] === "bust", star: t[1] === "star" || t[1] === "superstar" };
+	}
+	function proText(o) {
+		if (!o) return "—";
+		return o.tier + ", " + o.years + " season" + (o.years === 1 ? "" : "s") +
+			(o.allStars ? ", " + o.allStars + "x All-Star" : "");
+	}
+
+	/* The Hall of Fame weighted toward what a man did after college: the
+	   college record (honors, span) plus one and a half times the pro tail. */
+	function proHall(registry, n) {
+		const out = [];
+		for (const id of Object.keys(registry || {})) {
+			const x = registry[id];
+			if (!x || !x.id || !x.draft) continue;
+			const pro = proOutcome(x);
+			if (!pro) continue;
+			const college = (x.honors || []).length * 2 + (x.span || 0);
+			out.push({ id: x.id, name: x.name, school: x.draft.school || null,
+				season: x.draft.season, pro, college, score: college + pro.score * 1.5 });
+		}
+		out.sort((a, b) => b.score - a.score || String(a.name).localeCompare(String(b.name)));
+		return out.slice(0, n || 10);
+	}
+
+	/* THE SEASON DRAWER. What the world held about one row: the row, the
+	   config it ran under (u.cfgs by file index), a summary of the carry it
+	   was handed, and the threads that touch its season. */
+	function seasonDetail(u, i) {
+		const r = u && u.rows && u.rows[i];
+		if (!r) return null;
+		const d = Number.isFinite(r.position) && u.order ? u.order[r.position] : null;
+		const cfg = d && u.cfgs ? u.cfgs[d.index] || null : null;
+		const carry = cfg && cfg.carryOver;
+		const levels = (carry && carry.levels) || {};
+		const top = Object.keys(levels).sort((a, b) => levels[b] - levels[a]).slice(0, 5)
+			.map((k) => ({ team: k, level: Math.round(levels[k] * 10) / 10 }));
+		const count = (x) => (Array.isArray(x) ? x.length : x && typeof x === "object"
+			? Object.keys(x).length : 0);
+		return {
+			row: r,
+			cfg: cfg ? {
+				seed: cfg.seed, position: cfg.position,
+				settings: cfg.settings || null,
+				returners: count(cfg.returners),
+				pastRoster: count(cfg.pastRoster),
+				alumni: count(cfg.universeAlumni),
+			} : null,
+			carry: carry ? {
+				programs: Object.keys(levels).length,
+				coaches: count(carry.coaches),
+				titles: carry.titles || {},
+				topLevels: top,
+			} : null,
+			threads: (u.threads || []).filter((t) => t && typeof t === "object" &&
+				Array.isArray(t.seasons) && t.seasons.indexOf(r.season) !== -1),
 		};
 	}
 
@@ -3229,6 +3880,13 @@
 		peopleRecords, programHistory, programRowsOf, rivalryThreads,
 		returnerSource, pastRosterFrom, beginChain, rowKeys, replayPlan,
 		restoreImported, viewOnlyUniverse, segmentSettings, mergeRegistry, pruneRegistry,
-		PRESTIGE_CAP, RIVALRY_MAX,
+		PRESTIGE_CAP, RIVALRY_MAX, RIVALRY_HALF_LIFE, RIVALRY_RENEW_GAP,
+		rivalryHeat, rivalryTable, renewedThreads, comebackThreads, digestStep,
+		weirdestSeason, coachRecords, hotSeatPreview,
+		randomName, exportBaseName, timelineTable, recordsTable, filterThreads,
+		synthFile, synthFiles, synthFromOrder, synthFingerprint, returnerEntrants, applyEntrants,
+		SYNTH_SIZE,
+		rowMentions, followedCard, followedLead, dynastyProgress, lowPrestige,
+		proOutcome, proText, proHall, seasonDetail,
 	};
 })(typeof window !== "undefined" ? window : self);

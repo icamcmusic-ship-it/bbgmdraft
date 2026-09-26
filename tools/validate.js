@@ -34,7 +34,7 @@ function loadEngine() {
 			"text", "rng", "bbgm", "bbgmstats", "colleges", "config", "calibration", "ratings",
 			"traits",
 			"teams", "stats", "rankings", "tournament", "awards", "engine", "batch",
-			"sample", "news", "universe", "almanac", "site",
+			"sample", "news", "universe", "almanac", "replay", "site", "replaymeta", "play",
 		]) require(path.join(__dirname, "..", "js", f + ".js"));
 	}
 	return global;
@@ -1370,7 +1370,13 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		["BPM min", Math.min.apply(null, adv.bpm)].concat(extremeLow(-24, -10)),
 		["PER median (draft year)", pct(adv.per, 0.5)].concat(within(16.5, 3.0)),
 		["PER max", Math.max.apply(null, adv.per)].concat(extreme(30, 48)),
-		["VORP max", Math.max.apply(null, adv.vorp)].concat(extreme(4.5, 11)),
+		/* VORP is scaled by the college schedule now, not by 82 games
+		   (BBGM scales by the league's own numGames), so the old [4.5, 11]
+		   band is carried over multiplied by 82 / the schedule length:
+		   the same band, in the new unit, not a looser one. */
+		["VORP max", Math.max.apply(null, adv.vorp)].concat(extreme(
+			4.5 * 82 / (global.TeamsSim.CONF_GAMES + global.TeamsSim.NON_CONF_GAMES),
+			11 * 82 / (global.TeamsSim.CONF_GAMES + global.TeamsSim.NON_CONF_GAMES))),
 		["WS per 40 max", Math.max.apply(null, adv.ws40)].concat(extreme(0.28, 0.58)),
 		["ORtg median", pct(adv.ortg, 0.5)].concat(within(108, 6)),
 		["USG% max (BBGM advanced)", Math.max.apply(null, adv.usgp)].concat(extreme(33, 42)),
@@ -1466,7 +1472,13 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		   three decimals, so the seeds are the same teams playing the same
 		   season in a different order of draws. */
 		["1 seed beats 16 seed (rate)", lineRate(seedLine["1v16"])].concat(rateBand(0.88, 1.0)),
-		["2 seed beats 15 seed (rate)", lineRate(seedLine["2v15"])].concat(rateBand(0.82, 0.98)),
+		/* The same eighty trials on the 2/15 line. The model sits at 0.94-0.95
+		   (sixty tournaments, modern/realistic, either side of the one-game
+		   absence fix), and at that rate eighty games reach 79 wins about one
+		   run in eleven: a ceiling of 0.98 failed on a change that moved the
+		   sixty-seed rate by 0.01. 0.99 still fails a model that never loses
+		   the line. */
+		["2 seed beats 15 seed (rate)", lineRate(seedLine["2v15"])].concat(rateBand(0.82, 0.99)),
 		/* The model sits at 0.72 on this line — measured over forty
 		   tournaments on each fixture, and unchanged by the archetype table
 		   growing from 145 builds to 205 (0.72/0.72 against 0.72/0.68) —

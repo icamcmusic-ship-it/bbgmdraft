@@ -50,7 +50,9 @@
 		const atLarge = Object.values(teams)
 			.filter((t) => !autoSet.has(t.name))
 			.sort((a, b) => committee(b) - committee(a))
-			.slice(0, 68 - autos.length);
+			// More than 68 conferences would make this negative, and a
+			// negative slice keeps nearly every team as an at-large.
+			.slice(0, Math.max(0, 68 - autos.length));
 		for (const t of atLarge) t.bid = "at-large";
 
 		const bubble = Object.values(teams)
@@ -365,9 +367,7 @@
 			regionResults[r] = { seeds: regions[r], rounds: regionRounds, champ: alive[0] };
 		}
 
-		let ff = liveRegions.map((r) => regionResults[r].champ).filter(Boolean);
-		// Pad an under-filled bracket so the Final Four is still four teams.
-		while (ff.length > 1 && ff.length % 2 === 1) ff = ff.slice(0, ff.length - 1);
+		const ff = liveRegions.map((r) => regionResults[r].champ).filter(Boolean);
 		const semis = [];
 		const finalists = [];
 		for (let i = 0; i + 1 < ff.length; i += 2) {
@@ -383,6 +383,9 @@
 			winner.team.ncaaWins = (winner.team.ncaaWins || 0) + 1;
 			finalists.push(winner);
 		}
+		// An odd number of regional champions (a field too small for four
+		// regions) used to drop the last one silently; it gets a bye instead.
+		if (ff.length > 1 && ff.length % 2 === 1) finalists.push(ff[ff.length - 1]);
 		/* A degenerate field can leave one finalist (or none of the semis
 		   playable at all). The old padding pushed the same entry twice and
 		   then played it against itself, crediting one team both a win and a

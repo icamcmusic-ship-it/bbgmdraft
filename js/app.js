@@ -16,6 +16,8 @@
 	const STORE_KEY = "bbgm-draft-workshop/v1";
 
 	const state = {
+		// Active mutators (js/replaymeta.js), applied in effectiveCfg.
+		mutators: [],
 		mergeIndices: null,
 		/* The league export the loaded classes came out of, if any. Kept in
 		   memory (never persisted — it is megabytes) so a merge back into it
@@ -149,6 +151,13 @@
 		   a fixed seed and a settings budget, which is the inverse of
 		   "Reroll until…". */
 		challenge: null,
+		/* Replayability (see js/replay.js): the campaign's cleared tiers and
+		   the dials that cleared each, the reruns of the current attempt, an
+		   imported rival's result, and the active puzzle's target headlines. */
+		challengeProgress: { cleared: {} },
+		replayRun: null,
+		ghost: null,
+		puzzle: null,
 		/* Which season's carry-over the Universe tab's world table is showing.
 		   See worldSection in js/views.js. */
 		worldSeason: null,
@@ -251,6 +260,11 @@
 		const u = state.universe;
 		return {
 			rows: u.rows.slice(-PERSIST_ROWS),
+			/* Whether any bound below dropped something, so an export made
+			   after a reload can say its early history is missing. */
+			truncated: !!u.truncated || u.rows.length > PERSIST_ROWS ||
+				(u.threads || []).length > PERSIST_THREADS ||
+				(u.alumni || []).length > PERSIST_ALUMNI,
 			threads: (u.threads || []).slice(0, PERSIST_THREADS),
 			alumni: (u.alumni || []).slice(-PERSIST_ALUMNI),
 			baseSeed: u.baseSeed,
@@ -276,11 +290,18 @@
 			})),
 			order: (u.order || []).map((d) => ({
 				index: d.index, name: d.name || null, season: d.season,
-				fingerprint: d.fingerprint || null, seed: d.seed || null,
+				fingerprint: d.fingerprint || null, seed: d.seed || null, synth: d.synth || undefined,
 			})),
 			tail: u.running ? null : (u.tail || null),
 			engineRev: u.engineRev || null,
 			viewOnly: !!u.viewOnly,
+			name: u.name || null,
+			createdAt: u.createdAt || null,
+			followed: u.followed || null,
+			dynasty: u.dynasty || null,
+			/* The imported biographies: a rebuilt season without them draws
+			   different men. Held on state, not on the universe; see 6020. */
+			biography: state.universeBiography || null,
 		};
 	}
 
@@ -299,6 +320,7 @@
 	}
 
 	function persist() {
+		scheduleAutosave();
 		try {
 			localStorage.setItem(STORE_KEY, JSON.stringify(payload()));
 		} catch (e) {
@@ -333,6 +355,7 @@
 			poolHistory: state.poolHistory,
 			anomalyHistory: state.anomalyHistory,
 			flavorHistory: state.flavorHistory,
+			mutators: state.mutators,
 			presetName: state.presetName,
 			presetDirty: state.presetDirty,
 			customPresets: state.customPresets,
@@ -359,6 +382,10 @@
 			settingLocks: state.settingLocks,
 			settingTier: state.settingTier,
 			challenge: state.challenge,
+			challengeProgress: state.challengeProgress,
+			replayRun: state.replayRun,
+			ghost: state.ghost,
+			puzzle: state.puzzle,
 			lastUntil: state.lastUntil,
 			sessions: state.sessions.slice(0, SESSIONS_MAX),
 			// The branch point, so a reload continues the lineage rather than
@@ -437,6 +464,66 @@
 		return typeof v === "string" && (!allowed || allowed.indexOf(v) !== -1) ? v : null;
 	}
 
+	/* A stored universe (localStorage's bounded copy or an IndexedDB slot's
+	   full one) back into state.universe's shape. */
+	function universeFromSaved(su) {
+		return {
+			rows: su.rows,
+			/* Threads used to be sentences and are objects now (see
+			   Universe.threads). A stored timeline from before that is
+			   still readable — the view renders either — so it is kept
+			   rather than thrown away on a shape change that costs
+			   nothing to tolerate. */
+			threads: Array.isArray(su.threads) ? su.threads : [],
+			alumni: Array.isArray(su.alumni) ? su.alumni : [],
+			baseSeed: validString(su.baseSeed) || "",
+			records: su.records && typeof su.records === "object"
+				? su.records : null,
+			coachTree: su.coachTree &&
+				typeof su.coachTree === "object"
+				? su.coachTree : null,
+			/* THE REGISTRY WAS WRITTEN AND NEVER READ BACK.
+
+			   universeForStorage() persists it — deliberately bounded to
+			   the longest careers, for exactly the reason a persisted
+			   payload is bounded — and this rebuilt state.universe
+			   without the field, so every reload dropped it. The Careers
+			   section renders off u.registry and returns early when it is
+			   missing, so the one view in the tool that is about PEOPLE
+			   rather than about programmes was empty after every refresh,
+			   silently, while the data sat in localStorage. */
+			registry: su.registry &&
+				typeof su.registry === "object" &&
+				!Array.isArray(su.registry)
+				? su.registry : null,
+			broken: su.broken || null,
+			/* What universeForStorage now keeps so that an export after a
+			   reload writes the world's own settings rather than the
+			   panel's, and a later class extends the chain rather than
+			   rebuilding it. Each is optional: an older payload has none. */
+			settings: su.settings && typeof su.settings === "object"
+				? su.settings : null,
+			segments: Array.isArray(su.segments) ? su.segments : [],
+			order: Array.isArray(su.order) ? su.order : [],
+			tail: su.tail && typeof su.tail === "object"
+				? su.tail : null,
+			engineRev: su.engineRev || null,
+			viewOnly: !!su.viewOnly,
+			truncated: !!su.truncated,
+			name: validString(su.name) || null,
+			createdAt: validString(su.createdAt) || null,
+			cfgs: {},
+			running: false,
+			/* Universe play (audit section 5): persisted and exported. */
+			followed: validString(su.followed) || null,
+			dynasty: su.dynasty && typeof su.dynasty === "object" &&
+				validString(su.dynasty.program) ? su.dynasty : null,
+			/* Only a full (IndexedDB) save carries these. */
+			programs: su.programs && typeof su.programs === "object" ? su.programs : {},
+			recruiting: Array.isArray(su.recruiting) ? su.recruiting : null,
+		};
+	}
+
 	function restore() {
 		let saved = null;
 		try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) { saved = null; }
@@ -477,6 +564,7 @@
 			state.flavorHistory = saved.flavorHistory
 				.filter((n) => typeof n === "string");
 		}
+		state.mutators = global.ReplayMeta.cleanMutators(saved.mutators);
 		if (validString(saved.presetName)) state.presetName = saved.presetName;
 		state.presetDirty = !!saved.presetDirty;
 		if (saved.customPresets && typeof saved.customPresets === "object" &&
@@ -515,51 +603,10 @@
 		if (validString(saved.player)) state.player = saved.player;
 		if (saved.universe && typeof saved.universe === "object" &&
 			Array.isArray(saved.universe.rows)) {
-			state.universe = {
-				rows: saved.universe.rows,
-				/* Threads used to be sentences and are objects now (see
-				   Universe.threads). A stored timeline from before that is
-				   still readable — the view renders either — so it is kept
-				   rather than thrown away on a shape change that costs
-				   nothing to tolerate. */
-				threads: Array.isArray(saved.universe.threads) ? saved.universe.threads : [],
-				alumni: Array.isArray(saved.universe.alumni) ? saved.universe.alumni : [],
-				baseSeed: validString(saved.universe.baseSeed) || "",
-				records: saved.universe.records && typeof saved.universe.records === "object"
-					? saved.universe.records : null,
-				coachTree: saved.universe.coachTree &&
-					typeof saved.universe.coachTree === "object"
-					? saved.universe.coachTree : null,
-				/* THE REGISTRY WAS WRITTEN AND NEVER READ BACK.
-
-				   universeForStorage() persists it — deliberately bounded to
-				   the longest careers, for exactly the reason a persisted
-				   payload is bounded — and this rebuilt state.universe
-				   without the field, so every reload dropped it. The Careers
-				   section renders off u.registry and returns early when it is
-				   missing, so the one view in the tool that is about PEOPLE
-				   rather than about programmes was empty after every refresh,
-				   silently, while the data sat in localStorage. */
-				registry: saved.universe.registry &&
-					typeof saved.universe.registry === "object" &&
-					!Array.isArray(saved.universe.registry)
-					? saved.universe.registry : null,
-				broken: saved.universe.broken || null,
-				/* What universeForStorage now keeps so that an export after a
-				   reload writes the world's own settings rather than the
-				   panel's, and a later class extends the chain rather than
-				   rebuilding it. Each is optional: an older payload has none. */
-				settings: saved.universe.settings && typeof saved.universe.settings === "object"
-					? saved.universe.settings : null,
-				segments: Array.isArray(saved.universe.segments) ? saved.universe.segments : [],
-				order: Array.isArray(saved.universe.order) ? saved.universe.order : [],
-				tail: saved.universe.tail && typeof saved.universe.tail === "object"
-					? saved.universe.tail : null,
-				engineRev: saved.universe.engineRev || null,
-				viewOnly: !!saved.universe.viewOnly,
-				cfgs: {},
-				running: false,
-			};
+			state.universe = universeFromSaved(saved.universe);
+			state.universeBiography = saved.universe.biography &&
+				typeof saved.universe.biography === "object"
+				? saved.universe.biography : null;
 		}
 		if (validString(saved.team)) state.team = saved.team;
 		if (validString(saved.game)) state.game = saved.game;
@@ -592,8 +639,8 @@
 				state.lastSessionId = saved.lastSessionId;
 			}
 		}
-		if (typeof saved.challenge === "string" &&
-			CHALLENGES.some((c) => c.key === saved.challenge)) {
+		restoreReplay(saved);
+		if (typeof saved.challenge === "string" && findChallenge(saved.challenge)) {
 			state.challenge = saved.challenge;
 		}
 		/* Checked against the live predicate table, not trusted: a clause
@@ -614,7 +661,9 @@
 		}
 		const sort = validSortStack(saved.sort);
 		if (sort) state.sort = sort;
-		if (saved.pinned && typeof saved.pinned === "object") {
+		// indexSnapshot walks players, and a malformed pin must not stop startup.
+		if (saved.pinned && typeof saved.pinned === "object" &&
+			Array.isArray(saved.pinned.players)) {
 			state.pinned = indexSnapshot(saved.pinned);
 		}
 		// Never land on a tab that has nothing to show. A session saved before
@@ -681,6 +730,8 @@
 			   restore the settings panel without restoring what each file
 			   actually ran with. */
 			fileCfgs: JSON.parse(JSON.stringify(state.fileCfgs || {})),
+			// An input outside cfg too: the biographies decide who is drawn.
+			universeBiography: state.universeBiography || null,
 		};
 	}
 
@@ -694,14 +745,7 @@
 	}
 
 	function applySnapshot(snap, verb) {
-		state.cfg = CFG.make(snap.cfg);
-		state.overrides = snap.overrides;
-		if (snap.lastSeed !== undefined) state.lastSeed = snap.lastSeed;
-		if (Array.isArray(snap.poolHistory)) state.poolHistory = snap.poolHistory;
-		if (Array.isArray(snap.anomalyHistory)) state.anomalyHistory = snap.anomalyHistory;
-		if (Array.isArray(snap.flavorHistory)) state.flavorHistory = snap.flavorHistory;
-		state.fileCfgs = snap.fileCfgs && typeof snap.fileCfgs === "object"
-			? snap.fileCfgs : {};
+		setSnapshot(snap);
 		// A restored class is a different class, so an editor open on somebody
 		// who may not be in it any more has to close.
 		state.editing = null;
@@ -712,6 +756,19 @@
 		run(() => setStatus(verb + ": " + snap.label));
 	}
 
+	// The state half of applySnapshot, with no re-run: undoTo steps several.
+	function setSnapshot(snap) {
+		state.cfg = CFG.make(snap.cfg);
+		state.overrides = snap.overrides;
+		if (snap.lastSeed !== undefined) state.lastSeed = snap.lastSeed;
+		if (Array.isArray(snap.poolHistory)) state.poolHistory = snap.poolHistory;
+		if (Array.isArray(snap.anomalyHistory)) state.anomalyHistory = snap.anomalyHistory;
+		if (Array.isArray(snap.flavorHistory)) state.flavorHistory = snap.flavorHistory;
+		state.fileCfgs = snap.fileCfgs && typeof snap.fileCfgs === "object"
+			? snap.fileCfgs : {};
+		if (snap.universeBiography !== undefined) state.universeBiography = snap.universeBiography;
+	}
+
 	function undo() {
 		const prev = state.undo.pop();
 		if (!prev) return;
@@ -720,6 +777,47 @@
 		state.redo.push(undoSnapshot(prev.label));
 		if (state.redo.length > 40) state.redo.shift();
 		applySnapshot(prev, "Undid");
+	}
+
+	/* Jump back `n` steps in one re-run. Each step pushes onto redo exactly
+	   as undo() would, so Redo walks forward through them one at a time. */
+	function undoTo(n) {
+		n = Math.min(Math.max(1, n | 0), state.undo.length);
+		if (!n) return;
+		let prev = null;
+		for (let i = 0; i < n; i++) {
+			prev = state.undo.pop();
+			state.redo.push(undoSnapshot(prev.label));
+			if (state.redo.length > 40) state.redo.shift();
+			setSnapshot(prev);
+		}
+		applySnapshot(prev, n > 1 ? "Undid " + n + " steps, back to before" : "Undid");
+	}
+
+	/* The undo history: every label on the stack, newest first; a click jumps
+	   back to just before that change. */
+	function undoHistoryDialog() {
+		const box = el("div");
+		if (!state.undo.length) {
+			box.appendChild(el("p", "hint", "Nothing to undo yet."));
+			modal("Undo history", box);
+			return;
+		}
+		box.appendChild(el("p", "hint", "Pick a change to go back to just before it. " +
+			"Redo steps forward again, one change at a time."));
+		const list = el("ol", "undohistory");
+		for (let i = state.undo.length - 1, n = 1; i >= 0; i--, n++) {
+			const li = el("li");
+			const b = el("button", "tiny", state.undo[i].label);
+			b.dataset.steps = String(n);
+			b.title = "Undo " + n + (n === 1 ? " step" : " steps");
+			const steps = n;
+			b.addEventListener("click", () => { closeModal(); undoTo(steps); });
+			li.appendChild(b);
+			list.appendChild(li);
+		}
+		box.appendChild(list);
+		modal("Undo history", box);
 	}
 
 	function redo() {
@@ -736,14 +834,34 @@
 		// pushUndo("imported locks from a CSV") wrote a label that nothing ever
 		// displayed. The button says what it will undo.
 		b.textContent = state.undo.length
-			? "Undo " + short(state.undo[state.undo.length - 1].label)
+			? "Undo: " + short(state.undo[state.undo.length - 1].label)
 			: "Undo";
 		b.title = state.undo.length
 			? "Undo: " + state.undo[state.undo.length - 1].label + " (Ctrl+Z)"
 			: "Nothing to undo";
+		// The history dropdown beside it, made here so the header markup
+		// stays as it is.
+		let h = $("btnUndoHistory");
+		if (!h) {
+			h = el("button", "iconbtn", "▾");
+			h.id = "btnUndoHistory";
+			h.setAttribute("aria-label", "Undo history");
+			h.setAttribute("aria-haspopup", "dialog");
+			h.addEventListener("click", undoHistoryDialog);
+			b.after(h);
+		}
+		h.disabled = !state.undo.length;
+		h.title = state.undo.length
+			? "Undo history — " + state.undo.length + " step" +
+				(state.undo.length === 1 ? "" : "s") + " (right-click Undo too)"
+			: "Nothing to undo";
 		const r = $("btnRedo");
 		if (!r) return;
 		r.disabled = !state.redo.length;
+		// The same form as Undo: a word and the action, not a bare ↷.
+		r.textContent = state.redo.length
+			? "Redo: " + short(state.redo[state.redo.length - 1].label)
+			: "Redo";
 		r.title = state.redo.length
 			? "Redo: " + state.redo[state.redo.length - 1].label + " (Ctrl+Shift+Z)"
 			: "Nothing to redo";
@@ -1048,9 +1166,9 @@
 		awardStrictness: (v) => v > 1.2 ? "fewer national honors reach this class"
 			: v < 0.9 ? "more national honors reach this class" : "realistic national award volume",
 		confAwardStrictness: (v) => v > 1.2 ? "fewer conference honors"
-			: v < 0.9 ? "more conference honors" : "realistic conference award volume",
+			: v < 0.9 ? "more conference honors" : "realistic conference award volume (independent of the national dial)",
 		proAwardStrictness: (v) => v > 1.2 ? "a higher bar for honors abroad"
-			: v < 0.9 ? "a lower bar for honors abroad" : "a realistic bar abroad",
+			: v < 0.9 ? "a lower bar for honors abroad" : "a realistic bar abroad (independent of the national dial)",
 		anomalyMemory: (v) => (v <= 0
 			? "each class draws its anomalies with no memory of the last"
 			: "an anomaly used last class is " + Math.round(Math.pow(3, v)) +
@@ -1263,6 +1381,13 @@
 	   The dial says what was asked for; this says what happened, with the
 	   reasons beside it. See Engine.strangeness — a score with no ingredients
 	   listed is a number nobody can act on. */
+	function strangenessTip(res) {
+		const sc = res && global.Engine.strangeness ? global.Engine.strangeness(res) : null;
+		if (!sc) return "";
+		return "\nStrangeness " + sc.score + "/100" +
+			(sc.reasons.length ? ":\n· " + sc.reasons.join("\n· ") : " — nothing unusual.");
+	}
+
 	function paintStrangeness() {
 		const host = $("weirdness");
 		if (!host) return;
@@ -1282,6 +1407,24 @@
 				(sc.reasons.length > 3 ? "; +" + (sc.reasons.length - 3) + " more" : "")
 				: " — nothing unusual happened.");
 		box.title = sc.reasons.join("\n") || "Nothing unusual happened.";
+	}
+
+	/* A line in the status bar when a run comes out remarkable — once per
+	   class, keyed by its fingerprint, so a repaint does not repeat it. */
+	let lastAchievement = null;
+	function noteAchievement(res) {
+		if (!res || !global.Engine.strangeness) return;
+		const key = res.seed + "|" + classFingerprint(res);
+		if (key === lastAchievement) return;
+		lastAchievement = key;
+		const sc = global.Engine.strangeness(res);
+		const champ = res.tourney && res.tourney.champion && res.tourney.champion.team;
+		const perfect = champ && champ.regSnapshot && champ.regSnapshot.l === 0 &&
+			champ.regSnapshot.w >= 20;
+		const bits = [];
+		if (perfect) bits.push(champ.name + " went unbeaten and won it all");
+		if (sc && sc.score >= 50) bits.push("strangeness " + sc.score + "/100");
+		if (bits.length) setStatus("\u2605 Achievement: " + bits.join(" · ") + ".");
 	}
 
 	function awardInteractionHint() {
@@ -1422,6 +1565,7 @@
 		paintModifiedMarkerFor("varySize", state.cfg.varySize);
 		paintModifiedMarkerFor("universe", state.cfg.universe);
 		paintModifiedMarkerFor("narrative", state.cfg.narrative);
+		paintFlavorOptions();
 		$("flavorHint").value = state.cfg.flavorHint || "";
 		paintModifiedMarkerFor("flavorHint", state.cfg.flavorHint || "");
 		$("ovrMode").value = state.cfg.ovrMode;
@@ -1439,10 +1583,11 @@
 		for (const n of document.querySelectorAll("[data-curve]")) {
 			n.style.opacity = curve ? "1" : ".38";
 			n.querySelectorAll("input").forEach((i) => (i.disabled = !curve));
+			n.title = curve ? "" : "Unused while overalls are preserved; pick Rebuild class curve";
 		}
 		$("ovrModeHint").textContent = curve
-			? "Overalls are re-dealt along a configurable curve; the class can get better or worse."
-			: "Each prospect keeps the overall BBGM gave him. Only his build changes.";
+			? "Rebuild: overalls are re-dealt along a configurable curve, so the class can get better or worse."
+			: "Preserve: each prospect keeps the overall BBGM gave him (never inflated). Only his build changes.";
 		$("awardInteractionHint").textContent = awardInteractionHint();
 		/* The filter reads the labels and hints paintConfig just wrote, so it
 		   runs after it rather than only on a keystroke. */
@@ -1486,15 +1631,20 @@
 		const sel = $("era");
 		if (!sel) return;
 		const eras = global.Calibration.ERAS;
-		if (!sel.options.length) {
-			// An era the model is not calibrated to is not a choice: see
-			// `unfitted` in js/calibration.js.
-			for (const name of global.Calibration.fittedEras()) {
-				sel.appendChild(new Option(eras[name].label, name));
+		/* An era the model is not calibrated to is not a choice (see
+		   `unfitted` in js/calibration.js) — unless an achievement unlocked
+		   it. Rebuilt each paint, since an unlock can land mid-session. */
+		const names = pickableEras();
+		if (Array.from(sel.options).map((o) => o.value).join("|") !== names.join("|")) {
+			sel.innerHTML = "";
+			for (const name of names) {
+				sel.appendChild(new Option(eras[name].label +
+					(eras[name].unfitted ? " — unlocked, uncalibrated" : ""), name));
 			}
 		}
 		sel.value = state.cfg.era;
 		const info = eras[state.cfg.era] || eras[global.Calibration.DEFAULT_ERA];
+		paintShowAll(sel);
 		$("eraNote").textContent = info.note + "  Target: " + info.team.pts +
 			" team points per game at offensive rating " + info.rotation.ortg + ".";
 	}
@@ -1823,7 +1973,26 @@
 			const n = groupKeys(details).filter(
 				(k) => !isDefaultSetting(k, state.cfg[k])).length;
 			btn.hidden = n === 0;
-			btn.textContent = n ? "Reset " + n : "Reset group";
+			/* The count lives in the "changed: N" badge beside it, so the
+			   button itself stays a compact ↺ that still names the count to
+			   a screen reader. */
+			btn.textContent = "↺ Reset";
+			btn.setAttribute("aria-label", n
+				? "Reset " + n + " changed setting" + (n === 1 ? "" : "s") + " in " +
+					(details.querySelector("summary").dataset.label || "this group")
+				: "Reset group");
+			/* A "changed: N" badge beside it, so a collapsed group still
+			   says it has been touched. */
+			const summary = details.querySelector("summary");
+			let badge = summary && summary.querySelector(".grp-changed");
+			if (!badge && summary) {
+				badge = el("span", "grp-changed");
+				summary.insertBefore(badge, btn);
+			}
+			if (badge) {
+				badge.textContent = "changed: " + n;
+				badge.hidden = n === 0;
+			}
 		}
 	}
 
@@ -2206,6 +2375,338 @@
 		}, 0);
 	}
 
+	/* Today's seed: the same class for everyone on the same settings and
+	   date, which is what makes a class something to compare notes on. */
+	function dailySeed(d) {
+		d = d || new Date();
+		const pad = (n) => String(n).padStart(2, "0");
+		return "daily-" + d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+	}
+
+	function dailyReroll() {
+		if (!state.files.length) { setStatus("Load a class file first."); return; }
+		const seed = dailySeed();
+		pushUndo("rolled the daily seed " + seed);
+		rememberSession();
+		state.cfg.seed = seed;
+		state.cfg.anomalyPicks = null;
+		$("seed").value = seed;
+		state.editing = null;
+		state.selected = {};
+		run(() => setStatus("Today's class: seed " + seed + "."));
+	}
+
+	/* CHAOS DRAFT (audit 4.14): Surprise me with an anomaly shortlist, the
+	   weirdest candidates on it picked automatically. The picks go through
+	   the same anomalyPicks path the shortlist row writes. */
+	function chaosDraft() {
+		if (!state.files.length) { setStatus("Load a class file first."); return; }
+		pushUndo("chaos draft");
+		randomizeSettings("wide", null, true);
+		state.cfg.anomalyChoices = Math.max(4, state.cfg.anomalyChoices || 0);
+		// A wide draw can set the anomaly budget to 0 or 1, which can leave
+		// no shortlist to pick from at all.
+		state.cfg.surpriseBudget = Math.max(2, state.cfg.surpriseBudget || 0);
+		const before = state.results[state.active];
+		setTimeout(() => {
+			reroll({ noUndo: true });
+			let tries = 0;
+			const wait = () => {
+				const res = state.results[state.active];
+				// A minute, not ten seconds: a slow machine gave up silently.
+				if ((busyDepth > 0 || !res || res === before) && tries++ < 1200) {
+					setTimeout(wait, 50);
+					return;
+				}
+				const shortlist = res && res.surprises && res.surprises.shortlist;
+				if (!shortlist || !shortlist.length || res === before) {
+					setStatus("Chaos draft: the reroll gave no anomaly shortlist to pick from.");
+					return;
+				}
+				// The shortlist is the class's own count plus the extra choices.
+				const n = Math.max(1, shortlist.length - (state.cfg.anomalyChoices || 0));
+				state.cfg.anomalyPicks = global.ReplayMeta.chaosPicks(
+					shortlist, n, global.Engine.SURPRISES);
+				paintConfig();
+				persist();
+				run(() => {
+					const now = state.results[state.active];
+					if (!now) return;
+					const list = (now.surprises || []).map((x) => x.label).join("; ");
+					setStatus("Chaos draft: " + className(now) + (list ? " · " + list : "") +
+						" · Ctrl+Z takes all of it back.", true);
+				});
+			};
+			wait();
+		}, 0);
+	}
+
+	/* ------------------------------------------------ the replay layer */
+
+	/* Bingo card, achievements ledger and the "show everything" override
+	   (audit 4.6, 4.10, 4.11). Its own storage key: none of it is a class
+	   setting, and a shared link must not carry anybody's ledger. */
+	const REPLAY_KEY = "bbgm-draft-workshop/replay";
+	let replayState = null;
+	let replayLastKey = null;
+
+	function replayStore() {
+		if (replayState) return replayState;
+		const RM = global.ReplayMeta;
+		let saved = null;
+		try { saved = JSON.parse(localStorage.getItem(REPLAY_KEY) || "null"); } catch (e) { saved = null; }
+		const s = saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+		const ledger = {};
+		if (s.ledger && typeof s.ledger === "object") {
+			for (const id of Object.keys(s.ledger)) {
+				const e = s.ledger[id];
+				if (RM.ACH_BY_ID[id] && e && typeof e === "object") {
+					ledger[id] = { at: String(e.at || ""), seed: String(e.seed || ""),
+						link: typeof e.link === "string" ? e.link : "", name: String(e.name || "") };
+				}
+			}
+		}
+		replayState = {
+			card: RM.validCard(s.card) || RM.drawCard(mintRandomSeed()),
+			ledger,
+			// Gated by default; one tick shows every era and flavor.
+			showAll: !!s.showAll,
+		};
+		return replayState;
+	}
+
+	function saveReplay() {
+		try { localStorage.setItem(REPLAY_KEY, JSON.stringify(replayStore())); } catch (e) { /* storage off: the session keeps it */ }
+	}
+
+	function replayUnlocked(kind, name) {
+		const r = replayStore();
+		return global.ReplayMeta.isUnlocked(kind, name, r.ledger, r.showAll);
+	}
+
+	// The flavor dropdown, minus locked flavors (the one in use always shows).
+	function paintFlavorOptions() {
+		const fh = $("flavorHint");
+		if (!fh) return;
+		const cur = state.cfg.flavorHint || "";
+		const names = RB.CLASS_FLAVORS
+			.filter((f) => f.name === cur || replayUnlocked("flavor", f.name));
+		const sig = names.map((f) => f.name).join("|");
+		if (fh.dataset.sig === sig) return;
+		fh.dataset.sig = sig;
+		fh.innerHTML = "";
+		fh.appendChild(new Option("draw one at random", ""));
+		for (const f of names) fh.appendChild(new Option(f.label || f.name, f.name));
+		fh.value = cur;
+	}
+
+	/* THE toast: separate from the status line (which other code writes
+	   constantly). Achievements use it on unlock, and every copy action
+	   names what it copied through it (see copyText). One polite live
+	   region, so a screen reader hears each once. */
+	function toast(text) {
+		let box = $("replayToasts");
+		if (!box) {
+			box = el("div", "replaytoasts");
+			box.id = "replayToasts";
+			box.setAttribute("role", "status");
+			box.setAttribute("aria-live", "polite");
+			document.body.appendChild(box);
+		}
+		const t = el("div", "replaytoast", text);
+		box.appendChild(t);
+		setTimeout(() => t.remove(), 5000);
+		return t;
+	}
+	const replayToast = toast;
+
+	// A link that replays this result: its settings, its drawn seed, no locks.
+	function replayLinkFor(res) {
+		const p = encodeConfig(true);
+		delete p.overrides;
+		delete p.fp;
+		if (res && res.seed) p.seed = String(res.seed);
+		return "#c=" + encodeURIComponent(JSON.stringify(p));
+	}
+
+	function earn(r, id, res, fresh) {
+		if (r.ledger[id]) return;
+		r.ledger[id] = { at: new Date().toISOString().slice(0, 10),
+			seed: res ? String(res.seed) : "", link: res ? replayLinkFor(res) : "",
+			name: res ? className(res) : "" };
+		fresh.push(id);
+	}
+
+	/* After every run: mark the bingo card and record firsts. Keyed by seed
+	   and fingerprint, so a repaint of the same class does nothing twice. */
+	function replayAfterRun(res) {
+		if (!res || !global.ReplayMeta) return;
+		const RM = global.ReplayMeta;
+		const key = res.seed + ":" + classFingerprint(res);
+		if (key === replayLastKey) return;
+		replayLastKey = key;
+		const r = replayStore();
+		const sc = global.Engine.strangeness(res);
+		const fresh = [];
+		const linesBefore = RM.cardLines(r.card);
+		const marked = RM.markCard(r.card, sc && sc.kinds);
+		for (const id of RM.detect(res, sc)) earn(r, id, res, fresh);
+		if (RM.cardLines(r.card) > 0) earn(r, "bingo-line", res, fresh);
+		if (RM.cardFull(r.card)) earn(r, "bingo-full", res, fresh);
+		if (!marked.length && !fresh.length) return;
+		if (RM.cardLines(r.card) > linesBefore) replayToast("Bingo! A line on card " + r.card.seed + ".");
+		for (const id of fresh) {
+			const a = RM.ACH_BY_ID[id];
+			const opens = RM.UNLOCKS.filter((u) => u.requires === id)
+				.map((u) => (u.kind === "era"
+					? global.Calibration.ERAS[u.name].label + " era"
+					: u.name + " flavor"));
+			replayToast("Achievement: " + a.label + " — " + a.desc +
+				(opens.length && !r.showAll ? ". Unlocked: " + opens.join(", ") : ""));
+		}
+		saveReplay();
+		if (fresh.length) { paintEra(); paintFlavorOptions(); }
+	}
+
+	function replayDialog() {
+		const RM = global.ReplayMeta;
+		const r = replayStore();
+		const box = el("div", "replaybox");
+
+		// Mutators.
+		box.appendChild(el("h4", null, "Mutators (up to " + RM.MAX_MUTATORS + ")"));
+		box.appendChild(el("p", "hint", "Stackable setting patches, shown in the class " +
+			"name and carried in the link. A flavor still only moves settings left alone, " +
+			"and a mutator's settings count as moved."));
+		const mu = el("div", "mutatorlist");
+		for (const m of RM.MUTATORS) {
+			const lab = el("label", "check");
+			lab.title = m.note;
+			const cb = el("input");
+			cb.type = "checkbox";
+			cb.dataset.mutator = m.id;
+			cb.checked = state.mutators.indexOf(m.id) !== -1;
+			cb.addEventListener("change", () => {
+				const next = state.mutators.filter((x) => x !== m.id);
+				if (cb.checked) next.push(m.id);
+				if (next.length > RM.MAX_MUTATORS) {
+					cb.checked = false;
+					setStatus("Three mutators at most.");
+					return;
+				}
+				pushUndo("changed the mutators");
+				state.mutators = RM.cleanMutators(next);
+				markDirty();
+				persist();
+				scheduleRun();
+			});
+			lab.appendChild(cb);
+			lab.appendChild(document.createTextNode(" " + m.label + " — " + m.note));
+			mu.appendChild(lab);
+		}
+		box.appendChild(mu);
+
+		// Bingo.
+		const lines = RM.cardLines(r.card);
+		box.appendChild(el("h4", null, "Strangeness bingo — card " + r.card.seed +
+			(RM.cardFull(r.card) ? " · blackout"
+				: lines ? " · " + lines + " line" + (lines === 1 ? "" : "s") : "")));
+		const grid = el("div", "bingogrid");
+		const labels = {};
+		for (const k of RM.BINGO_KINDS) labels[k.kind] = k.label;
+		r.card.squares.forEach((k, i) => {
+			const sq = el("div", "bingosq" + (r.card.marked[i] ? " on" : ""), labels[k]);
+			sq.dataset.kind = k;
+			grid.appendChild(sq);
+		});
+		box.appendChild(grid);
+		const nb = el("button", null, "New card");
+		nb.type = "button";
+		nb.id = "btnNewBingo";
+		nb.addEventListener("click", () => {
+			r.card = RM.drawCard(mintRandomSeed());
+			saveReplay();
+			closeModal();
+			replayDialog();
+		});
+		box.appendChild(nb);
+
+		// Ledger.
+		const got = Object.keys(r.ledger).length;
+		box.appendChild(el("h4", null, "Achievements — " + got + " of " + RM.ACHIEVEMENTS.length));
+		const list = el("ul", "ledger");
+		for (const a of RM.ACHIEVEMENTS) {
+			const e = r.ledger[a.id];
+			const li = el("li", e ? "got" : "missing");
+			li.dataset.ach = a.id;
+			li.appendChild(el("b", null, a.label));
+			li.appendChild(document.createTextNode(" — " + a.desc));
+			const u = RM.UNLOCKS.filter((x) => x.requires === a.id)[0];
+			if (u) li.appendChild(el("span", "hint", " (unlocks the " + u.name + " " + u.kind + ")"));
+			if (e) {
+				li.appendChild(document.createTextNode(" · " + e.at + " · seed " + e.seed + " "));
+				if (e.link) {
+					const go = el("button", "linkish", "replay");
+					go.type = "button";
+					go.addEventListener("click", () => {
+						closeModal();
+						if (location.hash === e.link) setStatus("That class is the one on screen.");
+						else location.hash = e.link;
+					});
+					li.appendChild(go);
+				}
+			}
+			list.appendChild(li);
+		}
+		box.appendChild(list);
+		modal("Replay: bingo, mutators, achievements", box, null, "Close");
+	}
+
+	function bindReplay() {
+		if ($("btnReplay")) return;
+		const host = $("btnHowTo");
+		if (host) {
+			const b = el("button", "iconbtn", "\u{1F3C5}");
+			b.id = "btnReplay";
+			b.type = "button";
+			b.title = "Bingo card, mutators and the achievements ledger";
+			b.setAttribute("aria-label", "Replay goals");
+			b.addEventListener("click", replayDialog);
+			host.parentNode.insertBefore(b, host);
+		}
+		const sur = $("btnSurprise");
+		if (sur && !$("btnChaos")) {
+			const c = el("button", null, "\u{1F300} Chaos draft");
+			c.id = "btnChaos";
+			c.type = "button";
+			c.title = "Surprise me, plus an anomaly shortlist with the weirdest " +
+				"candidates picked for you. Ctrl+Z takes it all back.";
+			c.addEventListener("click", chaosDraft);
+			sur.parentNode.insertBefore(c, sur.nextSibling);
+		}
+	}
+
+	/* "Show everything": turns off the achievement gating on eras and
+	   flavors, so nothing is locked for anybody who does not want it. */
+	function paintShowAll(sel) {
+		if ($("replayShowAll")) { $("replayShowAll").checked = replayStore().showAll; return; }
+		const lab = el("label", "check");
+		const cb = el("input");
+		cb.type = "checkbox";
+		cb.id = "replayShowAll";
+		cb.checked = replayStore().showAll;
+		cb.addEventListener("change", () => {
+			replayStore().showAll = cb.checked;
+			saveReplay();
+			paintEra();
+			paintFlavorOptions();
+		});
+		lab.appendChild(cb);
+		lab.appendChild(document.createTextNode(" Show everything (no unlocks needed)"));
+		lab.title = "Eras and flavors that achievements unlock are listed from the start";
+		sel.parentNode.insertBefore(lab, $("eraNote"));
+	}
+
 	/* Replay a randomizer draw by its seed. */
 	function randomizeWithSeed() {
 		const box = el("div");
@@ -2306,6 +2807,13 @@
 			"Ctrl+Z takes all of it back in one step.";
 		b.addEventListener("click", surpriseMe);
 		host.parentNode.insertBefore(b, host.nextSibling);
+		const d = el("button", null, "📅 Daily seed");
+		d.id = "btnDaily";
+		d.type = "button";
+		d.title = "Roll today's seed (daily-YYYY-MM-DD) on the current settings — " +
+			"the same class for anyone with the same settings today.";
+		d.addEventListener("click", dailyReroll);
+		b.parentNode.insertBefore(d, b.nextSibling);
 	}
 
 	/* The "draw separately for each loaded class" checkbox: shown only when
@@ -2426,7 +2934,7 @@
 		const anchor = $("settingSearchBox");
 		if (!anchor || $("settingTier")) return;
 		const ctl = el("div", "ctl");
-		const lbl = el("span", "lbl", "Show");
+		const lbl = el("span", "lbl", "Show settings about:");
 		lbl.id = "settingTierLabel";
 		ctl.appendChild(lbl);
 		const chips = el("div", "chips");
@@ -2434,6 +2942,10 @@
 		chips.setAttribute("role", "radiogroup");
 		chips.setAttribute("aria-labelledby", "settingTierLabel");
 		ctl.appendChild(chips);
+		// How many settings the chosen tier is hiding (applySettingFilter).
+		const hid = el("p", "unit");
+		hid.id = "settingTierHidden";
+		ctl.appendChild(hid);
 		anchor.parentNode.insertBefore(ctl, anchor);
 		paintSettingTier();
 	}
@@ -2492,6 +3004,14 @@
 			grp.classList.toggle("settings-hidden", ctls.length > 0 && any === 0);
 			if ((q || changedOnly) && any > 0) grp.open = true;
 		}
+		const hid = $("settingTierHidden");
+		if (hid) {
+			hid.textContent = tiered ? tiered + " hidden" : "";
+			hid.hidden = !tiered;
+		}
+		// The re-run fine print is for the Model view (or a focused control).
+		const aside = $("settings");
+		if (aside) aside.classList.toggle("tier-model", state.settingTier === "model");
 		if (note) {
 			note.textContent = (q || changedOnly)
 				? shown + " of " + total + " settings" +
@@ -2569,10 +3089,7 @@
 		/* The class flavor, as a choice rather than a draw. See
 		   Config.DEFAULTS.flavorHint. */
 		const fh = $("flavorHint");
-		fh.appendChild(new Option("draw one at random", ""));
-		for (const f of RB.CLASS_FLAVORS) {
-			fh.appendChild(new Option(f.label || f.name, f.name));
-		}
+		paintFlavorOptions();
 		fh.addEventListener("change", () => {
 			pushUndo("changed the class flavor");
 			state.cfg.flavorHint = fh.value;
@@ -3123,6 +3640,7 @@
 		   thing that reproduces it, and a link without it opened a
 		   different class on another machine. */
 		if (withDrawnSeed && !out.seed && state.lastSeed) out.seed = String(state.lastSeed);
+		if (state.mutators && state.mutators.length) out.mu = state.mutators.slice();
 		if (Object.keys(state.overrides).length) {
 			out.overrides = state.overrides;
 			/* Locks are keyed by pid. Opening a shared link with a DIFFERENT
@@ -3202,6 +3720,8 @@
 	function writeHash(withDrawnSeed) {
 		try {
 			const payload = encodeConfig(withDrawnSeed);
+			// The challenge being played (a daily's date is in its key) and its score.
+			Object.assign(payload, challengeHashFields());
 			let body = Object.keys(payload).length
 				? encodeURIComponent(JSON.stringify(payload))
 				: "";
@@ -3231,8 +3751,19 @@
 	   back to the default here, where the panel is the one reading it. */
 	function fitEra(cfg) {
 		const CAL = global.Calibration;
-		if (cfg && CAL.fittedEras().indexOf(cfg.era) === -1) cfg.era = CAL.DEFAULT_ERA;
+		if (cfg && pickableEras().indexOf(cfg.era) === -1) cfg.era = CAL.DEFAULT_ERA;
 		return cfg;
+	}
+
+	// The fitted eras, plus any unfitted one an achievement has unlocked.
+	function pickableEras() {
+		const CAL = global.Calibration;
+		const out = CAL.fittedEras().slice();
+		for (const u of global.ReplayMeta.UNLOCKS) {
+			if (u.kind === "era" && CAL.ERAS[u.name] && out.indexOf(u.name) === -1 &&
+				replayUnlocked("era", u.name)) out.push(u.name);
+		}
+		return out;
 	}
 
 	function readHash() {
@@ -3251,11 +3782,15 @@
 		/* A LINK IS THE WHOLE STATE IT DESCRIBES. A link without locks is a
 		   class with no locks — keeping the ones localStorage remembered from
 		   some other session applied them to the linked class, silently. */
+		readChallengeHashFields(payload);
 		const ov = payload.overrides;
 		state.overrides = ov && typeof ov === "object" && !Array.isArray(ov) ? ov : {};
 		state.overrideFingerprint = state.overrides === ov ? (payload.fp || null) : null;
 		delete payload.overrides;
 		delete payload.fp;
+		// A link is the whole state: no `mu` means no mutators.
+		state.mutators = global.ReplayMeta.cleanMutators(payload.mu);
+		delete payload.mu;
 		state.cfg = fitEra(CFG.make(payload));
 		state.presetDirty = true;
 		return true;
@@ -3295,7 +3830,9 @@
 		if (story && (!flavor || story.toLowerCase() !== flavor.toLowerCase())) {
 			tail.push(story);
 		}
-		return bits[0] + (tail.length ? " — " + tail.join(", ") : "");
+		const mu = res.cfg && res.cfg.mutators && res.cfg.mutators.length
+			? " [" + global.ReplayMeta.mutatorLabel(res.cfg.mutators) + "]" : "";
+		return bits[0] + (tail.length ? " — " + tail.join(", ") : "") + mu;
 	}
 
 	function classFingerprint(res) {
@@ -3636,7 +4173,7 @@
 
 	function installFiles(loaded, problems, opts) {
 		const append = !!(opts && opts.append) && state.files.length > 0;
-		if (append) { appendFiles(loaded, problems); return; }
+		if (append) { appendFiles(loaded, problems, opts); return; }
 		{
 			$("empty").classList.remove("busy");
 			const ok = loaded.filter(Boolean);
@@ -3649,7 +4186,8 @@
 			   merge does not have to ask the user to find the same file on
 			   disk a second time. */
 			state.leagueSource = (ok.filter((f) => f.league)[0] || {}).league || null;
-			for (const f of state.files) f.fingerprint = fingerprint(f);
+			// A synthetic file keeps its seed-derived fingerprint.
+			for (const f of state.files) if (!f.synthetic) f.fingerprint = fingerprint(f);
 			state.runners = state.files.map((f) => global.Engine.createRunner(f.data));
 			state.results = [];
 			state.active = 0;
@@ -3658,6 +4196,8 @@
 			   patch drawn for somebody else's third file to whatever loads
 			   into that slot now. */
 			state.fileCfgs = {};
+			// Biographies belong to the universe they were imported with.
+			state.universeBiography = null;
 			/* The undo history belongs to the classes it was made on. Undoing
 			   across a replacing load restored the old class's locks — keyed
 			   by pid — onto whoever holds those pids in the new one. */
@@ -3686,7 +4226,7 @@
 				.map((w) => f.name + ": " + w));
 			if (warns.length) showWarning(warns.join("\n"));
 			setStatus("");
-			run();
+			if (!(opts && opts.noRun)) run();
 		}
 	}
 
@@ -3700,7 +4240,7 @@
 	   the chain has to be rebuilt, because a class inserted at 2031 changes
 	   the pool memory and the carry for every season after it, and that is
 	   said out loud rather than done silently. */
-	function appendFiles(loaded, problems) {
+	function appendFiles(loaded, problems, opts) {
 		$("empty").classList.remove("busy");
 		const ok = loaded.filter(Boolean);
 		if (problems && problems.length) showError(new Error(problems.join("\n")));
@@ -3767,6 +4307,8 @@
 		}
 		if (warns.length) showWarning(warns.join("\n"));
 		const added = fresh.length + " class" + (fresh.length === 1 ? "" : "es") + " added";
+		// The caller runs the chain itself (a synthetic extension or an import).
+		if (opts && opts.noRun) { setStatus(added + "."); return; }
 		if (state.cfg.universe && state.universe.rows.length && canExtendUniverse()) {
 			setStatus(added + " — extending the universe from " +
 				state.universe.tail.lastSeason + "…", true);
@@ -3850,9 +4392,80 @@
 				: " They were probably made against a file with different player ids."));
 	}
 
+	/* The tab strip scrolls sideways on a phone; fade whichever edge has more. */
+	function tabEdgeCue() {
+		const tabs = $("tabs");
+		if (!tabs) return;
+		const max = tabs.scrollWidth - tabs.clientWidth;
+		tabs.classList.toggle("more-l", max > 2 && tabs.scrollLeft > 2);
+		tabs.classList.toggle("more-r", max > 2 && tabs.scrollLeft < max - 2);
+	}
+
+	/* Icon-only buttons: the aria-label becomes a focus/hover tooltip and, on a
+	   wide screen, a visible word (both CSS, so textContent is untouched).
+	   Idempotent; re-run as buttons are added. */
+	function labelIconButtons() {
+		document.querySelectorAll("header .iconbtn[aria-label]:not([data-tip])").forEach((b) => {
+			const name = b.getAttribute("aria-label");
+			b.setAttribute("data-tip", name);
+		});
+	}
+
+	/* Below 560px the tools fold behind "⋯". */
+	function bindHeaderMore() {
+		const btn = $("btnHeaderMore");
+		if (!btn) return;
+		btn.addEventListener("click", () => {
+			const open = document.querySelector("header").classList.toggle("toolsopen");
+			btn.setAttribute("aria-expanded", open ? "true" : "false");
+		});
+	}
+
+	/* Pasted class JSON goes through readFiles like a chosen file, so it is
+	   validated the same way. */
+	function readPasted(text) {
+		text = String(text || "").trim();
+		if (!text) { setStatus("The clipboard is empty."); return; }
+		if (!/^[\[{]/.test(text)) { setStatus("That paste is not JSON — copy the whole exported file."); return; }
+		readFiles([new File([text], "pasted.json", { type: "application/json" })],
+			state.files.length ? { append: true } : null);
+	}
+
 	function bindFiles() {
 		$("btnLoad").addEventListener("click", () => $("file").click());
+		// The whole empty-state box opens the picker; its own buttons do not.
+		const empty = $("empty");
+		empty.addEventListener("click", (e) => {
+			if (e.target.closest("button, a, input")) return;
+			$("file").click();
+		});
+		empty.addEventListener("keydown", (e) => {
+			if (e.target !== empty || (e.key !== "Enter" && e.key !== " ")) return;
+			e.preventDefault();
+			$("file").click();
+		});
+		if ($("btnPasteClass")) {
+			$("btnPasteClass").addEventListener("click", () => {
+				if (!navigator.clipboard || !navigator.clipboard.readText) {
+					setStatus("This browser will not hand over the clipboard — press Ctrl+V (⌘V) instead.");
+					return;
+				}
+				navigator.clipboard.readText().then(readPasted,
+					() => setStatus("Clipboard access was refused — press Ctrl+V (⌘V) instead."));
+			});
+		}
+		document.addEventListener("paste", (e) => {
+			if (empty.hidden) return;
+			const t = e.target;
+			if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
+			if (!$("modal").hidden) return;
+			const text = e.clipboardData && e.clipboardData.getData("text");
+			if (!text) return;
+			e.preventDefault();
+			readPasted(text);
+		});
 		if ($("btnSample")) $("btnSample").addEventListener("click", loadSample);
+		if ($("btnSynthUniverse")) $("btnSynthUniverse").addEventListener("click", syntheticUniverseDialog);
 		$("file").addEventListener("change", (e) => {
 			/* Copied before the reset: a FileList is live, and a value left
 			   in place meant picking the same file again (after fixing it on
@@ -3956,6 +4569,15 @@
 		// flavors and one draw a class repeats sooner than a pool of
 		// forty-six builds does; this is the same memory on that axis.
 		cfg.recentFlavors = (state.flavorHistory || []).slice(0, POOL_HISTORY);
+		/* A challenge is the same class for everybody, so this browser's
+		   memory of its last few classes stays out of it. */
+		if (state.challenge) {
+			cfg.recentPools = [];
+			cfg.recentAnomalies = [];
+			cfg.recentFlavors = [];
+		}
+		// Mutators last: explicit choices, so the flavor treats them as touched.
+		global.ReplayMeta.applyMutators(cfg, state.mutators, RB);
 		return cfg;
 	}
 
@@ -4055,6 +4677,7 @@
 		cfg.universeRecruiting = saved.universeRecruiting || null;
 		cfg.universeAlumni = saved.universeAlumni || null;
 		cfg.universeTitles = saved.universeTitles || null;
+		cfg.universeDigest = saved.universeDigest || null;
 		cfg.biography = global.Universe.biographyForFile(state.universeBiography,
 			state.files[i] && state.files[i].fingerprint);
 		return cfg;
@@ -4331,6 +4954,9 @@
 			const b = $(id);
 			if (b) b.setAttribute("aria-busy", "true");
 		}
+		// The view being rebuilt says so, and shows a thin bar (see CSS).
+		const v = $("view");
+		if (v) v.setAttribute("aria-busy", "true");
 	}
 
 	function endBusy() {
@@ -4353,6 +4979,8 @@
 			const b = $(id);
 			if (b) b.removeAttribute("aria-busy");
 		}
+		const v = $("view");
+		if (v) v.removeAttribute("aria-busy");
 	}
 
 	/* Show the busy state, let the browser paint it, then do the work.
@@ -4402,6 +5030,7 @@
 			clearTimeout(Number(pill.dataset.flashTimer));
 			delete pill.dataset.flashTimer;
 		}
+		paintExportLabel();
 		pill.dataset.label = "seed " + res.seed + " · " + classFingerprint(res);
 		pill.textContent = pill.dataset.label;
 		pill.dataset.seed = res.seed;
@@ -4411,10 +5040,27 @@
 			" — BBGM Draft Class Workshop";
 		$("seedPill").title = "Seed and class fingerprint — two people with the same " +
 			"fingerprint are looking at the same seventy players. " +
-			"Click to copy the seed, shift-click or right-click to paste one" +
+			"Click to copy the seed, double-click to type one, shift-click or right-click to paste one" +
 			(Number.isFinite(ms) ? " · " + Math.round(ms) + "ms (" +
 				(res.phasesRun && res.phasesRun.length
-					? res.phasesRun.join(" → ") : "nothing to redo") + ")" : "");
+					? res.phasesRun.join(" → ") : "nothing to redo") + ")" : "") +
+			strangenessTip(res);
+	}
+
+	/* With several classes loaded, Export JSON names which one it writes. */
+	function paintExportLabel() {
+		const b = $("btnExport");
+		if (!b) return;
+		const f = activeFile();
+		if (state.files.length < 2 || !f) {
+			b.textContent = "Export JSON";
+			b.removeAttribute("title");
+			return;
+		}
+		const base = f.name.replace(/\.json(\.gz)?$|\.gz$/i, "");
+		const yr = f.data && f.data.startingSeason;
+		b.textContent = "Export " + (yr ? yr : base.length > 16 ? base.slice(0, 15) + "…" : base);
+		b.title = "Export " + base + "_customized.json" + (yr ? " (season " + yr + ")" : "");
 	}
 
 	/* Whether the config changed since the universe's last full run is
@@ -4485,6 +5131,8 @@
 		paintChallenge();
 		paintAnomalyPicks();
 		paintStrangeness();
+		noteAchievement(res);
+		replayAfterRun(res);
 		if (state.history[0] !== res.seed) {
 			state.history.unshift(res.seed);
 			state.history = state.history.slice(0, 12);
@@ -5075,6 +5723,27 @@
 			budget: 3,
 			forbid: ["midMajorLift"],
 		},
+		{
+			key: "strange",
+			name: "A very strange year",
+			blurb: "Make the world score 50 or more for strangeness, moving " +
+				"no more than two settings.",
+			seed: "challenge-weird",
+			cfg: {},
+			goals: ["strangeness:50"],
+			budget: 2,
+		},
+		{
+			key: "perfect",
+			name: "The perfect season",
+			blurb: "A team goes unbeaten in the regular season and no " +
+				"double-digit seed reaches the Final Four — without a mid-major surge.",
+			seed: "undefeated",
+			cfg: {},
+			goals: ["unbeaten", "!cinderella"],
+			budget: 3,
+			forbid: ["midMajorLift"],
+		},
 	];
 
 	/* How a challenge attempt stands right now: which goals the class on
@@ -5084,20 +5753,24 @@
 	function scoreChallenge(ch, res) {
 		if (!ch || !res) return null;
 		const goals = ch.goals.map((key) => {
-			const clause = parseClause(key);
+			// A goal is a predicate key, or (a puzzle's headlines) a {label, test}.
+			const clause = key && typeof key === "object" ? key : parseClause(key);
 			let met = false;
 			try { met = !!(clause && clause.test(res)); } catch (e) { met = false; }
 			return { label: clause ? clause.label : key, met };
 		});
 		const start = CFG.make(Object.assign({}, ch.cfg, { seed: ch.seed }));
-		const moved = Object.keys(diffConfigs(start, CFG.make(state.cfg)))
-			.filter((k) => k !== "seed");
+		// diffConfigs returns "key was → is" lines; the setting is the first word.
+		const changes = diffConfigs(start, CFG.make(state.cfg))
+			.filter((line) => line.split(" ")[0] !== "seed");
+		const moved = changes.map((line) => line.split(" ")[0]);
 		const broke = (ch.forbid || []).filter((k) => moved.indexOf(k) !== -1);
 		return {
 			goals,
 			met: goals.filter((g) => g.met).length,
 			total: goals.length,
 			moved,
+			changes,
 			budget: ch.budget,
 			overBudget: Math.max(0, moved.length - ch.budget),
 			broke,
@@ -5163,6 +5836,7 @@
 		sel.addEventListener("change", paint);
 		paint();
 		box.appendChild(detail);
+		box.appendChild(replayPanel());
 		modal("Challenges", box, () => {
 			const ch = CHALLENGES.filter((c) => c.key === sel.value)[0];
 			closeModal();
@@ -5174,6 +5848,7 @@
 	function startChallenge(ch) {
 		pushUndo("started the " + ch.name + " challenge");
 		state.challenge = ch.key;
+		state.replayRun = { key: ch.key, runs: 0 };
 		Object.assign(state.cfg, CFG.make(Object.assign({}, ch.cfg)));
 		state.cfg.seed = ch.seed;
 		state.lastSeed = ch.seed;
@@ -5197,7 +5872,7 @@
 		const host = $("presetDiff");
 		if (!host) return;
 		let bar = $("challengeBar");
-		const ch = CHALLENGES.filter((c) => c.key === state.challenge)[0];
+		const ch = findChallenge(state.challenge);
 		const res = state.results[state.active];
 		if (!ch || !res) { if (bar) bar.remove(); return; }
 		if (!bar) {
@@ -5211,6 +5886,7 @@
 		bar.appendChild(el("span", sc.solved ? "goal met" : "unit",
 			" " + sc.met + "/" + sc.total + " goals · " + sc.moved.length + "/" +
 			sc.budget + " settings" + (sc.solved ? " · solved" : "")));
+		paintReplayBar(bar, ch, sc, res);
 		const give = el("button", "linky", "give up");
 		give.type = "button";
 		give.addEventListener("click", () => {
@@ -5220,6 +5896,291 @@
 			setStatus("Challenge abandoned; the settings stay where you left them.");
 		});
 		bar.appendChild(give);
+		const copy = el("button", "linky", "copy result");
+		copy.id = "btnCopyChallenge";
+		copy.type = "button";
+		copy.addEventListener("click", () => copyText(challengeResultText(ch, sc), copy, null, "challenge result"));
+		bar.appendChild(copy);
+	}
+
+	/* One line to paste into a chat: the challenge, how it stands, and
+	   which dials moved from where the challenge started them. */
+	function challengeResultText(ch, sc) {
+		return ch.name + ": " + (sc.solved ? "solved" : "not solved") + " · " +
+			sc.met + "/" + sc.total + " goals · " + sc.moved.length + "/" + sc.budget +
+			" settings" + (sc.changes.length ? " (" + sc.changes.join(", ") + ")" : "") +
+			" · seed " + ch.seed;
+	}
+
+	/* ------------------------------------------------------- replayability
+
+	   Audit section 4, ideas 1, 2, 3, 7, 12 and 13. The rules live in
+	   js/replay.js (pure, tested in tools/tests/replaychallenge.js); this is
+	   the wiring. Everything here is its own function so the challenge bar
+	   and dialog each gain one line. */
+	const RP = global.Replay;
+	const BEST_KEY = "bbgm-draft-workshop/challenge-best";
+	let lastCountedRes = null;
+
+	/* Any challenge by key: the static table, a daily ("daily-YYYY-MM-DD"),
+	   a campaign tier ("campaign:<key>", null while locked) or the puzzle in
+	   progress ("puzzle:<id>", which needs its target from state.puzzle). */
+	function findChallenge(key) {
+		if (typeof key !== "string") return null;
+		const fixed = CHALLENGES.filter((c) => c.key === key)[0];
+		if (fixed) return fixed;
+		if (/^daily-/.test(key)) return RP.dailyChallenge(key.slice(6));
+		if (/^campaign:/.test(key)) {
+			const i = CHALLENGES.findIndex((c) => "campaign:" + c.key === key);
+			return i < 0 ? null : RP.campaignTier(CHALLENGES, i, state.challengeProgress);
+		}
+		if (/^puzzle:/.test(key) && state.puzzle && "puzzle:" + state.puzzle.id === key) {
+			const p = RP.puzzle(state.puzzle.id);
+			p.goals = RP.puzzleGoals(state.puzzle.target);
+			return p;
+		}
+		return null;
+	}
+
+	function readBest() {
+		try {
+			const b = JSON.parse(localStorage.getItem(BEST_KEY) || "{}");
+			return b && typeof b === "object" ? b : {};
+		} catch (e) { return {}; }
+	}
+	function writeBest(key, score) {
+		try {
+			const b = readBest();
+			if (!RP.betterScore(score, b[key])) return false;
+			b[key] = score;
+			localStorage.setItem(BEST_KEY, JSON.stringify(b));
+			return true;
+		} catch (e) { return false; }
+	}
+
+	// The current attempt's score, or null while it is unsolved.
+	function attemptScore(ch, sc) {
+		if (!sc || !sc.solved) return null;
+		const runs = state.replayRun && state.replayRun.key === ch.key ? state.replayRun.runs : 1;
+		return RP.parScore(sc.moved.length, ch.budget, runs);
+	}
+
+	function challengeHashFields() {
+		const ch = findChallenge(state.challenge);
+		if (!ch || /^puzzle:/.test(ch.key)) return {};
+		const sc = scoreChallenge(ch, state.results[state.active]);
+		const score = attemptScore(ch, sc);
+		return score === null ? { ch: ch.key } : { ch: ch.key, sc: score };
+	}
+	// Takes the challenge fields out of a link payload; they are not settings.
+	function readChallengeHashFields(payload) {
+		const key = payload.ch;
+		delete payload.ch;
+		delete payload.sc;
+		if (typeof key === "string" && findChallenge(key) && key !== state.challenge) {
+			state.challenge = key;
+			state.replayRun = { key, runs: 0 };
+		}
+	}
+
+	function restoreReplay(saved) {
+		const pr = saved.challengeProgress;
+		if (pr && pr.cleared && typeof pr.cleared === "object") {
+			state.challengeProgress = { cleared: pr.cleared };
+		}
+		const rr = saved.replayRun;
+		if (rr && typeof rr.key === "string" && Number.isFinite(rr.runs)) state.replayRun = rr;
+		const pz = saved.puzzle;
+		if (pz && typeof pz.id === "string" && pz.target && typeof pz.target === "object") {
+			state.puzzle = pz;
+		}
+		if (saved.ghost && typeof saved.ghost === "object") state.ghost = saved.ghost;
+	}
+
+	/* The bar's second line: par and score, the campaign, and the rival. */
+	function paintReplayBar(bar, ch, sc, res) {
+		if (!state.replayRun || state.replayRun.key !== ch.key) {
+			state.replayRun = { key: ch.key, runs: 0 };
+		}
+		if (res !== lastCountedRes) { lastCountedRes = res; state.replayRun.runs++; }
+		const runs = state.replayRun.runs;
+		const score = attemptScore(ch, sc);
+		if (score !== null) {
+			writeBest(ch.key, score);
+			if (Number.isFinite(ch.tier) &&
+				!state.challengeProgress.cleared[ch.baseKey]) {
+				state.challengeProgress.cleared[ch.baseKey] = sc.moved.slice();
+			}
+		}
+		const best = readBest()[ch.key];
+		const line = el("span", "unit replayscore",
+			" · par " + ch.budget + " · " + runs + " run" + (runs === 1 ? "" : "s") +
+			(score !== null ? " · score " + score : "") +
+			(Number.isFinite(best) ? " · best " + best : ""));
+		line.id = "challengeScore";
+		bar.appendChild(line);
+		if (ch.forbid && ch.forbid.length && Number.isFinite(ch.tier)) {
+			bar.appendChild(el("span", "unit", " · off limits: " + ch.forbid.join(", ")));
+		}
+		const g = state.ghost;
+		if (g && g.challenge === ch.key) {
+			const cmp = RP.ghostCompare(sc.moved, g.moved);
+			const rival = el("div", "unit replayghost",
+				"Rival: " + (g.moved.length ? g.moved.join(", ") : "no settings moved") +
+				(Number.isFinite(g.score) ? " · score " + g.score : g.solved ? "" : " · unsolved") +
+				(cmp.shared.length ? " · same dials: " + cmp.shared.join(", ") : "") +
+				(cmp.onlyMine.length ? " · only you: " + cmp.onlyMine.join(", ") : ""));
+			rival.id = "challengeGhost";
+			bar.appendChild(rival);
+		}
+		const code = el("button", "linky", "code");
+		code.type = "button";
+		code.title = "Copy a short code for this attempt (settings, dials and score)";
+		code.addEventListener("click", () => copyText(resultCode(), code, null, "result code"));
+		bar.appendChild(code);
+	}
+
+	/* A short code for the class on screen: the link's settings (seed and
+	   variation included) plus the attempt, when a challenge is on. */
+	function resultCode() {
+		const payload = encodeConfig(true);
+		delete payload.overrides;
+		delete payload.fp;
+		const ch = findChallenge(state.challenge);
+		if (!ch) return RP.makeResult(payload);
+		const sc = scoreChallenge(ch, state.results[state.active]);
+		return RP.makeResult(payload, { challenge: ch.key, moved: sc ? sc.moved : [],
+			score: attemptScore(ch, sc), solved: !!(sc && sc.solved) });
+	}
+
+	function applyCode(code) {
+		const r = RP.readResult(code);
+		if (!r) { setStatus("That code did not read — check it was copied whole."); return false; }
+		pushUndo("loaded a share code");
+		state.cfg = fitEra(CFG.make(r.payload));
+		state.overrides = {};
+		state.overrideFingerprint = null;
+		state.presetDirty = true;
+		if (r.challenge && findChallenge(r.challenge)) {
+			state.challenge = r.challenge;
+			state.replayRun = { key: r.challenge, runs: 0 };
+		}
+		state.lastSeed = state.cfg.seed || state.lastSeed;
+		$("seed").value = state.cfg.seed || "";
+		markDirty();
+		paintConfig();
+		persist();
+		run(() => setStatus("Loaded the code."));
+		return true;
+	}
+
+	function importGhost(code) {
+		const r = RP.readResult(code);
+		if (!r || !r.challenge) {
+			setStatus("A rival needs a code copied from a challenge attempt.");
+			return false;
+		}
+		state.ghost = { challenge: r.challenge, moved: r.moved, score: r.score, solved: r.solved };
+		persist();
+		paintChallenge();
+		setStatus("Rival loaded for " + r.challenge + ".");
+		return true;
+	}
+
+	function startDaily(date) {
+		const ch = RP.dailyChallenge(date || RP.dateKey(new Date()));
+		if (ch) startChallenge(ch);
+	}
+
+	function startCampaign(i) {
+		const ch = RP.campaignTier(CHALLENGES, i, state.challengeProgress);
+		if (!ch) { setStatus("Clear the previous tier first."); return; }
+		startChallenge(ch);
+	}
+
+	/* The target is run once, from the runner directly, so the hidden
+	   settings never reach the panel, the hash or the history. */
+	function startPuzzle(id) {
+		if (!state.files.length) { setStatus("Load a class file first."); return; }
+		const p = RP.puzzle(id || RP.dateKey(new Date()));
+		const was = state.challenge;
+		state.challenge = p.key;   // blanks the class memory; see effectiveCfg
+		let target;
+		try {
+			const cfg = effectiveCfg();
+			Object.assign(cfg, CFG.make(Object.assign({}, p.hidden, { seed: p.seed })));
+			cfg.overrides = {};
+			target = RP.headlines(state.runners[state.active].run(cfg));
+		} catch (e) {
+			state.challenge = was;
+			showError(e);
+			return;
+		}
+		state.puzzle = { id: p.key.slice(7), target };
+		p.goals = RP.puzzleGoals(target);
+		startChallenge(p);
+	}
+
+	function replayPanel() {
+		const box = el("div", "replaypanel");
+		const row = (label) => {
+			const r = el("div", "filters");
+			if (label) r.appendChild(el("span", "unit", label));
+			box.appendChild(r);
+			return r;
+		};
+		const button = (id, text, fn) => {
+			const b = el("button", null, text);
+			b.type = "button";
+			b.id = id;
+			b.addEventListener("click", fn);
+			return b;
+		};
+		const today = RP.dateKey(new Date());
+		const daily = RP.dailyChallenge(today);
+		row("Daily (" + today + ", budget " + daily.budget + "):")
+			.appendChild(button("replayDaily", "Play today's", () => {
+				closeModal(); startDaily(today);
+			}));
+		const unlocked = RP.campaignUnlocked(CHALLENGES, state.challengeProgress);
+		const tier = el("select");
+		tier.id = "replayTier";
+		tier.setAttribute("aria-label", "Campaign tier");
+		CHALLENGES.forEach((c, i) => {
+			const o = new Option((i + 1) + ". " + c.name +
+				(state.challengeProgress.cleared[c.key] ? " ✓" : i >= unlocked ? " (locked)" : ""), i);
+			o.disabled = i >= unlocked;
+			tier.appendChild(o);
+		});
+		tier.value = String(Math.min(unlocked, CHALLENGES.length) - 1);
+		const camp = row("Campaign:");
+		camp.appendChild(tier);
+		camp.appendChild(button("replayCampaign", "Play tier", () => {
+			closeModal(); startCampaign(Number(tier.value));
+		}));
+		const pid = el("input");
+		pid.id = "replayPuzzleId";
+		pid.value = today;
+		pid.setAttribute("aria-label", "Puzzle name");
+		const puz = row("Find the settings (≤3 dials, seed fixed):");
+		puz.appendChild(pid);
+		puz.appendChild(button("replayPuzzle", "Start puzzle", () => {
+			closeModal(); startPuzzle(pid.value.trim() || today);
+		}));
+		const paste = el("input");
+		paste.id = "replayPaste";
+		paste.placeholder = "BB1-…";
+		paste.setAttribute("aria-label", "Share code");
+		const codes = row("Code:");
+		codes.appendChild(paste);
+		codes.appendChild(button("replayLoad", "Load", () => {
+			if (applyCode(paste.value)) closeModal();
+		}));
+		codes.appendChild(button("replayRival", "Set as rival", () => {
+			if (importGhost(paste.value)) closeModal();
+		}));
+		codes.appendChild(button("replayCopy", "Copy mine", (e) => copyText(resultCode(), e.target, null, "result code")));
+		return box;
 	}
 
 	function reroll(opts) {
@@ -5276,6 +6237,8 @@
 		["gamelog", "Game logs", "Season"],
 		["notes", "Player notes", "Season"],
 		["universe", "Universe", "Universe"],
+		// Prediction, bracket pool and blind scout; see js/play.js.
+		["play", "Play", "Play"],
 	];
 
 	/* ----------------------------------------------------------- universe */
@@ -5444,12 +6407,17 @@
 	   chain, and the replay's next run then finds THAT running and stops —
 	   a world that is neither. Held until the last run of the replay ends. */
 	let universeReplay = false;
+	/* Measured ms per season of the last chain, for the estimate below. */
+	let universeSeasonMs = 0;
+	// At most one render per this many ms while a chain runs.
+	const UNIVERSE_RENDER_MS = 300;
 
 	function runUniverse(after, opts) {
 		opts = opts || {};
 		const U = global.Universe;
 		if (!state.files.length) {
-			setStatus("Load two or more class files to run a universe.");
+			setStatus("Load two or more class files to run a universe, or start a " +
+				"synthetic one (Universe tab → New synthetic universe).");
 			return;
 		}
 		if (state.universe.running) return;
@@ -5543,7 +6511,9 @@
 		/* SAY HOW LONG THIS WILL TAKE, BEFORE IT STARTS. Not a confirmation
 		   dialog: the chain is cancellable (see cancelUniverse). */
 		if (runnable.length >= UNIVERSE_SLOW_SEASONS) {
-			const secs = Math.max(1, Math.round(runnable.length * SEASON_MS / 1000));
+			// The last chain's measured pace when there is one.
+			const secs = Math.max(1, Math.round(runnable.length *
+				(universeSeasonMs || SEASON_MS) / 1000));
 			setStatus((extend ? "Extending" : "Running") + " " + runnable.length +
 				" seasons — about " + (secs >= 90
 					? Math.round(secs / 60) + " minutes" : secs + " seconds") +
@@ -5592,22 +6562,36 @@
 			settings: frozen,
 			baseSeed,
 			diags,
+			name: opts.identity ? opts.identity.name : state.universe.name || null,
+			createdAt: opts.identity ? opts.identity.createdAt : null,
 			make: (s) => CFG.make(s),
 			runnerFor: (i) => state.runners[i],
 			store: (i, res) => { state.results[i] = res; },
+			// A synthetic class gained or lost named returners: a fresh runner.
+			dataChanged: (i) => {
+				state.runners[i] = global.Engine.createRunner(state.files[i].data);
+				state.results[i] = null;
+			},
 			biographyFor: (fp) => U.biographyForFile(state.universeBiography, fp),
 			extrapolateGaps: state.cfg.extrapolateGaps !== false,
 			fullClass: UNIVERSE_FULL_CLASS,
 			anomalyHistory: ANOMALY_HISTORY,
 		});
+		const keepPlay = { followed: state.universe.followed || null,
+			dynasty: state.universe.dynasty || null };
 		state.universe = chain.universe;
+		if (!state.universe.followed) state.universe.followed = keepPlay.followed;
+		if (!state.universe.dynasty) state.universe.dynasty = keepPlay.dynasty;
 		render();
 		const total = chain.runnable.length;
+		const started = Date.now();
+		let lastRender = 0;
 		const finish = (cancelled) => {
 			const out = chain.finish({
 				cancelled, extrapolateYears: state.cfg.extrapolateYears || 0,
 			});
 			const u = state.universe;
+			if (total > 0) universeSeasonMs = (Date.now() - started) / total;
 			/* PASS THREE: the seasons a player actually played, on his own
 			   page — for the results that are live; an evicted one is linked
 			   when it is rebuilt. See linkCareers. */
@@ -5668,7 +6652,11 @@
 			evictUniverseResults(chain.runnable.slice(Math.max(0, k - UNIVERSE_LIVE_RESULTS + 1), k + 1)
 				.map((x) => x.index));
 			setStatus("Universe: season " + (k + 1) + " of " + total + "…", true);
-			render();
+			// finish() always renders, so the last season is never skipped.
+			if (Date.now() - lastRender >= UNIVERSE_RENDER_MS) {
+				render();
+				lastRender = Date.now();
+			}
 			setTimeout(() => step(k + 1), 0);
 		};
 		setTimeout(() => step(0), 0);
@@ -5715,11 +6703,131 @@
 		}, "Re-run");
 	}
 
+	/* A UNIVERSE FROM NOTHING. N consecutive synthetic classes, each drawn
+	   from hash(seed + season) (Universe.synthFile), run through the same
+	   cold chain as real files. Nothing is stored but the seed: a reload or
+	   an import regenerates the classes (see restoreSyntheticUniverse). */
+	const SYNTH_MAX_SEASONS = 60;
+	function newSyntheticUniverse(n, first) {
+		const U = global.Universe;
+		n = Math.max(2, Math.min(SYNTH_MAX_SEASONS, Math.round(Number(n) || 10)));
+		first = Number.isFinite(Number(first)) && Number(first) > 1900
+			? Math.round(Number(first)) : new Date().getFullYear() + 1;
+		if (state.universe.running) return;
+		pushUndo("started a synthetic universe");
+		const seed = state.cfg.seed && state.cfg.seed.trim()
+			? state.cfg.seed.trim() : "synth-" + Math.floor(Math.random() * 1e9);
+		state.cfg.seed = seed;
+		state.cfg.universe = true;
+		if ($("seed")) $("seed").value = seed;
+		paintConfig();
+		state.universeBiography = null;
+		installFiles(U.synthFiles(seed, first, n), [], { noRun: true });
+		state.tab = "universe";
+		runUniverse();
+	}
+
+	function syntheticUniverseDialog() {
+		const box = el("div");
+		box.appendChild(el("p", null,
+			"Start a universe with no class files: each season is a synthetic " +
+			"class drawn from the seed, so the same seed and settings rebuild the " +
+			"same world. The panel's seed is used when set."));
+		const mk = (label, value, min, max) => {
+			const row = el("label", "ctl", label + " ");
+			const inp = el("input");
+			inp.type = "number";
+			inp.min = String(min);
+			inp.max = String(max);
+			inp.value = String(value);
+			row.appendChild(inp);
+			box.appendChild(row);
+			return inp;
+		};
+		const nIn = mk("Seasons", 10, 2, SYNTH_MAX_SEASONS);
+		nIn.id = "synthSeasons";
+		const yIn = mk("First season", new Date().getFullYear() + 1, 1950, 2200);
+		yIn.id = "synthFirst";
+		modal("New synthetic universe", box, () => {
+			const n = Number(nIn.value);
+			const y = Number(yIn.value);
+			closeModal();
+			newSyntheticUniverse(n, y);
+		}, "Start");
+	}
+
+	/* REAL FORWARD SIMULATION. N more seasons past the last one played, as
+	   synthetic classes appended to the chain (an extension, so everything
+	   before stays put). Keyed on the world's own seed, so the same world
+	   simulated forward twice is the same future. extrapolateYears remains
+	   the cheap guess for when this is not wanted. */
+	function simulateForward(n) {
+		const U = global.Universe;
+		const u = state.universe;
+		const tail = universeTail();
+		if (!tail || u.running || !Number.isFinite(tail.lastSeason)) {
+			setStatus("Run a universe first — there is no finished season to continue from.");
+			return;
+		}
+		n = Math.max(1, Math.min(SYNTH_MAX_SEASONS, Math.round(Number(n) || 5)));
+		const files = U.synthFiles(tail.baseSeed || u.baseSeed, tail.lastSeason + 1, n);
+		state.cfg.universe = true;
+		if (state.files.length) installFiles(files, [], { append: true, noRun: true });
+		else installFiles(files, [], { noRun: true });
+		state.tab = "universe";
+		runUniverse(null, { extend: true });
+	}
+
+	function simulateForwardDialog() {
+		const box = el("div");
+		box.appendChild(el("p", null,
+			"Play more seasons past the last one, each on a synthetic class " +
+			"drawn from this world's seed — real games, not the extrapolated " +
+			"guesses of “Years past the last class”. The seasons already played " +
+			"are kept as they are."));
+		const row = el("label", "ctl", "Seasons ");
+		const inp = el("input");
+		inp.type = "number";
+		inp.id = "synthForward";
+		inp.min = "1";
+		inp.max = String(SYNTH_MAX_SEASONS);
+		inp.value = "5";
+		row.appendChild(inp);
+		box.appendChild(row);
+		modal("Simulate more seasons", box, () => {
+			const n = Number(inp.value);
+			closeModal();
+			simulateForward(n);
+		}, "Simulate");
+	}
+
+	/* Regenerate a saved synthetic universe's classes and replay it run by
+	   run, exactly as an import does, so a reload gets back the same world
+	   (with its results, not only its timeline). Only when every season in
+	   it is synthetic; a world with real classes waits for them. */
+	function restoreSyntheticUniverse() {
+		const U = global.Universe;
+		const u = state.universe;
+		if (state.files.length || !u || u.running || !Array.isArray(u.order) ||
+			!u.order.length || !u.order.every((o) => o && o.synth) || !u.settings) return false;
+		importUniverse(U.exportUniverse(Object.assign({}, u, {
+			biography: state.universeBiography || null,
+		})));
+		return true;
+	}
+
 	function exportUniverse(embedFiles) {
 		const U = global.Universe;
 		const u = state.universe;
 		if (!u.rows.length) {
 			setStatus("Build a timeline first.");
+			return;
+		}
+		/* A view has no class results of its own: embedding would write
+		   whatever standalone classes happen to be loaded. */
+		if (embedFiles && u.viewOnly) {
+			setStatus("This universe is a view — load its class files and import it " +
+				"again before exporting it with class files.", true);
 			return;
 		}
 		/* WHAT THE WORLD WAS BUILT UNDER, EVEN AFTER A RELOAD.
@@ -5763,33 +6871,458 @@
 		   which is every browser this tool supports except older Safari, where
 		   it falls back to the plain file rather than failing. */
 		const text = JSON.stringify(payload, null, embedFiles ? 0 : "\t");
+		const base = U.exportBaseName(u);
 		const done = (blob, name, note) => {
 			const a = document.createElement("a");
 			a.href = URL.createObjectURL(blob);
 			a.download = name;
+			markExported();
 			a.click();
 			setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-			setStatus(note);
+			setStatus(note + (u.truncated ? " Warning: this timeline was reloaded " +
+				"from browser storage, which keeps only the latest seasons, so its " +
+				"early history is missing from the file. Re-run it for a full export." : ""),
+				!!u.truncated);
 		};
 		if (!embedFiles) {
-			done(new Blob([text], { type: "application/json" }), "universe.json",
+			done(new Blob([text], { type: "application/json" }), base + ".json",
 				"Exported the universe (seeds and settings; load the class files beside it).");
 			return;
 		}
 		const plain = () => done(
-			new Blob([text], { type: "application/json" }), "universe-with-classes.json",
+			new Blob([text], { type: "application/json" }), base + "-with-classes.json",
 			"Exported the universe with its class files embedded.");
 		if (typeof CompressionStream !== "function") { plain(); return; }
 		try {
 			new Response(new Blob([text]).stream()
 				.pipeThrough(new CompressionStream("gzip"))).blob()
-				.then((gz) => done(gz, "universe-with-classes.json.gz",
+				.then((gz) => done(gz, base + "-with-classes.json.gz",
 					"Exported the universe with its class files embedded, gzipped (" +
 					Math.round(gz.size / 1024) + " KB from " +
 					Math.round(text.length / 1024) + " KB)."))
 				.catch(plain);
 		} catch (e) { plain(); }
 	}
+
+	/* The timeline or the records book as CSV, through esc() and its
+	   formula guard. */
+	function exportUniverseCsv(what) {
+		const U = global.Universe;
+		const u = state.universe;
+		if (!u.rows.length) { setStatus("Build a timeline first."); return; }
+		const records = what === "records";
+		const table = records ? U.recordsTable(u.records) : U.timelineTable(u.rows);
+		download(U.exportBaseName(u) + (records ? "-records.csv" : "-timeline.csv"),
+			csvJoin(table.map((r) => r.map(esc).join(","))), "text/csv");
+	}
+
+	/* A new world name, drawn from the programs and flavors in the code. */
+	let worldNameDraws = 0;
+	function randomizeUniverseName() {
+		const u = state.universe;
+		const flavors = (global.RatingsBuilder && global.RatingsBuilder.CLASS_FLAVORS || [])
+			.map((f) => f.label);
+		const schools = (u.rows || []).map((r) => r && r.champion).filter(Boolean);
+		u.name = global.Universe.randomName((u.baseSeed || "world") + "|" + (++worldNameDraws),
+			schools.length ? schools : (global.Colleges && global.Colleges.names) || [], flavors);
+		persist();
+		render();
+	}
+
+	/* ------------------------------------------ universe play (audit §5)
+
+	   Item 4, following a program; item 5, the dynasty goal; item 8, the
+	   IndexedDB saves; item 10, the season drawer. The pure parts live in
+	   js/universe.js (followedCard, dynastyProgress, seasonDetail). */
+
+	function followProgram(name) {
+		state.universe.followed = name || null;
+		persist();
+		render();
+		setStatus(name ? "Following " + name + ": its seasons are marked on the " +
+			"timeline and it leads the paper when it has news." : "No longer following a program.");
+	}
+
+	/* DYNASTY GOAL. The budget counts dials moved from the settings the
+	   goal started on, with the challenges' diff; the universe switch and
+	   the seed are not dials. */
+	function dynastyMoved(goal) {
+		if (!goal || !goal.startCfg) return 0;
+		return diffConfigs(CFG.make(goal.startCfg), CFG.make(state.cfg))
+			.filter((line) => !/^(universe|seed) /.test(line)).length;
+	}
+
+	function dynastyStatus() {
+		const U = global.Universe;
+		const u = state.universe;
+		const g = u && u.dynasty;
+		if (!g || !U) return null;
+		let hist = [];
+		try { hist = U.programHistory(u, g.program, (state.results || []).filter(Boolean)); }
+		catch (e) { hist = []; }
+		return U.dynastyProgress(g, hist, dynastyMoved(g));
+	}
+
+	function dynastyDialog() {
+		const U = global.Universe;
+		const u = state.universe;
+		const box = el("div");
+		box.appendChild(el("p", null,
+			"Take a program to a level, or to a title, within a number of seasons " +
+			"— moving at most a budget of settings from where you start. Rebuild " +
+			"the universe as you tune; the goal is scored off its program history."));
+		const results = (state.results || []).filter(Boolean);
+		let low = [];
+		try { low = U.lowPrestige(u, results, 60); } catch (e) { low = []; }
+		const prog = el("select");
+		prog.setAttribute("aria-label", "Program");
+		for (const x of low) prog.appendChild(new Option(x.name + " (level " + x.level + ")", x.name));
+		if (!low.length) {
+			box.appendChild(el("p", "hint", "Build a timeline first: the program list " +
+				"comes from its history."));
+		}
+		const kind = el("select");
+		kind.setAttribute("aria-label", "Goal");
+		kind.appendChild(new Option("reach a level", "level"));
+		kind.appendChild(new Option("win a national title", "title"));
+		const num = (label, v, lo, hi) => {
+			const lab = el("label", "check", label + " ");
+			const inp = el("input");
+			inp.type = "number";
+			inp.min = String(lo);
+			inp.max = String(hi);
+			inp.value = String(v);
+			lab.appendChild(inp);
+			return [lab, inp];
+		};
+		const [levLab, lev] = num("level", 70, 10, 99);
+		const [seaLab, sea] = num("within seasons", 5, 1, 60);
+		const [budLab, bud] = num("settings budget", 3, 0, 20);
+		for (const n of [prog, kind, levLab, seaLab, budLab]) {
+			const row = el("div", "filters");
+			row.appendChild(n);
+			box.appendChild(row);
+		}
+		modal("Dynasty goal", box, () => {
+			closeModal();
+			if (!prog.value) return;
+			const clamp = (x, lo, hi, d) => (Number.isFinite(x) ? Math.max(lo, Math.min(hi, x)) : d);
+			startDynasty({
+				program: prog.value, kind: kind.value,
+				level: clamp(Number(lev.value), 10, 99, 70),
+				seasons: clamp(Math.round(Number(sea.value)), 1, 60, 5),
+				budget: clamp(Math.round(Number(bud.value)), 0, 20, 3),
+			});
+		}, "Start");
+	}
+
+	function startDynasty(goal) {
+		pushUndo("started a dynasty goal");
+		goal.startCfg = JSON.parse(JSON.stringify(CFG.make(state.cfg)));
+		goal.startedAt = new Date().toISOString();
+		state.universe.dynasty = goal;
+		state.universe.followed = goal.program;
+		persist();
+		render();
+		const st = dynastyStatus();
+		setStatus("Dynasty goal: " + goal.program + " — " + (goal.kind === "title"
+			? "a national title" : "level " + goal.level) + " within " + goal.seasons +
+			" seasons, " + goal.budget + " settings to move." + (st ? " Now: " + st.status + "." : ""));
+	}
+
+	function abandonDynasty() {
+		state.universe.dynasty = null;
+		persist();
+		render();
+		setStatus("Dynasty goal abandoned.");
+	}
+
+	/* THE SEASON DRAWER: one timeline row, its config and carry snapshot,
+	   and the threads that touch it. */
+	function seasonDrawer(i) {
+		const U = global.Universe;
+		const d = U.seasonDetail(state.universe, i);
+		if (!d) return;
+		const r = d.row;
+		const box = el("div", "season-drawer");
+		const dl = el("div", "note");
+		const line = (k, v) => dl.appendChild(el("div", null, k + ": " + v));
+		line("Champion", (r.champion || "—") + (r.champSeed ? " (No. " + r.champSeed + ")" : "") +
+			(r.runnerUp ? ", over " + r.runnerUp : ""));
+		line("AP No. 1", r.apOne || "—");
+		if (r.finalFour && r.finalFour.length) {
+			line("Final Four", r.finalFour.map((x) => (x && typeof x === "object" ? x.team || x.name : x)).join(", "));
+		}
+		line("Player of the year", r.poy ? r.poy.name + " (" + (r.poy.school || r.poy.club || "?") + ")" : "—");
+		line("No. 1 pick", r.no1 ? r.no1.name + " (" + (r.no1.school || r.no1.club || "?") + ")" : "—");
+		line("Flavor", r.flavor || "—");
+		line("Sideline changes", String(r.coachChanges || 0));
+		if (r.realignment && r.realignment.length) line("Realignment", r.realignment.join("; "));
+		line("Seed", String(r.seed || "—") + (r.fileName ? " · " + r.fileName : ""));
+		if (r.extrapolated) line("Note", "extrapolated: no class file for this season");
+		box.appendChild(dl);
+		box.appendChild(el("h5", null, "What the season was handed"));
+		if (d.cfg) {
+			const c = el("div", "note");
+			c.appendChild(el("div", null, "Chain position " + d.cfg.position + ", seed " + d.cfg.seed));
+			c.appendChild(el("div", null, d.cfg.returners + " returner sources, " +
+				d.cfg.pastRoster + " past-roster entries, " + d.cfg.alumni + " alumni in memory"));
+			if (d.carry) {
+				c.appendChild(el("div", null, "Carry: " + d.carry.programs + " programs, " +
+					d.carry.coaches + " coaches"));
+				c.appendChild(el("div", null, "Strongest going in: " + d.carry.topLevels
+					.map((x) => x.team + " " + x.level).join(", ")));
+				const t = Object.keys(d.carry.titles).sort((a, b) => d.carry.titles[b] - d.carry.titles[a]);
+				if (t.length) {
+					c.appendChild(el("div", null, "Banners going in: " + t.slice(0, 6)
+						.map((k) => k + " " + d.carry.titles[k]).join(", ")));
+				}
+			} else c.appendChild(el("div", null, "First season: no carry-over."));
+			if (d.cfg.settings) {
+				const moved = diffConfigs(CFG.make({}), CFG.make(d.cfg.settings));
+				c.appendChild(el("div", null, "Settings vs defaults: " +
+					(moved.length ? moved.slice(0, 12).join("; ") + (moved.length > 12 ? "; …" : "")
+						: "all defaults")));
+			}
+			box.appendChild(c);
+		} else {
+			box.appendChild(el("p", "hint", r.extrapolated
+				? "An extrapolated season has no config: nothing was simulated."
+				: "The config snapshot is held for the session only; re-run the universe to see it."));
+		}
+		box.appendChild(el("h5", null, "Threads touching " + r.season));
+		box.appendChild(d.threads.length
+			? el("div", "note", d.threads.map((t) => t.text).join("\n"))
+			: el("p", "hint", "None."));
+		modal("Season " + r.season, box);
+	}
+
+	/* INDEXEDDB SAVES (item 8).
+
+	   The whole universe, untruncated, in IndexedDB: an autosave written
+	   whenever persist() runs, and UNIVERSE_SLOTS named slots. Settings stay
+	   in localStorage, and so does the bounded universe copy, which is what
+	   a browser without IndexedDB (or with it blocked) falls back to. Every
+	   access is wrapped; a failure resolves to null rather than throwing. */
+	const IDB_NAME = "bbgm-draft-workshop";
+	const IDB_STORE = "universes";
+	const UNIVERSE_SLOTS = 5;
+	const AUTO_SLOT = "autosave";
+	let idbPromise = null;
+	let idbOk = null;
+	let autosaveReady = false;
+	let autosaveTimer = null;
+
+	function idbOpen() {
+		if (idbPromise) return idbPromise;
+		idbPromise = new Promise((resolve) => {
+			try {
+				if (typeof indexedDB === "undefined" || !indexedDB) { resolve(null); return; }
+				const req = indexedDB.open(IDB_NAME, 1);
+				req.onupgradeneeded = () => {
+					try { req.result.createObjectStore(IDB_STORE, { keyPath: "slot" }); } catch (e) { /* exists */ }
+				};
+				req.onsuccess = () => resolve(req.result);
+				req.onerror = () => resolve(null);
+				req.onblocked = () => resolve(null);
+			} catch (e) { resolve(null); }
+		}).then((db) => { idbOk = !!db; return db; });
+		return idbPromise;
+	}
+
+	// One request in its own transaction; resolves with its result, or null.
+	function idbRequest(mode, make) {
+		return idbOpen().then((db) => new Promise((resolve) => {
+			if (!db) { resolve(null); return; }
+			try {
+				const tx = db.transaction(IDB_STORE, mode);
+				const req = make(tx.objectStore(IDB_STORE));
+				tx.oncomplete = () => resolve(req && req.result !== undefined ? req.result : null);
+				tx.onerror = () => resolve(null);
+				tx.onabort = () => resolve(null);
+			} catch (e) { resolve(null); }
+		})).catch(() => null);
+	}
+
+	// The universe in full: no row, thread, alumni or registry cap.
+	function universeFull() {
+		const u = state.universe;
+		return JSON.parse(JSON.stringify(Object.assign(universeForStorage(), {
+			rows: u.rows.slice(),
+			threads: (u.threads || []).slice(),
+			alumni: (u.alumni || []).slice(),
+			registry: u.registry || null,
+			programs: u.programs || null,
+			recruiting: u.recruiting || null,
+			truncated: !!u.truncated,
+			tail: u.running ? null : (u.tail || null),
+		})));
+	}
+
+	function slotRecord(slot, name) {
+		const u = state.universe;
+		return { slot, name: name || u.name || "Universe", savedAt: new Date().toISOString(),
+			seasons: u.rows.length, universe: universeFull() };
+	}
+
+	function applyUniverseSave(su) {
+		state.universe = universeFromSaved(su);
+		state.universeBiography = su.biography && typeof su.biography === "object"
+			? su.biography : null;
+	}
+
+	function scheduleAutosave() {
+		if (!autosaveReady || idbOk === false) return;
+		clearTimeout(autosaveTimer);
+		autosaveTimer = setTimeout(() => {
+			try {
+				const u = state.universe;
+				if (u.running) return;
+				if (!u.rows.length) {
+					idbRequest("readwrite", (s) => s.delete(AUTO_SLOT));
+					return;
+				}
+				idbRequest("readwrite", (s) => s.put(slotRecord(AUTO_SLOT)));
+			} catch (e) { /* the localStorage copy still stands */ }
+		}, 600);
+	}
+
+	/* At startup: the autosave replaces the bounded localStorage copy. No
+	   autosave is written until this has run, so a truncated copy never
+	   overwrites a full one. */
+	function loadAutosave() {
+		return idbRequest("readonly", (s) => s.get(AUTO_SLOT)).then((rec) => {
+			try {
+				/* Only the same world, and no less of it: the autosave is
+				   debounced, so a reload straight after persist() can find the
+				   PREVIOUS universe there, which would replace this one. */
+				const cur = state.universe;
+				const same = rec && rec.universe &&
+					(rec.universe.createdAt || null) === (cur.createdAt || null) &&
+					(rec.universe.baseSeed || null) === (cur.baseSeed || null) &&
+					Array.isArray(rec.universe.rows) &&
+					rec.universe.rows.length >= (cur.rows || []).length;
+				if (same && !cur.running && !(cur.cfgs && Object.keys(cur.cfgs).length)) {
+					applyUniverseSave(rec.universe);
+				}
+			} catch (e) { /* keep the localStorage copy */ }
+			autosaveReady = true;
+			render();
+		});
+	}
+
+	function listUniverseSlots() {
+		return idbRequest("readonly", (s) => s.getAll()).then((all) => {
+			const out = [];
+			for (let i = 1; i <= UNIVERSE_SLOTS; i++) {
+				const r = (all || []).filter((x) => x && x.slot === "slot" + i)[0];
+				out.push(r ? { slot: r.slot, name: r.name, savedAt: r.savedAt, seasons: r.seasons }
+					: { slot: "slot" + i, empty: true });
+			}
+			return out;
+		});
+	}
+
+	function saveUniverseSlot(slot, name) {
+		if (!/^slot[1-9]$/.test(slot) || Number(slot.slice(4)) > UNIVERSE_SLOTS) {
+			return Promise.resolve(false);
+		}
+		if (!state.universe.rows.length || state.universe.running) {
+			setStatus("Build a timeline first.");
+			return Promise.resolve(false);
+		}
+		let rec;
+		try { rec = slotRecord(slot, name); } catch (e) { showError(e); return Promise.resolve(false); }
+		return idbRequest("readwrite", (s) => s.put(rec)).then((ok) => {
+			setStatus(ok ? "Saved “" + rec.name + "” (" + rec.seasons + " seasons, in full) to " + slot + "."
+				: "Could not save: IndexedDB is not available in this browser.", !ok);
+			return !!ok;
+		});
+	}
+
+	function loadUniverseSlot(slot) {
+		if (state.universe.running) return Promise.resolve(false);
+		return idbRequest("readonly", (s) => s.get(slot)).then((rec) => {
+			if (!rec || !rec.universe || !Array.isArray(rec.universe.rows)) {
+				setStatus("That slot is empty.");
+				return false;
+			}
+			try {
+				pushUndo("loaded a saved universe");
+				applyUniverseSave(rec.universe);
+			} catch (e) { showError(e); return false; }
+			state.tab = "universe";
+			persist();
+			render();
+			setStatus("Loaded “" + rec.name + "” (" + rec.seasons + " seasons). Load its " +
+				"class files and rebuild to open its seasons on the other tabs.");
+			return true;
+		});
+	}
+
+	function deleteUniverseSlot(slot) {
+		return idbRequest("readwrite", (s) => s.delete(slot)).then(() => {
+			setStatus("Cleared " + slot + ".");
+			return true;
+		});
+	}
+
+	function universeStorageInfo() {
+		return { idb: idbOk, slots: UNIVERSE_SLOTS };
+	}
+
+	function universeSlotsDialog() {
+		const box = el("div");
+		const list = el("div", "note universe-slots");
+		box.appendChild(el("p", null, "Saved universes are stored in full in this " +
+			"browser's IndexedDB — no season, thread or career cap."));
+		box.appendChild(list);
+		const bar = el("div", "filters");
+		const sel = el("select");
+		sel.setAttribute("aria-label", "Slot");
+		const nm = el("input");
+		nm.type = "text";
+		nm.placeholder = "name";
+		nm.value = state.universe.name || "";
+		bar.appendChild(sel);
+		bar.appendChild(nm);
+		box.appendChild(bar);
+		const paint = () => listUniverseSlots().then((slots) => {
+			list.innerHTML = "";
+			sel.innerHTML = "";
+			if (idbOk === false) {
+				list.appendChild(el("div", "hint", "IndexedDB is not available here; the " +
+					"universe is kept (bounded) in localStorage only."));
+			}
+			for (const x of slots) {
+				sel.appendChild(new Option(x.slot + (x.empty ? " (empty)" : " — " + x.name), x.slot));
+				const row = el("div", "rowflex");
+				row.appendChild(el("span", null, x.slot + ": " + (x.empty ? "empty"
+					: x.name + " · " + x.seasons + " seasons · " + String(x.savedAt || "").slice(0, 16).replace("T", " "))));
+				if (!x.empty) {
+					const ld = el("button", "tiny", "Load");
+					ld.addEventListener("click", () => { closeModal(); loadUniverseSlot(x.slot); });
+					const del = el("button", "tiny warn", "Delete");
+					del.addEventListener("click", () => { deleteUniverseSlot(x.slot).then(paint); });
+					row.appendChild(ld);
+					row.appendChild(del);
+				}
+				list.appendChild(row);
+			}
+		});
+		paint();
+		modal("Universe save slots", box, () => {
+			const slot = sel.value;
+			const name = nm.value.trim();
+			closeModal();
+			saveUniverseSlot(slot, name);
+		}, "Save current to slot");
+	}
+
+
+	/* What a reload keeps: the caps universeForStorage writes under. */
+	const PERSIST_CAPS = { rows: PERSIST_ROWS, threads: PERSIST_THREADS,
+		alumni: PERSIST_ALUMNI, registry: PERSIST_REGISTRY };
 
 	/* THE WHOLE UNIVERSE AS ONE PLAYERS FILE.
 
@@ -5806,6 +7339,11 @@
 			setStatus("Build a timeline first.");
 			return;
 		}
+		if (state.universe.viewOnly) {
+			setStatus("This universe is a view — load its class files and import it " +
+				"again before exporting its players.", true);
+			return;
+		}
 		try {
 			/* The whole point is the seasons, so stats, prior seasons and
 			   awards are always on for this route whatever the export menu
@@ -5820,7 +7358,8 @@
 				{ type: "application/json" });
 			const a = document.createElement("a");
 			a.href = URL.createObjectURL(blob);
-			a.download = "universe-players.json";
+			a.download = global.Universe.exportBaseName(state.universe) + "-players.json";
+			markExported();
 			a.click();
 			setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 			setStatus("Exported " + out.file.players.length + " players across " +
@@ -5945,6 +7484,18 @@
 				}
 			}
 			if (loaded.length) installFiles(loaded, problems);
+		}
+		/* A synthetic season needs no file: it is regenerated from the seed
+		   its order entry records. Installed without a run; the replay
+		   below is the run. */
+		{
+			const loadedFps = new Set(state.files.map((f) => f.fingerprint));
+			const syn = (Array.isArray(json.order) ? json.order : [])
+				.filter((o) => o && o.synth && !loadedFps.has(o.fingerprint))
+				.map((o) => U.synthFromOrder(o)).filter(Boolean);
+			if (syn.length) {
+				installFiles(syn, [], { append: state.files.length > 0, noRun: true });
+			}
 		}
 		const have = new Set(state.files.map((f) => f.fingerprint));
 		const seasons = json.seasons || [];
@@ -6073,11 +7624,14 @@
 		} else {
 			setStatus("Replaying " + played.length + " seasons." + note);
 		}
+		state.universe.followed = typeof json.followed === "string" ? json.followed : null;
+		state.universe.dynasty = json.dynasty && typeof json.dynasty === "object" ? json.dynasty : null;
 		const steps = plan.steps;
 		const runStep = (i) => {
 			const s = steps[i];
 			const last = i === steps.length - 1;
-			const o = { settings: lockOn(s.settings), replaying: !last };
+			const o = { settings: lockOn(s.settings), replaying: !last,
+				identity: { name: json.name, createdAt: json.createdAt } };
 			if (s.kind === "extend") { o.extend = true; o.only = s.only; }
 			else if (s.kind === "resume") o.resumeFrom = s.from;
 			else if (s.only) o.only = s.only;
@@ -6256,13 +7810,21 @@
 	}
 
 	function render() {
+		paintExportLabel();
 		const tabs = $("tabs");
 		tabs.innerHTML = "";
 		tabs.setAttribute("role", "tablist");
 		let lastGroup = null;
+		// One span per group, so the strip wraps between groups, not inside one.
+		let set = null;
 		TABS.forEach(([key, label, group], i) => {
 			if (group !== lastGroup) {
-				tabs.appendChild(el("span", "tabgroup", group));
+				set = el("span", "tabset");
+				set.setAttribute("role", "presentation");
+				const cap = el("span", "tabgroup", group);
+				cap.setAttribute("aria-hidden", "true");
+				set.appendChild(cap);
+				tabs.appendChild(set);
 				lastGroup = group;
 			}
 			const b = el("button", key === state.tab ? "active" : "", label);
@@ -6274,13 +7836,17 @@
 				const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
 				if (!d) return;
 				e.preventDefault();
-				state.tab = TABS[(i + d + TABS.length) % TABS.length][0];
-				persist();
-				render();
+				// Through showTab, for the history entry, and past Compare
+				// when nothing is pinned, as the number keys already were.
+				let j = (i + d + TABS.length) % TABS.length;
+				if (TABS[j][0] === "compare" && !state.pinned) {
+					j = (j + d + TABS.length) % TABS.length;
+				}
+				showTab(TABS[j][0]);
 				const next = tabs.querySelector("button.active");
 				if (next) next.focus();
 			});
-			tabs.appendChild(b);
+			set.appendChild(b);
 		});
 		/* On a phone the tab strip is one sideways-scrolling row; keep the
 		   active tab in it rather than off the right edge. */
@@ -6294,6 +7860,7 @@
 				}
 			}
 		}
+		tabEdgeCue();
 		const view = $("view");
 		/* Every interaction rebuilds this view from scratch — clicking a row to
 		   open the editor, ticking a sort level, typing in a filter. With a
@@ -6354,6 +7921,8 @@
 		// The archetype editor reports what the last run actually produced, so
 		// it has to be repainted when there is a new run to report.
 		paintArchWeights();
+		// An open Play game hides every results tab until it is revealed.
+		if (global.Play && global.Play.gated(state, res)) { global.Play.gateView(view); return; }
 		(V[state.tab] || V.players)(view, res);
 		restoreScroll(view, scrolls);
 		restoreFocus(view, focus);
@@ -7109,6 +8678,7 @@
 	let modalOk = null;
 	let modalTrigger = null;      // the element that opened the modal
 	let modalTrapCleanup = null;  // focus-trap teardown
+	let modalValidate = null;     // returns false to keep the dialog open
 
 	/* `opts.focusCancel`: a destructive confirmation starts on Cancel, so an
 	   Enter pressed out of habit does not throw the work away. */
@@ -7120,6 +8690,7 @@
 		b.appendChild(body);
 		$("modalOk").textContent = okLabel || (onOk ? "OK" : "Close");
 		modalOk = onOk;
+		modalValidate = opts && opts.validate || null;
 		/* An information dialog has one way out. Showing "Close" beside a
 		   "Cancel" that did the same thing asked a question there was no
 		   answer to. */
@@ -7160,9 +8731,38 @@
 		modal(title, box, onOk, okLabel, { focusCancel: true });
 	}
 
+	/* The themed stand-in for window.prompt: one text box, a label, an inline
+	   error. `check(value)` returns an error sentence or "" — the dialog stays
+	   open until it passes. onOk gets the trimmed value. */
+	function promptModal(title, label, value, onOk, opts) {
+		const o = opts || {};
+		const box = el("div");
+		const lab = el("label", "promptlabel", label);
+		const input = el("input");
+		input.type = "text";
+		input.id = "modalPrompt";
+		input.value = value || "";
+		if (o.placeholder) input.placeholder = o.placeholder;
+		lab.htmlFor = "modalPrompt";
+		const err = el("p", "hint promptError");
+		err.setAttribute("role", "alert");
+		box.appendChild(lab);
+		box.appendChild(input);
+		box.appendChild(err);
+		const check = () => {
+			const msg = o.check ? o.check(input.value.trim()) : "";
+			err.textContent = msg || "";
+			if (msg) input.focus();
+			return !msg;
+		};
+		modal(title, box, () => onOk(input.value.trim()), o.okLabel || "OK", { validate: check });
+		setTimeout(() => { input.focus(); input.select(); }, 0);
+	}
+
 	function closeModal() {
 		$("modal").hidden = true;
 		modalOk = null;
+		modalValidate = null;
 		if (modalTrapCleanup) { modalTrapCleanup(); modalTrapCleanup = null; }
 		// Restore focus to the element that triggered the modal
 		if (modalTrigger && typeof modalTrigger.focus === "function") {
@@ -7173,7 +8773,9 @@
 
 	/* ------------------------------------------------------------- clipboard */
 
-	function copyText(text, button, restore) {
+	/* `what` names the thing copied for the toast ("seed", "link"); without
+	   it the button's resting label stands in. */
+	function copyText(text, button, restore, what) {
 		/* The label to put back is the one the button HAS, not one the caller
 		   remembered: the header's copy-link button is an icon (🔗) and the
 		   call site passed the word "Link", so one copy replaced the icon with
@@ -7193,7 +8795,10 @@
 			   confirmation at all — and the pill itself is not a button, so
 			   there was not even that. announce() is the tool's own live
 			   region and costs nothing. */
-			announce("Copied: " + String(text).slice(0, 60));
+			const name = what || (button && (button.getAttribute("aria-label") ||
+				button.dataset.restLabel || "").replace(/^Copy\s*/i, "").trim()) || "text";
+			// The toast carries its own live region; no second announcement.
+			toast("Copied " + name + " to the clipboard.");
 			if (!button) return;
 			button.textContent = "Copied ✓";
 			clearTimeout(Number(button.dataset.copyTimer) || 0);
@@ -7202,16 +8807,42 @@
 			}, 1400));
 		};
 		function fallback() {
+			// Put focus back afterwards: the textarea took it, and an async
+			// fallback could pull it out of whatever opened in the meantime.
+			const had = document.activeElement;
 			const ta = document.createElement("textarea");
 			ta.value = text;
 			document.body.appendChild(ta);
 			ta.select();
 			try { document.execCommand("copy"); done(); } catch (e) { /* nothing to do */ }
 			ta.remove();
+			if (had && had !== document.body && had.isConnected && had.focus) had.focus();
 		}
 		if (navigator.clipboard && navigator.clipboard.writeText) {
 			navigator.clipboard.writeText(text).then(done, fallback);
 		} else fallback();
+	}
+
+	/* UNSAVED WORK, conservatively: locks and player edits (state.overrides)
+	   or universe seasons that changed since the last file this tab wrote —
+	   or since the page loaded, since what storage restored is not new. A
+	   fresh sample with no locks and no universe is never "unsaved". */
+	let exportedSig = null;
+	function workSig() {
+		const u = state.universe;
+		/* The universe by its LAST season and name, not its row count: a
+		   reload replays the stored timeline and rebuilds rows it already
+		   had, which is not new work. */
+		const last = u && u.rows && u.rows.length ? u.rows[u.rows.length - 1] : null;
+		return JSON.stringify(state.overrides || {}) + "|" +
+			(last ? last.season : "") + "|" + (u && u.name || "");
+	}
+	function markExported() { exportedSig = workSig(); }
+	function unsavedWork() {
+		const u = state.universe;
+		const any = Object.keys(state.overrides || {}).length > 0 ||
+			!!(u && u.rows && u.rows.length);
+		return any && workSig() !== exportedSig;
 	}
 
 	/* --------------------------------------------------------------- export */
@@ -7298,6 +8929,7 @@
 		   ever naming the file — so "which of these four JSONs is the one I
 		   just made" was unanswerable from inside the tool. */
 		lastDownload = name;
+		markExported();
 		setStatus("Wrote " + name + ".");
 		return name;
 	}
@@ -7371,7 +9003,8 @@
 		   retypes the whole column as text. Infinity has the same problem. */
 		if (typeof v === "number" && !Number.isFinite(v)) return "";
 		let s = v === undefined || v === null ? "" : String(v);
-		if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+		/* Strings only: a negative number is data, and "'-3" reads as text. */
+		if (typeof v !== "number" && /^[=+\-@\t\r]/.test(s)) s = "'" + s;
 		return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 	}
 
@@ -8472,15 +10105,15 @@
 		}
 		hold.addEventListener("click", () => {
 			const suggested = String.fromCharCode(65 + heldBatches.length);
-			const name = window.prompt("Name this batch:", suggested);
-			if (name === null) return;
-			const label = (name.trim() || suggested);
-			heldBatches = heldBatches.filter((h) => h.label !== label);
-			heldBatches.push({
-				label, rows: rows.slice(), seed: batchBaseSeed, cfg: effectiveCfg(),
-			});
-			setStatus("Batch held as “" + label + "”. Change a setting and run another.");
-			renderBatch(rows);
+			promptModal("Hold this batch", "Name this batch", suggested, (name) => {
+				const label = name || suggested;
+				heldBatches = heldBatches.filter((h) => h.label !== label);
+				heldBatches.push({
+					label, rows: rows.slice(), seed: batchBaseSeed, cfg: effectiveCfg(),
+				});
+				setStatus("Batch held as “" + label + "”. Change a setting and run another.");
+				renderBatch(rows);
+			}, { okLabel: "Hold", check: (v) => v.length > 40 ? "Keep the name under 40 characters." : "" });
 		});
 		head.appendChild(hold);
 		for (const h of heldBatches) {
@@ -8621,8 +10254,17 @@
 		}
 	}
 
-	function runBatchInline(file, cfg, n) {
-		const runner = global.Engine.createRunner(file.data);
+	function runBatchInline(file, cfgLive, n) {
+		/* The worker is handed a structured clone of the settings and the
+		   file at click time; this path used to keep the live objects
+		   (state.overrides, the loaded file) across timer steps, and the
+		   page's own work between steps could reach them, so on a slow
+		   machine the fallback's later classes drifted from the worker's.
+		   The same copy, taken once, makes the two paths the same run. */
+		const copy = typeof structuredClone === "function" ? structuredClone
+			: (x) => JSON.parse(JSON.stringify(x));
+		const cfg = copy(cfgLive);
+		const runner = global.Engine.createRunner(copy(file.data));
 		const rows = [];
 		let i = 0;
 		const step = () => {
@@ -8742,17 +10384,31 @@
 	}
 
 	Object.assign(global.App, {
+		effectiveCfg, activeFile,
 		state, render, run, persist, openEditor, revealPlayer, visibleRows,
 		editorPanel, modal, closeModal,
 		clearLock, showPlayer, showTeam, showGame,
 		runUniverse, cancelUniverse, resumeUniverseDialog, exportUniverse, exportUniversePlayers,
+		newSyntheticUniverse, syntheticUniverseDialog, simulateForward, simulateForwardDialog,
+		restoreSyntheticUniverse,
+		exportUniverseCsv, randomizeUniverseName, PERSIST_CAPS,
+		followProgram, dynastyDialog, dynastyStatus, abandonDynasty, seasonDrawer,
+		universeSlotsDialog, saveUniverseSlot, loadUniverseSlot, deleteUniverseSlot,
+		listUniverseSlots, universeStorageInfo,
 		importUniverse, showPlayerInFile, universeCareers, liveResults,
 		// Exposed for tools/uismoke.js, which loads files without a file input.
 		installFiles, paintConfig,
-		copyText, announce, bulkApply, bulkShiftOvr, bulkLockAsIs, bulkClear, refreshBulkBar,
-		snapshot, rerollUntilDialog, rerollUntil, restoreSession, randomizeSettings,
+		copyText, announce, toast, promptModal, undoTo, undoHistoryDialog,
+		unsavedWork, markExported, editSeedInline, applySeed, bulkApply, bulkShiftOvr, bulkLockAsIs, bulkClear, refreshBulkBar,
+		snapshot, rerollUntilDialog, rerollUntil, dailySeed, CHALLENGES, startChallenge,
+		challengeResultText, scoreChallenge, restoreSession, randomizeSettings,
 		REROLL_PREDICATES,
 		exportCsv, setStatus, showError, indexSnapshot,
+		// The replay layer, for tools/uismoke.js.
+		replayStore, replayDialog, replayAfterRun, chaosDraft, className,
+		// Replayability (js/replay.js), for tools/uismoke.js.
+		findChallenge, resultCode, applyCode, importGhost, startDaily, startCampaign,
+		startPuzzle,
 	});
 
 	/* AN UNCAUGHT ERROR SAYS SO. A throw inside a listener used to leave
@@ -8782,6 +10438,13 @@
 
 	const saved = restore();
 	readHash();
+	// What came back from storage is not new work; only changes after this do.
+	markExported();
+	window.addEventListener("beforeunload", (e) => {
+		if (!unsavedWork()) return;
+		e.preventDefault();
+		e.returnValue = "";
+	});
 	lastWrittenHash = location.hash || "";
 	/* A link pasted into a tab that is already open changes only the hash,
 	   which reloads nothing — so the page went on showing the old class. The
@@ -8820,6 +10483,25 @@
 	bindRandomize();
 	bindSurprise();
 	bindChallenges();
+	bindReplay();
+	bindHeaderMore();
+	labelIconButtons();
+	// Buttons added to the tools group later (replay, daily…) get labelled too.
+	if ($("headerTools") && typeof MutationObserver !== "undefined") {
+		new MutationObserver(labelIconButtons).observe($("headerTools"), { childList: true });
+	}
+	/* body.noclass while the empty state shows (CSS collapses the settings
+	   and hides the Settings button). A class, not body:has(): :has on body
+	   re-checks on every mutation of a forty-column table. */
+	{
+		const syncNoClass = () => document.body.classList.toggle("noclass", !$("empty").hidden);
+		syncNoClass();
+		if (typeof MutationObserver !== "undefined") {
+			new MutationObserver(syncNoClass).observe($("empty"), { attributes: true, attributeFilter: ["hidden"] });
+		}
+	}
+	$("tabs").addEventListener("scroll", tabEdgeCue, { passive: true });
+	window.addEventListener("resize", tabEdgeCue);
 	bindSettingFilter();
 	bindFiles();
 	applyTheme();
@@ -8827,6 +10509,12 @@
 	paintHistory();
 	paintUndo();
 	if (saved) applyOpenGroups(saved.open);
+	/* The full autosave first, then a synthetic universe is rebuilt from
+	   whatever it restored: it has no files to re-drop, only its seed. */
+	const afterAutosave = () => {
+		try { restoreSyntheticUniverse(); } catch (e) { showError(e); }
+	};
+	Promise.resolve().then(loadAutosave).then(afterAutosave, afterAutosave);
 
 	$("errClose").addEventListener("click", clearError);
 	$("warnClose").addEventListener("click", () => { $("warnBanner").hidden = true; });
@@ -8874,6 +10562,11 @@
 			apply();
 		};
 		btn.addEventListener("click", toggle);
+		const fab = $("btnSettingsFab");
+		if (fab) fab.addEventListener("click", () => {
+			if (!isOpen()) toggle();
+			$("settings").scrollIntoView({ behavior: "smooth", block: "start" });
+		});
 		document.addEventListener("keydown", (e) => {
 			if (e.key !== "s" || e.ctrlKey || e.metaKey || e.altKey) return;
 			const tag = (e.target && e.target.tagName) || "";
@@ -8903,6 +10596,7 @@
 	// would pass it the click event.
 	$("btnRerun").addEventListener("click", () => run());
 	$("btnUndo").addEventListener("click", undo);
+	$("btnUndo").addEventListener("contextmenu", (e) => { e.preventDefault(); undoHistoryDialog(); });
 	$("btnExport").addEventListener("click", () => {
 		exportActive(currentExportOpts());
 	});
@@ -8939,7 +10633,16 @@
 		const f = e.target.files[0];
 		if (!f) return;
 		const r = new FileReader();
-		r.onload = () => importLocksCsv(String(r.result));
+		/* The same check the drag-and-drop path makes: with no class result
+		   planLockImport returned null and the import did nothing, silently. */
+		r.onload = () => {
+			const text = String(r.result);
+			if (!state.files.length) {
+				showError(new Error("Load a draft class first — a locks CSV is " +
+					"applied to the class on screen."));
+			} else if (state.results[state.active]) importLocksCsv(text);
+			else run(() => importLocksCsv(text));
+		};
 		r.readAsText(f);
 		e.target.value = "";
 	});
@@ -8949,6 +10652,9 @@
 		state.pinned = indexSnapshot(snapshot(res));
 		state.tab = "compare";
 		setStatus("Pinned seed " + res.seed + " as the comparison baseline.");
+		// Saved at once: the baseline is the one thing meant to outlive the class.
+		pushNav();
+		persist();
 		render();
 	});
 	/* The card layout follows the viewport in "auto" mode, so a rotation or a
@@ -8990,7 +10696,7 @@
 	$("seedPill").addEventListener("click", (e) => {
 		// Shift-click pastes (below); copying as well overwrote the clipboard.
 		if (e.shiftKey) return;
-		copyText($("seedPill").dataset.seed || "", null, "");
+		copyText($("seedPill").dataset.seed || "", null, "", "seed " + ($("seedPill").dataset.seed || ""));
 		const p = $("seedPill");
 		if (p.dataset.flashTimer) clearTimeout(Number(p.dataset.flashTimer));
 		p.textContent = "seed copied ✓";
@@ -9005,19 +10711,61 @@
 	   right-click) the pill and paste. */
 	const pasteSeed = (e) => {
 		e.preventDefault();
-		const take = (text) => {
-			const seed = String(text || "").trim();
-			if (!seed) return;
-			pushUndo("pasted a seed");
-			state.cfg.seed = seed;
-			$("seed").value = seed;
-			state.presetDirty = true;
-			run();
-		};
+		const take = (text) => applySeed(text, "pasted a seed");
 		if (navigator.clipboard && navigator.clipboard.readText) {
 			navigator.clipboard.readText().then(take, () => promptSeed(take));
 		} else promptSeed(take);
 	};
+	/* The one path a seed typed or pasted into the header takes. */
+	function applySeed(text, label) {
+		const seed = String(text || "").trim();
+		if (!seed) return false;
+		pushUndo(label);
+		state.cfg.seed = seed;
+		$("seed").value = seed;
+		state.presetDirty = true;
+		run();
+		return true;
+	}
+	/* Edit the seed in place: double-click (or F2 on) the pill swaps it for a
+	   text box. Enter applies through applySeed, Escape or blur cancels. */
+	function editSeedInline() {
+		const pill = $("seedPill");
+		if (pill.hidden || $("seedPillEdit")) return;
+		const input = el("input", "pill seedpill");
+		input.type = "text";
+		input.id = "seedPillEdit";
+		input.value = pill.dataset.seed || "";
+		input.setAttribute("aria-label", "Seed — Enter applies, Escape cancels");
+		input.size = Math.max(8, input.value.length + 2);
+		let done = false;
+		const finish = (apply) => {
+			if (done) return;
+			done = true;
+			const v = input.value.trim();
+			input.remove();
+			pill.hidden = false;
+			pill.focus();
+			if (apply && v && v !== String(pill.dataset.seed || "")) applySeed(v, "typed a seed");
+		};
+		input.addEventListener("keydown", (e) => {
+			e.stopPropagation();
+			if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); finish(true); }
+			else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+		});
+		// Deferred: a copy fallback borrows focus for a moment and gives it back.
+		input.addEventListener("blur", () => setTimeout(() => {
+			if (document.activeElement !== input) finish(false);
+		}, 0));
+		pill.hidden = true;
+		pill.after(input);
+		input.focus();
+		input.select();
+	}
+	$("seedPill").addEventListener("dblclick", (e) => { e.preventDefault(); editSeedInline(); });
+	$("seedPill").addEventListener("keydown", (e) => {
+		if (e.key === "F2") { e.preventDefault(); editSeedInline(); }
+	});
 	$("seedPill").addEventListener("contextmenu", pasteSeed);
 	$("seedPill").addEventListener("click", (e) => { if (e.shiftKey) pasteSeed(e); }, true);
 
@@ -9039,12 +10787,12 @@
 		writeHash(true);
 		// Shift-click copies the settings as prose instead of as a URL, for
 		// the forums and chat clients that eat links. Advertised in the title.
-		if (e.shiftKey) copyText(configAsText(), $("btnCopyLink"));
-		else copyText(location.href, $("btnCopyLink"));
+		if (e.shiftKey) copyText(configAsText(), $("btnCopyLink"), null, "settings as text");
+		else copyText(location.href, $("btnCopyLink"), null, "link to these settings");
 	});
 	$("btnCopyText").addEventListener("click", () => {
 		writeHash(true);
-		copyText(configAsText(), $("btnCopyText"));
+		copyText(configAsText(), $("btnCopyText"), null, "settings as text");
 	});
 	$("btnBatch").addEventListener("click", () => {
 		if (!state.files.length) return;
@@ -9055,6 +10803,7 @@
 	$("btnKeys").addEventListener("click", shortcutSheet);
 	$("btnHowTo").addEventListener("click", howToSheet);
 	$("modalOk").addEventListener("click", () => {
+		if (modalValidate && !modalValidate()) return;
 		const fn = modalOk;
 		closeModal();
 		if (fn) fn();
@@ -9125,9 +10874,7 @@
 			const t = TABS[(Number(k) + 9) % 10];
 			if (t && (t[0] !== "compare" || state.pinned)) {
 				e.preventDefault();
-				state.tab = t[0];
-				persist();
-				render();
+				showTab(t[0]);
 			}
 			return;
 		}
@@ -9279,7 +11026,7 @@
 			"and re-runs the current settings over it."],
 		["4. Shape the class with the settings panel", "Each fieldset is one " +
 			"idea. Quality & depth shapes the overall curve (switch to " +
-			"“Rebuild the class curve” to unlock it). Builds decides how " +
+			"“Rebuild class curve” to unlock it). Builds decides how " +
 			"specialized players are, how many archetypes one class draws " +
 			"from, and its flavor — pick a flavor in the dropdown to keep " +
 			"the seed and change what kind of class it is. Class years, " +

@@ -581,7 +581,7 @@ pixels the table becomes one card per prospect.
 | Group | What it controls |
 | --- | --- |
 | **Overall ratings** | `Preserve` keeps each prospect's original ovr (nothing inflates — only builds change). `Rebuild the class curve` re-deals overalls along a curve you shape. |
-| **Class quality / depth / elite prospects** | The shape of that curve. |
+| **Class quality / depth / elite prospects** | The shape of that curve. Dimmed and disabled while overalls are preserved, since they do nothing then. |
 | **Potential bias / spread** | How far pot sits above ovr, and how much it varies. These do not re-play the season — potential is computed after it — but they are not cosmetic: the mock draft board scores `(pot − ovr) × 0.65`, so moving them moves the board. |
 | **Specialization** | 0 = BBGM's fairly uniform builds, 2.5 = extreme specialists. |
 | **Archetype diversity** | Exactly `100 − v`% of the class stays Balanced. |
@@ -597,7 +597,7 @@ pixels the table becomes one card per prospect.
 | **Build noise** | Per-rating jitter. |
 | **Vary size** | Lets listed height and weight drift with the build. |
 | **Keep imported heights** | On by default. Pins every player's height rating and listed height to the value his file carried, so nothing the tool draws — a reroll, the variation dial, the size drift above, the 7'4" physical-outlier anomaly — can move either. A height you set by hand on a player still moves it: that is you saying how tall he is, not a draw. Off restores the old behavior, where heights are part of what a reroll redraws. |
-| **Freshmen / transfers / redshirts / reclassified** | Who is in what year, and how they got there. |
+| **Freshmen / transfers / redshirts / reclassified** | Who is in what year, and how they got there. Freshmen reaches 100 (the draw's lean toward freshmen at the top of the board flattens out above 50). Transfers is the share of upperclassmen who arrived from another program — seniors most, sophomores least; at the default mix 34 now gives about a third (it gave about half before the year weights were renormalized). |
 | **Destination weights** | Where blank-college prospects go, per league — grouped by region, each group collapsible with its own ×2 / ×½, because what anybody actually wants from thirty-odd number boxes is "more Europe". The grouping is derived from each league's own birthplace multipliers, so adding a league to `js/colleges.js` files it correctly with no second edit. |
 | **Scouting traits per prospect** | How many traits from the ~227-row table each prospect carries (see above). 0 turns the layer off, along with the per-player volatility, the offensive-glass bias and the medical file. |
 | **Avoid repeating recent anomalies** | The same memory the build pool has, one layer down. Thirty-two kinds and four draws a class is not enough separation on its own. |
@@ -616,7 +616,7 @@ pixels the table becomes one card per prospect.
 | **Events during the season** | A top-ten upset, the game of the year, a coach fired in January, a fourteen-game winning streak, a snowstorm postponement. All of them are read off results the simulation already produced, so none of them can contradict a box score. |
 | **Draft-day events** | What happens between the last game and the pick: a medical flag, a workout riser, a team trading up, a late-first reach, a green-room slide. 0 leaves the board as a plain ranking. |
 | **Voter disagreement** | How far the award voters stray from the arithmetic. The six player-of-the-year trophies have their own electorates, each weighting the team's resume differently — the coaches' and broadcasters' panels lean on it, the writers' lean away — scaled by a mood drawn once per class, so some years the argument is about the best player and some years about the best team. |
-| **National / conference / abroad award strictness** | Three separate dials. This used to be one slider driving three different mechanisms. |
+| **National / conference / abroad award strictness** | Three separate, independent dials — moving the national one does not move the other two. This used to be one slider driving three different mechanisms. |
 | **Archetype frequencies** | Per-build rarity weights for every archetype, grouped by guards / wings / bigs / any size with a ×2 and ×½ per group, and showing what share of the last generated class each build actually came out as. Searchable by name or by tag ("shooting" finds the twenty builds that shoot, not the one called it), filterable by the height a build is eligible at ("make this a rim-protector-heavy class" starts with the builds a seven-footer can draw) and by whether it is in the current class's pool, and each group folds. Hover a name to see its offset vector. The count and weight span in the hint are read off the table, not typed. |
 | **Note template** | Which lines are written into each player's exported note. |
 
@@ -771,6 +771,17 @@ setup; *Link* copies a URL that reproduces the exact class, settings and locks.
 imports directly — every player is re-solved against BBGM's own `ovr` formula,
 so what you see here is what the game computes. *More ▾* has CSV, season data,
 locked prospects and the settings on their own.
+
+**9. Play.** The *Play* tab has three games against the loaded class and
+seed. *Prediction*: pick the champion, the player of the year and the No. 1
+pick, graded out of 11. *Bracket pool*: fill in the 64-team bracket (with
+*Auto-fill by seed* and *Random* helpers) and score it ESPN-style,
+10/20/40/80/160/320; the upset factor is shown as the difficulty. *Blind
+scout*: rank a top 10 from bios and box scores with ovr, pot and board rank
+hidden, scored out of 100 against the final board and beside the preseason
+consensus. While a game is open every other tab is gated, so the answers
+stay hidden until you reveal them. A per-browser record is kept. The *Blind*
+column preset gives the board the same view.
 
 ---
 
@@ -1215,7 +1226,17 @@ working the season before, so after a decade a name has a **coaching tree**.
 And the Universe tab carries a **records book**: all-time titles, title games,
 seasons at AP No. 1, players of the year and No. 1 picks; the longest unbroken
 run at No. 1; the best single season anybody had; a player of the decade; and a
-hall of fame drawn from the alumni index. Continuity threads are structured
+hall of fame drawn from the alumni index; the **weirdest season** (every
+timeline row carries the engine's strangeness score, reasons on hover); and a
+**coaches' table** — wins, titles, tree size, longest tenure — with a hot-seat
+preview of who starts next season under pressure. The Rivalries table ranks by
+**heat** (a March meeting is worth 3, any other season the pair met 1, halving
+every four years), and a pair that meets in March after six or more years apart
+is a "rivalry renewed" thread. A man the registry (one identity per file and
+pid) saw honoured in two seasons, or back undrafted and honoured, is a "he came
+back" thread. Each program's last title, Final Four and player of the year ride
+in the carry as a digest, so the paper can write "first title in nine years" and
+"ends a ten-year Final Four drought". Continuity threads are structured
 data now (`{kind, team, seasons, count, text}`), so a program in one is a link
 to its team page rather than a word in a sentence.
 
@@ -1690,6 +1711,7 @@ js/sample.js        the synthetic class behind "Try a sample class"
 js/batch.js         what a batch run measures (shared with the worker)
 js/worker.js        batch mode off the main thread
 js/views.js         the tab views
+js/replaymeta.js    bingo, mutators, achievements and what they unlock
 js/app.js           state, settings, editing, persistence, export
 tools/validate.js   calibration bands against the empirical anchors
 tools/rolefit.js    fits the derived role-usage model and reports per-build residuals
@@ -2776,6 +2798,17 @@ dial — is declared with its reason, and a narrowing without a reason fails too
   available, and the only way to hit the target is to work out which settings
   produce it — inside a budget of how many you may move. Four to start with,
   scored live in the panel.
+- **Daily, campaign, puzzle, codes and rivals** (`js/replay.js`). The
+  Challenges dialog adds a **daily** challenge (seed `daily-YYYY-MM-DD`, goals
+  drawn from the reroll predicates by the date, budget 3–5); a **campaign**
+  over the fixed challenges, where clearing a tier opens the next and forbids
+  the dials that cleared it; a **find-the-settings** puzzle (match a hidden
+  config's champion, player of the year, No. 1 pick and flavor with at most
+  three dials); and **share codes** (`BB1-…`, base32 with a check character)
+  that load a class or set a **rival** whose dials and score show on the
+  challenge bar. Every attempt has a **par** (the budget) and a score — 100,
+  ±10 per dial under or over par, −1 per rerun after the first — and the best
+  per challenge is kept in the browser.
 - **Compound and negated reroll conditions.** Every condition was a tick box
   meaning "must be true", so half the interesting searches — a class with no
   seven-footer at the top, a year the mid-majors did not win — were
@@ -2805,6 +2838,22 @@ dial — is declared with its reason, and a narrowing without a reason fails too
   in, because an anomaly can change who is eligible for the next one.
 - **A name, not a hash.** "The 2027 class — the year of the stretch bigs, a
   wide-open year" in the tab title, the run history and the exported picture.
+- **Strangeness bingo, mutators, achievements, unlocks, chaos draft**
+  (`js/replaymeta.js`, the 🏅 button). The strangeness readout now returns a
+  `kinds` key beside each reason. A seeded 3×3 card of those kinds marks a
+  square whenever a run has it, across rerolls, and reports lines and a
+  blackout. Mutators are named patches of existing settings ("No bigs",
+  "Chaos March", "Portal era", seven more); up to three stack, later ones
+  win a clash, and they appear in the class name and in the link (`mu`).
+  A mutator writes a setting outright, so a flavor treats it as touched and
+  leaves it alone. The achievements ledger holds eighteen firsts (a 16 over
+  a 1, an unbeaten champion, a 7'4" No. 1 pick, strangeness 70 and more),
+  each stored with its seed and a replay link, and toasts once on unlock.
+  Some achievements unlock the 1990s era and three rare flavors in the
+  pickers. **Show everything**, beside the era picker, turns the gating off.
+  Chaos draft is Surprise me with an anomaly shortlist, and it picks the
+  rarest candidates on that shortlist. The card, the ledger and the override
+  are kept under their own storage key and never go into a link.
 
 ### Universe
 

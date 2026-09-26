@@ -419,8 +419,10 @@
 		[/^NCAA National Runner-Up$/, 11.5],
 		[/All-Region Team$/, 11],
 		[/^NCAA All-Tournament Team$/, 12],
-		[/Player of the Year$/, 13],
+		// Defensive first: "…Defensive Player of the Year" also ends in
+		// "Player of the Year" and would otherwise take the POY tier.
 		[/Defensive Player of the Year$/, 14],
+		[/Player of the Year$/, 13],
 		[/Freshman of the Year$/, 15],
 		[/Sixth Man of the Year$/, 16],
 		[/Most Improved Player$/, 17],
@@ -642,7 +644,7 @@
 				const r = rng.child(p.key + "|" + row.season);
 				const score = prod + resume + r.normal(0, 1.4 * noiseScale);
 				const def = fieldDefenseScore(L, defCal) + resume * 0.35 + r.normal(0, 1.2 * noiseScale);
-				const fresh = row.classYear === "Freshman";
+				const fresh = /^(Redshirt )?Freshman$/.test(row.classYear || "");
 				const out = [];
 				const bars = conf && confBars[conf] && teams[row.team] ? confBars[conf] : null;
 				if (bars) {
@@ -676,15 +678,17 @@
 	}
 
 	function assign(prospects, teams, tourney, cfg, rng) {
-		const strict = clamp(cfg.awardStrictness, 0.2, 3);
+		const band = global.Config.sliderRange("awardStrictness");
+		const strict = clamp(
+			cfg.awardStrictness == null ? 1 : cfg.awardStrictness, band.min, band.max);
 		// Conference hardware is its own dial. 32 conferences hand out far more
 		// of it than the national voters do, and wanting a realistic number of
 		// one was never a reason to get fewer of the other — but one slider
 		// used to drive both, plus the pro-league score bar on top.
 		const confStrict = clamp(
-			cfg.confAwardStrictness === undefined ? strict : cfg.confAwardStrictness, 0.2, 3);
+			cfg.confAwardStrictness == null ? strict : cfg.confAwardStrictness, band.min, band.max);
 		const proStrict = clamp(
-			cfg.proAwardStrictness === undefined ? strict : cfg.proAwardStrictness, 0.2, 3);
+			cfg.proAwardStrictness == null ? strict : cfg.proAwardStrictness, band.min, band.max);
 		/* How much the voters disagree with the arithmetic. The model already
 		   carried a fixed amount of this; it was not adjustable and there was
 		   no way to ask for the year where the award list is exactly what the
@@ -705,7 +709,7 @@
 			p.scoreResume = resumeScore(team);
 			p.scoreTotal = p.scoreProd + p.scoreResume + rng.normal(0, 1.4 * noiseScale);
 			p.scoreDefTotal = p.scoreDef + p.scoreResume * 0.35 + rng.normal(0, 1.2 * noiseScale);
-			p.isFreshman = p.classYear === "Freshman";
+			p.isFreshman = /^(Redshirt )?Freshman$/.test(p.classYear || "");
 			/* A newcomer ARRIVED from somewhere. The transfer layer also
 			   carries in-house moves — the walk-on who won a scholarship, the
 			   redshirt who came back — and those have `from: null`, so nine

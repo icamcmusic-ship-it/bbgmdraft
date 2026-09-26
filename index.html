@@ -7,7 +7,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23d97706'/%3E%3Cpath d='M2 16h28M16 2v28M6 6c6 4 6 16 0 20M26 6c-6 4-6 16 0 20' stroke='%23000' fill='none' stroke-width='1.6'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="css/style.css">
 </head>
-<body>
+<body class="noclass">
 
 <header>
 	<div class="brand">
@@ -46,9 +46,9 @@
 		<button id="btnRerollUntil" disabled title="Reroll until the class satisfies a condition — a 7'2&quot; top-five pick, a mid-major champion…">Until…</button>
 		<button id="btnRerun" disabled title="Re-apply the current settings with the same seed">Re-apply</button>
 	</div>
-	<div class="btngroup tools" role="group" aria-label="Tools">
-		<button id="btnUndo" class="iconbtn" disabled title="Undo the last settings or lock change (Ctrl+Z)" aria-label="Undo">↶</button>
-		<button id="btnRedo" class="iconbtn" disabled title="Redo (Ctrl+Shift+Z)" aria-label="Redo">↷</button>
+	<div class="btngroup tools" id="headerTools" role="group" aria-label="Tools">
+		<button id="btnUndo" class="iconbtn" disabled title="Undo the last settings or lock change (Ctrl+Z)">Undo</button>
+		<button id="btnRedo" class="iconbtn" disabled title="Redo (Ctrl+Shift+Z)">Redo</button>
 		<button id="btnPin" class="iconbtn" disabled title="Pin this class as a comparison baseline" aria-label="Pin as baseline">◎</button>
 		<button id="btnCopyLink" class="iconbtn" title="Copy a link that reproduces this exact class, settings and locks — shift-click to copy it as plain text instead" aria-label="Copy link">🔗</button>
 		<button id="btnCopyText" class="iconbtn" title="Copy the seed, the class fingerprint and every setting you changed as plain text, for a forum post or a chat message" aria-label="Copy seed and settings as text">📋</button>
@@ -67,25 +67,34 @@
 			title="CSV, season data, locked prospects and the settings JSON">More ▾</button>
 		<button id="btnExportAll" disabled hidden>Export all</button>
 	</div>
-	<select id="themeSelect" aria-label="Color theme" title="Color theme">
-		<option value="system">◐ Auto</option>
-		<option value="light">☀ Light</option>
-		<option value="dark">☾ Dark</option>
-		<optgroup label="Light themes">
-			<option value="ledger-light">Ledger Light</option>
-			<option value="draft-board">Draft Board</option>
-			<option value="fieldhouse">Fieldhouse</option>
-			<option value="scout-report">Scout Report</option>
-		</optgroup>
-		<optgroup label="Dark themes">
-			<option value="twilight-court">Twilight Court</option>
-			<option value="night-game">Night Game</option>
-		</optgroup>
-	</select>
+	<!-- Below 560px the tool buttons fold behind this; see bindHeaderMore. -->
+	<button id="btnHeaderMore" class="iconbtn headmore" type="button" aria-expanded="false"
+		aria-controls="headerTools" aria-label="More tools" title="More tools">⋯</button>
 </header>
 
 <div class="layout">
 <aside id="settings" aria-label="Settings">
+	<!-- The theme lived in the header and pushed Export onto a second row.
+	     It is the one control here that works before a class is loaded. -->
+	<div class="ctl themerow">
+		<label for="themeSelect">Theme</label>
+		<select id="themeSelect">
+			<option value="system">◐ Auto</option>
+			<option value="light">☀ Light</option>
+			<option value="dark">☾ Dark</option>
+			<optgroup label="Light themes">
+				<option value="ledger-light">Ledger Light</option>
+				<option value="draft-board">Draft Board</option>
+				<option value="fieldhouse">Fieldhouse</option>
+				<option value="scout-report">Scout Report</option>
+			</optgroup>
+			<optgroup label="Dark themes">
+				<option value="twilight-court">Twilight Court</option>
+				<option value="night-game">Night Game</option>
+			</optgroup>
+		</select>
+	</div>
+	<p class="hint noclassnote">The rest of the settings open once a class is loaded.</p>
 	<!-- Filled by js/app.js from the fieldsets below; shown below 860px. -->
 	<nav id="settingsJump" class="jumplist" aria-label="Jump to a settings group"></nav>
 	<div class="ctl">
@@ -125,8 +134,8 @@
 		<div class="ctl">
 			<label for="ovrMode">Overall ratings</label>
 			<select id="ovrMode">
-				<option value="preserve">Preserve each player's ovr (never inflate)</option>
-				<option value="curve">Rebuild the class curve</option>
+				<option value="preserve">Preserve each ovr</option>
+				<option value="curve">Rebuild class curve</option>
 			</select>
 			<p class="hint" id="ovrModeHint"></p>
 		</div>
@@ -338,15 +347,22 @@
 </aside>
 
 <main>
-	<div id="empty" class="drop">
-		<h2 style="margin:0 0 8px;font-size:18px">Drop a BBGM draft class or league file here</h2>
-		<p style="margin:0">Export a class from Basketball GM via <b>Tools → Export → Draft class</b>, or export the
-		whole league (<b>Tools → Export league</b>) and drop the <code>.json</code> or
-		<code>.json.gz</code> here. A league file is split into one editable class per
+	<!-- The whole box opens the file picker; a drop anywhere on the page, a
+	     paste, or the paste button reads a class too. See bindFiles. -->
+	<div id="empty" class="drop" role="button" tabindex="0" aria-describedby="emptyLead">
+		<h2>Choose a file (or drop it here)</h2>
+		<p id="emptyLead">A BBGM draft class or league file. Export a class from Basketball GM via
+		<b>Tools → Export → Draft class</b>, or export the whole league
+		(<b>Tools → Export league</b>) and choose the <code>.json</code> or
+		<code>.json.gz</code>. A league file is split into one editable class per
 		future draft year, and can be written straight back into it. Multiple files are fine.</p>
 		<p class="hint">Everything runs locally in your browser. Nothing is uploaded.</p>
-		<p style="margin:14px 0 0">No export to hand? <button type="button" id="btnSample"
-			title="Load a synthetic 70-man class so you can try every tab before exporting one from the game">Try a sample class</button></p>
+		<p class="emptyacts">No export to hand? <button type="button" id="btnSample" class="primary"
+			title="Load a synthetic 70-man class so you can try every tab before exporting one from the game">Try a sample class</button>
+			<button type="button" id="btnPasteClass"
+			title="Read a class or league JSON from the clipboard (or just paste with Ctrl+V)">Paste JSON</button>
+			<button type="button" id="btnSynthUniverse"
+			title="Run several synthetic seasons as one continuous world, rebuilt from the seed">New synthetic universe (N seasons)…</button></p>
 	</div>
 
 	<div id="errBanner" class="banner" role="alert" hidden>
@@ -360,6 +376,10 @@
 	<p id="status" class="status" role="status" hidden></p>
 	<p id="fileSummary" class="legendline" hidden></p>
 
+	<!-- Phones: the settings panel is above the page, so a Settings button
+	     that stays in reach. See bindSettingsToggle. -->
+	<button id="btnSettingsFab" class="fab" type="button"
+		title="Open the settings panel"><span aria-hidden="true">☰</span> Settings</button>
 	<div id="app" hidden>
 		<div class="tabs" id="tabs"></div>
 		<div id="view"></div>
@@ -400,8 +420,11 @@
 <script defer src="js/news.js"></script>
 <script defer src="js/universe.js"></script>
 <script defer src="js/almanac.js"></script>
+<script defer src="js/replay.js"></script>
 <script defer src="js/site.js"></script>
+<script defer src="js/replaymeta.js"></script>
 <script defer src="js/views.js"></script>
+<script defer src="js/play.js"></script>
 <script defer src="js/app.js"></script>
 </body>
 </html>

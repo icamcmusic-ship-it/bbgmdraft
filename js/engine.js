@@ -138,7 +138,7 @@
 
 	function assignClassYears(players, cfg, rng, ageIsInformative) {
 		const share = clamp(
-			(cfg.freshmanShare === undefined ? 46 : cfg.freshmanShare) / 100, 0, 1);
+			(cfg.freshmanShare === undefined ? global.Config.DEFAULTS.freshmanShare : cfg.freshmanShare) / 100, 0, 1);
 		const transferShare = clamp(
 			(cfg.transferShare === undefined ? 34 : cfg.transferShare) / 100, 0, 1);
 		const redshirtShare = clamp(
@@ -192,8 +192,11 @@
 			if (ageIsInformative) {
 				p.classYear = classYear(p.age);
 			} else {
-				// Freshman odds fall off steeply down the board.
-				const pFresh = clamp(share * (1.75 - 1.45 * rank), 0, 0.96);
+				// Freshman odds fall off steeply down the board. The tilt
+				// flattens above a 50% share so 100 can mean (nearly) all
+				// freshmen; the old 0.96 cap and full tilt stopped at ~80%.
+				const tilt = clamp(2 * (1 - share), 0, 1);
+				const pFresh = clamp(share * (1 + tilt * (0.75 - 1.45 * rank)), 0, 1);
 				const rest = 1 - pFresh;
 				// The remainder splits toward the upperclassmen as rank drops.
 				const w = [pFresh, rest * (0.46 - 0.10 * rank), rest * (0.30 + 0.02 * rank),
@@ -227,7 +230,10 @@
 
 			// Transfers. Freshmen do not transfer; the rest increasingly do.
 			p.transfer = null;
-			if (yearIdx >= 1 && r.random() < transferShare * (0.55 + 0.55 * yearIdx)) {
+			/* The year weights 0.8/1.2/1.6 average about 1 over the default
+			   upperclass mix, so the setting reads as the share of upperclassmen
+			   who transferred (they were 1.1/1.65/2.2: 34 gave ~48%). */
+			if (yearIdx >= 1 && r.random() < transferShare * (0.4 + 0.4 * yearIdx)) {
 				/* A fifth-year or graduate transfer is by definition a man
 				   who has used four years, so those kinds are only open to a
 				   senior. Drawing from the full list made them force
@@ -1878,7 +1884,8 @@
 		{
 			name: "lost season", w: 1.2,
 			label: "coming back off a lost season",
-			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman",
+			// Not a Graduate: "Redshirt Graduate" is not a class year.
+			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman" && p.classYear !== "Graduate",
 			apply: (p) => {
 				markRedshirt(p, "medical redshirt");
 				p.lostSeason = true;
@@ -2073,7 +2080,8 @@
 		{
 			name: "academic redshirt", w: 0.9,
 			label: "ineligible as a freshman",
-			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman",
+			// Not a Graduate: "Redshirt Graduate" is not a class year.
+			pick: (p) => !p.nonNcaa && p.classYear !== "Freshman" && p.classYear !== "Graduate",
 			apply: (p) => {
 				markRedshirt(p, "academic redshirt");
 				p.backstory = "was academically ineligible for his freshman season";
@@ -2894,8 +2902,9 @@
 			const hurt = r.random() < Math.min(0.95, 0.55 * rate * build);
 			const table = hurt ? INJURIES : ABSENCES;
 			const pickKind = r.weighted(table);
-			const games = Math.max(1, Math.round(
-				r.uniform(pickKind.lo, pickKind.hi + 0.999)));
+			// int(), not round(uniform(lo, hi + 0.999)): the rounding put a
+			// one-game suspension at two games about half the time.
+			const games = Math.max(1, r.int(pickKind.lo, pickKind.hi));
 			const out = Math.min(games, SEASON_GAMES - 5);
 			// A run of games for an injury; scattered nights for everything
 			// else, which is what "illness" and "a coach's decision" are.
@@ -3951,7 +3960,9 @@
 				p.draftEvent = {
 					kind: "fall",
 					from: i,
-					say: (moved) => "flagged at the combine and slid " + Text.plural(moved, "spot"),
+					say: (moved) => (moved > 0
+						? "flagged at the combine and slid " + Text.plural(moved, "spot")
+						: "was flagged at the combine"),
 					detail: r.pick([
 						"a stress reaction in the foot",
 						"a back issue teams could not agree on",
@@ -3973,7 +3984,9 @@
 				p.draftEvent = {
 					kind: "rise",
 					from: i,
-					say: (moved) => "rose " + Text.plural(-moved, "spot") + " on the workout circuit",
+					say: (moved) => (moved < 0
+						? "rose " + Text.plural(-moved, "spot") + " on the workout circuit"
+						: "impressed on the workout circuit"),
 					detail: r.pick([
 						"measured longer than his listed height",
 						"shot it far better in a gym than he had all season",
@@ -3995,7 +4008,9 @@
 				p.draftEvent = {
 					kind: "trade",
 					from: i,
-					say: (moved) => "a team moved up " + Text.plural(-moved, "spot") + " to take him",
+					say: (moved) => (moved < 0
+						? "a team moved up " + Text.plural(-moved, "spot") + " to take him"
+						: "a team traded up to take him"),
 					detail: "the pick cost a future first",
 				};
 				move(board, i, to);
@@ -4018,8 +4033,9 @@
 				p.draftEvent = {
 					kind: "reach",
 					from: i,
-					say: (moved) => "taken " + Text.plural(-moved, "spot") +
-						" earlier than the board had him",
+					say: (moved) => (moved < 0
+						? "taken " + Text.plural(-moved, "spot") + " earlier than the board had him"
+						: "taken on upside in the late first"),
 					/* Keyed to the player. Two of the three details were
 					   assertions about his age — "a 19-year-old", "the youngest
 					   player in the class" — drawn at random from a pool that
@@ -4704,38 +4720,40 @@
 		if (!res) return null;
 		const reasons = [];
 		let score = 0;
-		const add = (n, why) => { score += n; reasons.push(why); };
+		const kinds = [];
+		// `kinds` is a stable key per reason, for anything that counts them (bingo).
+		const add = (n, why, kind) => { score += n; reasons.push(why); kinds.push(kind); };
 		const board = res.board || [];
 		const top = board.slice(0, 5);
 		if (top.some((p) => (p.newHgtInches || 0) >= 86)) {
-			add(12, "a 7'2\" or taller prospect in the top five");
+			add(12, "a 7'2\" or taller prospect in the top five", "tallTop5");
 		}
 		if (top.some((p) => (p.newHgtInches || 0) <= 73)) {
-			add(10, "a six-foot-one prospect in the top five");
+			add(10, "a six-foot-one prospect in the top five", "smallTop5");
 		}
 		const champ = res.tourney && res.tourney.champion;
 		if (champ && Number.isFinite(champ.seed) && champ.seed >= 6) {
-			add(champ.seed >= 10 ? 18 : 11, "a No. " + champ.seed + " seed won the title");
+			add(champ.seed >= 10 ? 18 : 11, "a No. " + champ.seed + " seed won the title", "lowSeedChamp");
 		}
 		const ff = (res.tourney && res.tourney.finalFour) || [];
 		const wild = ff.filter((x) => x && Number.isFinite(x.seed) && x.seed >= 11);
 		if (wild.length) {
 			add(9 * wild.length, Text.plural(wild.length, "double-digit seed") +
-				" in the Final Four");
+				" in the Final Four", "cinderellaFF");
 		}
 		const no1 = board[0];
 		if (no1 && Number.isFinite(no1.preseasonRank) && no1.preseasonRank > 20) {
-			add(14, "the No. 1 pick was No. " + no1.preseasonRank + " in the preseason");
+			add(14, "the No. 1 pick was No. " + no1.preseasonRank + " in the preseason", "sleeperNo1");
 		}
-		if (no1 && no1.nonNcaa) add(8, "the No. 1 pick never played college basketball");
+		if (no1 && no1.nonNcaa) add(8, "the No. 1 pick never played college basketball", "nonNcaaNo1");
 		if (no1 && /Senior|Graduate/.test(no1.classYear || "")) {
-			add(7, "the No. 1 pick was a " + no1.classYear.toLowerCase());
+			add(7, "the No. 1 pick was a " + no1.classYear.toLowerCase(), "seniorNo1");
 		}
 		const narrative = res.narrative || [];
-		if (narrative.length >= 3) add(6, "three storylines in one season");
+		if (narrative.length >= 3) add(6, "three storylines in one season", "threeStories");
 		const anomalies = (res.surprises || []).length;
-		if (anomalies >= 6) add(8, anomalies + " anomalies in one class");
-		else if (anomalies >= 5) add(4, anomalies + " anomalies in one class");
+		if (anomalies >= 6) add(8, anomalies + " anomalies in one class", "manyAnomalies");
+		else if (anomalies >= 5) add(4, anomalies + " anomalies in one class", "manyAnomalies");
 		/* The REGULAR season, as the reroll predicate reads it: a team's
 		   final record includes March, so `t.l === 0` only ever fired for the
 		   national champion and missed every unbeaten team that then lost in
@@ -4743,16 +4761,17 @@
 		const unbeaten = Object.values(res.teams || {})
 			.filter((t) => t && t.regSnapshot && t.regSnapshot.l === 0 &&
 				t.regSnapshot.w >= 20);
-		if (unbeaten.length) add(20, unbeaten[0].name + " went unbeaten");
+		if (unbeaten.length) add(20, unbeaten[0].name + " went unbeaten", "unbeaten");
 		/* The class's own shape, against what a draft class usually looks
 		   like: a top-heavy year and a year with no stars in it are both
 		   strange, in opposite directions. */
 		const elite = (res.players || []).filter((p) => p.newOvr >= 55).length;
-		if (elite >= 6) add(9, elite + " prospects at 55+ overall");
-		if (elite === 0) add(9, "nobody in the class reached 55 overall");
+		if (elite >= 6) add(9, elite + " prospects at 55+ overall", "starStudded");
+		if (elite === 0) add(9, "nobody in the class reached 55 overall", "noStars");
 		return {
 			score: Math.min(100, score),
 			reasons,
+			kinds,
 			asked: Number(res.cfg && res.cfg.weirdness) || 0,
 		};
 	}
@@ -5991,7 +6010,9 @@
 		const tpa = Math.min(fga, rnd(tpaG * gp));
 		const fta = rnd(ftaG * gp);
 		let tp = Math.min(tpa, rnd(tpa * tpp));
-		let fg = Math.min(fga, Math.max(tp, rnd(fga * fgp)));
+		// Made twos can never exceed two-point attempts.
+		const fgCap = () => tp + (fga - tpa);
+		let fg = Math.min(fgCap(), Math.max(tp, rnd(fga * fgp)));
 		let ft = Math.min(fta, rnd(fta * ftp));
 		// Reconcile to the season scoring total: free throws absorb the
 		// rounding first (worth one point each), twos absorb the rest.
@@ -6000,8 +6021,13 @@
 		const ft2 = Math.max(0, Math.min(fta, ft + diff));
 		diff -= ft2 - ft;
 		ft = ft2;
-		const fg2 = Math.max(tp, Math.min(fga, fg + Math.trunc(diff / 2)));
+		const fg2 = Math.max(tp, Math.min(fgCap(), fg + Math.trunc(diff / 2)));
+		diff -= 2 * (fg2 - fg);
 		fg = fg2;
+		// Whatever the twos could not hold goes to threes: first missed threes
+		// become makes (three points each), then made twos become threes (one).
+		while (diff >= 3 && tp < tpa) { tp++; fg++; diff -= 3; }
+		while (diff > 0 && tp < tpa && fg > tp) { tp++; diff--; }
 		const pts = 2 * (fg - tp) + 3 * tp + ft;
 		const row = {
 			season: seasonYear,
@@ -6277,7 +6303,10 @@
 
 		/* One team-season: the rotation that played it, and which of its
 		   players this export needs a row for. */
-		const addTeam = (box, lines, margin, wanted) => {
+		/* `numGames` is the schedule that team-season was played to, which
+		   scales VORP the way BBGM's own numGames does (it was a flat 82, so
+		   a 31-game college season read at about 38% of its value). */
+		const addTeam = (box, lines, margin, wanted, numGames) => {
 			if (!box || !lines || !lines.length) return;
 			const gp = Math.max(1, box.gp);
 			const players = [];
@@ -6296,7 +6325,7 @@
 				});
 			}
 			rosters.push({
-				box, gp, margin,
+				box, gp, margin, numGames,
 				stats: null,        // filled in the second pass
 				players,
 			});
@@ -6329,7 +6358,7 @@
 				? team.log.reduce((a, g) => a + ((g.teamPts || 0) - (g.oppPts || 0)), 0) /
 					team.log.length
 				: null;
-			addTeam(team.box, items, margin, wanted);
+			addTeam(team.box, items, margin, wanted, SEASON_GAMES);
 		}
 
 		/* The clubs abroad and in the G League, the same way. A prospect at
@@ -6355,7 +6384,7 @@
 				const margin = club.log && club.log.length
 					? club.log.reduce((a, g) => a + ((g.teamPts || 0) - (g.oppPts || 0)), 0) / club.log.length
 					: null;
-				addTeam(club.box, items, margin, wanted);
+				addTeam(club.box, items, margin, wanted, PRO_GAMES[lgName] || 30);
 			}
 		}
 
@@ -6387,7 +6416,7 @@
 				addTeam(row.box, items, pm, [{
 					key, player: p, season: row.season, team: row.team,
 					draftYear: false, prior: row,
-				}]);
+				}], SEASON_GAMES);
 			}
 		}
 

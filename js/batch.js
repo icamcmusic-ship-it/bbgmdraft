@@ -86,5 +86,13 @@
 		return lo === hi ? s[lo] : s[lo] + (s[hi] - s[lo]) * (i - lo);
 	}
 
-	global.BatchStats = { summarize, batchSeed, mean, maxOf, pct };
+	/* One line per player, for pinning down where two runs of the same seed
+	   part ways (the worker/inline parity check in tools/uismoke.js). */
+	function fingerprint(res) {
+		return res.players.map((p) => [p.key, p.archetype, p.newOvr, p.newPot,
+			JSON.stringify(p.newRatings || null), p.newCollege,
+			p.stats ? p.stats.mpg : null, p.stats ? p.stats.ppg : null]);
+	}
+
+	global.BatchStats = { summarize, batchSeed, mean, maxOf, pct, fingerprint };
 })(typeof window !== "undefined" ? window : self);

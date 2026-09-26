@@ -924,10 +924,19 @@
 	   "Georgia" caught "Atlanta, Georgia", routing an American prospect to the
 	   EuroLeague weighting whenever a file spelled the state out rather than
 	   ending the string in USA. */
-	const hintRe = (hints) => new RegExp(
-		"(^|[^A-Za-z])(" +
-			hints.map((h) => h.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") +
-			")([^A-Za-z]|$)", "i");
+	/* Two-letter postal codes (GA, ON, LA, DE) match CASE-SENSITIVELY: with
+	   /i, "Rio de Janeiro, Brazil" hit DE and "La Coruna, Spain" hit LA,
+	   routing both to the US weighting. Full names keep /i. */
+	const hintRe = (hints) => {
+		const build = (hs, flags) => hs.length ? new RegExp(
+			"(^|[^A-Za-z])(" +
+				hs.map((h) => h.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") +
+				")([^A-Za-z]|$)", flags) : null;
+		const isCode = (h) => /^[A-Z]{2}$/.test(h);
+		const names = build(hints.filter((h) => !isCode(h)), "i");
+		const codes = build(hints.filter(isCode), "");
+		return { test: (s) => !!(names && names.test(s)) || !!(codes && codes.test(s)) };
+	};
 	const GEORGIAN_CITIES = ["Tbilisi", "Batumi", "Kutaisi", "Rustavi", "Zugdidi"];
 	const US_STATES = [
 		"Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado",

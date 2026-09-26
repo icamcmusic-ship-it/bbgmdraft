@@ -431,6 +431,8 @@
 		if (!openWhy) return;
 		openWhy.pop.remove();
 		openWhy.btn.setAttribute("aria-expanded", "false");
+		// Closed before the listeners went on: they must never go on.
+		clearTimeout(openWhy.timer);
 		document.removeEventListener("click", openWhy.away, true);
 		document.removeEventListener("keydown", openWhy.esc, true);
 		openWhy = null;
@@ -512,7 +514,7 @@
 			const away = () => closeWhy();
 			const esc = (ev) => { if (ev.key === "Escape") { closeWhy(); btn.focus(); } };
 			openWhy = { btn, pop, away, esc };
-			setTimeout(() => {
+			openWhy.timer = setTimeout(() => {
 				document.addEventListener("click", away, true);
 				document.addEventListener("keydown", esc, true);
 			}, 0);
@@ -1295,6 +1297,9 @@
 			"deflpg", "chgpg", "drtg", "pfpg", "awards"] },
 		{ name: "Team context", keys: ["pos", "college", "conf", "record", "apRank", "seed",
 			"newOvr", "mpg", "ppg", "usg", "ts", "awards"] },
+		// Blind scout: bio and box score, no ovr/pot/board (see js/play.js).
+		{ name: "Blind", keys: ["pos", "year", "archetype", "college", "conf", "hgtInches",
+			"weight", "mpg", "ppg", "rpg", "apg", "ts"] },
 		{ name: "Export", keys: ["pos", "year", "newOvr", "newPot", "archetype", "college",
 			"hgtInches", "weight", "board", "awards"] },
 	];
@@ -1431,16 +1436,35 @@
 			});
 			savedRow.appendChild(x);
 		}
+		/* Named inline rather than through window.prompt: this is already
+		   inside the themed dialog, so the name box lives here too. Enter
+		   saves; it does not reach the dialog's own OK. */
+		const nameIn = el("input");
+		nameIn.type = "text";
+		nameIn.className = "layoutname";
+		nameIn.placeholder = "Layout name";
+		nameIn.setAttribute("aria-label", "Name this column layout");
+		const nameErr = el("span", "hint");
+		nameErr.setAttribute("role", "alert");
 		const saveBtn = el("button", "tiny", "Save this layout…");
-		saveBtn.addEventListener("click", () => {
-			const name = window.prompt("Name this column layout:", "");
-			if (!name || !name.trim()) return;
-			saved[name.trim()] = Object.assign({}, draft);
+		const save = () => {
+			const name = nameIn.value.trim();
+			if (!name) { nameErr.textContent = "Type a name first."; nameIn.focus(); return; }
+			saved[name] = Object.assign({}, draft);
 			A().persist();
-			A().setStatus("Saved the column layout “" + name.trim() + "”.");
+			A().setStatus("Saved the column layout “" + name + "”.");
 			columnPicker(draft);
+		};
+		saveBtn.addEventListener("click", save);
+		nameIn.addEventListener("keydown", (e) => {
+			if (e.key !== "Enter" || e.isComposing) return;
+			e.preventDefault();
+			e.stopPropagation();
+			save();
 		});
+		savedRow.appendChild(nameIn);
 		savedRow.appendChild(saveBtn);
+		savedRow.appendChild(nameErr);
 		box.appendChild(savedRow);
 
 		const presets = el("div", "rowflex");
@@ -2702,7 +2726,9 @@
 	/* The season as dated articles (see js/news.js), replacing the four
 	   ·-joined strips that used to sit above the prospect table. */
 	function viewNews(view, res) {
-		const articles = global.News ? global.News.build(res) : [];
+		const stN = A().state;
+		const followed = stN.cfg.universe && stN.universe ? stN.universe.followed : null;
+		const articles = global.News ? global.News.build(res, { followed }) : [];
 		view.appendChild(el("h3", null, "The season, as it happened"));
 		view.appendChild(el("p", "legendline",
 			"Every article is read off results the sim actually produced — " +
@@ -3041,7 +3067,7 @@
 		const table = el("table");
 		const thead = el("thead");
 		const hr = el("tr");
-		for (const h of ["Player", "Seasons", "Span", "Drafted", "Honors", "What happened"]) {
+		for (const h of ["Player", "Seasons", "Span", "Drafted", "Honors", "What happened", "Pro career"]) {
 			hr.appendChild(el("th", ["Seasons", "Span", "Drafted", "Honors"].indexOf(h) >= 0
 				? "num" : "", h));
 		}
@@ -3067,6 +3093,7 @@
 			tr.appendChild(el("td", "num", String(x.honors.length)));
 			tr.appendChild(wrapCell(x.seasons
 				.map((s) => s.season + " " + s.as).join(" · ")));
+			tr.appendChild(el("td", "pro-career", global.Universe.proText(global.Universe.proOutcome(x))));
 			tb.appendChild(tr);
 		}
 		table.appendChild(tb);
@@ -3222,6 +3249,11 @@
 				(b.no1 ? ", the No. 1 pick" : "")));
 			notes.appendChild(line);
 		}
+		if (rec.weirdest) {
+			const w = rec.weirdest;
+			notes.appendChild(el("div", "weirdest-season", "Weirdest season: " + w.season +
+				", strangeness " + w.score + (w.reasons.length ? " — " + w.reasons.join("; ") : "")));
+		}
 		for (const d of rec.playersOfTheDecade || []) {
 			if (!d.player) continue;
 			notes.appendChild(el("div", null, "Player of the " + d.decade + "s: " +
@@ -3234,6 +3266,17 @@
 				m.name + " (" + m.school + ", " + m.seasons.join(", ") + ") — " +
 				m.reasons.join("; ")).join("\n")));
 		}
+		/* The pro-weighted Hall of Fame (seeded pro tails, Universe.proHall). */
+		let proHall = rec.proHall;
+		if (!proHall && u && u.registry && global.Universe && global.Universe.proHall) {
+			try { proHall = global.Universe.proHall(u.registry, 10); } catch (e) { proHall = null; }
+		}
+		if (proHall && proHall.length) {
+			view.appendChild(el("h5", null, "Hall of Fame, pro-weighted"));
+			view.appendChild(el("div", "note pro-hall", proHall.map((m, i) =>
+				(i + 1) + ". " + m.name + " (" + (m.school || "?") + ", " + m.season + ") — " +
+				global.Universe.proText(m.pro)).join("\n")));
+		}
 		/* The registry's record book. An export from before it existed has
 		   records without it; derive it when the registry is here. */
 		let people = rec.people;
@@ -3241,6 +3284,76 @@
 			try { people = global.Universe.peopleRecords(u.registry); } catch (e) { people = null; }
 		}
 		peopleRecordsSection(view, people, u && u.registry);
+		coachRecordsSection(view, rec);
+	}
+
+	/* THE COACHES' RECORD BOOK (Universe.coachRecords) and the hot-seat
+	   preview (Universe.hotSeatPreview): wins, titles, tree size and the
+	   longest run at one school, then who the next season starts under
+	   pressure. Both ride in the records book, so a reload keeps them. */
+	function coachRecordsSection(view, rec) {
+		const c = rec && rec.coaches;
+		if (c && c.wins && c.wins.length) {
+			view.appendChild(el("h5", null, "Coaches"));
+			const wrap = el("div", "scroll");
+			const table = el("table");
+			table.className = "coach-records";
+			const hr = el("tr");
+			for (const h of ["Coach", "W-L", "Titles", "Tree", "Longest tenure", "Schools"]) {
+				hr.appendChild(el("th", /W-L|Titles|Tree/.test(h) ? "num" : "", h));
+			}
+			const thead = el("thead");
+			thead.appendChild(hr);
+			table.appendChild(thead);
+			const tb = el("tbody");
+			for (const x of c.wins) {
+				const tr = el("tr");
+				tr.appendChild(el("td", null, x.name));
+				tr.appendChild(el("td", "num", x.w + "-" + x.l));
+				tr.appendChild(el("td", "num", String(x.titles)));
+				tr.appendChild(el("td", "num", String(x.tree)));
+				tr.appendChild(el("td", null, x.tenureAt ? x.tenure + " at " + x.tenureAt.school +
+					" (" + x.tenureAt.from + "–" + x.tenureAt.to + ")" : ""));
+				const td = el("td");
+				x.schools.forEach((sc, i) => {
+					if (i) td.appendChild(document.createTextNode(", "));
+					td.appendChild(programLink(sc));
+				});
+				tr.appendChild(td);
+				tb.appendChild(tr);
+			}
+			table.appendChild(tb);
+			wrap.appendChild(table);
+			view.appendChild(wrap);
+			const notes = el("div", "note");
+			const lead = (list, what) => {
+				const x = (list || [])[0];
+				if (x) notes.appendChild(el("div", null, what(x)));
+			};
+			lead(c.titles, (x) => "Most titles: " + x.name + ", " + x.titles);
+			lead(c.trees, (x) => "Biggest tree: " + x.name + ", " + x.tree + " head jobs");
+			lead(c.tenure, (x) => "Longest tenure: " + x.name + ", " + x.tenure + " seasons at " +
+				x.tenureAt.school);
+			if (notes.childNodes.length) view.appendChild(notes);
+		}
+		const hot = rec && rec.hotSeat;
+		if (hot && hot.length) {
+			view.appendChild(el("h5", null, "Hot seat preview"));
+			view.appendChild(el("p", "legendline",
+				"Coaches whose program ends the season more than twelve levels under its " +
+				"prestige — the test next season's hot-seat draw uses. A preview, not the draw."));
+			const box = el("div", "note hot-seat");
+			for (const h of hot) {
+				const line = el("div");
+				line.appendChild(document.createTextNode((h.coach || "?") + ", "));
+				line.appendChild(programLink(h.school));
+				line.appendChild(document.createTextNode(" — " + h.margin + " under" +
+					(h.record ? ", " + h.record + " last season" : "") +
+					(h.tenure ? ", year " + h.tenure : "")));
+				box.appendChild(line);
+			}
+			view.appendChild(box);
+		}
 	}
 
 	/* THE COACHING TREE.
@@ -3532,22 +3645,23 @@
 	   is the answer to "who keeps running into whom in March". */
 	function rivalriesSection(view, u) {
 		const riv = u.tail && u.tail.carry ? u.tail.carry.rivalries : null;
-		const list = Object.keys(riv || {}).map((k) => riv[k])
-			.filter((e) => e && e.a && e.b && (e.march || []).length >= 2)
-			.sort((x, y) => y.march.length - x.march.length || y.games - x.games ||
-				Math.max.apply(null, y.march) - Math.max.apply(null, x.march) ||
-				String(x.a + x.b).localeCompare(String(y.a + y.b)))
+		/* Hottest first (Universe.rivalryHeat): recent meetings count, old
+		   ones fade, so the table is the rivalries of now and not of 2031. */
+		const list = global.Universe.rivalryTable(riv, u.tail ? u.tail.lastSeason : null)
 			.slice(0, 10);
 		if (!list.length) return;
 		view.appendChild(el("h4", null, "Rivalries"));
 		view.appendChild(el("p", "legendline",
-			"Pairs that met in the NCAA tournament more than once. Once a pair " +
-			"has met in March, every later game between them counts toward the series."));
+			"Pairs that met in the NCAA tournament more than once, hottest first. Heat " +
+			"counts a March meeting as 3 and any other season they met as 1, halving every " +
+			global.Universe.RIVALRY_HALF_LIFE + " years. Once a pair has met in March, " +
+			"every later game between them counts toward the series."));
 		const wrap = el("div", "scroll");
 		const table = el("table");
+		table.className = "rivalry-table";
 		const hr = el("tr");
-		for (const h of ["Rivalry", "March meetings", "Seasons", "Series"]) {
-			hr.appendChild(el("th", h === "March meetings" ? "num" : "", h));
+		for (const h of ["Rivalry", "Heat", "March meetings", "Seasons", "Series"]) {
+			hr.appendChild(el("th", h === "March meetings" || h === "Heat" ? "num" : "", h));
 		}
 		const thead = el("thead");
 		thead.appendChild(hr);
@@ -3560,6 +3674,7 @@
 			td.appendChild(document.createTextNode(" vs "));
 			td.appendChild(programLink(e.b));
 			tr.appendChild(td);
+			tr.appendChild(el("td", "num", e.heat.toFixed(1)));
 			tr.appendChild(el("td", "num", String(e.march.length)));
 			tr.appendChild(el("td", null, e.march.slice().sort((a, b) => a - b).join(", ")));
 			tr.appendChild(el("td", null, e.aw === e.bw ? "level " + e.aw + "-" + e.bw
@@ -3639,6 +3754,95 @@
 		}
 	}
 
+	/* UNIVERSE PLAY: follow a program (its season-end card) and the dynasty
+	   goal (progress and result). See js/app.js "universe play". */
+	function universePlay(view, u) {
+		const U = global.Universe;
+		const all = programHistoryAll();
+		const names = Object.keys(all).sort((a, b) => a.localeCompare(b));
+		if (!names.length) {
+			for (const r of u.rows) {
+				for (const n of [r && r.champion, r && r.runnerUp, r && r.apOne]) {
+					if (n && names.indexOf(n) < 0) names.push(n);
+				}
+			}
+			names.sort((a, b) => a.localeCompare(b));
+		}
+		const bar = el("div", "filters universe-play");
+		const sel = el("select");
+		sel.setAttribute("aria-label", "Follow a program");
+		sel.appendChild(new Option("follow a program…", ""));
+		for (const n of names) sel.appendChild(new Option(n, n));
+		if (u.followed && names.indexOf(u.followed) < 0) sel.appendChild(new Option(u.followed, u.followed));
+		sel.value = u.followed || "";
+		sel.disabled = !!u.running;
+		sel.addEventListener("change", () => { A().followProgram(sel.value || null); });
+		bar.appendChild(sel);
+		const dyn = el("button", null, u.dynasty ? "New dynasty goal…" : "Dynasty goal…");
+		dyn.disabled = !!u.running;
+		dyn.title = "Take a program to a level or a title within N seasons, inside a settings budget.";
+		dyn.addEventListener("click", () => { A().dynastyDialog(); });
+		bar.appendChild(dyn);
+		view.appendChild(bar);
+
+		/* The season-end card. */
+		if (u.followed && !u.running) {
+			let c = null;
+			try { c = U.followedCard(u, u.followed, (A().state.results || []).filter(Boolean)); }
+			catch (e) { c = null; }
+			const card = el("div", "note followed-card");
+			const head = el("div");
+			head.appendChild(el("b", null, "Following "));
+			head.appendChild(programLink(u.followed));
+			card.appendChild(head);
+			if (c) {
+				const lc = c.levelChange;
+				card.appendChild(el("div", null, c.season + ": " + c.w + "-" + c.l +
+					(c.conf ? " in the " + c.conf : "") +
+					(c.title ? ", national champions" : c.ncaa ? ", NCAA: " + c.ncaa : ", no NCAA bid") +
+					(c.seed ? " (No. " + c.seed + " seed)" : "")));
+				card.appendChild(el("div", null, "Level " + c.level + (lc === null ? ""
+					: " (" + (lc > 0 ? "+" : "") + lc + " on the season before)") +
+					" · " + c.titles + " title" + (c.titles === 1 ? "" : "s") + " in " +
+					c.seasons + " season" + (c.seasons === 1 ? "" : "s")));
+				card.appendChild(el("div", null, "Coach: " + (c.coach || "—") +
+					(c.newCoach ? " (new; replaced " + (c.prevCoach || "?") + ")" : "")));
+			} else {
+				card.appendChild(el("div", "hint", "No played season on record for this program " +
+					"yet (its history rebuilds when the chain runs)."));
+			}
+			view.appendChild(card);
+		}
+
+		/* The dynasty goal: progress and result. */
+		const st = A().dynastyStatus ? A().dynastyStatus() : null;
+		if (u.dynasty && st) {
+			const g = u.dynasty;
+			const box = el("div", "note dynasty-card dynasty-" + st.status.replace(/ /g, "-"));
+			const head = el("div");
+			head.appendChild(el("b", null, "Dynasty: "));
+			head.appendChild(programLink(g.program));
+			head.appendChild(document.createTextNode(" — " + (g.kind === "title"
+				? "win a national title" : "reach level " + g.level) + " within " + g.seasons +
+				" season" + (g.seasons === 1 ? "" : "s")));
+			box.appendChild(head);
+			box.appendChild(el("div", null, "Seasons " + st.played + "/" + st.window +
+				" · best level " + (st.bestLevel === null ? "—" : st.bestLevel) +
+				(st.startLevel !== null ? " (from " + st.startLevel + ")" : "") +
+				" · titles " + st.titles + " · settings " + st.moved + "/" + st.budget));
+			box.appendChild(el("div", st.status === "won" ? "goal met" : "unit",
+				st.status === "won" ? "Won in " + st.achievedAt + "."
+					: st.status === "failed" ? "Failed: the window closed without it. Tune and rebuild."
+					: st.status === "over budget" ? st.overBudget + " setting" +
+						(st.overBudget === 1 ? "" : "s") + " over budget."
+					: "In progress: add seasons or rebuild."));
+			const give = el("button", "linky", "abandon");
+			give.addEventListener("click", () => { A().abandonDynasty(); });
+			box.appendChild(give);
+			view.appendChild(box);
+		}
+	}
+
 	function viewUniverse(view, res) {
 		const st = A().state;
 		const u = st.universe || { rows: [] };
@@ -3650,6 +3854,30 @@
 			"redrawn, a fired coach is replaced by a named first-year hire, and " +
 			"the build-pool memory spans the whole timeline. A universe re-runs " +
 			"from its seeds — the export stores seeds, not simulated output."));
+		if (u.rows.length) {
+			const nm = el("div", "filters");
+			nm.appendChild(el("span", "pill", "World: " + (u.name || "Universe")));
+			const rn = el("button", null, "Randomize world name");
+			rn.disabled = !!u.running;
+			rn.title = "Draw a new name for this world. It is saved and written into the export.";
+			rn.addEventListener("click", () => { A().randomizeUniverseName(); });
+			nm.appendChild(rn);
+			view.appendChild(nm);
+			universePlay(view, u);
+		}
+		/* Save slots work with or without a timeline (a slot can be loaded). */
+		{
+			const sb = el("div", "filters");
+			const slots = el("button", null, "Save slots\u2026");
+			const info = A().universeStorageInfo ? A().universeStorageInfo() : {};
+			slots.disabled = !!u.running || info.idb === false;
+			slots.title = info.idb === false
+				? "IndexedDB is not available in this browser; the universe is kept (bounded) in localStorage."
+				: "Save the whole universe to a named slot, or load or delete one.";
+			slots.addEventListener("click", () => { A().universeSlotsDialog(); });
+			sb.appendChild(slots);
+			view.appendChild(sb);
+		}
 
 		const bar = el("div", "filters");
 		/* Universe mode is a setting now (see the "The world" group in the
@@ -3680,6 +3908,22 @@
 			part.addEventListener("click", () => { A().resumeUniverseDialog(); });
 			bar.appendChild(part);
 		}
+		/* Past the last season: real games on synthetic classes. */
+		if (!u.running && u.rows.length && u.tail && !u.broken) {
+			const fwd = el("button", null, "Simulate more seasons…");
+			fwd.id = "btnSimForward";
+			fwd.title = "Play N more seasons past " + u.tail.lastSeason +
+				" on synthetic classes drawn from this world's seed.";
+			fwd.addEventListener("click", () => { A().simulateForwardDialog(); });
+			bar.appendChild(fwd);
+		}
+		if (!u.running) {
+			const syn = el("button", null, "New synthetic universe…");
+			syn.id = "btnSynthUniverseTab";
+			syn.title = "Start a new world of N synthetic seasons (replaces the loaded classes).";
+			syn.addEventListener("click", () => { A().syntheticUniverseDialog(); });
+			bar.appendChild(syn);
+		}
 		/* A way out. Fifty seasons is close to a minute of work and the chain
 		   had `running` and no stop — the batch runner has had one since it
 		   existed. The seasons already finished are kept, exactly as a
@@ -3699,7 +3943,7 @@
 		exp.addEventListener("click", () => { A().exportUniverse(false); });
 		bar.appendChild(exp);
 		const expAll = el("button", null, "Export with class files");
-		expAll.disabled = !u.rows.length || !!u.running;
+		expAll.disabled = !u.rows.length || !!u.running || !!u.viewOnly;
 		expAll.title = "The same file with the class exports inlined, so the " +
 			"whole universe is one file to hand somebody. Larger.";
 		expAll.addEventListener("click", () => { A().exportUniverse(true); });
@@ -3709,13 +3953,19 @@
 		   does not, and it takes one array — so the whole universe is one
 		   file. See Engine.universePlayersFile. */
 		const expPlayers = el("button", null, "Export universe players (BBGM)");
-		expPlayers.disabled = !u.rows.length || !!u.running;
+		expPlayers.disabled = !u.rows.length || !!u.running || !!u.viewOnly;
 		expPlayers.title = "One BBGM players file for the whole universe: every " +
 			"class at its own draft year, pids renumbered across the world, the " +
 			"seasons each man actually played, and father/son links. Load it with " +
 			"Tools → Import players and tick “include stats”.";
 		expPlayers.addEventListener("click", () => { A().exportUniversePlayers(); });
 		bar.appendChild(expPlayers);
+		for (const [what, label] of [["timeline", "Timeline CSV"], ["records", "Records CSV"]]) {
+			const b = el("button", null, label);
+			b.disabled = !u.rows.length || !!u.running || (what === "records" && !u.records);
+			b.addEventListener("click", () => { A().exportUniverseCsv(what); });
+			bar.appendChild(b);
+		}
 		const impBtn = el("button", null, "Import universe…");
 		impBtn.disabled = !!u.running;
 		const impInput = el("input");
@@ -3786,9 +4036,28 @@
 		   NCAA program (see Universe.summarize); a prospect abroad shows
 		   his club instead, since that is where the season happened. */
 		const where = (m) => m.nonNcaa && m.club ? m.club : (m.school || m.club || "?");
+		/* A POY or No. 1 pick opens his page in the season's file when that
+		   file is loaded and the row recorded his key. */
+		const fileOf = (r) => A().state.files.findIndex((f) =>
+			f && r.fingerprint && f.fingerprint === r.fingerprint);
+		const manCell = (m, r) => {
+			const td = el("td");
+			if (!m) { td.textContent = "—"; return td; }
+			const fi = m.key !== undefined && !r.extrapolated ? fileOf(r) : -1;
+			if (fi >= 0) {
+				const go = el("button", "linky", m.name);
+				go.title = "Open his page in the " + r.season + " class";
+				go.addEventListener("click", () => { A().showPlayerInFile(fi, m.key); });
+				td.appendChild(go);
+			} else td.appendChild(document.createTextNode(m.name));
+			td.appendChild(document.createTextNode(" (" + where(m) + ")"));
+			return td;
+		};
 		const guessedSeasons = new Set(u.rows.filter((r) => r && r.extrapolated)
 			.map((r) => r.season));
-		for (const r of u.rows) {
+		const followed = u.followed || null;
+		const UU = global.Universe;
+		u.rows.forEach((r, rowIndex) => {
 			/* A GAP IS A ROW. The status line named the seasons that were
 			   not played and the table did not, so 2030 followed 2027 as if
 			   nothing had happened. One greyed row per missing season says
@@ -3812,30 +4081,45 @@
 			   because the whole point is that it is NOT one: the champion and
 			   the player of the year are inferred from the world either side
 			   of the gap. */
-			const tr = el("tr", r.extrapolated ? "gaprow" : null);
+			const mine = followed && UU.rowMentions(r, followed);
+			const tr = el("tr", [r.extrapolated ? "gaprow" : "", mine ? "followed" : ""]
+				.filter(Boolean).join(" ") || null);
 			/* “*” is an extrapolated season (no class file); “†” is a season
 			   restored from an imported universe because the replay of it
 			   diverged. Both are rows the tool is telling you it did not
-			   simulate on this machine. */
-			tr.appendChild(el("td", null, String(r.season || "?") +
-				(r.extrapolated ? " *" : "") + (r.restored ? " †" : "")));
+			   simulate on this machine. The season opens its drawer. */
+			const seasonTd = el("td");
+			const open = el("button", "linky season-open", String(r.season || "?") +
+				(r.extrapolated ? " *" : "") + (r.restored ? " †" : ""));
+			open.title = "Open this season's detail: its config, carry and threads";
+			open.addEventListener("click", () => { A().seasonDrawer(rowIndex); });
+			seasonTd.appendChild(open);
+			if (mine) seasonTd.appendChild(el("span", "pill", followed));
+			tr.appendChild(seasonTd);
 			if (r.error) {
 				const td = el("td", null, "failed: " + r.error);
 				td.colSpan = 7;
 				tr.appendChild(td);
 				tb.appendChild(tr);
-				continue;
+				return;
 			}
-			tr.appendChild(el("td", null, (r.flavor || "—") +
+			const flTd = el("td", null, (r.flavor || "—") +
 				(r.partial ? " · partial class, honours topped up" : "") +
-				(r.restored ? " · restored from the imported universe" : "")));
+				(r.restored ? " · restored from the imported universe" : ""));
+			/* The season's strangeness (Engine.strangeness), reasons on hover. */
+			if (r.strange && Number.isFinite(r.strange.score)) {
+				const sp = el("span", "strange-score", " · strangeness " + r.strange.score);
+				sp.title = (r.strange.reasons || []).join("; ") || "nothing unusual";
+				flTd.appendChild(sp);
+			}
+			tr.appendChild(flTd);
 			tr.appendChild(el("td", null, r.apOne || "—"));
-			tr.appendChild(el("td", null, (r.champion || "—") +
-				(r.champSeed ? " (No. " + r.champSeed + ")" : "")));
-			tr.appendChild(el("td", null, r.poy
-				? r.poy.name + " (" + where(r.poy) + ")" : "—"));
-			tr.appendChild(el("td", null, r.no1
-				? r.no1.name + " (" + where(r.no1) + ")" : "—"));
+			const champTd = el("td");
+			champTd.appendChild(r.champion ? programLink(r.champion) : document.createTextNode("—"));
+			if (r.champSeed) champTd.appendChild(document.createTextNode(" (No. " + r.champSeed + ")"));
+			tr.appendChild(champTd);
+			tr.appendChild(manCell(r.poy, r));
+			tr.appendChild(manCell(r.no1, r));
 			tr.appendChild(el("td", null, r.realignment && r.realignment.length
 				? r.realignment.join("; ") : "—"));
 			/* Fired / retired / hired away, rather than one number that used
@@ -3852,7 +4136,7 @@
 				? r.futureOnRosters + (r.futureHonors ? " (" + r.futureHonors + " honors)" : "")
 				: "0"));
 			tb.appendChild(tr);
-		}
+		});
 		table.appendChild(tb);
 		wrap.appendChild(table);
 		view.appendChild(wrap);
@@ -3904,8 +4188,31 @@
 			   so the program in one is a link to its team page rather than a
 			   word in a sentence. A timeline stored before that change is a
 			   list of strings and still renders. */
+			/* Filter by kind and by program; the choice lives on state for the session. */
+			const st2 = A().state;
+			const fbar = el("div", "filters");
+			const mk = (label, opts, cur, set) => {
+				const sel = el("select");
+				sel.setAttribute("aria-label", label);
+				sel.appendChild(new Option("any " + label, ""));
+				for (const o of opts) sel.appendChild(new Option(o, o));
+				sel.value = opts.indexOf(cur) >= 0 ? cur : "";
+				sel.addEventListener("change", () => { set(sel.value); A().render(); });
+				fbar.appendChild(sel);
+			};
+			const objs = u.threads.filter((t) => t && typeof t === "object");
+			const kinds = Array.from(new Set(objs.map((t) => t.kind).filter(Boolean))).sort();
+			const teams = Array.from(new Set(objs.flatMap((t) => [t.team, t.other])
+				.filter(Boolean))).sort();
+			mk("kind", kinds, st2.universeThreadKind, (v) => { st2.universeThreadKind = v; });
+			mk("program", teams, st2.universeThreadTeam, (v) => { st2.universeThreadTeam = v; });
+			view.appendChild(fbar);
+			const shown = global.Universe.filterThreads(u.threads,
+				kinds.indexOf(st2.universeThreadKind) >= 0 ? st2.universeThreadKind : "",
+				teams.indexOf(st2.universeThreadTeam) >= 0 ? st2.universeThreadTeam : "");
 			const tl = el("div", "note");
-			for (const t of u.threads) {
+			if (!shown.length) tl.appendChild(el("div", "hint", "No threads match these filters."));
+			for (const t of shown) {
 				const line = el("div");
 				if (typeof t === "string") {
 					line.appendChild(document.createTextNode(t));
@@ -3946,6 +4253,31 @@
 			view.appendChild(el("div", "note", u.alumni.map((a) =>
 				a.season + "  " + a.name + " (" + a.school +
 				(a.club ? ", then " + a.club : "") + ") — " + a.why).join("\n")));
+		}
+		/* What a reload keeps. See universeForStorage in js/app.js. */
+		const caps = A().PERSIST_CAPS;
+		const store = A().universeStorageInfo ? A().universeStorageInfo() : {};
+		if (store.idb) {
+			view.appendChild(el("p", "hint universe-persist",
+				"Saved in full to this browser's IndexedDB (autosave, plus " + store.slots +
+				" named slots under Save slots). Nothing is dropped on a reload."));
+		} else if (caps) {
+			// Only multi-season careers are stored, so one-season entries always go.
+			const regAll = u.registry ? Object.values(u.registry) : [];
+			const regKept = Math.min(caps.registry, regAll.filter((x) => x && x.span >= 2).length);
+			const drop = [
+				[u.rows.length, caps.rows, "the oldest ", " seasons"],
+				[(u.threads || []).length, caps.threads, "", " threads"],
+				[(u.alumni || []).length, caps.alumni, "the oldest ", " alumni"],
+				[regAll.length, regKept, "", " career-index entries"],
+			].filter((x) => x[0] > x[1])
+				.map((x) => x[2] + (x[0] - x[1]) + x[3]);
+			view.appendChild(el("p", "hint universe-persist",
+				"Browser storage keeps up to " + caps.rows + " seasons, " + caps.threads +
+				" threads, " + caps.alumni + " alumni and " + caps.registry +
+				" career entries. " + (drop.length
+					? "A reload now would drop " + drop.join(", ") + " — re-run from the seeds to get them back."
+					: "A reload now keeps everything.")));
 		}
 	}
 
@@ -4490,7 +4822,8 @@
 			["edit", "Player Edit", "The full prospect table: filters, columns, locks and the editor"],
 		].forEach(([mode, label, title]) => {
 			const on = (st.boardMode || "board") === mode;
-			const b = el("button", on ? "on" : "", label);
+			// Player Edit carries a pencil so the power tool reads as one.
+			const b = el("button", on ? "on" : "", mode === "edit" ? "✎ " + label : label);
 			b.type = "button";
 			b.title = title;
 			b.setAttribute("role", "tab");
@@ -4513,8 +4846,16 @@
 		   clutter this reorganization exists to remove. */
 		if ((st.boardMode || "board") !== "edit") {
 			bar.appendChild(el("span", "pill", res.players.length + " prospects"));
+			/* The flavor pill read as a stray fragment ("a positionless
+			   class") with nothing to say what it was; it is labelled now and
+			   never truncated. */
 			if (res.flavor && res.flavor.label) {
-				bar.appendChild(el("span", "pill", res.flavor.label));
+				const notes = el("span", "classnotes");
+				notes.appendChild(el("span", "lbl", "Class notes:"));
+				const pill = el("span", "pill", res.flavor.label);
+				pill.title = "Class note: " + res.flavor.label;
+				notes.appendChild(pill);
+				bar.appendChild(notes);
 			}
 		}
 		view.appendChild(bar);
@@ -4526,56 +4867,71 @@
 	}
 
 	function viewBoard(view, res) {
+		/* One line up front; the provenance lives in a disclosure for
+		   whoever wants it. */
 		view.appendChild(el("p", "legendline",
+			"The board the simulated season implies, in mock-draft order. Click a name for his page."));
+		const about = el("details", "aboutboard");
+		about.appendChild(el("summary", null, "About this board"));
+		about.appendChild(el("p", "hint",
 			"The file already carries draft.round and draft.pick and the tool " +
 			"used them as nothing but a class-order proxy. This is the board the " +
 			"simulated season implies: a preseason ranking from ratings alone, " +
-			"then what the year actually showed. Click a name for his page."));
-		const cards = el("div", "cards");
-		const mk = (title, list, sign) => {
-			const box = el("div", "card");
-			box.appendChild(el("h4", null, title));
-			const noteBox = el("div", "note");
-			if (!list.length) {
-				noteBox.textContent = "nobody moved";
-			} else {
-				list.forEach((p, i) => {
-					if (i) noteBox.appendChild(document.createTextNode("\n"));
-					noteBox.appendChild(document.createTextNode(
-						(sign && p.stockMove > 0 ? "+" : "") + p.stockMove +
-						"  No. " + p.boardRank + "  "));
-					noteBox.appendChild(playerLink(p));
-					noteBox.appendChild(document.createTextNode(
-						" (" + (p.proClub || p.newCollege) + ")"));
+			"then what the year actually showed. Preseason is that ratings-only " +
+			"rank and ± is how far the season moved him."));
+		view.appendChild(about);
+
+		/* Risers and fallers as a small grid (move, pick, name, school)
+		   rather than monospace lines that wrapped mid-name. Each card
+		   copies its own list. */
+		const cards = el("div", "cards movercards");
+		const mk = (title, list) => {
+			const box = el("div", "card movers");
+			const head = el("div", "cardhead");
+			head.appendChild(el("h4", null, title));
+			if (list.length) {
+				const cp = el("button", "linkish", "Copy as markdown");
+				cp.type = "button";
+				cp.title = "Copy the " + title.toLowerCase() + " as a markdown table";
+				cp.addEventListener("click", () => {
+					A().copyText("**" + title + " — seed " + res.seed + "**\n\n" +
+						markdownTable(["±", "Board", "Player", "School / club"], list.map((p) => [
+							(p.stockMove > 0 ? "+" : "") + p.stockMove, p.boardRank, p.name,
+							p.proClub || p.newCollege])), cp, "Copy as markdown",
+						"the " + title.toLowerCase() + " as markdown");
 				});
+				head.appendChild(cp);
 			}
-			box.appendChild(noteBox);
+			box.appendChild(head);
+			if (!list.length) {
+				box.appendChild(el("p", "hint", "nobody moved"));
+				return box;
+			}
+			const grid = el("div", "movergrid");
+			grid.setAttribute("role", "list");
+			for (const p of list) {
+				const row = el("div", "moverrow");
+				row.setAttribute("role", "listitem");
+				row.appendChild(el("span", "num " + (p.stockMove > 0 ? "up" : "down"),
+					(p.stockMove > 0 ? "+" : "") + p.stockMove));
+				row.appendChild(el("span", "num dim", "No. " + p.boardRank));
+				const nm = el("span", "ell");
+				nm.appendChild(playerLink(p));
+				row.appendChild(nm);
+				const sch = el("span", "ell dim", p.proClub || p.newCollege);
+				sch.title = p.proClub || p.newCollege;
+				row.appendChild(sch);
+				grid.appendChild(row);
+			}
+			box.appendChild(grid);
 			return box;
 		};
-		cards.appendChild(mk("Risers", res.risers || [], true));
-		cards.appendChild(mk("Fallers", res.fallers || [], true));
+		cards.appendChild(mk("Risers", res.risers || []));
+		cards.appendChild(mk("Fallers", res.fallers || []));
 		view.appendChild(cards);
 
 		const BOARD_HEADS = ["Board", "Rd", "Pick", "Player", "Pos", "Year", "Ovr", "Pot",
 			"School / club", "Preseason", "±", "PPG", "Honors"];
-		/* Copy as markdown, beside the other copy actions in the tool: a
-		   draft board's natural destination is a forum post. */
-		const bar = el("div", "filters");
-		const md = el("button", null, "Copy as markdown");
-		md.title = "Copy the board as a markdown table";
-		md.addEventListener("click", () => {
-			const rows = (res.board || []).map((p) => [
-				p.boardRank, p.mockRound || "", p.mockPick || "", p.name, p.newPos,
-				p.classYear, p.newOvr, p.newPot, p.proClub || p.newCollege,
-				p.preseasonRank, p.stockMove === 0 ? "" : (p.stockMove > 0 ? "+" : "") + p.stockMove,
-				p.stats ? n1(p.stats.ppg) : "", (p.awards || []).slice(0, 3).join("; "),
-			]);
-			A().copyText("**Draft board — seed " + res.seed +
-				(res.flavor && res.flavor.label ? ", " + res.flavor.label : "") + "**\n\n" +
-				markdownTable(BOARD_HEADS, rows), md, "Copy as markdown");
-		});
-		bar.appendChild(md);
-		view.appendChild(bar);
 		if (!(res.board || []).length) {
 			const box = el("div", "card empty-state");
 			box.appendChild(el("h4", null, "No board to show"));
@@ -4589,9 +4945,10 @@
 		   from Duke", "sort by PPG" each meant going to Player Edit. The
 		   filter lives here (not in the prospect table's filter) because the
 		   two views answer different questions and one should not quietly
-		   narrow the other. */
+		   narrow the other. It sits directly above the table and sticks
+		   while the page scrolls the table under it. */
 		const bf = boardFilter;
-		const fbar = el("div", "filters");
+		const fbar = el("div", "filters boardfilters");
 		const q = searchInput("Find a prospect, school or club…", "Search the board",
 			() => bf.q, (v) => { bf.q = v; });
 		fbar.appendChild(q);
@@ -4611,6 +4968,25 @@
 			reset.addEventListener("click", () => { bf.sort = null; A().render(); });
 			fbar.appendChild(reset);
 		}
+		// "12 of 70" — filled in once the list is filtered, below.
+		const count = el("span", "unit boardcount");
+		fbar.appendChild(count);
+		/* Copy as markdown, beside the other copy actions in the tool: a
+		   draft board's natural destination is a forum post. */
+		const md = el("button", null, "Copy as markdown");
+		md.title = "Copy the board as a markdown table";
+		md.addEventListener("click", () => {
+			const rows = (res.board || []).map((p) => [
+				p.boardRank, p.mockRound || "", p.mockPick || "", p.name, p.newPos,
+				p.classYear, p.newOvr, p.newPot, p.proClub || p.newCollege,
+				p.preseasonRank, p.stockMove === 0 ? "" : (p.stockMove > 0 ? "+" : "") + p.stockMove,
+				p.stats ? n1(p.stats.ppg) : "", (p.awards || []).slice(0, 3).join("; "),
+			]);
+			A().copyText("**Draft board — seed " + res.seed +
+				(res.flavor && res.flavor.label ? ", " + res.flavor.label : "") + "**\n\n" +
+				markdownTable(BOARD_HEADS, rows), md, "Copy as markdown", "the draft board as markdown");
+		});
+		fbar.appendChild(md);
 		view.appendChild(fbar);
 
 		/* One sort value per heading. Pick is the overall mock slot
@@ -4634,6 +5010,8 @@
 			return (p.name + " " + (p.newCollege || "") + " " + (p.proClub || "") + " " +
 				(p.archetype || "")).toLowerCase().indexOf(needle) !== -1;
 		});
+		const total = (res.board || []).length;
+		count.textContent = list.length === total ? total + " prospects" : list.length + " of " + total;
 		if (bf.sort) {
 			const get = BOARD_SORT[bf.sort.key];
 			if (get) {
@@ -4643,7 +5021,7 @@
 		}
 
 		const wrap = el("div", "scroll");
-		const table = el("table");
+		const table = el("table", "boardtable");
 		const thead = el("thead");
 		const hr = el("tr");
 		for (const h of BOARD_HEADS) {
@@ -4748,6 +5126,15 @@
 			const nameTd = el("td", "sticky");
 			nameTd.appendChild(playerLink(p));
 			nameTd.appendChild(whyButton(p, res));
+			/* Player Edit was a mode toggle nobody found; each row now
+			   offers the editor for its own prospect. */
+			const ed = el("button", "rowedit linky", "✎");
+			ed.appendChild(el("span", "roweditword", " Edit"));
+			ed.type = "button";
+			ed.title = "Edit " + p.name + " in Player Edit";
+			ed.setAttribute("aria-label", "Edit " + p.name);
+			ed.addEventListener("click", () => { A().revealPlayer(p); });
+			nameTd.appendChild(ed);
 			tr.appendChild(nameTd);
 			tr.appendChild(el("td", null, p.newPos));
 			tr.appendChild(el("td", null, p.classYear));
@@ -4763,17 +5150,45 @@
 				p.stockMove === 0 ? "—" : (p.stockMove > 0 ? "+" : "") + p.stockMove));
 			tr.appendChild(mv);
 			tr.appendChild(el("td", "num", p.stats ? n1(p.stats.ppg) : "—"));
-			tr.appendChild(wrapCell(p.stats
-				? (p.awards || []).slice(0, 3).join("; ")
-				: "did not play"));
+			tr.appendChild(honorsCell(p));
 			tb.appendChild(tr);
 		}
 		table.appendChild(tb);
 		wrap.appendChild(table);
 		view.appendChild(wrap);
 		if (!list.length) {
-			view.appendChild(el("p", "hint", "No prospect on the board matches that search."));
+			const none = el("p", "hint boardnone", "No prospect on the board matches that search. ");
+			const clr = el("button", "chip", "Clear filters");
+			clr.type = "button";
+			clr.addEventListener("click", () => { bf.q = ""; bf.pos = ""; A().render(); });
+			none.appendChild(clr);
+			view.appendChild(none);
 		}
+	}
+
+	/* The Honors cell: a count badge and the list clamped to two lines;
+	   the badge expands the cell when there is more than fits. */
+	function honorsCell(p) {
+		if (!p.stats) return wrapCell("did not play");
+		const aw = p.awards || [];
+		const td = el("td", "wrap honors");
+		if (!aw.length) return td;
+		const inner = el("div", "clamp", aw.join("; "));
+		inner.title = aw.join("\n");
+		if (aw.length > 2) {
+			const badge = el("button", "honorcount", String(aw.length));
+			badge.type = "button";
+			badge.title = "Show all " + aw.length + " honors";
+			badge.setAttribute("aria-expanded", "false");
+			badge.addEventListener("click", (e) => {
+				e.stopPropagation();
+				const open = inner.classList.toggle("clamp");
+				badge.setAttribute("aria-expanded", open ? "false" : "true");
+			});
+			td.appendChild(badge);
+		}
+		td.appendChild(inner);
+		return td;
 	}
 	// Disclosure states that should survive a re-render but are not settings.
 	const uiMemo = { classInfoOpen: false, filtersOpen: false };
@@ -4957,7 +5372,7 @@
 		const copy = el("button", null, "Copy all notes");
 		copy.addEventListener("click", () => {
 			A().copyText(res.players.slice().sort((a, b) => b.newOvr - a.newOvr)
-				.map((p) => p.name + "\n" + p.note).join("\n\n"), copy, "Copy all notes");
+				.map((p) => p.name + "\n" + p.note).join("\n\n"), copy, "Copy all notes", "all scouting notes");
 		});
 		bar.appendChild(copy);
 		const tsv = el("button", null, "Copy as spreadsheet rows");
@@ -4965,7 +5380,7 @@
 			const rows = res.players.slice().sort((a, b) => b.newOvr - a.newOvr)
 				.map((p) => [p.name, (p.note || "").replace(/\n/g, " · ")].join("\t"));
 			A().copyText(["name\tnote"].concat(rows).join("\n"), tsv,
-				"Copy as spreadsheet rows");
+				"Copy as spreadsheet rows", "notes as spreadsheet rows");
 		});
 		bar.appendChild(tsv);
 		const md = el("button", null, "Copy as markdown");
@@ -4977,7 +5392,7 @@
 					String(p.note || "").split("\n").map((l) => l.trim()).filter(Boolean)
 						.map((l) => "- " + l).join("\n"))
 				.join("\n\n");
-			A().copyText(text, md, "Copy as markdown");
+			A().copyText(text, md, "Copy as markdown", "notes as markdown");
 		});
 		bar.appendChild(md);
 		view.appendChild(bar);
@@ -4998,7 +5413,7 @@
 			one.title = "Copy this note to the clipboard";
 			one.setAttribute("aria-label", "Copy the note for " + p.name);
 			one.addEventListener("click", () => {
-				A().copyText(p.name + "\n" + p.note, one, "Copy");
+				A().copyText(p.name + "\n" + p.note, one, "Copy", "the note on " + p.name);
 			});
 			head.appendChild(one);
 			c.appendChild(head);
@@ -5567,6 +5982,20 @@
 		if (p.transfer) row("Path", p.transfer.kind +
 			(p.transfer.from ? " — from " + p.transfer.from : ""));
 		if (p.backstory) row("Story", p.backstory);
+		/* The seeded pro tail, universe mode only (Universe.proOutcome). */
+		{
+			const stP = A().state;
+			const UP = global.Universe;
+			if (UP && stP.cfg.universe && stP.universe && (stP.universe.rows || []).length) {
+				const fi = Number.isFinite(res.fileIndex) ? res.fileIndex : stP.active;
+				const f = stP.files[fi];
+				const id = UP.playerId(f && f.fingerprint, p.key);
+				const entry = (stP.universe.registry && stP.universe.registry[id]) ||
+					{ id, draft: { pot: p.newPot, slot: p.draftSlot || null } };
+				const pro = UP.proOutcome(entry);
+				if (pro) row("Pro career", UP.proText(pro) + " (projected)");
+			}
+		}
 		if (p.awards && p.awards.length) row("Honors", p.awards.join("; "));
 		if (p.priorAwards && p.priorAwards.length) {
 			row("Earlier honors", p.priorAwards.slice()

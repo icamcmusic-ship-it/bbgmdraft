@@ -8150,7 +8150,7 @@
 		for (const c of candidates.slice(0, DESK_BUDGET)) articles.push(c.article);
 	}
 
-	function build(res) {
+	function build(res, opts) {
 		if (!res || !res.players) return [];
 		const rng = new Rng("news|" + ((res.cfg && res.cfg.seed) || ""));
 		const teams = res.teams || {};
@@ -8232,6 +8232,51 @@
 					]), { school: TM(a.school), n: T(String(ago)), name: T(a.name) }),
 					body,
 				});
+			}
+		}
+
+		/* --- droughts ending (universe mode only) -------------------------
+
+		   The program digest (see digestStep in js/universe.js) says when a
+		   program last won it all and last reached a Final Four, as of the
+		   season before this one. A title after five years or more without
+		   one, and a Final Four after eight, are the stories a fanbase
+		   tells. No draws: the headline is picked off the season, so the
+		   rest of the paper's seeded stream is untouched. */
+		{
+			const digest = (res.cfg && res.cfg.universeDigest) || null;
+			const t = res.tourney;
+			if (digest && t && Number.isFinite(season)) {
+				const champ = t.champion ? t.champion.team.name : null;
+				const d = champ ? digest[champ] : null;
+				const n = d && Number.isFinite(d.title) ? season - d.title : 0;
+				if (n >= 5) {
+					articles.push({
+						when: 1.195, kind: "title drought ended",
+						headline: fill(["{school}'s first title in {n} years",
+							"{school} ends a {n}-year wait for a title"][season % 2],
+						{ school: TM(champ), n: T(String(n)) }),
+						body: [TM(champ), T(" had not won a national title since " + d.title +
+							". That is " + n + " years" + (Number.isFinite(d.poy) && d.poyName
+								? ", and the last player of the year it had was " + d.poyName +
+									" in " + d.poy : "") + ".")],
+					});
+				}
+				const ff = ((t.finalFour || []).map((x) => x && x.team ? x.team.name : x && x.name)
+					.filter((x) => x && x !== champ));
+				for (const name of ff) {
+					const e = digest[name];
+					const gap = e && Number.isFinite(e.ff) ? season - e.ff : 0;
+					if (gap < 8) continue;
+					articles.push({
+						when: 1.15, kind: "final four drought ended",
+						headline: fill("{school} ends a {n}-year Final Four drought",
+							{ school: TM(name), n: T(String(gap)) }),
+						body: [TM(name), T(" is back in a Final Four for the first time since " +
+							e.ff + ".")],
+					});
+					break;
+				}
 			}
 		}
 
@@ -9571,6 +9616,28 @@
 			const year = yearOf(a.when, season);
 			a.year = year;
 			a.dateline = dateline(a.when) + (year ? " " + year : "");
+		}
+		/* A FOLLOWED PROGRAM LEADS THE PAPER (universe mode). Added after the
+		   voice pass and with no draw from the shared rng, so following a
+		   program changes nothing else in the feed. */
+		const followed = opts && opts.followed;
+		const lead = followed && global.Universe && global.Universe.followedLead
+			? global.Universe.followedLead(res, followed) : null;
+		if (lead) {
+			const banners = ((res.cfg && res.cfg.universeTitles) || {})[followed] || 0;
+			const body = [TM(followed), T(" " + lead.text + ".")];
+			if (lead.coachChange) body.push(T(" The sideline changes hands this April."));
+			if (banners) {
+				body.push(T(" It came in with " + banners + " banner" +
+					(banners === 1 ? "" : "s") + " in this universe."));
+			}
+			articles.unshift({
+				when: -1, kind: "followed program", group: "the season", lead: true,
+				headline: fill(lead.title ? "{school} are national champions"
+					: "Your program: {school}, " + lead.record, { school: TM(followed) }),
+				body, year: season || null,
+				dateline: "Your program" + (season ? " " + season : ""),
+			});
 		}
 		return articles;
 	}

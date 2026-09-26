@@ -18,7 +18,7 @@ const path = require("path");
 const os = require("os");
 
 const ROOT = path.join(__dirname, "..");
-const PORT = 8791;
+const PORT = Number(process.env.UISMOKE_PORT) || 8791;
 const TYPES = {
 	".html": "text/html", ".js": "text/javascript",
 	".css": "text/css", ".json": "application/json",
@@ -129,6 +129,14 @@ async function gotoProspects(page) {
 		String(e.stack || e.message).split("\n").slice(0, 4).join(" | ")));
 	page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
 	page.on("response", (r) => { if (r.status() >= 400) errors.push("http " + r.status() + " " + r.url()); });
+	/* The unsaved-work warning: the reloads below are deliberate, so leave.
+	   Counted, so the section that tests the warning can see it asked. */
+	let beforeUnloads = 0;
+	page.on("dialog", (d) => {
+		if (d.type() !== "beforeunload") return;
+		beforeUnloads++;
+		d.accept();
+	});
 
 	const base = "http://127.0.0.1:" + PORT + "/index.html";
 	await page.goto(base);
@@ -354,6 +362,16 @@ async function gotoProspects(page) {
 		const ps = res.players.filter((p) => p.stats);
 		return ps.reduce((a, p) => a + p.stats.ts, 0) / ps.length;
 	});
+	// Measured from one end of the dial to the other: from the default, +3
+	// moved the field between 0.7 and 2.6 points depending on the class, so
+	// a one-point bar failed on an unlucky draw.
+	const setEff = (v) => page.evaluate((v) => {
+		const i = document.getElementById("efficiencyEnv");
+		i.value = v;
+		i.dispatchEvent(new Event("input", { bubbles: true }));
+	}, v);
+	await setEff("-3");
+	await page.waitForTimeout(800);
 	const tsBefore = await fieldTs();
 	await page.evaluate(() => {
 		const i = document.getElementById("efficiencyEnv");
@@ -498,6 +516,7 @@ async function gotoProspects(page) {
 	   making the Worker constructor throw, which is exactly what a file://
 	   browser does. */
 	await page.evaluate(() => {
+		window.__batchRealWorker = window.Worker;
 		window.Worker = function () { throw new Error("workers are blocked"); };
 	});
 	const inputsInline = await snap();
@@ -541,9 +560,56 @@ async function gotoProspects(page) {
 			seedOf(inlineText) + "\n         inputs that differ: " +
 			(inputDiff.join("; ") || "none") + "\n         " + out.join("\n         ");
 	};
-	ok("the fallback produces the same batch the worker does",
-		strip(inlineText) === strip(withWorker),
-		strip(inlineText) === strip(withWorker) ? "" : batchDiffDetail());
+	/* On a disagreement, run class 0 of the batch both ways and name the
+	   first players that differ: which field parts first says which stage
+	   of the pipeline the two contexts disagree in. */
+	/* On a disagreement, re-run the batch's three classes three ways — one
+	   runner reused in the worker (what a batch does), one reused on the
+	   page (the fallback), and a fresh runner per class on the page — and
+	   name the first players that differ from the fresh runs, which says
+	   which context drifts and in which stage. */
+	const probeDetail = () => page.evaluate(async (seedText) => {
+		const A = window.App;
+		const cfg = A.effectiveCfg();
+		const file = A.activeFile().data;
+		const base = (seedText.match(/batch seed: ?(\S+)/) || [])[1];
+		const seeds = [0, 1, 2].map((i) => base + "#" + i);
+		const mk = (seed) => {
+			const c = Config.make(cfg);
+			c.seed = seed;
+			c.overrides = cfg.overrides || {};
+			return c;
+		};
+		const reused = Engine.createRunner(file);
+		const pageReused = seeds.map((s) => BatchStats.fingerprint(reused.run(mk(s))));
+		const fresh = seeds.map((s) => BatchStats.fingerprint(Engine.createRunner(file).run(mk(s))));
+		const w = new window.__batchRealWorker("js/worker.js");
+		const workerReused = await new Promise((resolve) => {
+			w.onmessage = (e) => resolve(e.data.rows || e.data.message);
+			w.postMessage({ type: "probe", leagueFile: file, cfg, seed: seeds });
+		});
+		w.terminate();
+		if (!Array.isArray(workerReused)) return "worker probe failed: " + workerReused;
+		const F = ["key", "build", "ovr", "pot", "ratings", "college", "mpg", "ppg"];
+		const diff = (label, got) => {
+			for (let c = 0; c < 3; c++) {
+				const a = got[c] || [], b = fresh[c];
+				for (let i = 0; i < b.length; i++) {
+					const d = F.filter((f, j) => JSON.stringify((a[i] || [])[j]) !== JSON.stringify(b[i][j]));
+					if (d.length) {
+						return label + " class " + c + " player " + i + " " + b[i][0] + ": " +
+							d.map((f) => f + " " + JSON.stringify((a[i] || [])[F.indexOf(f)]) +
+								" (fresh " + JSON.stringify(b[i][F.indexOf(f)]) + ")").join("; ");
+					}
+				}
+			}
+			return label + " matches fresh";
+		};
+		return "probe " + base + ": " + diff("worker", workerReused) + " | " + diff("page", pageReused);
+	}, withWorker).catch((e) => "probe threw: " + e.message);
+	const parity = strip(inlineText) === strip(withWorker);
+	ok("the fallback produces the same batch the worker does", parity,
+		parity ? "" : batchDiffDetail() + "\n         " + await probeDetail());
 
 	console.log("\nSettings coverage");
 	{
@@ -668,8 +734,14 @@ async function gotoProspects(page) {
 		// Saved column layouts.
 		await page.locator(".filters button", { hasText: "Columns…" }).click();
 		await page.waitForSelector(".colpicker", { timeout: 5000 });
-		page.once("dialog", (d) => d.accept("my view"));
+		// Named inline in the picker now, not through window.prompt.
 		await page.locator("button", { hasText: "Save this layout…" }).click();
+		await page.waitForTimeout(150);
+		ok("an unnamed layout is refused with a message, the picker stays open",
+			(await page.locator(".colpicker").count()) >= 1 &&
+			/name/i.test(await page.locator("#modal [role=alert]").first().innerText()));
+		await page.locator("input.layoutname").fill("my view");
+		await page.locator("input.layoutname").press("Enter");
 		await page.waitForTimeout(400);
 		ok("a column layout can be saved and comes back by name",
 			(await page.locator("button", { hasText: "my view" }).count()) >= 1);
@@ -703,6 +775,140 @@ async function gotoProspects(page) {
 		ok("undo brings the rerolled class back",
 			(await page.evaluate(() => window.App.state.lastSeed)) === seedBefore,
 			seedBefore + " -> " + (await page.evaluate(() => window.App.state.lastSeed)));
+	}
+
+	console.log("\nInteraction layer: prompts, unsaved work, seed, undo history, toasts");
+	{
+		// 1. No native dialogs left anywhere in the app.
+		const js = ["app.js", "views.js"].map((f) =>
+			fs.readFileSync(path.join(__dirname, "..", "js", f), "utf8")).join("\n");
+		ok("no window.prompt / confirm / alert remains",
+			!/window\.(prompt|confirm|alert)\s*\(/.test(js));
+		let native = 0;
+		const onDialog = (d) => { if (d.type() !== "beforeunload") { native++; d.dismiss(); } };
+		page.on("dialog", onDialog);
+		await page.evaluate(() => {
+			window.__promptGot = null;
+			window.App.promptModal("Name it", "Name", "", (v) => { window.__promptGot = v; },
+				{ check: (v) => v ? "" : "Type a name." });
+		});
+		await page.waitForTimeout(150);
+		ok("the themed prompt focuses its box",
+			await page.evaluate(() => document.activeElement &&
+				document.activeElement.id === "modalPrompt"));
+		await page.keyboard.press("Enter");
+		await page.waitForTimeout(100);
+		ok("an empty value is refused inline and the dialog stays open",
+			!(await page.locator("#modal").isHidden()) &&
+			/Type a name/.test(await page.locator(".promptError").innerText()));
+		await page.locator("#modalPrompt").fill("B side");
+		await page.keyboard.press("Enter");
+		await page.waitForTimeout(100);
+		ok("Enter submits a valid value and closes it",
+			(await page.locator("#modal").isHidden()) &&
+			(await page.evaluate(() => window.__promptGot)) === "B side");
+		await page.evaluate(() => window.App.promptModal("Again", "Name", "x", () => {
+			window.__promptGot = "wrong"; }));
+		await page.waitForTimeout(100);
+		await page.keyboard.press("Escape");
+		await page.waitForTimeout(100);
+		ok("Escape cancels without calling back",
+			(await page.locator("#modal").isHidden()) &&
+			(await page.evaluate(() => window.__promptGot)) === "B side");
+
+		// 2. Unsaved work: nothing on a clean class, a lock makes it, a write clears it.
+		const uw = await page.evaluate(() => {
+			const A = window.App, S = A.state;
+			const keep = JSON.stringify(S.overrides);
+			S.overrides = {};
+			A.markExported();
+			const clean = A.unsavedWork();
+			S.overrides = { zz: { ovr: 50 } };
+			const dirty = A.unsavedWork();
+			A.markExported();
+			const after = A.unsavedWork();
+			S.overrides = JSON.parse(keep);
+			A.markExported();
+			return { clean, dirty, after };
+		});
+		ok("unsaved work: clean, then a lock, then written",
+			!uw.clean && uw.dirty && !uw.after, JSON.stringify(uw));
+
+		// 9 + 3. Copying the seed names it in the toast; the pill edits in place.
+		const toastText = await page.evaluate(async () => {
+			const real = navigator.clipboard && navigator.clipboard.writeText;
+			if (real) navigator.clipboard.writeText = () => Promise.resolve();
+			document.getElementById("seedPill").click();
+			await new Promise((r) => setTimeout(r, 50));
+			if (real) navigator.clipboard.writeText = real;
+			const t = Array.from(document.querySelectorAll(".replaytoast")).pop();
+			const box = document.getElementById("replayToasts");
+			return (t ? t.textContent : "") + "|" + (box ? box.getAttribute("aria-live") : "");
+		});
+		ok("a copy shows one toast naming what was copied, in a live region",
+			/^Copied seed .+\|polite$/.test(toastText), toastText);
+		const seed0 = await page.evaluate(() => document.getElementById("seedPill").dataset.seed);
+		await page.locator("#seedPill").dblclick();
+		await page.waitForTimeout(100);
+		ok("double-clicking the seed pill opens an inline editor",
+			(await page.locator("#seedPillEdit").count()) === 1);
+		await page.locator("#seedPillEdit").fill("zzz");
+		await page.keyboard.press("Escape");
+		await page.waitForTimeout(200);
+		ok("Escape cancels the inline seed edit",
+			(await page.locator("#seedPillEdit").count()) === 0 &&
+			(await page.evaluate(() => document.getElementById("seedPill").dataset.seed)) === seed0);
+		await page.locator("#seedPill").dblclick();
+		await page.waitForTimeout(100);
+		await page.locator("#seedPillEdit").fill("inline-seed-7");
+		await page.keyboard.press("Enter");
+		await page.waitForFunction(() =>
+			document.getElementById("seedPill").dataset.seed === "inline-seed-7", null, { timeout: 30000 });
+		ok("Enter applies the typed seed through the seed path",
+			(await page.evaluate(() => window.App.state.cfg.seed)) === "inline-seed-7");
+
+		// 6. Undo history: jump back two steps; redo walks forward again.
+		await page.evaluate(() => {
+			const A = window.App;
+			document.getElementById("seed").value = "";
+		});
+		await page.locator("#btnReroll").click();
+		await page.waitForTimeout(900);
+		const before = await page.evaluate(() => ({
+			u: window.App.state.undo.length, r: window.App.state.redo.length }));
+		await page.locator("#btnUndoHistory").click();
+		await page.waitForTimeout(150);
+		const items = await page.locator("#modal ol.undohistory li button").count();
+		ok("the undo history lists the stack, newest first", items === before.u,
+			items + " vs " + before.u);
+		await page.locator("#modal ol.undohistory li button").nth(1).click();
+		await page.waitForTimeout(1200);
+		const after = await page.evaluate(() => ({
+			u: window.App.state.undo.length, r: window.App.state.redo.length,
+			seed: window.App.state.cfg.seed }));
+		ok("picking the second entry undoes two steps",
+			after.u === before.u - 2 && after.r === before.r + 2, JSON.stringify([before, after]));
+		await page.locator("#btnRedo").click();
+		await page.waitForTimeout(1000);
+		ok("redo steps forward one at a time after a jump",
+			(await page.evaluate(() => window.App.state.redo.length)) === before.r + 1);
+
+		// 4 + 5 (already present): the tab and board mode persist; the sheet lists row keys.
+		const stored = await page.evaluate(() => {
+			try { return JSON.parse(localStorage.getItem("bbgm-draft-workshop/v1")); }
+			catch (e) { return null; }
+		});
+		ok("the last tab and board mode are stored",
+			!!stored && typeof stored.tab === "string" && typeof stored.boardMode === "string");
+		await page.locator("#btnKeys").click();
+		await page.waitForTimeout(150);
+		const sheet = await page.locator("#modalBody").innerText();
+		ok("the shortcut sheet lists j/k, Enter and l for Player Edit",
+			/j \/ ↓/.test(sheet) && /Enter/.test(sheet) && /\bl\b/.test(sheet));
+		await page.keyboard.press("Escape");
+		await page.waitForTimeout(100);
+		page.off("dialog", onDialog);
+		ok("no native dialog opened in this section", native === 0, String(native));
 	}
 
 	console.log("\nNarrow viewport");
@@ -1776,6 +1982,88 @@ async function gotoProspects(page) {
 			hist.tab.programs && hist.tab.people, JSON.stringify(hist.tab));
 		ok("a rivalry thread renders with both programs linked",
 			hist.rivalry && hist.kinds[0] === "rivalry", JSON.stringify(hist));
+		/* THE TAB'S QUICK WINS: jump links, name, CSV files, thread filters
+		   and the persistence footer. Downloads are caught at the anchor. */
+		const qw = await page.evaluate(async () => {
+			const st = window.App.state;
+			const u = st.universe;
+			const table = document.querySelector("#view table");
+			const linkCells = table ? table.querySelectorAll("tbody tr td button.linky").length : 0;
+			const before = u.name;
+			window.App.randomizeUniverseName();
+			const saved = JSON.stringify(localStorage);
+			const named = u.name !== before &&
+				saved.indexOf(JSON.stringify(u.name).slice(1, -1)) !== -1 &&
+				document.getElementById("view").textContent.indexOf("World: " + u.name) !== -1;
+			const got = [];
+			const click = HTMLAnchorElement.prototype.click;
+			HTMLAnchorElement.prototype.click = function () { got.push(this.download); };
+			try {
+				window.App.exportUniverseCsv("timeline");
+				window.App.exportUniverseCsv("records");
+			} finally { HTMLAnchorElement.prototype.click = click; }
+			const kinds = Array.from(new Set((u.threads || []).map((t) => t && t.kind).filter(Boolean)));
+			let filtered = true;
+			if (kinds.length) {
+				st.universeThreadKind = kinds[0];
+				window.App.render();
+				const want = u.threads.filter((t) => t && t.kind === kinds[0]).length;
+				const sel = document.querySelector('#view select[aria-label="kind"]');
+				filtered = !!sel && sel.value === kinds[0] &&
+					want === window.Universe.filterThreads(u.threads, kinds[0], "").length;
+				st.universeThreadKind = "";
+				window.App.render();
+			}
+			return { linkCells, named, name: u.name, got, filtered, kinds,
+				footer: !!document.querySelector("#view .universe-persist") };
+		});
+		ok("the timeline links its champion, POY and No. 1 pick", qw.linkCells >= 2,
+			String(qw.linkCells));
+		ok("the world name randomizes, shows and persists", qw.named, qw.name);
+		ok("the timeline and records export as CSV named for the world",
+			qw.got.length === 2 && qw.got.every((n) =>
+				/^universe_[a-z0-9_-]+-(timeline|records)\.csv$/.test(n) && /smoke-universe/.test(n)),
+			qw.got.join(" | "));
+		ok("the threads list filters by kind", qw.filtered, qw.kinds.join(","));
+		ok("the tab says what a reload keeps", qw.footer);
+		/* UNIVERSE HISTORY (audit 5.3/7/9/13/14): strangeness on each row,
+		   the weirdest season, the coaches' table and hot seat, the rivalry
+		   table by heat. The hot seat and the rivalries are synthesised, as
+		   above, because two seasons rarely produce either. */
+		const uh = await page.evaluate(() => {
+			const st = window.App.state;
+			const u = st.universe;
+			const rec = u.records;
+			const savedHot = rec.hotSeat;
+			const savedTail = u.tail;
+			rec.hotSeat = [{ school: "Duke", coach: "Test Coach", tenure: 5, margin: 3.2, record: "12-19" }];
+			u.tail = Object.assign({}, savedTail, { lastSeason: 2030, carry: Object.assign({},
+				savedTail && savedTail.carry, { rivalries: {
+					"Duke|Kansas": { a: "Duke", b: "Kansas", games: 4, aw: 3, bw: 1, march: [2010, 2011, 2012] },
+					"Iowa|Ohio State": { a: "Iowa", b: "Ohio State", games: 2, aw: 1, bw: 1, march: [2029, 2030] },
+				} }) });
+			window.App.render();
+			const v = document.getElementById("view");
+			const out = {
+				strange: v.querySelectorAll(".strange-score").length,
+				rows: u.rows.filter((r) => r && !r.error).length,
+				weird: !!v.querySelector(".weirdest-season"),
+				coaches: v.querySelectorAll("table.coach-records tbody tr").length,
+				hot: /Test Coach/.test((v.querySelector(".hot-seat") || {}).textContent || ""),
+				firstRivalry: (v.querySelector("table.rivalry-table tbody tr td") || {}).textContent || "",
+			};
+			rec.hotSeat = savedHot;
+			u.tail = savedTail;
+			window.App.render();
+			return out;
+		});
+		ok("every timeline row shows its strangeness", uh.strange === uh.rows && uh.rows > 0,
+			JSON.stringify(uh));
+		ok("the records book names the weirdest season and the coaches",
+			uh.weird && uh.coaches > 0, JSON.stringify(uh));
+		ok("the hot-seat preview renders", uh.hot, JSON.stringify(uh));
+		ok("the rivalries table puts the hot pair above the old one",
+			/^Iowa vs Ohio State/.test(uh.firstRivalry), uh.firstRivalry);
 		if (hist.name) {
 			await page.evaluate((n) => window.App.showTeam(n), hist.name);
 			await page.waitForTimeout(150);
@@ -1794,6 +2082,100 @@ async function gotoProspects(page) {
 			uni.players > 100 && uni.players === uni.uniquePids,
 			uni.players + " players, " + uni.uniquePids + " pids");
 
+		/* UNIVERSE PLAY (audit section 5, items 4, 5, 6, 8, 10): follow a
+		   program, a dynasty goal, the pro tail, the season drawer and the
+		   IndexedDB save slots. */
+		const play = await page.evaluate(async () => {
+			const A = window.App;
+			const st = A.state;
+			const u = st.universe;
+			const f = st.files[st.active];
+			const row = u.rows.filter((r) => r.fingerprint === (f && f.fingerprint))[0] || u.rows[0];
+			const name = row.champion;
+			st.tab = "universe";
+			A.followProgram(name);
+			const out = { name };
+			out.marked = document.querySelectorAll("#view tr.followed").length;
+			out.card = !!document.querySelector("#view .followed-card") &&
+				document.querySelector("#view .followed-card").textContent.indexOf("Coach:") !== -1;
+			// Any bbgm key: the replay layer keeps its own one beside the session's.
+			out.persisted = Object.keys(localStorage).filter((k) => /bbgm/i.test(k))
+				.some((k) => (localStorage.getItem(k) || "")
+					.indexOf("\"followed\":" + JSON.stringify(name)) !== -1);
+			out.proHall = !!document.querySelector("#view .pro-hall");
+			out.proCol = document.querySelectorAll("#view td.pro-career").length;
+			out.careers = u.registry ? Object.values(u.registry).filter((x) => x && x.span >= 2).length : 0;
+			// The paper leads with it.
+			st.tab = "news";
+			A.render();
+			const kinds = Array.from(document.querySelectorAll("#view .newsitem .newskind"))
+				.map((x) => x.textContent);
+			out.lead = kinds[0] || "";
+			st.tab = "universe";
+			A.render();
+			// A dynasty goal through its dialog.
+			A.dynastyDialog();
+			document.getElementById("modalOk").click();
+			out.dynasty = !!document.querySelector("#view .dynasty-card");
+			out.dynStatus = A.dynastyStatus() ? A.dynastyStatus().status : null;
+			// The season drawer.
+			const open = document.querySelector("#view button.season-open");
+			if (open) open.click();
+			const body = document.getElementById("modalBody").textContent;
+			out.drawer = /What the season was handed/.test(body) && /Chain position/.test(body) &&
+				/Threads touching/.test(body);
+			A.closeModal();
+			// IndexedDB slots: save, list, load, delete.
+			out.idbGlobal = typeof indexedDB !== "undefined";
+			out.saved = await A.saveUniverseSlot("slot2", "smoke world");
+			const listed = await A.listUniverseSlots();
+			out.slots = listed.length;
+			out.listed = listed.filter((x) => x.slot === "slot2")[0];
+			out.idb = A.universeStorageInfo().idb;
+			const rows = u.rows.length;
+			const following = st.universe.followed;
+			out.loaded = await A.loadUniverseSlot("slot2");
+			out.sameRows = st.universe.rows.length === rows &&
+				st.universe.followed === following && !!st.universe.dynasty;
+			out.footer = (document.querySelector("#view .universe-persist") || {}).textContent || "";
+			await A.deleteUniverseSlot("slot2");
+			out.afterDelete = (await A.listUniverseSlots()).filter((x) => x.slot === "slot2")[0];
+			// The autosave lands a moment after persist().
+			await new Promise((r) => setTimeout(r, 1200));
+			out.autosave = await new Promise((resolve) => {
+				try {
+					const req = indexedDB.open("bbgm-draft-workshop", 1);
+					req.onsuccess = () => {
+						const g = req.result.transaction("universes").objectStore("universes").get("autosave");
+						g.onsuccess = () => resolve(g.result ? g.result.seasons : 0);
+						g.onerror = () => resolve(-1);
+					};
+					req.onerror = () => resolve(-1);
+				} catch (e) { resolve(-1); }
+			});
+			out.rows = rows;
+			return out;
+		});
+		ok("following a program marks its timeline rows and shows its card",
+			play.marked >= 1 && play.card, JSON.stringify(play).slice(0, 200));
+		ok("...and it is persisted", play.persisted);
+		ok("...and the paper leads with it", /^followed program/.test(play.lead), play.lead);
+		ok("a dynasty goal starts from its dialog and shows progress",
+			play.dynasty && !!play.dynStatus, String(play.dynStatus));
+		ok("the records book has a pro-weighted Hall of Fame", play.proHall);
+		ok("the careers table shows a pro career per man",
+			play.proCol === Math.min(40, play.careers), play.proCol + " of " + play.careers);
+		ok("a timeline season opens its drawer with config, carry and threads", play.drawer);
+		ok("IndexedDB is available in Chromium and the universe saves to a slot",
+			play.idbGlobal && play.idb === true && play.saved === true, JSON.stringify(play.listed));
+		ok("...five named slots, the saved one listed by name",
+			play.slots === 5 && play.listed && play.listed.name === "smoke world");
+		ok("...a slot loads the full universe back", play.loaded && play.sameRows);
+		ok("...the footer says nothing is dropped", /IndexedDB/.test(play.footer), play.footer);
+		ok("...a slot deletes", play.afterDelete && play.afterDelete.empty);
+		ok("...and persist() autosaves the whole universe", play.autosave === play.rows,
+			play.autosave + " vs " + play.rows);
+
 		/* Turning the setting off drops the chain's configs, so the tabs go
 		   back to standalone runs rather than silently keeping a world the
 		   user has switched out of. */
@@ -1806,6 +2188,81 @@ async function gotoProspects(page) {
 				Object.keys(window.App.state.universe.cfgs).length)) === 0);
 	}
 
+	console.log("\nA synthetic universe from nothing");
+	{
+		/* The empty screen's button, the dialog, a three-season world with no
+		   files dropped, two more seasons simulated forward, and a reload that
+		   rebuilds the same world from its seed. */
+		await page.goto(base);
+		await page.evaluate(() => localStorage.clear());
+		await page.goto(base);
+		await page.waitForFunction(() => window.App && window.App.state);
+		await page.evaluate(() => { window.App.state.cfg.seed = "smoke-synth"; });
+		await page.click("#btnSynthUniverse");
+		await page.waitForSelector("#synthSeasons", { timeout: 5000 });
+		await page.fill("#synthSeasons", "3");
+		await page.fill("#synthFirst", "2030");
+		await page.click("#modalOk");
+		await page.waitForFunction(() => !window.App.state.universe.running &&
+			window.App.state.universe.rows.length >= 3, null, { timeout: 90000 });
+		const first = await page.evaluate(() => {
+			const st = window.App.state;
+			return {
+				files: st.files.length, synth: st.files.every((f) => f.synthetic),
+				rows: st.universe.rows.map((r) => r.season + ":" + (r.error ? "ERR" : r.result)),
+				baseSeed: st.universe.baseSeed, tab: st.tab,
+				fwd: !!document.querySelector("#btnSimForward"),
+			};
+		});
+		ok("the empty screen starts a synthetic universe of N seasons",
+			first.files === 3 && first.synth && first.rows.length === 3 &&
+			first.rows.every((r) => !/ERR/.test(r)) && first.baseSeed === "smoke-synth" &&
+			first.tab === "universe", JSON.stringify(first));
+		ok("...and the Universe tab offers to simulate further", first.fwd);
+		await page.click("#btnSimForward");
+		await page.waitForSelector("#synthForward", { timeout: 5000 });
+		await page.fill("#synthForward", "2");
+		await page.click("#modalOk");
+		await page.waitForFunction(() => !window.App.state.universe.running &&
+			window.App.state.universe.rows.length >= 5, null, { timeout: 90000 });
+		const fwd = await page.evaluate(() => {
+			const u = window.App.state.universe;
+			return {
+				seasons: u.rows.map((r) => r.season).join(","),
+				guessed: u.rows.some((r) => r.extrapolated),
+				segs: u.segments.map((g) => g.kind).join(","),
+				rows: u.rows.map((r) => r.season + ":" + r.result),
+			};
+		});
+		ok("forward simulation plays real seasons on synthetic classes",
+			fwd.seasons === "2030,2031,2032,2033,2034" && !fwd.guessed &&
+			fwd.segs === "cold,extend" && fwd.rows.slice(0, 3).join() === first.rows.join(),
+			JSON.stringify(fwd));
+		await page.evaluate(() => window.App.persist());
+		const unsavedNow = await page.evaluate(() => window.App.unsavedWork());
+		const askedBefore = beforeUnloads;
+		await page.reload();
+		ok("leaving with an unexported universe asks first",
+			unsavedNow && beforeUnloads === askedBefore + 1, unsavedNow + " " + beforeUnloads);
+		await page.waitForFunction(() => window.App && window.App.state &&
+			window.App.state.files.length === 5 && !window.App.state.universe.running &&
+			window.App.state.universe.rows.length >= 5 && !window.App.state.universeExpect,
+			null, { timeout: 120000 });
+		const back = await page.evaluate(() => {
+			const st = window.App.state;
+			return {
+				rows: st.universe.rows.map((r) => r.season + ":" + r.result),
+				err: !document.getElementById("errBanner").hidden
+					? document.querySelector("#errBanner .bannertext").textContent : "",
+				live: st.results.filter(Boolean).length,
+			};
+		});
+		ok("a reload regenerates the classes and replays the same world",
+			back.rows.join() === fwd.rows.join() && !back.err && back.live > 0,
+			JSON.stringify(back));
+		await page.evaluate(() => localStorage.clear());
+	}
+
 	console.log("\nSaved column visibility");
 	{
 		/* An empty hidden-columns map saved by a build before the
@@ -1813,6 +2270,10 @@ async function gotoProspects(page) {
 		   restores as the defaults. The same empty map saved WITH the scheme
 		   marker is a user who asked for every column, and is kept. */
 		const restored = async (mutate) => {
+			/* A reload replays the stored universe, and that replay persists
+			   as it goes — over the map written below, if it is still running. */
+			await page.waitForFunction(() => !window.App.state.universe.running,
+				null, { timeout: 120000 });
 			await page.evaluate((m) => {
 				window.App.persist();
 				const key = "bbgm-draft-workshop/v1";
@@ -2073,6 +2534,12 @@ async function gotoProspects(page) {
 		await page.waitForSelector("table tbody tr", { timeout: 60000 });
 		ok("two classes loaded", (await page.evaluate(() =>
 			window.App.state.files.length)) === 2);
+		const exp = await page.evaluate(() => {
+			const b = document.getElementById("btnExport");
+			return { text: b.textContent, title: b.title };
+		});
+		ok("with several classes loaded, Export names which one it writes",
+			exp.text !== "Export JSON" && /_customized\.json/.test(exp.title), JSON.stringify(exp));
 		ok("the per-file checkbox appears with more than one file loaded",
 			await page.locator("#randomPerFileRow").isVisible());
 
@@ -2197,7 +2664,7 @@ async function gotoProspects(page) {
 		// The group's own reset appears, names how many, and puts them back.
 		const resetBefore = await page.evaluate(() => {
 			const b = document.querySelector("#grp-builds summary .grp-reset");
-			return b ? { hidden: b.hidden, text: b.textContent } : null;
+			return b ? { hidden: b.hidden, text: b.getAttribute("aria-label") || b.textContent } : null;
 		});
 		ok("a group with a modified setting offers a reset",
 			!!resetBefore && !resetBefore.hidden && /\d/.test(resetBefore.text),
@@ -2435,6 +2902,51 @@ async function gotoProspects(page) {
 		ok("and an out-of-range number is clamped when the box is left",
 			clamped[0] === 82 && clamped[1] === "82", clamped.join(" / "));
 
+		// Replayability (js/replay.js): daily, par, codes, rival, campaign, puzzle.
+		await page.evaluate(() => window.App.startDaily("2026-09-25"));
+		await page.waitForFunction(() => document.getElementById("challengeScore") &&
+			window.App.state.challenge === "daily-2026-09-25", null, { timeout: 30000 });
+		const daily = await page.evaluate(() => [document.getElementById("challengeBar").textContent,
+			decodeURIComponent(location.hash), window.App.state.cfg.seed]);
+		ok("the daily challenge starts on its date's seed with par on the bar",
+			/par \d/.test(daily[0]) && daily[2] === "daily-2026-09-25", daily[0]);
+		ok("...and the date rides in the link", /"ch":"daily-2026-09-25"/.test(daily[1]), daily[1]);
+		const code = await page.evaluate(() => window.App.resultCode());
+		ok("a result code is short base32", /^BB1-[0-9A-Z-]+$/.test(code) && code.length < 200, code);
+		await page.evaluate(() => { window.App.state.cfg.variation = 5; });
+		await page.evaluate((c) => window.App.applyCode(c), code);
+		await page.waitForTimeout(800);
+		const back = await page.evaluate(() => [window.App.state.cfg.variation,
+			window.App.state.cfg.seed, window.App.state.challenge]);
+		ok("loading a code restores its settings and challenge",
+			back[0] === 0 && back[1] === "daily-2026-09-25" && back[2] === "daily-2026-09-25",
+			back.join(" / "));
+		await page.evaluate((c) => window.App.importGhost(c), code);
+		await page.waitForTimeout(200);
+		const ghost = await page.evaluate(() => {
+			const g = document.getElementById("challengeGhost");
+			return g ? g.textContent : "";
+		});
+		ok("a rival's code shows beside yours on the bar", /^Rival:/.test(ghost), ghost);
+		const locked = await page.evaluate(() => {
+			window.App.startCampaign(1);
+			return window.App.state.challenge;
+		});
+		ok("a locked campaign tier does not start", locked === "daily-2026-09-25", locked);
+		await page.evaluate(() => window.App.startPuzzle("smoke"));
+		await page.waitForFunction(() => window.App.state.challenge === "puzzle:smoke" &&
+			document.getElementById("challengeScore"), null, { timeout: 30000 });
+		const puz = await page.evaluate(() => {
+			const ch = window.App.findChallenge("puzzle:smoke");
+			return [ch.goals.length, window.App.state.cfg.seed,
+				Object.keys(ch.hidden).some((k) => window.App.state.cfg[k] === ch.hidden[k]),
+				document.getElementById("challengeBar").textContent];
+		});
+		ok("the puzzle starts at defaults on its seed, grading four headlines",
+			puz[0] === 4 && puz[1] === "puzzle-smoke" && !puz[2], puz.join(" / "));
+		await page.locator("#challengeBar button", { hasText: "give up" }).click();
+		await page.waitForTimeout(200);
+
 		// Reroll until, with the worker refused: the inline fallback runs.
 		await page.evaluate(() => {
 			window.__RealWorker = window.Worker;
@@ -2455,6 +2967,489 @@ async function gotoProspects(page) {
 		});
 		ok("reroll until falls back to searching inline when the worker fails",
 			/Found it|No class in 2 tries/.test(fell), fell.slice(0, 120));
+	}
+
+	console.log("\nDaily seed, challenges and strangeness");
+	{
+		const today = await page.evaluate(() => window.App.dailySeed(new Date(2026, 0, 5)));
+		ok("the daily seed is the local date", today === "daily-2026-01-05", today);
+		await page.locator("#btnDaily").click();
+		await page.waitForFunction(() => /^daily-\d{4}-\d\d-\d\d$/.test(
+			(document.getElementById("seedPill").dataset.seed || "")), null, { timeout: 30000 });
+		const tip = await page.evaluate(() => document.getElementById("seedPill").title);
+		ok("the class header's tooltip lists the strangeness score", /Strangeness \d+\/100/.test(tip),
+			tip.slice(-120));
+		const ch = await page.evaluate(() => {
+			const A = window.App;
+			const keys = A.CHALLENGES.map((c) => c.key);
+			const bad = A.CHALLENGES.filter((c) => c.goals.some((g) =>
+				!global_parse(g)));
+			function global_parse(g) {
+				const bare = g.replace(/^!/, "");
+				return A.REROLL_PREDICATES.some((p) => p.key === bare);
+			}
+			return { keys, bad: bad.map((c) => c.key) };
+		});
+		ok("the new challenges are listed and every goal is a known clause",
+			ch.keys.indexOf("strange") !== -1 && ch.keys.indexOf("perfect") !== -1 &&
+			!ch.bad.length, ch.bad.join(", "));
+		await page.evaluate(() => {
+			const A = window.App;
+			A.startChallenge(A.CHALLENGES.filter((c) => c.key === "perfect")[0]);
+		});
+		await page.waitForSelector("#btnCopyChallenge", { timeout: 30000 });
+		const line = await page.evaluate(() => {
+			const A = window.App;
+			const c = A.CHALLENGES.filter((x) => x.key === "perfect")[0];
+			A.state.cfg.weirdness = 2;
+			return A.challengeResultText(c, A.scoreChallenge(c, A.state.results[A.state.active]));
+		});
+		ok("the challenge result line names the challenge, the dials moved and the seed",
+			/^The perfect season: (not )?solved · \d\/2 goals · 1\/3 settings \(weirdness 0 → 2\) · seed undefeated$/
+				.test(line), line);
+		const forbidden = await page.evaluate(() => {
+			const A = window.App;
+			const c = A.CHALLENGES.filter((x) => x.key === "perfect")[0];
+			A.state.cfg.midMajorLift = 3;
+			const sc = A.scoreChallenge(c, A.state.results[A.state.active]);
+			A.state.cfg.midMajorLift = 0;
+			return sc.broke.join(",");
+		});
+		ok("a forbidden dial is caught by the challenge score", forbidden === "midMajorLift", forbidden);
+		await page.locator("#btnCopyChallenge").click();
+		await page.evaluate(() => {
+			window.App.state.cfg.weirdness = 0;
+			window.App.state.challenge = null;
+		});
+	}
+
+	/* The replay layer: unlock gating, mutators, bingo, the ledger's toast
+	   and the chaos draft (js/replaymeta.js). */
+	{
+		await page.evaluate(() => {
+			const r = window.App.replayStore();
+			r.ledger = {};
+			r.showAll = false;
+			window.App.paintConfig();
+		});
+		ok("the replay and chaos buttons are in the header",
+			(await page.locator("#btnReplay").count()) === 1 &&
+			(await page.locator("#btnChaos").count()) === 1);
+		const opts = () => page.evaluate(() => ({
+			era: Array.from(document.getElementById("era").options).map((o) => o.value),
+			flavor: Array.from(document.getElementById("flavorHint").options).map((o) => o.value),
+		}));
+		const gated = await opts();
+		ok("the third era and the rare flavors are locked by default",
+			gated.era.indexOf("1990s") === -1 && gated.flavor.indexOf("bloodlines") === -1 &&
+			gated.flavor.indexOf("guard-heavy") !== -1, gated.era.join());
+		await page.evaluate(() => document.getElementById("replayShowAll").click());
+		const open = await opts();
+		ok("show everything lists them",
+			open.era.indexOf("1990s") !== -1 && open.flavor.indexOf("bloodlines") !== -1);
+		await page.evaluate(() => document.getElementById("replayShowAll").click());
+		ok("...and unticking hides them again", (await opts()).era.indexOf("1990s") === -1);
+
+		// Mutators from the dialog: the class name and the link carry them.
+		await page.evaluate(() => window.App.replayDialog());
+		ok("the replay dialog shows a 3x3 card", (await page.locator("#modal .bingosq").count()) === 9);
+		const seed0 = await page.evaluate(() => window.App.replayStore().card.seed);
+		await page.locator("#btnNewBingo").click();
+		const seed1 = await page.evaluate(() => window.App.replayStore().card.seed);
+		ok("new card draws a new card", seed0 !== seed1 && (await page.locator("#modal .bingosq").count()) === 9);
+		await page.locator('#modal input[data-mutator="chaos-march"]').check();
+		await page.locator('#modal input[data-mutator="no-bigs"]').check();
+		await page.evaluate(() => window.App.closeModal());
+		await page.waitForFunction(() => {
+			const res = window.App.state.results[window.App.state.active];
+			return res && res.cfg && res.cfg.mutators && res.cfg.mutators.length === 2;
+		}, null, { timeout: 60000 });
+		const mut = await page.evaluate(() => {
+			const res = window.App.state.results[window.App.state.active];
+			return { name: window.App.className(res), hash: decodeURIComponent(location.hash),
+				upset: res.effectiveCfg.upsetFactor };
+		});
+		ok("mutators show in the class name", /Chaos March \+ No bigs/.test(mut.name), mut.name);
+		ok("...ride in the link", /"mu":\["chaos-march","no-bigs"\]/.test(mut.hash));
+		ok("...and reach the run", mut.upset === 2, String(mut.upset));
+		await page.evaluate(() => { window.App.state.mutators = []; window.App.run(); });
+		await page.waitForFunction(() => {
+			const res = window.App.state.results[window.App.state.active];
+			return res && !(res.cfg && res.cfg.mutators);
+		}, null, { timeout: 60000 });
+
+		// Bingo marks what the run had; an achievement toasts once.
+		const bingo = await page.evaluate(() => {
+			const res = window.App.state.results[window.App.state.active];
+			const kinds = window.Engine.strangeness(res).kinds;
+			const card = window.App.replayStore().card;
+			return card.squares.every((k, i) => kinds.indexOf(k) === -1 || card.marked[i]);
+		});
+		ok("the bingo card marks every square the run's strangeness had", bingo);
+		const toasts = await page.evaluate(() => {
+			const App = window.App;
+			const res = App.state.results[App.state.active];
+			App.replayStore().ledger = {};
+			const tall = Object.assign({}, res.board[0], { newHgtInches: 90 });
+			const fake = (s) => Object.assign({}, res, { seed: s, board: [tall].concat(res.board.slice(1)) });
+			App.replayAfterRun(fake("tower-1"));
+			App.replayAfterRun(fake("tower-2"));
+			const e = App.replayStore().ledger["giant-no1"];
+			return { n: Array.from(document.querySelectorAll(".replaytoast"))
+				.filter((t) => /The tower/.test(t.textContent)).length,
+			seed: e && e.seed, link: e && e.link };
+		});
+		ok("an achievement toasts once", toasts.n === 1, String(toasts.n));
+		ok("...and is recorded with its seed and a replay link",
+			toasts.seed === "tower-1" && /^#c=/.test(toasts.link || ""));
+		await page.evaluate(() => window.App.replayDialog());
+		ok("the ledger lists it with a replay button",
+			(await page.locator('#modal li[data-ach="giant-no1"] button').count()) === 1);
+		await page.evaluate(() => window.App.closeModal());
+
+		// Chaos draft: an anomaly shortlist with the picks already made.
+		await page.locator("#btnChaos").click();
+		await page.waitForFunction(() => /Chaos draft:/.test(document.getElementById("status").textContent),
+			null, { timeout: 90000 });
+		const chaos = await page.evaluate(() => ({
+			choices: window.App.state.cfg.anomalyChoices,
+			picks: window.App.state.cfg.anomalyPicks,
+		}));
+		ok("chaos draft turns on the shortlist and picks from it",
+			chaos.choices >= 4 && Array.isArray(chaos.picks) && chaos.picks.length > 0,
+			JSON.stringify(chaos));
+		await page.evaluate(() => { window.App.replayStore().ledger = {}; });
+	}
+
+	/* The Play tab (js/play.js): each game starts, gates the other tabs
+	   without their answers in the DOM, and reveals a score. A fresh page,
+	   so nothing an earlier section left on is in the way. */
+	{
+		console.log("\nPlay");
+		await page.goto(base);
+		await page.evaluate(() => localStorage.clear());
+		await page.goto(base);
+		await page.setInputFiles("#file", fixture);
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		const playTab = async () => {
+			await page.locator("#tabs button", { hasText: /^Play$/ }).first().click();
+			await page.waitForTimeout(200);
+		};
+		const answers = await page.evaluate(() => {
+			const res = window.App.state.results[window.App.state.active];
+			return { champ: res.tourney.champion.team.name, no1: res.board[0].name };
+		});
+		await playTab();
+		ok("the Play tab offers three games",
+			(await page.locator("[data-play]").count()) === 3);
+
+		// Prediction.
+		await page.locator('[data-play="predict"]').click();
+		await page.waitForTimeout(200);
+		ok("a prediction game is open with a spoiler note",
+			(await page.locator(".playspoiler").count()) === 1);
+		await page.locator("#tabs button", { hasText: "March Madness" }).first().click();
+		await page.waitForTimeout(200);
+		const gated = await page.locator("#view").innerText();
+		ok("other tabs are gated while a game is open",
+			(await page.locator(".playgate").count()) === 1 && gated.indexOf(answers.champ) === -1);
+		await playTab();
+		ok("the reveal waits for all three picks",
+			await page.locator("[data-play-reveal]").isDisabled());
+		for (const k of ["champion", "poy", "no1"]) {
+			await page.selectOption('[data-play-pick="' + k + '"]', { index: 2 });
+			await page.waitForTimeout(80);
+		}
+		await page.locator("[data-play-reveal]").click();
+		await page.waitForTimeout(200);
+		const pr = await page.locator(".playresult").innerText();
+		ok("the prediction reveals the champion and a score",
+			/Score: \d+ \/ 11/.test(pr) && pr.indexOf(answers.champ) !== -1, pr.slice(0, 160));
+		await page.locator("#tabs button", { hasText: "March Madness" }).first().click();
+		await page.waitForTimeout(200);
+		ok("...and a revealed game no longer gates", (await page.locator(".playgate").count()) === 0);
+		await playTab();
+		await page.locator("[data-play-quit]").click();
+		await page.waitForTimeout(150);
+
+		// Bracket pool.
+		await page.locator('[data-play="bracket"]').click();
+		await page.waitForTimeout(200);
+		ok("the bracket shows its difficulty", /Difficulty: /.test(await page.locator("#view").innerText()));
+		await page.locator("[data-play-random]").click();
+		await page.waitForTimeout(150);
+		const rnd = await page.evaluate(() => JSON.stringify(window.App.state.play.picks));
+		await page.locator("[data-play-auto]").click();
+		await page.waitForTimeout(150);
+		ok("random fills the bracket and auto-fill keeps a full bracket",
+			!/null/.test(rnd) && !(await page.locator("[data-play-reveal]").isDisabled()));
+		await page.locator('[data-play-round="5"]').click();
+		await page.waitForTimeout(120);
+		ok("the rounds are navigable", (await page.locator(".playgame").count()) === 1);
+		await page.locator("[data-play-reveal]").click();
+		await page.waitForTimeout(200);
+		ok("the bracket reveals an ESPN score",
+			/Score: \d+ \/ 1920/.test(await page.locator(".playresult").innerText()));
+		await page.locator("[data-play-quit]").click();
+		await page.waitForTimeout(150);
+
+		// Blind scout.
+		await page.locator('[data-play="scout"]').click();
+		await page.waitForTimeout(200);
+		ok("the blind table has no ratings column",
+			!/\bOvr\b|\bPot\b/i.test(await page.locator("table.playscout thead").innerText()));
+		for (let i = 0; i < 10; i++) {
+			await page.locator("table.playscout tbody tr").first().click();
+			await page.waitForTimeout(60);
+		}
+		ok("ten clicks make a top 10", (await page.locator(".playpicks li").count()) === 10);
+		await page.locator("[data-play-reveal]").click();
+		await page.waitForTimeout(200);
+		ok("the scout reveals a score against the board and the preseason reference",
+			/Score: \d+ \/ 100[\s\S]*preseason/.test(await page.locator(".playresult").innerText()));
+		ok("the record is kept per browser", await page.evaluate(() => {
+			const r = JSON.parse(localStorage.getItem("bbgm-play-record") || "{}");
+			return r.predict && r.bracket && r.scout && r.scout.played === 1;
+		}));
+		await page.locator("[data-play-quit]").click();
+		await page.waitForTimeout(150);
+	}
+
+	/* ---------------------------------------------------------------------
+	   THE DRAFT BOARD AND SETTINGS PANEL, audit section 2 (UI 9-18, 20;
+	   QOL 8, 10): short intro, labelled class notes, mover grids, the
+	   sticky filter bar with its count, the honors badge, the per-row Edit,
+	   the tier label and hidden count, quiet re-run costs, the short
+	   #ovrMode options, the "changed: N" badge and the busy bar. */
+	console.log("\nThe draft board and settings, audit section 2");
+	{
+		await page.goto(base);
+		await page.evaluate(() => localStorage.clear());
+		await page.goto(base);
+		await page.setInputFiles("#file", fixture);
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		await page.waitForTimeout(400);
+		const board = await page.evaluate(() => {
+			const v = document.getElementById("view");
+			const intro = v.querySelector("p.legendline");
+			const fb = v.querySelector(".boardfilters");
+			const scroll = v.querySelector(".scroll");
+			const cards = v.querySelector(".cards.movercards");
+			const flavor = window.App.state.results[window.App.state.active].flavor;
+			return {
+				intro: intro ? intro.textContent : "",
+				about: !!v.querySelector("details.aboutboard summary"),
+				notes: v.querySelector(".classnotes .lbl") ? v.querySelector(".classnotes .lbl").textContent : null,
+				hasFlavor: !!(flavor && flavor.label),
+				grids: v.querySelectorAll(".movergrid").length,
+				mono: cards ? getComputedStyle(cards.querySelector(".card")).fontFamily : "",
+				cardCopy: v.querySelectorAll(".cardhead button").length,
+				order: !!(cards && fb && scroll &&
+					(cards.compareDocumentPosition(fb) & 4) && (fb.compareDocumentPosition(scroll) & 4)),
+				sticky: fb ? getComputedStyle(fb).position : "",
+				count: (v.querySelector(".boardcount") || {}).textContent,
+				honors: v.querySelectorAll("td.honors .clamp").length,
+				edits: v.querySelectorAll("button.rowedit").length,
+			};
+		});
+		ok("the board intro is one sentence, with the rest behind \"About this board\"",
+			board.intro.length < 110 && board.about, board.intro);
+		ok("the class notes are labelled", !board.hasFlavor || board.notes === "Class notes:",
+			String(board.notes));
+		ok("risers and fallers are small grids, each with its own copy button",
+			board.grids === 2 && board.cardCopy >= 1, JSON.stringify(board));
+		ok("the search and position filter sit right above the table and stick",
+			board.order && board.sticky === "sticky", JSON.stringify(board));
+		ok("the filter bar counts what it shows", board.count === "70 prospects", board.count);
+		ok("honors are clamped to two lines", board.honors > 0, String(board.honors));
+		ok("each board row offers Edit", board.edits === 70, String(board.edits));
+
+		await page.locator(".boardfilters input[type=search]").fill("zzzz-nobody");
+		await page.waitForTimeout(400);
+		const none = await page.evaluate(() => ({
+			count: (document.querySelector(".boardcount") || {}).textContent,
+			clear: !!document.querySelector(".boardnone button"),
+		}));
+		ok("an empty search reads \"0 of 70\" and offers to clear", none.count === "0 of 70" && none.clear,
+			JSON.stringify(none));
+		await page.locator(".boardnone button").click();
+		await page.waitForTimeout(300);
+		ok("clearing the board filters brings every row back",
+			(await page.locator(".boardcount").textContent()) === "70 prospects");
+
+		const firstKey = await page.evaluate(() =>
+			document.querySelector("#view tbody tr[data-pkey]").dataset.pkey);
+		await page.locator("#view tbody tr[data-pkey] button.rowedit").first().click();
+		await page.waitForTimeout(400);
+		const ed = await page.evaluate(() => ({
+			mode: window.App.state.boardMode, editing: window.App.state.editing,
+			drawer: !!document.querySelector(".editor"),
+		}));
+		ok("a row's Edit opens Player Edit on that prospect",
+			ed.mode === "edit" && ed.editing === firstKey && ed.drawer, JSON.stringify(ed));
+		await page.evaluate(() => {
+			window.App.state.editing = null;
+			window.App.state.boardMode = "board";
+			window.App.render();
+		});
+
+		// Settings panel.
+		await page.locator("#settingTier button", { hasText: "Shape" }).click();
+		await page.waitForTimeout(150);
+		const tier = await page.evaluate(() => {
+			const r = document.querySelector("#settings .ctl .rerun");
+			return {
+				label: document.getElementById("settingTierLabel").textContent,
+				hidden: document.getElementById("settingTierHidden").textContent,
+				rerun: r ? getComputedStyle(r).display : "none",
+			};
+		});
+		ok("the tier chips are labelled and say how many settings they hide",
+			tier.label === "Show settings about:" && /^\d+ hidden$/.test(tier.hidden), JSON.stringify(tier));
+		ok("outside the Model view the re-run cost is hidden", tier.rerun === "none", tier.rerun);
+		await page.locator("#settingTier button", { hasText: "Model" }).click();
+		await page.waitForTimeout(150);
+		ok("the Model view shows the re-run cost", await page.evaluate(() => {
+			const r = document.querySelector("#settings .ctl .rerun");
+			return !!r && getComputedStyle(r).display !== "none";
+		}));
+		ok("#ovrMode options are short enough not to clip", await page.evaluate(() =>
+			[...document.querySelectorAll("#ovrMode option")].every((o) => o.textContent.length <= 20)));
+
+		await page.evaluate(() => {
+			const s = document.getElementById("specialization");
+			s.value = String(Number(s.max));
+			s.dispatchEvent(new Event("input", { bubbles: true }));
+			s.dispatchEvent(new Event("change", { bubbles: true }));
+		});
+		await page.waitForTimeout(300);
+		const badge = await page.evaluate(() => {
+			const b = document.querySelector("#grp-builds summary .grp-changed");
+			const o = document.querySelector("#grp-years summary .grp-changed");
+			return { text: b && b.textContent, hidden: b && b.hidden, other: !o || o.hidden };
+		});
+		ok("a modified group's summary says \"changed: N\"",
+			badge.text === "changed: 1" && !badge.hidden && badge.other, JSON.stringify(badge));
+
+		const busy = await page.evaluate(() => new Promise((resolve) => {
+			window.App.run();
+			const during = document.getElementById("view").getAttribute("aria-busy");
+			setTimeout(() => resolve({ during,
+				after: document.getElementById("view").getAttribute("aria-busy") }), 1500);
+		}));
+		ok("a re-run marks #view aria-busy and clears it after",
+			busy.during === "true" && busy.after === null, JSON.stringify(busy));
+		ok("with one class loaded the export button just says Export JSON",
+			(await page.locator("#btnExport").textContent()) === "Export JSON");
+	}
+
+	console.log("\nHeader, tabs and the empty state");
+	{
+		// Undo and Redo read the same way and name the action.
+		ok("undo and redo are words, not a word and an arrow",
+			/^Undo/.test(await page.locator("#btnUndo").textContent()) &&
+			/^Redo/.test(await page.locator("#btnRedo").textContent()));
+		ok("an icon-only tool carries its name as a focus tooltip",
+			await page.evaluate(() => [...document.querySelectorAll("#headerTools .iconbtn[aria-label]")]
+				.every((b) => b.getAttribute("data-tip") === b.getAttribute("aria-label"))));
+		ok("the theme picker is in the settings panel, not the header",
+			await page.evaluate(() => !!document.querySelector("#settings #themeSelect") &&
+				!document.querySelector("header #themeSelect")));
+		ok("tab group captions are not tabs, and each group wraps as one",
+			await page.evaluate(() => document.querySelectorAll("#tabs .tabset").length >= 2 &&
+				[...document.querySelectorAll("#tabs .tabgroup")].every((g) => g.getAttribute("aria-hidden") === "true")));
+		await page.locator("#tabs button", { hasText: "Draft board" }).first().click();
+		await page.waitForTimeout(250);
+		const small = await page.evaluate(() => {
+			const bad = [];
+			for (const b of document.querySelectorAll("#view button.linky, #view .whybtn")) {
+				const r = b.getBoundingClientRect();
+				if (r.width && r.height < 23.5) bad.push(b.className + " " + r.height);
+			}
+			return bad;
+		});
+		ok("name links and ? buttons are at least 24px tall", small.length === 0, small.slice(0, 4).join(", "));
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.waitForTimeout(400);
+		const phone = await page.evaluate(() => {
+			const tools = document.getElementById("headerTools");
+			const fab = document.getElementById("btnSettingsFab");
+			const tabs = document.getElementById("tabs");
+			return {
+				h: Math.round(document.querySelector("header").getBoundingClientRect().height),
+				sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth,
+				tools: getComputedStyle(tools).display,
+				fab: getComputedStyle(fab).display,
+				cue: tabs.classList.contains("more-r") || tabs.classList.contains("more-l"),
+				// What sits where, for when the height check fails.
+				rows: [...document.querySelectorAll("header > *, header .btngroup > *")]
+					.filter((c) => c.getBoundingClientRect().height)
+					.map((c) => (c.id || c.className) + "@" + Math.round(c.getBoundingClientRect().top)).join(" "),
+			};
+		});
+		ok("the phone header is at most 180px tall", phone.h <= 180, JSON.stringify(phone));
+		ok("nothing scrolls the page sideways at 390px", phone.sw <= phone.cw + 1, JSON.stringify(phone));
+		ok("the tools fold behind ⋯ on a phone", phone.tools === "none");
+		await page.locator("#btnHeaderMore").click();
+		await page.waitForTimeout(150);
+		ok("and ⋯ shows them", (await page.evaluate(() =>
+			getComputedStyle(document.getElementById("headerTools")).display)) !== "none");
+		await page.locator("#btnHeaderMore").click();
+		ok("the tab strip fades at an edge with more tabs past it", phone.cue);
+		ok("a floating Settings button shows on a phone", phone.fab !== "none");
+		await page.locator("#btnSettingsFab").click();
+		await page.waitForTimeout(300);
+		ok("and it opens the settings panel",
+			await page.evaluate(() => getComputedStyle(document.getElementById("settings")).display !== "none"));
+		await page.locator("#btnSettings").click();
+		await page.setViewportSize({ width: 1500, height: 980 });
+		await page.waitForTimeout(300);
+
+		// A fresh page: the empty state.
+		const p2 = await browser.newPage({ viewport: { width: 390, height: 844 } });
+		p2.on("pageerror", (e) => errors.push("pageerror (empty state): " + e.message));
+		await p2.goto(base);
+		await p2.waitForTimeout(300);
+		const empty = await p2.evaluate(() => ({
+			presetShown: getComputedStyle(document.getElementById("preset").closest(".ctl")).display !== "none",
+			primary: document.getElementById("btnSample").classList.contains("primary"),
+			universe: !!document.getElementById("btnSynthUniverse"),
+			copy: document.querySelector("#empty h2").textContent,
+			inline: document.querySelectorAll("#empty [style]").length,
+			h: Math.round(document.querySelector("header").getBoundingClientRect().height),
+			sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth,
+		}));
+		ok("the empty state hides the settings until a class is loaded", !empty.presetShown);
+		ok("Try a sample class is the primary button, the universe one still there",
+			empty.primary && empty.universe);
+		ok("the empty state says choose, or drop, with no inline styles",
+			/^Choose a file/.test(empty.copy) && empty.inline === 0, JSON.stringify(empty));
+		ok("the empty-state phone header is short and does not scroll sideways",
+			empty.h <= 180 && empty.sw <= empty.cw + 1, JSON.stringify(empty));
+		const chooser = p2.waitForEvent("filechooser", { timeout: 3000 }).then(() => true, () => false);
+		await p2.locator("#empty h2").click();
+		ok("clicking anywhere in the empty box opens the file picker", await chooser);
+		// Pasting a class reads it through the same validation as a file.
+		const bad = JSON.stringify({ nope: 1 });
+		await p2.evaluate((t) => {
+			const dt = new DataTransfer();
+			dt.setData("text/plain", t);
+			document.body.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true }));
+		}, bad);
+		await p2.waitForTimeout(800);
+		ok("a pasted non-class is rejected with a message",
+			await p2.evaluate(() => !document.getElementById("empty").hidden &&
+				(!document.getElementById("errBanner").hidden || !document.getElementById("status").hidden)));
+		await p2.evaluate((t) => {
+			const dt = new DataTransfer();
+			dt.setData("text/plain", t);
+			document.body.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true }));
+		}, fs.readFileSync(fixture, "utf8"));
+		await p2.waitForSelector("table tbody tr", { timeout: 30000 }).catch(() => {});
+		ok("a pasted class loads", await p2.evaluate(() => document.getElementById("empty").hidden &&
+			!document.getElementById("app").hidden));
+		await p2.close();
 	}
 
 	console.log("\nNo errors");
