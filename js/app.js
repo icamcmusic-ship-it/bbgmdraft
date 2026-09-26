@@ -2404,6 +2404,9 @@
 		pushUndo("chaos draft");
 		randomizeSettings("wide", null, true);
 		state.cfg.anomalyChoices = Math.max(4, state.cfg.anomalyChoices || 0);
+		// A wide draw can set the anomaly budget to 0 or 1, which can leave
+		// no shortlist to pick from at all.
+		state.cfg.surpriseBudget = Math.max(2, state.cfg.surpriseBudget || 0);
 		const before = state.results[state.active];
 		setTimeout(() => {
 			reroll({ noUndo: true });
@@ -10251,8 +10254,17 @@
 		}
 	}
 
-	function runBatchInline(file, cfg, n) {
-		const runner = global.Engine.createRunner(file.data);
+	function runBatchInline(file, cfgLive, n) {
+		/* The worker is handed a structured clone of the settings and the
+		   file at click time; this path used to keep the live objects
+		   (state.overrides, the loaded file) across timer steps, and the
+		   page's own work between steps could reach them, so on a slow
+		   machine the fallback's later classes drifted from the worker's.
+		   The same copy, taken once, makes the two paths the same run. */
+		const copy = typeof structuredClone === "function" ? structuredClone
+			: (x) => JSON.parse(JSON.stringify(x));
+		const cfg = copy(cfgLive);
+		const runner = global.Engine.createRunner(copy(file.data));
 		const rows = [];
 		let i = 0;
 		const step = () => {
