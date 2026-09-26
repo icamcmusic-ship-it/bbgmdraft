@@ -77,6 +77,18 @@ self.onmessage = function (e) {
 		}
 		return;
 	}
+	if (msg.type === "probe") {
+		try {
+			const cfg = self.Config.make(msg.cfg);
+			cfg.seed = msg.seed;
+			cfg.overrides = msg.cfg.overrides || {};
+			const res = self.Engine.createRunner(msg.leagueFile).run(cfg);
+			self.postMessage({ type: "probe", rows: self.BatchStats.fingerprint(res) });
+		} catch (err) {
+			self.postMessage({ type: "error", message: err && err.message ? err.message : String(err) });
+		}
+		return;
+	}
 	if (msg.type !== "batch") return;
 	try {
 		const runner = self.Engine.createRunner(msg.leagueFile);

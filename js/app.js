@@ -10372,6 +10372,7 @@
 	}
 
 	Object.assign(global.App, {
+		effectiveCfg, activeFile,
 		state, render, run, persist, openEditor, revealPlayer, visibleRows,
 		editorPanel, modal, closeModal,
 		clearLock, showPlayer, showTeam, showGame,

@@ -516,6 +516,7 @@ async function gotoProspects(page) {
 	   making the Worker constructor throw, which is exactly what a file://
 	   browser does. */
 	await page.evaluate(() => {
+		window.__batchRealWorker = window.Worker;
 		window.Worker = function () { throw new Error("workers are blocked"); };
 	});
 	const inputsInline = await snap();
@@ -559,9 +560,39 @@ async function gotoProspects(page) {
 			seedOf(inlineText) + "\n         inputs that differ: " +
 			(inputDiff.join("; ") || "none") + "\n         " + out.join("\n         ");
 	};
-	ok("the fallback produces the same batch the worker does",
-		strip(inlineText) === strip(withWorker),
-		strip(inlineText) === strip(withWorker) ? "" : batchDiffDetail());
+	/* On a disagreement, run class 0 of the batch both ways and name the
+	   first players that differ: which field parts first says which stage
+	   of the pipeline the two contexts disagree in. */
+	const probeDetail = () => page.evaluate(async (seedText) => {
+		const A = window.App;
+		const cfg = A.effectiveCfg();
+		const file = A.activeFile().data;
+		const seed = (seedText.match(/batch seed: ?(\S+)/) || [])[1] + "#0";
+		const c = Config.make(cfg);
+		c.seed = seed;
+		c.overrides = cfg.overrides || {};
+		const inline = BatchStats.fingerprint(Engine.createRunner(file).run(c));
+		const w = new window.__batchRealWorker("js/worker.js");
+		const viaWorker = await new Promise((resolve) => {
+			w.onmessage = (e) => resolve(e.data.rows || e.data.message);
+			w.postMessage({ type: "probe", leagueFile: file, cfg, seed });
+		});
+		w.terminate();
+		if (!Array.isArray(viaWorker)) return "worker probe failed: " + viaWorker;
+		const out = [];
+		const F = ["key", "build", "ovr", "pot", "ratings", "college", "mpg", "ppg"];
+		for (let i = 0; i < Math.max(inline.length, viaWorker.length) && out.length < 4; i++) {
+			const a = viaWorker[i] || [], b = inline[i] || [];
+			const d = F.filter((f, j) => JSON.stringify(a[j]) !== JSON.stringify(b[j]));
+			if (d.length) out.push("player " + i + " " + (a[0] || b[0]) + ": " +
+				d.map((f) => f + " " + JSON.stringify(a[F.indexOf(f)]) + " / " +
+					JSON.stringify(b[F.indexOf(f)])).join("; "));
+		}
+		return "probe " + seed + ": " + (out.length ? out.join("\n           ") : "class 0 identical");
+	}, withWorker).catch((e) => "probe threw: " + e.message);
+	const parity = strip(inlineText) === strip(withWorker);
+	ok("the fallback produces the same batch the worker does", parity,
+		parity ? "" : batchDiffDetail() + "\n         " + await probeDetail());
 
 	console.log("\nSettings coverage");
 	{
