@@ -563,32 +563,49 @@ async function gotoProspects(page) {
 	/* On a disagreement, run class 0 of the batch both ways and name the
 	   first players that differ: which field parts first says which stage
 	   of the pipeline the two contexts disagree in. */
+	/* On a disagreement, re-run the batch's three classes three ways — one
+	   runner reused in the worker (what a batch does), one reused on the
+	   page (the fallback), and a fresh runner per class on the page — and
+	   name the first players that differ from the fresh runs, which says
+	   which context drifts and in which stage. */
 	const probeDetail = () => page.evaluate(async (seedText) => {
 		const A = window.App;
 		const cfg = A.effectiveCfg();
 		const file = A.activeFile().data;
-		const seed = (seedText.match(/batch seed: ?(\S+)/) || [])[1] + "#0";
-		const c = Config.make(cfg);
-		c.seed = seed;
-		c.overrides = cfg.overrides || {};
-		const inline = BatchStats.fingerprint(Engine.createRunner(file).run(c));
+		const base = (seedText.match(/batch seed: ?(\S+)/) || [])[1];
+		const seeds = [0, 1, 2].map((i) => base + "#" + i);
+		const mk = (seed) => {
+			const c = Config.make(cfg);
+			c.seed = seed;
+			c.overrides = cfg.overrides || {};
+			return c;
+		};
+		const reused = Engine.createRunner(file);
+		const pageReused = seeds.map((s) => BatchStats.fingerprint(reused.run(mk(s))));
+		const fresh = seeds.map((s) => BatchStats.fingerprint(Engine.createRunner(file).run(mk(s))));
 		const w = new window.__batchRealWorker("js/worker.js");
-		const viaWorker = await new Promise((resolve) => {
+		const workerReused = await new Promise((resolve) => {
 			w.onmessage = (e) => resolve(e.data.rows || e.data.message);
-			w.postMessage({ type: "probe", leagueFile: file, cfg, seed });
+			w.postMessage({ type: "probe", leagueFile: file, cfg, seed: seeds });
 		});
 		w.terminate();
-		if (!Array.isArray(viaWorker)) return "worker probe failed: " + viaWorker;
-		const out = [];
+		if (!Array.isArray(workerReused)) return "worker probe failed: " + workerReused;
 		const F = ["key", "build", "ovr", "pot", "ratings", "college", "mpg", "ppg"];
-		for (let i = 0; i < Math.max(inline.length, viaWorker.length) && out.length < 4; i++) {
-			const a = viaWorker[i] || [], b = inline[i] || [];
-			const d = F.filter((f, j) => JSON.stringify(a[j]) !== JSON.stringify(b[j]));
-			if (d.length) out.push("player " + i + " " + (a[0] || b[0]) + ": " +
-				d.map((f) => f + " " + JSON.stringify(a[F.indexOf(f)]) + " / " +
-					JSON.stringify(b[F.indexOf(f)])).join("; "));
-		}
-		return "probe " + seed + ": " + (out.length ? out.join("\n           ") : "class 0 identical");
+		const diff = (label, got) => {
+			for (let c = 0; c < 3; c++) {
+				const a = got[c] || [], b = fresh[c];
+				for (let i = 0; i < b.length; i++) {
+					const d = F.filter((f, j) => JSON.stringify((a[i] || [])[j]) !== JSON.stringify(b[i][j]));
+					if (d.length) {
+						return label + " class " + c + " player " + i + " " + b[i][0] + ": " +
+							d.map((f) => f + " " + JSON.stringify((a[i] || [])[F.indexOf(f)]) +
+								" (fresh " + JSON.stringify(b[i][F.indexOf(f)]) + ")").join("; ");
+					}
+				}
+			}
+			return label + " matches fresh";
+		};
+		return "probe " + base + ": " + diff("worker", workerReused) + " | " + diff("page", pageReused);
 	}, withWorker).catch((e) => "probe threw: " + e.message);
 	const parity = strip(inlineText) === strip(withWorker);
 	ok("the fallback produces the same batch the worker does", parity,
