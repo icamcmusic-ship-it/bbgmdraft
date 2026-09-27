@@ -438,9 +438,15 @@ console.log("\nSeason invariants");
 		if (!tt) continue;
 		for (const p of t.prospects) {
 			if (!p.stats) continue;
-			if (tt.ast > 0) worstAst = Math.max(worstAst, p.stats.apg / tt.ast);
-			if (tt.trb > 0) worstReb = Math.max(worstReb, p.stats.rpg / tt.trb);
-			if (tt.blk > 0) worstBlk = Math.max(worstBlk, p.stats.bpg / tt.blk);
+			/* A line is per game PLAYED and the team total is per team game
+			   (see gpWeight in js/stats.js), so a man who missed fifteen of
+			   thirty-five nights read as 52% of his team's blocks when he
+			   had 30% of them. His share of the season is weighted. */
+			const wt = t.games > 0 && Number.isFinite(p.stats.gp)
+				? Math.min(1, p.stats.gp / t.games) : 1;
+			if (tt.ast > 0) worstAst = Math.max(worstAst, p.stats.apg * wt / tt.ast);
+			if (tt.trb > 0) worstReb = Math.max(worstReb, p.stats.rpg * wt / tt.trb);
+			if (tt.blk > 0) worstBlk = Math.max(worstBlk, p.stats.bpg * wt / tt.blk);
 		}
 	}
 	const TU = global.StatsSim.TUNING;

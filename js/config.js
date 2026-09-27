@@ -19,7 +19,7 @@
 		buildNoise: 5,         // per-rating random jitter (rating points)
 		// Rookie soft caps (0 = off). An incoming player is not already a
 		// good pro: skill/shooting ratings ease in 10 under the cap and
-		// rarely pass it, physicals likewise, and the overall eases in 6
+		// rarely pass it, physicals likewise, and the overall eases in 10
 		// under its cap. hgt is never capped. See RatingsBuilder.softCap.
 		rookieSkillCap: 70,
 		rookiePhysCap: 80,

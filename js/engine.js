@@ -1610,12 +1610,14 @@
 			   soft-capped (cfg.rookieOvrCap): a class used to open with its
 			   top men at 55-57, a starter's overall, and an incoming rookie
 			   is not already better than the league's average player. The
-			   ease starts six under the cap and approaches four over it, so
-			   the order of the board is kept and only its top is pressed. */
+			   ease starts ten under the cap and approaches four over it: a
+			   knee six under bunched a class's top ten on one overall, and
+			   ten under keeps them spread (typically 50 down to 46) while
+			   the order of the board is kept. */
 			const targetOvr = Number.isFinite(ov.ovr)
 				? clamp(Math.round(ov.ovr), 0, 100)
 				: Math.round(RB.softCap(curve ? curve[i] : p.origOvr,
-					Number(cfg.rookieOvrCap) || 0, 6, 4));
+					Number(cfg.rookieOvrCap) || 0, 10, 4));
 			// The raw ovr->pot gap, before any of the potential dials. This is
 			// what the college season is simulated off (see talentPot), so
 			// moving "Potential bias" never re-simulates a game.
@@ -4609,7 +4611,7 @@
 			deps: [
 				"seed", "ovrMode", "classQuality", "classDepth", "eliteCount",
 				"specialization", "archetypeDiversity", "buildNoise", "varySize",
-				"lockHeights",
+				"lockHeights", "rookieSkillCap", "rookiePhysCap", "rookieOvrCap",
 				"archetypeWeights", "classFlavor", "freshmanShare", "transferShare",
 				"redshirtShare", "reclassShare", "leagueWeights", "wEuroLeague",
 				"wGLeague", "wNBL", "pDII", "overrides",
