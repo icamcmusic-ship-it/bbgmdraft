@@ -19,8 +19,9 @@
 		buildNoise: 5,         // per-rating random jitter (rating points)
 		// Rookie soft caps (0 = off). An incoming player is not already a
 		// good pro: skill/shooting ratings ease in 10 under the cap and
-		// rarely pass it, physicals likewise, and the overall eases in 10
-		// under its cap. hgt is never capped. See RatingsBuilder.softCap.
+		// rarely pass it, physicals likewise. The overall cap applies only to
+		// re-simulated overalls (ovrMode "curve"), eases in 10 under the cap
+		// and adds a rare upside tail; "preserve" keeps the file's overalls. hgt is never capped. See RatingsBuilder.softCap.
 		rookieSkillCap: 70,
 		rookiePhysCap: 80,
 		rookieOvrCap: 50,

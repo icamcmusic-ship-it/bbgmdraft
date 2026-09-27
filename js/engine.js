@@ -13,6 +13,10 @@
 	const BB = global.BBGM;
 	const C = global.Colleges;
 	const RB = global.RatingsBuilder;
+	// The rookie overall cap's upside tail (see the build phase): who draws
+	// it, and the mean of the exponential they draw.
+	const OVR_TAIL_BAND = 4;
+	const OVR_TAIL_MEAN = 2.8;
 	/* How wide the soft floor under the ovr-to-pot gap is, in gap points. Two:
 	   wide enough to turn the 10.9% pile-up on gap = 1 into a tail (the
 	   neighbouring buckets ran 3-4%), narrow enough that a prospect whose
@@ -1614,10 +1618,27 @@
 			   knee six under bunched a class's top ten on one overall, and
 			   ten under keeps them spread (typically 50 down to 46) while
 			   the order of the board is kept. */
-			const targetOvr = Number.isFinite(ov.ovr)
-				? clamp(Math.round(ov.ovr), 0, 100)
-				: Math.round(RB.softCap(curve ? curve[i] : p.origOvr,
-					Number(cfg.rookieOvrCap) || 0, 10, 4));
+			/* THE GENERATIONAL TAIL. A hard-feeling ceiling at the cap made
+			   every class's best man the same player. So a prospect the cap
+			   has put near the top (within OVR_TAIL_BAND of it) draws an
+			   exponential upside on top: most draw a point or two. Measured
+			   over 60 curve-mode classes at the defaults, the class's best man
+			   was 55+ in 28% of them, 58+ in 10% and 60+ in under 2%. Its own stream, drawn
+			   for every player, so the build draws after it do not move. */
+			const ovrCap = Number(cfg.rookieOvrCap) || 0;
+			const tailU = rng.child("ovrTail:" + p.key + rerollSalt(p, "build") + vsalt).random();
+			let targetOvr;
+			if (Number.isFinite(ov.ovr)) {
+				targetOvr = clamp(Math.round(ov.ovr), 0, 100);
+			} else {
+				/* Only a RE-SIMULATED overall is capped. Under "preserve" the
+				   overall the file came in with is the player's, and the cap
+				   is not the tool's to apply to it. */
+				const capped = curve ? RB.softCap(curve[i], ovrCap, 10, 4) : p.origOvr;
+				const tail = curve && ovrCap > 0 && capped >= ovrCap - OVR_TAIL_BAND
+					? -OVR_TAIL_MEAN * Math.log(1 - tailU) : 0;
+				targetOvr = clamp(Math.round(capped + tail), 0, 100);
+			}
 			// The raw ovr->pot gap, before any of the potential dials. This is
 			// what the college season is simulated off (see talentPot), so
 			// moving "Potential bias" never re-simulates a game.

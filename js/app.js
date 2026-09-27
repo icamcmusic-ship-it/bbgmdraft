@@ -1099,7 +1099,9 @@
 			? "stre/spd/jmp/endu ease in from " + (v - 10) + " and rarely pass " + v
 			: "no cap on physicals",
 		rookieOvrCap: (v) => v > 0
-			? "the top of the class eases in from " + (v - 10) + " and rarely passes " + v + "; a locked overall is kept"
+			? "re-simulated overalls (curve mode) ease in from " + (v - 10) +
+				" with a rare upside tail: 55+ in about a quarter of classes, 58+ generational; " +
+				"preserve mode and locked overalls are kept as they are"
 			: "no cap: the class's best can come in at a starter's overall",
 		specialization: (v) => v < 0.4 ? "BBGM's samey builds"
 			: v > 1.6 ? "extreme specialists" : "clear roles, real weaknesses",
