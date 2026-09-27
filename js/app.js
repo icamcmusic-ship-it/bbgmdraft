@@ -3878,6 +3878,25 @@
 
 	/* ------------------------------------------------------------ file input */
 
+	/* The loaded files, collapsed to one line. The per-file detail is
+	   behind a click: a long universe printed one sentence per class and
+	   pushed everything else off the screen. */
+	function paintFileSummary() {
+		const box = $("fileSummary");
+		if (!box) return;
+		const n = state.files.length;
+		box.querySelector("summary").textContent = n === 1
+			? state.files[0].name + ": " + summarize(state.files[0].data)
+			: n + " classes loaded — show details";
+		const list = box.querySelector(".filelist");
+		list.textContent = "";
+		if (n > 1) {
+			for (const f of state.files) list.appendChild(el("div", null, f.name + ": " + summarize(f.data)));
+		}
+		box.open = false;
+		box.hidden = n === 0;
+	}
+
 	function summarize(data) {
 		const players = data.players || [];
 		const blank = players.filter((p) => !p.college || !String(p.college).trim()).length;
@@ -4241,9 +4260,7 @@
 			$("btnExportAll").hidden = state.files.length < 2;
 			$("empty").hidden = true;
 			$("app").hidden = false;
-			$("fileSummary").textContent = state.files.map(
-				(f) => f.name + ": " + summarize(f.data)).join("  ·  ");
-			$("fileSummary").hidden = false;
+			paintFileSummary();
 			for (const id of ["btnReroll", "btnRerollUntil", "btnRerun", "btnExport", "btnExportMenu",
 				"btnExportAll", "btnPin"]) $(id).disabled = false;
 			checkLockFingerprint();
@@ -4319,9 +4336,7 @@
 		$("btnExportAll").hidden = state.files.length < 2;
 		$("empty").hidden = true;
 		$("app").hidden = false;
-		$("fileSummary").textContent = state.files.map(
-			(f) => f.name + ": " + summarize(f.data)).join("  ·  ");
-		$("fileSummary").hidden = false;
+		paintFileSummary();
 		for (const id of ["btnReroll", "btnRerollUntil", "btnRerun", "btnExport", "btnExportMenu",
 			"btnExportAll", "btnPin"]) $(id).disabled = false;
 		const warns = fresh.flatMap((f) => (f.warnings || []).map((w) => f.name + ": " + w));

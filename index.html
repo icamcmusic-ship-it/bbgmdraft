@@ -377,7 +377,9 @@
 		<button type="button" class="bannerclose" id="warnClose" aria-label="Dismiss this warning">×</button>
 	</div>
 	<p id="status" class="status" role="status" hidden></p>
-	<p id="fileSummary" class="legendline" hidden></p>
+	<!-- Collapsed by default: one line per loaded class buried the page
+	     under a wall of text on a 70-file universe. -->
+	<details id="fileSummary" class="legendline" hidden><summary></summary><div class="filelist"></div></details>
 
 	<!-- Phones: the settings panel is above the page, so a Settings button
 	     that stays in reach. See bindSettingsToggle. -->
