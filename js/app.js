@@ -331,7 +331,7 @@
 				   state and re-runs from its seeds, and settings are not. */
 				try {
 					localStorage.setItem(STORE_KEY,
-						JSON.stringify(Object.assign(payload(), { universe: null })));
+						JSON.stringify(Object.assign(payload(), { universe: null, universeShed: true })));
 					if (!quotaWarned) {
 						quotaWarned = true;
 						setStatus("Browser storage is full, so the saved timeline was " +
@@ -3994,6 +3994,13 @@
 	}
 
 	function readFiles(fileList, opts) {
+		/* The running chain reads state.files, runners and results by index;
+		   swapping them under it ran the rest of the chain on the wrong
+		   classes. */
+		if (state.universe.running) {
+			setStatus("A universe is running — cancel it on the Universe tab before loading files.", true);
+			return;
+		}
 		const problems = [];
 		// A five-file drop used to just sit there with nothing on screen.
 		$("empty").classList.add("busy");
@@ -4172,6 +4179,8 @@
 	}
 
 	function installFiles(loaded, problems, opts) {
+		// A search's answer belongs to the classes it was searching.
+		if (untilSearch) untilSearch.cancel();
 		const append = !!(opts && opts.append) && state.files.length > 0;
 		if (append) { appendFiles(loaded, problems, opts); return; }
 		{
@@ -5081,6 +5090,16 @@
 
 	function runNow() {
 		if (!state.files.length) return;
+		/* A change made while the chain is running must not fall through to
+		   the standalone path below: that wiped the chain's stored seasons
+		   and ran a plain config through the chain's own runner. Stop the
+		   chain and run it again from the top once it has stopped. */
+		if (state.cfg.universe && state.universe.running) {
+			universeRerun = true;
+			universeCancel = true;
+			setStatus("Settings changed — restarting the universe after this season…", true);
+			return;
+		}
 		/* Universe mode is a setting, not a tab. With it on, one file is one
 		   season of a chain and running it alone would produce a world the
 		   Timeline disagrees with, so the chain is what runs. It is async (a
@@ -5465,7 +5484,8 @@
 	/* What a search's answer is only valid for. A seed is found under one set
 	   of settings and locks; applied under another it is just a seed. */
 	function untilKey() {
-		return JSON.stringify([state.cfg, state.overrides, state.active, state.fileCfgs]);
+		return JSON.stringify([state.cfg, state.overrides, state.active, state.fileCfgs,
+			state.files.map((f) => f.fingerprint)]);
 	}
 
 	function rerollUntil(keys, maxTries) {
@@ -6187,7 +6207,7 @@
 		/* A second reroll inside the busy window of the first one read a
 		   lastSeed the first had blanked, and pushed an undo entry that
 		   restored nothing. One at a time. */
-		if (busyDepth > 0 || untilSearch) return;
+		if (busyDepth > 0 || untilSearch || state.universe.running) return;
 		const previous = state.lastSeed;
 		if (!(opts && opts.noUndo)) pushUndo("rerolled the class");
 		// The class being replaced goes into the run history, with everything
@@ -6254,6 +6274,8 @@
 	   button, read at the top of every step, and the seasons already finished
 	   are KEPT, exactly as a cancelled batch keeps its finished classes. */
 	let universeCancel = false;
+	// Set when a settings change arrives mid-chain; finish() re-runs it.
+	let universeRerun = false;
 
 	function cancelUniverse() {
 		if (!state.universe.running) return;
@@ -6639,6 +6661,11 @@
 			if (active) stampSeedPill(active, null);
 			paintEffective();
 			render();
+			if (universeRerun) {
+				universeRerun = false;
+				setTimeout(runNow, 0);
+				return;
+			}
 			if (typeof after === "function" && !u.cancelled) after();
 		};
 		const step = (k) => {
@@ -7197,11 +7224,19 @@
 				   debounced, so a reload straight after persist() can find the
 				   PREVIOUS universe there, which would replace this one. */
 				const cur = state.universe;
-				const same = rec && rec.universe &&
+				/* When the quota fallback shed the universe from localStorage,
+				   this record IS the only copy; there is no identity to match. */
+				let shed = false;
+				try { shed = !!JSON.parse(localStorage.getItem(STORE_KEY) || "{}").universeShed; }
+				catch (e) { /* not readable: fall back to the identity check */ }
+				const empty = !(cur.rows && cur.rows.length) && !cur.baseSeed;
+				const same = (rec && rec.universe && Array.isArray(rec.universe.rows) &&
+					shed && empty) ||
+					(rec && rec.universe &&
 					(rec.universe.createdAt || null) === (cur.createdAt || null) &&
 					(rec.universe.baseSeed || null) === (cur.baseSeed || null) &&
 					Array.isArray(rec.universe.rows) &&
-					rec.universe.rows.length >= (cur.rows || []).length;
+					rec.universe.rows.length >= (cur.rows || []).length);
 				if (same && !cur.running && !(cur.cfgs && Object.keys(cur.cfgs).length)) {
 					applyUniverseSave(rec.universe);
 				}
@@ -10218,7 +10253,7 @@
 		$("btnBatch").disabled = true;
 		$("btnBatchCancel").hidden = false;
 		batchProgress(0, n);
-		const cfg = effectiveCfg();
+		const cfg = fileCfgFor(state.active) || effectiveCfg();
 		// One seed for the whole batch, so the batch itself is reproducible.
 		batchBaseSeed = global.BatchStats.batchSeed(cfg, null);
 
@@ -10843,6 +10878,9 @@
 			if (!$("btnReroll").disabled) reroll();
 			return;
 		}
+		/* Nor undo, redo or the shortcut sheet: undo re-ran the class under
+		   an open dialog, and a second modal() overwrote the first one's OK. */
+		if (!$("modal").hidden) return;
 		if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
 			if (typing) return;
 			e.preventDefault();

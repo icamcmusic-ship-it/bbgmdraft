@@ -367,7 +367,22 @@
 			regionResults[r] = { seeds: regions[r], rounds: regionRounds, champ: alive[0] };
 		}
 
-		const ff = liveRegions.map((r) => regionResults[r].champ).filter(Boolean);
+		/* The national semifinals pair the region of the overall #1 seed with
+		   the region of the overall #4, and #2's with #3's. Taking the regions
+		   in listed order paired East with West — overall #1 against #2 —
+		   and balanceBracket may since have traded 1 seeds anyway, so the
+		   pairing is keyed on where each region's 1 seed sat on the S-curve. */
+		const overall = new Map(field64.map((team, i) => [team, i]));
+		const oneSeedRank = (r) => {
+			const one = regions[r].find((x) => x.seed === 1);
+			return one && overall.has(one.team) ? overall.get(one.team) : Infinity;
+		};
+		let ffRegions = liveRegions;
+		if (liveRegions.length === 4) {
+			const byRank = liveRegions.slice().sort((a, b) => oneSeedRank(a) - oneSeedRank(b));
+			ffRegions = [byRank[0], byRank[3], byRank[1], byRank[2]];
+		}
+		const ff = ffRegions.map((r) => regionResults[r].champ).filter(Boolean);
 		const semis = [];
 		const finalists = [];
 		for (let i = 0; i + 1 < ff.length; i += 2) {
@@ -430,6 +445,10 @@
 			selection: sel, firstFour, regions: regionResults, semis,
 			final: finalGame,
 			champion, runnerUp, finalFour: ff, nit,
+			// The regions in semifinal order: [0] v [1], [2] v [3].
+			semiRegions: ffRegions,
+			// Where each of those regions' 1 seed sat on the S-curve (0 = overall #1).
+			semiOneSeedRanks: ffRegions.map(oneSeedRank),
 		};
 	}
 

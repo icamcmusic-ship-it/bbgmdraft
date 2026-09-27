@@ -4443,7 +4443,7 @@
 		view.appendChild(ff);
 
 		const ROUNDS = ["Round of 64", "Round of 32", "Sweet 16", "Elite Eight"];
-		const REG = global.Tournament.REGIONS.filter((r) => t.regions[r]);
+		const REG = (t.semiRegions || global.Tournament.REGIONS).filter((r) => t.regions[r]);
 		const mirror = el("div", "bracketwrap");
 		const leftCol = el("div", "half");
 		const rightCol = el("div", "half right");

@@ -3265,18 +3265,20 @@
 		],
 	});
 
+	const lastPlayed = (r, ctx) => r.simulated && !r.redshirt && r.season === ctx.season - 1;
 	TPL({
 		kind: "sophomore leap", group: "regular season", p: 0.7, when: 0.58,
 		find: (ctx) => {
 			const cand = ctx.ncaa.filter((p) => p.stats && p.stats.mpg >= 22 &&
-				(p.priorSeasons || []).some((r) => r.simulated && !r.redshirt &&
-					r.season === ctx.season - 1 && p.stats.ppg - r.ppg >= 7));
+				(p.priorSeasons || []).some((r) => lastPlayed(r, ctx) && p.stats.ppg - r.ppg >= 7));
 			if (!cand.length) return null;
 			return bestBy(cand, (p) => p.stats.ppg -
-				p.priorSeasons.filter((r) => r.season === ctx.season - 1)[0].ppg);
+				p.priorSeasons.filter((r) => lastPlayed(r, ctx))[0].ppg);
 		},
 		slots: (p, ctx) => {
-			const r = p.priorSeasons.filter((x) => x.season === ctx.season - 1)[0];
+			/* The played row, not the first row of that season: a redshirt row
+			   for the same year has no ppg. */
+			const r = p.priorSeasons.filter((x) => lastPlayed(x, ctx))[0];
 			return {
 				player: PL(p.name, p.key), team: TM(p.newCollege),
 				then: T(r.ppg.toFixed(1)), now: T(p.stats.ppg.toFixed(1)),
