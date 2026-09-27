@@ -877,6 +877,7 @@
 	const SLIDERS = [
 		"classQuality", "classDepth", "eliteCount", "potBias", "potSpread",
 		"specialization", "archetypeDiversity", "classFlavor", "buildNoise",
+		"rookieSkillCap", "rookiePhysCap", "rookieOvrCap",
 		"freshmanShare", "transferShare", "redshirtShare", "reclassShare", "pDII",
 		"talentCoupling", "birthplaceWeight",
 		"pace", "scoringEnv", "efficiencyEnv", "statNoise", "upsetFactor",
@@ -956,6 +957,9 @@
 		talentCoupling: (v) => v.toFixed(1) + "x",
 		birthplaceWeight: (v) => v.toFixed(1) + "x",
 		specialization: (v) => v.toFixed(2) + "x",
+		rookieSkillCap: (v) => v > 0 ? "~" + v : "off",
+		rookiePhysCap: (v) => v > 0 ? "~" + v : "off",
+		rookieOvrCap: (v) => v > 0 ? "~" + v : "off",
 		classFlavor: (v) => v.toFixed(2) + "x",
 		statNoise: (v) => v.toFixed(2) + "x",
 		upsetFactor: (v) => v.toFixed(2) + "x",
@@ -1088,6 +1092,15 @@
 		potBias: (v) => "ovr→pot gap shifted " + (v >= 0 ? "+" : "") + (v * 2.2).toFixed(1) +
 			" points (cosmetic: potential does not feed the season)",
 		potSpread: (v) => "gap sd " + v + " points (higher = more boom/bust)",
+		rookieSkillCap: (v) => v > 0
+			? "skill and shooting ratings ease in from " + (v - 10) + " and rarely pass " + v + " (hgt is never capped)"
+			: "no cap: a specialist can come in with a 95",
+		rookiePhysCap: (v) => v > 0
+			? "stre/spd/jmp/endu ease in from " + (v - 10) + " and rarely pass " + v
+			: "no cap on physicals",
+		rookieOvrCap: (v) => v > 0
+			? "the top of the class eases in from " + (v - 6) + " and rarely passes " + v + "; a locked overall is kept"
+			: "no cap: the class's best can come in at a starter's overall",
 		specialization: (v) => v < 0.4 ? "BBGM's samey builds"
 			: v > 1.6 ? "extreme specialists" : "clear roles, real weaknesses",
 		// True by construction now: the +0.05 / +0.02 fudge terms that made this
@@ -2892,6 +2905,7 @@
 	const TIER_SHAPE = new Set([
 		"preset", "seed", "ovrMode", "classQuality", "classDepth", "eliteCount",
 		"specialization", "classFlavor", "flavorHint", "archetypePool",
+		"rookieSkillCap", "rookiePhysCap", "rookieOvrCap",
 		"freshmanShare", "transferShare", "varySize", "lockHeights", "universe", "era",
 		"pDII", "collegeSource", "talentCoupling", "birthplaceWeight", "signatureSkills",
 	]);
@@ -5497,7 +5511,18 @@
 		if (!preds.length || !state.files.length) return;
 		const runner = state.runners[state.active];
 		if (!runner) return;
+		const redoBefore = state.redo;
 		pushUndo("rerolled until " + preds.map((p) => p.label).join(" and "));
+		const undoEntry = state.undo[state.undo.length - 1];
+		/* A search that changes nothing (cancelled, failed, or no match)
+		   takes its undo entry back and gives the redo history back with it;
+		   left behind, undo did nothing visible and redo was gone. */
+		function unwind() {
+			if (state.undo[state.undo.length - 1] !== undoEntry) return;
+			state.undo.pop();
+			state.redo = redoBefore;
+			paintUndo();
+		}
 		rememberSession();
 		rememberPool();
 		const base = (state.lastSeed || state.cfg.seed || mintRandomSeed()) +
@@ -5544,6 +5569,7 @@
 		}
 		function cancel() {
 			end();
+			unwind();
 			setStatus("Search cancelled after " + k + " tr" + (k === 1 ? "y" : "ies") +
 				". The class on screen is unchanged.");
 			// The inline path left the runner's cache on its last candidate.
@@ -5567,6 +5593,7 @@
 					"or locks changed during the search, so it was not applied — it " +
 					"satisfies " + said + " only under the settings it was searched with.",
 					true);
+				unwind();
 				if (inline) run();
 				return;
 			}
@@ -5591,6 +5618,7 @@
 		function finish() {
 			if (found) { apply(found.seed); return; }
 			end();
+			unwind();
 			const breakdown = preds
 				.map((p, i) => ({ label: p.label, n: hits[i] }))
 				.sort((a, b) => a.n - b.n)
@@ -5658,6 +5686,8 @@
 				if (searchWorker !== w) return;
 				const m = e.data || {};
 				if (m.type === "searchProgress") {
+					// The cancel message reports this count.
+					k = m.done;
 					progress(m.done, m.total);
 				} else if (m.type === "searchDone") {
 					w.terminate();
@@ -5665,6 +5695,7 @@
 					finishFound(m.found, m.tries, m.hits || []);
 				} else if (m.type === "error") {
 					end();
+					unwind();
 					showError(new Error(m.message));
 					run();
 				}
@@ -10101,6 +10132,8 @@
 		$("batchProgress").hidden = true;
 		$("btnBatch").disabled = false;
 		$("btnBatchCancel").hidden = true;
+		// An idle worker still holds the league file it was sent.
+		if (batchWorker) batchWorker.terminate();
 		batchWorker = null;
 		const use = (rows && rows.length) ? rows : batchPartial;
 		if (!use.length) { setStatus("Batch canceled before any class finished."); return; }
@@ -10438,7 +10471,7 @@
 		snapshot, rerollUntilDialog, rerollUntil, dailySeed, CHALLENGES, startChallenge,
 		challengeResultText, scoreChallenge, restoreSession, randomizeSettings,
 		REROLL_PREDICATES,
-		exportCsv, setStatus, showError, indexSnapshot,
+		exportCsv, setStatus, showError, indexSnapshot, readTextFile,
 		// The replay layer, for tools/uismoke.js.
 		replayStore, replayDialog, replayAfterRun, chaosDraft, className,
 		// Replayability (js/replay.js), for tools/uismoke.js.
@@ -10488,8 +10521,10 @@
 		const h = location.hash || "";
 		if (h === lastWrittenHash || !/[#&]c=/.test(h)) return;
 		lastWrittenHash = h;
+		const redoBefore = state.redo;
 		pushUndo("opened a shared link");
-		if (!readHash()) { state.undo.pop(); paintUndo(); return; }
+		// An invalid link changes nothing, so the redo history survives it.
+		if (!readHash()) { state.undo.pop(); state.redo = redoBefore; paintUndo(); return; }
 		state.editing = null;
 		state.selected = {};
 		checkLockFingerprint();

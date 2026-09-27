@@ -1606,9 +1606,16 @@
 			   difference between "look at this guy again" and "reroll the class
 			   and hope the other sixty-nine come back the same". */
 			const prng = rng.child("build:" + p.key + rerollSalt(p, "build") + vsalt);
+			/* A hand-locked overall is taken literally. Everything else is
+			   soft-capped (cfg.rookieOvrCap): a class used to open with its
+			   top men at 55-57, a starter's overall, and an incoming rookie
+			   is not already better than the league's average player. The
+			   ease starts six under the cap and approaches four over it, so
+			   the order of the board is kept and only its top is pressed. */
 			const targetOvr = Number.isFinite(ov.ovr)
 				? clamp(Math.round(ov.ovr), 0, 100)
-				: (curve ? curve[i] : p.origOvr);
+				: Math.round(RB.softCap(curve ? curve[i] : p.origOvr,
+					Number(cfg.rookieOvrCap) || 0, 6, 4));
 			// The raw ovr->pot gap, before any of the potential dials. This is
 			// what the college season is simulated off (see talentPot), so
 			// moving "Potential bias" never re-simulates a game.
@@ -1665,6 +1672,8 @@
 			p.buildBase = built.base;
 			p.buildCleanBase = built.cleanBase;
 			p.buildPinned = ov.ratings || null;
+			// The rookie caps this build ran under, for every later re-solve.
+			p.buildCaps = RB.rookieCaps(cfg);
 			p.newOvr = built.ovr;
 			p.ovrRange = built.ovrRange;
 			p.builtPot = built.pot;
@@ -1853,7 +1862,8 @@
 					}
 				}
 				const re = RB.resolveTo(base, p.newOvr, p.archetype,
-					p.origRatings.fuzz, p.buildPinned, cleanBase, (ctx && ctx.cfg) || undefined);
+					p.origRatings.fuzz, p.buildPinned, cleanBase, (ctx && ctx.cfg) || undefined,
+					p.buildCaps || null);
 				p.newHgtInches = inches;
 				p.buildBase = re.base;
 				p.buildCleanBase = re.cleanBase;
@@ -3545,7 +3555,8 @@
 		let re;
 		try {
 			re = RB.resolveTo(p.buildCleanBase, targetOvr, p.archetype,
-				p.origRatings ? p.origRatings.fuzz : 0, p.buildPinned, p.buildCleanBase);
+				p.origRatings ? p.origRatings.fuzz : 0, p.buildPinned, p.buildCleanBase,
+				undefined, p.buildCaps || null);
 		} catch (e) {
 			return null;
 		}
@@ -4874,7 +4885,8 @@
 			let re;
 			try {
 				re = RB.resolveTo(p.buildCleanBase, ovr, p.archetype,
-					p.origRatings ? p.origRatings.fuzz : 0, p.buildPinned, p.buildCleanBase);
+					p.origRatings ? p.origRatings.fuzz : 0, p.buildPinned, p.buildCleanBase,
+					undefined, p.buildCaps || null);
 			} catch (e) {
 				continue;
 			}

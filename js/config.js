@@ -17,6 +17,13 @@
 		specialization: 1.0,   // 0 = keep BBGM's samey builds, 2 = extreme specialists
 		archetypeDiversity: 85,// 0-100, how often a non-balanced archetype is used
 		buildNoise: 5,         // per-rating random jitter (rating points)
+		// Rookie soft caps (0 = off). An incoming player is not already a
+		// good pro: skill/shooting ratings ease in 10 under the cap and
+		// rarely pass it, physicals likewise, and the overall eases in 6
+		// under its cap. hgt is never capped. See RatingsBuilder.softCap.
+		rookieSkillCap: 70,
+		rookiePhysCap: 80,
+		rookieOvrCap: 50,
 		varySize: false,       // let hgt/weight drift with the archetype
 		/* THE IMPORTED HEIGHT IS THE PLAYER'S HEIGHT.
 
@@ -792,6 +799,9 @@
 		specialization: { lo: 0, hi: 2.5 },
 		archetypeDiversity: { lo: 0, hi: 100 },
 		buildNoise: { lo: 0, hi: 14 },
+		rookieSkillCap: { lo: 0, hi: 99 },
+		rookiePhysCap: { lo: 0, hi: 99 },
+		rookieOvrCap: { lo: 0, hi: 99 },
 		classFlavor: { lo: 0, hi: 2 },
 		flavorBlend: { lo: 0, hi: 1 },
 		/* The ceiling is the build table's size, read lazily: config.js

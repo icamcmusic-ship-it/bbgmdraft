@@ -2050,7 +2050,8 @@
 			},
 			"The best " + COMPARE_MAX + " " + (p.newPos || "players") +
 			" in the class, side by side");
-		item("Show his game log", () => {
+		// Only a player who has one: the tab had nothing to show for the rest.
+		if (p.gameLog) item("Show his game log", () => {
 			st.logPlayer = p.key;
 			st.tab = "gamelog";
 			A().persist();
@@ -3970,15 +3971,17 @@
 		impBtn.disabled = !!u.running;
 		const impInput = el("input");
 		impInput.type = "file";
-		impInput.accept = ".json";
+		impInput.accept = ".json,.gz";
 		impInput.hidden = true;
 		impInput.addEventListener("change", () => {
 			const f = impInput.files && impInput.files[0];
 			if (!f) return;
-			f.text().then((txt) => {
+			// Through readTextFile, so a gzipped export imports here as it
+			// does by drag and drop, and a failed read says so.
+			A().readTextFile(f).then((txt) => {
 				try { A().importUniverse(JSON.parse(txt)); }
 				catch (e) { A().showError(e); }
-			});
+			}).catch((e) => A().showError(e));
 			impInput.value = "";
 		});
 		impBtn.addEventListener("click", () => impInput.click());
@@ -5463,7 +5466,7 @@
 			view.appendChild(box);
 			return;
 		}
-		if (!st.logPlayer || !sorted.some((p) => p.key === st.logPlayer)) {
+		if (!st.logPlayer || !sorted.some((p) => p.key === st.logPlayer && p.gameLog)) {
 			st.logPlayer = sel.options[0].value;
 		}
 		sel.value = st.logPlayer;
