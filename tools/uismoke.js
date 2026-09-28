@@ -32,6 +32,24 @@ try {
 	process.exit(0);
 }
 
+/* A clean slate is localStorage AND the IndexedDB autosave. With only
+   the first cleared, a universe that had been shed from localStorage for
+   size came back from its autosave (which is what the autosave is for), so
+   a section that meant to start from nothing started inside the previous
+   section's world. Deletion is blocked while the page holds the database
+   open and completes on the navigation that follows. */
+function clearStorage(page) {
+	return page.evaluate(() => {
+		localStorage.clear();
+		return new Promise((resolve) => {
+			try {
+				const req = indexedDB.deleteDatabase("bbgm-draft-workshop");
+				req.onsuccess = req.onerror = req.onblocked = () => resolve();
+			} catch (e) { resolve(); }
+		});
+	});
+}
+
 function serve() {
 	return new Promise((resolve) => {
 		const server = http.createServer((req, res) => {
@@ -140,7 +158,7 @@ async function gotoProspects(page) {
 
 	const base = "http://127.0.0.1:" + PORT + "/index.html";
 	await page.goto(base);
-	await page.evaluate(() => localStorage.clear());
+	await clearStorage(page);
 	await page.goto(base);
 	await page.setInputFiles("#file", fixture);
 	await page.waitForSelector("table tbody tr", { timeout: 30000 });
@@ -1246,7 +1264,7 @@ async function gotoProspects(page) {
 		   a button. The button has to produce a class through the same
 		   path a real file takes. */
 		await page.goto(base);
-		await page.evaluate(() => localStorage.clear());
+		await clearStorage(page);
 		await page.goto(base);
 		ok("the empty screen offers a sample class",
 			(await page.locator("#btnSample").count()) === 1);
@@ -1808,7 +1826,7 @@ async function gotoProspects(page) {
 		   Two class files, universe mode on, and the champion the Timeline
 		   names has to be the champion the cached result carries. */
 		await page.goto(base);
-		await page.evaluate(() => localStorage.clear());
+		await clearStorage(page);
 		await page.goto(base);
 		await page.evaluate(() => {
 			const S = window.Sample;
@@ -2194,7 +2212,7 @@ async function gotoProspects(page) {
 		   files dropped, two more seasons simulated forward, and a reload that
 		   rebuilds the same world from its seed. */
 		await page.goto(base);
-		await page.evaluate(() => localStorage.clear());
+		await clearStorage(page);
 		await page.goto(base);
 		await page.waitForFunction(() => window.App && window.App.state);
 		await page.evaluate(() => { window.App.state.cfg.seed = "smoke-synth"; });
@@ -2260,7 +2278,7 @@ async function gotoProspects(page) {
 		ok("a reload regenerates the classes and replays the same world",
 			back.rows.join() === fwd.rows.join() && !back.err && back.live > 0,
 			JSON.stringify(back));
-		await page.evaluate(() => localStorage.clear());
+		await clearStorage(page);
 	}
 
 	console.log("\nSaved column visibility");
@@ -2319,7 +2337,7 @@ async function gotoProspects(page) {
 		   The sample class is used rather than a loaded file because it is the
 		   one input the harness can produce identically every time. */
 		await page.goto(base);
-		await page.evaluate(() => localStorage.clear());
+		await clearStorage(page);
 		await page.goto(base);
 		/* The sample-class BUTTON seeds itself from the clock, so the class it
 		   builds is different every run and cannot be a snapshot. The sample
@@ -2450,7 +2468,7 @@ async function gotoProspects(page) {
 		fs.writeFileSync(leagueFixture, JSON.stringify(league));
 
 		await page.goto(base);
-		await page.evaluate(() => localStorage.clear());
+		await clearStorage(page);
 		await page.goto(base);
 		await page.setInputFiles("#file", leagueFixture);
 		await page.waitForSelector("table tbody tr", { timeout: 60000 });
@@ -2528,7 +2546,7 @@ async function gotoProspects(page) {
 		fs.writeFileSync(leagueFixture, JSON.stringify(league));
 
 		await page.goto(base);
-		await page.evaluate(() => localStorage.clear());
+		await clearStorage(page);
 		await page.goto(base);
 		await page.setInputFiles("#file", leagueFixture);
 		await page.waitForSelector("table tbody tr", { timeout: 60000 });
@@ -2621,7 +2639,7 @@ async function gotoProspects(page) {
 	{
 		console.log("\nThe settings panel");
 		await page.goto(base);
-		await page.evaluate(() => localStorage.clear());
+		await clearStorage(page);
 		await page.goto(base);
 		await page.evaluate(() => {
 			const data = window.Sample.makeClass(909, 40, 2027);
@@ -2727,7 +2745,7 @@ async function gotoProspects(page) {
 	{
 		console.log("\nClearing the filters");
 		await page.goto(base);
-		await page.evaluate(() => localStorage.clear());
+		await clearStorage(page);
 		await page.goto(base);
 		await page.evaluate(() => {
 			const data = window.Sample.makeClass(414, 40, 2029);
@@ -2827,7 +2845,7 @@ async function gotoProspects(page) {
 		console.log("\nSettings that arrive from outside, and the panel around them");
 		await page.goto(base + "#c=" + encodeURIComponent(JSON.stringify(
 			{ era: "bogus", ovrMode: "sideways", universe: "nope", pace: 70 })));
-		await page.evaluate(() => localStorage.clear());
+		await clearStorage(page);
 		await page.reload();
 		await page.waitForTimeout(300);
 		const bad = await page.evaluate(() => ({
@@ -2844,7 +2862,7 @@ async function gotoProspects(page) {
 			bad.presets > 3 && /team points/.test(bad.hint), JSON.stringify(bad));
 
 		await page.goto(base + "#");
-		await page.evaluate(() => localStorage.clear());
+		await clearStorage(page);
 		await page.goto(base);
 		await page.evaluate(() => {
 			const data = window.Sample.makeClass(4242, 40, 2027);
@@ -3127,7 +3145,7 @@ async function gotoProspects(page) {
 	{
 		console.log("\nPlay");
 		await page.goto(base);
-		await page.evaluate(() => localStorage.clear());
+		await clearStorage(page);
 		await page.goto(base);
 		await page.setInputFiles("#file", fixture);
 		await page.waitForSelector("table tbody tr", { timeout: 30000 });
@@ -3224,7 +3242,7 @@ async function gotoProspects(page) {
 	console.log("\nThe draft board and settings, audit section 2");
 	{
 		await page.goto(base);
-		await page.evaluate(() => localStorage.clear());
+		await clearStorage(page);
 		await page.goto(base);
 		await page.setInputFiles("#file", fixture);
 		await page.waitForSelector("table tbody tr", { timeout: 30000 });
