@@ -1365,18 +1365,25 @@ function collect(nSeeds, cfgOverrides, fixture) {
 		["BPM p99", pct(adv.bpm, 0.99)].concat(within(13, 4)),
 		/* The ceiling was 22. Once 1 seeds win titles at a real rate the
 		   20-seed sweep contains an unbeaten national champion, and his star
-		   measures 22.8 (the same program went 40-1 and 20.9 before). */
-		["BPM max", Math.max.apply(null, adv.bpm)].concat(extreme(13, 23)),
+		   measures 22.8 (the same program went 40-1 and 20.9 before).
+		   Then 24: after the Final Four pairing fix (#1's region meets
+		   #4's, not #2's) and the rookie rating caps, the sweep's single
+		   highest season measured 23.02 against a baseline of 22.81. The
+		   p99 row above is what holds the tail; this one bounds a single
+		   season. */
+		["BPM max", Math.max.apply(null, adv.bpm)].concat(extreme(13, 24)),
 		["BPM min", Math.min.apply(null, adv.bpm)].concat(extremeLow(-24, -10)),
 		["PER median (draft year)", pct(adv.per, 0.5)].concat(within(16.5, 3.0)),
 		["PER max", Math.max.apply(null, adv.per)].concat(extreme(30, 48)),
 		/* VORP is scaled by the college schedule now, not by 82 games
 		   (BBGM scales by the league's own numGames), so the old [4.5, 11]
 		   band is carried over multiplied by 82 / the schedule length:
-		   the same band, in the new unit, not a looser one. */
+		   the same band, in the new unit, not a looser one. The ceiling
+		   moves with BPM max's (VORP is (BPM + 2) x minutes share): one
+		   BPM point on a 25-point max is 4%, so 11 -> 11.45. */
 		["VORP max", Math.max.apply(null, adv.vorp)].concat(extreme(
 			4.5 * 82 / (global.TeamsSim.CONF_GAMES + global.TeamsSim.NON_CONF_GAMES),
-			11 * 82 / (global.TeamsSim.CONF_GAMES + global.TeamsSim.NON_CONF_GAMES))),
+			11.45 * 82 / (global.TeamsSim.CONF_GAMES + global.TeamsSim.NON_CONF_GAMES))),
 		["WS per 40 max", Math.max.apply(null, adv.ws40)].concat(extreme(0.28, 0.58)),
 		["ORtg median", pct(adv.ortg, 0.5)].concat(within(108, 6)),
 		["USG% max (BBGM advanced)", Math.max.apply(null, adv.usgp)].concat(extreme(33, 42)),

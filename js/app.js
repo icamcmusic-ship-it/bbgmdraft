@@ -331,7 +331,7 @@
 				   state and re-runs from its seeds, and settings are not. */
 				try {
 					localStorage.setItem(STORE_KEY,
-						JSON.stringify(Object.assign(payload(), { universe: null })));
+						JSON.stringify(Object.assign(payload(), { universe: null, universeShed: true })));
 					if (!quotaWarned) {
 						quotaWarned = true;
 						setStatus("Browser storage is full, so the saved timeline was " +
@@ -877,6 +877,7 @@
 	const SLIDERS = [
 		"classQuality", "classDepth", "eliteCount", "potBias", "potSpread",
 		"specialization", "archetypeDiversity", "classFlavor", "buildNoise",
+		"rookieSkillCap", "rookiePhysCap", "rookieOvrCap",
 		"freshmanShare", "transferShare", "redshirtShare", "reclassShare", "pDII",
 		"talentCoupling", "birthplaceWeight",
 		"pace", "scoringEnv", "efficiencyEnv", "statNoise", "upsetFactor",
@@ -956,6 +957,9 @@
 		talentCoupling: (v) => v.toFixed(1) + "x",
 		birthplaceWeight: (v) => v.toFixed(1) + "x",
 		specialization: (v) => v.toFixed(2) + "x",
+		rookieSkillCap: (v) => v > 0 ? "~" + v : "off",
+		rookiePhysCap: (v) => v > 0 ? "~" + v : "off",
+		rookieOvrCap: (v) => v > 0 ? "~" + v : "off",
 		classFlavor: (v) => v.toFixed(2) + "x",
 		statNoise: (v) => v.toFixed(2) + "x",
 		upsetFactor: (v) => v.toFixed(2) + "x",
@@ -1088,6 +1092,17 @@
 		potBias: (v) => "ovr→pot gap shifted " + (v >= 0 ? "+" : "") + (v * 2.2).toFixed(1) +
 			" points (cosmetic: potential does not feed the season)",
 		potSpread: (v) => "gap sd " + v + " points (higher = more boom/bust)",
+		rookieSkillCap: (v) => v > 0
+			? "skill and shooting ratings ease in from " + (v - 10) + " and rarely pass " + v + " (hgt is never capped)"
+			: "no cap: a specialist can come in with a 95",
+		rookiePhysCap: (v) => v > 0
+			? "stre/spd/jmp/endu ease in from " + (v - 10) + " and rarely pass " + v
+			: "no cap on physicals",
+		rookieOvrCap: (v) => v > 0
+			? "re-simulated overalls (curve mode) ease in from " + (v - 10) +
+				" with a rare upside tail: 55+ in about a quarter of classes, 58+ generational; " +
+				"preserve mode and locked overalls are kept as they are"
+			: "no cap: the class's best can come in at a starter's overall",
 		specialization: (v) => v < 0.4 ? "BBGM's samey builds"
 			: v > 1.6 ? "extreme specialists" : "clear roles, real weaknesses",
 		// True by construction now: the +0.05 / +0.02 fudge terms that made this
@@ -2892,6 +2907,7 @@
 	const TIER_SHAPE = new Set([
 		"preset", "seed", "ovrMode", "classQuality", "classDepth", "eliteCount",
 		"specialization", "classFlavor", "flavorHint", "archetypePool",
+		"rookieSkillCap", "rookiePhysCap", "rookieOvrCap",
 		"freshmanShare", "transferShare", "varySize", "lockHeights", "universe", "era",
 		"pDII", "collegeSource", "talentCoupling", "birthplaceWeight", "signatureSkills",
 	]);
@@ -3862,6 +3878,25 @@
 
 	/* ------------------------------------------------------------ file input */
 
+	/* The loaded files, collapsed to one line. The per-file detail is
+	   behind a click: a long universe printed one sentence per class and
+	   pushed everything else off the screen. */
+	function paintFileSummary() {
+		const box = $("fileSummary");
+		if (!box) return;
+		const n = state.files.length;
+		box.querySelector("summary").textContent = n === 1
+			? state.files[0].name + ": " + summarize(state.files[0].data)
+			: n + " classes loaded — show details";
+		const list = box.querySelector(".filelist");
+		list.textContent = "";
+		if (n > 1) {
+			for (const f of state.files) list.appendChild(el("div", null, f.name + ": " + summarize(f.data)));
+		}
+		box.open = false;
+		box.hidden = n === 0;
+	}
+
 	function summarize(data) {
 		const players = data.players || [];
 		const blank = players.filter((p) => !p.college || !String(p.college).trim()).length;
@@ -3994,6 +4029,13 @@
 	}
 
 	function readFiles(fileList, opts) {
+		/* The running chain reads state.files, runners and results by index;
+		   swapping them under it ran the rest of the chain on the wrong
+		   classes. */
+		if (state.universe.running) {
+			setStatus("A universe is running — cancel it on the Universe tab before loading files.", true);
+			return;
+		}
 		const problems = [];
 		// A five-file drop used to just sit there with nothing on screen.
 		$("empty").classList.add("busy");
@@ -4172,6 +4214,8 @@
 	}
 
 	function installFiles(loaded, problems, opts) {
+		// A search's answer belongs to the classes it was searching.
+		if (untilSearch) untilSearch.cancel();
 		const append = !!(opts && opts.append) && state.files.length > 0;
 		if (append) { appendFiles(loaded, problems, opts); return; }
 		{
@@ -4216,9 +4260,7 @@
 			$("btnExportAll").hidden = state.files.length < 2;
 			$("empty").hidden = true;
 			$("app").hidden = false;
-			$("fileSummary").textContent = state.files.map(
-				(f) => f.name + ": " + summarize(f.data)).join("  ·  ");
-			$("fileSummary").hidden = false;
+			paintFileSummary();
 			for (const id of ["btnReroll", "btnRerollUntil", "btnRerun", "btnExport", "btnExportMenu",
 				"btnExportAll", "btnPin"]) $(id).disabled = false;
 			checkLockFingerprint();
@@ -4294,9 +4336,7 @@
 		$("btnExportAll").hidden = state.files.length < 2;
 		$("empty").hidden = true;
 		$("app").hidden = false;
-		$("fileSummary").textContent = state.files.map(
-			(f) => f.name + ": " + summarize(f.data)).join("  ·  ");
-		$("fileSummary").hidden = false;
+		paintFileSummary();
 		for (const id of ["btnReroll", "btnRerollUntil", "btnRerun", "btnExport", "btnExportMenu",
 			"btnExportAll", "btnPin"]) $(id).disabled = false;
 		const warns = fresh.flatMap((f) => (f.warnings || []).map((w) => f.name + ": " + w));
@@ -5081,6 +5121,16 @@
 
 	function runNow() {
 		if (!state.files.length) return;
+		/* A change made while the chain is running must not fall through to
+		   the standalone path below: that wiped the chain's stored seasons
+		   and ran a plain config through the chain's own runner. Stop the
+		   chain and run it again from the top once it has stopped. */
+		if (state.cfg.universe && state.universe.running) {
+			universeRerun = true;
+			universeCancel = true;
+			setStatus("Settings changed — restarting the universe after this season…", true);
+			return;
+		}
 		/* Universe mode is a setting, not a tab. With it on, one file is one
 		   season of a chain and running it alone would produce a world the
 		   Timeline disagrees with, so the chain is what runs. It is async (a
@@ -5465,7 +5515,8 @@
 	/* What a search's answer is only valid for. A seed is found under one set
 	   of settings and locks; applied under another it is just a seed. */
 	function untilKey() {
-		return JSON.stringify([state.cfg, state.overrides, state.active, state.fileCfgs]);
+		return JSON.stringify([state.cfg, state.overrides, state.active, state.fileCfgs,
+			state.files.map((f) => f.fingerprint)]);
 	}
 
 	function rerollUntil(keys, maxTries) {
@@ -5477,7 +5528,18 @@
 		if (!preds.length || !state.files.length) return;
 		const runner = state.runners[state.active];
 		if (!runner) return;
+		const redoBefore = state.redo;
 		pushUndo("rerolled until " + preds.map((p) => p.label).join(" and "));
+		const undoEntry = state.undo[state.undo.length - 1];
+		/* A search that changes nothing (cancelled, failed, or no match)
+		   takes its undo entry back and gives the redo history back with it;
+		   left behind, undo did nothing visible and redo was gone. */
+		function unwind() {
+			if (state.undo[state.undo.length - 1] !== undoEntry) return;
+			state.undo.pop();
+			state.redo = redoBefore;
+			paintUndo();
+		}
 		rememberSession();
 		rememberPool();
 		const base = (state.lastSeed || state.cfg.seed || mintRandomSeed()) +
@@ -5524,6 +5586,7 @@
 		}
 		function cancel() {
 			end();
+			unwind();
 			setStatus("Search cancelled after " + k + " tr" + (k === 1 ? "y" : "ies") +
 				". The class on screen is unchanged.");
 			// The inline path left the runner's cache on its last candidate.
@@ -5547,6 +5610,7 @@
 					"or locks changed during the search, so it was not applied — it " +
 					"satisfies " + said + " only under the settings it was searched with.",
 					true);
+				unwind();
 				if (inline) run();
 				return;
 			}
@@ -5571,6 +5635,7 @@
 		function finish() {
 			if (found) { apply(found.seed); return; }
 			end();
+			unwind();
 			const breakdown = preds
 				.map((p, i) => ({ label: p.label, n: hits[i] }))
 				.sort((a, b) => a.n - b.n)
@@ -5638,6 +5703,8 @@
 				if (searchWorker !== w) return;
 				const m = e.data || {};
 				if (m.type === "searchProgress") {
+					// The cancel message reports this count.
+					k = m.done;
 					progress(m.done, m.total);
 				} else if (m.type === "searchDone") {
 					w.terminate();
@@ -5645,6 +5712,7 @@
 					finishFound(m.found, m.tries, m.hits || []);
 				} else if (m.type === "error") {
 					end();
+					unwind();
 					showError(new Error(m.message));
 					run();
 				}
@@ -6187,7 +6255,7 @@
 		/* A second reroll inside the busy window of the first one read a
 		   lastSeed the first had blanked, and pushed an undo entry that
 		   restored nothing. One at a time. */
-		if (busyDepth > 0 || untilSearch) return;
+		if (busyDepth > 0 || untilSearch || state.universe.running) return;
 		const previous = state.lastSeed;
 		if (!(opts && opts.noUndo)) pushUndo("rerolled the class");
 		// The class being replaced goes into the run history, with everything
@@ -6254,6 +6322,8 @@
 	   button, read at the top of every step, and the seasons already finished
 	   are KEPT, exactly as a cancelled batch keeps its finished classes. */
 	let universeCancel = false;
+	// Set when a settings change arrives mid-chain; finish() re-runs it.
+	let universeRerun = false;
 
 	function cancelUniverse() {
 		if (!state.universe.running) return;
@@ -6639,6 +6709,11 @@
 			if (active) stampSeedPill(active, null);
 			paintEffective();
 			render();
+			if (universeRerun) {
+				universeRerun = false;
+				setTimeout(runNow, 0);
+				return;
+			}
 			if (typeof after === "function" && !u.cancelled) after();
 		};
 		const step = (k) => {
@@ -7197,11 +7272,19 @@
 				   debounced, so a reload straight after persist() can find the
 				   PREVIOUS universe there, which would replace this one. */
 				const cur = state.universe;
-				const same = rec && rec.universe &&
+				/* When the quota fallback shed the universe from localStorage,
+				   this record IS the only copy; there is no identity to match. */
+				let shed = false;
+				try { shed = !!JSON.parse(localStorage.getItem(STORE_KEY) || "{}").universeShed; }
+				catch (e) { /* not readable: fall back to the identity check */ }
+				const empty = !(cur.rows && cur.rows.length) && !cur.baseSeed;
+				const same = (rec && rec.universe && Array.isArray(rec.universe.rows) &&
+					shed && empty) ||
+					(rec && rec.universe &&
 					(rec.universe.createdAt || null) === (cur.createdAt || null) &&
 					(rec.universe.baseSeed || null) === (cur.baseSeed || null) &&
 					Array.isArray(rec.universe.rows) &&
-					rec.universe.rows.length >= (cur.rows || []).length;
+					rec.universe.rows.length >= (cur.rows || []).length);
 				if (same && !cur.running && !(cur.cfgs && Object.keys(cur.cfgs).length)) {
 					applyUniverseSave(rec.universe);
 				}
@@ -10066,6 +10149,8 @@
 		$("batchProgress").hidden = true;
 		$("btnBatch").disabled = false;
 		$("btnBatchCancel").hidden = true;
+		// An idle worker still holds the league file it was sent.
+		if (batchWorker) batchWorker.terminate();
 		batchWorker = null;
 		const use = (rows && rows.length) ? rows : batchPartial;
 		if (!use.length) { setStatus("Batch canceled before any class finished."); return; }
@@ -10218,7 +10303,7 @@
 		$("btnBatch").disabled = true;
 		$("btnBatchCancel").hidden = false;
 		batchProgress(0, n);
-		const cfg = effectiveCfg();
+		const cfg = fileCfgFor(state.active) || effectiveCfg();
 		// One seed for the whole batch, so the batch itself is reproducible.
 		batchBaseSeed = global.BatchStats.batchSeed(cfg, null);
 
@@ -10403,7 +10488,7 @@
 		snapshot, rerollUntilDialog, rerollUntil, dailySeed, CHALLENGES, startChallenge,
 		challengeResultText, scoreChallenge, restoreSession, randomizeSettings,
 		REROLL_PREDICATES,
-		exportCsv, setStatus, showError, indexSnapshot,
+		exportCsv, setStatus, showError, indexSnapshot, readTextFile,
 		// The replay layer, for tools/uismoke.js.
 		replayStore, replayDialog, replayAfterRun, chaosDraft, className,
 		// Replayability (js/replay.js), for tools/uismoke.js.
@@ -10453,8 +10538,10 @@
 		const h = location.hash || "";
 		if (h === lastWrittenHash || !/[#&]c=/.test(h)) return;
 		lastWrittenHash = h;
+		const redoBefore = state.redo;
 		pushUndo("opened a shared link");
-		if (!readHash()) { state.undo.pop(); paintUndo(); return; }
+		// An invalid link changes nothing, so the redo history survives it.
+		if (!readHash()) { state.undo.pop(); state.redo = redoBefore; paintUndo(); return; }
 		state.editing = null;
 		state.selected = {};
 		checkLockFingerprint();
@@ -10843,6 +10930,9 @@
 			if (!$("btnReroll").disabled) reroll();
 			return;
 		}
+		/* Nor undo, redo or the shortcut sheet: undo re-ran the class under
+		   an open dialog, and a second modal() overwrote the first one's OK. */
+		if (!$("modal").hidden) return;
 		if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
 			if (typing) return;
 			e.preventDefault();

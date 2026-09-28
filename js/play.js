@@ -22,16 +22,16 @@
 
 	/* ------------------------------------------------------------ scoring */
 
-	/* The 64-team bracket as the tournament plays it: regions in REGIONS
-	   order, each in SEED_ORDER, so game g of round k is fed by games 2g and
-	   2g+1 of round k-1 and the semis pair East-West and South-Midwest (see
-	   tournament.js). Seeds are the post-First-Four lines. Null when the
+	/* The 64-team bracket as the tournament plays it: regions in semifinal
+	   order (tourney.semiRegions — the overall #1 seed's region beside the
+	   #4's), each in SEED_ORDER, so game g of round k is fed by games 2g and
+	   2g+1 of round k-1 (see tournament.js). Seeds are the post-First-Four lines. Null when the
 	   field is too small for four full regions. */
 	function bracketBase(tourney) {
 		const TT = global.Tournament;
 		if (!tourney || !tourney.regions || !TT) return null;
 		const slots = [];
-		for (const r of TT.REGIONS) {
+		for (const r of (tourney.semiRegions || TT.REGIONS)) {
 			const reg = tourney.regions[r];
 			if (!reg || !reg.seeds) return null;
 			const bySeed = {};

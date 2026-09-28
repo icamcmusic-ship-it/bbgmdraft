@@ -1662,3 +1662,7 @@ button.linky { min-height: 24px; }
 .whybtn { min-width: 24px; min-height: 24px; }
 body.noclass .fab { display: none; }
 @media print { .fab { display: none !important; } }
+
+/* The loaded-files line: one summary, the per-class detail on click. */
+#fileSummary > summary { cursor: pointer; }
+#fileSummary .filelist { max-height: 200px; overflow-y: auto; margin-top: 4px; }

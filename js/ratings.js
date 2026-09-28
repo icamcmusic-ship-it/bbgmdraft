@@ -1653,6 +1653,58 @@
 	   specialize with anyway, and above it the shift is untouched. */
 	const FLOOR_KNEE = 10;
 
+	/* ROOKIE SOFT CAPS.
+
+	   An incoming college player is not already a good pro at anything: a
+	   specialist build at specialization 1 used to come out with a 98 tp or
+	   a 95 diq, and 3.5% of every class's skill ratings were over 70. The
+	   cap is soft, not a clamp. Up to CAP_KNEE points under it a rating is
+	   untouched; above that it eases toward cap + CAP_HEADROOM and never
+	   reaches it, so a 70 cap lets through the odd 71-73 and nothing near
+	   80. The ease is C1 at the knee (slope 1 both sides) and monotone, so
+	   it sits inside applyShift without breaking the bisection, and the
+	   solver spends the ovr it takes away on the ratings under the knee:
+	   a capped specialist keeps his overall and gets a flatter vector.
+	   hgt is never capped (it is tied to listed height). */
+	const CAP_KNEE = 10;
+	const CAP_HEADROOM = 4;
+	const PHYSICAL = new Set(["stre", "spd", "jmp", "endu"]);
+	/* e^-x for x >= 0 from + - * / only. The solver bisects to the exact
+	   point where a rating crosses a rounding boundary, so the ease has to be
+	   bit-identical in every context: Math.exp is not required to be, and
+	   the page and the batch worker disagreed in its last bit often enough
+	   to flip one rounded rating in a re-solve and change a season's stats
+	   (CI's worker/fallback parity check). Halve the argument into [0, 0.5],
+	   sum the Taylor series to far below a double's precision, square back. */
+	function expNeg(x) {
+		let n = 0;
+		while (x > 0.5 && n < 60) { x /= 2; n++; }
+		let term = 1;
+		let sum = 1;
+		for (let i = 1; i <= 18; i++) { term *= -x / i; sum += term; }
+		for (let i = 0; i < n; i++) sum *= sum;
+		return sum;
+	}
+	function softCap(v, cap, knee, headroom) {
+		if (!(cap > 0)) return v;
+		const kn = knee === undefined ? CAP_KNEE : knee;
+		const K = cap - kn;
+		if (v <= K) return v;
+		const span = kn + (headroom === undefined ? CAP_HEADROOM : headroom);
+		return K + span * (1 - expNeg((v - K) / span));
+	}
+	/* The caps a build runs under, or null for none. 0 turns one off. */
+	function rookieCaps(cfg) {
+		if (!cfg) return null;
+		const skill = Number(cfg.rookieSkillCap) || 0;
+		const phys = Number(cfg.rookiePhysCap) || 0;
+		return skill > 0 || phys > 0 ? { skill, phys } : null;
+	}
+	function capFor(caps, key) {
+		if (!caps || key === "hgt") return 0;
+		return PHYSICAL.has(key) ? caps.phys : caps.skill;
+	}
+
 	/* BBGM's usage composite, which decides how much of an offense a player is
 	   given: ins 1.5, dnk 1, fg 1, tp 1, spd 0.5, hgt 0.5, drb 0.5, oiq 0.5.
 	   Normalized to a share so it can be used as a protection weight below. */
@@ -3140,7 +3192,7 @@
 		return rest;
 	}
 
-	function applyShift(base, k, scales, pinned) {
+	function applyShift(base, k, scales, pinned, caps) {
 		const sc = scales || SHIFT_SCALE;
 		const out = {};
 		for (const key of BB.RATING_KEYS) {
@@ -3199,6 +3251,7 @@
 				if (K > 0 && t < K) {
 					v = t <= -K ? 1 : 1 + ((t + K) * (t + K)) / (4 * K);
 				}
+				v = softCap(v, capFor(caps, key));
 			}
 			// The same floor and ceiling the base is built on. A 0/100 clamp
 			// here put 2.6% of a class's tp ratings on exactly 0.
@@ -3220,7 +3273,7 @@
 	   (shiftScales zeroes a pinned key and nothing else), and both callers
 	   passed a vector chosen by direction when the two directions agree on
 	   every key this loop can reach. */
-	function touchUp(ratings, targetOvr, pinned) {
+	function touchUp(ratings, targetOvr, pinned, caps) {
 		let cur = BB.ovr(ratings);
 		for (let iter = 0; iter < 8 && cur !== targetOvr; iter++) {
 			const dir = targetOvr > cur ? 1 : -1;
@@ -3234,6 +3287,8 @@
 					if (key === "hgt" || (pinned && Number.isFinite(pinned[key]))) continue;
 					const v = ratings[key] + dir * step;
 					if (v < 1 || v > 99) continue;
+					// The last point is not spent pushing a rating past its cap.
+					if (dir > 0 && capFor(caps, key) > 0 && v > capFor(caps, key)) continue;
 					const trial = Object.assign({}, ratings, { [key]: v });
 					const gap = Math.abs(BB.ovr(trial) - targetOvr);
 					/* Strictly better only. The step loop stops as soon as a
@@ -3266,12 +3321,12 @@
 	   that was reachable a moment ago stopped being so. It is a function of the
 	   original ratings, the archetype, the specialization setting and the
 	   pinned vector, all of which the user can see. */
-	function ovrRange(base, arch, pinned, lean) {
+	function ovrRange(base, arch, pinned, lean, caps) {
 		const upScales = arch ? shiftScales(arch, true, pinned, lean) : SHIFT_SCALE;
 		const downScales = arch ? shiftScales(arch, false, pinned, lean) : SHIFT_SCALE;
 		return {
-			min: BB.ovr(applyShift(base, -SHIFT_RANGE, downScales, pinned)),
-			max: BB.ovr(applyShift(base, SHIFT_RANGE, upScales, pinned)),
+			min: BB.ovr(applyShift(base, -SHIFT_RANGE, downScales, pinned, caps)),
+			max: BB.ovr(applyShift(base, SHIFT_RANGE, upScales, pinned, caps)),
 		};
 	}
 
@@ -3280,7 +3335,10 @@
 	   shape rebuild() does for the fields that move. */
 	/* `cfg` (optional) is read only for the signature guarantee, so a
 	   re-solve keeps the lean its original build was solved with. */
-	function resolveTo(base, targetOvr, archName, fuzz, pinned, cleanBase, cfg) {
+	/* `caps` (optional) is the rookie soft-cap pair the build was made
+	   under (see rookieCaps); a re-solve passes it so the rebuilt vector
+	   obeys the same limits. */
+	function resolveTo(base, targetOvr, archName, fuzz, pinned, cleanBase, cfg, caps) {
 		/* The fallback used to be ARCHETYPES[length - 1] — whichever build
 		   happened to be written last, silently re-shaping a player around a
 		   vector nobody asked for. Same contract as roleUsage and potFactors:
@@ -3310,10 +3368,10 @@
 		   disagree. `ovrShortfall` is the signed gap, so an editor can report
 		   an impossible request instead of appearing to grant it. */
 		const lean = signatureLean(arch, cfg);
-		const range = ovrRange(cleanBase || base, arch, pinned, lean);
+		const range = ovrRange(cleanBase || base, arch, pinned, lean, caps);
 		const reachable = Number.isFinite(range.min) && Number.isFinite(range.max)
 			? clamp(targetOvr, range.min, range.max) : targetOvr;
-		const solved = solveToOvr(base, reachable, arch, pinned, lean);
+		const solved = solveToOvr(base, reachable, arch, pinned, lean, caps);
 		const ovr = BB.ovr(solved);
 		return {
 			base,
@@ -3327,13 +3385,13 @@
 		};
 	}
 
-	function solveToOvr(base, targetOvr, arch, pinned, lean) {
+	function solveToOvr(base, targetOvr, arch, pinned, lean, caps) {
 		// Two scale vectors, one for each direction; both equal SHIFT_SCALE at
 		// k = 0, so the shift stays continuous and monotone across the origin
 		// and the bisection below is still valid.
 		const upScales = arch ? shiftScales(arch, true, pinned, lean) : SHIFT_SCALE;
 		const downScales = arch ? shiftScales(arch, false, pinned, lean) : SHIFT_SCALE;
-		const shift = (k) => applyShift(base, k, k >= 0 ? upScales : downScales, pinned);
+		const shift = (k) => applyShift(base, k, k >= 0 ? upScales : downScales, pinned, caps);
 		let lo = -SHIFT_RANGE;
 		let hi = SHIFT_RANGE;
 		/* AN OUT-OF-RANGE TARGET USED TO COME BACK AS A WRONG ANSWER.
@@ -3379,7 +3437,7 @@
 		   in exactly that blind spot for as long as it did because of it.
 		   tools/validate.js bands the median. Non-enumerable, same contract as
 		   ovrShortfall above: callers still see fourteen ratings. */
-		const out = BB.ovr(near) === targetOvr ? near : touchUp(near, targetOvr, pinned);
+		const out = BB.ovr(near) === targetOvr ? near : touchUp(near, targetOvr, pinned, caps);
 		Object.defineProperty(out, "solveShift", {
 			value: useLo ? lo : hi, enumerable: false, configurable: true,
 		});
@@ -3605,7 +3663,8 @@
 		}
 
 		const lean = signatureLean(arch, cfg);
-		const range = ovrRange(cleanBase, arch, pinned, lean);
+		const caps = rookieCaps(cfg);
+		const range = ovrRange(cleanBase, arch, pinned, lean, caps);
 		/* AN UNREACHABLE TARGET IS SOLVED TO THE NEAREST REACHABLE ONE.
 
 		   `ovrRange` is the honest answer to "what overall can this player be
@@ -3618,7 +3677,7 @@
 		   `ovrShortfall` is that amount. */
 		const reachable = clamp(targetOvr, range.min, range.max);
 		const shortfall = reachable - targetOvr;
-		let solved = solveToOvr(base, reachable, arch, pinned, lean);
+		let solved = solveToOvr(base, reachable, arch, pinned, lean, caps);
 		let finalOvr = BB.ovr(solved);
 		/* The reported range describes the jitter-free build, so it has to be
 		   a promise the solver keeps. Per-rating jitter can push a rating onto
@@ -3627,7 +3686,7 @@
 		   then silently missed. In that rare case the jitter is dropped for
 		   this player rather than the promise. */
 		if (finalOvr !== reachable && reachable >= range.min && reachable <= range.max) {
-			const retry = solveToOvr(cleanBase, reachable, arch, pinned, lean);
+			const retry = solveToOvr(cleanBase, reachable, arch, pinned, lean, caps);
 			if (Math.abs(BB.ovr(retry) - reachable) < Math.abs(finalOvr - reachable)) {
 				solved = retry;
 				finalOvr = BB.ovr(retry);
@@ -3664,9 +3723,9 @@
 						nc[k] = clamp(cleanBase[k] + d, 1, 99);
 					}
 				}
-				const cand = solveToOvr(nb, finalOvr, arch, pinned, lean);
+				const cand = solveToOvr(nb, finalOvr, arch, pinned, lean, caps);
 				if (BB.ovr(cand) !== finalOvr) break;
-				const r2 = ovrRange(nc, arch, pinned, lean);
+				const r2 = ovrRange(nc, arch, pinned, lean, caps);
 				if (!(finalOvr >= r2.min && finalOvr <= r2.max)) break;
 				solved = cand;
 				outBase = nb;
@@ -3713,6 +3772,7 @@
 		// needs — both properties OF THIS FUNCTION, not of a class built with
 		// it, and neither reachable through the public entry points.
 		rebuild, classCurve, pickArchetype, solveToOvr, shiftScales, applyShift, ovrRange, resolveTo,
+		rookieCaps, softCap,
 		potAdjust, potFactors, sumFactors, POT_MODELS, POT_MODEL_DEFAULT, bbgmPotEstimate, potForModel, potFromRole, ROLE_USG_CENTER, POT_BY_ARCHETYPE, computePotGap,
 		POT_SKILL_W, POT_INTENT, POT_LEVEL_ANCHOR, POT_RAW_FLOOR, POT_HAND, typicalWeight,
 		ROLE_USAGE, roleUsage, computeRoleUsage, usageCompositeDelta, creationDelta,

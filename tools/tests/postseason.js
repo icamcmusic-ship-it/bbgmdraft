@@ -89,6 +89,25 @@ module.exports = function (ok, V) {
 			short.length === 0, short.map((p) => p.name).join(", "));
 	}
 
+	/* ---- the national semifinals ------------------------------------- */
+	{
+		/* The overall #1 seed's region meets the #4's, #2's meets #3's. The
+		   semis used to take the regions in listed order, East v West, which
+		   is overall #1 v #2. */
+		const t = res.tourney;
+		const sr = t.semiRegions || [];
+		ok("postseason/the semifinal order names all four regions", sr.length === 4, sr.join(","));
+		if (sr.length === 4) {
+			const rk = t.semiOneSeedRanks || [];
+			ok("postseason/the overall #1 seed's region meets the #4's, #2's the #3's",
+				rk.length === 4 && rk[0] < rk[2] && rk[2] < rk[3] && rk[3] < rk[1], rk.join(","));
+			ok("postseason/the semis are fed by the regions the order names",
+				t.semis.length === 2 &&
+				[t.semis[0].a, t.semis[0].b].every((x) => x === t.regions[sr[0]].champ || x === t.regions[sr[1]].champ) &&
+				[t.semis[1].a, t.semis[1].b].every((x) => x === t.regions[sr[2]].champ || x === t.regions[sr[3]].champ));
+		}
+	}
+
 	/* ---- the bracket -------------------------------------------------- */
 	{
 		const regions = res.tourney.regions;

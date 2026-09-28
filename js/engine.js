@@ -13,6 +13,10 @@
 	const BB = global.BBGM;
 	const C = global.Colleges;
 	const RB = global.RatingsBuilder;
+	// The rookie overall cap's upside tail (see the build phase): who draws
+	// it, and the mean of the exponential they draw.
+	const OVR_TAIL_BAND = 4;
+	const OVR_TAIL_MEAN = 2.8;
 	/* How wide the soft floor under the ovr-to-pot gap is, in gap points. Two:
 	   wide enough to turn the 10.9% pile-up on gap = 1 into a tail (the
 	   neighbouring buckets ran 3-4%), narrow enough that a prospect whose
@@ -1606,9 +1610,35 @@
 			   difference between "look at this guy again" and "reroll the class
 			   and hope the other sixty-nine come back the same". */
 			const prng = rng.child("build:" + p.key + rerollSalt(p, "build") + vsalt);
-			const targetOvr = Number.isFinite(ov.ovr)
-				? clamp(Math.round(ov.ovr), 0, 100)
-				: (curve ? curve[i] : p.origOvr);
+			/* A hand-locked overall is taken literally. Everything else is
+			   soft-capped (cfg.rookieOvrCap): a class used to open with its
+			   top men at 55-57, a starter's overall, and an incoming rookie
+			   is not already better than the league's average player. The
+			   ease starts ten under the cap and approaches four over it: a
+			   knee six under bunched a class's top ten on one overall, and
+			   ten under keeps them spread (typically 50 down to 46) while
+			   the order of the board is kept. */
+			/* THE GENERATIONAL TAIL. A hard-feeling ceiling at the cap made
+			   every class's best man the same player. So a prospect the cap
+			   has put near the top (within OVR_TAIL_BAND of it) draws an
+			   exponential upside on top: most draw a point or two. Measured
+			   over 60 curve-mode classes at the defaults, the class's best man
+			   was 55+ in 28% of them, 58+ in 10% and 60+ in under 2%. Its own stream, drawn
+			   for every player, so the build draws after it do not move. */
+			const ovrCap = Number(cfg.rookieOvrCap) || 0;
+			const tailU = rng.child("ovrTail:" + p.key + rerollSalt(p, "build") + vsalt).random();
+			let targetOvr;
+			if (Number.isFinite(ov.ovr)) {
+				targetOvr = clamp(Math.round(ov.ovr), 0, 100);
+			} else {
+				/* Only a RE-SIMULATED overall is capped. Under "preserve" the
+				   overall the file came in with is the player's, and the cap
+				   is not the tool's to apply to it. */
+				const capped = curve ? RB.softCap(curve[i], ovrCap, 10, 4) : p.origOvr;
+				const tail = curve && ovrCap > 0 && capped >= ovrCap - OVR_TAIL_BAND
+					? -OVR_TAIL_MEAN * Math.log(1 - tailU) : 0;
+				targetOvr = clamp(Math.round(capped + tail), 0, 100);
+			}
 			// The raw ovr->pot gap, before any of the potential dials. This is
 			// what the college season is simulated off (see talentPot), so
 			// moving "Potential bias" never re-simulates a game.
@@ -1665,6 +1695,8 @@
 			p.buildBase = built.base;
 			p.buildCleanBase = built.cleanBase;
 			p.buildPinned = ov.ratings || null;
+			// The rookie caps this build ran under, for every later re-solve.
+			p.buildCaps = RB.rookieCaps(cfg);
 			p.newOvr = built.ovr;
 			p.ovrRange = built.ovrRange;
 			p.builtPot = built.pot;
@@ -1853,7 +1885,8 @@
 					}
 				}
 				const re = RB.resolveTo(base, p.newOvr, p.archetype,
-					p.origRatings.fuzz, p.buildPinned, cleanBase, (ctx && ctx.cfg) || undefined);
+					p.origRatings.fuzz, p.buildPinned, cleanBase, (ctx && ctx.cfg) || undefined,
+					p.buildCaps || null);
 				p.newHgtInches = inches;
 				p.buildBase = re.base;
 				p.buildCleanBase = re.cleanBase;
@@ -3545,7 +3578,8 @@
 		let re;
 		try {
 			re = RB.resolveTo(p.buildCleanBase, targetOvr, p.archetype,
-				p.origRatings ? p.origRatings.fuzz : 0, p.buildPinned, p.buildCleanBase);
+				p.origRatings ? p.origRatings.fuzz : 0, p.buildPinned, p.buildCleanBase,
+				undefined, p.buildCaps || null);
 		} catch (e) {
 			return null;
 		}
@@ -4598,7 +4632,7 @@
 			deps: [
 				"seed", "ovrMode", "classQuality", "classDepth", "eliteCount",
 				"specialization", "archetypeDiversity", "buildNoise", "varySize",
-				"lockHeights",
+				"lockHeights", "rookieSkillCap", "rookiePhysCap", "rookieOvrCap",
 				"archetypeWeights", "classFlavor", "freshmanShare", "transferShare",
 				"redshirtShare", "reclassShare", "leagueWeights", "wEuroLeague",
 				"wGLeague", "wNBL", "pDII", "overrides",
@@ -4874,7 +4908,8 @@
 			let re;
 			try {
 				re = RB.resolveTo(p.buildCleanBase, ovr, p.archetype,
-					p.origRatings ? p.origRatings.fuzz : 0, p.buildPinned, p.buildCleanBase);
+					p.origRatings ? p.origRatings.fuzz : 0, p.buildPinned, p.buildCleanBase,
+					undefined, p.buildCaps || null);
 			} catch (e) {
 				continue;
 			}
