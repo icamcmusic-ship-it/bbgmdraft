@@ -1669,13 +1669,29 @@
 	const CAP_KNEE = 10;
 	const CAP_HEADROOM = 4;
 	const PHYSICAL = new Set(["stre", "spd", "jmp", "endu"]);
+	/* e^-x for x >= 0 from + - * / only. The solver bisects to the exact
+	   point where a rating crosses a rounding boundary, so the ease has to be
+	   bit-identical in every context: Math.exp is not required to be, and
+	   the page and the batch worker disagreed in its last bit often enough
+	   to flip one rounded rating in a re-solve and change a season's stats
+	   (CI's worker/fallback parity check). Halve the argument into [0, 0.5],
+	   sum the Taylor series to far below a double's precision, square back. */
+	function expNeg(x) {
+		let n = 0;
+		while (x > 0.5 && n < 60) { x /= 2; n++; }
+		let term = 1;
+		let sum = 1;
+		for (let i = 1; i <= 18; i++) { term *= -x / i; sum += term; }
+		for (let i = 0; i < n; i++) sum *= sum;
+		return sum;
+	}
 	function softCap(v, cap, knee, headroom) {
 		if (!(cap > 0)) return v;
 		const kn = knee === undefined ? CAP_KNEE : knee;
 		const K = cap - kn;
 		if (v <= K) return v;
 		const span = kn + (headroom === undefined ? CAP_HEADROOM : headroom);
-		return K + span * (1 - Math.exp(-(v - K) / span));
+		return K + span * (1 - expNeg((v - K) / span));
 	}
 	/* The caps a build runs under, or null for none. 0 turns one off. */
 	function rookieCaps(cfg) {
