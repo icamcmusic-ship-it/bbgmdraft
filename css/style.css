@@ -1672,7 +1672,6 @@ body.noclass .fab { display: none; }
 	font-size: 15px; line-height: 1; cursor: pointer; color: var(--dim); }
 .watchstar.on { color: #d9a400; }
 .watchstar:hover, .watchstar:focus-visible { color: #d9a400; }
-td.heat { background: color-mix(in srgb, var(--accent) calc(var(--heat, 0) * 38%), transparent); }
 tr.tierbreak td { border-top: 2px solid var(--accent); }
 .mynote { width: 100%; box-sizing: border-box; font: inherit; }
 

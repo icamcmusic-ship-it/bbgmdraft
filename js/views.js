@@ -5130,7 +5130,7 @@
 			const r = fn ? fn(v) : null;
 			if (r === null) return td;
 			td.classList.add("heat");
-			td.style.setProperty("--heat", r.toFixed(2));
+			td.style.background = "color-mix(in srgb, var(--accent) " + Math.round(r * 38) + "%, transparent)";
 			return td;
 		};
 		/* Tier breaks: in board order, a rule above the first man of each
