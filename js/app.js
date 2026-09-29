@@ -71,6 +71,13 @@
 		columnOrder: null,
 		statMode: "perGame",
 		density: "normal",
+		/* The user's own marks on prospects, by player key: a watchlist star
+		   and a scouting note. They belong to the person, not to a class, so
+		   they survive a reroll and ride along in the saved settings. */
+		watch: {},
+		notes: {},
+		// Board heatmap: shade Ovr / Pot / PPG by percentile within the class.
+		boardHeat: false,
 		// "auto" | "on" | "off" — see cardMode() in js/views.js.
 		cardView: "auto",
 		cardAll: false,
@@ -373,6 +380,9 @@
 			game: state.game,
 			universe: universeForStorage(),
 			density: state.density,
+			watch: state.watch,
+			notes: state.notes,
+			boardHeat: state.boardHeat,
 			cardView: state.cardView,
 			cardAll: state.cardAll,
 			compactBracket: state.compactBracket,
@@ -611,6 +621,20 @@
 		if (validString(saved.team)) state.team = saved.team;
 		if (validString(saved.game)) state.game = saved.game;
 		if (validString(saved.density, ["normal", "compact", "comfortable"])) state.density = saved.density;
+		/* Plain string-keyed maps only; anything else in a saved copy is dropped. */
+		if (saved.watch && typeof saved.watch === "object" && !Array.isArray(saved.watch)) {
+			state.watch = {};
+			for (const k of Object.keys(saved.watch)) if (saved.watch[k]) state.watch[k] = true;
+		}
+		if (saved.notes && typeof saved.notes === "object" && !Array.isArray(saved.notes)) {
+			state.notes = {};
+			for (const k of Object.keys(saved.notes)) {
+				if (typeof saved.notes[k] === "string" && saved.notes[k].trim()) {
+					state.notes[k] = saved.notes[k].slice(0, 2000);
+				}
+			}
+		}
+		state.boardHeat = !!saved.boardHeat;
 		if (validString(saved.cardView, ["auto", "on", "off"])) state.cardView = saved.cardView;
 		state.cardAll = !!saved.cardAll;
 		state.compactBracket = !!saved.compactBracket;
@@ -10495,6 +10519,17 @@
 		findChallenge, resultCode, applyCode, importGhost, startDaily, startCampaign,
 		startPuzzle,
 	});
+
+	/* Offline install. A service worker needs http(s) (a file:// page cannot
+	   have one — the documented way of opening the tool still works, just not
+	   offline-installable), and it is skipped under browser automation so a
+	   test never talks to a cache from an earlier run. */
+	if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol) &&
+		!navigator.webdriver) {
+		window.addEventListener("load", () => {
+			navigator.serviceWorker.register("sw.js").catch(() => { /* optional */ });
+		});
+	}
 
 	/* AN UNCAUGHT ERROR SAYS SO. A throw inside a listener used to leave
 	   the page half-updated with nothing on screen, and the only record was

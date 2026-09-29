@@ -1,0 +1,13 @@
+{
+  "name": "BBGM Draft Class Workshop",
+  "short_name": "Draft Workshop",
+  "description": "Build, simulate and scout a Basketball GM draft class. Works offline once installed.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#14161a",
+  "theme_color": "#d97706",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
