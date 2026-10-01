@@ -1666,3 +1666,20 @@ body.noclass .fab { display: none; }
 /* The loaded-files line: one summary, the per-class detail on click. */
 #fileSummary > summary { cursor: pointer; }
 #fileSummary .filelist { max-height: 200px; overflow-y: auto; margin-top: 4px; }
+
+/* Watchlist star, board heatmap, tier breaks and the notes box. */
+.watchstar { background: none; border: 0; padding: 0 4px; min-width: 24px; min-height: 24px;
+	font-size: 15px; line-height: 1; cursor: pointer; color: var(--dim); }
+.watchstar.on { color: #d9a400; }
+.watchstar:hover, .watchstar:focus-visible { color: #d9a400; }
+tr.tierbreak td { border-top: 2px solid var(--accent); }
+.mynote { width: 100%; box-sizing: border-box; font: inherit; }
+
+/* The board on paper: no shading, no stars, and a row is not split by a page. */
+@media print {
+	td.heat { background: none !important; }
+	.watchstar, .mynote { display: none !important; }
+	tr { break-inside: avoid; }
+	tr.tierbreak td { border-top: 1px solid #000; }
+	tr.bandrow td { font-weight: 700; border-bottom: 1px solid #000; }
+}

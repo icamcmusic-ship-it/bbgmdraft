@@ -3470,6 +3470,68 @@ async function gotoProspects(page) {
 		await p2.close();
 	}
 
+	console.log("\nBoard quick wins: watchlist, notes, heatmap, tiers, top 30");
+	{
+		await page.goto(base);
+		await clearStorage(page);
+		await page.goto(base);
+		await page.setInputFiles("#file", fixture);
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		await page.waitForTimeout(400);
+		const rows = () => page.locator("table.boardtable tbody tr:not(.bandrow)").count();
+		const total = await rows();
+		ok("every board row carries a watchlist star", (await page.locator("table.boardtable .watchstar").count()) === total);
+		await page.locator("table.boardtable .watchstar").nth(2).click();
+		await page.waitForTimeout(200);
+		ok("clicking a star marks it and does not open the player page",
+			(await page.locator("table.boardtable .watchstar.on").count()) === 1 &&
+			(await page.locator("#tabs button.active").first().textContent()).indexOf("Draft board") !== -1);
+		await page.locator(".boardfilters button", { hasText: "Starred" }).click();
+		await page.waitForTimeout(200);
+		ok("the starred filter shows only the watchlist", (await rows()) === 1);
+		await page.locator(".boardfilters button", { hasText: "Starred" }).click();
+		// A reload empties the class, so it is dropped in again; the marks are the user's.
+		await page.reload();
+		await page.setInputFiles("#file", fixture);
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		await page.waitForTimeout(300);
+		ok("the watchlist survives a reload", (await page.locator("table.boardtable .watchstar.on").count()) === 1);
+		ok("no heat before the heatmap is on", (await page.locator("table.boardtable td.heat").count()) === 0);
+		await page.locator(".boardfilters button", { hasText: "Heatmap" }).click();
+		await page.waitForTimeout(200);
+		ok("the heatmap shades Ovr, Pot and PPG", (await page.locator("table.boardtable td.heat").count()) >= total * 2);
+		const tiers = await page.locator("table.boardtable tr.tierbreak").count();
+		ok("tier breaks mark drops of three overall or more", tiers >= 0 && tiers < total, String(tiers));
+		await page.locator("table.boardtable .linky", { hasText: /\S/ }).first().click();
+		await page.waitForSelector(".mynote", { timeout: 5000 });
+		await page.fill(".mynote", "Late riser, watch the jumper");
+		await page.locator(".mynote").blur();
+		await page.waitForTimeout(200);
+		const noted = await page.evaluate(() => Object.values(window.App.state.notes));
+		ok("a note is kept against the player", noted.length === 1 && /jumper/.test(noted[0]));
+		// A reload empties the class, so it is dropped in again; the marks are the user's.
+		await page.reload();
+		await page.setInputFiles("#file", fixture);
+		await page.waitForFunction(() => window.App.state.results.some(Boolean), null, { timeout: 30000 });
+		await page.waitForTimeout(300);
+		ok("...and survives a reload", (await page.evaluate(() => Object.values(window.App.state.notes).length)) === 1);
+		await page.locator("#tabs button", { hasText: "Draft board" }).first().click();
+		await page.waitForSelector(".boardfilters", { timeout: 5000 });
+		await page.evaluate(() => {
+			window.__copied = null;
+			navigator.clipboard.writeText = (t) => { window.__copied = t; return Promise.resolve(); };
+		});
+		await page.locator(".boardfilters button", { hasText: "Copy top 30" }).click();
+		await page.waitForTimeout(300);
+		const copied = await page.evaluate(() => window.__copied || "");
+		ok("Copy top 30 is a numbered markdown list", /^\*\*Top 30/.test(copied) && /\n1\. /.test(copied) &&
+			/\n30\. /.test(copied), copied.slice(0, 80));
+		ok("...with the star and the note on the player who has them", /★/.test(copied) || /> Late riser/.test(copied));
+		ok("the web manifest is served", (await page.evaluate(() => fetch("manifest.webmanifest").then((r) => r.ok))) === true);
+		ok("the service worker is not registered under automation",
+			(await page.evaluate(() => navigator.serviceWorker.getRegistrations().then((r) => r.length))) === 0);
+	}
+
 	console.log("\nNo errors");
 	ok("no console or page errors", errors.length === 0, errors.join("\n         "));
 

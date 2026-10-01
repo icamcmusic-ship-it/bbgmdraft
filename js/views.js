@@ -4971,6 +4971,25 @@
 			reset.addEventListener("click", () => { bf.sort = null; A().render(); });
 			fbar.appendChild(reset);
 		}
+		const st0 = A().state;
+		const nStar = (res.board || []).filter((p) => st0.watch[p.key]).length;
+		const starChip = el("button", "chip" + (bf.starred ? " on" : ""),
+			"★ Starred" + (nStar ? " (" + nStar + ")" : ""));
+		starChip.type = "button";
+		starChip.setAttribute("aria-pressed", bf.starred ? "true" : "false");
+		starChip.title = "Show only the prospects on your watchlist (click ☆ beside a name to add one)";
+		starChip.addEventListener("click", () => { bf.starred = !bf.starred; A().render(); });
+		fbar.appendChild(starChip);
+		const heatChip = el("button", "chip" + (st0.boardHeat ? " on" : ""), "Heatmap");
+		heatChip.type = "button";
+		heatChip.setAttribute("aria-pressed", st0.boardHeat ? "true" : "false");
+		heatChip.title = "Shade Ovr, Pot and PPG by where each sits in this class";
+		heatChip.addEventListener("click", () => {
+			st0.boardHeat = !st0.boardHeat;
+			A().persist();
+			A().render();
+		});
+		fbar.appendChild(heatChip);
 		// "12 of 70" — filled in once the list is filtered, below.
 		const count = el("span", "unit boardcount");
 		fbar.appendChild(count);
@@ -4990,6 +5009,26 @@
 				markdownTable(BOARD_HEADS, rows), md, "Copy as markdown", "the draft board as markdown");
 		});
 		fbar.appendChild(md);
+		/* A forum-ready top 30: a numbered list, one line a player, with his
+		   note when the user has written one. The table above is for a
+		   spreadsheet; this is what gets pasted into a thread. */
+		const top = el("button", null, "Copy top 30");
+		top.title = "Copy the top 30 as a numbered markdown list, with your notes";
+		top.addEventListener("click", () => {
+			const notes = A().state.notes;
+			const lines = (res.board || []).slice(0, 30).map((p) => {
+				const bits = [p.newPos, p.classYear, p.proClub || p.newCollege,
+					p.newOvr + "/" + p.newPot];
+				if (p.stats) bits.push(n1(p.stats.ppg) + " ppg");
+				return p.boardRank + ". " + (A().state.watch[p.key] ? "★ " : "") + "**" + p.name +
+					"** — " + bits.join(", ") +
+					(notes[p.key] ? "\n   > " + notes[p.key].replace(/\s*\n\s*/g, " ") : "");
+			});
+			A().copyText("**Top 30 — seed " + res.seed +
+				(res.flavor && res.flavor.label ? ", " + res.flavor.label : "") + "**\n\n" +
+				lines.join("\n"), top, "Copy top 30", "the top 30 as a markdown list");
+		});
+		fbar.appendChild(top);
 		view.appendChild(fbar);
 
 		/* One sort value per heading. Pick is the overall mock slot
@@ -5009,6 +5048,7 @@
 		const needle = bf.q.trim().toLowerCase();
 		let list = (res.board || []).filter((p) => {
 			if (bf.pos && p.newPos !== bf.pos) return false;
+			if (bf.starred && !A().state.watch[p.key]) return false;
 			if (!needle) return true;
 			return (p.name + " " + (p.newCollege || "") + " " + (p.proClub || "") + " " +
 				(p.archetype || "")).toLowerCase().indexOf(needle) !== -1;
@@ -5068,6 +5108,37 @@
 			: p.mockRound === 2 ? "Second round" : "Round " + p.mockRound);
 		// Dividers only make sense in board order.
 		const banded = !bf.sort;
+		/* Heatmap: each cell's rank in the whole class, 0..1, so a filter
+		   does not change what "hot" means. */
+		const heat = {};
+		if (A().state.boardHeat) {
+			const all = res.board || [];
+			const rankOf = (get) => {
+				const vals = all.map(get).filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
+				return (v) => {
+					if (!Number.isFinite(v) || vals.length < 2) return null;
+					let lo = 0;
+					while (lo < vals.length && vals[lo] < v) lo++;
+					return lo / (vals.length - 1);
+				};
+			};
+			heat.ovr = rankOf((p) => p.newOvr);
+			heat.pot = rankOf((p) => p.newPot);
+			heat.ppg = rankOf((p) => (p.stats ? p.stats.ppg : NaN));
+		}
+		const heatCell = (td, fn, v) => {
+			const r = fn ? fn(v) : null;
+			if (r === null) return td;
+			td.classList.add("heat");
+			td.style.background = "color-mix(in srgb, var(--accent) " + Math.round(r * 38) + "%, transparent)";
+			return td;
+		};
+		/* Tier breaks: in board order, a rule above the first man of each
+		   step down of TIER_DROP overall or more from the man above him. The
+		   board's round dividers say where the picks fall; this says where
+		   the class actually thins out, which is not the same place. */
+		const TIER_DROP = 3;
+		let prevOvr = null;
 		let firstRow = true;
 		for (const p of list) {
 			const band = bandOf(p);
@@ -5080,6 +5151,11 @@
 				tb.appendChild(sep);
 			}
 			const tr = el("tr");
+			if (banded && prevOvr !== null && prevOvr - p.newOvr >= TIER_DROP) {
+				tr.classList.add("tierbreak");
+				tr.title = "Tier break: " + (prevOvr - p.newOvr) + " overall below the man above";
+			}
+			prevOvr = p.newOvr;
 			/* Roving tabindex, as in Player Edit: one row in the tab order
 			   and the arrow keys (or j/k) walk the rest, instead of sixty tab
 			   stops between the header and whatever is under the board. */
@@ -5127,6 +5203,7 @@
 			tr.appendChild(el("td", "num", p.mockRound ? String(p.mockRound) : "—"));
 			tr.appendChild(el("td", "num", p.mockPick ? String(p.mockPick) : "—"));
 			const nameTd = el("td", "sticky");
+			nameTd.appendChild(watchStar(p));
 			nameTd.appendChild(playerLink(p));
 			nameTd.appendChild(whyButton(p, res));
 			/* Player Edit was a mode toggle nobody found; each row now
@@ -5141,8 +5218,8 @@
 			tr.appendChild(nameTd);
 			tr.appendChild(el("td", null, p.newPos));
 			tr.appendChild(el("td", null, p.classYear));
-			tr.appendChild(el("td", "num", String(p.newOvr)));
-			tr.appendChild(el("td", "num", String(p.newPot)));
+			tr.appendChild(heatCell(el("td", "num", String(p.newOvr)), heat.ovr, p.newOvr));
+			tr.appendChild(heatCell(el("td", "num", String(p.newPot)), heat.pot, p.newPot));
 			const schoolTd = el("td");
 			if (!p.nonNcaa && res.teams[p.newCollege]) schoolTd.appendChild(teamLink(p.newCollege));
 			else schoolTd.appendChild(document.createTextNode(p.proClub || p.newCollege));
@@ -5152,7 +5229,8 @@
 			mv.appendChild(el("span", p.stockMove > 0 ? "up" : p.stockMove < 0 ? "down" : "",
 				p.stockMove === 0 ? "—" : (p.stockMove > 0 ? "+" : "") + p.stockMove));
 			tr.appendChild(mv);
-			tr.appendChild(el("td", "num", p.stats ? n1(p.stats.ppg) : "—"));
+			tr.appendChild(heatCell(el("td", "num", p.stats ? n1(p.stats.ppg) : "—"),
+				heat.ppg, p.stats ? p.stats.ppg : NaN));
 			tr.appendChild(honorsCell(p));
 			tb.appendChild(tr);
 		}
@@ -5196,7 +5274,7 @@
 	// Disclosure states that should survive a re-render but are not settings.
 	const uiMemo = { classInfoOpen: false, filtersOpen: false };
 	// The board's own search, position filter and sort (see viewBoard).
-	const boardFilter = { q: "", pos: "", sort: null };
+	const boardFilter = { q: "", pos: "", sort: null, starred: false };
 
 	/* --------------------------------------------------------- distributions */
 
@@ -5812,6 +5890,26 @@
 	/* The player-page equivalent of teamLink. Every player name in the season
 	   views used to be a string in a text node; there was no page to send it
 	   to. Takes a player object or (name, key). */
+	/* The watchlist star: ☆ to add a prospect, ★ to take him off. It is a
+	   toggle button, not a link, so the row click that opens his page is not
+	   fired by it. */
+	function watchStar(p) {
+		const st = A().state;
+		const on = !!st.watch[p.key];
+		const b = el("button", "watchstar" + (on ? " on" : ""), on ? "★" : "☆");
+		b.type = "button";
+		b.setAttribute("aria-pressed", on ? "true" : "false");
+		b.setAttribute("aria-label", (on ? "Remove " : "Add ") + p.name + (on ? " from" : " to") + " your watchlist");
+		b.title = on ? "On your watchlist — click to remove" : "Add to your watchlist";
+		b.addEventListener("click", (e) => {
+			e.stopPropagation();
+			if (st.watch[p.key]) delete st.watch[p.key]; else st.watch[p.key] = true;
+			A().persist();
+			A().render();
+		});
+		return b;
+	}
+
 	function playerLink(p, key) {
 		const name = typeof p === "string" ? p : p.name;
 		const k = typeof p === "string" ? key : p.key;
@@ -6126,6 +6224,27 @@
 			box.appendChild(el("h4", null, "Scouting note"));
 			box.appendChild(el("div", "note", p.note));
 		}
+
+		/* The user's own notes, kept apart from the generated one above. They
+		   are saved with the settings and keyed by player, so a reroll that
+		   keeps him keeps what was written. */
+		box.appendChild(el("h4", null, "My notes"));
+		const myNote = el("textarea", "mynote");
+		myNote.rows = 3;
+		myNote.maxLength = 2000;
+		myNote.placeholder = "Your own read on " + p.name + " — saved in this browser.";
+		myNote.setAttribute("aria-label", "Your notes on " + p.name);
+		myNote.value = A().state.notes[p.key] || "";
+		myNote.addEventListener("change", () => {
+			const v = myNote.value.trim();
+			if (v) A().state.notes[p.key] = v; else delete A().state.notes[p.key];
+			A().persist();
+		});
+		box.appendChild(myNote);
+		const starRow = el("div", "rowflex");
+		starRow.appendChild(watchStar(p));
+		starRow.appendChild(el("span", "hint", "Watchlist"));
+		box.appendChild(starRow);
 
 		const actions = el("div", "rowflex");
 		const edit = el("button", null, "Edit this prospect…");
