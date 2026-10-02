@@ -1304,7 +1304,9 @@ tool writes evaluate identically inside the game.
 ```
 node tools/validate.js [nSeeds] [--json]   # calibration bands
 node tools/validate.js 20 --fixture=realistic   # the default fixture only, twice as fast
-node tools/test.js [--update-golden]       # regression tests, tools/tests/*.js included
+node tools/test-parallel.js [--fast]       # the regression suite across every core (about 6 min; --fast about 3)
+node tools/test.js [--update-golden]       # the same checks, serially (the reference; about 20 min)
+node tools/run-area.js <area>              # one tools/tests/<area>.js on its own
 node tools/rolefit.js [nSeeds]             # re-fit the derived role-usage model
 node tools/universe.js                     # universe determinism / idempotency / round trip
 node tools/bench.js [reps] [--md|--json]   # staged-pipeline timings
@@ -1715,7 +1717,9 @@ js/replaymeta.js    bingo, mutators, achievements and what they unlock
 js/app.js           state, settings, editing, persistence, export
 tools/validate.js   calibration bands against the empirical anchors
 tools/rolefit.js    fits the derived role-usage model and reports per-build residuals
-tools/test.js       golden-file, round-trip, determinism and property tests
+tools/test.js       golden-file, round-trip, determinism and property tests (inline sections)
+tools/test-parallel.js  runs test.js's inline part and every tools/tests/*.js as parallel processes
+tools/run-area.js   runs one or more tools/tests/*.js area files
 tools/tests/*.js    one suite per area, loaded by test.js off the disk
 tools/universe.js   universe determinism, idempotency and BBGM round trip
 tools/uismoke.js    headless-browser smoke test

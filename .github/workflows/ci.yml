@@ -4,10 +4,10 @@ on:
   push:
   pull_request:
 
-# A push to a branch that already has a run in flight supersedes it. Six jobs
-# run on every push and the regression suite alone is tens of minutes, so
+# A push to a branch that already has a run in flight supersedes it. Two jobs
+# (check and ui) run on every push and the regression suite is minutes, so
 # without this a branch pushed three times in ten minutes has three full
-# matrices racing and two of them are answering a question nobody is asking
+# runs racing and two of them are answering a question nobody is asking
 # any more. Never cancels a run on the default branch, where the answer is the
 # record rather than feedback.
 concurrency:
@@ -25,8 +25,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      # The same checks as `node tools/test.js`, spread over the runner's cores
+      # (tools/test-parallel.js runs the inline part and each area file as its
+      # own process). That file stays the serial reference: a CI run takes
+      # minutes instead of the best part of half an hour.
       - name: Regression tests
-        run: node tools/test.js
+        run: node tools/test-parallel.js
       - name: Calibration bands
         run: node tools/validate.js 20
       # Every band scales with the seed count, so the documented low-seed
