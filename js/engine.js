@@ -5814,6 +5814,17 @@
 		return "Earlier honors: " + shown.join("; ") + (extra > 0 ? " (+" + extra + " more)" : "");
 	}
 
+	/* The user's own notes ("My notes" on a player page) go into the exported
+	   note as the LAST block, under a label of ours, so that a previous export's
+	   copy can be recognised and replaced rather than stacked: a round trip
+	   through BBGM and back carries the block in `note`. */
+	const MY_NOTES_LABEL = "My notes:";
+	function stripMyNotes(text) {
+		const t = String(text || "");
+		const at = t.search(/(^|\n)My notes:/);
+		return at < 0 ? t : t.slice(0, at).replace(/\s+$/, "");
+	}
+
 	/* The note's opening sentence. It used to start "School (Conf) · Year"
 	   and go straight to stat lines, which reads like a stat export; a
 	   scout's note opens with what the player IS. Built from the things
@@ -7096,7 +7107,7 @@
 			   silently overwrote them. Any previous Honors: line is dropped
 			   either way; that one is ours. */
 			if (opts.noteAppend && String(orig.note || "").trim()) {
-				const keep = String(orig.note).split("\n")
+				const keep = stripMyNotes(String(orig.note)).split("\n")
 					.filter((l) => l.indexOf("Honors:") !== 0 &&
 						l.indexOf("Earlier honors:") !== 0).join("\n").trim();
 				const gen = String(p.note || "").trim();
@@ -7236,13 +7247,17 @@
 						? earlierHonorsLine(priorRows.map((a) => ({ season: a.season, name: a.type })))
 						: "");
 			}
-			/* The flag matches the note: writing noteBool = 1 beside an
-			   empty note made BBGM flag a note the player doesn't have. */
-			if (out.note && String(out.note).trim()) out.noteBool = 1;
-			else {
-				delete out.noteBool;
-				if (out.note === "") delete out.note;
-			}
+			/* THE USER'S OWN NOTES and watchlist, when the export dialog asks for
+			   them (opts.myMarks) and the app has stamped them on the result
+			   (result.userMarks, keyed by player key). They were saved in the
+			   browser and went nowhere: a note written on a prospect never
+			   reached the game. Added after the template's lines and the
+			   honors, and surviving "Include scouting notes" being off,
+			   because they are the user's own words and not the generated
+			   prose that switch is about. */
+			const marks = opts.myMarks && result.userMarks ? result.userMarks : null;
+			const mine = marks && marks.notes && marks.notes[p.key]
+				? String(marks.notes[p.key]).trim() : "";
 			/* The note is generated every run regardless (see phaseNotes) —
 			   this only decides whether the exported file carries it. A
 			   scout who wants the class simulated with notes on for the
@@ -7252,6 +7267,18 @@
 			if (opts.includeNotes === false) {
 				delete out.note;
 				delete out.noteBool;
+			}
+			if (mine) {
+				const base = stripMyNotes(out.note || "").replace(/\s+$/, "");
+				out.note = (base ? base + "\n\n" : "") + MY_NOTES_LABEL + " " + mine;
+			}
+			if (marks && marks.watch && marks.watch[p.key]) out.watch = true;
+			/* The flag matches the note: writing noteBool = 1 beside an
+			   empty note made BBGM flag a note the player doesn't have. */
+			if (out.note && String(out.note).trim()) out.noteBool = 1;
+			else {
+				delete out.noteBool;
+				if (out.note === "") delete out.note;
 			}
 			if (opts.stats && p.stats) {
 				const built = collegeSeasonStats(result);

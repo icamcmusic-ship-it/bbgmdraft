@@ -152,6 +152,8 @@ header h1 span { color: var(--accent); font-weight: 600; }
 .spacer { flex: 1 1 0; height: 0; }
 /* Six loose buttons in a row read as one undifferentiated bar. */
 .btngroup { display: inline-flex; gap: 0; align-items: center; }
+/* The note-template presets wrap: six buttons do not fit a 305px sidebar in a row. */
+.notepresets { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 8px; }
 .btngroup.wide { display: flex; gap: 6px; margin: 6px 0; }
 .btngroup > button, .btngroup > select { border-radius: 0; margin-left: -1px; }
 .btngroup > *:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }

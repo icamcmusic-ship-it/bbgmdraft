@@ -120,4 +120,46 @@ module.exports = function (ok, V) {
 			winners.length > 0 && winners.every((x) => /(^|\n)Honors: /.test(forced.players[x.i].note)),
 			winners.length + " winners");
 	}
+
+	/* ---- the user's own notes and stars reach the file ------------------- */
+	{
+		const lf = V.realisticClass("notes-mine", 20);
+		const res = run(lf, "notes-mine", { noteLines: ["summary", "awards"] });
+		const k0 = res.players[0].key;
+		const k1 = res.players[1].key;
+		res.userMarks = { notes: { [k0]: "  Late riser, watch the jumper  " }, watch: { [k1]: true } };
+
+		const plain = E.exportFile(res, { awards: true });
+		ok("mynotes/nothing is written unless the export asks for it",
+			String(plain.players[0].note).indexOf("My notes:") === -1 && plain.players[1].watch === undefined);
+
+		const on = E.exportFile(res, { awards: true, myMarks: true });
+		const lines0 = String(on.players[0].note).split("\n");
+		ok("mynotes/the note is the last block, labelled, trimmed",
+			lines0[lines0.length - 1] === "My notes: Late riser, watch the jumper",
+			JSON.stringify(on.players[0].note));
+		ok("mynotes/a player with no note of his own is untouched",
+			on.players[2].note === plain.players[2].note);
+		ok("mynotes/a starred player is written as watched, and only he is",
+			on.players[1].watch === true && on.players.filter((p) => p.watch).length === 1);
+		ok("mynotes/the template's own lines are still there above it",
+			lines0[0] === res.players[0].note.split("\n")[0]);
+
+		const off = E.exportFile(res, { awards: true, myMarks: true, includeNotes: false });
+		ok("mynotes/they survive 'Include scouting notes' being off, alone",
+			off.players[0].note === "My notes: Late riser, watch the jumper" &&
+			off.players[0].noteBool === 1 && off.players[2].note === undefined);
+
+		// A round trip: the exported file comes back in and is exported again.
+		const again = run(JSON.parse(JSON.stringify(on)), "notes-mine", { noteLines: ["summary", "awards"] });
+		again.userMarks = { notes: { [again.players[0].key]: "Second thought" }, watch: {} };
+		const twice = E.exportFile(again, { awards: true, myMarks: true, noteAppend: true });
+		const blocks = (String(twice.players[0].note).match(/My notes:/g) || []).length;
+		ok("mynotes/a round trip replaces the block rather than stacking it",
+			blocks === 1 && /My notes: Second thought$/.test(twice.players[0].note),
+			JSON.stringify(twice.players[0].note));
+		ok("mynotes/...and an old block is dropped when none is wanted now",
+			(String(E.exportFile(again, { awards: true, noteAppend: true }).players[0].note)
+				.indexOf("My notes:")) === -1);
+	}
 };

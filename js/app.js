@@ -3640,6 +3640,35 @@
 
 		// Note template: which lines are written into each player's note.
 		const box = $("noteLines");
+		/* Presets for the template. Nineteen boxes is a lot to decide one by
+		   one, and the three most common wants (a short blurb, a forum post, a
+		   stat sheet) are each a few clicks of ticking and unticking. */
+		const NOTE_PRESETS = [
+			["None", []],
+			["Short", ["summary", "team", "stats"]],
+			["Forum", ["summary", "team", "traits", "awards", "stock"]],
+			["Standard", global.Config.DEFAULTS.noteLines.slice()],
+			["Stat sheet", ["summary", "team", "stats", "shooting", "advanced", "defense",
+				"playmaking", "highs", "ranks"]],
+			["Everything", global.Engine.NOTE_LINES.map((x) => x[0])],
+		];
+		const presetBar = el("div", "notepresets");
+		presetBar.setAttribute("role", "group");
+		presetBar.setAttribute("aria-label", "Note template presets");
+		for (const [label, lines] of NOTE_PRESETS) {
+			const b = el("button", "tiny", label);
+			b.type = "button";
+			b.title = lines.length ? "Write: " + lines.join(", ") : "Write no scouting notes";
+			b.addEventListener("click", () => {
+				pushUndo("note template: " + label);
+				state.cfg.noteLines = lines.slice();
+				markDirty();
+				paintNoteLines();
+				scheduleRun();
+			});
+			presetBar.appendChild(b);
+		}
+		box.parentNode.insertBefore(presetBar, box);
 		for (const [key, label] of global.Engine.NOTE_LINES) {
 			const lab = el("label", "check");
 			const cb = el("input");
@@ -7556,6 +7585,7 @@
 			   awards are always on for this route whatever the export menu
 			   says — a universe players file without them is a class list. */
 			const all = liveResults();
+			if (currentExportOpts().myMarks) all.forEach(stampUserMarks);
 			const out = global.Engine.universePlayersFile(all, Object.assign(
 				{}, currentExportOpts(),
 				{ stats: true, prior: true, awards: true,
@@ -9151,9 +9181,30 @@
 		setStatus("Wrote " + lastDownload + (extra ? " — " + extra : "") + ".");
 	}
 
+	/* The user's notes and stars for ONE class, by player key, stamped on the
+	   result so the engine (which knows nothing of the browser) can write them.
+	   They are stored scoped to the class (see userKey); this undoes the
+	   scoping for the class the result belongs to. */
+	function stampUserMarks(res) {
+		if (!res) return res;
+		const idx = Number.isFinite(res.fileIndex) ? res.fileIndex : state.active;
+		const f = state.files[idx];
+		const prefix = "@" + ((f && f.fingerprint) || "") + "|";
+		const pick = (map) => {
+			const out = {};
+			for (const k of Object.keys(map || {})) {
+				if (k.indexOf(prefix) === 0) out[k.slice(prefix.length)] = map[k];
+			}
+			return out;
+		};
+		res.userMarks = { notes: pick(state.notes), watch: pick(state.watch) };
+		return res;
+	}
+
 	function exportOne(i, opts) {
 		const res = ensureResult(i);
 		if (!res) return false;
+		if (opts && opts.myMarks) stampUserMarks(res);
 		try {
 			const out = global.Engine.exportFile(res, opts);
 			/* A player whose identity check failed passed through untouched;
@@ -9987,11 +10038,20 @@
 		optBox.appendChild(el("p", "unit",
 			"The generated note replaces whatever the file carried. Tick this to " +
 			"add it underneath instead, for a file whose notes you edited in BBGM."));
+		/* The user's own notes and stars. They are written in this browser and
+		   are the person's, so they are not in a file unless asked for: an
+		   export gets pasted into forum threads. */
+		const oMyMarks = opt("myMarks", "Include my notes and watchlist");
+		optBox.appendChild(el("p", "unit",
+			"Adds what you wrote under “My notes” on a player page as the last " +
+			"lines of his note (so BBGM shows it), and marks starred prospects " +
+			"as watched. Off by default: they stay in this browser."));
 		list.appendChild(optBox);
 		paintScope();
 		const exportOpts = () => ({
 			stats: oStats(), prior: oPrior(), highs: oHighs(), awards: oAwards(),
 			ages: oAges(), noteAppend: oNoteAppend(), includeNotes: oIncludeNotes(),
+			myMarks: oMyMarks(),
 			injuries: oInjuries(), jerseys: oJerseys(),
 			awardsScope: scopeSel.value,
 			majorConferences: confInput.value.split(",")
@@ -10057,7 +10117,9 @@
 			const res2 = ensureResult(state.active);
 			if (!res2) return;
 			try {
-				const out = global.Engine.exportPlayersFile(res2, exportOpts());
+				const popts = exportOpts();
+				if (popts.myMarks) stampUserMarks(res2);
+				const out = global.Engine.exportPlayersFile(res2, popts);
 				const base = state.files[state.active].name.replace(/\.json(\.gz)?$|\.gz$/i, "");
 				download(base + "_players.json", "\ufeff" + JSON.stringify(out, null, 2),
 					"application/json");
@@ -10108,7 +10170,7 @@
 		const results = [];
 		for (const i of picked) {
 			const r = ensureResult(i);
-			if (r) results.push(r);
+			if (r) results.push((state.mergeOpts && state.mergeOpts.myMarks) ? stampUserMarks(r) : r);
 		}
 		if (!results.length) return;
 		let out;

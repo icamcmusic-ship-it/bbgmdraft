@@ -3569,6 +3569,17 @@ async function gotoProspects(page) {
 		await tickAll(true);
 		await page.waitForTimeout(1500);
 		ok("every box ticked writes a long note", (await noteOf()).some((n) => n.split("\n").length > 8));
+		/* The presets above the boxes. The group is a collapsed <details>. */
+		await page.evaluate(() => { document.getElementById("grp-notes").open = true; });
+		await page.locator(".notepresets button", { hasText: "Short" }).click();
+		await page.waitForTimeout(1200);
+		ok("the Short preset ticks summary, team and stats",
+			(await page.evaluate(() => Array.from(document.querySelectorAll("#noteLines input:checked"))
+				.map((c) => c.value).sort().join())) === "stats,summary,team");
+		await page.locator(".notepresets button", { hasText: "Standard" }).click();
+		await page.waitForTimeout(1200);
+		ok("the Standard preset restores the default template",
+			(await page.locator("#noteLines input:checked").count()) === 7);
 
 		// A star belongs to the class it was given on.
 		await page.locator("#tabs button", { hasText: "Draft board" }).first().click();
