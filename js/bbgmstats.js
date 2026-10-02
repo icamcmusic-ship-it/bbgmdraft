@@ -238,11 +238,22 @@
 			"tov", "fta", "trb", "poss", "ortg", "drtg"];
 		const league = { pace: 0 };
 		for (const k of LEAGUE_KEYS) league[k] = 0;
+		/* Pace per MINUTE alongside the per-game figure. BBGM's PER scales by
+		   league.pace / team.pace, which is right when every team plays the
+		   same forty-eight minutes and wrong in a field that mixes game
+		   lengths: uPER is per minute, so the factor has to compare
+		   possessions per minute. On a thirty-two-minute prep team the old
+		   ratio read PER about a quarter high, on a forty-eight-minute club
+		   about a sixth low. */
+		let leaguePaceMin = 0;
 		for (const t of teams) {
 			for (const k of LEAGUE_KEYS) league[k] += t.stats[k] || 0;
 			league.pace += (t.stats.pace || 0) * (t.stats.gp || 0);
+			leaguePaceMin += ((t.stats.pace || 0) / (((t.stats && t.stats.gameMinutes) || gameMinutes) || 1)) *
+				(t.stats.gp || 0);
 		}
 		league.pace = league.gp > 0 ? league.pace / league.gp : 0;
+		leaguePaceMin = league.gp > 0 ? leaguePaceMin / league.gp : 0;
 		const numTeams = teams.filter((t) => (t.stats.gp || 0) > 0).length || 1;
 
 		const out = players.map(() => ({}));
@@ -277,7 +288,7 @@
 			for (let i = 0; i < players.length; i++) {
 				const ps = players[i].p.stats;
 				const t = players[i].t.stats;
-				const paceAdj = t.pace === 0 ? 1 : league.pace / t.pace;
+				const paceAdj = t.pace === 0 ? 1 : leaguePaceMin / (t.pace / gmOf(players[i].t));
 				let uPER = 0;
 				if (ps.min > 10) {
 					uPER = (1 / ps.min) *

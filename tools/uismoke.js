@@ -3532,6 +3532,106 @@ async function gotoProspects(page) {
 			(await page.evaluate(() => navigator.serviceWorker.getRegistrations().then((r) => r.length))) === 0);
 	}
 
+	/* The note template, in the page. These are the ways a ticked box and a
+	   written note came apart: every box off wrote the defaults, and in
+	   universe mode a changed template changed nothing. And the user's own
+	   star stays with the class it was given on. */
+	{
+		console.log("\nNote template and the user's marks");
+		const noteOf = () => page.evaluate(() => {
+			const r = window.App.state.results[window.App.state.active];
+			return r ? r.players.map((p) => p.note || "") : [];
+		});
+		const tickAll = (on, only) => page.evaluate(({ on, only }) => {
+			for (const cb of document.querySelectorAll("#noteLines input")) {
+				if (only && cb.value !== only) continue;
+				if (cb.checked !== on) {
+					cb.checked = on;
+					cb.dispatchEvent(new Event("change", { bubbles: true }));
+				}
+			}
+		}, { on, only });
+		await page.locator("#tabs button", { hasText: "Draft board" }).first().click();
+		await tickAll(false);
+		await page.waitForTimeout(1500);
+		ok("every box unticked leaves them unticked",
+			(await page.locator("#noteLines input:checked").count()) === 0);
+		ok("...and writes no notes", (await noteOf()).every((n) => n === ""));
+		await page.locator("#tabs button", { hasText: "Player notes" }).first().click();
+		await page.waitForTimeout(300);
+		ok("...and the Notes tab says so instead of showing blank cards",
+			(await page.locator("#view .card .note").count()) === 0 &&
+			/note template is off/.test(await page.locator("#view").textContent()));
+		await tickAll(true, "summary");
+		await page.waitForTimeout(1500);
+		ok("one box ticked writes just that line",
+			(await noteOf()).every((n) => n.split("\n").length === 1 && n.length > 10));
+		await tickAll(true);
+		await page.waitForTimeout(1500);
+		ok("every box ticked writes a long note", (await noteOf()).some((n) => n.split("\n").length > 8));
+
+		// A star belongs to the class it was given on.
+		await page.locator("#tabs button", { hasText: "Draft board" }).first().click();
+		await page.waitForSelector(".boardfilters", { timeout: 5000 });
+		// The board block above may have left a star on this class already.
+		if ((await page.locator("table.boardtable .watchstar.on").count()) === 0) {
+			await page.locator("table.boardtable .watchstar").first().click();
+			await page.waitForTimeout(200);
+		}
+		ok("the star is on before the class changes",
+			(await page.locator("table.boardtable .watchstar.on").count()) === 1);
+		const other = path.join(require("os").tmpdir(), "bbgm-uismoke-class-b.json");
+		/* A different class: the fingerprint reads the count, the season and the
+		   first and last few names, and two synthetic classes draw the same
+		   names, so the season is what tells them apart here. */
+		const otherClass = V.syntheticClass(5, 70);
+		otherClass.startingSeason = (otherClass.startingSeason || 2026) + 1;
+		fs.writeFileSync(other, JSON.stringify(otherClass));
+		await page.setInputFiles("#file", other);
+		await page.waitForFunction(() => window.App.state.results.some(Boolean), null, { timeout: 30000 });
+		await page.waitForTimeout(400);
+		await page.locator("#tabs button", { hasText: "Draft board" }).first().click();
+		await page.waitForSelector(".boardfilters", { timeout: 5000 });
+		ok("a star given on one class is not on the same pid of another",
+			(await page.locator("table.boardtable .watchstar.on").count()) === 0);
+		await page.setInputFiles("#file", fixture);
+		await page.waitForFunction(() => window.App.state.results.some(Boolean), null, { timeout: 30000 });
+		await page.waitForTimeout(400);
+		await page.locator("#tabs button", { hasText: "Draft board" }).first().click();
+		await page.waitForSelector(".boardfilters", { timeout: 5000 });
+		ok("...and is still there when the first class comes back",
+			(await page.locator("table.boardtable .watchstar.on").count()) === 1);
+
+		// Universe mode: the template changes the notes.
+		const a = path.join(require("os").tmpdir(), "bbgm-uismoke-uni-a.json");
+		const b = path.join(require("os").tmpdir(), "bbgm-uismoke-uni-b.json");
+		fs.writeFileSync(a, JSON.stringify(V.syntheticClass(2, 40)));
+		fs.writeFileSync(b, JSON.stringify(V.syntheticClass(3, 40)));
+		await page.setInputFiles("#file", [a, b]);
+		await page.waitForFunction(() => window.App.state.files.length === 2, null, { timeout: 30000 });
+		await page.evaluate(() => {
+			const u = document.getElementById("universe");
+			u.checked = true;
+			u.dispatchEvent(new Event("change", { bubbles: true }));
+		});
+		await page.waitForFunction(() => {
+			const u = window.App.state.universe;
+			return u && !u.running && u.rows && u.rows.length >= 2;
+		}, null, { timeout: 120000 });
+		await page.waitForTimeout(500);
+		const withTraits = (await noteOf()).some((n) => /Scouts note/.test(n));
+		await tickAll(false, "traits");
+		await page.waitForTimeout(2500);
+		ok("universe: unticking the trait line removes it from the notes",
+			withTraits && !(await noteOf()).some((n) => /Scouts note/.test(n)));
+		await page.evaluate(() => {
+			const u = document.getElementById("universe");
+			u.checked = false;
+			u.dispatchEvent(new Event("change", { bubbles: true }));
+		});
+		await page.waitForTimeout(800);
+	}
+
 	console.log("\nNo errors");
 	ok("no console or page errors", errors.length === 0, errors.join("\n         "));
 

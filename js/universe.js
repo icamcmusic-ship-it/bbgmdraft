@@ -13,6 +13,16 @@
 (function (global) {
 	"use strict";
 
+	/* Code-unit comparison for tie-breaks that feed the simulation. localeCompare
+	   follows the browser's ICU collation, which differs between engines and
+	   versions, so the same seed could order two tied teams differently on two
+	   machines. */
+	function cmpText(a, b, ci) {
+		a = String(a); b = String(b);
+		if (ci) { a = a.toLowerCase(); b = b.toLowerCase(); }
+		return a < b ? -1 : a > b ? 1 : 0;
+	}
+
 	/* 3: the export carries the timeline itself — the rows, the threads, the
 	   records book, the alumni index and the chain's tail — beside the seeds
 	   that produced it. A version 1 or 2 file still imports; it simply has
@@ -27,7 +37,12 @@
 	   the per-season result fingerprints below and can then say "season 2034
 	   diverged — this universe was built on an older engine" instead of
 	   silently handing back another world under the same name. */
-	const ENGINE_REV = 1;
+	/* 2: the 2026-10-01 audit fixes — potential's age term is measured against
+	   the class as judged, returners keep the class's rookie caps, award teams
+	   are equal-sized at any strictness, pace and stat noise are jittered
+	   inside their bands, and every tie-break is code-unit order rather than
+	   the browser's collation. Any of them moves a board or a trophy. */
+	const ENGINE_REV = 2;
 
 	/* THE ONE DEFINITION OF PLAYER OF THE YEAR.
 
@@ -352,7 +367,7 @@
 			.filter((e) => e && e.a && e.b && (e.march || []).length >= (min || 2))
 			.map((e) => Object.assign({}, e, { heat: rivalryHeat(e, now) }))
 			.sort((x, y) => y.heat - x.heat || y.march.length - x.march.length ||
-				y.games - x.games || String(x.a + x.b).localeCompare(String(y.a + y.b)));
+				y.games - x.games || cmpText(x.a + x.b, y.a + y.b));
 	}
 
 	function rivalriesStep(prev, res) {
@@ -894,7 +909,7 @@
 		};
 		const byRecord = teamList.slice().sort((a, b) =>
 			(b.w || 0) - (a.w || 0) || (a.l || 0) - (b.l || 0) ||
-			String(a.name).localeCompare(String(b.name)));
+			cmpText(a.name, b.name));
 		const best = byRecord[0] || null;
 		/* An undefeated regular season is the rarest fact a college season
 		   produces and the timeline could not see one.
@@ -979,8 +994,20 @@
 	function threads(rows, alumni, extra) {
 		const out = [];
 		const titleSeasons = {};
+		const guessedTitles = {};
 		const no1Seasons = {};
-		for (const r of rows) {
+		/* PLAYED SEASONS ONLY. An extrapolated season has a champion nobody
+		   simulated, and these threads said "North Carolina won 5 national
+		   titles" when three of them were guesses, and "repeated as champions"
+		   across two invented years. The records book already separates the
+		   two ("5 (3 extrapolated)"); the guesses are named here, not counted. */
+		const live = (rows || []).filter((r) => r && !r.error && !r.extrapolated);
+		for (const r of rows || []) {
+			if (r && !r.error && r.extrapolated && r.champion) {
+				guessedTitles[r.champion] = (guessedTitles[r.champion] || 0) + 1;
+			}
+		}
+		for (const r of live) {
 			if (r.champion) {
 				(titleSeasons[r.champion] = titleSeasons[r.champion] || []).push(r.season);
 			}
@@ -990,13 +1017,15 @@
 				(no1Seasons[r.no1.school] = no1Seasons[r.no1.school] || []).push(r.season);
 			}
 		}
-		const byName = (a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: "base" });
+		const byName = (a, b) => cmpText(a, b, true);
 		for (const name of Object.keys(titleSeasons).sort(byName)) {
 			const seasons = titleSeasons[name];
 			if (seasons.length >= 2) {
+				const g = guessedTitles[name] || 0;
 				out.push({ kind: "titles", team: name, seasons: seasons.slice(),
 					count: seasons.length,
-					text: name + " won " + seasons.length + " national titles" });
+					text: name + " won " + seasons.length + " national titles" +
+						(g ? " (plus " + g + " in extrapolated seasons)" : "") });
 			}
 		}
 		for (const name of Object.keys(no1Seasons).sort(byName)) {
@@ -1013,19 +1042,33 @@
 				text: crossed + " roster spots across the timeline were filled by " +
 					"players from a later draft class" });
 		}
-		for (let i = 1; i < rows.length; i++) {
-			if (rows[i].champion && rows[i].champion === rows[i - 1].champion) {
-				out.push({ kind: "repeat", team: rows[i].champion,
-					seasons: [rows[i - 1].season, rows[i].season], count: 2,
-					text: rows[i].champion + " repeated as champions in " + rows[i].season });
+		/* Back-to-back means CONSECUTIVE: with a gap in the files (and no
+		   extrapolation) 2028 and 2031 are adjacent rows and were reported as
+		   a repeat. And a streak is one story, not one thread per pair: a
+		   run of exactly two is the "repeat"; a longer run is the "threepeat"
+		   moreThreads already writes. */
+		const runs = (same, max) => {
+			const found = [];
+			let start = 0;
+			for (let i = 1; i <= live.length; i++) {
+				const joined = i < live.length && live[i].season === live[i - 1].season + 1 &&
+					same(live[i], live[i - 1]);
+				if (joined) continue;
+				if (i - start >= 2 && i - start <= max) found.push([live[start], live[i - 1], i - start]);
+				start = i;
 			}
-			if (rows[i].poy && rows[i - 1].poy &&
-				!rows[i].poy.nonNcaa && !rows[i - 1].poy.nonNcaa &&
-				rows[i].poy.school === rows[i - 1].poy.school) {
-				out.push({ kind: "poyRepeat", team: rows[i].poy.school,
-					seasons: [rows[i - 1].season, rows[i].season], count: 2,
-					text: rows[i].poy.school + " had back-to-back players of the year" });
-			}
+			return found;
+		};
+		for (const [a, b] of runs((x, y) => x.champion && x.champion === y.champion, 2)) {
+			out.push({ kind: "repeat", team: b.champion,
+				seasons: [a.season, b.season], count: 2,
+				text: b.champion + " repeated as champions in " + b.season });
+		}
+		for (const [a, b, n] of runs((x, y) => x.poy && y.poy && !x.poy.nonNcaa && !y.poy.nonNcaa &&
+			x.poy.school === y.poy.school, Infinity)) {
+			out.push({ kind: "poyRepeat", team: b.poy.school,
+				seasons: [a.season, b.season], count: n,
+				text: b.poy.school + " had back-to-back players of the year" });
 		}
 		/* A gap in the files is a fact about the world, not only about the
 		   file list: five years passed with nobody playing them. */
@@ -1063,7 +1106,7 @@
 			}
 		}
 		out.sort((x, y) => y.seasons[1] - x.seasons[1] || y.count - x.count ||
-			String(x.team + x.other).localeCompare(String(y.team + y.other)));
+			cmpText(x.team + x.other, y.team + y.other));
 		return out.slice(0, 4);
 	}
 
@@ -1097,7 +1140,7 @@
 				count: honorSeasons.length + back.length, text,
 				score: back.length * 4 + backHonors * 3 + honorSeasons.length * 5 });
 		}
-		out.sort((a, b) => b.score - a.score || String(a.text).localeCompare(String(b.text)));
+		out.sort((a, b) => b.score - a.score || cmpText(a.text, b.text));
 		return out.slice(0, 6).map((t) => { delete t.score; return t; });
 	}
 	function countOf(n, w) { return n + " " + w + (n === 1 ? "" : "s"); }
@@ -1126,7 +1169,7 @@
 			scored.push({ e, ss, best });
 		}
 		scored.sort((x, y) => y.best.count - x.best.count || y.ss.length - x.ss.length ||
-			String(x.e.a + x.e.b).localeCompare(String(y.e.a + y.e.b)));
+			cmpText(x.e.a + x.e.b, y.e.a + y.e.b));
 		for (const x of scored.slice(0, 6)) {
 			const e = x.e;
 			const inWindow = x.ss.filter((s) => s >= x.best.from && s <= x.best.to);
@@ -1176,7 +1219,7 @@
 			if (!key) return;
 			(map[key] = map[key] || []).push(season);
 		};
-		const byName = (a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: "base" });
+		const byName = (a, b) => cmpText(a, b, true);
 		const keys = (map) => Object.keys(map).sort(byName);
 		const list = (names) => names.length === 1 ? names[0]
 			: names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
@@ -1813,7 +1856,7 @@
 			.map((name) => ({ name, level: levels[name] }))
 			.filter((x) => Number.isFinite(x.level))
 			.sort((a, b) => b.level - a.level ||
-				String(a.name).localeCompare(String(b.name)))
+				cmpText(a.name, b.name))
 			.slice(0, 40)
 			.map((x) => ({ name: x.name, level: x.level, w: Math.pow(Math.max(1, x.level - 40), 2.2) }));
 	}
@@ -1836,7 +1879,7 @@
 			}
 		}
 		return out.sort((a, b) => (b.talent + b.level * 0.35) - (a.talent + a.level * 0.35) ||
-			String(a.name).localeCompare(String(b.name)));
+			cmpText(a.name, b.name));
 	}
 
 	/* One extrapolated season. `carry` is the world as it stood going into it,
@@ -2076,8 +2119,17 @@
 		const apOnes = {};
 		const poys = {};
 		const no1s = {};
-		for (const r of rows) {
+		/* Titles are the one record that counts the guesses (flagged above).
+		   Everything else is a record of seasons somebody simulated: title
+		   games, AP No. 1s, players of the year, No. 1 picks, the AP streak and
+		   the best season were counting invented years with no flag at all.
+		   `rows` stays the full list for the Hall's size below. */
+		const allRows = rows;
+		for (const r of allRows) {
 			if (r.champion) titles[r.champion] = (titles[r.champion] || 0) + 1;
+		}
+		rows = allRows.filter((r) => !r.extrapolated);
+		for (const r of rows) {
 			if (r.champion) finals[r.champion] = (finals[r.champion] || 0) + 1;
 			if (r.runnerUp) finals[r.runnerUp] = (finals[r.runnerUp] || 0) + 1;
 			if (r.apOne) apOnes[r.apOne] = (apOnes[r.apOne] || 0) + 1;
@@ -2091,7 +2143,7 @@
 		const leaders = (map, label) => Object.keys(map)
 			.map((team) => ({ team, count: map[team], label }))
 			.sort((a, b) => b.count - a.count ||
-				String(a.team).localeCompare(String(b.team), undefined, { sensitivity: "base" }))
+				cmpText(a.team, b.team, true))
 			.slice(0, 10);
 
 		/* The longest unbroken run at AP No. 1, which is a streak over the
@@ -2141,7 +2193,9 @@
 		   `undefined`. */
 		const WEIGHT = { "player of the year": 5, "top of the board": 2 };
 		const byMan = {};
-		for (const a of alumni) {
+		/* An extrapolated player of the year is a name with no file behind
+		   him: no ratings, no career page. He is not a Hall of Fame row. */
+		for (const a of alumni.filter((x) => x && !x.extrapolated)) {
 			const w = WEIGHT[a.why] !== undefined ? WEIGHT[a.why]
 				: /won the title/.test(a.why || "") ? 3 : 1;
 			const id = a.id || (a.key !== null && a.key !== undefined
@@ -2232,7 +2286,7 @@
 			c.tree = tree && tree.by && tree.by[c.name] ? tree.by[c.name].length : 0;
 			c.schools.sort();
 		}
-		const byName = (a, b) => String(a.name).localeCompare(String(b.name));
+		const byName = (a, b) => cmpText(a.name, b.name);
 		const top = (key, min) => men.filter((c) => c[key] >= (min || 1))
 			.sort((a, b) => b[key] - a[key] || b.w - a.w || byName(a, b)).slice(0, 10);
 		return {
@@ -2280,7 +2334,7 @@
 	function peopleRecords(registry) {
 		const men = Object.keys(registry || {}).map((id) => registry[id])
 			.filter((x) => x && x.id);
-		const byName = (a, b) => String(a.name).localeCompare(String(b.name));
+		const byName = (a, b) => cmpText(a.name, b.name);
 		const brief = (x, extra) => Object.assign({ id: x.id, name: x.name,
 			span: x.span || 0, school: x.draft ? x.draft.school || null : null }, extra);
 		const mostHonors = men.filter((x) => (x.honors || []).length)
@@ -2859,7 +2913,8 @@
 				classYear: p.classYear, newCollege: p.newCollege,
 				newOvr: p.newOvr, talentPot: p.talentPot, archetype: p.archetype,
 				origRatings: p.origRatings ? { fuzz: p.origRatings.fuzz } : null,
-				buildPinned: p.buildPinned, hand: p.hand, volatility: p.volatility,
+				buildPinned: p.buildPinned, buildCaps: p.buildCaps || null,
+				hand: p.hand, volatility: p.volatility,
 				orbBias: p.orbBias, traitInjuryMult: p.traitInjuryMult,
 			});
 		}
@@ -3832,7 +3887,7 @@
 			out.push({ id: x.id, name: x.name, school: x.draft.school || null,
 				season: x.draft.season, pro, college, score: college + pro.score * 1.5 });
 		}
-		out.sort((a, b) => b.score - a.score || String(a.name).localeCompare(String(b.name)));
+		out.sort((a, b) => b.score - a.score || cmpText(a.name, b.name));
 		return out.slice(0, n || 10);
 	}
 

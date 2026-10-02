@@ -352,6 +352,17 @@
 </aside>
 
 <main>
+	<!-- Above the drop box: on first run a load error used to appear below it,
+	     off-screen on a short viewport. -->
+	<div id="errBanner" class="banner" role="alert" hidden>
+		<span class="bannertext"></span>
+		<button type="button" class="bannerclose" id="errClose" aria-label="Dismiss this error">×</button>
+	</div>
+	<div id="warnBanner" class="banner" role="status" hidden>
+		<span class="bannertext"></span>
+		<button type="button" class="bannerclose" id="warnClose" aria-label="Dismiss this warning">×</button>
+	</div>
+
 	<!-- The whole box opens the file picker; a drop anywhere on the page, a
 	     paste, or the paste button reads a class too. See bindFiles. -->
 	<div id="empty" class="drop" role="button" tabindex="0" aria-describedby="emptyLead">
@@ -370,14 +381,6 @@
 			title="Run several synthetic seasons as one continuous world, rebuilt from the seed">New synthetic universe (N seasons)…</button></p>
 	</div>
 
-	<div id="errBanner" class="banner" role="alert" hidden>
-		<span class="bannertext"></span>
-		<button type="button" class="bannerclose" id="errClose" aria-label="Dismiss this error">×</button>
-	</div>
-	<div id="warnBanner" class="banner" role="status" hidden>
-		<span class="bannertext"></span>
-		<button type="button" class="bannerclose" id="warnClose" aria-label="Dismiss this warning">×</button>
-	</div>
 	<p id="status" class="status" role="status" hidden></p>
 	<!-- Collapsed by default: one line per loaded class buried the page
 	     under a wall of text on a 70-file universe. -->

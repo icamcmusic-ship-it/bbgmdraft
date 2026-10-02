@@ -1431,15 +1431,15 @@ details.filterfold > summary { display: none; }
 .programs { margin-top: 10px; }
 .proghead { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 20px; margin: 6px 0 10px; }
 .banners { display: flex; flex-wrap: wrap; gap: 6px; }
-.banner {
+.pennant {
 	display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
 	min-width: 54px; padding: 5px 8px 9px; border-radius: 3px 3px 0 0;
 	background: var(--panel-2); border: 1px solid var(--accent-2); border-bottom-width: 3px;
 	color: var(--text); line-height: 1.15;
 	clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 86%, 0 100%);
 }
-.banner .bannery { font-weight: 700; font-size: 13px; font-variant-numeric: tabular-nums; }
-.banner .bannerw { font-size: 9.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
+.pennant .bannery { font-weight: 700; font-size: 13px; font-variant-numeric: tabular-nums; }
+.pennant .bannerw { font-size: 9.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
 .levelfig { margin: 0; max-width: 100%; }
 svg.spark.levelspark { width: 280px; max-width: 100%; height: auto; aspect-ratio: 280 / 46; color: var(--spark); }
 .levelspark .lvlline { fill: none; stroke: var(--spark); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
@@ -1454,7 +1454,7 @@ table.proghist td.confmove { box-shadow: inset 3px 0 0 var(--bad); }
 .lvup { color: var(--good); font-size: 10.5px; }
 .lvdown { color: var(--bad); font-size: 10.5px; }
 @media (forced-colors: active) {
-	.banner { border-color: CanvasText; }
+	.banner, .pennant { border-color: CanvasText; }
 	.levelspark .lvlline, .levelspark .lvlmove { stroke: CanvasText; }
 	.levelspark .lvldot, .levelspark .lvltitle { fill: CanvasText; }
 }

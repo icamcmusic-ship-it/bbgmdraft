@@ -1647,6 +1647,11 @@
 			   meant seventy round trips to the mouse. j/k and the arrow keys
 			   move; if the editor is open it follows you down the table. */
 			tr.addEventListener("keydown", (e) => {
+				/* Keys pressed on a control INSIDE the row (the selection
+				   checkbox, the lock badge, the star) belong to that control.
+				   Without this, Space on the checkbox opened the editor and
+				   the box could not be ticked from the keyboard. */
+				if (e.target !== tr) return;
 				if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); return; }
 				const d = (e.key === "j" || e.key === "ArrowDown") ? 1
 					: (e.key === "k" || e.key === "ArrowUp") ? -1 : 0;
@@ -3515,7 +3520,7 @@
 			ban.setAttribute("aria-label", titles.length + " national title" +
 				(titles.length === 1 ? "" : "s"));
 			for (const s of titles) {
-				const b = el("span", "banner");
+				const b = el("span", "pennant");
 				b.appendChild(el("span", "bannery", String(s)));
 				b.appendChild(el("span", "bannerw", "Champions"));
 				ban.appendChild(b);
@@ -4972,7 +4977,7 @@
 			fbar.appendChild(reset);
 		}
 		const st0 = A().state;
-		const nStar = (res.board || []).filter((p) => st0.watch[p.key]).length;
+		const nStar = (res.board || []).filter((p) => st0.watch[A().userKey(p)]).length;
 		const starChip = el("button", "chip" + (bf.starred ? " on" : ""),
 			"★ Starred" + (nStar ? " (" + nStar + ")" : ""));
 		starChip.type = "button";
@@ -5020,9 +5025,9 @@
 				const bits = [p.newPos, p.classYear, p.proClub || p.newCollege,
 					p.newOvr + "/" + p.newPot];
 				if (p.stats) bits.push(n1(p.stats.ppg) + " ppg");
-				return p.boardRank + ". " + (A().state.watch[p.key] ? "★ " : "") + "**" + p.name +
+				return p.boardRank + ". " + (A().state.watch[A().userKey(p)] ? "★ " : "") + "**" + p.name +
 					"** — " + bits.join(", ") +
-					(notes[p.key] ? "\n   > " + notes[p.key].replace(/\s*\n\s*/g, " ") : "");
+					(notes[A().userKey(p)] ? "\n   > " + notes[A().userKey(p)].replace(/\s*\n\s*/g, " ") : "");
 			});
 			A().copyText("**Top 30 — seed " + res.seed +
 				(res.flavor && res.flavor.label ? ", " + res.flavor.label : "") + "**\n\n" +
@@ -5048,7 +5053,7 @@
 		const needle = bf.q.trim().toLowerCase();
 		let list = (res.board || []).filter((p) => {
 			if (bf.pos && p.newPos !== bf.pos) return false;
-			if (bf.starred && !A().state.watch[p.key]) return false;
+			if (bf.starred && !A().state.watch[A().userKey(p)]) return false;
 			if (!needle) return true;
 			return (p.name + " " + (p.newCollege || "") + " " + (p.proClub || "") + " " +
 				(p.archetype || "")).toLowerCase().indexOf(needle) !== -1;
@@ -5482,6 +5487,8 @@
 		const cards = el("div", "cards");
 		let shown = 0;
 		for (const p of res.players.slice().sort((a, b) => b.newOvr - a.newOvr)) {
+			// Every box unticked writes no note; a blank card says nothing.
+			if (!String(p.note || "").trim()) continue;
 			if (q && (p.name + "\n" + p.note).toLowerCase().indexOf(q) === -1) continue;
 			shown++;
 			const c = el("div", "card");
@@ -5506,7 +5513,8 @@
 			box.appendChild(el("h4", null, q ? "No note mentions “" + q + "”" : "No notes"));
 			box.appendChild(el("p", "hint", q
 				? "The search covers names and note text. Clear it to see every note."
-				: "Every line of the note template is off, or the class is empty."));
+				: "Every line of the note template is off, or the class is empty. " +
+					"Tick lines under “Note template” in the sidebar to write notes."));
 			if (q) {
 				const clear = el("button", "tiny", "Clear the search");
 				clear.addEventListener("click", () => { st.noteQuery = ""; A().render(); });
@@ -5895,7 +5903,8 @@
 	   fired by it. */
 	function watchStar(p) {
 		const st = A().state;
-		const on = !!st.watch[p.key];
+		const uk = A().userKey(p);
+		const on = !!st.watch[uk];
 		const b = el("button", "watchstar" + (on ? " on" : ""), on ? "★" : "☆");
 		b.type = "button";
 		b.setAttribute("aria-pressed", on ? "true" : "false");
@@ -5903,7 +5912,7 @@
 		b.title = on ? "On your watchlist — click to remove" : "Add to your watchlist";
 		b.addEventListener("click", (e) => {
 			e.stopPropagation();
-			if (st.watch[p.key]) delete st.watch[p.key]; else st.watch[p.key] = true;
+			if (st.watch[uk]) delete st.watch[uk]; else st.watch[uk] = true;
 			A().persist();
 			A().render();
 		});
@@ -6234,10 +6243,11 @@
 		myNote.maxLength = 2000;
 		myNote.placeholder = "Your own read on " + p.name + " — saved in this browser.";
 		myNote.setAttribute("aria-label", "Your notes on " + p.name);
-		myNote.value = A().state.notes[p.key] || "";
+		myNote.value = A().state.notes[A().userKey(p)] || "";
 		myNote.addEventListener("change", () => {
 			const v = myNote.value.trim();
-			if (v) A().state.notes[p.key] = v; else delete A().state.notes[p.key];
+			const nk = A().userKey(p);
+			if (v) A().state.notes[nk] = v; else delete A().state.notes[nk];
 			A().persist();
 		});
 		box.appendChild(myNote);

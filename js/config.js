@@ -601,12 +601,23 @@
 		/* Known keys only, once the engine that names them is loaded: an
 		   unknown line is a tick box the panel cannot show and a note line
 		   buildNote silently skips. */
+		/* The seed is text. A link, a preset or a settings file can carry a
+		   number (`"seed": 12345`) or a stray object, and `seed.trim()` in the
+		   universe runner then threw on every reload, because the config is
+		   persisted. A number becomes its digits; anything else is "no seed". */
+		if (typeof cfg.seed !== "string") {
+			cfg.seed = typeof cfg.seed === "number" && Number.isFinite(cfg.seed)
+				? String(cfg.seed) : "";
+		}
 		const known = global.Engine && Array.isArray(global.Engine.NOTE_LINES)
 			? new Set(global.Engine.NOTE_LINES.map((x) => x[0])) : null;
 		cfg.noteLines = (Array.isArray(cfg.noteLines) ? cfg.noteLines : DEFAULTS.noteLines)
 			.filter((k) => typeof k === "string" && (!known || known.has(k)))
 			.filter((k, i, a) => a.indexOf(k) === i);
-		if (!cfg.noteLines.length) cfg.noteLines = DEFAULTS.noteLines.slice();
+		/* An empty list is a real choice — "write no scouting notes" — and
+		   stays empty. It used to fall back to the default template here, so
+		   unticking every box left the boxes empty and the notes written
+		   with seven lines anyway. */
 		/* THE TEXT CHOICES AND THE SWITCHES go through the same door as the
 		   numbers. A link carrying `"era": "bogus"` was stored verbatim, and
 		   the pace hint then read the anchors of an era that does not exist

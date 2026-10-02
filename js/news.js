@@ -13,6 +13,16 @@
 (function (global) {
 	"use strict";
 
+	/* Code-unit comparison for tie-breaks that feed the simulation. localeCompare
+	   follows the browser's ICU collation, which differs between engines and
+	   versions, so the same seed could order two tied teams differently on two
+	   machines. */
+	function cmpText(a, b, ci) {
+		a = String(a); b = String(b);
+		if (ci) { a = a.toLowerCase(); b = b.toLowerCase(); }
+		return a < b ? -1 : a > b ? 1 : 0;
+	}
+
 	const { Rng } = global.BBGMRng;
 
 	const T = (v) => ({ t: "text", v });
@@ -8148,7 +8158,7 @@
 			}
 		}
 		candidates.sort((a, b) => b.key - a.key ||
-			String(a.kind).localeCompare(String(b.kind)));
+			cmpText(a.kind, b.kind));
 		for (const c of candidates.slice(0, DESK_BUDGET)) articles.push(c.article);
 	}
 
@@ -8213,10 +8223,13 @@
 					x.boardRank === 1).length;
 				const body = [T("A note from the archive: "), TM(a.school),
 					T(" is " + ago + " season" + (ago > 1 ? "s" : "") + " on from " +
-						a.name + ", who was " +
-						(a.why === "player of the year" ? "the national player of the year"
-							: a.why === "top of the board" ? "one of the top prospects in the country"
-							: a.why) + " in " + a.season + ".")];
+						a.name + ", who " +
+						/* `why` is a phrase for the alumni index, not a predicate:
+						   "won the title at Temple" read "who was won the title". */
+						(a.why === "player of the year" ? "was the national player of the year"
+							: a.why === "top of the board" ? "was one of the top prospects in the country"
+							: /^won /.test(a.why || "") ? a.why
+							: "was " + a.why) + " in " + a.season + ".")];
 				if (banners >= 2) {
 					body.push(T(" The program has " + banners + " banners in this " +
 						"universe."));

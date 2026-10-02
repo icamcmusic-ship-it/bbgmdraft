@@ -20,6 +20,16 @@
 (function (global) {
 	"use strict";
 
+	/* Code-unit comparison for tie-breaks that feed the simulation. localeCompare
+	   follows the browser's ICU collation, which differs between engines and
+	   versions, so the same seed could order two tied teams differently on two
+	   machines. */
+	function cmpText(a, b, ci) {
+		a = String(a); b = String(b);
+		if (ci) { a = a.toLowerCase(); b = b.toLowerCase(); }
+		return a < b ? -1 : a > b ? 1 : 0;
+	}
+
 	const { clamp } = global.BBGMRng;
 	const C = global.Colleges;
 	const T = global.TeamsSim;
@@ -448,7 +458,7 @@
 		return 30;
 	}
 	function sortAwards(list) {
-		return list.slice().sort((a, b) => awardRank(a) - awardRank(b) || a.localeCompare(b));
+		return list.slice().sort((a, b) => awardRank(a) - awardRank(b) || cmpText(a, b));
 	}
 
 	/* Who is eligible for which kind of honor.
@@ -1008,9 +1018,13 @@
 			if (n >= 4) giveNat(winner, "Consensus National Player of the Year", true);
 		}
 
-		nation.slice(0, slots(5)).forEach((x) => giveNat(x, "Consensus First Team All-American"));
-		nation.slice(slots(5), slots(10)).forEach((x) => giveNat(x, "Consensus Second Team All-American"));
-		nation.slice(slots(10), slots(15)).forEach((x) => giveNat(x, "Third Team All-American"));
+		/* One team size, three times. slots(5), slots(10) and slots(15) are each
+		   rounded on their own, so at a strictness of 1.5 the three teams came
+		   out 3/4/3 and at 2.0 3/2/3 — teams of five that were not equal. */
+		const team5 = slots(5);
+		nation.slice(0, team5).forEach((x) => giveNat(x, "Consensus First Team All-American"));
+		nation.slice(team5, 2 * team5).forEach((x) => giveNat(x, "Consensus Second Team All-American"));
+		nation.slice(2 * team5, 3 * team5).forEach((x) => giveNat(x, "Third Team All-American"));
 
 		// Position awards. Each is a one-winner trophy over its own position
 		// group, so award volume tracks what the class is actually made of.
@@ -1054,11 +1068,11 @@
 			winner.awards.push(award.name);
 		}
 		// The NABC all-defensive teams, which did not exist at national level.
-		natDef.slice(0, slots(5)).forEach((x) => {
+		natDef.slice(0, team5).forEach((x) => {
 			if (x.filler || !x.awards) return;
 			x.awards.push("NABC All-Defensive First Team");
 		});
-		natDef.slice(slots(5), slots(10)).forEach((x) => {
+		natDef.slice(team5, 2 * team5).forEach((x) => {
 			if (x.filler || !x.awards) return;
 			x.awards.push("NABC All-Defensive Second Team");
 		});
@@ -1632,7 +1646,7 @@
 					[r, weigh(r) + house.get(r) + arng.normal(0, 3)]));
 				const winner = pool.slice()
 					.sort((a, b) => (score.get(b) - score.get(a)) ||
-						String(a.team.name).localeCompare(String(b.team.name)))[0];
+						cmpText(a.team.name, b.team.name))[0];
 				coachHonors.push({
 					award, coach: winner.coach.name, school: winner.team.name,
 					conf: winner.team.conf, record: winner.team.regW + "-" + winner.team.regL,
