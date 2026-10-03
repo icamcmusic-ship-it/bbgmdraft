@@ -3924,16 +3924,7 @@
 	}
 
 	/* A short, stable identity for one draft class file. */
-	function fingerprint(file) {
-		if (!file || !file.data) return null;
-		const players = file.data.players || [];
-		const sample = players.slice(0, 6).concat(players.slice(-3))
-			.map((p) => (p.pid === undefined ? "?" : p.pid) + ":" +
-				(p.firstName || "") + (p.lastName || "")).join("|");
-		const h = global.BBGMRng.hashSeed(
-			players.length + "/" + file.data.startingSeason + "/" + sample);
-		return (h() >>> 0).toString(36);
-	}
+	function fingerprint(file) { return global.Universe.fileFingerprint(file); }
 
 	function activeFile() { return state.files[state.active] || null; }
 
@@ -6468,7 +6459,7 @@
 	   carried one. A BBGM class is sixty to eighty men; a league export's
 	   future class is often half that, and the season it produces has honours
 	   drawn from a field that thin. See Universe.topUpPartialSeason. */
-	const UNIVERSE_FULL_CLASS = 65;
+	const UNIVERSE_FULL_CLASS = global.Universe.FULL_CLASS;
 
 	/* How long a season costs, and how many of them are worth warning about.
 	   The figure is measured (tools/bench.js reports the staged timings); it

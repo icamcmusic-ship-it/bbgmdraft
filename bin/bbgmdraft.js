@@ -8,6 +8,7 @@
 
      bbgmdraft run   <file> [options]   generate a class and write the customized file
      bbgmdraft batch <file> [options]   generate many and print the distribution
+     bbgmdraft universe <file>... [options]  chain several seasons into one world
      bbgmdraft check <file>             validate a file and list what is wrong with it
      bbgmdraft settings [name]          the settings, their defaults and ranges; the presets
      bbgmdraft help
@@ -48,7 +49,7 @@ const FLAGS = {
 	"--out": true, "-n": true, "--stats": false, "--prior": false, "--highs": false,
 	"--awards": false, "--awards-major": false, "--no-ages": false, "--no-jerseys": false,
 	"--no-injuries": false, "--csv": false, "--json": false,
-	"--quiet": false, "-q": false, "--help": false, "-h": false,
+	"--quiet": false, "-q": false, "--no-gaps": false, "--help": false, "-h": false,
 };
 
 function parseArgs(argv) {
@@ -253,6 +254,72 @@ function cmdBatch(args) {
 	}
 }
 
+/* A UNIVERSE, the way js/app.js's runUniverse builds one: the files in season
+   order, one chain, each season handing its world to the next. Prints the
+   timeline and writes the universe export (seeds, fingerprints, the rows and
+   the records), which the page's Universe tab imports. The players file is
+   not written here: it needs the career links the page adds after the chain
+   (js/app.js linkCareers), and that step is not yet shared. */
+function cmdUniverse(args) {
+	const U = global.Universe;
+	const files = args.positional.slice(1);
+	if (files.length < 1) throw new Error("universe needs one or more class files");
+	const loaded = [];
+	for (const name of files) {
+		const { data } = readClassFile(name, args.flags["--year"]);
+		loaded.push({ name: path.basename(name), data });
+	}
+	loaded.forEach((f) => { f.fingerprint = U.fileFingerprint(f); });
+	const cfg = buildConfig(args);
+	const frozen = global.Config.make(cfg);
+	frozen.biography = null;
+	const baseSeed = cfg.seed && cfg.seed.trim() ? cfg.seed.trim()
+		: "universe-" + Math.floor(Math.random() * 1e9).toString(36);
+	const runners = loaded.map((f) => global.Engine.createRunner(f.data));
+	const diags = U.validate(loaded);
+	const runnable = diags.filter((d) => d.ok)
+		.sort((a, b) => (a.season || 0) - (b.season || 0) || a.index - b.index);
+	for (const d of diags.filter((x) => !x.ok)) say(args, "skipped " + d.name + ": " + d.errors.join("; "));
+	if (!runnable.length) throw new Error("no runnable files");
+	const chain = U.beginChain({
+		mode: "cold", files: loaded, runnable, settings: frozen, baseSeed, diags,
+		name: null, createdAt: null,
+		make: (st) => global.Config.make(st),
+		runnerFor: (i) => runners[i],
+		store: () => {},
+		dataChanged: (i) => { runners[i] = global.Engine.createRunner(loaded[i].data); },
+		biographyFor: () => null,
+		extrapolateGaps: !args.flags["--no-gaps"] && cfg.extrapolateGaps !== false,
+		fullClass: U.FULL_CLASS,
+		anomalyHistory: global.Engine.ANOMALY_MEMORY_DEPTH || 3,
+	});
+	for (let k = 0; k < chain.runnable.length; k++) {
+		chain.step(k);
+		if (process.stderr.isTTY && !args.flags["--quiet"]) {
+			process.stderr.write("\r  season " + (k + 1) + " of " + chain.runnable.length);
+		}
+	}
+	chain.finish({ cancelled: false, extrapolateYears: cfg.extrapolateYears || 0 });
+	if (process.stderr.isTTY && !args.flags["--quiet"]) process.stderr.write("\r                         \r");
+	const u = chain.universe;
+	const name = (x) => (x && x.name) || "";
+	if (args.flags["--json"]) {
+		process.stdout.write(JSON.stringify({ baseSeed, engineRev: U.ENGINE_REV,
+			rows: u.rows, threads: u.threads }, null, 2) + "\n");
+	} else {
+		process.stdout.write(table([["season", "champion", "runner-up", "player of the year", "No. 1 pick", ""]]
+			.concat(u.rows.map((r) => [r.season, r.champion || "", r.runnerUp || "",
+				name(r.poy), name(r.no1), r.extrapolated ? "extrapolated" : r.error ? "FAILED" : ""]))) + "\n");
+		say(args, u.rows.length + " seasons · " + u.threads.length + " threads · base seed " +
+			baseSeed + " · engine rev " + U.ENGINE_REV);
+	}
+	if (args.flags["--out"]) {
+		fs.writeFileSync(args.flags["--out"], JSON.stringify(U.exportUniverse(u), null, 1));
+		say(args, "wrote " + args.flags["--out"]);
+	}
+	if (u.broken) process.exitCode = 1;
+}
+
 function cmdCheck(args) {
 	const { data, league } = readClassFile(args.positional[1], args.flags["--year"]);
 	let v;
@@ -293,6 +360,7 @@ const HELP = `BBGM Draft Class Workshop (command line, experimental)
 
   bbgmdraft run   <file> [options]    write a customized class file
   bbgmdraft batch <file> [options]    run many seeds, print a table
+  bbgmdraft universe <file>... [opts] run the classes as one continuous world
   bbgmdraft check <file>              validate a file
   bbgmdraft settings [name|presets]   settings, defaults, ranges; presets
 
@@ -315,6 +383,11 @@ Options (run)
   --json             print the summary as JSON on stderr
   -q                 no summary
 
+Options (universe)
+  --out FILE         write the universe export (the page's Universe tab imports it)
+  --no-gaps          do not extrapolate seasons missing between the files
+  --json             the rows and threads as JSON on stdout
+
 Options (batch)
   -n N               how many classes (default 10)
   --csv | --json     machine-readable output on stdout
@@ -336,6 +409,7 @@ function main() {
 	try {
 		if (cmd === "run") cmdRun(args);
 		else if (cmd === "batch") cmdBatch(args);
+		else if (cmd === "universe") cmdUniverse(args);
 		else if (cmd === "check") cmdCheck(args);
 		else if (cmd === "settings") cmdSettings(args);
 		else throw new Error("unknown command \"" + cmd + "\" (try: bbgmdraft help)");

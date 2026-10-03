@@ -3925,8 +3925,31 @@
 		};
 	}
 
+	/* WHAT A FILE IS, FOR A UNIVERSE: the count, the season and the first and
+	   last few "pid:name" pairs, hashed to 32 bits. Every season's seed is keyed
+	   off it (see seedFor), so the page and the command line have to compute it
+	   identically or the same files run to different worlds; it lives here, with
+	   the thing that consumes it, and js/app.js calls it. (It does not look at
+	   ratings — an edited class with the same names has the same fingerprint.) */
+	function fileFingerprint(file) {
+		if (!file || !file.data) return null;
+		const players = file.data.players || [];
+		const sample = players.slice(0, 6).concat(players.slice(-3))
+			.map((p) => (p.pid === undefined ? "?" : p.pid) + ":" +
+				(p.firstName || "") + (p.lastName || "")).join("|");
+		const h = global.BBGMRng.hashSeed(
+			players.length + "/" + file.data.startingSeason + "/" + sample);
+		return (h() >>> 0).toString(36);
+	}
+
+	/* What a whole draft class is, for the purpose of deciding whether a file
+	   carried one. A BBGM class is sixty to eighty men; a league export's
+	   future class is often half that, and the season it produces has honours
+	   drawn from a field that thin. See topUpPartialSeason. */
+	const FULL_CLASS = 65;
+
 	global.Universe = {
-		VERSION, ENGINE_REV, validate, harvest, returnersOf, alumniOf, summarize,
+		VERSION, ENGINE_REV, fileFingerprint, FULL_CLASS, validate, harvest, returnersOf, alumniOf, summarize,
 		playerId, biographyForFile, registryOf,
 		threads, moreThreads, records, exportUniverse, biographyOf, seedFor, resultFingerprint,
 		extrapolateGap, extrapolateSeason, topUpPartialSeason, extrapolatedAlumni,

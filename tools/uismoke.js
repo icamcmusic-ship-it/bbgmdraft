@@ -3642,6 +3642,62 @@ async function gotoProspects(page) {
 		await page.waitForTimeout(800);
 	}
 
+	/* The command line and the page run the same universe. The page is driven
+	   with three class files, the seed and Universe mode; the executable gets
+	   the same files and seed; the two timelines must agree row for row. */
+	{
+		console.log("\nUniverse: the page and the command line");
+		// Default settings, the way the executable starts: every section above
+		// has moved something.
+		await clearStorage(page);
+		await page.goto(base);
+		const os = require("os");
+		const dirU = fs.mkdtempSync(path.join(os.tmpdir(), "bbgm-uismoke-uni-"));
+		const fileU = [1, 2, 3].map((y) => {
+			const c = V.realisticClass("par" + y, 50);
+			c.startingSeason = 2024 + y;
+			c.players.forEach((p) => { p.draft.year = 2024 + y; p.born.year = 2024 + y - 20; p.pid += y * 100; });
+			const f = path.join(dirU, "u" + y + ".json");
+			fs.writeFileSync(f, JSON.stringify(c));
+			return f;
+		});
+		const cliRun = require("child_process").spawnSync(process.execPath,
+			[path.join(__dirname, "..", "bin", "bbgmdraft.js"), "universe"].concat(fileU,
+				["--seed", "parity", "--json"]), { encoding: "utf8" });
+		const want = JSON.parse(cliRun.stdout || "{\"rows\":[]}").rows
+			.map((r) => [r.season, r.champion, r.runnerUp, r.poy && r.poy.name, r.no1 && r.no1.name, r.seed]);
+		await page.setInputFiles("#file", fileU);
+		await page.waitForFunction(() => window.App.state.files.length === 3, null, { timeout: 30000 });
+		await page.evaluate(() => {
+			const s = document.getElementById("seed");
+			s.value = "parity";
+			s.dispatchEvent(new Event("input", { bubbles: true }));
+			s.dispatchEvent(new Event("change", { bubbles: true }));
+		});
+		await page.waitForTimeout(400);
+		await page.evaluate(() => {
+			const u = document.getElementById("universe");
+			u.checked = true;
+			u.dispatchEvent(new Event("change", { bubbles: true }));
+		});
+		await page.waitForFunction(() => {
+			const u = window.App.state.universe;
+			return u && !u.running && u.rows && u.rows.length >= 3;
+		}, null, { timeout: 120000 });
+		const got = await page.evaluate(() => window.App.state.universe.rows
+			.map((r) => [r.season, r.champion, r.runnerUp, r.poy && r.poy.name, r.no1 && r.no1.name, r.seed]));
+		ok("the command line's timeline is the page's, row for row",
+			want.length === 3 && JSON.stringify(got) === JSON.stringify(want),
+			"cli " + JSON.stringify(want) + "\npage " + JSON.stringify(got));
+		await page.evaluate(() => {
+			const u = document.getElementById("universe");
+			u.checked = false;
+			u.dispatchEvent(new Event("change", { bubbles: true }));
+		});
+		await page.waitForTimeout(800);
+		fs.rmSync(dirU, { recursive: true, force: true });
+	}
+
 	/* The bug report: what it carries and what it does not. */
 	{
 		console.log("\nBug report");

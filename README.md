@@ -15,6 +15,7 @@ The same engine, without the browser (Node 20 or newer; nothing to install):
 ```
 node bin/bbgmdraft.js run   class.json --seed demo --notes short --stats --awards
 node bin/bbgmdraft.js batch class.json -n 50 --set pace=72 --csv > batch.csv
+node bin/bbgmdraft.js universe 2025.json 2026.json 2027.json --seed demo --out world.json
 node bin/bbgmdraft.js check class.json
 node bin/bbgmdraft.js settings            # every setting, its default and range
 ```
@@ -26,7 +27,12 @@ class or a league export (`--year` picks the class of a league), `.json` or
 export options the page's dialog has (`--stats --prior --highs --awards`).
 Because the engine is deterministic, the same file, seed and settings give the
 page's class byte for byte, and `tools/tests/cli.js` checks that against the
-engine itself. Experimental: the flags may change. `node bin/bbgmdraft.js help`
+engine itself. `universe` runs several classes as one continuous world, as the
+page's Universe mode does (same seeds, same timeline, checked row for row
+against the page in `tools/uismoke.js`), prints the timeline and writes the
+universe export the Universe tab imports; it does not yet write the players
+file, which needs the career links the page adds after the chain.
+Experimental: the flags may change. `node bin/bbgmdraft.js help`
 lists them all.
 
 ## What it does

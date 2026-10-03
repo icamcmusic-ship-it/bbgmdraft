@@ -126,5 +126,39 @@ module.exports = function (ok, V) {
 			!written.teams && written.players.every((p) => p.pid >= 1000), r.stderr);
 	}
 
+	/* ---- a universe: the chain the page runs ------------------------------ */
+	{
+		const seasons = [1, 2, 3].map((y) => {
+			const c = V.realisticClass("cli-u" + y, 40);
+			c.startingSeason = 2024 + y;
+			c.players.forEach((p) => {
+				p.draft.year = 2024 + y;
+				p.born.year = 2024 + y - 20;
+				p.pid = p.pid + y * 100;
+			});
+			const f = path.join(dir, "u" + y + ".json");
+			fs.writeFileSync(f, JSON.stringify(c));
+			return f;
+		});
+		const out = path.join(dir, "universe.json");
+		const r = cli("universe", seasons[2], seasons[0], seasons[1], "--seed", "uni", "--out", out, "-q");
+		ok("cli/universe runs the files in season order whatever order they are given",
+			r.status === 0 && /2025[\s\S]*2026[\s\S]*2027/.test(r.stdout), r.stderr + r.stdout);
+		const exp = JSON.parse(fs.readFileSync(out, "utf8"));
+		ok("cli/the universe export is the page's format, with the engine revision",
+			exp.format === "bbgm-draft-workshop/universe" && exp.seasons.length === 3 &&
+			exp.engineRev === global.Universe.ENGINE_REV && exp.baseSeed === "uni");
+		ok("cli/each season's seed is keyed to the base seed and the file, as the page's is",
+			exp.seasons.every((x, i) => x.seed.indexOf("uni#" + i + ":" + x.season + ":") === 0),
+			JSON.stringify(exp.seasons.map((x) => x.seed)));
+		const again = cli("universe", seasons[0], seasons[1], seasons[2], "--seed", "uni", "-q");
+		ok("cli/the same universe twice is the same world", again.stdout === r.stdout);
+		ok("cli/a different seed is a different world",
+			cli("universe", seasons[0], seasons[1], seasons[2], "--seed", "other", "-q").stdout !== r.stdout);
+		const json = JSON.parse(cli("universe", seasons[0], seasons[1], "--seed", "uni", "--json").stdout);
+		ok("cli/universe --json carries the rows and threads", json.rows.length === 2 && Array.isArray(json.threads));
+		ok("cli/universe with no file is an error", cli("universe").status === 1);
+	}
+
 	fs.rmSync(dir, { recursive: true, force: true });
 };
