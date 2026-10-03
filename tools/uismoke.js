@@ -3713,6 +3713,35 @@ async function gotoProspects(page) {
 		const text = (await page.locator(".problock").first().textContent()) || "";
 		ok("the player page carries a pro projection and his mock-draft slot",
 			/median peak of \d+/.test(text) && /Mock draft: No\. 1 /.test(text), text.slice(0, 160));
+
+		// A class from a league export is drafted by that league's teams.
+		const lg = { version: 73, startingSeason: 2027, gameAttributes: { season: 2027 },
+			teams: [["Austin", "Armadillos"], ["Baltimore", "Crabs"], ["Chicago", "Whirlwinds"], ["Denver", "High"]]
+				.map((n, tid) => ({ tid, region: n[0], name: n[1], abbrev: n[0].slice(0, 3).toUpperCase() })),
+			players: [] };
+		let lpid = 0;
+		for (const p of V.realisticClass("ui-lg", 50).players) {
+			lg.players.push(Object.assign({}, p, { pid: lpid++, tid: -2,
+				draft: { year: 2027, round: 0, pick: 0, tid: -1 }, born: { year: 2007, loc: "USA" } }));
+		}
+		V.realisticClass("ui-lg-vets", 48).players.forEach((p, i) => {
+			lg.players.push(Object.assign({}, p, { pid: lpid++, tid: i % 4,
+				draft: { year: 2019, round: 1, pick: 3, tid: i % 4 }, born: { year: 1999, loc: "USA" } }));
+		});
+		const lgFile = path.join(require("os").tmpdir(), "bbgm-uismoke-mock-league.json");
+		fs.writeFileSync(lgFile, JSON.stringify(lg));
+		await page.setInputFiles("#file", lgFile);
+		await page.waitForFunction(() => window.App.state.files.length === 1 &&
+			window.App.state.results.some(Boolean), null, { timeout: 60000 });
+		await page.locator("#tabs button", { hasText: "Mock draft" }).first().click();
+		await page.waitForTimeout(400);
+		const legend = (await page.locator("#view .legendline").first().textContent()) || "";
+		const teamsSeen = await page.locator("table.mocktable tbody tr:not(.tierbreak) td:nth-child(2)").allTextContents();
+		ok("a league export's own teams draft its class, with their rating and depth",
+			/Your league's teams/.test(legend) && teamsSeen.length === 8 &&
+			teamsSeen.every((t) => /Austin|Baltimore|Chicago|Denver/.test(t)) &&
+			(await page.locator("table.mocktable thead th", { hasText: "Depth" }).count()) === 1,
+			legend.slice(0, 80) + " · " + teamsSeen.join(", "));
 	}
 
 	/* The bug report: what it carries and what it does not. */

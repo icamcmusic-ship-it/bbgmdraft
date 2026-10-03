@@ -10,7 +10,14 @@ Open `index.html` in any browser. Nothing is uploaded and there is no build step
 
 ## Mock draft and pro projections
 
-The **Mock draft** tab drafts the class with thirty invented teams. Each team
+The **Mock draft** tab drafts the class. If the class came out of a league
+export, that league's own teams draft it: each team's rating is BBGM's team
+rating computed from its current roster, its need is its depth at guard, wing
+and big (the mean of its two best overalls at each) against the league's, and
+the order is the league's draft picks for that season — their pick numbers if
+the lottery has been run, traded picks used by the team holding them —
+otherwise worst first by this season's record (or team rating before any games)
+with a lottery for the top four. Without a league, thirty invented teams draft. Each team
 has a plan (rebuilding teams take ceiling, contenders take players ready now,
 set by its place in the order, with a lottery for the top four) and a need at
 guard, wing or big; every pick is the player worth most to that team — his

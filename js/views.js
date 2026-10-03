@@ -5452,7 +5452,12 @@
 		let c = proCache.get(res);
 		if (!c && global.Pro) {
 			const projections = global.Pro.projectClass(res);
-			c = { projections, mock: global.Pro.mockDraft(res, { projections }) };
+			/* A class that came out of a league export is drafted by that
+			   league's teams (Pro.leagueDraft). */
+			const st = A().state;
+			const f = st.files[Number.isFinite(res.fileIndex) ? res.fileIndex : st.active];
+			const league = f && f.league && f.league.data ? f.league.data : null;
+			c = { projections, mock: global.Pro.mockDraft(res, { projections, league }) };
 			proCache.set(res, c);
 		}
 		return c || { projections: {}, mock: { picks: [], teams: [] } };
@@ -5464,8 +5469,14 @@
 
 	function viewMock(view, res) {
 		const { mock } = proFor(res);
-		view.appendChild(el("p", "legendline",
-			"Thirty invented teams draft this class. Each has a plan (rebuilding teams " +
+		view.appendChild(el("p", "legendline", (mock.fromLeague
+			? "Your league's teams draft this class: each team's rating is BBGM's team " +
+				"rating from its current roster, its need is its depth at guard, wing and " +
+				"big (the mean of its two best overalls at each) against the league's, and " +
+				"the order is " + mock.source + ". "
+			: "Thirty invented teams draft this class (load a league export to use its " +
+				"own teams). ") +
+			"Each team has a plan (rebuilding teams " +
 			"take ceiling, contenders take players ready now) and a need at guard, wing " +
 			"or big; each pick is the player worth most to that team. “Peak” is the " +
 			"median projected NBA overall, with the 10th-90th percentile range, from " +
@@ -5493,8 +5504,9 @@
 		const table = el("table", "mocktable");
 		const thead = el("thead");
 		const hr = el("tr");
-		for (const h of ["Pick", "Team", "Player", "Pos", "Ovr", "Pot", "Board", "Peak",
-			"Career", "Verdict", "Why"]) hr.appendChild(el("th", null, h));
+		const heads = ["Pick", "Team"].concat(mock.fromLeague ? ["Team ovr", "Depth G · W · B"] : [],
+			["Player", "Pos", "Ovr", "Pot", "Board", "Peak", "Career", "Verdict", "Why"]);
+		for (const h of heads) hr.appendChild(el("th", null, h));
 		thead.appendChild(hr);
 		table.appendChild(thead);
 		const tbody = el("tbody");
@@ -5504,16 +5516,20 @@
 				round = k.round;
 				const rr = el("tr", "tierbreak");
 				const td = el("td", null, "Round " + round);
-				td.colSpan = 11;
+				td.colSpan = heads.length;
 				rr.appendChild(td);
 				tbody.appendChild(rr);
 			}
 			const tr = el("tr");
 			const x = k.projection;
 			tr.appendChild(el("td", "num", String(k.pick)));
-			const team = el("td", null, k.team);
+			const team = el("td", null, k.team + (k.via ? " (via " + k.via + ")" : ""));
 			team.title = k.teamPlan + "; biggest need: " + k.teamNeed;
 			tr.appendChild(team);
+			if (mock.fromLeague) {
+				tr.appendChild(el("td", "num", k.teamOvr === null ? "—" : String(k.teamOvr)));
+				tr.appendChild(el("td", "num", k.teamDepth));
+			}
 			const who = el("td");
 			who.appendChild(playerLink(k.name, k.key));
 			tr.appendChild(who);

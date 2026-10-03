@@ -95,7 +95,7 @@ function readClassFile(file, year) {
 			else throw new Error(file + " is a league with " + found.length + " draft classes (" +
 				found.map((c) => c.year).join(", ") + "); choose one with --year");
 		}
-		return { data: E.extractDraftClass(data, Number(year)), league: true };
+		return { data: E.extractDraftClass(data, Number(year)), league: true, leagueData: data };
 	}
 	return { data, league: false };
 }
@@ -324,16 +324,17 @@ function cmdUniverse(args) {
 /* The mock draft and the pro projections (js/pro.js), derived from the class
    the same file, seed and settings make. Nothing is written but the table. */
 function cmdMock(args) {
-	const { data } = readClassFile(args.positional[1], args.flags["--year"]);
+	const { data, leagueData } = readClassFile(args.positional[1], args.flags["--year"]);
 	const res = global.Engine.run(data, buildConfig(args));
 	const projections = global.Pro.projectClass(res);
-	const mock = global.Pro.mockDraft(res, { projections });
+	// A class from a league export is drafted by that league's teams.
+	const mock = global.Pro.mockDraft(res, { projections, league: leagueData || null });
 	if (args.flags["--json"]) {
 		process.stdout.write(JSON.stringify({ seed: res.seed, engineRev: global.Universe.ENGINE_REV,
 			teams: mock.teams, picks: mock.picks, undrafted: mock.undrafted }, null, 2) + "\n");
 		return;
 	}
-	const rows = mock.picks.map((k) => [k.pick, k.team, k.name, k.pos, k.ovr + "/" + k.pot,
+	const rows = mock.picks.map((k) => [k.pick, k.team + (k.via ? " (via " + k.via + ")" : ""), k.name, k.pos, k.ovr + "/" + k.pot,
 		k.consensus || "", k.projection ? k.projection.peak + " (" + k.projection.peakLow + "-" +
 			k.projection.peakHigh + ")" : "", k.projection ? k.projection.verdict : "", k.why]);
 	const heads = ["pick", "team", "player", "pos", "ovr/pot", "board", "peak", "verdict", "why"];
@@ -342,7 +343,7 @@ function cmdMock(args) {
 	} else {
 		process.stdout.write(table([heads].concat(rows)) + "\n");
 		say(args, "seed " + res.seed + " · " + mock.picks.length + " picks · " +
-			mock.undrafted.length + " undrafted");
+			mock.undrafted.length + " undrafted · " + mock.source);
 	}
 }
 

@@ -24,9 +24,13 @@
    The verdict comes from the median peak, on BBGM's scale: 65+ is a star, 58 a
    starter, 50 a rotation player, 45 a fringe one, below that a bust risk.
 
-   THE MOCK DRAFT. Thirty invented teams, each with a strength (which sets the
-   draft order, with a lottery for the top four), a plan (rebuilding teams draft
-   ceiling, contending teams draft readiness) and a need at guard, wing and big.
+   THE MOCK DRAFT. When the class came out of a BBGM league export, that
+   league's own teams draft it, with their real rosters setting their strength
+   and their positional needs and the league's draft picks setting the order
+   (see leagueDraft). Otherwise thirty invented teams, each with a strength
+   (which sets the draft order, with a lottery for the top four), a plan
+   (rebuilding teams draft ceiling, contending teams draft readiness) and a
+   need at guard, wing and big.
    Each pick takes the player with the best value to THAT team: his projected
    value, blended between ceiling and readiness by the team's plan, plus the fit
    of his position to the team's need, plus a little noise for taste. Two
@@ -195,47 +199,207 @@
 		return { value: blend + fit - bust + rng.normal(0, 1.2), fit, ceiling, ready };
 	}
 
+	/* ------------------------------------------- the league's own teams
+
+	   A class lifted out of a BBGM league export is drafted by that league's
+	   teams, not by the invented thirty:
+
+	     - each team's strength is BBGM's own team rating, computed from its
+	       current roster (team/ovr.basketball.ts: the top ten overalls with
+	       weights 0.3334 * e^(-0.1609 i), minus 102.98, as a predicted margin,
+	       mapped to a 50-centred rating);
+	     - its need at guard, wing and big is its positional depth (the mean of
+	       its two best overalls at each) against the league's average depth
+	       there, so a team whose bigs are thin drafts bigs;
+	     - the order is the league's own draft picks for that season when it has
+	       them (with their pick numbers if the lottery has been run, and with
+	       traded picks owned by the team that holds them), and otherwise one
+	       pick per team a round. Without pick numbers, teams are ordered worst
+	       first by this season's record when games have been played and by
+	       team rating when they have not, and the top four of round one are a
+	       weighted lottery among the seven worst — a simplification of BBGM's
+	       several lottery types, said as such in the view. */
+	const TEAM_OVR = { a: 0.3334, b: -0.1609, k: 102.98 };
+
+	function teamRating(ovrs) {
+		const r = ovrs.slice().sort((x, y) => y - x).slice(0, 10);
+		while (r.length < 10) r.push(0);
+		let mov = -TEAM_OVR.k;
+		for (let i = 0; i < 10; i++) mov += TEAM_OVR.a * Math.exp(TEAM_OVR.b * i) * r[i];
+		return Math.round((mov * 50) / 15 + 50);
+	}
+
+	function lastRatings(p) {
+		const rows = Array.isArray(p && p.ratings) ? p.ratings : [];
+		return rows[rows.length - 1] || null;
+	}
+
+	function leagueDraft(league, season, seed) {
+		if (!league || !Array.isArray(league.teams) || !Array.isArray(league.players)) return null;
+		const BB = global.BBGM;
+		const teams = league.teams.filter((t) => t && !t.disabled && Number.isFinite(Number(t.tid)))
+			.map((t) => ({
+				tid: Number(t.tid),
+				name: [t.region, t.name].filter(Boolean).join(" ") || t.abbrev || ("Team " + t.tid),
+				abbrev: t.abbrev || null, roster: [],
+			}));
+		if (teams.length < 2) return null;
+		const byTid = new Map(teams.map((t) => [t.tid, t]));
+		for (const p of league.players) {
+			const t = byTid.get(Number(p && p.tid));
+			const r = lastRatings(p);
+			if (!t || !r) continue;
+			const ovr = Number.isFinite(Number(r.ovr)) ? Number(r.ovr) : BB.ovr(r);
+			const pos = r.pos || BB.pos(r);
+			t.roster.push({ ovr, group: GROUP[pos] || "wing" });
+		}
+		const groups = ["guard", "wing", "big"];
+		for (const t of teams) {
+			t.ovr = teamRating(t.roster.map((x) => x.ovr));
+			t.depth = {};
+			for (const g of groups) {
+				const top = t.roster.filter((x) => x.group === g).map((x) => x.ovr)
+					.sort((x, y) => y - x).slice(0, 2);
+				while (top.length < 2) top.push(30);
+				t.depth[g] = (top[0] + top[1]) / 2;
+			}
+		}
+		for (const g of groups) {
+			const vals = teams.map((t) => t.depth[g]);
+			const mean = vals.reduce((x, y) => x + y, 0) / vals.length;
+			const sd = Math.sqrt(vals.reduce((x, y) => x + (y - mean) * (y - mean), 0) / vals.length) || 1;
+			for (const t of teams) t.need = Object.assign(t.need || {}, { [g]: clamp(0.5 + (mean - t.depth[g]) / sd * 0.3, 0, 1) });
+		}
+		for (const t of teams) t.needOf = groups.slice().sort((x, y) => t.need[y] - t.need[x])[0];
+
+		// Worst first: this season's record when games have been played, else rating.
+		const recs = new Map();
+		for (const ts of league.teamSeasons || []) {
+			if (!ts || Number(ts.season) !== Number(season)) continue;
+			const g = (Number(ts.won) || 0) + (Number(ts.lost) || 0) + (Number(ts.tied) || 0);
+			if (g > 0) recs.set(Number(ts.tid), ((Number(ts.won) || 0) + 0.5 * (Number(ts.tied) || 0)) / g);
+		}
+		const usesRecord = recs.size >= teams.length / 2;
+		const worse = (x, y) => (usesRecord
+			? (recs.has(x.tid) ? recs.get(x.tid) : 0.5) - (recs.has(y.tid) ? recs.get(y.tid) : 0.5) : 0) ||
+			x.ovr - y.ovr || x.tid - y.tid;
+		const ranked = teams.slice().sort(worse);
+		ranked.forEach((t, i) => {
+			t.strength = i;
+			t.plan = clamp(i / (ranked.length - 1), 0, 1);
+			t.planLabel = t.plan < 0.35 ? "rebuilding" : t.plan > 0.7 ? "contending" : "retooling";
+		});
+
+		// The slots.
+		const picks = (league.draftPicks || []).filter((dp) => dp && Number(dp.season) === Number(season) &&
+			byTid.has(Number(dp.tid)) && byTid.has(Number(dp.originalTid)));
+		const rng = new Rng("mock-league-lottery|" + (seed || ""));
+		const lotteryOrder = () => {
+			const pool = ranked.slice(0, 7);
+			const weights = [14, 13.4, 12.7, 12, 10.5, 9, 7.5];
+			const w = new Map(pool.map((t, i) => [t, weights[i]]));
+			const out = [];
+			for (let k = 0; k < 4 && pool.length; k++) {
+				const total = pool.reduce((x, t) => x + w.get(t), 0);
+				let r = rng.random() * total;
+				let at = 0;
+				while (at < pool.length - 1 && r > w.get(pool[at])) { r -= w.get(pool[at]); at++; }
+				out.push(pool.splice(at, 1)[0]);
+			}
+			return out.concat(pool, ranked.slice(7));
+		};
+		let slots;
+		let source;
+		if (picks.length && picks.every((dp) => Number(dp.pick) > 0)) {
+			slots = picks.slice().sort((x, y) => Number(x.round) - Number(y.round) || Number(x.pick) - Number(y.pick))
+				.map((dp) => ({ round: Number(dp.round), team: byTid.get(Number(dp.tid)),
+					via: Number(dp.tid) !== Number(dp.originalTid) ? byTid.get(Number(dp.originalTid)) : null }));
+			source = "the league's draft order";
+		} else {
+			const first = lotteryOrder();
+			const rounds = picks.length
+				? Math.max.apply(null, picks.map((dp) => Number(dp.round) || 1)) : 2;
+			slots = [];
+			for (let round = 1; round <= rounds; round++) {
+				const order = round === 1 ? first : ranked;
+				for (const orig of order) {
+					let owner = orig;
+					if (picks.length) {
+						const dp = picks.find((x) => Number(x.round) === round && Number(x.originalTid) === orig.tid);
+						if (!dp) continue;   // the pick does not exist (forfeited, or never made)
+						owner = byTid.get(Number(dp.tid));
+					}
+					slots.push({ round, team: owner, via: owner !== orig ? orig : null });
+				}
+			}
+			source = (picks.length ? "the league's picks" : "one pick per team a round") +
+				", ordered worst first by " + (usesRecord ? "this season's record" : "team rating") +
+				", with a lottery for the top four";
+		}
+		return { teams: ranked, slots, source, league: true };
+	}
+
+	function depthText(t) {
+		return t && t.depth ? "G " + Math.round(t.depth.guard) + " · W " + Math.round(t.depth.wing) +
+			" · B " + Math.round(t.depth.big) : "";
+	}
+
 	function mockDraft(res, opts) {
 		opts = opts || {};
 		const rounds = opts.rounds || 2;
 		const seed = (res && res.seed) || "";
 		const projections = opts.projections || projectClass(res);
-		const order = teamsFor(seed);
+		let plan = opts.league ? leagueDraft(opts.league, res && res.season, seed) : null;
+		if (!plan) {
+			const order = teamsFor(seed);
+			const slots = [];
+			for (let round = 1; round <= rounds; round++) {
+				for (const team of order) slots.push({ round, team, via: null });
+			}
+			plan = { teams: order, slots, source: "thirty invented teams", league: false };
+		}
 		const pool = ((res && res.board) || (res && res.players) || []).slice();
 		const picks = [];
 		let n = 0;
-		for (let round = 1; round <= rounds; round++) {
-			for (const team of order) {
-				if (!pool.length) break;
-				n++;
-				const rng = new Rng("mock-pick|" + seed + "|" + n);
-				let best = null;
-				for (const p of pool) {
-					const v = valueTo(team, projections[p.key], p, rng.child(p.key));
-					if (!best || v.value > best.v.value) best = { p, v };
-				}
-				pool.splice(pool.indexOf(best.p), 1);
-				const consensus = best.p.boardRank || null;
-				const reach = consensus ? consensus - n : 0;
-				const why = best.v.fit >= 3 && team.needOf === (GROUP[best.p.newPos] || "wing")
-					? "fills the need at " + team.needOf
-					: team.plan < 0.35 && best.v.ceiling >= best.v.ready + 10 ? "bets on the ceiling"
-					: team.plan > 0.7 ? "ready to play now"
-					: "best available";
-				picks.push({
-					pick: n, round, inRound: ((n - 1) % order.length) + 1,
-					team: team.name, teamPlan: team.planLabel, teamNeed: team.needOf,
-					key: best.p.key, name: best.p.name, pos: best.p.newPos,
-					ovr: best.p.newOvr, pot: best.p.newPot, consensus, reach,
-					why: reach >= 8 ? why + " (a reach: No. " + consensus + " on the board)"
-						: reach <= -8 ? why + " (a steal: No. " + consensus + " on the board)" : why,
-					projection: projections[best.p.key] || null,
-				});
+		const inRound = {};
+		for (const slot of plan.slots) {
+			if (!pool.length) break;
+			const team = slot.team;
+			n++;
+			inRound[slot.round] = (inRound[slot.round] || 0) + 1;
+			const rng = new Rng("mock-pick|" + seed + "|" + n);
+			let best = null;
+			for (const p of pool) {
+				const v = valueTo(team, projections[p.key], p, rng.child(p.key));
+				if (!best || v.value > best.v.value) best = { p, v };
 			}
+			pool.splice(pool.indexOf(best.p), 1);
+			const consensus = best.p.boardRank || null;
+			const reach = consensus ? consensus - n : 0;
+			const why = best.v.fit >= 3 && team.needOf === (GROUP[best.p.newPos] || "wing")
+				? "fills the need at " + team.needOf
+				: team.plan < 0.35 && best.v.ceiling >= best.v.ready + 10 ? "bets on the ceiling"
+				: team.plan > 0.7 ? "ready to play now"
+				: "best available";
+			picks.push({
+				pick: n, round: slot.round, inRound: inRound[slot.round],
+				team: team.name, via: slot.via ? slot.via.name : null,
+				teamPlan: team.planLabel, teamNeed: team.needOf,
+				teamOvr: Number.isFinite(team.ovr) ? team.ovr : null, teamDepth: depthText(team),
+				key: best.p.key, name: best.p.name, pos: best.p.newPos,
+				ovr: best.p.newOvr, pot: best.p.newPot, consensus, reach,
+				why: reach >= 8 ? why + " (a reach: No. " + consensus + " on the board)"
+					: reach <= -8 ? why + " (a steal: No. " + consensus + " on the board)" : why,
+				projection: projections[best.p.key] || null,
+			});
 		}
-		return { teams: order.map((t) => ({ name: t.name, plan: t.planLabel, need: t.needOf })),
-			picks, undrafted: pool.map((p) => p.key) };
+		return {
+			teams: plan.teams.map((t) => ({ name: t.name, plan: t.planLabel, need: t.needOf,
+				ovr: Number.isFinite(t.ovr) ? t.ovr : null, depth: depthText(t) })),
+			picks, undrafted: pool.map((p) => p.key), source: plan.source, fromLeague: plan.league,
+		};
 	}
 
-	global.Pro = { project, projectClass, mockDraft, teamsFor, draftAge, VERDICTS, REPLACEMENT };
+	global.Pro = { project, projectClass, mockDraft, teamsFor, leagueDraft, teamRating, draftAge,
+		VERDICTS, REPLACEMENT };
 })(typeof window !== "undefined" ? window : self);
