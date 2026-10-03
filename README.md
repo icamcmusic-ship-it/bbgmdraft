@@ -8,6 +8,27 @@ Open `index.html` in any browser. Nothing is uploaded and there is no build step
 
 ---
 
+## From the command line
+
+The same engine, without the browser (Node 20 or newer; nothing to install):
+
+```
+node bin/bbgmdraft.js run   class.json --seed demo --notes short --stats --awards
+node bin/bbgmdraft.js batch class.json -n 50 --set pace=72 --csv > batch.csv
+node bin/bbgmdraft.js check class.json
+node bin/bbgmdraft.js settings            # every setting, its default and range
+```
+
+`run` writes `class_customized.json` beside the input (or wherever `--out`
+says; `-` is stdout) and prints the seed and the top five. It takes a draft
+class or a league export (`--year` picks the class of a league), `.json` or
+`.json.gz`, and a preset (`--preset`), any setting (`--set key=value`) and the
+export options the page's dialog has (`--stats --prior --highs --awards`).
+Because the engine is deterministic, the same file, seed and settings give the
+page's class byte for byte, and `tools/tests/cli.js` checks that against the
+engine itself. Experimental: the flags may change. `node bin/bbgmdraft.js help`
+lists them all.
+
 ## What it does
 
 **1. Fills in the blank colleges.** Every prospect whose college is `""` (shown as

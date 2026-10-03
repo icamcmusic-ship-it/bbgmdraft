@@ -101,7 +101,7 @@ module.exports = [
 		rules,
 	},
 	{
-		files: ["tools/**/*.js", "eslint.config.js"],
+		files: ["tools/**/*.js", "bin/**/*.js", "eslint.config.js"],
 		ignores: ["tools/uismoke.js"],
 		languageOptions: { ecmaVersion: 2022, sourceType: "commonjs",
 			globals: Object.assign({}, nodeGlobals, { window: "writable" }) },

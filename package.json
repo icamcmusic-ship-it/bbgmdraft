@@ -16,6 +16,10 @@
     "universe": "node tools/universe.js",
     "ui": "node tools/uismoke.js",
     "bench": "node tools/bench.js 2",
-    "lint": "npx --yes eslint@9 ."
+    "lint": "npx --yes eslint@9 .",
+    "cli": "node bin/bbgmdraft.js"
+  },
+  "bin": {
+    "bbgmdraft": "bin/bbgmdraft.js"
   }
 }
