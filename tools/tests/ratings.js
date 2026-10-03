@@ -267,7 +267,6 @@ module.exports = function (ok, V) {
 	{
 		const lf = V.realisticClass(13, 12);
 		const first = lf.players[0];
-		const r = first.ratings[first.ratings.length - 1];
 		const pin = {};
 		for (const k of BB.RATING_KEYS) if (k !== "hgt") pin[k] = 20;
 		const cfg = C.make({ seed: "lk", ovrMode: "curve" });

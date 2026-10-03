@@ -887,7 +887,6 @@ async function gotoProspects(page) {
 
 		// 6. Undo history: jump back two steps; redo walks forward again.
 		await page.evaluate(() => {
-			const A = window.App;
 			document.getElementById("seed").value = "";
 		});
 		await page.locator("#btnReroll").click();

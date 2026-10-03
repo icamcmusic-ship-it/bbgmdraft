@@ -1395,7 +1395,6 @@ console.log("\nEarlier seasons");
 	   sophomore seasons and the comparison below is between two means. */
 	const runs = [4, 5, 6].map((i) => global.Engine.run(V.realisticClass(i, 70),
 		global.Config.make({ seed: "prior" + i })));
-	const res = runs[0];
 	const everyone = runs.reduce((a, r) => a.concat(r.players), []);
 	const by = { Freshman: [], Sophomore: [], Junior: [], Senior: [] };
 	let simulated = 0;

@@ -29,6 +29,11 @@ jobs:
       # (tools/test-parallel.js runs the inline part and each area file as its
       # own process). That file stays the serial reference: a CI run takes
       # minutes instead of the best part of half an hour.
+      # A name that does not exist, a key written twice, a dead variable: the
+      # defects a 90,000-line codebase with no compiler finds only when a path
+      # runs. eslint.config.js is small on purpose and needs no plugin.
+      - name: Lint
+        run: npx --yes eslint@9 .
       - name: Regression tests
         run: node tools/test-parallel.js
       - name: Calibration bands

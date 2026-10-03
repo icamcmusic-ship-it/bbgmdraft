@@ -1307,6 +1307,7 @@ node tools/validate.js 20 --fixture=realistic   # the default fixture only, twic
 node tools/test-parallel.js [--fast]       # the regression suite across every core (about 6 min; --fast about 3)
 node tools/test.js [--update-golden]       # the same checks, serially (the reference; about 20 min)
 node tools/run-area.js <area>              # one tools/tests/<area>.js on its own
+npx eslint@9 .                             # lint: undefined names, duplicate keys, dead variables (eslint.config.js)
 node tools/rolefit.js [nSeeds]             # re-fit the derived role-usage model
 node tools/universe.js                     # universe determinism / idempotency / round trip
 node tools/bench.js [reps] [--md|--json]   # staged-pipeline timings
