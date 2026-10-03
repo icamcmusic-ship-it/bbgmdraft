@@ -6412,6 +6412,7 @@
 		["board", "Draft board", "Class"],
 		["compare", "Compare", "Class"],
 		["distribution", "Distributions", "Class"],
+		["mock", "Mock draft", "Class"],
 		["teams", "AP Poll & Teams", "Season"],
 		["bracket", "March Madness", "Season"],
 		["awards", "Awards & leaders", "Season"],

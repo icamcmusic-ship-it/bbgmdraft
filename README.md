@@ -8,6 +8,25 @@ Open `index.html` in any browser. Nothing is uploaded and there is no build step
 
 ---
 
+## Mock draft and pro projections
+
+The **Mock draft** tab drafts the class with thirty invented teams. Each team
+has a plan (rebuilding teams take ceiling, contenders take players ready now,
+set by its place in the order, with a lottery for the top four) and a need at
+guard, wing or big; every pick is the player worth most to that team — his
+projected value blended by the plan, plus positional fit, minus bust risk for
+teams that cannot afford one. Reaches and steals against the board are named.
+
+Every prospect also gets a **pro projection** (on his player page and in the
+mock): 41 seeded careers in which he closes the gap to his potential (fast at
+19-22, slowly by 26, around an uncertain ceiling that is wider the younger he
+is), declines from 29, and leaves the league when he stops being good enough
+or loses a fringe roster spot. It reports the median peak with its 10th-90th
+percentile range, career length, star and bust chances, and a verdict (star,
+starter, rotation player, fringe player, bust risk). Both are derived from the
+finished class and change nothing in it or in the export (`js/pro.js`;
+`tools/tests/pro.js`).
+
 ## From the command line
 
 The same engine, without the browser (Node 20 or newer; nothing to install):
@@ -16,6 +35,7 @@ The same engine, without the browser (Node 20 or newer; nothing to install):
 node bin/bbgmdraft.js run   class.json --seed demo --notes short --stats --awards
 node bin/bbgmdraft.js batch class.json -n 50 --set pace=72 --csv > batch.csv
 node bin/bbgmdraft.js universe 2025.json 2026.json 2027.json --seed demo --out world.json
+node bin/bbgmdraft.js mock class.json --seed demo   # two-round mock draft with pro projections
 node bin/bbgmdraft.js check class.json
 node bin/bbgmdraft.js settings            # every setting, its default and range
 ```

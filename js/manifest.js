@@ -30,7 +30,7 @@
 		["sample", "node"], ["batch", "all"],
 		// The face drawer and its vendored library: DOM and SVG, never Node.
 		["vendor/facesjs", "page"], ["faces", "page"],
-		["news", "all"], ["universe", "all"],
+		["news", "all"], ["universe", "all"], ["pro", "node"],
 		/* These build text and files from result objects and touch no DOM, so the
 		   harness loads them to test what they write; the worker never needs them. */
 		["almanac", "node"], ["replay", "node"], ["site", "node"], ["replaymeta", "node"],

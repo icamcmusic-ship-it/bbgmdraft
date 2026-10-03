@@ -9,6 +9,7 @@
      bbgmdraft run   <file> [options]   generate a class and write the customized file
      bbgmdraft batch <file> [options]   generate many and print the distribution
      bbgmdraft universe <file>... [options]  chain several seasons into one world
+     bbgmdraft mock  <file> [options]   a two-round mock draft with pro projections
      bbgmdraft check <file>             validate a file and list what is wrong with it
      bbgmdraft settings [name]          the settings, their defaults and ranges; the presets
      bbgmdraft help
@@ -320,6 +321,31 @@ function cmdUniverse(args) {
 	if (u.broken) process.exitCode = 1;
 }
 
+/* The mock draft and the pro projections (js/pro.js), derived from the class
+   the same file, seed and settings make. Nothing is written but the table. */
+function cmdMock(args) {
+	const { data } = readClassFile(args.positional[1], args.flags["--year"]);
+	const res = global.Engine.run(data, buildConfig(args));
+	const projections = global.Pro.projectClass(res);
+	const mock = global.Pro.mockDraft(res, { projections });
+	if (args.flags["--json"]) {
+		process.stdout.write(JSON.stringify({ seed: res.seed, engineRev: global.Universe.ENGINE_REV,
+			teams: mock.teams, picks: mock.picks, undrafted: mock.undrafted }, null, 2) + "\n");
+		return;
+	}
+	const rows = mock.picks.map((k) => [k.pick, k.team, k.name, k.pos, k.ovr + "/" + k.pot,
+		k.consensus || "", k.projection ? k.projection.peak + " (" + k.projection.peakLow + "-" +
+			k.projection.peakHigh + ")" : "", k.projection ? k.projection.verdict : "", k.why]);
+	const heads = ["pick", "team", "player", "pos", "ovr/pot", "board", "peak", "verdict", "why"];
+	if (args.flags["--csv"]) {
+		process.stdout.write(heads.join(",") + "\n" + rows.map((r) => r.map(csvCell).join(",")).join("\n") + "\n");
+	} else {
+		process.stdout.write(table([heads].concat(rows)) + "\n");
+		say(args, "seed " + res.seed + " · " + mock.picks.length + " picks · " +
+			mock.undrafted.length + " undrafted");
+	}
+}
+
 function cmdCheck(args) {
 	const { data, league } = readClassFile(args.positional[1], args.flags["--year"]);
 	let v;
@@ -361,6 +387,7 @@ const HELP = `BBGM Draft Class Workshop (command line, experimental)
   bbgmdraft run   <file> [options]    write a customized class file
   bbgmdraft batch <file> [options]    run many seeds, print a table
   bbgmdraft universe <file>... [opts] run the classes as one continuous world
+  bbgmdraft mock  <file> [options]    mock draft and pro career projections
   bbgmdraft check <file>              validate a file
   bbgmdraft settings [name|presets]   settings, defaults, ranges; presets
 
@@ -410,6 +437,7 @@ function main() {
 		if (cmd === "run") cmdRun(args);
 		else if (cmd === "batch") cmdBatch(args);
 		else if (cmd === "universe") cmdUniverse(args);
+		else if (cmd === "mock") cmdMock(args);
 		else if (cmd === "check") cmdCheck(args);
 		else if (cmd === "settings") cmdSettings(args);
 		else throw new Error("unknown command \"" + cmd + "\" (try: bbgmdraft help)");

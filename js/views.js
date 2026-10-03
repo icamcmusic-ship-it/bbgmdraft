@@ -5443,6 +5443,124 @@
 		view.appendChild(cards);
 	}
 
+	/* ------------------------------------------------- pro careers, mock draft */
+
+	/* Computed once per result: 41 careers a prospect is a few milliseconds a
+	   class, but the board, the player page and the mock all read it. */
+	const proCache = new WeakMap();
+	function proFor(res) {
+		let c = proCache.get(res);
+		if (!c && global.Pro) {
+			const projections = global.Pro.projectClass(res);
+			c = { projections, mock: global.Pro.mockDraft(res, { projections }) };
+			proCache.set(res, c);
+		}
+		return c || { projections: {}, mock: { picks: [], teams: [] } };
+	}
+
+	function proRange(x) {
+		return x ? x.peak + " (" + x.peakLow + "-" + x.peakHigh + ")" : "—";
+	}
+
+	function viewMock(view, res) {
+		const { mock } = proFor(res);
+		view.appendChild(el("p", "legendline",
+			"Thirty invented teams draft this class. Each has a plan (rebuilding teams " +
+			"take ceiling, contenders take players ready now) and a need at guard, wing " +
+			"or big; each pick is the player worth most to that team. “Peak” is the " +
+			"median projected NBA overall, with the 10th-90th percentile range, from " +
+			"41 simulated careers. Derived from the class: none of this changes the " +
+			"export. The board's own order is the consensus."));
+		const bar = el("div", "filters");
+		const copy = el("button", null, "Copy as text");
+		copy.addEventListener("click", () => {
+			A().copyText(mock.picks.map((k) => k.pick + ". " + k.team + ": " + k.name +
+				" (" + k.pos + ", " + (k.projection ? k.projection.verdict : "") + ") — " + k.why)
+				.join("\n"), copy, "Copy as text", "the mock draft");
+		});
+		bar.appendChild(copy);
+		const md = el("button", null, "Copy as markdown");
+		md.addEventListener("click", () => {
+			A().copyText(markdownTable(["Pick", "Team", "Player", "Pos", "Ovr/Pot", "Board",
+				"Peak", "Verdict", "Why"], mock.picks.map((k) => [k.pick, k.team, k.name, k.pos,
+				k.ovr + "/" + k.pot, k.consensus || "", proRange(k.projection),
+				k.projection ? k.projection.verdict : "", k.why])), md, "Copy as markdown",
+				"the mock draft as markdown");
+		});
+		bar.appendChild(md);
+		view.appendChild(bar);
+
+		const table = el("table", "mocktable");
+		const thead = el("thead");
+		const hr = el("tr");
+		for (const h of ["Pick", "Team", "Player", "Pos", "Ovr", "Pot", "Board", "Peak",
+			"Career", "Verdict", "Why"]) hr.appendChild(el("th", null, h));
+		thead.appendChild(hr);
+		table.appendChild(thead);
+		const tbody = el("tbody");
+		let round = 0;
+		for (const k of mock.picks) {
+			if (k.round !== round) {
+				round = k.round;
+				const rr = el("tr", "tierbreak");
+				const td = el("td", null, "Round " + round);
+				td.colSpan = 11;
+				rr.appendChild(td);
+				tbody.appendChild(rr);
+			}
+			const tr = el("tr");
+			const x = k.projection;
+			tr.appendChild(el("td", "num", String(k.pick)));
+			const team = el("td", null, k.team);
+			team.title = k.teamPlan + "; biggest need: " + k.teamNeed;
+			tr.appendChild(team);
+			const who = el("td");
+			who.appendChild(playerLink(k.name, k.key));
+			tr.appendChild(who);
+			tr.appendChild(el("td", null, k.pos));
+			tr.appendChild(el("td", "num", String(k.ovr)));
+			tr.appendChild(el("td", "num", String(k.pot)));
+			const board = el("td", "num" + (k.reach >= 8 ? " down" : k.reach <= -8 ? " up" : ""),
+				k.consensus ? String(k.consensus) : "—");
+			tr.appendChild(board);
+			tr.appendChild(el("td", "num", proRange(x)));
+			tr.appendChild(el("td", "num", x ? x.years + " yrs" : "—"));
+			tr.appendChild(el("td", null, x ? x.verdict : "—"));
+			tr.appendChild(el("td", "hint", k.why));
+			tbody.appendChild(tr);
+		}
+		table.appendChild(tbody);
+		const wrap = el("div", "tablewrap");
+		wrap.appendChild(table);
+		view.appendChild(wrap);
+		if (mock.undrafted.length) {
+			view.appendChild(el("p", "hint", mock.undrafted.length + " prospects go undrafted in this mock."));
+		}
+	}
+
+	/* The projection block on a player page. */
+	function proBlock(res, p) {
+		const { projections, mock } = proFor(res);
+		const x = projections[p.key];
+		if (!x) return null;
+		const box = el("div", "problock");
+		box.appendChild(el("h4", null, "Pro projection"));
+		const pick = mock.picks.find((k) => k.key === p.key);
+		box.appendChild(el("p", null,
+			global.Text.capitalize(global.Text.withArticle(x.verdict)) + ": a median peak of " + x.peak +
+			" overall (" + x.peakLow + "-" + x.peakHigh + " in nine careers of ten) around age " +
+			x.peakAge + ", and " + x.years + " seasons in the league (" + x.yearsLow + "-" +
+			x.yearsHigh + "). " + Math.round(x.starChance * 100) + "% chance of a star's peak, " +
+			Math.round(x.bustChance * 100) + "% of a bust." +
+			(pick ? " Mock draft: No. " + pick.pick + " to the " + pick.team + " — " + pick.why + "."
+				: " Undrafted in the mock draft.")));
+		if (x.curve.length) {
+			box.appendChild(el("p", "hint", "A median career: " + x.curve.slice(0, 16)
+				.map((s) => s.age + ": " + s.ovr).join(" · ")));
+		}
+		return box;
+	}
+
 	/* ---------------------------------------------------------------- notes */
 
 	function viewNotes(view, res) {
@@ -6113,6 +6231,10 @@
 				.map((a) => a.season + " " + a.award).join("; "));
 		}
 		box.appendChild(dl);
+		{
+			const pb = proBlock(res, p);
+			if (pb) box.appendChild(pb);
+		}
 
 		/* Earlier seasons, when they were simulated — and the later ones, when
 		   the world played them. `laterSeasons` is a returner's career after
@@ -7371,7 +7493,7 @@
 	global.Views = {
 		players: viewPlayers, teams: viewTeams, bracket: viewBracket, bulkBar,
 		awards: viewAwards, board: viewDraft, distribution: viewDistribution, tournamentCard,
-		notes: viewNotes, gamelog: viewGameLog, compare: viewCompare,
+		notes: viewNotes, gamelog: viewGameLog, compare: viewCompare, mock: viewMock, proFor,
 		news: viewNews, universe: viewUniverse, playerLink, teamLink, playerPage,
 		gamePage, gameKeyFor, quadBar, pollSpark, ballotCards,
 		COLUMNS, STAT_MODES, PCT_KEYS, DERIVED, derived, cellValue, statValue,

@@ -684,8 +684,8 @@ async function gotoProspects(page) {
 		await page.locator("body").click({ position: { x: 5, y: 5 } });
 
 		// A number key is a tab. 1 is the Draft board, which is where the
-		// tool opens; 4 is the poll, which is somewhere else.
-		await page.keyboard.press("4");
+		// tool opens; 5 is the poll, which is somewhere else.
+		await page.keyboard.press("5");
 		await page.waitForTimeout(250);
 		ok("a number key jumps to a tab",
 			(await page.locator("#tabs button.active").first().textContent())
@@ -3696,6 +3696,23 @@ async function gotoProspects(page) {
 		});
 		await page.waitForTimeout(800);
 		fs.rmSync(dirU, { recursive: true, force: true });
+	}
+
+	/* The mock draft tab and the projection on a player page. */
+	{
+		console.log("\nMock draft and pro projections");
+		await page.locator("#tabs button", { hasText: "Mock draft" }).first().click();
+		await page.waitForTimeout(400);
+		const rows = await page.locator("table.mocktable tbody tr:not(.tierbreak)").count();
+		const classSize = await page.evaluate(() =>
+			window.App.state.results[window.App.state.active].players.length);
+		ok("the mock draft has two rounds of thirty picks (or the whole class, if smaller)",
+			rows === Math.min(60, classSize), rows + " of " + classSize);
+		await page.locator("table.mocktable .linky").first().click();
+		await page.waitForTimeout(300);
+		const text = (await page.locator(".problock").first().textContent()) || "";
+		ok("the player page carries a pro projection and his mock-draft slot",
+			/median peak of \d+/.test(text) && /Mock draft: No\. 1 /.test(text), text.slice(0, 160));
 	}
 
 	/* The bug report: what it carries and what it does not. */
