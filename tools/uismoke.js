@@ -684,8 +684,8 @@ async function gotoProspects(page) {
 		await page.locator("body").click({ position: { x: 5, y: 5 } });
 
 		// A number key is a tab. 1 is the Draft board, which is where the
-		// tool opens; 4 is the poll, which is somewhere else.
-		await page.keyboard.press("4");
+		// tool opens; 5 is the poll, which is somewhere else.
+		await page.keyboard.press("5");
 		await page.waitForTimeout(250);
 		ok("a number key jumps to a tab",
 			(await page.locator("#tabs button.active").first().textContent())
@@ -887,7 +887,6 @@ async function gotoProspects(page) {
 
 		// 6. Undo history: jump back two steps; redo walks forward again.
 		await page.evaluate(() => {
-			const A = window.App;
 			document.getElementById("seed").value = "";
 		});
 		await page.locator("#btnReroll").click();
@@ -3530,6 +3529,239 @@ async function gotoProspects(page) {
 		ok("the web manifest is served", (await page.evaluate(() => fetch("manifest.webmanifest").then((r) => r.ok))) === true);
 		ok("the service worker is not registered under automation",
 			(await page.evaluate(() => navigator.serviceWorker.getRegistrations().then((r) => r.length))) === 0);
+	}
+
+	/* The note template, in the page. These are the ways a ticked box and a
+	   written note came apart: every box off wrote the defaults, and in
+	   universe mode a changed template changed nothing. And the user's own
+	   star stays with the class it was given on. */
+	{
+		console.log("\nNote template and the user's marks");
+		const noteOf = () => page.evaluate(() => {
+			const r = window.App.state.results[window.App.state.active];
+			return r ? r.players.map((p) => p.note || "") : [];
+		});
+		const tickAll = (on, only) => page.evaluate(({ on, only }) => {
+			for (const cb of document.querySelectorAll("#noteLines input")) {
+				if (only && cb.value !== only) continue;
+				if (cb.checked !== on) {
+					cb.checked = on;
+					cb.dispatchEvent(new Event("change", { bubbles: true }));
+				}
+			}
+		}, { on, only });
+		await page.locator("#tabs button", { hasText: "Draft board" }).first().click();
+		await tickAll(false);
+		await page.waitForTimeout(1500);
+		ok("every box unticked leaves them unticked",
+			(await page.locator("#noteLines input:checked").count()) === 0);
+		ok("...and writes no notes", (await noteOf()).every((n) => n === ""));
+		await page.locator("#tabs button", { hasText: "Player notes" }).first().click();
+		await page.waitForTimeout(300);
+		ok("...and the Notes tab says so instead of showing blank cards",
+			(await page.locator("#view .card .note").count()) === 0 &&
+			/note template is off/.test(await page.locator("#view").textContent()));
+		await tickAll(true, "summary");
+		await page.waitForTimeout(1500);
+		ok("one box ticked writes just that line",
+			(await noteOf()).every((n) => n.split("\n").length === 1 && n.length > 10));
+		await tickAll(true);
+		await page.waitForTimeout(1500);
+		ok("every box ticked writes a long note", (await noteOf()).some((n) => n.split("\n").length > 8));
+		/* The presets above the boxes. The group is a collapsed <details>. */
+		await page.evaluate(() => { document.getElementById("grp-notes").open = true; });
+		await page.locator(".notepresets button", { hasText: "Short" }).click();
+		await page.waitForTimeout(1200);
+		ok("the Short preset ticks summary, team and stats",
+			(await page.evaluate(() => Array.from(document.querySelectorAll("#noteLines input:checked"))
+				.map((c) => c.value).sort().join())) === "stats,summary,team");
+		await page.locator(".notepresets button", { hasText: "Standard" }).click();
+		await page.waitForTimeout(1200);
+		ok("the Standard preset restores the default template",
+			(await page.locator("#noteLines input:checked").count()) === 7);
+
+		// A star belongs to the class it was given on.
+		await page.locator("#tabs button", { hasText: "Draft board" }).first().click();
+		await page.waitForSelector(".boardfilters", { timeout: 5000 });
+		// The board block above may have left a star on this class already.
+		if ((await page.locator("table.boardtable .watchstar.on").count()) === 0) {
+			await page.locator("table.boardtable .watchstar").first().click();
+			await page.waitForTimeout(200);
+		}
+		ok("the star is on before the class changes",
+			(await page.locator("table.boardtable .watchstar.on").count()) === 1);
+		const other = path.join(require("os").tmpdir(), "bbgm-uismoke-class-b.json");
+		/* A different class: the fingerprint reads the count, the season and the
+		   first and last few names, and two synthetic classes draw the same
+		   names, so the season is what tells them apart here. */
+		const otherClass = V.syntheticClass(5, 70);
+		otherClass.startingSeason = (otherClass.startingSeason || 2026) + 1;
+		fs.writeFileSync(other, JSON.stringify(otherClass));
+		await page.setInputFiles("#file", other);
+		await page.waitForFunction(() => window.App.state.results.some(Boolean), null, { timeout: 30000 });
+		await page.waitForTimeout(400);
+		await page.locator("#tabs button", { hasText: "Draft board" }).first().click();
+		await page.waitForSelector(".boardfilters", { timeout: 5000 });
+		ok("a star given on one class is not on the same pid of another",
+			(await page.locator("table.boardtable .watchstar.on").count()) === 0);
+		await page.setInputFiles("#file", fixture);
+		await page.waitForFunction(() => window.App.state.results.some(Boolean), null, { timeout: 30000 });
+		await page.waitForTimeout(400);
+		await page.locator("#tabs button", { hasText: "Draft board" }).first().click();
+		await page.waitForSelector(".boardfilters", { timeout: 5000 });
+		ok("...and is still there when the first class comes back",
+			(await page.locator("table.boardtable .watchstar.on").count()) === 1);
+
+		// Universe mode: the template changes the notes.
+		const a = path.join(require("os").tmpdir(), "bbgm-uismoke-uni-a.json");
+		const b = path.join(require("os").tmpdir(), "bbgm-uismoke-uni-b.json");
+		fs.writeFileSync(a, JSON.stringify(V.syntheticClass(2, 40)));
+		fs.writeFileSync(b, JSON.stringify(V.syntheticClass(3, 40)));
+		await page.setInputFiles("#file", [a, b]);
+		await page.waitForFunction(() => window.App.state.files.length === 2, null, { timeout: 30000 });
+		await page.evaluate(() => {
+			const u = document.getElementById("universe");
+			u.checked = true;
+			u.dispatchEvent(new Event("change", { bubbles: true }));
+		});
+		await page.waitForFunction(() => {
+			const u = window.App.state.universe;
+			return u && !u.running && u.rows && u.rows.length >= 2;
+		}, null, { timeout: 120000 });
+		await page.waitForTimeout(500);
+		const withTraits = (await noteOf()).some((n) => /Scouts note/.test(n));
+		await tickAll(false, "traits");
+		await page.waitForTimeout(2500);
+		ok("universe: unticking the trait line removes it from the notes",
+			withTraits && !(await noteOf()).some((n) => /Scouts note/.test(n)));
+		await page.evaluate(() => {
+			const u = document.getElementById("universe");
+			u.checked = false;
+			u.dispatchEvent(new Event("change", { bubbles: true }));
+		});
+		await page.waitForTimeout(800);
+	}
+
+	/* The command line and the page run the same universe. The page is driven
+	   with three class files, the seed and Universe mode; the executable gets
+	   the same files and seed; the two timelines must agree row for row. */
+	{
+		console.log("\nUniverse: the page and the command line");
+		// Default settings, the way the executable starts: every section above
+		// has moved something.
+		await clearStorage(page);
+		await page.goto(base);
+		const os = require("os");
+		const dirU = fs.mkdtempSync(path.join(os.tmpdir(), "bbgm-uismoke-uni-"));
+		const fileU = [1, 2, 3].map((y) => {
+			const c = V.realisticClass("par" + y, 50);
+			c.startingSeason = 2024 + y;
+			c.players.forEach((p) => { p.draft.year = 2024 + y; p.born.year = 2024 + y - 20; p.pid += y * 100; });
+			const f = path.join(dirU, "u" + y + ".json");
+			fs.writeFileSync(f, JSON.stringify(c));
+			return f;
+		});
+		const cliRun = require("child_process").spawnSync(process.execPath,
+			[path.join(__dirname, "..", "bin", "bbgmdraft.js"), "universe"].concat(fileU,
+				["--seed", "parity", "--json"]), { encoding: "utf8" });
+		const want = JSON.parse(cliRun.stdout || "{\"rows\":[]}").rows
+			.map((r) => [r.season, r.champion, r.runnerUp, r.poy && r.poy.name, r.no1 && r.no1.name, r.seed]);
+		await page.setInputFiles("#file", fileU);
+		await page.waitForFunction(() => window.App.state.files.length === 3, null, { timeout: 30000 });
+		await page.evaluate(() => {
+			const s = document.getElementById("seed");
+			s.value = "parity";
+			s.dispatchEvent(new Event("input", { bubbles: true }));
+			s.dispatchEvent(new Event("change", { bubbles: true }));
+		});
+		await page.waitForTimeout(400);
+		await page.evaluate(() => {
+			const u = document.getElementById("universe");
+			u.checked = true;
+			u.dispatchEvent(new Event("change", { bubbles: true }));
+		});
+		await page.waitForFunction(() => {
+			const u = window.App.state.universe;
+			return u && !u.running && u.rows && u.rows.length >= 3;
+		}, null, { timeout: 120000 });
+		const got = await page.evaluate(() => window.App.state.universe.rows
+			.map((r) => [r.season, r.champion, r.runnerUp, r.poy && r.poy.name, r.no1 && r.no1.name, r.seed]));
+		ok("the command line's timeline is the page's, row for row",
+			want.length === 3 && JSON.stringify(got) === JSON.stringify(want),
+			"cli " + JSON.stringify(want) + "\npage " + JSON.stringify(got));
+		await page.evaluate(() => {
+			const u = document.getElementById("universe");
+			u.checked = false;
+			u.dispatchEvent(new Event("change", { bubbles: true }));
+		});
+		await page.waitForTimeout(800);
+		fs.rmSync(dirU, { recursive: true, force: true });
+	}
+
+	/* The mock draft tab and the projection on a player page. */
+	{
+		console.log("\nMock draft and pro projections");
+		await page.locator("#tabs button", { hasText: "Mock draft" }).first().click();
+		await page.waitForTimeout(400);
+		const rows = await page.locator("table.mocktable tbody tr:not(.tierbreak)").count();
+		const classSize = await page.evaluate(() =>
+			window.App.state.results[window.App.state.active].players.length);
+		ok("the mock draft has two rounds of thirty picks (or the whole class, if smaller)",
+			rows === Math.min(60, classSize), rows + " of " + classSize);
+		await page.locator("table.mocktable .linky").first().click();
+		await page.waitForTimeout(300);
+		const text = (await page.locator(".problock").first().textContent()) || "";
+		ok("the player page carries a pro projection and his mock-draft slot",
+			/median peak of \d+/.test(text) && /Mock draft: No\. 1 /.test(text), text.slice(0, 160));
+
+		// A class from a league export is drafted by that league's teams.
+		const lg = { version: 73, startingSeason: 2027, gameAttributes: { season: 2027 },
+			teams: [["Austin", "Armadillos"], ["Baltimore", "Crabs"], ["Chicago", "Whirlwinds"], ["Denver", "High"]]
+				.map((n, tid) => ({ tid, region: n[0], name: n[1], abbrev: n[0].slice(0, 3).toUpperCase() })),
+			players: [] };
+		let lpid = 0;
+		for (const p of V.realisticClass("ui-lg", 50).players) {
+			lg.players.push(Object.assign({}, p, { pid: lpid++, tid: -2,
+				draft: { year: 2027, round: 0, pick: 0, tid: -1 }, born: { year: 2007, loc: "USA" } }));
+		}
+		V.realisticClass("ui-lg-vets", 48).players.forEach((p, i) => {
+			lg.players.push(Object.assign({}, p, { pid: lpid++, tid: i % 4,
+				draft: { year: 2019, round: 1, pick: 3, tid: i % 4 }, born: { year: 1999, loc: "USA" } }));
+		});
+		const lgFile = path.join(require("os").tmpdir(), "bbgm-uismoke-mock-league.json");
+		fs.writeFileSync(lgFile, JSON.stringify(lg));
+		await page.setInputFiles("#file", lgFile);
+		await page.waitForFunction(() => window.App.state.files.length === 1 &&
+			window.App.state.results.some(Boolean), null, { timeout: 60000 });
+		await page.locator("#tabs button", { hasText: "Mock draft" }).first().click();
+		await page.waitForTimeout(400);
+		const legend = (await page.locator("#view .legendline").first().textContent()) || "";
+		const teamsSeen = await page.locator("table.mocktable tbody tr:not(.tierbreak) td:nth-child(2)").allTextContents();
+		ok("a league export's own teams draft its class, with their rating and depth",
+			/Your league's teams/.test(legend) && teamsSeen.length === 8 &&
+			teamsSeen.every((t) => /Austin|Baltimore|Chicago|Denver/.test(t)) &&
+			(await page.locator("table.mocktable thead th", { hasText: "Depth" }).count()) === 1,
+			legend.slice(0, 80) + " · " + teamsSeen.join(", "));
+	}
+
+	/* The bug report: what it carries and what it does not. */
+	{
+		console.log("\nBug report");
+		const report = await page.evaluate(() => window.App.bugReport());
+		ok("the report names the engine revision, the seed and the browser",
+			/Engine revision: \d+/.test(report) && /Seed: \S+/.test(report) && /Browser: /.test(report));
+		ok("...lists the settings that were moved", /Settings changed from the defaults/.test(report));
+		ok("...and carries no player data",
+			!/ppg|Honors:|Scouts note/.test(report) &&
+			!(await page.evaluate(() => window.App.state.results[window.App.state.active].players
+				.slice(0, 5).some((p) => window.App.bugReport().indexOf(p.name) !== -1))));
+		await page.evaluate(() => { try { null.x; } catch (e) { window.dispatchEvent(new ErrorEvent("error", { error: e, message: e.message })); } });
+		await page.waitForTimeout(200);
+		ok("an uncaught error is kept with its stack for the report",
+			/Last error[\s\S]*Thrown as: [\s\S]*at /.test(await page.evaluate(() => window.App.bugReport())));
+		ok("the error banner offers the report",
+			(await page.locator("#errBanner:not([hidden]) #errReport").count()) === 1);
+		await page.locator("#errClose").click();
 	}
 
 	console.log("\nNo errors");

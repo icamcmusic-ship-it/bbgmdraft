@@ -9,6 +9,16 @@
 (function (global) {
 	"use strict";
 
+	/* Code-unit comparison for tie-breaks that feed the simulation. localeCompare
+	   follows the browser's ICU collation, which differs between engines and
+	   versions, so the same seed could order two tied teams differently on two
+	   machines. */
+	function cmpText(a, b, ci) {
+		a = String(a); b = String(b);
+		if (ci) { a = a.toLowerCase(); b = b.toLowerCase(); }
+		return a < b ? -1 : a > b ? 1 : 0;
+	}
+
 	const { Rng, clamp } = global.BBGMRng;
 	const BB = global.BBGM;
 	const C = global.Colleges;
@@ -416,7 +426,7 @@
 
 	function assignCollege(rng, player, cfg, prospect) {
 		const ds = destinationSettings(cfg);
-		const named = !!(player.college && player.college.trim() !== "");
+		const named = typeof player.college === "string" && player.college.trim() !== "";
 		if (named && ds.mode !== "rewrite") {
 			/* A file this tool wrote carries a prospect abroad's CLUB here
 			   (BBGM prints the field as College and a league name is not a
@@ -656,7 +666,7 @@
 					(!Number.isFinite(Number(last.ovr)) ||
 						!Number.isFinite(Number(last.pot)))) missingOvrPot++;
 			}
-			if (!p.born || !Number.isFinite(Number(p.born.year))) {
+			if (!p.born || num(p.born.year) === undefined) {
 				bad.push(who + " has no born.year");
 			}
 			/* A file without pids used to collapse the entire generator in
@@ -679,6 +689,27 @@
 				bad.slice(0, 4).join("; ") + (bad.length > 4 ? "; …" : ""));
 		}
 		const warnings = [];
+		/* The schema version the file says it is. BBGM migrates on the way in by
+		   it (see LEAGUE_DATABASE_VERSION in js/bbgm.js): at 23 or below it
+		   recomputes every hgt rating from the listed height, and at 32 or
+		   below it rewrites the ratings season and the draft year, so a class
+		   whose ratings this tool solved exactly can arrive different. A version
+		   above the one this tool knows may carry fields it passes through
+		   without understanding. A file with NO version is stamped on export. */
+		{
+			const ver = num(leagueFile.version);
+			if (ver !== undefined && ver <= 32) {
+				warnings.push("This file is schema version " + ver + ", older than 33. " +
+					"Basketball GM runs its old-file migrations when it imports one, " +
+					"which can rewrite every player's height rating and the draft " +
+					"year. Open the class in a current Basketball GM and export it " +
+					"again before working on it here.");
+			} else if (ver !== undefined && ver > BB.LEAGUE_DATABASE_VERSION) {
+				warnings.push("This file is schema version " + ver + "; this tool was " +
+					"written against " + BB.LEAGUE_DATABASE_VERSION + ". Fields added " +
+					"since are passed through untouched, but check the import.");
+			}
+		}
 		if (missingOvrPot) {
 			warnings.push(missingOvrPot + " player" +
 				(missingOvrPot === 1 ? " has" : "s have") +
@@ -732,9 +763,10 @@
 			let odd = 0;
 			const future = [];
 			for (const p of leagueFile.players) {
-				const own = p && p.draft && Number(p.draft.year);
+				const own = p && p.draft && num(p.draft.year);
 				const ref = Number.isFinite(own) ? own : Number(season);
-				const age = ref - Number(p && p.born && p.born.year);
+				const bornYear = p && p.born && num(p.born.year);
+				const age = bornYear === undefined ? NaN : ref - bornYear;
 				if (!Number.isFinite(age)) continue;
 				if (age < 0) {
 					const name = ((p.firstName || "") + " " + (p.lastName || "")).trim();
@@ -1045,6 +1077,11 @@
 	   into arithmetic that produced NaN and exported `ovr: null`. Every
 	   numeric field this tool reads or writes goes through here. */
 	function num(v) {
+		/* Number(null), Number(""), Number("  ") and Number(false) are all 0,
+		   so a null height became a 4'10" 74-rated big and a null tid was
+		   written as team 0. Those are missing values, not zeros. */
+		if (v === null || typeof v === "boolean" ||
+			(typeof v === "string" && v.trim() === "")) return undefined;
 		const n = Number(v);
 		return Number.isFinite(n) ? n : undefined;
 	}
@@ -1455,11 +1492,19 @@
 		   make two classes with the same settings feel different. */
 		const envRng = rng.child("classEnv");
 		const jitteredCfg = Object.assign({}, cfg);
-		jitteredCfg.pace = Math.max(PACE_MIN, cfg.pace + envRng.normal(0, 2.5));
+		/* Jittered INSIDE the band: the floor alone left the top open, so at a
+		   slider of 82 the effective pace ran 78-85 and every consumer clamped
+		   the excess away, which made the realized mean ~81 and left a pace the
+		   effective-settings box could not honestly show. */
+		jitteredCfg.pace = clamp(cfg.pace + envRng.normal(0, 2.5), PACE_MIN, PACE_MAX);
 		jitteredCfg.efficiencyEnv = clamp(
 			(cfg.efficiencyEnv || 0) + envRng.normal(0, 0.6), -3, 3);
-		jitteredCfg.statNoise = Math.max(0,
-			(Number.isFinite(cfg.statNoise) ? cfg.statNoise : 1) + envRng.normal(0, 0.25));
+		/* A stat noise of exactly 0 is "stat lines follow ratings exactly", and
+		   the jitter made it 0.00-0.44. The draw is still taken so the stream
+		   is the same whatever the setting. */
+		const noiseDraw = envRng.normal(0, 0.25);
+		jitteredCfg.statNoise = cfg.statNoise === 0 ? 0 : Math.max(0,
+			(Number.isFinite(cfg.statNoise) ? cfg.statNoise : 1) + noiseDraw);
 
 		state.effectiveCfg = jitteredCfg;
 		/* The builds this class is made of. Drawing the pool before the players
@@ -3861,6 +3906,20 @@
 		const cfg = state.effectiveCfg || state.cfg;
 		const rng = state.rng.child("pot" + variationSalt(state.cfg));
 		const usageRef = archetypeUsageReference(state.players);
+		/* The age each player is judged at: the file's own when it varies, the
+		   one his ROLLED class year implies when it does not (BBGM writes 19
+		   for everyone), and an anomaly's age outright. */
+		const potAgeOf = (p) => state.ageIsInformative || !Number.isFinite(p.age) ||
+			p.ageFromAnomaly ? p.age : ageForClassYear(p.classYear, p.transfer);
+		/* "Age relative to the class" has to be against THE CLASS AS JUDGED.
+		   It was the mean of the FILE's ages (about 19 for a BBGM export) while
+		   each player was judged at his rolled age (19-24), so the term was a
+		   second absolute age slope stacked on the first: class-wide it averaged
+		   -2.0 where a relative term averages 0, and a senior lost four points
+		   of upside twice over. */
+		const judged = state.players.map(potAgeOf).filter(Number.isFinite);
+		const classPotAge = judged.length
+			? judged.reduce((a, b) => a + b, 0) / judged.length : state.classAge;
 		for (const p of state.players) {
 			const ov = p.override || {};
 			const prng = rng.child("pot:" + p.key);
@@ -3878,12 +3937,10 @@
 			/* An anomaly that set the age outright (the 17-year-old
 			   prodigy, the 24-year-old JUCO) is a real age even in a file
 			   whose own ages say nothing — same rule as the export. */
-			const potAge = state.ageIsInformative || !Number.isFinite(p.age) ||
-				p.ageFromAnomaly
-				? p.age : ageForClassYear(p.classYear, p.transfer);
+			const potAge = potAgeOf(p);
 			const factors = RB.potFactors(
 				p.archetype, potAge, p.newRatings,
-				{ hgtInches: p.newHgtInches, weight: p.newWeight }, state.classAge);
+				{ hgtInches: p.newHgtInches, weight: p.newWeight }, classPotAge);
 			factors.role = RB.potFromRole(p.stats, p.classYear, usageRefFor(usageRef, p));
 			factors.bias = bias;
 			factors.noise = prng.normal(0, spread * 0.35);
@@ -4979,7 +5036,11 @@
 			let re;
 			try {
 				re = RB.resolveTo(p.buildCleanBase, ovr, p.archetype,
-					p.origRatings ? p.origRatings.fuzz : 0, p.buildPinned, p.buildCleanBase);
+					p.origRatings ? p.origRatings.fuzz : 0, p.buildPinned, p.buildCleanBase,
+					// The class's rookie caps, as futureRosterFor passes them:
+					// a returner is the man his own file built, not a re-solve
+					// that ignores the ceiling that file put on him.
+					undefined, p.buildCaps || null);
 			} catch (e) {
 				continue;
 			}
@@ -5055,11 +5116,12 @@
 				   skips the build phase would lose the jitter. */
 				const envRng = new Rng(seed).child("classEnv");
 				const j = Object.assign({}, bent);
-				j.pace = Math.max(PACE_MIN, bent.pace + envRng.normal(0, 2.5));
+				j.pace = clamp(bent.pace + envRng.normal(0, 2.5), PACE_MIN, PACE_MAX);
 				j.efficiencyEnv = clamp(
 					(bent.efficiencyEnv || 0) + envRng.normal(0, 0.6), -3, 3);
-				j.statNoise = Math.max(0,
-					(Number.isFinite(bent.statNoise) ? bent.statNoise : 1) + envRng.normal(0, 0.25));
+				const noiseDraw = envRng.normal(0, 0.25);
+				j.statNoise = bent.statNoise === 0 ? 0 : Math.max(0,
+					(Number.isFinite(bent.statNoise) ? bent.statNoise : 1) + noiseDraw);
 				state.effectiveCfg = j;
 			}
 			if (from === 0) {
@@ -5067,9 +5129,21 @@
 				state.seed = seed;
 			}
 			const ran = [];
-			for (let i = from; i < PHASES.length; i++) {
-				PHASES[i].run(state);
-				ran.push(PHASES[i].name);
+			try {
+				for (let i = from; i < PHASES.length; i++) {
+					PHASES[i].run(state);
+					ran.push(PHASES[i].name);
+				}
+			} catch (err) {
+				/* Phases mutate the shared state in place, so a throw halfway
+				   through leaves it part-written for the NEW settings while
+				   `keys` still describes the OLD ones. Undoing the offending
+				   setting then matched every phase key, ran nothing, and
+				   returned the half-written class as if it were the old one.
+				   Discard both, so the next run starts cold. */
+				state = null;
+				keys = null;
+				throw err;
 			}
 			keys = nextKeys;
 			return {
@@ -5705,35 +5779,72 @@
 	/* The scouting note written into the exported file. Which lines appear is
 	   configurable (cfg.noteLines) rather than hardcoded, so the README no
 	   longer has to explain a fixed set of omissions. */
+	/* LISTED IN THE ORDER THEY ARE WRITTEN. buildNote emits lines in this fixed
+	   order whatever order the boxes were ticked in, and the picker used to
+	   list "Where he finished" last although it prints before the season
+	   high, and "Scouting traits" in the middle although it prints fifth. */
 	const NOTE_LINES = [
-		["summary", "One-line scouting summary"],
+		["summary", "One-line summary (who he is, plus whatever is ticked below)"],
 		["team", "School / club, conference, class year"],
 		["path", "How he got here (recruiting, transfer, redshirt)"],
 		["record", "Team record and postseason result"],
-		["stats", "Season stat line"],
-		["shooting", "Shooting splits and TS%"],
-		["advanced", "Usage, rebounds split, fouls"],
-		["defense", "Defensive line (contests, deflections, charges, DRtg)"],
-		["playmaking", "Assisted rate, transition share, plus/minus, close games"],
-		["signature", "Best game of the season"],
-		["highs", "Season highs, 20-point games, streaks"],
-		["march", "Postseason splits"],
-		["injury", "Games missed and why"],
-		["coach", "Who coaches him, and what kind of year the staff is having"],
-		["archetype", "Archetype label"],
 		/* Everything a scout writes down that is not a shape: wingspan, motor,
 		   the off hand, the medical file, whether he wants it late. See
 		   js/traits.js — this line is the trait layer's main surface. */
 		["traits", "Scouting traits (frame, motor, hands, medical)"],
-		["awards", "Honors"],
-		["stock", "Draft stock and mock position"],
+		["stats", "Season stat line"],
+		["shooting", "Shooting splits and TS%"],
+		["advanced", "Usage, rebounds split, fouls"],
+		["defense", "Defensive line (contests, deflections, charges, DRtg)"],
 		/* Where his season places him against the rest of Division I. Every
 		   number on the lines above is a number until something says what it
 		   was worth, and the model already ranked the whole field to hand out
 		   awards. See rankAgainstField in js/awards.js. */
 		["ranks", "Where he finished nationally and in his conference"],
+		["signature", "Best game of the season"],
+		["highs", "Season highs, 20-point games, streaks"],
+		["march", "Postseason splits"],
+		["injury", "Games missed and why"],
+		["coach", "Who coaches him, and what kind of year the staff is having"],
+		["playmaking", "Assisted rate, transition share, plus/minus, close games"],
+		["archetype", "Archetype label"],
+		["awards", "Honors"],
+		["stock", "Draft stock and mock position"],
 	];
 	const DEFAULT_NOTE_LINES = ["summary", "team", "traits", "stats", "shooting", "signature", "awards"];
+
+	/* The two honors lines, built in one place. buildNote writes them into the
+	   Notes tab and exportFile rewrites them to the export's award scope, and
+	   they used to be two separate pieces of code: the tab showed the top six
+	   with "(+3 more)" in the template's position and the file carried the
+	   whole list at the end of the note. A character-for-character copy of the
+	   same function is what keeps the two from drifting again. */
+	const NOTE_HONORS_MAX = 6;
+	function honorsLine(list) {
+		if (!list || !list.length) return "";
+		const shown = list.slice(0, NOTE_HONORS_MAX);
+		const extra = list.length - shown.length;
+		return "Honors: " + shown.join("; ") + (extra > 0 ? " (+" + extra + " more)" : "");
+	}
+	/* `rows` are {season, name}; newest first, the top three. */
+	function earlierHonorsLine(rows) {
+		if (!rows || !rows.length) return "";
+		const sorted = rows.slice().sort((a, b) => b.season - a.season);
+		const shown = sorted.slice(0, 3).map((a) => a.season + " " + a.name);
+		const extra = sorted.length - shown.length;
+		return "Earlier honors: " + shown.join("; ") + (extra > 0 ? " (+" + extra + " more)" : "");
+	}
+
+	/* The user's own notes ("My notes" on a player page) go into the exported
+	   note as the LAST block, under a label of ours, so that a previous export's
+	   copy can be recognised and replaced rather than stacked: a round trip
+	   through BBGM and back carries the block in `note`. */
+	const MY_NOTES_LABEL = "My notes:";
+	function stripMyNotes(text) {
+		const t = String(text || "");
+		const at = t.search(/(^|\n)My notes:/);
+		return at < 0 ? t : t.slice(0, at).replace(/\s+$/, "");
+	}
 
 	/* The note's opening sentence. It used to start "School (Conf) · Year"
 	   and go straight to stat lines, which reads like a stat export; a
@@ -5741,7 +5852,8 @@
 	   the engine already knows — hand, size, class year, position, build,
 	   the one number his season was about, and what the jumper looks like
 	   — and drawn from the player's own key so it survives a re-run. */
-	function noteSummary(p, team, season) {
+	function noteSummary(p, team, season, on) {
+		on = on || (() => true);
 		const s = p.stats;
 		const r = p.newRatings || {};
 		const rng = new Rng("summary|" + p.key);
@@ -5752,33 +5864,53 @@
 			F: "forward", PF: "forward", FC: "big", C: "center" })[p.newPos] || "player";
 		const who = [p.hand === "left" ? "left-handed" : "", size, year, pos]
 			.filter(Boolean).join(" ");
-		const build = p.archetype && p.archetype !== "Balanced"
+		/* WHAT THE SUMMARY MAY SAY IS WHAT THE TEMPLATE ASKED FOR.
+
+		   The sentence used to carry the build, the school, the record, the
+		   stat blurb, the jumper and the free-throw rate no matter which boxes
+		   were ticked, so unticking "Archetype label", "School / club…" or
+		   "Season stat line" removed a line and left the same facts in the
+		   opening sentence. It now says who he is (hand, size, class, position)
+		   and adds each clause only when the line that owns it is ticked:
+		   build <- archetype, school <- team, record <- record, numbers <-
+		   stats, jumper and free throws <- shooting. */
+		const build = on("archetype") && p.archetype && p.archetype !== "Balanced"
 			? " built as " + Text.withArticle(p.archetype) : "";
 		// The jumper, which is the first thing after the height and the hand.
-		const shot = Number.isFinite(r.tp)
+		const shot = on("shooting") && Number.isFinite(r.tp)
 			? (r.tp >= 62 ? "a real jumper" : r.tp >= 45 ? "a workable jumper"
 				: r.tp >= 28 ? "a jumper still in progress" : "no jumper to speak of")
 			: "";
-		const ft = s && Number.isFinite(s.ftp) && s.fta >= 1.5
+		const ft = shot && s && Number.isFinite(s.ftp) && s.fta >= 1.5
 			? " and " + (s.ftp * 100).toFixed(0) + "% from the line" : "";
-		const where = p.nonNcaa
-			? (p.proClub ? p.proClub + " (" + p.newCollege + ")" : p.newCollege)
-			: p.newCollege;
-		const record = team && Number.isFinite(team.w) && Number.isFinite(team.l)
+		const where = !on("team") ? ""
+			: p.nonNcaa
+				? (p.proClub ? p.proClub + " (" + p.newCollege + ")" : p.newCollege)
+				: p.newCollege;
+		const record = where && on("record") && team &&
+			Number.isFinite(team.w) && Number.isFinite(team.l)
 			? team.w + "-" + team.l + " " : "";
-		const numbers = s && s.gp > 0
-			? (global.News ? global.News.statBlurb(s) : s.ppg.toFixed(1) + " points a game")
-			: "no season on record";
+		const place = record + where;
+		const numbers = !on("stats") ? ""
+			: s && s.gp > 0
+				? (global.News ? global.News.statBlurb(s) : s.ppg.toFixed(1) + " points a game")
+				: "no season on record";
+		const at = where ? " at " + where : "";
+		const clause = shot ? shot + ft : "";
 		const variants = [
-			() => Text.capitalize(Text.withArticle(who) + build + ": " + numbers +
-				" for " + record + where + (shot ? ", with " + shot + ft : "") + "."),
-			() => Text.capitalize(p.archetype && p.archetype !== "Balanced"
-				? Text.withArticle(p.archetype) + " at " + where + ", " + Text.withArticle(who) +
-					" who put up " + numbers + (shot ? "; " + shot + ft : "") + "."
-				: Text.withArticle(who) + " at " + where + " who put up " + numbers +
-					(shot ? "; " + shot + ft : "") + "."),
-			() => Text.capitalize("put up " + numbers + " for " + record + where + " as " +
-				Text.withArticle(who) + build + (shot ? " — " + shot + ft : "") + "."),
+			() => Text.capitalize(Text.withArticle(who) + build +
+				(numbers ? ": " + numbers + (place ? " for " + place : "") : at) +
+				(clause ? ", with " + clause : "") + "."),
+			() => Text.capitalize((on("archetype") && p.archetype && p.archetype !== "Balanced"
+				? Text.withArticle(p.archetype) + at + ", " + Text.withArticle(who)
+				: Text.withArticle(who) + at) +
+				(numbers ? " who put up " + numbers : "") +
+				(clause ? "; " + clause : "") + "."),
+			() => Text.capitalize((numbers
+				? "put up " + numbers + (place ? " for " + place : "") + " as " +
+					Text.withArticle(who) + build
+				: Text.withArticle(who) + build + at) +
+				(clause ? " — " + clause : "") + "."),
 		];
 		void season;
 		return rng.pick(variants)();
@@ -5791,7 +5923,7 @@
 		const on = (k) => want.indexOf(k) !== -1;
 		const team = p.nonNcaa ? p.proTeam : teams[p.newCollege];
 
-		if (on("summary")) lines.push(noteSummary(p, team, season));
+		if (on("summary")) lines.push(noteSummary(p, team, season, on));
 
 		if (on("team")) {
 			if (p.nonNcaa) {
@@ -5985,21 +6117,13 @@
 			// dozen honors across the national, conference and tournament
 			// lists, and a note that prints all of them buries the ones that
 			// matter — so the top few, then a count.
-			const MAX = 6;
-			const shown = p.awards.slice(0, MAX);
-			const extra = p.awards.length - shown.length;
-			lines.push("Honors: " + shown.join("; ") +
-				(extra > 0 ? " (+" + extra + " more)" : ""));
+			lines.push(honorsLine(p.awards));
 		}
 		if (on("awards") && p.priorAwards && p.priorAwards.length) {
 			/* The seasons before this one, newest first, top three: a
 			   two-time all-conference pick reads as one. */
-			const prior = p.priorAwards.slice()
-				.sort((a, b) => b.season - a.season);
-			const shown = prior.slice(0, 3).map((a) => a.season + " " + a.award);
-			const extra = prior.length - shown.length;
-			lines.push("Earlier honors: " + shown.join("; ") +
-				(extra > 0 ? " (+" + extra + " more)" : ""));
+			lines.push(earlierHonorsLine(
+				p.priorAwards.map((a) => ({ season: a.season, name: a.award }))));
 		}
 		if (on("stock") && p.boardRank) {
 			const move = p.stockMove > 0 ? "up " + p.stockMove
@@ -7004,14 +7128,18 @@
 			   silently overwrote them. Any previous Honors: line is dropped
 			   either way; that one is ours. */
 			if (opts.noteAppend && String(orig.note || "").trim()) {
-				const keep = String(orig.note).split("\n")
+				const keep = stripMyNotes(String(orig.note)).split("\n")
 					.filter((l) => l.indexOf("Honors:") !== 0 &&
 						l.indexOf("Earlier honors:") !== 0).join("\n").trim();
-				out.note = keep && keep !== String(p.note || "").trim()
-					? keep + "\n\n" + p.note : p.note;
-			} else {
+				const gen = String(p.note || "").trim();
+				out.note = keep && keep !== gen
+					? (gen ? keep + "\n\n" + p.note : keep) : p.note;
+			} else if (String(p.note || "").trim()) {
 				out.note = p.note;
 			}
+			/* else: the template wrote nothing (every box unticked), so the
+			   file's own note, if it had one, is left alone rather than
+			   replaced with an empty string. */
 
 			/* Guarded on the FLAG, not on whether this player won anything.
 			   Keying it on p.awards.length left a man who was an All-American in
@@ -7110,28 +7238,47 @@
 				   "major honors only" export does not say otherwise in the
 				   note. */
 				const templateHasHonors = noteTemplateHas(result, "awards");
-				const isOurs = (l) => l.indexOf("Honors:") === 0 || l.indexOf("Earlier honors:") === 0;
-				out.note = String(out.note || "")
-					.split("\n").filter((l) => !isOurs(l)).join("\n");
-				if (scoped.length && (opts.honorsInNote || templateHasHonors)) {
-					out.note = (out.note ? out.note + "\n" : "") +
-						"Honors: " + scoped.join("; ");
-				}
+				/* Rewritten IN PLACE, in the note's own format. These two lines
+				   used to be stripped and re-appended at the end, unabridged:
+				   the file's honors sat after the Board line, as a full list,
+				   while the Notes tab showed the top six where the template had
+				   put them. Now a line that is already there is replaced where
+				   it stands, and one that is not (the Import players route, or
+				   a template that left honors out) is appended. */
+				const place = (text, prefix, replacement) => {
+					const kept = [];
+					let at = -1;
+					for (const l of String(text || "").split("\n")) {
+						if (l.indexOf(prefix) === 0) { if (at < 0) at = kept.length; }
+						else kept.push(l);
+					}
+					if (replacement) {
+						if (at < 0) kept.push(replacement); else kept.splice(at, 0, replacement);
+					}
+					return kept.join("\n");
+				};
+				const wantHonors = !!(opts.honorsInNote || templateHasHonors);
+				out.note = place(out.note, "Honors:",
+					scoped.length && wantHonors ? honorsLine(scoped) : "");
 				/* The earlier seasons' line follows the same scope as the
 				   rows: a "major honors only" export used to keep the
 				   template's unscoped line beside a scoped array. */
-				if (priorRows.length && (opts.honorsInNote || templateHasHonors)) {
-					const prior = priorRows.slice().sort((a, b) => b.season - a.season);
-					const shown = prior.slice(0, 3).map((a) => a.season + " " + a.type);
-					const extra = prior.length - shown.length;
-					out.note += "\nEarlier honors: " + shown.join("; ") +
-						(extra > 0 ? " (+" + extra + " more)" : "");
-				}
+				out.note = place(out.note, "Earlier honors:",
+					priorRows.length && wantHonors
+						? earlierHonorsLine(priorRows.map((a) => ({ season: a.season, name: a.type })))
+						: "");
 			}
-			/* The flag matches the note: writing noteBool = 1 beside an
-			   empty note made BBGM flag a note the player doesn't have. */
-			if (out.note && String(out.note).trim()) out.noteBool = 1;
-			else delete out.noteBool;
+			/* THE USER'S OWN NOTES and watchlist, when the export dialog asks for
+			   them (opts.myMarks) and the app has stamped them on the result
+			   (result.userMarks, keyed by player key). They were saved in the
+			   browser and went nowhere: a note written on a prospect never
+			   reached the game. Added after the template's lines and the
+			   honors, and surviving "Include scouting notes" being off,
+			   because they are the user's own words and not the generated
+			   prose that switch is about. */
+			const marks = opts.myMarks && result.userMarks ? result.userMarks : null;
+			const mine = marks && marks.notes && marks.notes[p.key]
+				? String(marks.notes[p.key]).trim() : "";
 			/* The note is generated every run regardless (see phaseNotes) —
 			   this only decides whether the exported file carries it. A
 			   scout who wants the class simulated with notes on for the
@@ -7141,6 +7288,18 @@
 			if (opts.includeNotes === false) {
 				delete out.note;
 				delete out.noteBool;
+			}
+			if (mine) {
+				const base = stripMyNotes(out.note || "").replace(/\s+$/, "");
+				out.note = (base ? base + "\n\n" : "") + MY_NOTES_LABEL + " " + mine;
+			}
+			if (marks && marks.watch && marks.watch[p.key]) out.watch = true;
+			/* The flag matches the note: writing noteBool = 1 beside an
+			   empty note made BBGM flag a note the player doesn't have. */
+			if (out.note && String(out.note).trim()) out.noteBool = 1;
+			else {
+				delete out.noteBool;
+				if (out.note === "") delete out.note;
 			}
 			if (opts.stats && p.stats) {
 				const built = collegeSeasonStats(result);
@@ -7357,7 +7516,7 @@
 	function exportLeagueFragment(result) {
 		const teams = Object.values(result.teams)
 			.filter((t) => t && t.name && t.log)
-			.sort((a, b) => a.name.localeCompare(b.name));
+			.sort((a, b) => cmpText(a.name, b.name));
 		const confs = [];
 		const cidOf = {};
 		for (const t of teams) {

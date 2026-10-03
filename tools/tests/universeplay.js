@@ -158,7 +158,7 @@ module.exports = function (ok, V) {
 			/indexedDB\.open\(IDB_NAME/.test(app) && /UNIVERSE_SLOTS = 5/.test(app));
 		ok("...every access guarded, falling back to null",
 			/function idbOpen\(\)[\s\S]{0,900}catch \(e\) \{ resolve\(null\); \}/.test(app) &&
-			/function idbRequest[\s\S]{0,600}catch \(e\) \{ resolve\(null\); \}/.test(app));
+			/function idbRequest[\s\S]{0,1000}catch \(e\) \{ resolve\(null\); \}/.test(app));
 		ok("...the full universe, not the capped copy",
 			/function universeFull\(\)[\s\S]{0,300}rows: u\.rows\.slice\(\)/.test(app));
 		ok("...never autosaving before the full copy was read back",

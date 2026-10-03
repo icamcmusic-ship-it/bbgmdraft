@@ -8,6 +8,60 @@ Open `index.html` in any browser. Nothing is uploaded and there is no build step
 
 ---
 
+## Mock draft and pro projections
+
+The **Mock draft** tab drafts the class. If the class came out of a league
+export, that league's own teams draft it: each team's rating is BBGM's team
+rating computed from its current roster, its need is its depth at guard, wing
+and big (the mean of its two best overalls at each) against the league's, and
+the order is the league's draft picks for that season — their pick numbers if
+the lottery has been run, traded picks used by the team holding them —
+otherwise worst first by this season's record (or team rating before any games)
+with a lottery for the top four. Without a league, thirty invented teams draft. Each team
+has a plan (rebuilding teams take ceiling, contenders take players ready now,
+set by its place in the order, with a lottery for the top four) and a need at
+guard, wing or big; every pick is the player worth most to that team — his
+projected value blended by the plan, plus positional fit, minus bust risk for
+teams that cannot afford one. Reaches and steals against the board are named.
+
+Every prospect also gets a **pro projection** (on his player page and in the
+mock): 41 seeded careers in which he closes the gap to his potential (fast at
+19-22, slowly by 26, around an uncertain ceiling that is wider the younger he
+is), declines from 29, and leaves the league when he stops being good enough
+or loses a fringe roster spot. It reports the median peak with its 10th-90th
+percentile range, career length, star and bust chances, and a verdict (star,
+starter, rotation player, fringe player, bust risk). Both are derived from the
+finished class and change nothing in it or in the export (`js/pro.js`;
+`tools/tests/pro.js`).
+
+## From the command line
+
+The same engine, without the browser (Node 20 or newer; nothing to install):
+
+```
+node bin/bbgmdraft.js run   class.json --seed demo --notes short --stats --awards
+node bin/bbgmdraft.js batch class.json -n 50 --set pace=72 --csv > batch.csv
+node bin/bbgmdraft.js universe 2025.json 2026.json 2027.json --seed demo --out world.json
+node bin/bbgmdraft.js mock class.json --seed demo   # two-round mock draft with pro projections
+node bin/bbgmdraft.js check class.json
+node bin/bbgmdraft.js settings            # every setting, its default and range
+```
+
+`run` writes `class_customized.json` beside the input (or wherever `--out`
+says; `-` is stdout) and prints the seed and the top five. It takes a draft
+class or a league export (`--year` picks the class of a league), `.json` or
+`.json.gz`, and a preset (`--preset`), any setting (`--set key=value`) and the
+export options the page's dialog has (`--stats --prior --highs --awards`).
+Because the engine is deterministic, the same file, seed and settings give the
+page's class byte for byte, and `tools/tests/cli.js` checks that against the
+engine itself. `universe` runs several classes as one continuous world, as the
+page's Universe mode does (same seeds, same timeline, checked row for row
+against the page in `tools/uismoke.js`), prints the timeline and writes the
+universe export the Universe tab imports; it does not yet write the players
+file, which needs the career links the page adds after the chain.
+Experimental: the flags may change. `node bin/bbgmdraft.js help`
+lists them all.
+
 ## What it does
 
 **1. Fills in the blank colleges.** Every prospect whose college is `""` (shown as
@@ -1304,7 +1358,10 @@ tool writes evaluate identically inside the game.
 ```
 node tools/validate.js [nSeeds] [--json]   # calibration bands
 node tools/validate.js 20 --fixture=realistic   # the default fixture only, twice as fast
-node tools/test.js [--update-golden]       # regression tests, tools/tests/*.js included
+node tools/test-parallel.js [--fast]       # the regression suite across every core (about 6 min; --fast about 3)
+node tools/test.js [--update-golden]       # the same checks, serially (the reference; about 20 min)
+node tools/run-area.js <area>              # one tools/tests/<area>.js on its own
+npx eslint@9 .                             # lint: undefined names, duplicate keys, dead variables (eslint.config.js)
 node tools/rolefit.js [nSeeds]             # re-fit the derived role-usage model
 node tools/universe.js                     # universe determinism / idempotency / round trip
 node tools/bench.js [reps] [--md|--json]   # staged-pipeline timings
@@ -1715,7 +1772,9 @@ js/replaymeta.js    bingo, mutators, achievements and what they unlock
 js/app.js           state, settings, editing, persistence, export
 tools/validate.js   calibration bands against the empirical anchors
 tools/rolefit.js    fits the derived role-usage model and reports per-build residuals
-tools/test.js       golden-file, round-trip, determinism and property tests
+tools/test.js       golden-file, round-trip, determinism and property tests (inline sections)
+tools/test-parallel.js  runs test.js's inline part and every tools/tests/*.js as parallel processes
+tools/run-area.js   runs one or more tools/tests/*.js area files
 tools/tests/*.js    one suite per area, loaded by test.js off the disk
 tools/universe.js   universe determinism, idempotency and BBGM round trip
 tools/uismoke.js    headless-browser smoke test

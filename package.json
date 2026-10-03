@@ -1,0 +1,25 @@
+{
+  "name": "bbgm-draft-workshop",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A single-page, offline tool for reworking Basketball GM draft class files. There is no build step; this file only names the checks.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node tools/test-parallel.js",
+    "test:fast": "node tools/test-parallel.js --fast",
+    "test:serial": "node tools/test.js",
+    "test:area": "node tools/run-area.js",
+    "validate": "node tools/validate.js 4",
+    "universe": "node tools/universe.js",
+    "ui": "node tools/uismoke.js",
+    "bench": "node tools/bench.js 2",
+    "lint": "npx --yes eslint@9 .",
+    "cli": "node bin/bbgmdraft.js"
+  },
+  "bin": {
+    "bbgmdraft": "bin/bbgmdraft.js"
+  }
+}

@@ -3144,6 +3144,12 @@
 		   team's own rating), so an export that writes them needs the rotation
 		   and not only its total. */
 		team.lines = lines;
+		/* The plus/minus impact is cached per team and keyed by these line
+		   objects (see impactTerms). A warm re-run builds new ones for the
+		   same team object, so the old map matched none of them and every
+		   player's impact read 0: the exported plus/minus depended on which
+		   sliders had been moved before. */
+		PM_IMPACT.delete(team);
 		team.fieldPlayers = field;
 		team.defense = defenseProfile(comps, mins, teamMinutes, gameMinutes);
 		// Team defensive efficiency: points allowed per 100 possessions, read

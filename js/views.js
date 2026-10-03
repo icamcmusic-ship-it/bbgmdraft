@@ -1647,6 +1647,11 @@
 			   meant seventy round trips to the mouse. j/k and the arrow keys
 			   move; if the editor is open it follows you down the table. */
 			tr.addEventListener("keydown", (e) => {
+				/* Keys pressed on a control INSIDE the row (the selection
+				   checkbox, the lock badge, the star) belong to that control.
+				   Without this, Space on the checkbox opened the editor and
+				   the box could not be ticked from the keyboard. */
+				if (e.target !== tr) return;
 				if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); return; }
 				const d = (e.key === "j" || e.key === "ArrowDown") ? 1
 					: (e.key === "k" || e.key === "ArrowUp") ? -1 : 0;
@@ -3515,7 +3520,7 @@
 			ban.setAttribute("aria-label", titles.length + " national title" +
 				(titles.length === 1 ? "" : "s"));
 			for (const s of titles) {
-				const b = el("span", "banner");
+				const b = el("span", "pennant");
 				b.appendChild(el("span", "bannery", String(s)));
 				b.appendChild(el("span", "bannerw", "Champions"));
 				ban.appendChild(b);
@@ -4972,7 +4977,7 @@
 			fbar.appendChild(reset);
 		}
 		const st0 = A().state;
-		const nStar = (res.board || []).filter((p) => st0.watch[p.key]).length;
+		const nStar = (res.board || []).filter((p) => st0.watch[A().userKey(p)]).length;
 		const starChip = el("button", "chip" + (bf.starred ? " on" : ""),
 			"★ Starred" + (nStar ? " (" + nStar + ")" : ""));
 		starChip.type = "button";
@@ -5020,9 +5025,9 @@
 				const bits = [p.newPos, p.classYear, p.proClub || p.newCollege,
 					p.newOvr + "/" + p.newPot];
 				if (p.stats) bits.push(n1(p.stats.ppg) + " ppg");
-				return p.boardRank + ". " + (A().state.watch[p.key] ? "★ " : "") + "**" + p.name +
+				return p.boardRank + ". " + (A().state.watch[A().userKey(p)] ? "★ " : "") + "**" + p.name +
 					"** — " + bits.join(", ") +
-					(notes[p.key] ? "\n   > " + notes[p.key].replace(/\s*\n\s*/g, " ") : "");
+					(notes[A().userKey(p)] ? "\n   > " + notes[A().userKey(p)].replace(/\s*\n\s*/g, " ") : "");
 			});
 			A().copyText("**Top 30 — seed " + res.seed +
 				(res.flavor && res.flavor.label ? ", " + res.flavor.label : "") + "**\n\n" +
@@ -5048,7 +5053,7 @@
 		const needle = bf.q.trim().toLowerCase();
 		let list = (res.board || []).filter((p) => {
 			if (bf.pos && p.newPos !== bf.pos) return false;
-			if (bf.starred && !A().state.watch[p.key]) return false;
+			if (bf.starred && !A().state.watch[A().userKey(p)]) return false;
 			if (!needle) return true;
 			return (p.name + " " + (p.newCollege || "") + " " + (p.proClub || "") + " " +
 				(p.archetype || "")).toLowerCase().indexOf(needle) !== -1;
@@ -5438,6 +5443,140 @@
 		view.appendChild(cards);
 	}
 
+	/* ------------------------------------------------- pro careers, mock draft */
+
+	/* Computed once per result: 41 careers a prospect is a few milliseconds a
+	   class, but the board, the player page and the mock all read it. */
+	const proCache = new WeakMap();
+	function proFor(res) {
+		let c = proCache.get(res);
+		if (!c && global.Pro) {
+			const projections = global.Pro.projectClass(res);
+			/* A class that came out of a league export is drafted by that
+			   league's teams (Pro.leagueDraft). */
+			const st = A().state;
+			const f = st.files[Number.isFinite(res.fileIndex) ? res.fileIndex : st.active];
+			const league = f && f.league && f.league.data ? f.league.data : null;
+			c = { projections, mock: global.Pro.mockDraft(res, { projections, league }) };
+			proCache.set(res, c);
+		}
+		return c || { projections: {}, mock: { picks: [], teams: [] } };
+	}
+
+	function proRange(x) {
+		return x ? x.peak + " (" + x.peakLow + "-" + x.peakHigh + ")" : "—";
+	}
+
+	function viewMock(view, res) {
+		const { mock } = proFor(res);
+		view.appendChild(el("p", "legendline", (mock.fromLeague
+			? "Your league's teams draft this class: each team's rating is BBGM's team " +
+				"rating from its current roster, its need is its depth at guard, wing and " +
+				"big (the mean of its two best overalls at each) against the league's, and " +
+				"the order is " + mock.source + ". "
+			: "Thirty invented teams draft this class (load a league export to use its " +
+				"own teams). ") +
+			"Each team has a plan (rebuilding teams " +
+			"take ceiling, contenders take players ready now) and a need at guard, wing " +
+			"or big; each pick is the player worth most to that team. “Peak” is the " +
+			"median projected NBA overall, with the 10th-90th percentile range, from " +
+			"41 simulated careers. Derived from the class: none of this changes the " +
+			"export. The board's own order is the consensus."));
+		const bar = el("div", "filters");
+		const copy = el("button", null, "Copy as text");
+		copy.addEventListener("click", () => {
+			A().copyText(mock.picks.map((k) => k.pick + ". " + k.team + ": " + k.name +
+				" (" + k.pos + ", " + (k.projection ? k.projection.verdict : "") + ") — " + k.why)
+				.join("\n"), copy, "Copy as text", "the mock draft");
+		});
+		bar.appendChild(copy);
+		const md = el("button", null, "Copy as markdown");
+		md.addEventListener("click", () => {
+			A().copyText(markdownTable(["Pick", "Team", "Player", "Pos", "Ovr/Pot", "Board",
+				"Peak", "Verdict", "Why"], mock.picks.map((k) => [k.pick, k.team, k.name, k.pos,
+				k.ovr + "/" + k.pot, k.consensus || "", proRange(k.projection),
+				k.projection ? k.projection.verdict : "", k.why])), md, "Copy as markdown",
+				"the mock draft as markdown");
+		});
+		bar.appendChild(md);
+		view.appendChild(bar);
+
+		const table = el("table", "mocktable");
+		const thead = el("thead");
+		const hr = el("tr");
+		const heads = ["Pick", "Team"].concat(mock.fromLeague ? ["Team ovr", "Depth G · W · B"] : [],
+			["Player", "Pos", "Ovr", "Pot", "Board", "Peak", "Career", "Verdict", "Why"]);
+		for (const h of heads) hr.appendChild(el("th", null, h));
+		thead.appendChild(hr);
+		table.appendChild(thead);
+		const tbody = el("tbody");
+		let round = 0;
+		for (const k of mock.picks) {
+			if (k.round !== round) {
+				round = k.round;
+				const rr = el("tr", "tierbreak");
+				const td = el("td", null, "Round " + round);
+				td.colSpan = heads.length;
+				rr.appendChild(td);
+				tbody.appendChild(rr);
+			}
+			const tr = el("tr");
+			const x = k.projection;
+			tr.appendChild(el("td", "num", String(k.pick)));
+			const team = el("td", null, k.team + (k.via ? " (via " + k.via + ")" : ""));
+			team.title = k.teamPlan + "; biggest need: " + k.teamNeed;
+			tr.appendChild(team);
+			if (mock.fromLeague) {
+				tr.appendChild(el("td", "num", k.teamOvr === null ? "—" : String(k.teamOvr)));
+				tr.appendChild(el("td", "num", k.teamDepth));
+			}
+			const who = el("td");
+			who.appendChild(playerLink(k.name, k.key));
+			tr.appendChild(who);
+			tr.appendChild(el("td", null, k.pos));
+			tr.appendChild(el("td", "num", String(k.ovr)));
+			tr.appendChild(el("td", "num", String(k.pot)));
+			const board = el("td", "num" + (k.reach >= 8 ? " down" : k.reach <= -8 ? " up" : ""),
+				k.consensus ? String(k.consensus) : "—");
+			tr.appendChild(board);
+			tr.appendChild(el("td", "num", proRange(x)));
+			tr.appendChild(el("td", "num", x ? x.years + " yrs" : "—"));
+			tr.appendChild(el("td", null, x ? x.verdict : "—"));
+			tr.appendChild(el("td", "hint", k.why));
+			tbody.appendChild(tr);
+		}
+		table.appendChild(tbody);
+		const wrap = el("div", "tablewrap");
+		wrap.appendChild(table);
+		view.appendChild(wrap);
+		if (mock.undrafted.length) {
+			view.appendChild(el("p", "hint", mock.undrafted.length + " prospects go undrafted in this mock."));
+		}
+	}
+
+	/* The projection block on a player page. */
+	function proBlock(res, p) {
+		const { projections, mock } = proFor(res);
+		const x = projections[p.key];
+		if (!x) return null;
+		const box = el("div", "problock");
+		box.appendChild(el("h4", null, "Pro projection"));
+		const pick = mock.picks.find((k) => k.key === p.key);
+		box.appendChild(el("p", null,
+			global.Text.capitalize(global.Text.withArticle(x.verdict)) + ": a median peak of " + x.peak +
+			" overall (" + x.peakLow + "-" + x.peakHigh + " in nine careers of ten) around age " +
+			x.peakAge + ", and " + x.years + " seasons in the league (" + x.yearsLow + "-" +
+			x.yearsHigh + "). " + Math.round(x.starChance * 100) + "% chance of a star's peak, " +
+			Math.round(x.bustChance * 100) + "% of a bust." +
+			(pick ? " Mock draft: No. " + pick.pick + " to the " + pick.team + " — " + pick.why + "."
+				: " Undrafted in the mock draft.")));
+		if (x.curve.length) {
+			box.appendChild(el("p", "hint", "A median career: " + x.curve.slice(0, 16)
+				.map((s) => s.age + ": " + s.ovr).join(" · ")));
+		}
+		return box;
+	}
+
 	/* ---------------------------------------------------------------- notes */
 
 	function viewNotes(view, res) {
@@ -5482,6 +5621,8 @@
 		const cards = el("div", "cards");
 		let shown = 0;
 		for (const p of res.players.slice().sort((a, b) => b.newOvr - a.newOvr)) {
+			// Every box unticked writes no note; a blank card says nothing.
+			if (!String(p.note || "").trim()) continue;
 			if (q && (p.name + "\n" + p.note).toLowerCase().indexOf(q) === -1) continue;
 			shown++;
 			const c = el("div", "card");
@@ -5506,7 +5647,8 @@
 			box.appendChild(el("h4", null, q ? "No note mentions “" + q + "”" : "No notes"));
 			box.appendChild(el("p", "hint", q
 				? "The search covers names and note text. Clear it to see every note."
-				: "Every line of the note template is off, or the class is empty."));
+				: "Every line of the note template is off, or the class is empty. " +
+					"Tick lines under “Note template” in the sidebar to write notes."));
 			if (q) {
 				const clear = el("button", "tiny", "Clear the search");
 				clear.addEventListener("click", () => { st.noteQuery = ""; A().render(); });
@@ -5895,7 +6037,8 @@
 	   fired by it. */
 	function watchStar(p) {
 		const st = A().state;
-		const on = !!st.watch[p.key];
+		const uk = A().userKey(p);
+		const on = !!st.watch[uk];
 		const b = el("button", "watchstar" + (on ? " on" : ""), on ? "★" : "☆");
 		b.type = "button";
 		b.setAttribute("aria-pressed", on ? "true" : "false");
@@ -5903,7 +6046,7 @@
 		b.title = on ? "On your watchlist — click to remove" : "Add to your watchlist";
 		b.addEventListener("click", (e) => {
 			e.stopPropagation();
-			if (st.watch[p.key]) delete st.watch[p.key]; else st.watch[p.key] = true;
+			if (st.watch[uk]) delete st.watch[uk]; else st.watch[uk] = true;
 			A().persist();
 			A().render();
 		});
@@ -6104,6 +6247,10 @@
 				.map((a) => a.season + " " + a.award).join("; "));
 		}
 		box.appendChild(dl);
+		{
+			const pb = proBlock(res, p);
+			if (pb) box.appendChild(pb);
+		}
 
 		/* Earlier seasons, when they were simulated — and the later ones, when
 		   the world played them. `laterSeasons` is a returner's career after
@@ -6234,10 +6381,11 @@
 		myNote.maxLength = 2000;
 		myNote.placeholder = "Your own read on " + p.name + " — saved in this browser.";
 		myNote.setAttribute("aria-label", "Your notes on " + p.name);
-		myNote.value = A().state.notes[p.key] || "";
+		myNote.value = A().state.notes[A().userKey(p)] || "";
 		myNote.addEventListener("change", () => {
 			const v = myNote.value.trim();
-			if (v) A().state.notes[p.key] = v; else delete A().state.notes[p.key];
+			const nk = A().userKey(p);
+			if (v) A().state.notes[nk] = v; else delete A().state.notes[nk];
 			A().persist();
 		});
 		box.appendChild(myNote);
@@ -7361,7 +7509,7 @@
 	global.Views = {
 		players: viewPlayers, teams: viewTeams, bracket: viewBracket, bulkBar,
 		awards: viewAwards, board: viewDraft, distribution: viewDistribution, tournamentCard,
-		notes: viewNotes, gamelog: viewGameLog, compare: viewCompare,
+		notes: viewNotes, gamelog: viewGameLog, compare: viewCompare, mock: viewMock, proFor,
 		news: viewNews, universe: viewUniverse, playerLink, teamLink, playerPage,
 		gamePage, gameKeyFor, quadBar, pollSpark, ballotCards,
 		COLUMNS, STAT_MODES, PCT_KEYS, DERIVED, derived, cellValue, statValue,

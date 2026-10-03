@@ -1107,15 +1107,19 @@
 			: "the mid-majors are where the table says"),
 		injuryRate: (v) => (v === 0
 			? "nobody misses a game"
-			: "drawn before the season, so a team's record responds to them"),
-		classQuality: (v) => "top prospect ≈ " + Math.round(43 + v * 2.6) +
-			" ovr, back of the class ≈ " + Math.round(18 + v * 2.0),
+			: "drawn before the season, so a team's record responds to them. " +
+				"Injuries grow faster than the dial (2x is about 3x) and level off near 2"),
+		classQuality: (v) => "curve base: top prospect ≈ " + Math.round(43 + v * 2.6) +
+			" ovr, back of the class ≈ " + Math.round(18 + v * 2.0) +
+			" (before the lottery boost and the star bumps, which add several points at the top)",
 		classDepth: (v) => (v < 0 ? "top-heavy: stars, then a cliff"
 			: v > 0 ? "deep: fewer stars, more rotation players" : "an even curve"),
 		eliteCount: (v) => v === 0 ? "no genuine stars" : v + " prospect(s) get a star ceiling",
 		potBias: (v) => "ovr→pot gap shifted " + (v >= 0 ? "+" : "") + (v * 2.2).toFixed(1) +
 			" points (cosmetic: potential does not feed the season)",
-		potSpread: (v) => "gap sd " + v + " points (higher = more boom/bust)",
+		potSpread: (v) => "extra noise of " + (v * 0.35).toFixed(1) + " points sd on the ovr→pot gap, " +
+			"added to the build's own spread of about 5.6 (higher = more boom/bust; " +
+			"no effect under the bbgm potential model)",
 		rookieSkillCap: (v) => v > 0
 			? "skill and shooting ratings ease in from " + (v - 10) + " and rarely pass " + v + " (hgt is never capped)"
 			: "no cap: a specialist can come in with a 95",
@@ -1197,9 +1201,13 @@
 		   true shooting at exactly 0.572 in every configuration, because pace
 		   and scoringEnv are both possession dials and nothing in the tool
 		   moved what a possession was worth. */
-		efficiencyEnv: (v) => (v >= 0 ? "+" : "") + (v * 1.0).toFixed(1) +
-			" points of shooting percentage — roughly " +
-			(v >= 0 ? "+" : "") + (v * 2.2).toFixed(1) + " team points per game",
+		/* Measured, not promised: a step moves true shooting by about 0.7 points
+		   and trades shot volume against it, but team scoring is anchored to the
+		   scoreboard, so points per game and records do not move. */
+		efficiencyEnv: (v) => v === 0 ? "league-average shooting"
+			: "about " + (v >= 0 ? "+" : "") + (v * 0.7).toFixed(1) +
+				" points of true shooting, with fewer or more shots to match — " +
+				"team points per game and records do not move",
 		statNoise: (v) => v < 0.3 ? "stat lines follow ratings exactly" : "season-to-season luck",
 		upsetFactor: (v) => v < 0.6 ? "chalk: seeds mostly hold" : v > 1.4 ? "madness" : "a normal March",
 		awardStrictness: (v) => v > 1.2 ? "fewer national honors reach this class"
@@ -3632,6 +3640,35 @@
 
 		// Note template: which lines are written into each player's note.
 		const box = $("noteLines");
+		/* Presets for the template. Nineteen boxes is a lot to decide one by
+		   one, and the three most common wants (a short blurb, a forum post, a
+		   stat sheet) are each a few clicks of ticking and unticking. */
+		const NOTE_PRESETS = [
+			["None", []],
+			["Short", ["summary", "team", "stats"]],
+			["Forum", ["summary", "team", "traits", "awards", "stock"]],
+			["Standard", global.Config.DEFAULTS.noteLines.slice()],
+			["Stat sheet", ["summary", "team", "stats", "shooting", "advanced", "defense",
+				"playmaking", "highs", "ranks"]],
+			["Everything", global.Engine.NOTE_LINES.map((x) => x[0])],
+		];
+		const presetBar = el("div", "notepresets");
+		presetBar.setAttribute("role", "group");
+		presetBar.setAttribute("aria-label", "Note template presets");
+		for (const [label, lines] of NOTE_PRESETS) {
+			const b = el("button", "tiny", label);
+			b.type = "button";
+			b.title = lines.length ? "Write: " + lines.join(", ") : "Write no scouting notes";
+			b.addEventListener("click", () => {
+				pushUndo("note template: " + label);
+				state.cfg.noteLines = lines.slice();
+				markDirty();
+				paintNoteLines();
+				scheduleRun();
+			});
+			presetBar.appendChild(b);
+		}
+		box.parentNode.insertBefore(presetBar, box);
 		for (const [key, label] of global.Engine.NOTE_LINES) {
 			const lab = el("label", "check");
 			const cb = el("input");
@@ -3887,18 +3924,36 @@
 	}
 
 	/* A short, stable identity for one draft class file. */
-	function fingerprint(file) {
-		if (!file || !file.data) return null;
-		const players = file.data.players || [];
-		const sample = players.slice(0, 6).concat(players.slice(-3))
-			.map((p) => (p.pid === undefined ? "?" : p.pid) + ":" +
-				(p.firstName || "") + (p.lastName || "")).join("|");
-		const h = global.BBGMRng.hashSeed(
-			players.length + "/" + file.data.startingSeason + "/" + sample);
-		return (h() >>> 0).toString(36);
-	}
+	function fingerprint(file) { return global.Universe.fileFingerprint(file); }
 
 	function activeFile() { return state.files[state.active] || null; }
+
+	/* THE USER'S OWN MARKS BELONG TO A CLASS.
+
+	   The watchlist and "My notes" were keyed by the bare player key, which is
+	   a pid, and every BBGM league (and every sample class) numbers its
+	   prospects from the same few pids. Loading a second class put the first
+	   class's star and note on whoever held that pid there. The key now
+	   carries the class's fingerprint, the way locks do. A "@" prefix marks
+	   the new form; an older bare key is adopted by the first class loaded
+	   after the upgrade (adoptLegacyUserKeys). */
+	function userKey(p) {
+		const key = typeof p === "string" ? p : p.key;
+		const f = activeFile();
+		return "@" + ((f && f.fingerprint) || "") + "|" + key;
+	}
+
+	function adoptLegacyUserKeys() {
+		for (const map of [state.watch, state.notes]) {
+			if (!map) continue;
+			for (const k of Object.keys(map)) {
+				if (k.charAt(0) === "@") continue;
+				const scoped = userKey(k);
+				if (map[scoped] === undefined) map[scoped] = map[k];
+				delete map[k];
+			}
+		}
+	}
 
 	/* ------------------------------------------------------------ file input */
 
@@ -4271,6 +4326,14 @@
 			   by pid — onto whoever holds those pids in the new one. */
 			state.undo = [];
 			state.redo = [];
+			/* Pointers into the previous class: a compare slot, the open player
+			   page and the game-log player are keys into a class that is no
+			   longer loaded, and resolve to whoever holds that pid now. */
+			state.compare = [null, null, null, null];
+			state.player = null;
+			state.logPlayer = null;
+			adoptLegacyUserKeys();
+			resetExportAll();
 			paintUndo();
 			paintRandomPerFile();
 			const sel = $("fileSelect");
@@ -4313,6 +4376,8 @@
 		else clearError();
 		if (!ok.length) { setStatus(""); return; }
 		for (const f of ok) if (!f.fingerprint) f.fingerprint = fingerprint(f);
+		/* A half-finished "Export next (1/3)" counts a file set that has changed. */
+		resetExportAll();
 		const before = state.files.slice();
 		const { merged, fresh, dupes, remap } = mergeFiles(before, ok);
 		if (!fresh.length) {
@@ -4588,10 +4653,22 @@
 	/* The banners carry a real close button now. They were dismiss-on-click
 	   with the instruction hidden in a `title` and appended to the message
 	   text, which is neither discoverable nor reachable from the keyboard. */
-	function showError(err) {
+	/* What went wrong last, kept for the bug report (see bugReport). `original`
+	   is the error the page actually threw when what is shown is a friendlier
+	   wrapper around it. */
+	let lastErrorInfo = null;
+
+	function showError(err, original) {
 		const b = $("errBanner");
 		b.hidden = false;
 		const text = err && err.message ? err.message : String(err);
+		const root = original || err;
+		lastErrorInfo = {
+			message: text,
+			original: original && original.message ? original.message : null,
+			stack: root && root.stack ? String(root.stack) : null,
+			at: new Date().toISOString(),
+		};
 		b.querySelector(".bannertext").textContent = text;
 		// Banners are dismissible and a dismissed banner used to be gone for
 		// good; everything said this session is kept (Tools → Message history).
@@ -4731,7 +4808,20 @@
 		   panel, and rebuilding an evicted one under the panel's gave a
 		   different season from the one on the timeline. */
 		const cfg = CFG.make(saved.settings || state.cfg);
-		cfg.overrides = state.overrides;
+		/* The chain runs every season with NO player overrides (js/universe.js
+		   sets `overrides = {}` for previews and for each season). A rebuild
+		   under the panel's locks gave a different season from the one the
+		   Timeline recorded: the champion on the Timeline and the one on the
+		   Bracket tab could disagree for any season rebuilt after eviction. */
+		cfg.overrides = {};
+		/* The note template is the one setting a season is NOT rebuilt under:
+		   the notes-only shortcut in runNow evicts the cached results and
+		   expects this to read the panel's template, which it did not — it
+		   built the season from the frozen settings above, so a changed
+		   template changed nothing in universe mode, in the tabs or the
+		   export. phaseNotes depends on noteLines alone, so this costs the
+		   one phase. */
+		if (Array.isArray(state.cfg.noteLines)) cfg.noteLines = state.cfg.noteLines.slice();
 		cfg.seed = saved.seed;
 		cfg.carryOver = saved.carryOver || null;
 		cfg.recentPools = (saved.recentPools || []).map((a) => a.slice());
@@ -6322,6 +6412,7 @@
 		["board", "Draft board", "Class"],
 		["compare", "Compare", "Class"],
 		["distribution", "Distributions", "Class"],
+		["mock", "Mock draft", "Class"],
 		["teams", "AP Poll & Teams", "Season"],
 		["bracket", "March Madness", "Season"],
 		["awards", "Awards & leaders", "Season"],
@@ -6369,13 +6460,17 @@
 	   carried one. A BBGM class is sixty to eighty men; a league export's
 	   future class is often half that, and the season it produces has honours
 	   drawn from a field that thin. See Universe.topUpPartialSeason. */
-	const UNIVERSE_FULL_CLASS = 65;
+	const UNIVERSE_FULL_CLASS = global.Universe.FULL_CLASS;
 
 	/* How long a season costs, and how many of them are worth warning about.
 	   The figure is measured (tools/bench.js reports the staged timings); it
 	   only has to be right to the order of magnitude, because it is spent on a
 	   sentence rather than on a decision. */
-	const SEASON_MS = 330;
+	/* Was 330, which announced a 30-season run as about ten seconds. Measured
+	   in the chain (Engine.run plus the cross-file preview and carry work) it
+	   is 1.2-1.8 s a season on a shared four-core box, so a long run took four
+	   or five times what it said. The first chain's measured pace replaces it. */
+	const SEASON_MS = 1200;
 	const UNIVERSE_SLOW_SEASONS = 12;
 
 	function evictUniverseResults(keepIndices) {
@@ -6681,9 +6776,23 @@
 		const started = Date.now();
 		let lastRender = 0;
 		const finish = (cancelled) => {
-			const out = chain.finish({
-				cancelled, extrapolateYears: state.cfg.extrapolateYears || 0,
-			});
+			let out;
+			try {
+				out = chain.finish({
+					cancelled, extrapolateYears: state.cfg.extrapolateYears || 0,
+				});
+			} catch (err) {
+				/* finish() builds the threads and the records. If it throws,
+				   `running` stays true for good: every later run, load and
+				   import returns early on it and Stop has no loop left to
+				   read it. Say what happened and let the page be used. */
+				state.universe.running = false;
+				universeCancel = false;
+				universeRerun = false;
+				showError(err);
+				render();
+				return;
+			}
 			const u = state.universe;
 			if (total > 0) universeSeasonMs = (Date.now() - started) / total;
 			/* PASS THREE: the seasons a player actually played, on his own
@@ -6747,7 +6856,19 @@
 				finish(cancelled);
 				return;
 			}
-			chain.step(k);
+			try {
+				chain.step(k);
+			} catch (err) {
+				/* step() guards the season itself, but the work around it
+				   (extrapolating a gap, handing entrants over, ageing the
+				   carry) is outside that guard. A throw here left the chain
+				   running with nothing left to advance it. Stop it cleanly,
+				   keeping the seasons already played. */
+				showError(err);
+				universeCancel = false;
+				finish(true);
+				return;
+			}
 			evictUniverseResults(chain.runnable.slice(Math.max(0, k - UNIVERSE_LIVE_RESULTS + 1), k + 1)
 				.map((x) => x.index));
 			setStatus("Universe: season " + (k + 1) + " of " + total + "…", true);
@@ -7209,6 +7330,7 @@
 	const AUTO_SLOT = "autosave";
 	let idbPromise = null;
 	let idbOk = null;
+	let idbFailure = "";
 	let autosaveReady = false;
 	let autosaveTimer = null;
 
@@ -7225,7 +7347,12 @@
 				req.onerror = () => resolve(null);
 				req.onblocked = () => resolve(null);
 			} catch (e) { resolve(null); }
-		}).then((db) => { idbOk = !!db; return db; });
+		}).then((db) => {
+			idbOk = !!db;
+			// A failed or blocked open is not the answer for the whole session.
+			if (!db) idbPromise = null;
+			return db;
+		});
 		return idbPromise;
 	}
 
@@ -7234,11 +7361,14 @@
 		return idbOpen().then((db) => new Promise((resolve) => {
 			if (!db) { resolve(null); return; }
 			try {
+				idbFailure = "";
 				const tx = db.transaction(IDB_STORE, mode);
 				const req = make(tx.objectStore(IDB_STORE));
 				tx.oncomplete = () => resolve(req && req.result !== undefined ? req.result : null);
-				tx.onerror = () => resolve(null);
-				tx.onabort = () => resolve(null);
+				// Remember WHY: a quota abort and a missing database are
+				// different problems and read differently to the person.
+				tx.onerror = () => { idbFailure = (tx.error && tx.error.name) || "error"; resolve(null); };
+				tx.onabort = () => { idbFailure = (tx.error && tx.error.name) || "aborted"; resolve(null); };
 			} catch (e) { resolve(null); }
 		})).catch(() => null);
 	}
@@ -7342,7 +7472,10 @@
 		try { rec = slotRecord(slot, name); } catch (e) { showError(e); return Promise.resolve(false); }
 		return idbRequest("readwrite", (s) => s.put(rec)).then((ok) => {
 			setStatus(ok ? "Saved “" + rec.name + "” (" + rec.seasons + " seasons, in full) to " + slot + "."
-				: "Could not save: IndexedDB is not available in this browser.", !ok);
+				: idbOk === false ? "Could not save: IndexedDB is not available in this browser."
+				: "Could not save" + (idbFailure ? " (" + idbFailure + ")" : "") +
+					(/Quota/i.test(idbFailure) ? ": the browser's storage is full — delete a slot or free space."
+						: "."), !ok);
 			return !!ok;
 		});
 	}
@@ -7456,6 +7589,7 @@
 			   awards are always on for this route whatever the export menu
 			   says — a universe players file without them is a class list. */
 			const all = liveResults();
+			if (currentExportOpts().myMarks) all.forEach(stampUserMarks);
 			const out = global.Engine.universePlayersFile(all, Object.assign(
 				{}, currentExportOpts(),
 				{ stats: true, prior: true, awards: true,
@@ -8355,12 +8489,15 @@
 		apply.addEventListener("click", () => {
 			pushUndo("locked " + p.name);
 			const next = {};
-			if (controls.ovr.cb.checked) next.ovr = Number(ovrIn.value);
-			if (controls.pot.cb.checked) next.pot = Number(potIn.value);
+			/* A blanked box is "no value", not zero: Number("") is 0, which
+			   locked a man at ovr 0, pot 0 or height 0. */
+			const given = (inp) => String(inp.value).trim() !== "" && Number.isFinite(Number(inp.value));
+			if (controls.ovr.cb.checked && given(ovrIn)) next.ovr = Number(ovrIn.value);
+			if (controls.pot.cb.checked && given(potIn)) next.pot = Number(potIn.value);
 			if (controls.archetype.cb.checked && archSel.value) next.archetype = archSel.value;
 			if (controls.college.cb.checked && colSel.value) next.college = colSel.value;
 			if (controls.name.cb.checked && nameIn.value.trim()) next.name = nameIn.value.trim();
-			if (controls.hgtInches.cb.checked) next.hgtInches = Number(hgtIn.value);
+			if (controls.hgtInches.cb.checked && given(hgtIn)) next.hgtInches = Number(hgtIn.value);
 			const ratings = {};
 			for (const k of BB.RATING_KEYS) {
 				const raw = ratingInputs[k].value;
@@ -9029,7 +9166,7 @@
 		a.download = name;
 		document.body.appendChild(a);
 		a.click();
-		setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+		setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 5000);
 		/* What was written, by name. A browser that saves to a download folder
 		   without asking gives no visible sign at all, and the statuses the
 		   callers wrote said what had happened ("Season exported.") without
@@ -9048,9 +9185,30 @@
 		setStatus("Wrote " + lastDownload + (extra ? " — " + extra : "") + ".");
 	}
 
+	/* The user's notes and stars for ONE class, by player key, stamped on the
+	   result so the engine (which knows nothing of the browser) can write them.
+	   They are stored scoped to the class (see userKey); this undoes the
+	   scoping for the class the result belongs to. */
+	function stampUserMarks(res) {
+		if (!res) return res;
+		const idx = Number.isFinite(res.fileIndex) ? res.fileIndex : state.active;
+		const f = state.files[idx];
+		const prefix = "@" + ((f && f.fingerprint) || "") + "|";
+		const pick = (map) => {
+			const out = {};
+			for (const k of Object.keys(map || {})) {
+				if (k.indexOf(prefix) === 0) out[k.slice(prefix.length)] = map[k];
+			}
+			return out;
+		};
+		res.userMarks = { notes: pick(state.notes), watch: pick(state.watch) };
+		return res;
+	}
+
 	function exportOne(i, opts) {
 		const res = ensureResult(i);
 		if (!res) return false;
+		if (opts && opts.myMarks) stampUserMarks(res);
 		try {
 			const out = global.Engine.exportFile(res, opts);
 			/* A player whose identity check failed passed through untouched;
@@ -9295,7 +9453,7 @@
 			a.download = name;
 			document.body.appendChild(a);
 			a.click();
-			setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+			setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 5000);
 			lastDownload = name;
 			setStatus("Wrote " + name + " — the first round as a picture, " +
 				"for somebody who does not have the game.");
@@ -9708,6 +9866,12 @@
 	/* One sequence at a time, driven from the button's single listener. A
 	   second `onclick` handler beside the listener fired both on every
 	   "Export next" click, so file 0 downloaded again each time. */
+	function resetExportAll() {
+		state.exportAllStep = null;
+		const b = $("btnExportAll");
+		if (b) b.textContent = "Export all";
+	}
+
 	function exportAll() {
 		if (state.exportAllStep) { state.exportAllStep(); return; }
 		let i = 0;
@@ -9871,16 +10035,27 @@
 		const oIncludeNotes = opt("includeNotes", "Include scouting notes in the export", true);
 		optBox.appendChild(el("p", "unit",
 			"Off writes the file with no note field at all. The note itself is " +
-			"still built and still shown on the Notes tab either way."));
+			"still built and still shown on the Notes tab either way. On the " +
+			"Tools → Import players route the note is the only place honors " +
+			"survive, so turning this off drops them there too."));
 		const oNoteAppend = opt("noteAppend", "Keep any note already in the file");
 		optBox.appendChild(el("p", "unit",
 			"The generated note replaces whatever the file carried. Tick this to " +
 			"add it underneath instead, for a file whose notes you edited in BBGM."));
+		/* The user's own notes and stars. They are written in this browser and
+		   are the person's, so they are not in a file unless asked for: an
+		   export gets pasted into forum threads. */
+		const oMyMarks = opt("myMarks", "Include my notes and watchlist");
+		optBox.appendChild(el("p", "unit",
+			"Adds what you wrote under “My notes” on a player page as the last " +
+			"lines of his note (so BBGM shows it), and marks starred prospects " +
+			"as watched. Off by default: they stay in this browser."));
 		list.appendChild(optBox);
 		paintScope();
 		const exportOpts = () => ({
 			stats: oStats(), prior: oPrior(), highs: oHighs(), awards: oAwards(),
 			ages: oAges(), noteAppend: oNoteAppend(), includeNotes: oIncludeNotes(),
+			myMarks: oMyMarks(),
 			injuries: oInjuries(), jerseys: oJerseys(),
 			awardsScope: scopeSel.value,
 			majorConferences: confInput.value.split(",")
@@ -9946,7 +10121,9 @@
 			const res2 = ensureResult(state.active);
 			if (!res2) return;
 			try {
-				const out = global.Engine.exportPlayersFile(res2, exportOpts());
+				const popts = exportOpts();
+				if (popts.myMarks) stampUserMarks(res2);
+				const out = global.Engine.exportPlayersFile(res2, popts);
 				const base = state.files[state.active].name.replace(/\.json(\.gz)?$|\.gz$/i, "");
 				download(base + "_players.json", "\ufeff" + JSON.stringify(out, null, 2),
 					"application/json");
@@ -9977,6 +10154,9 @@
 		item("Import locks from a CSV…", () => $("csvFile").click());
 		item("Settings as JSON — drop it on the page to load them again", exportSettingsJson);
 		item("Message history", messageHistory);
+		item("Copy a bug report (seed, settings, engine revision, last error — no player data)", () => {
+			copyText(bugReport(), null, "", "the bug report");
+		});
 		item("Compare two presets…", comparePresets);
 		box.appendChild(list);
 		modal("Export and import", box, null, "Close");
@@ -9997,7 +10177,7 @@
 		const results = [];
 		for (const i of picked) {
 			const r = ensureResult(i);
-			if (r) results.push(r);
+			if (r) results.push((state.mergeOpts && state.mergeOpts.myMarks) ? stampUserMarks(r) : r);
 		}
 		if (!results.length) return;
 		let out;
@@ -10169,7 +10349,7 @@
 	   180 that 200 was too many. */
 	let batchPartial = [];
 
-	function batchDone(rows) {
+	function batchDone(rows, failed) {
 		$("batchProgress").hidden = true;
 		$("btnBatch").disabled = false;
 		$("btnBatchCancel").hidden = true;
@@ -10177,11 +10357,15 @@
 		if (batchWorker) batchWorker.terminate();
 		batchWorker = null;
 		const use = (rows && rows.length) ? rows : batchPartial;
-		if (!use.length) { setStatus("Batch canceled before any class finished."); return; }
+		if (!use.length) {
+			setStatus(failed ? "Batch stopped by an error before any class finished."
+				: "Batch canceled before any class finished.");
+			return;
+		}
 		renderBatch(use);
 		setStatus(rows && rows.length
 			? ""
-			: "Cancelled — showing the " + use.length + " " +
+			: (failed ? "Stopped by an error — showing the " : "Cancelled — showing the ") + use.length + " " +
 				(use.length === 1 ? "class" : "classes") + " that finished.");
 		batchPartial = [];
 	}
@@ -10347,7 +10531,7 @@
 				} else if (m.type === "done") batchDone(m.rows);
 				else if (m.type === "error") {
 					showError(new Error(m.message));
-					batchDone(null);
+					batchDone(null, true);
 				}
 			};
 			batchWorker.onerror = () => {
@@ -10391,7 +10575,7 @@
 				batchPartial = rows.slice();
 			} catch (err) {
 				showError(err);
-				batchDone(null);
+				batchDone(null, true);
 				return;
 			}
 			i++;
@@ -10493,7 +10677,7 @@
 	}
 
 	Object.assign(global.App, {
-		effectiveCfg, activeFile,
+		effectiveCfg, activeFile, userKey, bugReport,
 		state, render, run, persist, openEditor, revealPlayer, visibleRows,
 		editorPanel, modal, closeModal,
 		clearLock, showPlayer, showTeam, showGame,
@@ -10538,6 +10722,55 @@
 	   rather than looping. */
 	let lastUncaught = null;
 	let reportingUncaught = false;
+	/* A BUG REPORT THAT CAN BE REPRODUCED.
+
+	   The engine is deterministic, so the seed, the settings that were moved
+	   and the engine revision are a complete recipe for the class on screen:
+	   nobody needs the file. This writes them, plus the last error with its
+	   stack, as plain text to paste into an issue. It carries no player data,
+	   no file contents and no notes — only the names of the files loaded, which
+	   the person can strike out before posting. */
+	function bugReport() {
+		const res = state.results[state.active];
+		const lines = ["BBGM Draft Class Workshop — bug report", ""];
+		const add = (k, v) => lines.push(k + ": " + v);
+		add("When", new Date().toISOString());
+		add("Browser", navigator.userAgent);
+		add("Opened from", location.protocol === "file:" ? "a local file" : location.origin);
+		add("Engine revision", global.Universe ? global.Universe.ENGINE_REV : "?");
+		add("Settings store / universe export versions",
+			STORE_VERSION + " / " + (global.Universe ? global.Universe.VERSION : "?"));
+		add("Tab", state.tab + (state.player ? " (player page open)" : ""));
+		add("Files loaded", state.files.length
+			? state.files.map((f) => f.name + " (season " + (f.data && f.data.startingSeason) + ", " +
+				((f.data && f.data.players) || []).length + " players)").join("; ") : "none");
+		if (res) {
+			add("Seed", res.seed);
+			add("Class", classFingerprint(res));
+			add("Last phases run", (res.phasesRun || []).join(" → ") || "none (served from the cache)");
+		}
+		const changed = diffConfigs(CFG.DEFAULTS, CFG.make(state.cfg));
+		add("Settings changed from the defaults", changed.length ? "" : "none");
+		for (const c of changed) lines.push("  " + c);
+		add("Locks", Object.keys(state.overrides || {}).length + " player(s)");
+		if (state.cfg.universe) {
+			const u = state.universe;
+			add("Universe", (u.rows ? u.rows.length : 0) + " seasons" + (u.running ? ", running" : "") +
+				(u.viewOnly ? ", view only" : ""));
+		}
+		if (lastErrorInfo) {
+			lines.push("", "Last error (" + lastErrorInfo.at + "):", lastErrorInfo.message);
+			if (lastErrorInfo.original) lines.push("Thrown as: " + lastErrorInfo.original);
+			if (lastErrorInfo.stack) {
+				lines.push(lastErrorInfo.stack.split("\n").slice(0, 12).join("\n"));
+			}
+		} else {
+			lines.push("", "Last error: none this session");
+		}
+		lines.push("", "What I did, and what I expected:", "");
+		return lines.join("\n");
+	}
+
 	function reportUncaught(err) {
 		if (reportingUncaught) return;
 		const text = err && err.message ? err.message : String(err || "unknown error");
@@ -10548,7 +10781,7 @@
 		try {
 			showError(new Error("Something went wrong: " + text +
 				". The page may be out of step with the settings — Re-apply, or " +
-				"reload if it persists."));
+				"reload if it persists."), err);
 		} catch (e) { /* nothing left to report with */ } finally {
 			reportingUncaught = false;
 		}
@@ -10639,6 +10872,9 @@
 	Promise.resolve().then(loadAutosave).then(afterAutosave, afterAutosave);
 
 	$("errClose").addEventListener("click", clearError);
+	$("errReport").addEventListener("click", () => {
+		copyText(bugReport(), $("errReport"), "Copy bug report", "the bug report");
+	});
 	$("warnClose").addEventListener("click", () => { $("warnBanner").hidden = true; });
 	/* The settings panel is a toggle at EVERY width now, not only narrow.
 	   On a phone it starts closed — the first act is to look at the class,
@@ -10653,7 +10889,12 @@
 		for (const grp of document.querySelectorAll("aside details.grp")) {
 			const sum = grp.querySelector("summary");
 			if (!sum || !grp.id) continue;
-			const a = el("a", null, sum.textContent.trim());
+			/* The summary's own text only: it also holds the Reset button and
+			   the hidden "changed: N" badge, and textContent counts hidden
+			   elements ("Buildschanged: 0↺ Reset"). */
+			const first = sum.firstChild && sum.firstChild.nodeType === 3
+				? sum.firstChild.textContent : "";
+			const a = el("a", null, (sum.dataset.label || first || sum.textContent).trim());
 			a.href = "#" + grp.id;
 			a.addEventListener("click", (e) => {
 				e.preventDefault();

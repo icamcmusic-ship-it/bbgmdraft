@@ -29,13 +29,11 @@ function loadEngine() {
 		   ran in CI ever read a News article's text, which is exactly how
 		   "a Arizona State dunk" shipped. faces.js is the one exception: it
 		   wraps the vendored facesjs and draws SVG, which has no business in
-		   a Node harness. */
-		for (const f of [
-			"text", "rng", "bbgm", "bbgmstats", "colleges", "config", "calibration", "ratings",
-			"traits",
-			"teams", "stats", "rankings", "tournament", "awards", "engine", "batch",
-			"sample", "news", "universe", "almanac", "replay", "site", "replaymeta", "play",
-		]) require(path.join(__dirname, "..", "js", f + ".js"));
+		   a Node harness. The list is js/manifest.js, shared with the page's
+		   worker and checked against index.html by tools/tests/fixes.js. */
+		for (const f of require("../js/manifest.js").node) {
+			require(path.join(__dirname, "..", "js", f + ".js"));
+		}
 	}
 	return global;
 }
