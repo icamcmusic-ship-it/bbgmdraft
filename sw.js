@@ -10,20 +10,19 @@
    four (the shell and the manifest), so the first offline visit after a single
    online one found no scripts and no stylesheet, and every failed script
    request was answered with index.html — thirty "Unexpected token '<'" errors
-   and no app. Keep this list in step with index.html and js/worker.js;
-   tools/tests/sw.js fails when a script is on the page and not here. */
+   and no app. The scripts come from js/manifest.js; tools/tests/fixes.js fails when
+   index.html loads a script that is not in it. */
 const CACHE = "bbgm-draft-workshop-v2";
+
+/* The scripts are listed once, in js/manifest.js, which this worker imports (an
+   imported script is stored with the worker, so it is there offline too). The
+   files that are not scripts are named here. */
+importScripts("js/manifest.js");
 
 const SHELL = [
 	"./", "index.html", "icon.svg", "manifest.webmanifest", "css/style.css",
-	"js/text.js", "js/rng.js", "js/bbgm.js", "js/bbgmstats.js", "js/colleges.js",
-	"js/config.js", "js/calibration.js", "js/ratings.js", "js/traits.js",
-	"js/teams.js", "js/stats.js", "js/rankings.js", "js/tournament.js",
-	"js/awards.js", "js/engine.js", "js/sample.js", "js/batch.js",
-	"js/vendor/facesjs.js", "js/faces.js", "js/news.js", "js/universe.js",
-	"js/almanac.js", "js/replay.js", "js/site.js", "js/replaymeta.js",
-	"js/views.js", "js/play.js", "js/app.js", "js/worker.js",
-];
+	"js/manifest.js", "js/worker.js",
+].concat(self.BBGMManifest.page.map((f) => "js/" + f + ".js"));
 
 self.addEventListener("install", (e) => {
 	/* One missing file must not fail the whole install, so each is added on

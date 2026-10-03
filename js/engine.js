@@ -689,6 +689,27 @@
 				bad.slice(0, 4).join("; ") + (bad.length > 4 ? "; …" : ""));
 		}
 		const warnings = [];
+		/* The schema version the file says it is. BBGM migrates on the way in by
+		   it (see LEAGUE_DATABASE_VERSION in js/bbgm.js): at 23 or below it
+		   recomputes every hgt rating from the listed height, and at 32 or
+		   below it rewrites the ratings season and the draft year, so a class
+		   whose ratings this tool solved exactly can arrive different. A version
+		   above the one this tool knows may carry fields it passes through
+		   without understanding. A file with NO version is stamped on export. */
+		{
+			const ver = num(leagueFile.version);
+			if (ver !== undefined && ver <= 32) {
+				warnings.push("This file is schema version " + ver + ", older than 33. " +
+					"Basketball GM runs its old-file migrations when it imports one, " +
+					"which can rewrite every player's height rating and the draft " +
+					"year. Open the class in a current Basketball GM and export it " +
+					"again before working on it here.");
+			} else if (ver !== undefined && ver > BB.LEAGUE_DATABASE_VERSION) {
+				warnings.push("This file is schema version " + ver + "; this tool was " +
+					"written against " + BB.LEAGUE_DATABASE_VERSION + ". Fields added " +
+					"since are passed through untouched, but check the import.");
+			}
+		}
 		if (missingOvrPot) {
 			warnings.push(missingOvrPot + " player" +
 				(missingOvrPot === 1 ? " has" : "s have") +

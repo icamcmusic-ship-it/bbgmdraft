@@ -12,11 +12,10 @@
    workers in most browsers, and that is the documented way to use this tool. */
 "use strict";
 
-self.importScripts(
-	"text.js", "rng.js", "bbgm.js", "bbgmstats.js", "colleges.js", "config.js", "calibration.js",
-	"ratings.js", "traits.js", "teams.js", "stats.js", "rankings.js", "tournament.js", "awards.js",
-	"engine.js", "batch.js", "news.js", "universe.js",
-);
+/* The list lives in js/manifest.js, which is what the page, the service worker
+   and the Node harness are checked against too. */
+self.importScripts("manifest.js");
+self.importScripts.apply(self, self.BBGMManifest.worker.map((f) => f + ".js"));
 
 /* THE SEARCH, WHICH IS THE OTHER THING WORTH SENDING HERE.
 

@@ -3643,6 +3643,26 @@ async function gotoProspects(page) {
 		await page.waitForTimeout(800);
 	}
 
+	/* The bug report: what it carries and what it does not. */
+	{
+		console.log("\nBug report");
+		const report = await page.evaluate(() => window.App.bugReport());
+		ok("the report names the engine revision, the seed and the browser",
+			/Engine revision: \d+/.test(report) && /Seed: \S+/.test(report) && /Browser: /.test(report));
+		ok("...lists the settings that were moved", /Settings changed from the defaults/.test(report));
+		ok("...and carries no player data",
+			!/ppg|Honors:|Scouts note/.test(report) &&
+			!(await page.evaluate(() => window.App.state.results[window.App.state.active].players
+				.slice(0, 5).some((p) => window.App.bugReport().indexOf(p.name) !== -1))));
+		await page.evaluate(() => { try { null.x; } catch (e) { window.dispatchEvent(new ErrorEvent("error", { error: e, message: e.message })); } });
+		await page.waitForTimeout(200);
+		ok("an uncaught error is kept with its stack for the report",
+			/Last error[\s\S]*Thrown as: [\s\S]*at /.test(await page.evaluate(() => window.App.bugReport())));
+		ok("the error banner offers the report",
+			(await page.locator("#errBanner:not([hidden]) #errReport").count()) === 1);
+		await page.locator("#errClose").click();
+	}
+
 	console.log("\nNo errors");
 	ok("no console or page errors", errors.length === 0, errors.join("\n         "));
 

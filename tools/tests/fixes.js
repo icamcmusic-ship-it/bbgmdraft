@@ -14,25 +14,38 @@ module.exports = function (ok, V) {
 	const ROOT = path.join(__dirname, "..", "..");
 	const read = (f) => fs.readFileSync(path.join(ROOT, f), "utf8");
 
-	/* ---- the offline worker caches what the page loads ------------------- */
+	/* ---- the script list is written once, and the page agrees with it ----- */
 	{
+		const M = require("../../js/manifest.js");
 		const sw = read("sw.js");
 		const html = read("index.html");
-		const scripts = Array.from(html.matchAll(/<script[^>]*\bsrc="([^"]+)"/g)).map((m) => m[1]);
-		const sheets = Array.from(html.matchAll(/<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"/g))
-			.map((m) => m[1]);
+		const scripts = Array.from(html.matchAll(/<script[^>]*\bsrc="js\/([^"]+)\.js"/g)).map((m) => m[1]);
+		ok("manifest/index.html loads exactly the manifest's scripts, in its order",
+			scripts.join() === M.page.join(),
+			"html: " + scripts.join() + "\nmanifest: " + M.page.join());
+		const gone = M.page.filter((f) => !fs.existsSync(path.join(ROOT, "js", f + ".js")));
+		ok("manifest/every listed script exists", gone.length === 0, gone.join(", "));
+		const unlisted = fs.readdirSync(path.join(ROOT, "js")).filter((f) => f.endsWith(".js"))
+			.map((f) => f.replace(/\.js$/, ""))
+			.filter((f) => ["manifest", "worker"].indexOf(f) === -1 && M.page.indexOf(f) === -1);
+		ok("manifest/no script in js/ is missing from it", unlisted.length === 0, unlisted.join(", "));
+		ok("manifest/the worker and the node harness are subsets of the page, in page order",
+			[M.worker, M.node].every((list) => list.every((f, i) =>
+				M.page.indexOf(f) !== -1 && (i === 0 || M.page.indexOf(list[i - 1]) < M.page.indexOf(f)))));
+		ok("manifest/the engine's own dependencies are all in the worker list",
+			["text", "rng", "bbgm", "config", "ratings", "engine", "batch", "universe"]
+				.every((f) => M.worker.indexOf(f) !== -1));
 		const worker = read("js/worker.js");
-		const imported = Array.from((worker.match(/importScripts\(([\s\S]*?)\)/) || ["", ""])[1]
-			.matchAll(/"([^"]+)"/g)).map((m) => "js/" + m[1]);
-		const needed = scripts.concat(sheets, ["js/worker.js"], imported);
-		const missing = needed.filter((f) => sw.indexOf('"' + f + '"') === -1);
-		ok("sw/every script, the stylesheet and the batch worker are precached",
-			scripts.length > 20 && missing.length === 0, "missing: " + missing.join(", "));
+		ok("manifest/the worker imports the list instead of repeating it",
+			/importScripts\("manifest\.js"\)/.test(worker) && !/"bbgmstats\.js"/.test(worker));
+		ok("sw/the service worker precaches the manifest's scripts, the worker and the stylesheet",
+			/importScripts\("js\/manifest\.js"\)/.test(sw) && /BBGMManifest\.page/.test(sw) &&
+			/"js\/worker\.js"/.test(sw) && /"css\/style\.css"/.test(sw) && /"js\/manifest\.js"/.test(sw));
 		ok("sw/a failed script or stylesheet is not answered with index.html",
 			/req\.mode === "navigate"/.test(sw));
 		ok("sw/the cache name was bumped past v1", /bbgm-draft-workshop-v([2-9]|\d\d)/.test(sw));
-		const gone = needed.filter((f) => f !== "./" && !fs.existsSync(path.join(ROOT, f)));
-		ok("sw/every precached file exists", gone.length === 0, gone.join(", "));
+		ok("manifest/the harness loaded everything on the node list",
+			!!global.Engine && !!global.Universe && !!global.Play && !!global.ReplayMeta && !!global.SeasonSite && !!global.Sample && !!global.BatchStats);
 	}
 
 	/* ---- a seed is text -------------------------------------------------- */
@@ -173,5 +186,20 @@ module.exports = function (ok, V) {
 		const html = read("index.html");
 		ok("ui/the error banner sits above the drop box",
 			html.indexOf('id="errBanner"') < html.indexOf('id="empty"'));
+	}
+
+	/* ---- the file's own schema version is read, not assumed --------------- */
+	{
+		const w = (version) => {
+			const lf = V.realisticClass("ver" + version, 8);
+			if (version === null) delete lf.version; else lf.version = version;
+			return E.validateLeagueFile(lf).warnings.filter((x) => /schema version/.test(x));
+		};
+		ok("version/an old schema is warned about before BBGM migrates it", w(23).length === 1 && w(32).length === 1,
+			JSON.stringify(w(23)));
+		ok("version/the current schema is not", w(global.BBGM.LEAGUE_DATABASE_VERSION).length === 0 && w(40).length === 0);
+		ok("version/a schema newer than the tool's is warned about",
+			w(global.BBGM.LEAGUE_DATABASE_VERSION + 1).length === 1);
+		ok("version/no version at all is left to the export to stamp", w(null).length === 0);
 	}
 };

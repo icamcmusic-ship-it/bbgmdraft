@@ -4662,10 +4662,22 @@
 	/* The banners carry a real close button now. They were dismiss-on-click
 	   with the instruction hidden in a `title` and appended to the message
 	   text, which is neither discoverable nor reachable from the keyboard. */
-	function showError(err) {
+	/* What went wrong last, kept for the bug report (see bugReport). `original`
+	   is the error the page actually threw when what is shown is a friendlier
+	   wrapper around it. */
+	let lastErrorInfo = null;
+
+	function showError(err, original) {
 		const b = $("errBanner");
 		b.hidden = false;
 		const text = err && err.message ? err.message : String(err);
+		const root = original || err;
+		lastErrorInfo = {
+			message: text,
+			original: original && original.message ? original.message : null,
+			stack: root && root.stack ? String(root.stack) : null,
+			at: new Date().toISOString(),
+		};
 		b.querySelector(".bannertext").textContent = text;
 		// Banners are dismissible and a dismissed banner used to be gone for
 		// good; everything said this session is kept (Tools → Message history).
@@ -10150,6 +10162,9 @@
 		item("Import locks from a CSV…", () => $("csvFile").click());
 		item("Settings as JSON — drop it on the page to load them again", exportSettingsJson);
 		item("Message history", messageHistory);
+		item("Copy a bug report (seed, settings, engine revision, last error — no player data)", () => {
+			copyText(bugReport(), null, "", "the bug report");
+		});
 		item("Compare two presets…", comparePresets);
 		box.appendChild(list);
 		modal("Export and import", box, null, "Close");
@@ -10670,7 +10685,7 @@
 	}
 
 	Object.assign(global.App, {
-		effectiveCfg, activeFile, userKey,
+		effectiveCfg, activeFile, userKey, bugReport,
 		state, render, run, persist, openEditor, revealPlayer, visibleRows,
 		editorPanel, modal, closeModal,
 		clearLock, showPlayer, showTeam, showGame,
@@ -10715,6 +10730,55 @@
 	   rather than looping. */
 	let lastUncaught = null;
 	let reportingUncaught = false;
+	/* A BUG REPORT THAT CAN BE REPRODUCED.
+
+	   The engine is deterministic, so the seed, the settings that were moved
+	   and the engine revision are a complete recipe for the class on screen:
+	   nobody needs the file. This writes them, plus the last error with its
+	   stack, as plain text to paste into an issue. It carries no player data,
+	   no file contents and no notes — only the names of the files loaded, which
+	   the person can strike out before posting. */
+	function bugReport() {
+		const res = state.results[state.active];
+		const lines = ["BBGM Draft Class Workshop — bug report", ""];
+		const add = (k, v) => lines.push(k + ": " + v);
+		add("When", new Date().toISOString());
+		add("Browser", navigator.userAgent);
+		add("Opened from", location.protocol === "file:" ? "a local file" : location.origin);
+		add("Engine revision", global.Universe ? global.Universe.ENGINE_REV : "?");
+		add("Settings store / universe export versions",
+			STORE_VERSION + " / " + (global.Universe ? global.Universe.VERSION : "?"));
+		add("Tab", state.tab + (state.player ? " (player page open)" : ""));
+		add("Files loaded", state.files.length
+			? state.files.map((f) => f.name + " (season " + (f.data && f.data.startingSeason) + ", " +
+				((f.data && f.data.players) || []).length + " players)").join("; ") : "none");
+		if (res) {
+			add("Seed", res.seed);
+			add("Class", classFingerprint(res));
+			add("Last phases run", (res.phasesRun || []).join(" → ") || "none (served from the cache)");
+		}
+		const changed = diffConfigs(CFG.DEFAULTS, CFG.make(state.cfg));
+		add("Settings changed from the defaults", changed.length ? "" : "none");
+		for (const c of changed) lines.push("  " + c);
+		add("Locks", Object.keys(state.overrides || {}).length + " player(s)");
+		if (state.cfg.universe) {
+			const u = state.universe;
+			add("Universe", (u.rows ? u.rows.length : 0) + " seasons" + (u.running ? ", running" : "") +
+				(u.viewOnly ? ", view only" : ""));
+		}
+		if (lastErrorInfo) {
+			lines.push("", "Last error (" + lastErrorInfo.at + "):", lastErrorInfo.message);
+			if (lastErrorInfo.original) lines.push("Thrown as: " + lastErrorInfo.original);
+			if (lastErrorInfo.stack) {
+				lines.push(lastErrorInfo.stack.split("\n").slice(0, 12).join("\n"));
+			}
+		} else {
+			lines.push("", "Last error: none this session");
+		}
+		lines.push("", "What I did, and what I expected:", "");
+		return lines.join("\n");
+	}
+
 	function reportUncaught(err) {
 		if (reportingUncaught) return;
 		const text = err && err.message ? err.message : String(err || "unknown error");
@@ -10725,7 +10789,7 @@
 		try {
 			showError(new Error("Something went wrong: " + text +
 				". The page may be out of step with the settings — Re-apply, or " +
-				"reload if it persists."));
+				"reload if it persists."), err);
 		} catch (e) { /* nothing left to report with */ } finally {
 			reportingUncaught = false;
 		}
@@ -10816,6 +10880,9 @@
 	Promise.resolve().then(loadAutosave).then(afterAutosave, afterAutosave);
 
 	$("errClose").addEventListener("click", clearError);
+	$("errReport").addEventListener("click", () => {
+		copyText(bugReport(), $("errReport"), "Copy bug report", "the bug report");
+	});
 	$("warnClose").addEventListener("click", () => { $("warnBanner").hidden = true; });
 	/* The settings panel is a toggle at EVERY width now, not only narrow.
 	   On a phone it starts closed — the first act is to look at the class,
