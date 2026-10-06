@@ -117,9 +117,18 @@
 		return safeValue(face, 0);
 	}
 
+	/* The seeded face's key. Engine.faceKeyFor adds the salt of a "re-roll his
+	   face" lock (ov.faceSalt), and a salted player is drawn from it even when
+	   his file carries a usable face, exactly as the export writes him. */
+	function faceKeyOf(p) {
+		const E = global.Engine;
+		return p && E && typeof E.faceKeyFor === "function" ? E.faceKeyFor(p)
+			: p ? p.key : "unknown";
+	}
 	function faceOf(p) {
 		const face = p && p.src && p.src.face;
-		return usable(face) ? face : seededFace(p ? p.key : "unknown");
+		const salted = !!(p && p.override && faceKeyOf(p) !== String(p.key));
+		return usable(face) && !salted ? face : seededFace(faceKeyOf(p));
 	}
 
 	/* No hats. facesjs's "accessories" range is caps, headbands, eye black, a
@@ -192,7 +201,7 @@
 			return true;
 		} catch (e) {
 			try {
-				F.display(container, seededFace(p ? p.key : "unknown"));
+				F.display(container, seededFace(faceKeyOf(p)));
 				return true;
 			} catch (e2) {
 				container.textContent = "";

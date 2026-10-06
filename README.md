@@ -43,6 +43,7 @@ node bin/bbgmdraft.js run   class.json --seed demo --notes short --stats --award
 node bin/bbgmdraft.js batch class.json -n 50 --set pace=72 --csv > batch.csv
 node bin/bbgmdraft.js universe 2025.json 2026.json 2027.json --seed demo --out world.json
 node bin/bbgmdraft.js mock class.json --seed demo   # two-round mock draft with pro projections
+node bin/bbgmdraft.js seek class.json --want tallTop5 --not abroadNo1 --tries 60 --seed hunt
 node bin/bbgmdraft.js check class.json
 node bin/bbgmdraft.js settings            # every setting, its default and range
 ```
@@ -67,6 +68,43 @@ universe export the Universe tab imports; it does not yet write the players
 file, which needs the career links the page adds after the chain.
 Experimental: the flags may change. `node bin/bbgmdraft.js help`
 lists them all.
+
+More flags, each checked against the engine or the page in
+`tools/tests/quickwins-engine.js`:
+
+* **Settings and locks.** `--settings file.json` takes the page's "Export
+  settings JSON" (`{format, v, cfg}`), or a class file written with
+  `--recipe`, and applies it after `--preset` and before `--set`, `--notes` and
+  `--seed`. `--locks file.csv` reads the page's locks CSV (`key`, `name`,
+  `ovr`, `pot`, `archetype`, `college`) the way its import does and locks those
+  prospects; it says how many rows applied, were refused or matched nobody.
+* **Pipes and files.** A class file of `-` is standard input (gzip is
+  recognised), and a class that came from a pipe goes back out stdout.
+  `--gzip` writes gzip (`class_customized.json.gz`). `--count N` writes N
+  classes, seeds `<base>#0` to `#N-1` (the seeds `batch` runs), into the
+  directory `--out` names.
+* **Other outputs of `run`.** `--merge league.json` merges the class into that
+  league (`league_merged.json`), `--players-file` writes the Tools -> Import
+  players file and `--fragment` the college-league fragment. They are
+  alternatives: choose one.
+* **Opt-in extras on the export.** `--fuzz keep|zero|regenerate` (with
+  `--scouting N`) for BBGM's scouting fuzz, `--recipe` to embed the seed,
+  engine revision, settings and source fingerprint in the file's `bbgmdraft`
+  key, `--hometowns` for a "City, ST, USA" birthplace weighted by the school's
+  region where the file has none, and `--pro-lines` for "Pro projection:" and
+  "Mock:" lines in each note. Without them the file is the one it always was.
+* **`mock --rounds N`** sets the rounds of the mock draft.
+* **`seek`** prints the first seed whose class meets every `--want` and none
+  of the `--not` conditions, trying `--tries N` seeds `<--seed>#0, #1, ...`,
+  and exits 1 when none does. The conditions are the page's "reroll until"
+  ones (`tallTop5`, `abroadNo1`, `deepClass`, `strangeness:N`, ...) plus
+  `topOvr:N`, `count50:N`, `pos1:C`, `archetype:Name`, `school:Name`,
+  `height:N` (inches) and `freshmen:N`.
+
+`node tools/bundle.js` (or `npm run bundle`) writes the whole tool as one HTML
+file, `dist/bbgm-draft-workshop.html` (about 3.5 MB: the stylesheet and every
+script inlined, no dependencies), for email or a USB stick; a page opened from
+a disk cannot run the batch worker, which the page already allows for.
 
 ## What it does
 
@@ -1190,13 +1228,18 @@ carry-over was already aged across the hole — coaches age and the oldest
 leave, program levels regress toward the field's own mean, star returners
 advance a class year and graduate out — and the timeline still skipped from
 2026 to 2031 as though nothing had happened between them. **Extrapolated
-seasons** fill the gap with what a season is remembered by: a champion and a
-runner-up drawn against program strength, a poll No. 1, a player of the year
-and a five-man All-America taken from the named star returners the carry is
-holding. It is not a simulation and does not pretend to be — every row is
-flagged (a `*` on the timeline), nothing derived from one is fed back into the
-chain, and the names run out as the gap lengthens, because a world five years
-past the last file it was given genuinely does not know who is playing. The
+seasons** fill the gap with what a season is remembered by: a champion, a
+runner-up and a Final Four drawn against program strength (a level is worth
+what it is worth in the simulated seasons: the draw was fitted to them), a poll
+No. 1, a player of the year, a No. 1 pick and a five-man All-America, plus the
+April coaching changes and the conference moves, which come from the same
+season model the played years use. The named star returners the carry is
+holding are used first; after them the men are invented, named off the
+synthetic generator's deal so no name repeats, and flagged. It is not a
+simulation and does not pretend to be — every row is flagged (a `*` on the
+timeline), an invented man has no file, no career page and no place in the
+records, the Hall or the threads, and nothing derived from a guessed year is
+fed back into the chain. The
 same machinery **tops up a partial class**: a league export whose future draft
 class is forty men produces a real season whose honours were drawn from a thin
 field, and the All-America places that field could not fill are added and

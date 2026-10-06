@@ -18,6 +18,8 @@
 	const state = {
 		// Active mutators (js/replaymeta.js), applied in effectiveCfg.
 		mutators: [],
+		// Where a shared link asked to land; see applyPendingDeep.
+		pendingDeep: null,
 		mergeIndices: null,
 		/* The league export the loaded classes came out of, if any. Kept in
 		   memory (never persisted — it is megabytes) so a merge back into it
@@ -43,6 +45,8 @@
 			playedOnly: false, didNotPlayOnly: false,
 			// [{key, min, max}] — numeric range filters, see Views.rangeBar.
 			ranges: [],
+			// Skill tags (every one ticked), class year, how he got here, tag.
+			skills: [], classYear: "", path: "", tag: "",
 		},
 		noteQuery: "",   // the Notes tab has its own search; it used to share one
 		overrides: {},   // player key -> {ovr, pot, archetype, college, ratings, …}
@@ -76,6 +80,13 @@
 		   they survive a reroll and ride along in the saved settings. */
 		watch: {},
 		notes: {},
+		/* Tags beside the star (sleeper, bust risk, my guy): userKey -> [tag].
+		   Scoped to the class by its fingerprint, like the star and the note. */
+		tags: {},
+		// Saved filters, by name — the way columnLayouts are saved.
+		filterViews: {},
+		// "imperial" | "metric": how height and weight are SHOWN. Never exported.
+		units: "imperial",
 		// Board heatmap: shade Ovr / Pot / PPG by percentile within the class.
 		boardHeat: false,
 		// "auto" | "on" | "off" — see cardMode() in js/views.js.
@@ -382,6 +393,11 @@
 			density: state.density,
 			watch: state.watch,
 			notes: state.notes,
+			tags: state.tags,
+			filterViews: state.filterViews,
+			units: state.units,
+			// So a column added later can be told from one the user hid.
+			knownColumns: V.COLUMNS.map((c) => c.key),
 			boardHeat: state.boardHeat,
 			cardView: state.cardView,
 			cardAll: state.cardAll,
@@ -634,6 +650,20 @@
 				if (typeof saved.notes[k] === "string" && saved.notes[k].trim()) {
 					state.notes[k] = saved.notes[k].slice(0, 2000);
 				}
+			}
+		}
+		state.tags = V.cleanTags(saved.tags);
+		state.filterViews = V.cleanFilterViews(saved.filterViews);
+		if (saved.units === "metric") state.units = "metric";
+		/* A column added since this was saved starts hidden if it is an
+		   optional one, instead of appearing in a table the user had set up. */
+		{
+			const known = Array.isArray(saved.knownColumns) ? saved.knownColumns : null;
+			for (const c of V.COLUMNS) {
+				if (!c.off || c.fixed) continue;
+				const isNew = known ? known.indexOf(c.key) === -1
+					: V.EXTRA_COLUMNS.some((x) => x.key === c.key);
+				if (isNew) state.hiddenColumns[c.key] = true;
 			}
 		}
 		state.boardHeat = !!saved.boardHeat;
@@ -3894,37 +3924,78 @@
 	   truncating. A class with 70 fully-locked players clears it easily, and a
 	   silently truncated link is worse than no link: it opens, parses as far as
 	   it got, and applies the wrong settings. */
-	const HASH_LIMIT = 8000;
+	const HASH_LIMIT = global.Share.HASH_LIMIT;
 	let hashWarned = false;
 	// What writeHash last put in the address bar; see the hashchange listener.
 	let lastWrittenHash = null;
+	let hashSeq = 0;
 
+	/* What a shared link carries: the settings and locks, the challenge being
+	   played and, when somebody is deliberately sharing (`withDrawnSeed`), where
+	   to land — the tab, the open prospect, the compared set — with the file's
+	   fingerprint they are keys into. */
+	function linkPayload(withDrawnSeed) {
+		const payload = encodeConfig(withDrawnSeed);
+		// The challenge being played (a daily's date is in its key) and its score.
+		Object.assign(payload, challengeHashFields());
+		if (withDrawnSeed) {
+			const f = activeFile();
+			const deep = global.Share.deepFields({ tab: state.tab, player: state.player,
+				compare: state.compare, fp: f && f.fingerprint });
+			// A fingerprint already on the payload is the one the locks were made against.
+			if (Object.keys(deep).length && (!payload.fp || payload.fp === deep.fp)) Object.assign(payload, deep);
+		}
+		return payload;
+	}
+
+	function setHash(hash) {
+		lastWrittenHash = hash;
+		history.replaceState(null, "", hash || "#");
+	}
+
+	function warnLeanLink() {
+		if (hashWarned) return;
+		hashWarned = true;
+		setStatus("This class has too many locked players to fit in a " +
+			"shareable link, so the link carries the settings only. " +
+			"Export the locks as CSV (More ▾) to share those.", true);
+	}
+
+	/* Writes the address bar. A payload that fits is written at once, as it
+	   always was. One that does not is written without its locks at once and
+	   then replaced by the COMPRESSED link, locks and all, when the browser has
+	   finished deflating it — so the return value is a promise in that case
+	   (resolved when the final link is in place) and undefined when the link is
+	   already final. */
 	function writeHash(withDrawnSeed) {
 		try {
-			const payload = encodeConfig(withDrawnSeed);
-			// The challenge being played (a daily's date is in its key) and its score.
-			Object.assign(payload, challengeHashFields());
-			let body = Object.keys(payload).length
-				? encodeURIComponent(JSON.stringify(payload))
-				: "";
-			if (body.length > HASH_LIMIT && payload.overrides) {
-				/* Drop the locks rather than the settings: the settings are what
-				   a shared link is usually for, and the locks are the part that
-				   grows without bound. */
-				const lean = Object.assign({}, payload);
-				delete lean.overrides;
-				delete lean.fp;
-				body = encodeURIComponent(JSON.stringify(lean));
-				if (!hashWarned) {
-					hashWarned = true;
-					setStatus("This class has too many locked players to fit in a " +
-						"shareable link, so the link carries the settings only. " +
-						"Export the locks as CSV (More ▾) to share those.", true);
-				}
+			const payload = linkPayload(withDrawnSeed);
+			const seq = ++hashSeq;
+			const plain = Object.keys(payload).length
+				? encodeURIComponent(JSON.stringify(payload)) : "";
+			if (plain.length <= HASH_LIMIT) {
+				setHash(plain ? "#c=" + plain : "");
+				return undefined;
 			}
-			lastWrittenHash = body ? "#c=" + body : "";
-			history.replaceState(null, "", body ? "#c=" + body : "#");
+			const lean = Object.assign({}, payload);
+			delete lean.overrides;
+			delete lean.fp;
+			setHash("#c=" + encodeURIComponent(JSON.stringify(lean)));
+			if (!global.Share.canStream()) { if (payload.overrides) warnLeanLink(); return undefined; }
+			return global.Share.encodeLink(payload).then((r) => {
+				if (seq !== hashSeq) return;
+				try { setHash(r.hash); } catch (e) { /* a hash that will not fit is not worth an error banner */ }
+				if (r.lean && payload.overrides) warnLeanLink();
+			}, () => { if (payload.overrides) warnLeanLink(); });
 		} catch (e) { /* a hash that will not fit is not worth an error banner */ }
+		return undefined;
+	}
+
+	// Copies the page's link (the compressed one when the plain one is too long).
+	function copyLink(button, what) {
+		const pending = writeHash(true);
+		const go = () => copyText(location.href, button || null, null, what || "link to this page");
+		if (pending) pending.then(go); else go();
 	}
 
 	/* The era picker offers only the eras the model is fitted to. Config.make
@@ -3948,16 +4019,28 @@
 		return out;
 	}
 
-	function readHash() {
-		const m = /[#&]c=([^&]+)/.exec(location.hash || "");
-		if (!m) return false;
+	/* `onLate` runs after a compressed link (#z=) has been opened, which takes a
+	   moment; a plain link (#c=) is applied before this returns. */
+	function readHash(onLate) {
+		const h = global.Share.parseHash(location.hash);
+		if (!h) return false;
+		if (h.kind === "z") {
+			global.Share.decodeLink(location.hash).then((payload) => {
+				if (applyLinkPayload(payload) && onLate) onLate();
+			}, () => showError(new Error("Could not read the settings in this link.")));
+			return false;
+		}
 		let payload;
 		try {
-			payload = JSON.parse(decodeURIComponent(m[1]));
+			payload = JSON.parse(decodeURIComponent(h.body));
 		} catch (e) {
 			showError(new Error("Could not read the settings in this link."));
 			return false;
 		}
+		return applyLinkPayload(payload);
+	}
+
+	function applyLinkPayload(payload) {
 		/* `#c=null`, `#c=[]`, `#c=5`: valid JSON and not a settings object.
 		   Nothing to apply, and nothing worth an error banner either. */
 		if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
@@ -3965,6 +4048,13 @@
 		   class with no locks — keeping the ones localStorage remembered from
 		   some other session applied them to the linked class, silently. */
 		readChallengeHashFields(payload);
+		/* Where to land (tab, prospect, compared set): kept until a class file
+		   with the link's fingerprint is on screen. */
+		state.pendingDeep = global.Share.readDeep(payload,
+			TABS.map((t) => t[0]).filter((k) => k !== "universe" && k !== "play"));
+		delete payload.tab;
+		delete payload.pk;
+		delete payload.cmp;
 		const ov = payload.overrides;
 		state.overrides = ov && typeof ov === "object" && !Array.isArray(ov) ? ov : {};
 		state.overrideFingerprint = state.overrides === ov ? (payload.fp || null) : null;
@@ -3976,6 +4066,26 @@
 		state.cfg = fitEra(CFG.make(payload));
 		state.presetDirty = true;
 		return true;
+	}
+
+	/* The tab, prospect and compared set a link named, applied once the class
+	   file is the one the link was made on. A different file gets the settings
+	   only, and is told so: the keys are pids and would name somebody else. */
+	function applyPendingDeep() {
+		const d = state.pendingDeep;
+		const f = activeFile();
+		if (!d || !f) return;
+		state.pendingDeep = null;
+		if (!global.Share.deepApplies(d, f.fingerprint)) {
+			const banner = $("warnBanner");
+			const had = banner && !banner.hidden ? banner.querySelector(".bannertext").textContent + "\n" : "";
+			showWarning(had + "This link names a tab or a prospect in a different class file, " +
+				"so only its settings were applied.");
+			return;
+		}
+		if (d.tab) state.tab = d.tab;
+		if (d.cmp) state.compare = d.cmp.concat([null, null, null, null]).slice(0, 4);
+		if (d.pk) { state.player = d.pk; state.tab = "board"; }
 	}
 
 	/* A short, stable identity for one GENERATED class. Built from what the
@@ -4323,20 +4433,26 @@
 		if (!res || !keys.length) { setStatus("No prospect in this class is locked."); return; }
 		const byKey = {};
 		for (const p of res.players) byKey[p.key] = p;
-		const cols = ["key", "name", "ovr", "pot", "archetype", "college"];
+		/* name finds the prospect; newname is the rename lock. hgtinches, weight
+		   and the fifteen ratings are the other locks a CSV row can carry, so
+		   nothing a lock holds is left out of the file any more. */
+		const cols = ["key", "name", "ovr", "pot", "archetype", "college", "newname",
+			"hgtinches", "weight"].concat(V.RATING_COLUMN_KEYS);
 		const lines = [cols.join(",")];
 		let ratingsOnly = 0;
 		for (const k of keys) {
 			const o = state.overrides[k] || {};
 			const p = byKey[k];
-			const row = [k, p ? p.name : "", o.ovr, o.pot, o.archetype, o.college];
+			const r = o.ratings || {};
+			const row = [k, p ? p.name : "", o.ovr, o.pot, o.archetype, o.college, o.name,
+				o.hgtInches, o.weight].concat(V.RATING_COLUMN_KEYS.map((rk) => r[rk]));
 			if (row.slice(2).every((v) => v === undefined || v === null || v === "")) ratingsOnly++;
 			lines.push(row.map(esc).join(","));
 		}
 		const base = ((activeFile() || {}).name || "class").replace(/\.json(\.gz)?$|\.gz$/i, "");
 		download(base + "_locks.csv", "﻿" + csvJoin(lines), "text/csv");
 		exported(keys.length + " locked prospect" + (keys.length === 1 ? "" : "s") +
-			(ratingsOnly ? "; " + ratingsOnly + " of them lock only individual ratings, " +
+			(ratingsOnly ? "; " + ratingsOnly + " of them carry only a per-player reroll, " +
 				"which a CSV row has no column for" : ""));
 	}
 
@@ -4461,6 +4577,7 @@
 			const warns = state.files.flatMap((f) => (f.warnings || [])
 				.map((w) => f.name + ": " + w));
 			if (warns.length) showWarning(warns.join("\n"));
+			applyPendingDeep();
 			setStatus("");
 			if (!(opts && opts.noRun)) run();
 		}
@@ -4648,6 +4765,246 @@
 	}
 
 	/* Below 560px the tools fold behind "⋯". */
+	/* ---- kept classes, the command line, install and file handling ----------
+
+	   The sharing tools that are not a link: a class kept under a name outside
+	   the run history's cap, the settings as a `bbgmdraft run` command, the
+	   install button and the installed app's file handler. The pure parts are
+	   in js/share.js. */
+	const KEPT_KEY = "bbgm-draft-workshop/kept";
+	state.kept = [];
+
+	function loadKept() {
+		try {
+			state.kept = global.Share.keptList(JSON.parse(localStorage.getItem(KEPT_KEY) || "[]"));
+		} catch (e) { state.kept = []; }
+	}
+
+	function saveKept() {
+		try {
+			localStorage.setItem(KEPT_KEY, JSON.stringify(state.kept));
+			return true;
+		} catch (e) {
+			setStatus("Browser storage is full or off, so kept classes will not survive a reload. " +
+				"Export them as a bundle to keep them.", true);
+			return false;
+		}
+	}
+
+	/* The class on screen, as a kept entry: the same snapshot a run-history row
+	   is (settings, locks, the drawn seed and the memories that make it
+	   reproducible), plus a name and a note. */
+	function keepCurrentClass(name, note) {
+		const res = state.results[state.active];
+		if (!res) { setStatus("Nothing to keep yet — load a class first."); return null; }
+		const fp = classFingerprint(res);
+		const snap = undoSnapshot(className(res) + " · " + fp);
+		snap.fingerprint = fp;
+		snap.seed = res.seed;
+		snap.flavor = res.flavor ? res.flavor.label : null;
+		snap.at = Date.now();
+		snap.file = activeFile() ? activeFile().name : null;
+		snap.fileFp = activeFile() ? activeFile().fingerprint || null : null;
+		snap.name = className(res);
+		snap.season = res.season;
+		snap.id = "kept/" + fp + "/" + res.seed + "/" + snap.at;
+		snap.keptName = String(name || "").trim() || className(res);
+		snap.keptNote = String(note || "");
+		const kept = global.Share.cleanKept(snap);
+		if (!kept) return null;
+		// The same class kept twice replaces its earlier entry.
+		state.kept = state.kept.filter((k) => !(k.fingerprint === fp && String(k.seed) === String(res.seed) &&
+			JSON.stringify(k.cfg) === JSON.stringify(kept.cfg)));
+		state.kept.unshift(kept);
+		state.kept = state.kept.slice(0, global.Share.KEPT_MAX);
+		saveKept();
+		return kept;
+	}
+
+	function keptDialog() {
+		const box = el("div", "keptbox");
+		const res = state.results[state.active];
+		if (res) {
+			const form = el("div", "keptform");
+			const nameIn = el("input");
+			nameIn.type = "text";
+			nameIn.id = "keptName";
+			nameIn.maxLength = 80;
+			nameIn.value = className(res);
+			nameIn.setAttribute("aria-label", "Name for this class");
+			const noteIn = el("textarea");
+			noteIn.id = "keptNote";
+			noteIn.rows = 2;
+			noteIn.placeholder = "A note: why this class is worth coming back to";
+			noteIn.setAttribute("aria-label", "Note");
+			const keep = el("button", "primary", "Keep this class");
+			keep.id = "keptKeep";
+			keep.addEventListener("click", () => {
+				if (keepCurrentClass(nameIn.value, noteIn.value)) {
+					setStatus("Kept “" + (nameIn.value.trim() || className(res)) + "”.");
+					noteIn.value = "";
+					paint();
+				}
+			});
+			form.appendChild(el("p", "hint", "Seed " + res.seed + " · " + classFingerprint(res) +
+				". A kept class is not dropped when the run history fills up."));
+			form.appendChild(nameIn);
+			form.appendChild(noteIn);
+			form.appendChild(keep);
+			box.appendChild(form);
+		}
+		const list = el("div", "keptlist");
+		box.appendChild(list);
+		const bar = el("div", "filters");
+		const exp = el("button", null, "Export bundle");
+		exp.addEventListener("click", () => {
+			if (!state.kept.length) { setStatus("Nothing is kept yet."); return; }
+			download("kept-classes.json", JSON.stringify(global.Share.makeBundle(state.kept), null, 2), "application/json");
+			exported(state.kept.length + " kept class" + (state.kept.length === 1 ? "" : "es") +
+				" — Import bundle reads them back");
+		});
+		const imp = el("button", null, "Import bundle…");
+		const file = el("input");
+		file.type = "file";
+		file.accept = ".json,application/json";
+		file.hidden = true;
+		imp.addEventListener("click", () => file.click());
+		file.addEventListener("change", () => {
+			const f = file.files && file.files[0];
+			file.value = "";
+			if (!f) return;
+			readTextFile(f).then((text) => {
+				const got = global.Share.parseBundle(text);
+				if (got.error) { setStatus(got.error); return; }
+				const merged = global.Share.mergeKept(state.kept, got.list);
+				state.kept = merged.list;
+				saveKept();
+				paint();
+				setStatus("Imported " + merged.added + " kept class" + (merged.added === 1 ? "" : "es") +
+					(merged.updated ? ", updated " + merged.updated : "") +
+					(got.dropped ? ", skipped " + got.dropped + " that could not be read" : "") + ".");
+			}, () => setStatus("Could not read that file."));
+		});
+		bar.appendChild(exp);
+		bar.appendChild(imp);
+		bar.appendChild(file);
+		box.appendChild(bar);
+		function paint() {
+			list.innerHTML = "";
+			if (!state.kept.length) {
+				list.appendChild(el("p", "hint", "Nothing is kept yet."));
+				return;
+			}
+			for (const k of state.kept) {
+				const row = el("div", "keptrow");
+				row.dataset.id = k.id;
+				const name = el("input");
+				name.type = "text";
+				name.value = k.keptName;
+				name.maxLength = 80;
+				name.setAttribute("aria-label", "Name");
+				name.addEventListener("change", () => { k.keptName = name.value.trim() || k.keptName; saveKept(); });
+				const note = el("textarea");
+				note.rows = 2;
+				note.value = k.keptNote;
+				note.setAttribute("aria-label", "Note");
+				note.addEventListener("change", () => { k.keptNote = note.value.slice(0, 2000); saveKept(); });
+				row.appendChild(name);
+				row.appendChild(el("p", "unit", "seed " + k.seed + (k.fingerprint ? " · " + k.fingerprint : "") +
+					(k.flavor ? " · " + k.flavor : "") + (k.file ? " · " + k.file : "") +
+					(k.at ? " · " + new Date(k.at).toISOString().slice(0, 10) : "")));
+				row.appendChild(note);
+				const acts = el("div", "rowflex");
+				const open = el("button", "tiny", "Open");
+				open.addEventListener("click", () => { closeModal(); restoreSession(null, k); });
+				const del = el("button", "tiny", "Remove");
+				del.addEventListener("click", () => {
+					state.kept = state.kept.filter((x) => x !== k);
+					saveKept();
+					paint();
+				});
+				acts.appendChild(open);
+				acts.appendChild(del);
+				row.appendChild(acts);
+				list.appendChild(row);
+			}
+		}
+		paint();
+		modal("Kept classes", box, null, "Close");
+	}
+
+	/* The settings on screen as `bbgmdraft run …`. Settings that are tables go
+	   through --settings (the page's settings JSON); the note says so. */
+	function commandLineText() {
+		const f = activeFile();
+		const res = state.results[state.active];
+		const delta = encodeConfig(true);
+		const league = f && f.league && f.league.name;
+		const out = global.Share.commandLine({
+			file: league || (f ? f.name : "class.json"),
+			year: league ? (f.data && f.data.startingSeason) : null,
+			seed: delta.seed || (res && res.seed) || "",
+			delta,
+			locks: Object.keys(state.overrides || {}).length,
+		});
+		return [out.text].concat(out.notes).join("\n");
+	}
+
+	function copyCommandLine(button) {
+		if (!activeFile()) { setStatus("Load a class first."); return; }
+		copyText(commandLineText(), button || null, null, "command line");
+	}
+
+	let installPrompt = null;
+	function bindShareTools() {
+		loadKept();
+		const tools = $("headerTools");
+		const add = (id, text, title, onClick, hidden) => {
+			if (!tools || $(id)) return null;
+			const b = el("button", "iconbtn", text);
+			b.id = id;
+			b.type = "button";
+			b.title = title;
+			b.setAttribute("aria-label", title);
+			b.hidden = !!hidden;
+			b.addEventListener("click", onClick);
+			tools.appendChild(b);
+			return b;
+		};
+		add("btnKept", "★", "Kept classes — keep this class under a name and a note, outside the run history's cap",
+			keptDialog);
+		add("btnCopyCmd", ">_", "Copy these settings as a bbgmdraft command line",
+			() => copyCommandLine($("btnCopyCmd")));
+		add("btnInstall", "Install", "Install this tool as an app", () => {
+			const ev = installPrompt;
+			if (!ev) return;
+			installPrompt = null;
+			$("btnInstall").hidden = true;
+			try { Promise.resolve(ev.prompt()).catch(() => {}); } catch (e) { /* the browser refused */ }
+		}, true);
+		window.addEventListener("beforeinstallprompt", (e) => {
+			if (e.preventDefault) e.preventDefault();
+			installPrompt = e;
+			if ($("btnInstall")) $("btnInstall").hidden = false;
+		});
+		window.addEventListener("appinstalled", () => {
+			installPrompt = null;
+			if ($("btnInstall")) $("btnInstall").hidden = true;
+		});
+		/* Launched as an installed app by opening a class file (the manifest's
+		   file_handlers): the files arrive here, not in a file input. */
+		if (window.launchQueue && typeof window.launchQueue.setConsumer === "function") {
+			window.launchQueue.setConsumer((params) => {
+				const handles = params && params.files ? params.files : [];
+				if (!handles.length) return;
+				Promise.all(handles.map((h) => h.getFile())).then((files) => {
+					const ok = files.filter((f) => /\.(json|gz)$/i.test(f.name || ""));
+					if (ok.length) readFiles(ok, state.files.length ? { append: true } : null);
+				}, () => setStatus("Could not open the file this app was launched with."));
+			});
+		}
+	}
+
 	function bindHeaderMore() {
 		const btn = $("btnHeaderMore");
 		if (!btn) return;
@@ -4701,6 +5058,11 @@
 			readPasted(text);
 		});
 		if ($("btnSample")) $("btnSample").addEventListener("click", loadSample);
+		// Q17: a class of a chosen size, year and seed, from the header or the empty state.
+		for (const id of ["btnNewClass", "btnNewClassEmpty"]) {
+			if ($(id)) $(id).addEventListener("click", newClassDialog);
+		}
+		if ($("btnPrint")) $("btnPrint").addEventListener("click", printPage);
 		if ($("btnSynthUniverse")) $("btnSynthUniverse").addEventListener("click", syntheticUniverseDialog);
 		$("file").addEventListener("change", (e) => {
 			/* Copied before the reset: a FileList is live, and a value left
@@ -5576,8 +5938,8 @@
 		paintSessions();
 	}
 
-	function restoreSession(i) {
-		const saved = state.sessions[i];
+	function restoreSession(i, from) {
+		const saved = from || state.sessions[i];
 		if (!saved) return;
 		const snap = JSON.parse(JSON.stringify(saved));
 		/* A SESSION BELONGS TO THE FILE IT WAS MADE ON.
@@ -8354,6 +8716,8 @@
 		// An open Play game hides every results tab until it is revealed.
 		if (global.Play && global.Play.gated(state, res)) { global.Play.gateView(view); return; }
 		(V[state.tab] || V.players)(view, res);
+		// A "copy this table" strip above every real table in the view.
+		V.decorateTables(view);
 		restoreScroll(view, scrolls);
 		restoreFocus(view, focus);
 	}
@@ -8491,10 +8855,7 @@
 		const f = state.filter;
 		const hidden = !V.matchesFilter(p, state.results[state.active] || {});
 		if (hidden) {
-			state.filter = {
-				q: "", pos: "", conf: "", archetype: "",
-				changedOnly: false, lockedOnly: false, ranges: [],
-			};
+			state.filter = V.emptyFilter();
 			setStatus("Cleared the table filters to show " + p.name + ".");
 		}
 		void f;
@@ -8641,6 +9002,56 @@
 		hgtIn.value = Number.isFinite(ov.hgtInches) ? ov.hgtInches : p.newHgtInches;
 		field("hgtInches", "Listed height (inches)", hgtIn, p.newHgtInches,
 			"listed weight " + p.newWeight + " lb");
+
+		// Weight is a lock of its own (the engine honors ov.weight; without it
+		// a height lock moves the weight along with the height).
+		const weightIn = el("input");
+		weightIn.type = "number";
+		weightIn.min = 120;
+		weightIn.max = 400;
+		weightIn.value = Number.isFinite(ov.weight) ? ov.weight : p.newWeight;
+		field("weight", "Listed weight (lb)", weightIn, p.newWeight,
+			"120 to 400; unlocked, it follows his height");
+
+		const yearSel = el("select");
+		yearSel.appendChild(new Option("(roll it)", ""));
+		for (const y of V.CLASS_YEAR_CHOICES) yearSel.appendChild(new Option(y, y));
+		yearSel.value = typeof ov.classYear === "string" ? ov.classYear : "";
+		field("classYear", "Class year", yearSel, "", "now " + p.classYear);
+
+		const jerseyIn = el("input");
+		jerseyIn.type = "text";
+		jerseyIn.maxLength = 2;
+		jerseyIn.inputMode = "numeric";
+		jerseyIn.placeholder = "0-99";
+		jerseyIn.value = ov.jersey !== undefined && ov.jersey !== null ? String(ov.jersey) : "";
+		field("jersey", "Jersey number", jerseyIn, "", "written to the file; blank = the tool picks one");
+
+		/* Mood traits: BBGM's four letters. A div that answers to .value so the
+		   field's "revert" (which sets .value) puts the generated traits back. */
+		const moodBox = el("div", "moodpick");
+		const moodBoxes = {};
+		const moodNames = { F: "Fame", L: "Loyalty", "$": "Money", W: "Winning" };
+		for (const letter of ["F", "L", "$", "W"]) {
+			const lab = el("label", "check");
+			const cb = el("input");
+			cb.type = "checkbox";
+			cb.value = letter;
+			cb.setAttribute("aria-label", moodNames[letter]);
+			lab.appendChild(cb);
+			lab.appendChild(document.createTextNode(" " + letter));
+			lab.title = moodNames[letter];
+			moodBoxes[letter] = cb;
+			moodBox.appendChild(lab);
+		}
+		Object.defineProperty(moodBox, "value", {
+			get() { return Object.keys(moodBoxes).filter((k) => moodBoxes[k].checked).join(""); },
+			set(v) { for (const k of Object.keys(moodBoxes)) moodBoxes[k].checked = String(v).indexOf(k) !== -1; },
+		});
+		moodBox.value = Array.isArray(ov.moodTraits) ? ov.moodTraits.join("")
+			: (p.moodTraits || []).join("");
+		field("moodTraits", "Mood traits", moodBox, (p.moodTraits || []).join(""),
+			"BBGM's F fame · L loyalty · $ money · W winning");
 		panel.appendChild(grid);
 
 		/* Individual ratings. Sometimes you just want to bump one guy's tp to
@@ -8687,6 +9098,13 @@
 			if (controls.college.cb.checked && colSel.value) next.college = colSel.value;
 			if (controls.name.cb.checked && nameIn.value.trim()) next.name = nameIn.value.trim();
 			if (controls.hgtInches.cb.checked && given(hgtIn)) next.hgtInches = Number(hgtIn.value);
+			if (controls.weight.cb.checked && given(weightIn)) next.weight = Number(weightIn.value);
+			if (controls.classYear.cb.checked && yearSel.value) next.classYear = yearSel.value;
+			// Kept as text: "00" is a legal BBGM number and is not 0.
+			if (controls.jersey.cb.checked && /^\d{1,2}$/.test(jerseyIn.value.trim())) next.jersey = jerseyIn.value.trim();
+			if (controls.moodTraits.cb.checked && moodBox.value) next.moodTraits = moodBox.value.split("");
+			// A re-rolled face is state, not a lock: keep it (see the button below).
+			if (ov.faceSalt) next.faceSalt = ov.faceSalt;
 			const ratings = {};
 			for (const k of BB.RATING_KEYS) {
 				const raw = ratingInputs[k].value;
@@ -8751,6 +9169,18 @@
 		if (!schoolIsOurs) sb.disabled = true;
 		rerollAxis("stats", "↻ season",
 			"Same player, a different set of nights.");
+		/* A different face. The face is drawn from his key, so a salt on the
+		   key is another, equally stable face; nothing else about him moves. */
+		const faceBtn = el("button", null, "↻ face");
+		faceBtn.title = "Draw a different face for him. Ratings, school and stats stay as they are.";
+		faceBtn.addEventListener("click", () => {
+			pushUndo("re-rolled " + p.name + "'s face");
+			const cur = state.overrides[p.key] || {};
+			state.overrides[p.key] = Object.assign({}, cur, { faceSalt: (Number(cur.faceSalt) || 0) + 1 });
+			state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
+			run();
+		});
+		buttons.appendChild(faceBtn);
 		panel.appendChild(buttons);
 
 		panel.appendChild(el("h4", null, "Why this player looks like this"));
@@ -9017,6 +9447,57 @@
 		}
 		state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
 		run();
+	}
+
+	/* Q15. The same shape as bulkShiftOvr for potential and height, and a
+	   reroll counter for the whole selection. Each writes a lock (or, for the
+	   reroll, the per-player counter the editor's own reroll uses), so a
+	   later reroll of the class leaves these prospects as they are. */
+	function bulkShiftField(field, d, lo, hi, what, read) {
+		const keys = bulkTargets();
+		if (!keys.length) return;
+		const res = state.results[state.active];
+		if (!res) return;
+		pushUndo("shifted " + what + " by " + d + " for " + keys.length + " prospects");
+		for (const key of keys) {
+			const p = res.players.filter((x) => x.key === key)[0];
+			if (!p) continue;
+			const cur = state.overrides[key] || {};
+			const base = Number.isFinite(cur[field]) ? cur[field] : read(p);
+			if (!Number.isFinite(base)) continue;
+			state.overrides[key] = Object.assign({}, cur,
+				{ [field]: Math.max(lo, Math.min(hi, Math.round(base + d))) });
+		}
+		state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
+		run();
+	}
+	function bulkShiftPot(d) { bulkShiftField("pot", d, 0, 100, "potential", (p) => p.newPot); }
+	function bulkShiftHeight(d) {
+		bulkShiftField("hgtInches", d, 58, 96, "height (inches)", (p) => p.newHgtInches);
+	}
+	function bulkReroll() {
+		const keys = bulkTargets();
+		if (!keys.length) return;
+		pushUndo("rerolled " + keys.length + " prospects");
+		for (const key of keys) {
+			const cur = state.overrides[key] || {};
+			state.overrides[key] = Object.assign({}, cur, { reroll: (Number(cur.reroll) || 0) + 1 });
+		}
+		state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
+		run(() => setStatus("Redrew " + keys.length + " prospect" + (keys.length === 1 ? "" : "s") +
+			"; the rest of the class is as it was."));
+	}
+
+	/* Q16. One tag on or off for one prospect. */
+	function toggleTag(p, tag) {
+		if (V.PLAYER_TAGS.indexOf(tag) === -1) return;
+		const k = userKey(p);
+		const cur = (state.tags[k] || []).slice();
+		const i = cur.indexOf(tag);
+		if (i === -1) cur.push(tag); else cur.splice(i, 1);
+		if (cur.length) state.tags[k] = cur; else delete state.tags[k];
+		persist();
+		render();
 	}
 
 	function bulkShiftOvr(d) {
@@ -9406,7 +9887,17 @@
 			}
 			return out;
 		};
-		res.userMarks = { notes: pick(state.notes), watch: pick(state.watch) };
+		/* Tags (sleeper, bust risk, my guy) travel in the user's own note: one
+		   "Tags: …" line under what he wrote, so the export's "My notes"
+		   block carries them without the engine knowing tags exist. */
+		const notes = pick(state.notes);
+		const tags = pick(state.tags);
+		for (const k of Object.keys(tags)) {
+			if (!Array.isArray(tags[k]) || !tags[k].length) continue;
+			notes[k] = (notes[k] ? String(notes[k]).replace(/\s+$/, "") + "\n" : "") +
+				"Tags: " + tags[k].join(", ");
+		}
+		res.userMarks = { notes, watch: pick(state.watch), tags };
 		return res;
 	}
 
@@ -9424,9 +9915,9 @@
 				? "Warning: " + global.Engine.exportFile.passthroughs +
 					" player(s) could not be matched and were exported unmodified."
 				: "";
-			const base = state.files[i].name.replace(/\.json(\.gz)?$|\.gz$/i, "");
+			exportOne.trimmed = global.Engine.exportFile.trimmed || null;
 			// BBGM writes its exports with a BOM; match it.
-			download(base + "_customized.json", "\ufeff" + JSON.stringify(out, null, 2),
+			download(exportName(i, opts), "\ufeff" + JSON.stringify(out, null, 2),
 				"application/json");
 			return true;
 		} catch (err) {
@@ -9455,7 +9946,13 @@
 		   file and the screen the derived columns below are routed through
 		   Views.derived to avoid. */
 		"pm", "onOff", "astd", "trans", "clutchPpg",
-		"usg", "fgp", "tpp", "ftp", "ts", "awards"];
+		"usg", "fgp", "tpp", "ftp", "ts", "awards"]
+		/* The columns the table gained from fields the model already carried
+		   (skills, the file's own overall and potential, the pro projection,
+		   jersey, mood, birthplace) and the fifteen ratings. They come from
+		   Views.CSV_EXTRA, the same table the screen reads, so the two
+		   cannot disagree. */
+		.concat(V.CSV_EXTRA.map((x) => x[0]));
 
 	/* A field beginning =, +, - or @ is executed as a FORMULA when the file is
 	   opened in Excel or Sheets. Names come from BBGM, but the lock-import
@@ -9537,7 +10034,7 @@
 				s.pm, s.onOff, d("astd"), d("trans"), s.clutchPpg,
 				s.usg, s.fgp, s.tpp, s.ftp, s.ts,
 				global.Awards.scopeAwards(p.awards, scope, confs).join("; "),
-			].map((v) => esc(typeof v === "number" && Number.isFinite(v)
+			].concat(V.csvExtras(p, res)).map((v) => esc(typeof v === "number" && Number.isFinite(v)
 				? Number(v.toFixed(3)) : v)).join(","));
 		}
 		/* The export silently obeyed the table filter and was still called
@@ -9571,13 +10068,19 @@
 	   ranking is `boardRank`, and they differ, which is what the event column
 	   is for). Two columns of fifteen, so it is a shape that fits a screen. */
 	const MOCK_ROUND = 30;
-	function exportMockImage(res) {
+	/* `opts.items` (the Mock tab's picture): [{n, name, sub, note}] rows to draw
+	   instead of the board's draft night, so it is sized to the round it shows
+	   (a league's team count) and not to thirty. `opts.title` and `opts.round`
+	   name it. With no opts this is the picture it has always been. */
+	function exportMockImage(res, opts) {
 		if (!res || !res.board || !res.board.length) {
 			setStatus("No draft board to draw.");
 			return;
 		}
-		const order = (res.draftOrder && res.draftOrder.length ? res.draftOrder : res.board)
-			.slice(0, MOCK_ROUND);
+		const own = opts && Array.isArray(opts.items) ? opts.items : null;
+		const order = own ? own.map((it) => ({ name: it.name, __item: it })) :
+			(res.draftOrder && res.draftOrder.length ? res.draftOrder : res.board)
+				.slice(0, MOCK_ROUND);
 		if (!order.length) { setStatus("No draft board to draw."); return; }
 		const scale = 2;                      // drawn at 2x for a sharp file
 		const W = 1180;
@@ -9606,7 +10109,7 @@
 		g.fillText(className(res), 28, 44);
 		g.fillStyle = dim;
 		g.font = "13px ui-monospace, SFMono-Regular, Menlo, monospace";
-		g.fillText("Mock first round · seed " + res.seed + " · " +
+		g.fillText((own && opts.title ? opts.title : "Mock first round") + " · seed " + res.seed + " · " +
 			classFingerprint(res), 28, 68);
 		g.strokeStyle = rule;
 		g.lineWidth = 1;
@@ -9626,19 +10129,19 @@
 			}
 			g.fillStyle = accent;
 			g.font = "600 15px ui-monospace, SFMono-Regular, Menlo, monospace";
-			g.fillText(String(i + 1).padStart(2, " "), x, y);
+			g.fillText(String(p.__item ? p.__item.n : i + 1).padStart(2, " "), x, y);
 			g.fillStyle = ink;
 			g.font = "600 15px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
 			g.fillText(p.name, x + 34, y);
 			g.fillStyle = dim;
 			g.font = "12.5px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
 			const where = p.proClub || p.newCollege || "";
-			g.fillText([where, p.classYear, p.newPos].filter(Boolean).join(" · "),
+			g.fillText(p.__item ? p.__item.sub : [where, p.classYear, p.newPos].filter(Boolean).join(" · "),
 				x + 34, y + 16);
 			/* The draft-night story, where there is one. This is the whole
 			   reason the picture is of `draftOrder` and not of the ranking:
 			   without it the image is a list, and with it it is a draft. */
-			const ev = p.draftEvent && p.draftEvent.text;
+			const ev = p.__item ? p.__item.note : p.draftEvent && p.draftEvent.text;
 			if (ev) {
 				g.fillStyle = accent;
 				g.font = "italic 11.5px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
@@ -9650,7 +10153,7 @@
 		g.font = "11.5px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
 		g.fillText("Generated with the BBGM Draft Class Workshop · " +
 			"the same seed reproduces this class exactly", 28, H - 16);
-		const name = "mock_round_1_" + res.seed + ".png";
+		const name = "mock_round_" + (own && opts.round ? opts.round : 1) + "_" + res.seed + ".png";
 		cv.toBlob((blob) => {
 			if (!blob) { setStatus("Could not encode the image."); return; }
 			const a = document.createElement("a");
@@ -9663,6 +10166,217 @@
 			setStatus("Wrote " + name + " — the first round as a picture, " +
 				"for somebody who does not have the game.");
 		}, "image/png");
+	}
+
+	/* ---- share cards: a class and a player, as pictures --------------------
+
+	   The same canvas pattern as the mock picture above (its own light palette,
+	   drawn at 2x), for the two things people paste into a thread: "here is the
+	   class my settings made" and "here is the guy". Nothing here changes a
+	   result. */
+	const CARD_FONT = "system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+	const CARD_MONO = "ui-monospace, SFMono-Regular, Menlo, monospace";
+	const CARD_INK = "#14181d";
+	const CARD_DIM = "#5c6773";
+	const CARD_RULE = "#dfe4ea";
+	const CARD_ACCENT = "#b45309";
+
+	function saveCanvasPng(cv, name, what) {
+		cv.toBlob((blob) => {
+			if (!blob) { setStatus("Could not encode the image."); return; }
+			const a = document.createElement("a");
+			a.href = URL.createObjectURL(blob);
+			a.download = name;
+			document.body.appendChild(a);
+			a.click();
+			setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 5000);
+			lastDownload = name;
+			setStatus("Wrote " + name + " — " + what + ".");
+		}, "image/png");
+	}
+
+	function newCardCanvas(W, H) {
+		const scale = 2;
+		const cv = document.createElement("canvas");
+		cv.width = W * scale;
+		cv.height = H * scale;
+		const g = cv.getContext("2d");
+		if (!g) { setStatus("This browser cannot draw to a canvas."); return null; }
+		g.scale(scale, scale);
+		g.fillStyle = "#ffffff";
+		g.fillRect(0, 0, W, H);
+		return { cv, g };
+	}
+
+	// Text cut to fit a width, with an ellipsis.
+	function fitText(g, text, maxW) {
+		text = String(text == null ? "" : text);
+		if (g.measureText(text).width <= maxW) return text;
+		while (text.length > 1 && g.measureText(text + "…").width > maxW) text = text.slice(0, -1);
+		return text + "…";
+	}
+
+	function exportClassCard(res) {
+		res = res || state.results[state.active];
+		if (!res || !res.board || !res.board.length) { setStatus("No class to draw."); return; }
+		const W = 1200;
+		const H = 630;
+		const c = newCardCanvas(W, H);
+		if (!c) return;
+		const g = c.g;
+		g.fillStyle = CARD_INK;
+		g.font = "600 32px " + CARD_FONT;
+		g.fillText(fitText(g, className(res), W - 56), 28, 52);
+		g.fillStyle = CARD_DIM;
+		g.font = "14px " + CARD_MONO;
+		g.fillText("seed " + res.seed + " · " + classFingerprint(res) + " · " + res.players.length +
+			" prospects", 28, 78);
+		g.strokeStyle = CARD_RULE;
+		g.lineWidth = 1;
+		g.beginPath();
+		g.moveTo(28, 96);
+		g.lineTo(W - 28, 96);
+		g.stroke();
+		// The top five.
+		g.fillStyle = CARD_DIM;
+		g.font = "600 12px " + CARD_FONT;
+		g.fillText("THE TOP FIVE", 28, 124);
+		const top = res.board.slice(0, 5);
+		top.forEach((p, i) => {
+			const y = 168 + i * 82;
+			g.fillStyle = CARD_ACCENT;
+			g.font = "600 28px " + CARD_MONO;
+			g.fillText(String(i + 1), 28, y);
+			g.fillStyle = CARD_INK;
+			g.font = "600 24px " + CARD_FONT;
+			g.fillText(fitText(g, p.name, 520), 78, y - 4);
+			g.fillStyle = CARD_DIM;
+			g.font = "15px " + CARD_FONT;
+			g.fillText(fitText(g, [p.newPos, V.feet(p.newHgtInches), p.proClub || p.newCollege, p.classYear]
+				.filter(Boolean).join(" · "), 520), 78, y + 20);
+			g.fillStyle = CARD_INK;
+			g.font = "600 26px " + CARD_MONO;
+			const rating = p.newOvr + " / " + p.newPot;
+			g.fillText(rating, 690 - g.measureText(rating).width, y);
+			g.fillStyle = CARD_DIM;
+			g.font = "12px " + CARD_FONT;
+			g.fillText("ovr / pot", 690 - g.measureText("ovr / pot").width, y + 20);
+		});
+		// The class in numbers, on the right.
+		const facts = [];
+		const mean = (k) => res.players.reduce((a, p) => a + (Number(p[k]) || 0), 0) / res.players.length;
+		facts.push(["Mean overall", mean("newOvr").toFixed(1)]);
+		facts.push(["Mean potential", mean("newPot").toFixed(1)]);
+		facts.push(["50+ overall", String(res.players.filter((p) => p.newOvr >= 50).length)]);
+		const tall = res.players.reduce((a, p) => ((p.newHgtInches || 0) > (a.newHgtInches || 0) ? p : a), res.players[0]);
+		facts.push(["Tallest", tall.name + ", " + V.feet(tall.newHgtInches)]);
+		if (res.flavor && res.flavor.label) facts.push(["Flavor", res.flavor.label]);
+		const champ = res.tourney && res.tourney.champion && res.tourney.champion.team;
+		if (champ) facts.push(["National champion", champ.name]);
+		const sc = global.Engine.strangeness ? global.Engine.strangeness(res) : null;
+		if (sc) facts.push(["Strangeness", sc.score + " / 100"]);
+		g.fillStyle = CARD_DIM;
+		g.font = "600 12px " + CARD_FONT;
+		g.fillText("THE CLASS", 760, 124);
+		facts.forEach(([k, v], i) => {
+			const y = 160 + i * 38;
+			g.fillStyle = CARD_DIM;
+			g.font = "14px " + CARD_FONT;
+			g.fillText(k, 760, y);
+			g.fillStyle = CARD_INK;
+			g.font = "600 16px " + CARD_FONT;
+			g.fillText(fitText(g, v, 410 - 150), 920, y);
+		});
+		if (sc && sc.reasons.length) {
+			g.fillStyle = CARD_ACCENT;
+			g.font = "italic 13px " + CARD_FONT;
+			sc.reasons.slice(0, 3).forEach((r, i) => g.fillText(fitText(g, "• " + r, 410), 760, 160 + facts.length * 38 + 10 + i * 20));
+		}
+		g.fillStyle = CARD_DIM;
+		g.font = "12px " + CARD_FONT;
+		g.fillText("Generated with the BBGM Draft Class Workshop · the same seed reproduces this class exactly", 28, H - 20);
+		saveCanvasPng(c.cv, "class_card_" + res.seed + ".png", "the class as a picture");
+	}
+
+	function exportPlayerCard(res, key) {
+		res = res || state.results[state.active];
+		const p = res && res.players.filter((x) => x.key === key)[0];
+		if (!p) { setStatus("No such prospect to draw."); return; }
+		const W = 1000;
+		const H = 560;
+		const c = newCardCanvas(W, H);
+		if (!c) return;
+		const g = c.g;
+		g.fillStyle = CARD_INK;
+		g.font = "600 36px " + CARD_FONT;
+		g.fillText(fitText(g, p.name, 620), 28, 56);
+		g.fillStyle = CARD_DIM;
+		g.font = "16px " + CARD_FONT;
+		const wt = Number.isFinite(p.newWeight) ? p.newWeight : p.weight;
+		g.fillText(fitText(g, [p.proClub || p.newCollege, p.classYear, p.newPos, V.feet(p.newHgtInches) +
+			(Number.isFinite(wt) ? ", " + wt + " lb" : ""), p.archetype].filter(Boolean).join(" · "), W - 56), 28, 84);
+		g.strokeStyle = CARD_RULE;
+		g.lineWidth = 1;
+		g.beginPath();
+		g.moveTo(28, 104);
+		g.lineTo(W - 28, 104);
+		g.stroke();
+		// Big numbers.
+		g.fillStyle = CARD_ACCENT;
+		g.font = "600 76px " + CARD_MONO;
+		g.fillText(String(p.newOvr), 28, 190);
+		g.fillStyle = CARD_INK;
+		g.fillText(String(p.newPot), 190, 190);
+		g.fillStyle = CARD_DIM;
+		g.font = "600 12px " + CARD_FONT;
+		g.fillText("OVERALL", 30, 212);
+		g.fillText("POTENTIAL", 192, 212);
+		let y = 250;
+		g.font = "15px " + CARD_FONT;
+		const line = (text, color) => {
+			g.fillStyle = color || CARD_INK;
+			g.fillText(fitText(g, text, 330), 28, y);
+			y += 24;
+		};
+		if (p.boardRank) line("Board: No. " + p.boardRank);
+		if (p.newSkills && p.newSkills.length) line("Skills: " + p.newSkills.join(" "));
+		const s = p.stats;
+		if (s) {
+			line(n1(s.ppg) + " pts · " + n1(s.rpg) + " reb · " + n1(s.apg) + " ast");
+			line(n1(s.mpg) + " min · " + pc(s.ts) + "% TS");
+		}
+		const pro = V.proFor ? V.proFor(res) : null;
+		const proj = pro && pro.projections ? pro.projections[p.key] : null;
+		if (proj) line(global.Text.capitalize(global.Text.withArticle(proj.verdict)) + ", peak " + proj.peak +
+			" (" + proj.peakLow + "-" + proj.peakHigh + ")", CARD_ACCENT);
+		const pick = pro && pro.mock ? pro.mock.picks.filter((k) => k.key === p.key)[0] : null;
+		if (pick) line("Mock: No. " + pick.pick + " to " + pick.team, CARD_DIM);
+		// The ratings, two columns of bars.
+		const keys = BB.RATING_KEYS;
+		const colX = [420, 720];
+		const per = Math.ceil(keys.length / 2);
+		keys.forEach((k, i) => {
+			const col = i < per ? 0 : 1;
+			const row = i - col * per;
+			const x = colX[col];
+			const yy = 140 + row * 38;
+			const v = p.newRatings ? p.newRatings[k] : 0;
+			g.fillStyle = CARD_DIM;
+			g.font = "13px " + CARD_MONO;
+			g.fillText(k, x, yy);
+			g.fillStyle = CARD_RULE;
+			g.fillRect(x + 40, yy - 11, 180, 11);
+			g.fillStyle = CARD_ACCENT;
+			g.fillRect(x + 40, yy - 11, 180 * Math.max(0, Math.min(100, v)) / 100, 11);
+			g.fillStyle = CARD_INK;
+			g.font = "600 13px " + CARD_MONO;
+			g.fillText(String(v), x + 228, yy);
+		});
+		g.fillStyle = CARD_DIM;
+		g.font = "12px " + CARD_FONT;
+		g.fillText("seed " + res.seed + " · " + classFingerprint(res) + " · BBGM Draft Class Workshop", 28, H - 20);
+		const safe = String(p.name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "player";
+		saveCanvasPng(c.cv, "player_card_" + safe + ".png", p.name + " as a picture");
 	}
 
 	/* The whole simulated season was throwaway except for the note strings. */
@@ -9942,8 +10656,7 @@
 		for (const a of plan.applied.slice(0, 200)) {
 			const tr = el("tr");
 			tr.appendChild(el("td", null, a.player.name));
-			tr.appendChild(el("td", null, Object.keys(a.patch)
-				.map((k) => k + " = " + a.patch[k]).join(", ")));
+			tr.appendChild(el("td", null, V.lockPatchText(a.patch)));
 			table.appendChild(tr);
 		}
 		wrap.appendChild(table);
@@ -9977,66 +10690,16 @@
 	function planLockImport(text) {
 		const rows = parseCsv(text);
 		if (!rows.length) { showError(new Error("That CSV has no rows.")); return null; }
-		const head = rows[0].map((h) => h.trim().toLowerCase());
-		const idx = (name) => head.indexOf(name);
 		const res = state.results[state.active];
 		if (!res) return null;
-		const byKey = {};
-		const byName = {};
-		for (const p of res.players) {
-			byKey[p.key] = p;
-			byName[p.name.toLowerCase()] = p;
-		}
-		const cols = {
-			key: idx("key"), name: idx("name"), ovr: idx("ovr"), pot: idx("pot"),
-			archetype: idx("archetype"), college: idx("college"),
-		};
-		if (cols.key < 0 && cols.name < 0) {
-			showError(new Error("The CSV needs a `key` or `name` column to match players."));
-			return null;
-		}
-		const applied = [];
-		const unmatched = [];
-		const rejected = [];
-		const archetypeNames = new Set(global.RatingsBuilder.ARCHETYPES.map((a) => a.name));
-		const schoolNames = new Set(global.Colleges.names
-			.concat(Object.keys(global.Colleges.NON_NCAA)));
-		let total = 0;
-		for (let i = 1; i < rows.length; i++) {
-			const r = rows[i];
-			if (!r.length || r.every((c) => !c.trim())) continue;
-			total++;
-			const k = cols.key >= 0 ? String(r[cols.key]).trim() : null;
-			const nm = cols.name >= 0 ? String(r[cols.name]).trim().toLowerCase() : null;
-			const p = (k && byKey[k]) || (nm && byName[nm]);
-			if (!p) { unmatched.push(k || nm); continue; }
-			const patch = {};
-			const num = (c) => {
-				// An empty cell is no lock, not a lock at 0 (Number("") is 0).
-				const t = String(r[c] === undefined ? "" : r[c]).trim();
-				const v = Number(t);
-				return t !== "" && Number.isFinite(v) ? v : null;
-			};
-			if (cols.ovr >= 0 && num(cols.ovr) !== null) patch.ovr = num(cols.ovr);
-			if (cols.pot >= 0 && num(cols.pot) !== null) patch.pot = num(cols.pot);
-			/* A name the tool does not know is refused here, not applied:
-			   an unknown archetype fell back to the rolled build while the
-			   lock badge said otherwise, and an unknown school was written
-			   verbatim into the export with no team behind it. */
-			if (cols.archetype >= 0 && String(r[cols.archetype]).trim()) {
-				const a = String(r[cols.archetype]).trim();
-				if (archetypeNames.has(a)) patch.archetype = a;
-				else rejected.push(p.name + ": unknown archetype “" + a + "”");
-			}
-			if (cols.college >= 0 && String(r[cols.college]).trim()) {
-				const c = String(r[cols.college]).trim();
-				if (schoolNames.has(c)) patch.college = c;
-				else rejected.push(p.name + ": unknown school “" + c + "”");
-			}
-			if (!Object.keys(patch).length) continue;
-			applied.push({ player: p, patch });
-		}
-		return { applied, unmatched, rejected, total };
+		// The rows and columns are read by Views.planLockRows (key, name, ovr,
+		// pot, archetype, college, newname, hgtinches, weight and the ratings).
+		const plan = V.planLockRows(rows, res.players, {
+			archetypes: new Set(global.RatingsBuilder.ARCHETYPES.map((a) => a.name)),
+			schools: new Set(global.Colleges.names.concat(Object.keys(global.Colleges.NON_NCAA))),
+		});
+		if (plan.error) { showError(new Error(plan.error)); return null; }
+		return plan;
 	}
 
 	function parseCsv(text) {
@@ -10117,9 +10780,251 @@
 	   in the status line instead of overwriting it a moment later. */
 	function exportActive(opts) {
 		if (!exportOne(state.active, opts)) return;
+		const tr = opts && Array.isArray(opts.only) ? exportOne.trimmed : null;
 		exported("from " + state.files[state.active].name +
+			(tr ? " — " + tr.kept + " of " + (tr.kept + tr.dropped) + " prospects" +
+				(tr.relativesCut ? ", " + tr.relativesCut + " relative link(s) to others cut" : "") : "") +
 			(exportOne.warning ? ". " + exportOne.warning : ""));
 	}
+
+	/* Q5. The file name the export template makes for loaded class i. Tokens:
+	   {file} the source name, {seed}, {season} the class year, {flavor} and
+	   {fp} the source file's fingerprint. */
+	function exportTokens(i) {
+		const f = state.files[i] || {};
+		const r = state.results[i];
+		return {
+			file: String(f.name || "class").replace(/\.json(\.gz)?$|\.gz$/i, ""),
+			seed: r && r.seed !== undefined ? r.seed : "",
+			season: r && Number.isFinite(r.season) ? r.season
+				: f.data && f.data.startingSeason !== undefined ? f.data.startingSeason : "",
+			flavor: r && r.flavor && r.flavor.label ? r.flavor.label : "",
+			fp: f.fingerprint || "",
+		};
+	}
+	function exportName(i, opts, ext) {
+		return V.exportFilename(opts && opts.filename, exportTokens(i), ext);
+	}
+
+	/* Q7. The keys a partial export keeps: the top N of the board, the
+	   starred, the ticked rows, or whatever the prospect table's filter
+	   shows. null is the whole class. */
+	function partialKeys(res, mode, n) {
+		if (!res || !mode || mode === "all") return null;
+		const ranked = (res.board && res.board.length ? res.board : res.players.slice()
+			.sort((a, b) => (a.boardRank || 999) - (b.boardRank || 999)));
+		let list;
+		if (mode === "top") {
+			list = ranked.slice(0, Math.max(1, Math.min(ranked.length, Math.round(Number(n)) || 10)));
+		} else if (mode === "starred") list = res.players.filter((p) => state.watch[userKey(p)]);
+		else if (mode === "selected") list = res.players.filter((p) => state.selected[p.key]);
+		else if (mode === "filter") list = res.players.filter((p) => V.matchesFilter(p, res));
+		else return null;
+		return list.map((p) => p.key);
+	}
+
+	/* Q6. Every loaded class in ONE .zip, so a set of classes is one click
+	   rather than "Export next" once per file (a browser blocks several
+	   downloads from one click). Same options as a single export. */
+	function exportAllZip(opts) {
+		const o = Object.assign({}, opts || currentExportOpts());
+		delete o.only;
+		const files = [];
+		let warn = 0;
+		for (let i = 0; i < state.files.length; i++) {
+			const res = ensureResult(i);
+			if (!res) {
+				showError(new Error("Could not export " + state.files[i].name +
+					": it has not been run yet."));
+				return false;
+			}
+			if (o.myMarks) stampUserMarks(res);
+			try {
+				const out = global.Engine.exportFile(res, o);
+				warn += global.Engine.exportFile.passthroughs || 0;
+				files.push({
+					name: exportName(i, o),
+					data: "\ufeff" + JSON.stringify(out, null, 2),
+				});
+			} catch (err) {
+				showError(new Error("Could not export " + state.files[i].name + ": " + err.message));
+				return false;
+			}
+		}
+		const bytes = V.zipStore(files, new Date());
+		download("bbgm_draft_classes_" + files.length + ".zip", bytes, "application/zip");
+		exported(files.length + " classes in one zip" +
+			(warn ? ". Warning: " + warn + " player(s) could not be matched and were exported unmodified." : ""));
+		return true;
+	}
+
+	/* Q2. What the tool did to the file: the engine's change report as a
+	   download, Markdown or CSV. */
+	function exportChangeReport(res, format, opts) {
+		if (!global.Engine.changeReport) {
+			setStatus("This build of the engine has no change report.");
+			return;
+		}
+		try {
+			const report = global.Engine.changeReport(res, { exportOptions: opts || currentExportOpts() });
+			const text = global.Engine.changeReportText(report, format);
+			const base = exportName(state.active, opts || currentExportOpts(), "");
+			download(base + "_change_report." + (format === "csv" ? "csv" : "md"), text,
+				format === "csv" ? "text/csv" : "text/markdown");
+			exported(report.counts.rewritten + " of " + report.counts.players + " players listed, " +
+				report.counts.ovrChanged + " with a new overall");
+		} catch (err) {
+			showError(new Error("Could not build the change report: " + err.message));
+		}
+	}
+
+	/* Q12. A pasted list of names, applied to the prospects in board order. */
+	function renameDialog() {
+		const res = state.results[state.active];
+		if (!res) return;
+		const board = res.board && res.board.length ? res.board : res.players.slice()
+			.sort((a, b) => (a.boardRank || 999) - (b.boardRank || 999));
+		const box = el("div");
+		box.appendChild(el("p", "hint",
+			"One name per line, best prospect first: line 1 renames No. 1 on the board, " +
+			"line 2 No. 2, and so on. A blank line or a lone - keeps that prospect's name. " +
+			"A leading “1.” or bullet is dropped. Each rename is a lock, so it survives a reroll."));
+		const ta = el("textarea");
+		ta.rows = 10;
+		ta.style.width = "100%";
+		ta.id = "renameList";
+		ta.setAttribute("aria-label", "Names, one per line, in board order");
+		ta.placeholder = board.slice(0, 3).map((p, i) => (i + 1) + ". New name " + (i + 1)).join("\n");
+		box.appendChild(ta);
+		const summary = el("p", "hint");
+		summary.setAttribute("role", "status");
+		const prev = el("div", "scroll renamepreview");
+		box.appendChild(summary);
+		box.appendChild(prev);
+		let plan = V.planRenames("", board);
+		const paint = () => {
+			plan = V.planRenames(ta.value, board);
+			prev.textContent = "";
+			summary.textContent = !ta.value.trim() ? "Paste or type the list; the preview appears here."
+				: plan.rows.length + " of " + board.length + " prospects will be renamed" +
+				(plan.extra ? "; " + plan.extra + " line(s) past the end of the class are ignored" : "") +
+				(plan.duplicates.length ? ". Two prospects would share the name " +
+					plan.duplicates.slice(0, 3).join(", ") : "") + ".";
+			if (!plan.rows.length) return;
+			const t = el("table", "mini");
+			t.dataset.nocopy = "";
+			const h = el("tr");
+			for (const x of ["Board", "Now", "New name"]) h.appendChild(el("th", null, x));
+			t.appendChild(h);
+			for (const r of plan.rows.slice(0, 200)) {
+				const tr = el("tr");
+				tr.appendChild(el("td", "num", String(r.rank)));
+				tr.appendChild(el("td", null, r.from));
+				tr.appendChild(el("td", null, r.to));
+				t.appendChild(tr);
+			}
+			prev.appendChild(t);
+		};
+		ta.addEventListener("input", paint);
+		paint();
+		modal("Rename in board order", box, () => {
+			if (!plan.rows.length) return;
+			pushUndo("renamed " + plan.rows.length + " prospects from a pasted list");
+			for (const r of plan.rows) {
+				state.overrides[r.key] = Object.assign({}, state.overrides[r.key] || {}, { name: r.to });
+			}
+			state.overrideFingerprint = (activeFile() || {}).fingerprint || null;
+			run(() => setStatus("Renamed " + plan.rows.length + " prospect" +
+				(plan.rows.length === 1 ? "" : "s") + " in board order."));
+		}, "Rename");
+		setTimeout(() => ta.focus(), 0);
+	}
+
+	/* Q17. A synthetic class of a chosen size, year and seed, added beside
+	   whatever is loaded (or on its own when nothing is). */
+	function newClassDialog() {
+		if (!global.Sample) return;
+		const box = el("div");
+		box.appendChild(el("p", "hint",
+			"A synthetic draft class built from a seed: the same seed, size and year always " +
+			"give the same class. It is added to the classes already loaded."));
+		const years = state.files.map((f) => Number(f.data && f.data.startingSeason)).filter(Number.isFinite);
+		const nextYear = years.length ? Math.max.apply(null, years) + 1 : new Date().getFullYear() + 1;
+		const field = (label, input) => {
+			const wrap = el("div", "ctl");
+			const lab = el("label", null, label);
+			lab.htmlFor = input.id;
+			wrap.appendChild(lab);
+			wrap.appendChild(input);
+			box.appendChild(wrap);
+			return input;
+		};
+		const mk = (id, type, value, extra) => {
+			const i = el("input");
+			i.id = id;
+			i.type = type;
+			i.value = String(value);
+			if (extra) Object.assign(i, extra);
+			return i;
+		};
+		const sizeIn = field("Players (8 to 120)", mk("newClassSize", "number", 70, { min: 8, max: 120, step: 1 }));
+		const yearIn = field("Draft year", mk("newClassYear", "number", nextYear, { min: 1950, max: 2200, step: 1 }));
+		const seedIn = field("Seed (any text or number)", mk("newClassSeed", "text", Date.now() % 100000));
+		const err = el("p", "hint");
+		err.setAttribute("role", "alert");
+		box.appendChild(err);
+		const read = () => {
+			const n = Math.round(Number(sizeIn.value));
+			const y = Math.round(Number(yearIn.value));
+			const seed = seedIn.value.trim();
+			if (!Number.isFinite(n) || n < 8 || n > 120) return { error: "Players: a number from 8 to 120." };
+			if (!Number.isFinite(y) || y < 1950 || y > 2200) return { error: "Draft year: 1950 to 2200." };
+			if (!seed) return { error: "Type a seed." };
+			return { n, y, seed };
+		};
+		modal("New class", box, () => {
+			const v = read();
+			if (v.error) return;
+			const data = global.Sample.makeClass(v.seed, v.n, v.y);
+			const check = global.Engine.validateLeagueFile(data);
+			data.startingSeason = check.season;
+			installFiles([{ name: "sample-class-" + v.y + "-" + String(v.seed).replace(/[^\w.-]+/g, "_") + ".json",
+				data, warnings: check.warnings }], [], { append: state.files.length > 0 });
+		}, "Create", {
+			validate: () => {
+				const v = read();
+				err.textContent = v.error || "";
+				return !v.error;
+			},
+		});
+		setTimeout(() => sizeIn.focus(), 0);
+	}
+
+	/* Q24. Print, or save as a PDF, under a header that says which class this
+	   is: the page header with the seed and the file is hidden on paper. */
+	function printHeaderText() {
+		const res = state.results[state.active];
+		const f = activeFile();
+		if (!res) return "";
+		return className(res) + " — seed " + res.seed + " — class " + classFingerprint(res) +
+			(f && f.fingerprint ? " — file " + f.fingerprint : "") + " — " +
+			new Date().toISOString().slice(0, 10);
+	}
+	function paintPrintHeader() {
+		const box = $("printHeader");
+		if (!box) return;
+		box.textContent = "";
+		const text = printHeaderText();
+		if (!text) return;
+		const parts = text.split(" — ");
+		box.appendChild(el("b", null, parts[0]));
+		box.appendChild(document.createTextNode(" — " + parts.slice(1).join(" — ")));
+	}
+	function printPage() {
+		paintPrintHeader();
+		window.print();
+	}
+	window.addEventListener("beforeprint", paintPrintHeader);
 
 	function exportMenu() {
 		const res = state.results[state.active];
@@ -10265,7 +11170,62 @@
 			"as watched. Off by default: they stay in this browser."));
 		list.appendChild(optBox);
 		paintScope();
+		/* Q5: the file name, as a template. */
+		const nameWrap = el("div", "ctl");
+		const nameLab = el("label", null, "File name");
+		nameLab.htmlFor = "exportFilename";
+		const nameIn = el("input");
+		nameIn.id = "exportFilename";
+		nameIn.type = "text";
+		nameIn.maxLength = 120;
+		nameIn.placeholder = V.EXPORT_NAME_DEFAULT;
+		nameIn.value = (remembered && remembered.filename) || "";
+		const namePreview = el("p", "unit");
+		const paintName = () => {
+			namePreview.textContent = "Writes " + exportName(state.active, { filename: nameIn.value }) +
+				" — tokens {file} {seed} {season} {flavor} {fp}; blank is " + V.EXPORT_NAME_DEFAULT + ".";
+		};
+		nameIn.addEventListener("input", () => { paintName(); rememberExportOpts(exportOpts()); });
+		nameWrap.appendChild(nameLab);
+		nameWrap.appendChild(nameIn);
+		nameWrap.appendChild(namePreview);
+		list.appendChild(nameWrap);
+		paintName();
+		/* Q7: all of the class, or part of it. Used by the class file only. */
+		const onlyWrap = el("div", "ctl");
+		const onlyLab = el("label", null, "Which prospects");
+		onlyLab.htmlFor = "exportOnly";
+		const onlySel = el("select");
+		onlySel.id = "exportOnly";
+		for (const [v, l] of [["all", "the whole class"], ["top", "the top N of the board"],
+			["starred", "my starred prospects"], ["selected", "the rows I ticked"],
+			["filter", "what the prospect table's filter shows"]]) onlySel.appendChild(new Option(l, v));
+		const onlyN = el("input");
+		onlyN.type = "number";
+		onlyN.id = "exportOnlyN";
+		onlyN.min = "1";
+		onlyN.value = "14";
+		onlyN.style.width = "70px";
+		onlyN.setAttribute("aria-label", "How many prospects from the top of the board");
+		const onlyHint = el("p", "unit");
+		const paintOnly = () => {
+			onlyN.hidden = onlySel.value !== "top";
+			const keys = partialKeys(res, onlySel.value, onlyN.value);
+			onlyHint.textContent = keys
+				? "The class file will carry " + keys.length + " of " + res.players.length +
+					" prospects (the others are left out; their ranks in notes stay the full class's)."
+				: "";
+		};
+		onlySel.addEventListener("change", paintOnly);
+		onlyN.addEventListener("input", paintOnly);
+		onlyWrap.appendChild(onlyLab);
+		onlyWrap.appendChild(onlySel);
+		onlyWrap.appendChild(onlyN);
+		onlyWrap.appendChild(onlyHint);
+		list.appendChild(onlyWrap);
+		paintOnly();
 		const exportOpts = () => ({
+			filename: nameIn.value.trim(),
 			stats: oStats(), prior: oPrior(), highs: oHighs(), awards: oAwards(),
 			ages: oAges(), noteAppend: oNoteAppend(), includeNotes: oIncludeNotes(),
 			myMarks: oMyMarks(),
@@ -10328,8 +11288,23 @@
 			"“DNE” itself, whatever team the file named — that is BBGM, not " +
 			"this export."));
 		item("BBGM class file, with the options above", () => {
-			exportActive(exportOpts());
+			const popts = exportOpts();
+			const keys = partialKeys(res, onlySel.value, onlyN.value);
+			if (keys) {
+				if (!keys.length) {
+					setStatus("Nothing to export: no prospect matches “" +
+						onlySel.options[onlySel.selectedIndex].text + "”.");
+					return;
+				}
+				popts.only = keys;
+			}
+			exportActive(popts);
 		});
+		if (state.files.length > 1) {
+			item("Every loaded class as ONE .zip (with the options above)", () => exportAllZip(exportOpts()));
+		}
+		item("What the tool changed in my file — report as Markdown", () => exportChangeReport(res, "md", exportOpts()));
+		item("What the tool changed in my file — report as CSV", () => exportChangeReport(res, "csv", exportOpts()));
 		item("Players file, for Tools → Import players (keeps the statline)", () => {
 			const res2 = ensureResult(state.active);
 			if (!res2) return;
@@ -10352,6 +11327,7 @@
 		});
 		/* The one export that needs nothing but a browser to read. */
 		item("Mock first round as a picture (PNG) — for a forum post", () => exportMockImage(res));
+		item("Class card as a picture (PNG) — the top five and the class in numbers", () => exportClassCard(res));
 		item("Prospect table as CSV (the current filter)", () => exportCsv(res));
 		item("Prospect table as CSV (whole class)", () => exportCsv(res, true));
 		item("Season as JSON — records, bracket, awards, board", () => exportSeasonJson(res));
@@ -10365,6 +11341,9 @@
 		item("Notes as Markdown, for a forum post", () => exportNotesMarkdown(res));
 		item("Locked prospects as CSV — the file Import locks reads back", exportLocksCsv);
 		item("Import locks from a CSV…", () => $("csvFile").click());
+		item("Rename prospects from a pasted list of names…", renameDialog);
+		item("New synthetic class… (size, year, seed)", newClassDialog);
+		item("Print this page, or save it as a PDF…", printPage);
 		item("Settings as JSON — drop it on the page to load them again", exportSettingsJson);
 		item("Message history", messageHistory);
 		item("Copy a bug report (seed, settings, engine revision, last error — no player data)", () => {
@@ -10681,6 +11660,7 @@
 			"seeds: " + rows.map((r) => r.seed).join(", "),
 		].join("\n")));
 		if (heldBatches.length) view.appendChild(batchDiff(heldBatches, rows));
+		view.appendChild(contactSheet(rows));
 		const cards = el("div", "cards");
 		cards.appendChild(V.histogram("Scoring leader per class", col("topPpg"), 10));
 		cards.appendChild(V.histogram("Awards per class", col("awards"), 10));
@@ -10714,6 +11694,74 @@
 			.map((k) => String(flavors[k]).padStart(3) + "  " + k).join("\n")));
 		cards.appendChild(fBox);
 		view.appendChild(cards);
+	}
+
+	/* THE BATCH AS A CONTACT SHEET.
+
+	   "Generate thirty, keep the best" is the workflow a batch exists for, and a
+	   table of averages cannot do it: you need each class's top five and what
+	   is odd about it, side by side, and a way to open the one you like. Every
+	   row is one class; "Open this class" puts its seed in and re-applies. */
+	const CONTACT_SORTS = [["batch", "Batch order"], ["strange", "Strangest first"],
+		["ovr", "Highest mean overall"], ["top", "Best top pick"], ["tall", "Tall big first"]];
+	function contactSheet(rows) {
+		const box = el("div", "card contactsheet");
+		box.appendChild(el("h4", null, "Class contact sheet"));
+		const bar = el("div", "filters");
+		const sort = el("select");
+		sort.setAttribute("aria-label", "Sort the classes");
+		for (const [k, label] of CONTACT_SORTS) sort.appendChild(new Option(label, k));
+		bar.appendChild(sort);
+		const csv = el("button", null, "Download CSV");
+		csv.addEventListener("click", () => {
+			download("batch_classes_" + (batchBaseSeed || "batch") + ".csv", global.Share.contactCsv(rows), "text/csv");
+		});
+		bar.appendChild(csv);
+		box.appendChild(bar);
+		const wrap = el("div", "tablewrap");
+		box.appendChild(wrap);
+		const topOvr = (r) => (r.top5 && r.top5[0] ? r.top5[0].ovr : -1);
+		const paint = () => {
+			const list = rows.map((r, i) => ({ r, i }));
+			const by = sort.value;
+			if (by === "strange") list.sort((a, b) => (b.r.strangeness || 0) - (a.r.strangeness || 0) || a.i - b.i);
+			else if (by === "ovr") list.sort((a, b) => b.r.ovr - a.r.ovr || a.i - b.i);
+			else if (by === "top") list.sort((a, b) => topOvr(b.r) - topOvr(a.r) || a.i - b.i);
+			else if (by === "tall") list.sort((a, b) => (b.r.tallBig ? 1 : 0) - (a.r.tallBig ? 1 : 0) || a.i - b.i);
+			const table = el("table", "mini");
+			const hr = el("tr");
+			for (const h of ["#", "Seed", "Flavor", "Strange", "7'2\"+ top 5", "Top five", "Ovr", "Pot", ""]) {
+				hr.appendChild(el("th", h === "Strange" || h === "Ovr" || h === "Pot" ? "num" : null, h));
+			}
+			table.appendChild(hr);
+			for (const { r, i } of list) {
+				const tr = el("tr");
+				tr.appendChild(el("td", "num", String(i + 1)));
+				tr.appendChild(el("td", "mono", String(r.seed)));
+				tr.appendChild(el("td", null, r.flavor || "—"));
+				tr.appendChild(el("td", "num", Number.isFinite(r.strangeness) ? String(r.strangeness) : "—"));
+				tr.appendChild(el("td", null, r.tallBig ? "yes" : ""));
+				const top = el("td", "hint", (r.top5 || []).map(global.Share.topLine).join(" · ") || "—");
+				tr.appendChild(top);
+				tr.appendChild(el("td", "num", Number.isFinite(r.ovr) ? r.ovr.toFixed(1) : "—"));
+				tr.appendChild(el("td", "num", Number.isFinite(r.pot) ? r.pot.toFixed(1) : "—"));
+				const open = el("td");
+				const b = el("button", "tiny", "Open this class");
+				b.dataset.seed = String(r.seed);
+				b.title = "Use seed " + r.seed + " with the current settings and re-apply";
+				b.addEventListener("click", () => applySeed(String(r.seed), "opened batch class " + r.seed));
+				open.appendChild(b);
+				tr.appendChild(open);
+				table.appendChild(tr);
+			}
+			wrap.innerHTML = "";
+			wrap.appendChild(table);
+		};
+		sort.addEventListener("change", paint);
+		paint();
+		box.appendChild(el("p", "hint", "“Open this class” applies the seed to the settings on screen; if you changed a " +
+			"setting after running the batch, that class will come out differently."));
+		return box;
 	}
 
 	function runBatch(n) {
@@ -10906,10 +11954,17 @@
 		installFiles, paintConfig,
 		copyText, announce, toast, promptModal, undoTo, undoHistoryDialog,
 		unsavedWork, markExported, editSeedInline, applySeed, bulkApply, bulkShiftOvr, bulkLockAsIs, bulkClear, refreshBulkBar,
+		bulkShiftPot, bulkShiftHeight, bulkReroll, toggleTag,
+		exportAllZip, exportName, exportTokens, partialKeys, exportChangeReport, renameDialog,
+		newClassDialog, printHeaderText, paintPrintHeader, planLockImport, parseCsv, CSV_COLS,
+		exportLocksCsv, quickWinKey,
 		snapshot, rerollUntilDialog, rerollUntil, dailySeed, CHALLENGES, startChallenge,
 		challengeResultText, scoreChallenge, restoreSession, randomizeSettings,
 		REROLL_PREDICATES,
 		exportCsv, setStatus, showError, indexSnapshot, readTextFile,
+		// The analytics, mock and sharing UI (js/share.js, js/views.js).
+		exportMockImage, exportClassCard, exportPlayerCard, downloadText: download, copyLink,
+		keepCurrentClass, keptDialog, commandLineText, copyCommandLine,
 		// The replay layer, for tools/uismoke.js.
 		replayStore, replayDialog, replayAfterRun, chaosDraft, className,
 		// Replayability (js/replay.js), for tools/uismoke.js.
@@ -11003,7 +12058,7 @@
 	window.addEventListener("unhandledrejection", (e) => reportUncaught(e.reason));
 
 	const saved = restore();
-	readHash();
+	readHash(() => { paintConfig(); persist(); });
 	// What came back from storage is not new work; only changes after this do.
 	markExported();
 	window.addEventListener("beforeunload", (e) => {
@@ -11017,18 +12072,25 @@
 	   hash writeHash put there itself is not news and is ignored. */
 	window.addEventListener("hashchange", () => {
 		const h = location.hash || "";
-		if (h === lastWrittenHash || !/[#&]c=/.test(h)) return;
+		if (h === lastWrittenHash || !/[#&][cz]=/.test(h)) return;
 		lastWrittenHash = h;
 		const redoBefore = state.redo;
 		pushUndo("opened a shared link");
+		const applied = () => {
+			state.editing = null;
+			state.selected = {};
+			checkLockFingerprint();
+			applyPendingDeep();
+			paintConfig();
+			persist();
+			run(() => setStatus("Applied the settings in the link."));
+		};
 		// An invalid link changes nothing, so the redo history survives it.
-		if (!readHash()) { state.undo.pop(); state.redo = redoBefore; paintUndo(); return; }
-		state.editing = null;
-		state.selected = {};
-		checkLockFingerprint();
-		paintConfig();
-		persist();
-		run(() => setStatus("Applied the settings in the link."));
+		const ok = readHash(applied);
+		if (ok) { applied(); return; }
+		// A compressed link is still being opened; the undo entry waits for it.
+		if (/[#&]z=/.test(h)) return;
+		state.undo.pop(); state.redo = redoBefore; paintUndo();
 	});
 	window.addEventListener("resize", syncHeaderHeight);
 	/* The header wraps without the window resizing — a long "Undo …" label,
@@ -11046,6 +12108,7 @@
 	addGroupResets();
 	bindSettingTier();
 	bindSessions();
+	bindShareTools();
 	bindConfig();
 	bindSliderNumbers();
 	bindRandomize();
@@ -11366,11 +12429,12 @@
 		setTimeout(() => input.focus(), 0);
 	}
 	$("btnCopyLink").addEventListener("click", (e) => {
-		writeHash(true);
 		// Shift-click copies the settings as prose instead of as a URL, for
 		// the forums and chat clients that eat links. Advertised in the title.
-		if (e.shiftKey) copyText(configAsText(), $("btnCopyLink"), null, "settings as text");
-		else copyText(location.href, $("btnCopyLink"), null, "link to these settings");
+		if (e.shiftKey) {
+			writeHash(true);
+			copyText(configAsText(), $("btnCopyLink"), null, "settings as text");
+		} else copyLink($("btnCopyLink"), "link to these settings");
 	});
 	$("btnCopyText").addEventListener("click", () => {
 		writeHash(true);
@@ -11412,6 +12476,10 @@
 			// The shortcut sheet promises this closes the editor too.
 			state.editing = null;
 			render();
+		} else if (e.key === "Escape" && state.player && state.tab === "board" &&
+			!/^(input|textarea|select)$/i.test(e.target.tagName || "")) {
+			// Esc backs out of a player's page to the list, as the back button does.
+			showPlayer(null);
 		}
 		const tag = (e.target.tagName || "").toLowerCase();
 		const typing = tag === "input" || tag === "textarea" || tag === "select";
@@ -11492,6 +12560,18 @@
 			render();
 			return;
 		}
+		/* On a player's page j and k step through the class in board order
+		   (the buttons beside "All prospects" do the same). */
+		if ((k === "j" || k === "k") && state.player && state.tab === "board") {
+			const res = state.results[state.active];
+			const nb = res ? V.neighborKeys(res, state.player) : null;
+			if (nb && nb.total > 1 && nb.index !== -1) {
+				e.preventDefault();
+				showPlayer(k === "j" ? nb.next : nb.prev);
+				return;
+			}
+		}
+		if (quickWinKey(e, k)) return;
 		if (k === "r" && !$("btnReroll").disabled) { e.preventDefault(); reroll(); return; }
 		if (k === "g") {
 			e.preventDefault();
@@ -11527,6 +12607,76 @@
 			render();
 		}
 	});
+
+	/* The prospect a one-key action applies to: the player page that is open,
+	   else the board or table row that has focus. */
+	function keyTarget() {
+		const res = state.results[state.active];
+		if (!res) return null;
+		let key = state.player || null;
+		if (!key) {
+			const row = document.activeElement && document.activeElement.closest
+				? document.activeElement.closest("tr[data-pkey]") : null;
+			key = row ? row.dataset.pkey : null;
+		}
+		const p = key ? res.players.filter((x) => x.key === key)[0] : null;
+		return p ? { p, res } : null;
+	}
+
+	/* Q44: w star, c add to compare, y copy link, n jump to the note, h
+	   heatmap, x the export menu. True when the key was one of them. */
+	function quickWinKey(e, k) {
+		if (k === "w") {
+			const t = keyTarget();
+			if (!t) return false;
+			e.preventDefault();
+			const uk = userKey(t.p);
+			if (state.watch[uk]) delete state.watch[uk]; else state.watch[uk] = true;
+			persist();
+			render();
+			setStatus((state.watch[uk] ? "Starred " : "Removed the star from ") + t.p.name + ".");
+			return true;
+		}
+		if (k === "c") {
+			const t = keyTarget();
+			if (!t) return false;
+			e.preventDefault();
+			V.compareWith(t.p, t.res);
+			return true;
+		}
+		if (k === "y") {
+			e.preventDefault();
+			copyLink($("btnCopyLink"));
+			return true;
+		}
+		if (k === "n") {
+			const t = keyTarget();
+			if (!t) return false;
+			e.preventDefault();
+			const focusNote = () => {
+				const box = $("myNote");
+				if (box) { box.focus(); if (box.scrollIntoView) box.scrollIntoView({ block: "center" }); }
+			};
+			if (state.player === t.p.key && $("myNote")) focusNote();
+			else { showPlayer(t.p.key); requestAnimationFrame(focusNote); }
+			return true;
+		}
+		if (k === "h") {
+			if (!state.results[state.active]) return false;
+			e.preventDefault();
+			state.boardHeat = !state.boardHeat;
+			persist();
+			render();
+			setStatus("Board heatmap " + (state.boardHeat ? "on" : "off") + ".");
+			return true;
+		}
+		if (k === "x" && !$("btnExportMenu").disabled) {
+			e.preventDefault();
+			exportMenu();
+			return true;
+		}
+		return false;
+	}
 
 	/* Lock (or unlock) one player from the keyboard. Locking is the tool's
 	   central verb and it needed a mouse: open the editor, find the control,
@@ -11565,13 +12715,19 @@
 		["[ / ]", "Previous / next archetype filter"],
 		["p", "Pin this class as the comparison baseline"],
 		["e", "Export the active file"],
+		["x", "Open the export menu"],
+		["w", "Star or unstar the prospect (his page, or the focused row)"],
+		["c", "Add the prospect to the comparison and open it"],
+		["n", "Jump to the prospect's note"],
+		["y", "Copy a link to this exact class and page"],
+		["h", "Board heatmap on or off"],
 		["s", "Show or hide the settings panel"],
 		["Ctrl / Cmd + Z", "Undo the last change — a reroll included"],
 		["Ctrl / Cmd + Shift + Z", "Redo it"],
-		["j / ↓", "Next prospect in the table"],
-		["k / ↑", "Previous prospect"],
+		["j / ↓", "Next prospect in the table (on a player's page: the next one in board order)"],
+		["k / ↑", "Previous prospect (on a player's page: the previous one)"],
 		["Enter or Space", "Open the editor for the focused row"],
-		["Escape", "Close the editor or a dialog"],
+		["Escape", "Close the editor or a dialog, or leave a player's page"],
 		["Tab", "Into the table, then arrow keys between rows"],
 	];
 

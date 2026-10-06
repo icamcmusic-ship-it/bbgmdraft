@@ -189,14 +189,16 @@
 		return order.concat(pool, teams.slice(7));
 	}
 
-	/* What a prospect is worth to one team. */
-	function valueTo(team, proj, p, rng) {
+	/* What a prospect is worth to one team. `noise` is the sd of the taste
+	   term (default 1.2; 0 is a draft with no taste at all). */
+	const TASTE_SD = 1.2;
+	function valueTo(team, proj, p, rng, noise) {
 		const ceiling = proj ? proj.peak : p.newPot || p.newOvr;
 		const ready = p.newOvr;
 		const blend = ceiling * (1 - 0.45 * team.plan) + (ready + 8) * 0.45 * team.plan;
 		const fit = (team.need[GROUP[p.newPos] || "wing"] || 0) * 4;
 		const bust = proj ? proj.bustChance * (2 + 3 * team.plan) : 0;
-		return { value: blend + fit - bust + rng.normal(0, 1.2), fit, ceiling, ready };
+		return { value: blend + fit - bust + rng.normal(0, noise === undefined ? TASTE_SD : noise), fit, ceiling, ready };
 	}
 
 	/* ------------------------------------------- the league's own teams
@@ -344,8 +346,23 @@
 			" · B " + Math.round(t.depth.big) : "";
 	}
 
+	/* Why a team likes a player at its pick, in a few words. */
+	function whyOf(team, v, p) {
+		return v.fit >= 3 && team.needOf === (GROUP[p.newPos] || "wing")
+			? "fills the need at " + team.needOf
+			: team.plan < 0.35 && v.ceiling >= v.ready + 10 ? "bets on the ceiling"
+			: team.plan > 0.7 ? "ready to play now"
+			: "best available";
+	}
+
+	/* opts.salt re-draws every pick's taste (a redraft of the same teams in the
+	   same order); opts.noise is the sd of that taste (default 1.2, 0 = none).
+	   Both absent writes exactly the draft this function always has. */
 	function mockDraft(res, opts) {
 		opts = opts || {};
+		const noise = Number.isFinite(opts.noise) && opts.noise >= 0 ? opts.noise : undefined;
+		const saltKey = opts.salt === undefined || opts.salt === null || opts.salt === ""
+			? "" : "|s" + opts.salt;
 		const rounds = opts.rounds || 2;
 		const seed = (res && res.seed) || "";
 		const projections = opts.projections || projectClass(res);
@@ -359,6 +376,7 @@
 			plan = { teams: order, slots, source: "thirty invented teams", league: false };
 		}
 		const pool = ((res && res.board) || (res && res.players) || []).slice();
+		const pool0 = pool.slice();
 		const picks = [];
 		let n = 0;
 		const inRound = {};
@@ -367,20 +385,16 @@
 			const team = slot.team;
 			n++;
 			inRound[slot.round] = (inRound[slot.round] || 0) + 1;
-			const rng = new Rng("mock-pick|" + seed + "|" + n);
+			const rng = new Rng("mock-pick|" + seed + saltKey + "|" + n);
 			let best = null;
 			for (const p of pool) {
-				const v = valueTo(team, projections[p.key], p, rng.child(p.key));
+				const v = valueTo(team, projections[p.key], p, rng.child(p.key), noise);
 				if (!best || v.value > best.v.value) best = { p, v };
 			}
 			pool.splice(pool.indexOf(best.p), 1);
 			const consensus = best.p.boardRank || null;
 			const reach = consensus ? consensus - n : 0;
-			const why = best.v.fit >= 3 && team.needOf === (GROUP[best.p.newPos] || "wing")
-				? "fills the need at " + team.needOf
-				: team.plan < 0.35 && best.v.ceiling >= best.v.ready + 10 ? "bets on the ceiling"
-				: team.plan > 0.7 ? "ready to play now"
-				: "best available";
+			const why = whyOf(team, best.v, best.p);
 			picks.push({
 				pick: n, round: slot.round, inRound: inRound[slot.round],
 				team: team.name, via: slot.via ? slot.via.name : null,
@@ -393,13 +407,44 @@
 				projection: projections[best.p.key] || null,
 			});
 		}
-		return {
+		const out = {
 			teams: plan.teams.map((t) => ({ name: t.name, plan: t.planLabel, need: t.needOf,
 				ovr: Number.isFinite(t.ovr) ? t.ovr : null, depth: depthText(t) })),
 			picks, undrafted: pool.map((p) => p.key), source: plan.source, fromLeague: plan.league,
 		};
+		/* What targetsFor needs to replay a pick, kept off the enumerable
+		   surface so the draft serialises and compares exactly as before. */
+		Object.defineProperty(out, "_ctx", { enumerable: false, value: {
+			teams: plan.teams, pool: pool0, projections, seed, saltKey, noise } });
+		return out;
 	}
 
-	global.Pro = { project, projectClass, mockDraft, teamsFor, leagueDraft, teamRating, draftAge,
+	/* A team's five best targets at a pick: the same value the draft used, with
+	   the same taste draw, so when the team is the one on the clock the first
+	   target is the player it took. `pickIndex` is the position in mock.picks
+	   (0 = the first pick); omit it for the team's first pick. `teamIndex` is a
+	   position in mock.teams, or the team's name. Each target carries the fit
+	   reason (why) and the numbers behind it. */
+	function targetsFor(mock, teamIndex, pickIndex) {
+		const ctx = mock && mock._ctx;
+		if (!ctx) return [];
+		const team = typeof teamIndex === "string"
+			? ctx.teams.filter((t) => t.name === teamIndex)[0] : ctx.teams[teamIndex];
+		if (!team) return [];
+		let at = pickIndex;
+		if (at === undefined || at === null) at = mock.picks.findIndex((k) => k.team === team.name);
+		if (!Number.isInteger(at) || at < 0 || at >= mock.picks.length) return [];
+		const gone = new Set(mock.picks.slice(0, at).map((k) => k.key));
+		const rng = new Rng("mock-pick|" + ctx.seed + ctx.saltKey + "|" + (at + 1));
+		return ctx.pool.filter((p) => !gone.has(p.key)).map((p) => {
+			const v = valueTo(team, ctx.projections[p.key], p, rng.child(p.key), ctx.noise);
+			return { key: p.key, name: p.name, pos: p.newPos, ovr: p.newOvr, pot: p.newPot,
+				value: Math.round(v.value * 10) / 10, fit: Math.round(v.fit * 10) / 10,
+				ceiling: Math.round(v.ceiling), ready: p.newOvr, why: whyOf(team, v, p),
+				taken: mock.picks[at].key === p.key, _v: v.value };
+		}).sort((a, b) => b._v - a._v).slice(0, 5).map((t) => { delete t._v; return t; });
+	}
+
+	global.Pro = { project, projectClass, mockDraft, targetsFor, valueTo, teamsFor, leagueDraft, teamRating, draftAge,
 		VERDICTS, REPLACEMENT };
 })(typeof window !== "undefined" ? window : self);

@@ -689,7 +689,7 @@
 			   that — it used to hand the pre-gap champion a recruiting boost
 			   in a season it had nothing to do with. The banner count keeps
 			   the title; the momentum is gone. */
-			champion: null,
+			champion: guess ? carry.champion || null : null,
 			titles: Object.assign({}, carry.titles || {}),
 			stale: (carry.stale || 0) + years,
 			/* The slow variables ride along: prestige drift decays toward
@@ -702,6 +702,7 @@
 		if (carry.extrapolatedTitles) {
 			out.extrapolatedTitles = Object.assign({}, carry.extrapolatedTitles);
 		}
+		if (guess && carry.recentChamps) out.recentChamps = carry.recentChamps.slice();
 		for (const name of Object.keys(carry.prestigeDelta || {})) {
 			out.prestigeDelta[name] = guess ? carry.prestigeDelta[name]
 				: Math.round(carry.prestigeDelta[name] *
@@ -1983,17 +1984,31 @@
 	   median champion ranked 9th. These are the exponents of exp(k x level)
 	   fitted by maximum likelihood to 120 simulated seasons (six synthetic
 	   20-season worlds): the champion k = 0.20 (log-likelihood -450 against
-	   -708 for a flat draw), the runner-up and the other two Final Four teams
+	   -708 for a flat draw; 0.21 is used, which balances a guess from an old
+	   tail against one from a young tail), the runner-up and the other two Final Four teams
 	   0.15, the final poll's No. 1 0.20, and the schools of the player of
 	   the year, the No. 1 pick and an All-American 0.13 / 0.09 / 0.12 (set
-	   against the rank percentiles of those schools in the simulated seasons). The whole
-	   field is in the draw: in a simulated season the champion was outside
-	   the top 40 by level one time in five. tools/tests/universe-realism-
-	   extrap.js re-measures all of this against a fresh simulated world. */
-	const GUESS_K = { champion: 0.20, runnerUp: 0.15, finalFour: 0.15, apOne: 0.20,
+	   against the rank percentiles of those schools in the simulated
+	   seasons). The whole field is in the draw: in a simulated season the
+	   champion was outside the top 40 by level 18% of the time.
+	   tools/tests/universe-realism-extrap.js re-measures all of this against
+	   a fresh simulated world.
+
+	   Measured against eight simulated 20-season worlds (guessed years from
+	   each one's tail): different champions in 20 years 13.3 against 14.0,
+	   most titles by one program 4.2 against 3.9, the top three's share
+	   0.45 against 0.41, median champion rank 6 against 9. From a 3-season
+	   tail over 17 years: 12.8 / 3.2 / 0.40 against 11.9 / 3.6 / 0.46 for
+	   simulated seasons 4-20. A final poll's No. 1, a repeat champion and
+	   the coaching and realignment counts were fitted the same way (see
+	   GUESS_MOMENTUM, GUESS_REALIGN_SCALE, GUESS_RECORD_SD). */
+	const GUESS_K = { champion: 0.21, runnerUp: 0.15, finalFour: 0.15, apOne: 0.20,
 		poy: 0.13, no1: 0.09, allAmerica: 0.12 };
 	// How often the final poll's No. 1 is the champion (0.19 simulated).
 	const GUESS_AP_IS_CHAMPION = 0.15;
+	const GUESS_MOMENTUM = 1.2;
+	const GUESS_MOMENTUM_FADE = 0.85;
+	const GUESS_MOMENTUM_CAP = 2;
 
 	/* The programs a missing season would have been about, strongest first,
 	   weighted for the champion (see GUESS_K). */
@@ -2004,8 +2019,30 @@
 			.filter((x) => Number.isFinite(x.level))
 			.sort((a, b) => b.level - a.level ||
 				cmpText(a.name, b.name));
-		const top = out.length ? out[0].level : 0;
-		for (const x of out) x.w = Math.exp(GUESS_K.champion * (x.level - top));
+		/* MOMENTUM. A simulated champion repeats 11% of the time (7% for a
+		   draw off levels alone) and a program that has won recently wins
+		   again more than its level says, because a title is also a
+		   recruiting class and a roster that stays: the lag-2 to lag-5
+		   repeat rates ran 4-6% against 3-4%. Each of the last few guessed
+		   champions is worth GUESS_MOMENTUM levels, fading by
+		   GUESS_MOMENTUM_FADE a year and capped at GUESS_MOMENTUM_CAP in all
+		   (carry.recentChamps, newest first; only a guessed year keeps one,
+		   see ageCarry and creditGuess; the defending champion alone when
+		   there is no history). Kept mild on purpose: at the full measured
+		   size the bonus feeds on itself and a thirty-year run grows
+		   dynasties the simulated worlds do not have. */
+		const recent = (carry && carry.recentChamps) ||
+			(carry && carry.champion ? [carry.champion] : []);
+		const bonus = {};
+		recent.forEach((name, i) => {
+			bonus[name] = (bonus[name] || 0) + GUESS_MOMENTUM * Math.pow(GUESS_MOMENTUM_FADE, i);
+		});
+		for (const name of Object.keys(bonus)) bonus[name] = Math.min(GUESS_MOMENTUM_CAP, bonus[name]);
+		let boosted = -Infinity;
+		for (const x of out) boosted = Math.max(boosted, x.level + (bonus[x.name] || 0));
+		for (const x of out) {
+			x.w = Math.exp(GUESS_K.champion * (x.level + (bonus[x.name] || 0) - boosted));
+		}
 		return out;
 	}
 
@@ -2078,12 +2115,12 @@
 		/* THE FINAL FOUR is the champion, the runner-up and two more programs
 		   drawn the same way: a row used to carry just the two finalists. */
 		const semis = [];
-		const out = new Set([champ.name, runnerUp ? runnerUp.name : null]);
+		const drawn = new Set([champ.name, runnerUp ? runnerUp.name : null]);
 		for (let i = 0; i < 2; i++) {
-			const s = pickByLevel(rng, field, GUESS_K.finalFour, out);
+			const s = pickByLevel(rng, field, GUESS_K.finalFour, drawn);
 			if (!s) break;
 			semis.push(s);
-			out.add(s.name);
+			drawn.add(s.name);
 		}
 		/* The poll No. 1 is the champion sometimes and otherwise the best
 		   programme by the same weighting, which is what a poll is. */
@@ -2125,9 +2162,8 @@
 		// The No. 1 pick is a prospect, never a carried returner: always invented.
 		const no1 = invent(GUESS_K.no1);
 		const confOf = carry.confOf || {};
-		const man = (p) => (p.invented ? { name: p.name, school: p.school, club: null,
-			nonNcaa: false, invented: true } : { name: p.name, school: p.school, club: null,
-			nonNcaa: false });
+		const man = (p) => Object.assign({ name: p.name, school: p.school, club: null,
+			nonNcaa: false }, p.invented ? { invented: true } : null);
 		const awards = [];
 		if (poy) {
 			awards.push({ season, name: poy.name, school: poy.school,
@@ -2386,6 +2422,7 @@
 		});
 		out.titles[row.champion] = (out.titles[row.champion] || 0) + 1;
 		out.extrapolatedTitles[row.champion] = (out.extrapolatedTitles[row.champion] || 0) + 1;
+		out.recentChamps = [row.champion].concat(world.recentChamps || []).slice(0, 6);
 		const rng = new global.BBGMRng.Rng(String((opts && opts.baseSeed) || "guess") +
 			"|gap|" + row.season + "|result");
 		const teams = guessTeams(world, row, rng);

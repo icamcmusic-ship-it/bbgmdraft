@@ -17,7 +17,8 @@
     "ui": "node tools/uismoke.js",
     "bench": "node tools/bench.js 2",
     "lint": "npx --yes eslint@9 .",
-    "cli": "node bin/bbgmdraft.js"
+    "cli": "node bin/bbgmdraft.js",
+    "bundle": "node tools/bundle.js"
   },
   "bin": {
     "bbgmdraft": "bin/bbgmdraft.js"

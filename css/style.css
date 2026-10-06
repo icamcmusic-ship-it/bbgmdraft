@@ -421,6 +421,37 @@ tbody tr { cursor: pointer; }
 	font-size: 10px; color: var(--dim); margin-top: 2px;
 }
 .histaxis .ticks { display: flex; justify-content: space-between; }
+/* The original ratings drawn as an outline over the rebuilt bars. */
+.hist.ghosted .histrow { grid-template-columns: 48px 1fr 58px; }
+.histtrack { position: relative; display: block; height: 10px; }
+.histtrack .histbar { position: absolute; left: 0; top: 0; }
+.histbar.histghost { background: transparent; box-shadow: inset 0 0 0 1.5px var(--accent-2); }
+
+/* ---- class curve (ovr / pot by pick) and the other distribution cards ---- */
+.curvecard { grid-column: 1 / -1; }
+.curvesvg { width: 100%; height: auto; max-height: 260px; display: block; }
+.curvesvg .axis { stroke: var(--line); stroke-width: 1; }
+.curvesvg .tick { fill: var(--dim); font-size: 9px; }
+.curvesvg .ln { fill: none; stroke-width: 2; }
+.curvesvg .ln.orig { stroke: var(--dim); }
+.curvesvg .ln.rebuilt { stroke: var(--accent); }
+.curvesvg .ln.ref { stroke: var(--accent-2); stroke-dasharray: 5 4; }
+.curvekey { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11px; color: var(--dim); margin: 4px 0; align-items: center; }
+.curvekey i { display: inline-block; width: 16px; height: 0; border-top: 2px solid var(--dim); vertical-align: middle; margin-right: 4px; }
+.curvekey i.rebuilt { border-color: var(--accent); }
+.curvekey i.ref { border-top-style: dashed; border-color: var(--accent-2); }
+tr.myteam td { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.mocktaste { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+.mocktaste input { width: 90px; }
+.mockteams summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+.contactsheet td.mono { font-family: var(--mono); font-size: 11px; }
+.contactsheet td.hint { max-width: 520px; }
+.keptbox { display: grid; gap: 10px; min-width: min(560px, 100%); }
+.keptform, .keptrow { display: grid; gap: 6px; }
+.keptlist { display: grid; gap: 10px; max-height: 46vh; overflow: auto; }
+.keptrow { padding: 8px; border: 1px solid var(--line); border-radius: var(--r-md); }
+.keptbox textarea, .keptbox input[type="text"] { width: 100%; box-sizing: border-box; }
+#btnInstall { white-space: nowrap; }
 
 /* ---- mirrored bracket ---------------------------------------------------- */
 /* A region needs four 190px columns to lay out without scrolling. Putting two
@@ -1705,4 +1736,23 @@ tr.tierbreak td { border-top: 2px solid var(--accent); }
 	tr { break-inside: avoid; }
 	tr.tierbreak td { border-top: 1px solid #000; }
 	tr.bandrow td { font-weight: 700; border-bottom: 1px solid #000; }
+}
+
+/* ---- quick wins: copy strip, tags, search hint, print header --------------- */
+/* The strip above a table that copies it as TSV or markdown. */
+.tablecopy { display: flex; align-items: center; gap: 6px; justify-content: flex-end; margin: 2px 0; }
+/* A tag the user put on a prospect, beside his name on the board. */
+.tag.tagmark { margin-left: 4px; border-color: var(--accent); color: var(--accent); }
+.tagrow .chip.on, .boardfilters .tagchip.on { border-color: var(--accent); }
+/* A search the box only partly understood. */
+input.badquery { outline: 2px dashed var(--bad); outline-offset: 1px; }
+.skillchips { display: inline-flex; flex-wrap: wrap; gap: 3px; }
+/* Said once on screen, in print only: the class, the seed, the file. */
+.printonly { display: none; }
+.renamepreview { max-height: 220px; overflow: auto; margin-top: 6px; }
+@media print {
+	.printonly { display: block !important; font-size: 10pt; margin: 0 0 8px;
+		padding-bottom: 4px; border-bottom: 1px solid #000; }
+	.printonly b { font-size: 12pt; }
+	.tablecopy, .tagrow, .skillchips, .tagmark { display: none !important; }
 }

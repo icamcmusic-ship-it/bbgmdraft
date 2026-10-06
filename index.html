@@ -32,6 +32,9 @@
 		     universe whose new classes are all later than its last season is
 		     extended rather than redrawn. See appendFiles. -->
 		<button id="btnAddFiles" hidden title="Add more draft classes, keeping the ones already loaded">Add classes…</button>
+		<!-- A synthetic class of a size, year and seed you choose, added beside
+		     whatever is loaded (or on its own when nothing is). -->
+		<button id="btnNewClass" title="Make a new synthetic class — size, year and seed — and add it to the classes already loaded">New class…</button>
 		<select id="fileSelect" hidden aria-label="Loaded file"></select>
 	</div>
 	<span class="spacer"></span>
@@ -58,6 +61,7 @@
 		     used to wear a "?" while the ? KEY opened the shortcuts. -->
 		<button id="btnHowTo" class="iconbtn" title="How to play — what everything does and a sensible order to do it in" aria-label="Guide">📖</button>
 		<button id="btnKeys" class="iconbtn" title="Keyboard shortcuts (press ?)" aria-label="Keyboard shortcuts">⌨</button>
+		<button id="btnPrint" class="iconbtn" title="Print this page, or save it as a PDF, under a header with the class name, seed, fingerprint and date" aria-label="Print or save as PDF">🖨</button>
 	</div>
 	<div class="btngroup" role="group" aria-label="Export">
 		<button id="btnExport" class="primary" disabled>Export JSON</button>
@@ -354,6 +358,9 @@
 </aside>
 
 <main>
+	<!-- Shown only when printing (see @media print): which class this page is
+	     about, since the header with the seed and the file is hidden then. -->
+	<div id="printHeader" class="printonly" aria-hidden="true"></div>
 	<!-- Above the drop box: on first run a load error used to appear below it,
 	     off-screen on a short viewport. -->
 	<div id="errBanner" class="banner" role="alert" hidden>
@@ -378,6 +385,8 @@
 		<p class="hint">Everything runs locally in your browser. Nothing is uploaded.</p>
 		<p class="emptyacts">No export to hand? <button type="button" id="btnSample" class="primary"
 			title="Load a synthetic 70-man class so you can try every tab before exporting one from the game">Try a sample class</button>
+			<button type="button" id="btnNewClassEmpty"
+			title="Make a synthetic class of a size, year and seed you choose">Custom sample class…</button>
 			<button type="button" id="btnPasteClass"
 			title="Read a class or league JSON from the clipboard (or just paste with Ctrl+V)">Paste JSON</button>
 			<button type="button" id="btnSynthUniverse"
@@ -437,6 +446,7 @@
 <script defer src="js/replay.js"></script>
 <script defer src="js/site.js"></script>
 <script defer src="js/replaymeta.js"></script>
+<script defer src="js/share.js"></script>
 <script defer src="js/views.js"></script>
 <script defer src="js/play.js"></script>
 <script defer src="js/app.js"></script>

@@ -387,6 +387,11 @@
 		   scouting note can say what a scout would say, and a line nobody
 		   turns on says nothing. See js/traits.js. */
 		noteLines: ["summary", "team", "traits", "stats", "shooting", "signature", "awards"],
+		/* A first and a last line for every note, in the commissioner's own
+		   words. {class} {seed} {rank} {school} are filled in per player.
+		   Empty (the default) writes nothing; see buildNote. */
+		noteHeader: "",
+		noteFooter: "",
 		/* How many scouting traits a prospect carries, roughly. 0 turns the
 		   layer off, which is what a user who wants a plain statline note
 		   wants; the effects (night-to-night volatility, the offensive glass,
@@ -568,6 +573,7 @@
 	   one; a list that is not loaded yet (null) is not checked. `era` is
 	   checked against every era the table knows, fitted or not — the harness
 	   runs an unfitted era by name on purpose; the panel narrows it further. */
+	const NOTE_FRAME_MAX = 300;
 	const CHOICES = {
 		ovrMode: () => ["preserve", "curve"],
 		priorSeasons: () => ["simulate", "reconstruct"],
@@ -626,6 +632,13 @@
 		cfg.noteLines = (Array.isArray(cfg.noteLines) ? cfg.noteLines : DEFAULTS.noteLines)
 			.filter((k) => typeof k === "string" && (!known || known.has(k)))
 			.filter((k, i, a) => a.indexOf(k) === i);
+		/* The note header and footer are text, at most NOTE_FRAME_MAX characters
+		   each (a link or a settings file can carry anything); whitespace alone
+		   is no text. */
+		for (const key of ["noteHeader", "noteFooter"]) {
+			const t = typeof cfg[key] === "string" ? cfg[key].replace(/\r/g, "") : "";
+			cfg[key] = t.trim() ? t.slice(0, NOTE_FRAME_MAX) : "";
+		}
 		/* An empty list is a real choice — "write no scouting notes" — and
 		   stays empty. It used to fall back to the default template here, so
 		   unticking every box left the boxes empty and the notes written
@@ -919,5 +932,5 @@
 	}
 
 	global.Config = { DEFAULTS, PRESETS, make, defaultLeagueWeights, COUNTS, isCount,
-		CLAMP, CHOICES, sliderRange, LEAGUE_WEIGHT_MAX, ARCH_WEIGHT_MAX };
+		CLAMP, CHOICES, NOTE_FRAME_MAX, sliderRange, LEAGUE_WEIGHT_MAX, ARCH_WEIGHT_MAX };
 })(typeof window !== "undefined" ? window : self);

@@ -3764,6 +3764,469 @@ async function gotoProspects(page) {
 		await page.locator("#errClose").click();
 	}
 
+	/* The October 2026 quick wins on the board, tables and export side, in the
+	   browser: copy as text, tags, the file-name template, partial export, the
+	   change report, previous/next, the new keys, the new columns and the CSV
+	   that shares them, units, the search syntax and saved filters, bulk
+	   actions, the locks CSV round trip, pasted names, New class..., the zip
+	   and print. The pure halves are in tools/tests/quickwins-ui.js. */
+	{
+		const os = require("os");
+		console.log("\nQuick wins: board, tables and export");
+		const dirQ = fs.mkdtempSync(path.join(os.tmpdir(), "bbgm-uismoke-qw-"));
+		const second = path.join(dirQ, "second.json");
+		fs.writeFileSync(second, JSON.stringify(V.syntheticClass(7, 40)));
+		const settleQ = () => page.waitForTimeout(500);
+		const dl = async (trigger) => {
+			const [d] = await Promise.all([page.waitForEvent("download", { timeout: 15000 }), trigger()]);
+			const p = await d.path();
+			return { name: d.suggestedFilename(), file: p, text: () => fs.readFileSync(p, "utf8") };
+		};
+		const openMenu = async () => {
+			await page.click("#btnExportMenu");
+			await page.waitForSelector("#modal:not([hidden]) #exportFilename", { timeout: 5000 });
+		};
+		const menuItem = (label) => page.locator("#modal .checks button", { hasText: label }).first();
+		await clearStorage(page);
+		await page.goto(base);
+		await page.setInputFiles("#file", fixture);
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		await page.setViewportSize({ width: 1500, height: 980 });
+		await page.evaluate(() => {
+			navigator.clipboard.writeText = (t) => { window.__copied = t; return Promise.resolve(); };
+		});
+		const board0 = await page.evaluate(() => window.App.state.results[window.App.state.active].board.map((p) => p.key));
+
+		// Q22: the board copies as text, the rows and columns on screen.
+		await page.locator("#tabs button", { hasText: "Draft board" }).first().click();
+		await settleQ();
+		await page.click('#view button:has-text("Copy for spreadsheet")');
+		await page.waitForTimeout(250);
+		const sheet = await page.evaluate(() => window.__copied || "");
+		const sheetRows = sheet.split("\n");
+		ok("the board's Copy for spreadsheet is tab-separated, one row per prospect, the player column without its star",
+			sheetRows.length === board0.length + 1 && /^Board\tRd\tPick\tPlayer\tPos\t/.test(sheetRows[0]) &&
+			!/[☆★]/.test(sheet) && sheetRows[1].split("\t").length === sheetRows[0].split("\t").length, sheetRows.slice(0, 2).join(" // "));
+		// ... and AP poll (and every other real table) gets a copy strip
+		await page.locator("#tabs button", { hasText: "Teams" }).first().click();
+		await settleQ();
+		ok("a table on another tab has a Copy-this-table strip with TSV and markdown",
+			(await page.locator("#view .tablecopy button").count()) >= 2);
+		await page.locator("#view .tablecopy button", { hasText: "Markdown" }).first().click();
+		await page.waitForTimeout(250);
+		ok("the markdown copy is a pipe table with a separator row",
+			/^\| .* \|\n\| --- /.test(await page.evaluate(() => window.__copied || "")));
+		await page.locator("#view .tablecopy button", { hasText: "TSV" }).first().click();
+		await page.waitForTimeout(250);
+		ok("the TSV copy has a header row and tab-separated cells",
+			/^[^\n]*\t[^\n]*\n[^\n]*\t/.test(await page.evaluate(() => window.__copied || "")));
+
+		// Q16: tags
+		await page.evaluate((k) => window.App.showPlayer(k), board0[0]);
+		await settleQ();
+		await page.click('.tagrow .chip:has-text("sleeper")');
+		await page.click('.tagrow .chip:has-text("my guy")');
+		await settleQ();
+		const tagState = await page.evaluate(() => window.App.state.tags);
+		ok("tags: several can be set on one prospect, keyed by the class fingerprint",
+			Object.keys(tagState).length === 1 && Object.keys(tagState)[0].charAt(0) === "@" &&
+			JSON.stringify(tagState[Object.keys(tagState)[0]]) === '["sleeper","my guy"]', JSON.stringify(tagState));
+		await page.click('button:has-text("All prospects")');
+		await settleQ();
+		ok("the board shows the tags beside the name, and a chip per tag in use",
+			(await page.locator("table.boardtable .tagmark").count()) === 2 &&
+			(await page.locator('.boardfilters .tagchip:has-text("sleeper (1)")').count()) === 1);
+		await page.click('.boardfilters .tagchip:has-text("sleeper")');
+		await settleQ();
+		ok("the tag chip filters the board to the tagged prospect",
+			(await page.locator("table.boardtable tbody tr[data-pkey]").count()) === 1);
+		await page.click('.boardfilters .tagchip:has-text("sleeper")');
+		await settleQ();
+		// the user's marks block in the export carries the tag line
+		await openMenu();
+		await page.evaluate(() => {
+			const l = [...document.querySelectorAll("#modal label.check")].find((x) => /my notes and watchlist/.test(x.textContent));
+			if (!l.querySelector("input").checked) l.querySelector("input").click();
+		});
+		const tagged = await dl(() => menuItem("BBGM class file").click());
+		const taggedJson = JSON.parse(tagged.text().replace(/^\ufeff/, ""));
+		const taggedRow = taggedJson.players.filter((p) => /Tags: sleeper, my guy/.test(p.note || ""));
+		ok("the export's my-notes block carries the tags as a line under the note",
+			taggedRow.length === 1, String(taggedRow.length));
+
+		// Q5, Q7: the file name template and a partial export, from the menu
+		await openMenu();
+		await page.fill("#exportFilename", "{file}-{season}-{seed}-{fp}");
+		const named = await page.evaluate(() => {
+			const a = window.App;
+			return a.exportName(a.state.active, { filename: "{file}-{season}-{seed}-{fp}" });
+		});
+		ok("the menu previews the file name the template writes",
+			(await page.textContent("#modal .ctl:has(#exportFilename) .unit")).indexOf(named) !== -1, named);
+		await page.selectOption("#exportOnly", "top");
+		await page.fill("#exportOnlyN", "5");
+		const partial = await dl(() => menuItem("BBGM class file").click());
+		const partialJson = JSON.parse(partial.text().replace(/^\ufeff/, ""));
+		ok("the class file is named by the template", partial.name === named, partial.name + " vs " + named);
+		ok("partial export: the top 5 of the board, and only they, are in the file",
+			partialJson.players.length === 5, String(partialJson.players.length));
+		ok("...the template is remembered and shown beside the Export button",
+			(await page.evaluate(() => window.App.state.exportOpts.filename)) === "{file}-{season}-{seed}-{fp}" &&
+			/file name/.test(await page.evaluate(() => document.getElementById("exportSummary").textContent)));
+		// Starred / selected / filter scopes, and an empty one refuses to write
+		await openMenu();
+		await page.selectOption("#exportOnly", "starred");
+		ok("an empty scope says nothing will be written (no empty file)",
+			/0 of \d+ prospects/.test(await page.textContent("#modal .ctl:has(#exportOnly) .unit")));
+		await page.keyboard.press("Escape");
+		// Q2: the change report
+		await openMenu();
+		const rep = await dl(() => menuItem("report as Markdown").click());
+		ok("the change report downloads as Markdown with the rewritten-field counts",
+			/_change_report\.md$/.test(rep.name) && /# What the tool did to the file/.test(rep.text()) && /ovr changed:/.test(rep.text()), rep.name);
+		await openMenu();
+		const repCsv = await dl(() => menuItem("report as CSV").click());
+		ok("...and as CSV with one row per player",
+			/^key,name,origOvr,newOvr/.test(repCsv.text().replace(/^\ufeff/, "")) && repCsv.text().trim().split("\n").length === 71, repCsv.name);
+		// reset the template for the rest of the section
+		await page.evaluate(() => { window.App.state.exportOpts.filename = ""; });
+
+		// Q4: previous / next on the player page, j/k and Esc
+		await page.evaluate((k) => window.App.showPlayer(k), board0[3]);
+		await settleQ();
+		await page.click('button[data-nav="next"]');
+		await settleQ();
+		ok("Next steps to the next prospect in board order", (await page.evaluate(() => window.App.state.player)) === board0[4]);
+		await page.keyboard.press("k");
+		await settleQ();
+		ok("k steps back", (await page.evaluate(() => window.App.state.player)) === board0[3]);
+		await page.keyboard.press("j");
+		await settleQ();
+		ok("j steps forward", (await page.evaluate(() => window.App.state.player)) === board0[4]);
+		ok("the page says where he is in the class", /5 of 70/.test(await page.textContent("#view")));
+		// Q44: the new keys
+		const wasStar = await page.evaluate(() => Object.keys(window.App.state.watch).length);
+		await page.keyboard.press("w");
+		await settleQ();
+		ok("w stars the prospect on the page", (await page.evaluate(() => Object.keys(window.App.state.watch).length)) === wasStar + 1);
+		await page.keyboard.press("w");
+		await settleQ();
+		ok("w again removes the star", (await page.evaluate(() => Object.keys(window.App.state.watch).length)) === wasStar);
+		await page.keyboard.press("n");
+		await settleQ();
+		ok("n jumps to the note box", (await page.evaluate(() => document.activeElement && document.activeElement.id)) === "myNote");
+		await page.evaluate(() => document.activeElement.blur());
+		await page.keyboard.press("y");
+		await page.waitForTimeout(300);
+		ok("y copies a link", /^http/.test(await page.evaluate(() => window.__copied || "")));
+		await page.keyboard.press("h");
+		await settleQ();
+		ok("h turns the heatmap on", (await page.evaluate(() => window.App.state.boardHeat)) === true);
+		await page.keyboard.press("h");
+		await page.keyboard.press("x");
+		await page.waitForSelector("#modal:not([hidden])", { timeout: 4000 });
+		ok("x opens the export menu", /Export and import/.test(await page.textContent("#modalTitle")));
+		await page.keyboard.press("Escape");
+		await settleQ();
+		await page.keyboard.press("Escape");
+		await settleQ();
+		ok("Esc leaves the player page", (await page.evaluate(() => window.App.state.player)) === null);
+		await page.evaluate((k) => window.App.showPlayer(k), board0[1]);
+		await settleQ();
+		await page.keyboard.press("c");
+		await settleQ();
+		ok("c adds him to the comparison and opens it",
+			(await page.evaluate(() => window.App.state.tab)) === "compare" &&
+			(await page.evaluate((k) => window.App.state.compare.indexOf(k), board0[1])) !== -1);
+		await page.evaluate(() => window.App.showTab("board"));
+		await page.evaluate(() => window.App.showPlayer(null));
+		await page.keyboard.press("?");
+		await page.waitForSelector("#modal:not([hidden])", { timeout: 4000 });
+		const help = await page.textContent("#modalBody");
+		ok("the help sheet lists the new keys",
+			["Star or unstar", "Add the prospect to the comparison", "jump to the prospect's note", "Copy a link", "heatmap", "export menu"]
+				.every((s) => help.toLowerCase().indexOf(s.toLowerCase()) !== -1) ||
+			/\bw\b/.test(help) && /heatmap/i.test(help) && /export menu/i.test(help), help.slice(0, 200));
+		await page.keyboard.press("Escape");
+
+		// Q18, Q1: the new columns and the CSV that shares them
+		await gotoProspects(page);
+		await page.evaluate(() => {
+			const st = window.App.state;
+			for (const k of ["skills", "origOvr", "origPot", "ovrDelta", "proVerdict", "proPeak", "jersey", "mood", "birthplace", "r_hgt", "r_tp"]) {
+				delete st.hiddenColumns[k];
+			}
+			window.App.render();
+		});
+		await settleQ();
+		const heads = await page.locator("table thead th").allTextContents();
+		ok("the new columns appear when switched on",
+			["Skills", "Ovr0", "Pot0", "Verdict", "Peak", "Mood", "Born", "hgt", "tp"].every((h) => heads.some((x) => x.indexOf(h) === 0)) &&
+			heads.some((x) => /Ovr$/.test(x) && x.indexOf("Δ") === 0), heads.join("|"));
+		const tableCheck = await page.evaluate(() => {
+			const res = window.App.state.results[window.App.state.active];
+			const t = document.querySelector("#view .tablesplit table");
+			const heads = [...t.tHead.rows[0].cells].map((c) => c.textContent.replace(/\s*[▾▴]$/, ""));
+			const col = (h) => heads.indexOf(h);
+			let bad = 0;
+			let n = 0;
+			for (const tr of t.tBodies[0].rows) {
+				const p = res.players.filter((x) => x.key === tr.dataset.pkey)[0];
+				n++;
+				if (tr.cells[col("Skills")].textContent !== (p.newSkills || []).join(" ")) bad++;
+				if (tr.cells[col("Ovr0")].textContent !== String(p.origOvr)) bad++;
+				if (tr.cells[col("hgt")].textContent !== String(p.newRatings.hgt)) bad++;
+			}
+			return { n, bad };
+		});
+		ok("every row's skills, original overall and hgt rating match the engine's values",
+			tableCheck.n === 70 && tableCheck.bad === 0, JSON.stringify(tableCheck));
+		await openMenu();
+		const csv = await dl(() => menuItem("Prospect table as CSV (whole class)").click());
+		const csvLines = csv.text().replace(/^\ufeff/, "").trim().split(/\r?\n/);
+		const csvHead = csvLines[0].split(",");
+		ok("the CSV has the fifteen ratings, skills and original ovr/pot",
+			["hgt", "stre", "spd", "jmp", "endu", "ins", "dnk", "ft", "fg", "tp", "oiq", "diq", "drb", "pss", "reb", "skills", "origOvr", "origPot",
+				"proPeak", "proVerdict", "jersey", "mood", "birthplace"].every((h) => csvHead.indexOf(h) !== -1), csvHead.slice(-30).join(","));
+		const csvAgree = await page.evaluate((text) => {
+			const res = window.App.state.results[window.App.state.active];
+			const rows = window.App.parseCsv(text.replace(/^\ufeff/, "")).filter((r) => r.length > 1);
+			const head = rows[0];
+			let bad = 0;
+			for (const r of rows.slice(1)) {
+				const p = res.players.filter((x) => x.key === r[0])[0];
+				if (!p) { bad++; continue; }
+				if (Number(r[head.indexOf("origOvr")]) !== p.origOvr) bad++;
+				if (Number(r[head.indexOf("tp")]) !== p.newRatings.tp) bad++;
+				if (Number(r[head.indexOf("hgtInches")]) !== p.newHgtInches) bad++;
+			}
+			return { rows: rows.length - 1, bad };
+		}, csv.text());
+		ok("the CSV and the engine agree on every row", csvAgree.rows === 70 && csvAgree.bad === 0, JSON.stringify(csvAgree));
+
+		// Q23: units are display only
+		await page.selectOption('select[aria-label="Height and weight units"]', "metric");
+		await settleQ();
+		await page.evaluate(() => { delete window.App.state.hiddenColumns.hgtInches; delete window.App.state.hiddenColumns.weight; window.App.render(); });
+		await settleQ();
+		const unitCells = await page.evaluate(() => {
+			const t = document.querySelector("#view .tablesplit table");
+			const heads = [...t.tHead.rows[0].cells].map((c) => c.textContent.replace(/\s*[▾▴]$/, ""));
+			const r = t.tBodies[0].rows[0];
+			return [r.cells[heads.indexOf("Ht")].textContent, r.cells[heads.indexOf("Wt")].textContent];
+		});
+		ok("metric shows cm and kg in the table", /^\d{3} cm$/.test(unitCells[0]) && /^\d{2,3}$/.test(unitCells[1]), unitCells.join(" / "));
+		await openMenu();
+		const csvMetric = await dl(() => menuItem("Prospect table as CSV (whole class)").click());
+		ok("...and the CSV still says inches",
+			(() => {
+				const lines = csvMetric.text().replace(/^\ufeff/, "").trim().split(/\r?\n/);
+				const v = Number(lines[1].split(",")[lines[0].split(",").indexOf("hgtInches")]);
+				return v >= 60 && v <= 96;
+			})());
+		await page.reload();
+		await page.waitForTimeout(800);
+		ok("the units choice survives a reload", (await page.evaluate(() => window.App.state.units)) === "metric");
+		await page.setInputFiles("#file", fixture);
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		await gotoProspects(page);
+		await page.selectOption('select[aria-label="Height and weight units"]', "imperial");
+		await settleQ();
+
+		// Q20, Q19, Q21: the search syntax, the new filters, saved filters
+		const countMatching = (q) => page.evaluate((qq) => {
+			const st = window.App.state;
+			const res = st.results[st.active];
+			const keep = st.filter.q;
+			st.filter.q = qq;
+			const n = res.players.filter((p) => window.Views.matchesFilter(p, res)).length;
+			st.filter.q = keep;
+			return n;
+		}, q);
+		await page.fill("#prospectSearch", "pos:C ovr>=40");
+		await page.waitForTimeout(700);
+		const shownRows = () => page.locator("#view .tablesplit table tbody tr").count();
+		ok("the search box reads pos:C ovr>=40", (await shownRows()) === (await countMatching("pos:C ovr>=40")) &&
+			(await shownRows()) > 0 && (await shownRows()) < 70, String(await shownRows()));
+		await page.fill("#prospectSearch", "is:locked");
+		await page.waitForTimeout(700);
+		ok("is:locked on a class with no locks matches nobody and says so",
+			(await page.locator(".empty-state").count()) === 1);
+		await page.fill("#prospectSearch", "-is:locked ovr<30");
+		await page.waitForTimeout(700);
+		ok("a negated flag combines with a number", (await shownRows()) === (await countMatching("-is:locked ovr<30")));
+		await page.fill("#prospectSearch", "is:wizard");
+		await page.waitForTimeout(700);
+		ok("a term it does not understand is flagged on the box and ignored", (await page.locator("input.badquery").count()) === 1 &&
+			(await shownRows()) === 70);
+		await page.fill("#prospectSearch", "");
+		await page.waitForTimeout(700);
+		// skill / class year / path filters
+		const skillPick = await page.evaluate(() => {
+			const res = window.App.state.results[window.App.state.active];
+			const c = {};
+			for (const p of res.players) for (const s of p.newSkills || []) c[s] = (c[s] || 0) + 1;
+			const k = Object.keys(c).filter((s) => c[s] > 2 && c[s] < 60)[0];
+			return { skill: k, n: c[k] };
+		});
+		await page.click('.skillchips .chip:text-is("' + skillPick.skill + '")');
+		await settleQ();
+		ok("a skill chip keeps only players with that skill", (await shownRows()) === skillPick.n, (await shownRows()) + " vs " + skillPick.n);
+		const yearVal = await page.evaluate(() => window.App.state.results[window.App.state.active].players[0].classYear);
+		await page.selectOption('select[aria-label="Filter by class year"]', yearVal);
+		await settleQ();
+		const expectYearSkill = await page.evaluate((a) => {
+			const res = window.App.state.results[window.App.state.active];
+			return res.players.filter((p) => p.classYear === a.y && (p.newSkills || []).indexOf(a.s) !== -1).length;
+		}, { y: yearVal, s: skillPick.skill });
+		ok("class year and skill filters combine", (await shownRows()) === expectYearSkill, (await shownRows()) + " vs " + expectYearSkill);
+		// saved filter
+		await page.click('button:has-text("Save filter")');
+		await page.fill("#modalPrompt", "My sleepers");
+		await page.click("#modalOk");
+		await settleQ();
+		ok("a filter is saved under a name",
+			(await page.evaluate(() => Object.keys(window.App.state.filterViews).join())) === "My sleepers");
+		await page.click('button:has-text("Clear")');
+		await settleQ();
+		ok("clearing shows the whole class again", (await shownRows()) === 70);
+		await page.selectOption('select[aria-label="Saved filter view"]', "My sleepers");
+		await settleQ();
+		ok("picking the saved filter restores it",
+			(await shownRows()) === expectYearSkill && (await page.evaluate(() => window.App.state.filter.skills.length)) === 1);
+		await page.reload();
+		await page.waitForTimeout(800);
+		ok("saved filters survive a reload",
+			(await page.evaluate(() => Object.keys(window.App.state.filterViews).join())) === "My sleepers");
+		await page.setInputFiles("#file", fixture);
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		await gotoProspects(page);
+
+		// Q15: bulk actions
+		await page.evaluate(() => {
+			const st = window.App.state;
+			const res = st.results[st.active];
+			st.selected = {};
+			for (const p of res.board.slice(0, 3)) st.selected[p.key] = true;
+			window.App.render();
+		});
+		await settleQ();
+		const before = await page.evaluate(() => {
+			const res = window.App.state.results[window.App.state.active];
+			return res.board.slice(0, 3).map((p) => ({ key: p.key, pot: p.newPot, hgt: p.newHgtInches }));
+		});
+		await page.fill('input[aria-label="Potential adjustment for the selection"]', "-2");
+		await page.click('#bulkBar button:has-text("Shift pot")');
+		await page.waitForTimeout(900);
+		await page.fill('input[aria-label="Height adjustment in inches for the selection"]', "1");
+		await page.click('#bulkBar button:has-text("Shift height")');
+		await page.waitForTimeout(900);
+		const afterShift = await page.evaluate((ks) => {
+			const st = window.App.state;
+			return ks.map((k) => st.overrides[k]);
+		}, before.map((b) => b.key));
+		ok("bulk: shift pot and shift height write locks relative to what each had",
+			afterShift.length === 3 && afterShift.every((o, i) => o && o.pot === Math.max(0, before[i].pot - 2) && o.hgtInches === before[i].hgt + 1),
+			JSON.stringify(afterShift) + " vs " + JSON.stringify(before));
+		await page.click('#bulkBar button:has-text("Reroll selected")');
+		await page.waitForTimeout(900);
+		ok("bulk: reroll selected adds a per-player reroll to each",
+			(await page.evaluate(() => Object.keys(window.App.state.selected).every((k) => window.App.state.overrides[k].reroll === 1))));
+		await page.evaluate(() => window.App.state.selected = {});
+
+		// Q11: the locks CSV round trip with name, height, weight and ratings
+		await openMenu();
+		const lockCsv = await dl(() => menuItem("Locked prospects as CSV").click());
+		const lockHead = lockCsv.text().replace(/^\ufeff/, "").split(/\r?\n/)[0].split(",");
+		ok("the locks CSV has newname, hgtinches, weight and the fifteen ratings",
+			["key", "name", "ovr", "pot", "archetype", "college", "newname", "hgtinches", "weight", "hgt", "reb"].every((h) => lockHead.indexOf(h) !== -1), lockHead.join());
+		const lockedKey = Object.keys(await page.evaluate(() => window.App.state.overrides))[0];
+		const editedCsv = path.join(dirQ, "locks.csv");
+		fs.writeFileSync(editedCsv, "key,name,newname,hgtinches,weight,tp\n" + lockedKey + ",,Renamed Rookie,79,205,71\n");
+		await page.setInputFiles("#csvFile", editedCsv);
+		await page.waitForSelector("#modal:not([hidden])", { timeout: 6000 });
+		const preview = await page.textContent("#modalBody");
+		ok("importing it previews the rename, height, weight and rating",
+			/name = Renamed Rookie/.test(preview) && /hgtInches = 79/.test(preview) && /weight = 205/.test(preview) && /ratings tp 71/.test(preview), preview.slice(0, 300));
+		await page.click("#modalOk");
+		await page.waitForTimeout(1200);
+		const applied = await page.evaluate((k) => {
+			const st = window.App.state;
+			const p = st.results[st.active].players.filter((x) => x.key === k)[0];
+			return { name: p.name, hgt: p.newHgtInches, wt: p.newWeight, tp: p.newRatings.tp };
+		}, lockedKey);
+		ok("...and the engine applies them", applied.name === "Renamed Rookie" && applied.hgt === 79 && applied.wt === 205 && applied.tp === 71, JSON.stringify(applied));
+
+		// Q12: paste a list of names, in board order
+		await page.locator("#tabs button", { hasText: "Draft board" }).first().click();
+		await page.evaluate(() => { window.App.state.boardMode = "board"; window.App.render(); });
+		await settleQ();
+		await page.click('#view button:has-text("Paste names")');
+		await page.fill("#renameList", "1. Zed Alpha\n\n- \nQuin Beta");
+		await page.waitForTimeout(200);
+		ok("the rename dialog previews what will change",
+			/2 of \d+ prospects will be renamed/.test(await page.textContent("#modalBody")) &&
+			(await page.locator("#modalBody .renamepreview tbody tr, #modalBody .renamepreview tr").count()) >= 3);
+		await page.click("#modalOk");
+		await page.waitForTimeout(1200);
+		const renamed = await page.evaluate(() => {
+			const res = window.App.state.results[window.App.state.active];
+			return [res.board[0].name, res.board[3].name, !!window.App.state.overrides[res.board[0].key].name];
+		});
+		ok("names are applied in board order and kept as locks", renamed[0] === "Zed Alpha" && renamed[1] === "Quin Beta" && renamed[2] === true, JSON.stringify(renamed));
+
+		// Q17: New class... with a file loaded
+		await page.click("#btnNewClass");
+		await page.waitForSelector("#newClassSize", { timeout: 4000 });
+		await page.fill("#newClassSize", "30");
+		await page.fill("#newClassYear", "2041");
+		await page.fill("#newClassSeed", "qwseed");
+		await page.click("#modalOk");
+		await page.waitForFunction(() => window.App.state.files.length === 2, null, { timeout: 30000 });
+		await page.waitForTimeout(800);
+		const made = await page.evaluate(() => window.App.state.files.map((f) => ({ n: f.data.players.length, season: f.data.startingSeason })));
+		ok("New class adds a 30-player 2041 class beside the loaded one",
+			made.some((m) => m.n === 30 && m.season === 2041) && made.some((m) => m.n === 70), JSON.stringify(made));
+		await page.click("#btnNewClass");
+		await page.waitForSelector("#newClassSize", { timeout: 4000 });
+		await page.fill("#newClassSize", "3");
+		await page.click("#modalOk");
+		ok("a size that is out of range keeps the dialog open and says why",
+			(await page.isVisible("#newClassSize")) && /8 to 120/.test(await page.textContent("#modalBody")));
+		await page.keyboard.press("Escape");
+
+		// Q6: every loaded class as ONE .zip
+		await openMenu();
+		const zip = await dl(() => menuItem("ONE .zip").click());
+		const zbytes = fs.readFileSync(zip.file);
+		ok("Export all as one .zip: a zip with one JSON per class, python's zipfile finds no bad CRC",
+			/\.zip$/.test(zip.name) && zbytes.readUInt32LE(0) === 0x04034b50 &&
+			(() => {
+				const cp = require("child_process");
+				const out = cp.spawnSync("python3", ["-I", "-c",
+					"import sys, zipfile, json; z = zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; print(len(z.namelist()), all(json.loads(z.read(n).decode('utf-8-sig'))['players'] for n in z.namelist()))", zip.file],
+				{ encoding: "utf8" });
+				return out.error ? true : out.stdout.trim() === "2 True";
+			})(), zip.name);
+
+		// Q24: print
+		await page.emulateMedia({ media: "print" });
+		await page.evaluate(() => window.App.paintPrintHeader());
+		const printed = await page.evaluate(() => {
+			const h = document.getElementById("printHeader");
+			return { shown: getComputedStyle(h).display !== "none", text: h.textContent, header: getComputedStyle(document.querySelector("header")).display };
+		});
+		ok("print: a header names the class, seed, fingerprint and date, and the page header is hidden",
+			printed.shown && /seed/.test(printed.text) && /class [a-z0-9]{3,}/.test(printed.text) && /\d{4}-\d\d-\d\d/.test(printed.text) &&
+			printed.header === "none", JSON.stringify(printed));
+		ok("print: the copy strips are not printed",
+			await page.evaluate(() => [...document.querySelectorAll(".tablecopy")].every((e) => getComputedStyle(e).display === "none")));
+		await page.emulateMedia({ media: "screen" });
+		ok("on screen the print header is hidden",
+			(await page.evaluate(() => getComputedStyle(document.getElementById("printHeader")).display)) === "none");
+		fs.rmSync(dirQ, { recursive: true, force: true });
+	}
+
 	/* The October 2026 audit's UI fixes, in the browser: what a preset does to
 	   the note template, a session restored onto the wrong class, the file
 	   picker's stale pointers, the export options across a reload, a saved
@@ -3959,6 +4422,372 @@ async function gotoProspects(page) {
 			if (u && u.checked) { u.checked = false; u.dispatchEvent(new Event("change", { bubbles: true })); }
 		});
 		await page.waitForTimeout(800);
+	}
+
+	/* The analytics, mock, sharing and editor quick wins (audit section 6), in
+	   the browser: the curve chart and the extra distribution cards, the Mock
+	   tab's downloads, rounds, My team and redraft, the batch contact sheet,
+	   the share cards, deep and compressed links, kept classes, the command
+	   line, the install button and the editor's new locks. The pure halves are
+	   in tools/tests/quickwins-share.js. */
+	{
+		console.log("\nQuick wins: analytics, mock, sharing and the editor");
+		const tab = async (label) => {
+			await page.locator("#tabs button", { hasText: label }).first().click();
+			await page.waitForTimeout(500);
+		};
+		const download = async (click) => {
+			const [d] = await Promise.all([page.waitForEvent("download"), click()]);
+			const f = path.join(os.tmpdir(), "bbgm-qw-" + process.pid + "-" + d.suggestedFilename());
+			await d.saveAs(f);
+			return { name: d.suggestedFilename(), path: f };
+		};
+		await clearStorage(page);
+		await page.goto(base);
+		await page.setInputFiles("#file", fixture);
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		await page.setViewportSize({ width: 1500, height: 980 });
+
+		// Q25 / Q26: distributions.
+		await tab("Distributions");
+		const dist = await page.evaluate(() => {
+			const card = document.querySelector(".curvecard");
+			const paths = () => card ? card.querySelectorAll("svg path.ln").length : 0;
+			const out = { has: !!card, lines: paths(), ghost: document.querySelectorAll(".histghost").length };
+			if (card) {
+				const sel = card.querySelector("select");
+				sel.value = "pot";
+				sel.dispatchEvent(new Event("change", { bubbles: true }));
+				out.potLines = paths();
+				sel.value = "ovr";
+				sel.dispatchEvent(new Event("change", { bubbles: true }));
+			}
+			const titles = [...document.querySelectorAll(".cards .card h4")].map((h) => h.textContent);
+			out.titles = titles;
+			return out;
+		});
+		ok("the Distributions tab draws the pick curve with three lines for overall",
+			dist.has && dist.lines === 3, JSON.stringify(dist));
+		ok("...and two for potential, which has no typical-class reference", dist.potLines === 2, JSON.stringify(dist));
+		ok("the overall histogram carries the original ratings as an outline", dist.ghost > 3, String(dist.ghost));
+		ok("position mix, height, weight and skills have cards",
+			["Position mix", "Height (inches)", "Weight (lb)", "Skills"].every((t) => dist.titles.indexOf(t) !== -1),
+			dist.titles.join(" | "));
+
+		// Q28 / Q29 / Q30 / Q31: the Mock tab.
+		await tab("Mock draft");
+		const bar = await page.evaluate(() => ({
+			csv: [...document.querySelectorAll("#view button")].some((b) => b.textContent === "Download CSV"),
+			png: [...document.querySelectorAll("#view button")].filter((b) => /as PNG/.test(b.textContent)).length,
+			rounds: !!document.getElementById("mockRounds"), team: !!document.getElementById("mockTeam"),
+			redraft: !!document.getElementById("mockRedraft"), noise: !!document.getElementById("mockNoise"),
+			card: /Reaches and steals/.test(document.getElementById("view").innerText),
+			teams: !!document.querySelector("details.mockteams"),
+		}));
+		ok("the Mock tab offers CSV, a PNG for each round, rounds, My team, redraft and taste",
+			bar.csv && bar.png === 2 && bar.rounds && bar.team && bar.redraft && bar.noise, JSON.stringify(bar));
+		ok("...and the reaches and steals card and the teams panel", bar.card && bar.teams, JSON.stringify(bar));
+		const csv = await download(() => page.locator("#view button", { hasText: "Download CSV" }).first().click());
+		const csvLines = fs.readFileSync(csv.path, "utf8").replace(/^﻿/, "").trim().split(/\r?\n/);
+		ok("Download CSV writes a row a pick under a header",
+			/^mock_draft_.+\.csv$/.test(csv.name) && csvLines[0].indexOf("pick,round,team") === 0 && csvLines.length === 61,
+			csv.name + " " + csvLines.length);
+		const png = await download(() => page.locator("#view button", { hasText: "Round 1 as PNG" }).first().click());
+		const head = fs.readFileSync(png.path).slice(0, 8);
+		ok("Round 1 as PNG writes a real PNG", /^mock_round_1_.+\.png$/.test(png.name) &&
+			head.toString("hex") === "89504e470d0a1a0a", png.name);
+		const names = () => page.evaluate(() => [...document.querySelectorAll("table.mocktable tbody tr:not(.tierbreak)")]
+			.map((r) => r.children[2].textContent));
+		const before = await names();
+		await page.selectOption("#mockRounds", "3");
+		await page.waitForTimeout(500);
+		ok("a third round adds its picks", (await page.locator("table.mocktable tr.tierbreak").count()) === 3 &&
+			(await names()).length === 70, String((await names()).length));
+		await page.selectOption("#mockRounds", "2");
+		await page.waitForTimeout(400);
+		await page.click("#mockRedraft");
+		await page.waitForTimeout(500);
+		const after = await names();
+		ok("Redraft draws the teams' tastes again: same slots, different picks",
+			after.length === before.length && JSON.stringify(after) !== JSON.stringify(before));
+		await page.click("#mockRedraft");
+		await page.waitForTimeout(300);
+		const team = await page.evaluate(() => {
+			const sel = document.getElementById("mockTeam");
+			sel.value = sel.options[3].value;
+			sel.dispatchEvent(new Event("change", { bubbles: true }));
+			return sel.value;
+		});
+		await page.waitForTimeout(500);
+		const mine = await page.evaluate((t) => ({
+			rows: document.querySelectorAll("table.mocktable tr.myteam").length,
+			picks: [...document.querySelectorAll("table.mocktable tbody tr:not(.tierbreak)")]
+				.filter((r) => r.children[1].textContent.indexOf(t) === 0).length,
+			targets: (document.querySelector(".mytargets .note") || {}).textContent || "",
+		}), team);
+		ok("My team highlights its picks", mine.rows === 2 && mine.picks === 2, JSON.stringify(mine));
+		ok("...and lists five targets with the reason, the first one is the player it took",
+			mine.targets.split("\n").length === 5 && /fit [+-]/.test(mine.targets) && /← taken/.test(mine.targets.split("\n")[0]),
+			mine.targets);
+
+		// Q27: the batch contact sheet.
+		await tab("Draft board");
+		await page.evaluate(() => {
+			document.getElementById("grp-batch").open = true;
+			document.getElementById("batchN").value = "3";
+		});
+		await page.locator("#btnBatch").click();
+		await page.waitForFunction(() => document.getElementById("batchProgress").hidden === true, null, { timeout: 120000 });
+		await page.waitForTimeout(300);
+		const sheet = await page.evaluate(() => {
+			const rows = [...document.querySelectorAll(".contactsheet table tr")].slice(1);
+			return { n: rows.length, open: document.querySelectorAll(".contactsheet button[data-seed]").length,
+				top: rows[0] ? rows[0].children[5].textContent : "", seed: rows[0] ? rows[0].children[1].textContent : "" };
+		});
+		ok("a batch ends in a contact sheet: a row per class, each with its top five and an Open button",
+			sheet.n === 3 && sheet.open === 3 && (sheet.top.match(/\(/g) || []).length === 5, JSON.stringify(sheet));
+		const sheetCsv = await download(() => page.locator(".contactsheet button", { hasText: "Download CSV" }).click());
+		const sheetLines = fs.readFileSync(sheetCsv.path, "utf8").replace(/^﻿/, "").trim().split(/\r?\n/);
+		ok("its CSV has a row a class", sheetLines.length === 4 && /^batch_classes_/.test(sheetCsv.name), sheetCsv.name);
+		await page.selectOption(".contactsheet select", "strange");
+		await page.waitForTimeout(200);
+		await page.locator(".contactsheet button[data-seed]").first().click();
+		await page.waitForSelector("table tbody tr", { timeout: 60000 });
+		await page.waitForTimeout(800);
+		const opened = await page.evaluate(() => ({ seed: window.App.state.cfg.seed,
+			res: window.App.state.results[window.App.state.active].seed }));
+		ok("Open this class sets the seed and re-applies", /#\d+$/.test(opened.seed) && opened.res === opened.seed, JSON.stringify(opened));
+
+		// Q32: share cards.
+		const cc = await page.evaluate(() => window.App.exportClassCard !== undefined);
+		await page.locator("#btnExportMenu").click();
+		await page.waitForTimeout(300);
+		const classCard = await download(() => page.locator("#modal button", { hasText: "Class card as a picture" }).first().click());
+		ok("the export menu writes the class card as a PNG", cc && /^class_card_.+\.png$/.test(classCard.name) &&
+			fs.readFileSync(classCard.path).slice(1, 4).toString() === "PNG", classCard.name);
+		if (!(await page.locator("#modal").isHidden())) await page.locator("#modalCancel, #modalOk").first().click();
+		await page.evaluate(() => window.App.showPlayer(window.App.state.results[window.App.state.active].board[0].key));
+		await page.waitForTimeout(500);
+		const playerCard = await download(() => page.locator("button", { hasText: "Share card" }).first().click());
+		ok("a player page writes his card as a PNG", /^player_card_.+\.png$/.test(playerCard.name) &&
+			fs.readFileSync(playerCard.path).slice(1, 4).toString() === "PNG", playerCard.name);
+
+		// Q33 / Q34: deep and compressed links.
+		await page.evaluate(() => {
+			const App = window.App;
+			const res = App.state.results[App.state.active];
+			App.state.player = res.board[2].key;
+			App.state.tab = "board";
+		});
+		const deep = await page.evaluate(async () => {
+			window.App.copyLink(null);
+			await new Promise((r) => setTimeout(r, 200));
+			return location.hash;
+		});
+		const deepPayload = JSON.parse(decodeURIComponent(deep.replace(/^#c=/, "")));
+		ok("a shared link names the open prospect and the file's fingerprint",
+			/^#c=/.test(deep) && typeof deepPayload.pk === "string" && typeof deepPayload.fp === "string", deep.slice(0, 120));
+		const wanted = await page.evaluate(() => window.App.state.player);
+		await page.goto("about:blank");
+		await page.goto(base + deep);
+		await page.setInputFiles("#file", fixture);
+		await page.waitForSelector("table tbody tr, .playerhead", { timeout: 30000 });
+		await page.waitForTimeout(600);
+		ok("opened with the same file, the link lands on that prospect's page",
+			(await page.evaluate(() => window.App.state.player)) === wanted &&
+			(await page.locator(".playerhead").count()) === 1);
+		const other = path.join(os.tmpdir(), "bbgm-uismoke-qw-other.json");
+		fs.writeFileSync(other, JSON.stringify(V.syntheticClass(11, 60)));
+		await page.goto("about:blank");
+		await page.goto(base + deep);
+		await page.setInputFiles("#file", other);
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		await page.waitForTimeout(500);
+		ok("opened with a different file, only the settings apply and the page says so",
+			(await page.evaluate(() => window.App.state.player)) === null &&
+			/different class file/.test(await page.locator("#warnBanner").textContent()));
+		await page.goto(base);
+		await clearStorage(page);
+		await page.goto(base);
+		await page.setInputFiles("#file", fixture);
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		await page.setViewportSize({ width: 1500, height: 980 });
+		const big = await page.evaluate(async () => {
+			const App = window.App;
+			const res = App.state.results[App.state.active];
+			for (const p of res.players) {
+				App.state.overrides[p.key] = { ovr: p.newOvr + 1, pot: p.newPot + 1, name: "Locked Player " + p.key,
+					archetype: p.archetype, college: p.newCollege, hgtInches: p.newHgtInches };
+			}
+			App.state.overrideFingerprint = App.activeFile().fingerprint;
+			App.copyLink(null);
+			await new Promise((r) => setTimeout(r, 800));
+			return { hash: location.hash.slice(0, 3), len: location.hash.length, n: Object.keys(App.state.overrides).length };
+		});
+		ok("a link with seventy locks is written compressed and fits", big.hash === "#z=" && big.len < 8000 && big.n === 70,
+			JSON.stringify(big));
+		const zhash = await page.evaluate(() => location.hash);
+		await page.goto("about:blank");
+		await page.goto(base + zhash);
+		await page.waitForTimeout(1200);
+		ok("and opens again with every lock",
+			(await page.evaluate(() => Object.keys(window.App.state.overrides).length)) === 70);
+		// A plain link in the old form still reads.
+		await page.goto("about:blank");
+		await page.goto(base + "#c=" + encodeURIComponent(JSON.stringify({ classQuality: 2 })));
+		await page.waitForTimeout(600);
+		ok("a plain #c= link still opens", (await page.evaluate(() => window.App.state.cfg.classQuality)) === 2);
+		await clearStorage(page);
+		await page.goto(base);
+		await page.setInputFiles("#file", fixture);
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+
+		// Q37: kept classes.
+		const keptSeed = await page.evaluate(() => window.App.state.results[window.App.state.active].seed);
+		await page.click("#btnKept");
+		await page.waitForTimeout(300);
+		await page.fill("#keptName", "My favourite");
+		await page.fill("#keptNote", "tall centre in the top three");
+		await page.click("#keptKeep");
+		await page.waitForTimeout(300);
+		ok("Keep this class lists it with its name and note",
+			(await page.locator(".keptrow").count()) === 1 &&
+			(await page.locator(".keptrow input").first().inputValue()) === "My favourite");
+		const bundle = await download(() => page.locator("#modal button", { hasText: "Export bundle" }).click());
+		const parsed = JSON.parse(fs.readFileSync(bundle.path, "utf8"));
+		ok("the bundle carries it, with the seed", parsed.format === "bbgm-draft-workshop/kept-classes" &&
+			parsed.kept.length === 1 && String(parsed.kept[0].seed) === String(keptSeed) &&
+			parsed.kept[0].keptNote === "tall centre in the top three");
+		await page.keyboard.press("Escape");
+		// Forty rerolls would overflow the run history; the kept class is not in it.
+		await page.evaluate(() => { window.App.state.sessions = []; window.App.persist(); });
+		await page.reload();
+		await page.waitForTimeout(1500);
+		await page.evaluate(() => window.App.keptDialog());
+		ok("it survives a reload, apart from the run history",
+			(await page.locator(".keptrow").count()) === 1);
+		await page.locator(".keptrow button", { hasText: "Remove" }).click();
+		ok("Remove forgets it", (await page.locator(".keptrow").count()) === 0);
+		await page.locator("#modal input[type=file]").setInputFiles(bundle.path);
+		await page.waitForTimeout(500);
+		ok("Import bundle brings it back", (await page.locator(".keptrow").count()) === 1);
+		await page.keyboard.press("Escape");
+		await page.setInputFiles("#file", fixture);
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		await page.evaluate(() => window.App.keptDialog());
+		await page.locator(".keptrow button", { hasText: "Open" }).click();
+		await page.waitForSelector("table tbody tr", { timeout: 60000 });
+		await page.waitForTimeout(800);
+		ok("Open returns to that class", (await page.evaluate(() => window.App.state.results[window.App.state.active].seed)) === keptSeed);
+
+		// Q39: the command line.
+		const cmd = await page.evaluate(() => {
+			const i = document.getElementById("classQuality");
+			i.value = String(Number(i.value) === 4 ? 3 : 4);
+			i.dispatchEvent(new Event("input", { bubbles: true }));
+			return null;
+		});
+		void cmd;
+		await page.waitForTimeout(900);
+		const line = await page.evaluate(() => window.App.commandLineText());
+		ok("Copy as command line writes bbgmdraft run, the file, the seed and a --set per changed setting",
+			/^bbgmdraft run \S+ --seed \S+ --set classQuality=\d/.test(line), line);
+		await page.evaluate(() => {
+			const App = window.App;
+			App.state.cfg.archetypeWeights = { Sharpshooter: 3 };
+		});
+		const withTable = await page.evaluate(() => window.App.commandLineText());
+		ok("a table-valued setting goes through --settings and a note says so",
+			/--settings settings\.json/.test(withTable) && /# archetypeWeights/.test(withTable), withTable);
+
+		// Q35: install.
+		const inst = await page.evaluate(() => {
+			let prompted = 0;
+			const ev = new Event("beforeinstallprompt", { cancelable: true });
+			ev.prompt = () => { prompted++; return Promise.resolve(); };
+			const hiddenBefore = document.getElementById("btnInstall").hidden;
+			window.dispatchEvent(ev);
+			const shown = !document.getElementById("btnInstall").hidden;
+			document.getElementById("btnInstall").click();
+			return { hiddenBefore, shown, prompted, hiddenAfter: document.getElementById("btnInstall").hidden };
+		});
+		ok("the install button appears on beforeinstallprompt, prompts, and goes away",
+			inst.hiddenBefore && inst.shown && inst.prompted === 1 && inst.hiddenAfter, JSON.stringify(inst));
+		/* The installed app's file handler: a stand-in launchQueue (Chromium only
+		   has the real one), set before the page's scripts run, receives the
+		   consumer the page registers and is handed a class file the way the OS
+		   hands one over. */
+		await page.addInitScript(() => {
+			Object.defineProperty(window, "launchQueue", { configurable: true,
+				value: { setConsumer(fn) { window.__launchConsumer = fn; } } });
+		});
+		await page.reload();
+		await page.waitForTimeout(800);
+		const launched = await page.evaluate(async (text) => {
+			if (typeof window.__launchConsumer !== "function") return "no consumer";
+			const mk = (name) => ({ getFile: async () => new File([text], name, { type: "application/json" }) });
+			await window.__launchConsumer({ files: [mk("launched.json"), mk("notes.txt")] });
+			return "handed over";
+		}, fs.readFileSync(fixture, "utf8"));
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		ok("an installed app launched with a class file loads it (and ignores other files)",
+			launched === "handed over" && (await page.evaluate(() => window.App.state.files.length === 1 &&
+				window.App.state.files[0].name === "launched.json")), launched);
+
+		// Q10 / Q13 / Q14: the editor.
+		await page.goto(base);
+		await clearStorage(page);
+		await page.goto(base);
+		await page.setInputFiles("#file", fixture);
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		const pkey = await page.evaluate(() => window.App.state.results[window.App.state.active].board[5].key);
+		await page.evaluate((k) => { window.App.state.tab = "board"; window.App.state.boardMode = "edit"; window.App.openEditor(window.App.state.results[window.App.state.active].players.find((p) => p.key === k)); }, pkey);
+		await page.waitForSelector(".editor", { timeout: 8000 });
+		const fields = await page.evaluate(() => ["weight", "classYear", "jersey", "moodTraits", "hgtInches"]
+			.map((k) => !!document.getElementById("lock-" + k)));
+		ok("the editor has weight, class year, jersey and mood trait locks", fields.every(Boolean), JSON.stringify(fields));
+		await page.evaluate(() => {
+			const w = document.querySelector("#lock-weight").closest(".ctl").querySelector("input[type=number]");
+			w.value = "263"; w.dispatchEvent(new Event("input", { bubbles: true }));
+			const y = document.querySelector("#lock-classYear").closest(".ctl").querySelector("select");
+			y.value = "Junior"; y.dispatchEvent(new Event("change", { bubbles: true }));
+			const j = document.querySelector("#lock-jersey").closest(".ctl").querySelector("input[type=text]");
+			j.value = "00"; j.dispatchEvent(new Event("input", { bubbles: true }));
+			for (const cb of document.querySelectorAll(".moodpick input")) {
+				cb.checked = cb.value === "F" || cb.value === "$";
+				cb.dispatchEvent(new Event("change", { bubbles: true }));
+			}
+		});
+		await page.locator(".editor button", { hasText: "Apply lock" }).click();
+		await page.waitForTimeout(1200);
+		const lock = await page.evaluate((k) => ({ ov: window.App.state.overrides[k],
+			p: window.App.state.results[window.App.state.active].players.find((x) => x.key === k) }), pkey);
+		ok("Apply lock stores the weight, the class year, the jersey as text and the mood traits",
+			lock.ov && lock.ov.weight === 263 && lock.ov.classYear === "Junior" && lock.ov.jersey === "00" &&
+			JSON.stringify(lock.ov.moodTraits) === '["F","$"]', JSON.stringify(lock.ov));
+		ok("...and the player comes back with them", lock.p.newWeight === 263 && lock.p.classYear === "Junior" &&
+			JSON.stringify(lock.p.moodTraits) === '["F","$"]', JSON.stringify([lock.p.newWeight, lock.p.classYear, lock.p.moodTraits]));
+		await page.waitForSelector(".editor", { timeout: 8000 });
+		await page.locator(".editor button", { hasText: "↻ face" }).click();
+		await page.waitForTimeout(900);
+		ok("re-roll face bumps ov.faceSalt and keeps the other locks",
+			(await page.evaluate((k) => { const o = window.App.state.overrides[k]; return o.faceSalt === 1 && o.weight === 263; }, pkey)) === true);
+		// Q13 bulk.
+		await page.evaluate((k) => {
+			window.App.state.selected = {};
+			window.App.state.selected[k] = true;
+			window.App.state.editing = null;
+			window.App.render();
+		}, pkey);
+		await page.waitForTimeout(500);
+		await page.evaluate(() => {
+			const sel = document.querySelector('#bulkBar select[aria-label="Set class year for the selection"]');
+			sel.value = "Senior";
+			sel.dispatchEvent(new Event("change", { bubbles: true }));
+		});
+		await page.waitForTimeout(1200);
+		ok("the bulk bar sets a class year for the selection",
+			(await page.evaluate((k) => window.App.state.overrides[k].classYear, pkey)) === "Senior");
 	}
 
 	console.log("\nNo errors");

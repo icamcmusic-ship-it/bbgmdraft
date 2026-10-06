@@ -34,7 +34,7 @@
 		/* These build text and files from result objects and touch no DOM, so the
 		   harness loads them to test what they write; the worker never needs them. */
 		["almanac", "node"], ["replay", "node"], ["site", "node"], ["replaymeta", "node"],
-		["views", "page"], ["play", "node"], ["app", "page"],
+		["share", "node"], ["views", "page"], ["play", "node"], ["app", "page"],
 	];
 
 	const names = (keep) => SCRIPTS.filter((s) => keep(s[1])).map((s) => s[0]);
