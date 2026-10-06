@@ -335,6 +335,15 @@
 	<details class="grp" id="grp-notes">
 		<summary>Note template</summary>
 		<div id="noteLines" class="checks"></div>
+		<div class="ctl">
+			<label for="noteHeader">Note header</label>
+			<input type="text" id="noteHeader" maxlength="300" placeholder="e.g. {class} class, seed {seed}">
+		</div>
+		<div class="ctl">
+			<label for="noteFooter">Note footer</label>
+			<input type="text" id="noteFooter" maxlength="300" placeholder="e.g. Board No. {rank}, {school}">
+		</div>
+		<p class="hint">Header and footer go above and below every note. Tokens: {class} {seed} {rank} {school}. Leave empty for none.</p>
 		<p class="hint">These lines are built into each player's note. The file can differ: the awards scope, “My notes” and “Include scouting notes” are set in the export dialog.</p>
 	</details>
 

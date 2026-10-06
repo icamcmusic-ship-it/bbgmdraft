@@ -50,7 +50,12 @@
 	   carry advanced stats, potential is centred and a class remembers how it
 	   was built, the outlier anomaly is relative, and Balanced shares are
 	   exact. Every one moves a rating, a stat line or a board. */
-	const ENGINE_REV = 3;
+	/* 4: the 2026-10-06 Universe realism fixes — guessed seasons name stars and
+	   a Final Four, carried programs keep their strength (a year's change is
+	   bounded, not a fresh draw), and realignment is geographic with a
+	   cooldown. A universe's champions, levels and conferences move; a
+	   standalone class does not. */
+	const ENGINE_REV = 4;
 
 	/* THE ONE DEFINITION OF PLAYER OF THE YEAR.
 

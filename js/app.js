@@ -3809,6 +3809,19 @@
 			lab.appendChild(text);
 			box.appendChild(lab);
 		}
+		// The note's frame (Config noteHeader / noteFooter): text above and
+		// below every note, with {class} {seed} {rank} {school} tokens.
+		for (const k of ["noteHeader", "noteFooter"]) {
+			const inp = $(k);
+			if (!inp || inp.dataset.bound) continue;
+			inp.dataset.bound = "1";
+			inp.addEventListener("change", () => {
+				pushUndo("changed the note " + (k === "noteHeader" ? "header" : "footer"));
+				state.cfg[k] = inp.value.slice(0, global.Config.NOTE_FRAME_MAX || 300);
+				markDirty();
+				scheduleRun();
+			});
+		}
 
 		for (const d of document.querySelectorAll("details.grp")) {
 			d.addEventListener("toggle", persist);
@@ -3820,6 +3833,10 @@
 		if (!box) return;
 		for (const cb of box.querySelectorAll("input")) {
 			cb.checked = (state.cfg.noteLines || []).indexOf(cb.value) !== -1;
+		}
+		for (const k of ["noteHeader", "noteFooter"]) {
+			const inp = $(k);
+			if (inp && inp.value !== (state.cfg[k] || "")) inp.value = state.cfg[k] || "";
 		}
 	}
 
@@ -5300,6 +5317,8 @@
 		   export. phaseNotes depends on noteLines alone, so this costs the
 		   one phase. */
 		if (Array.isArray(state.cfg.noteLines)) cfg.noteLines = state.cfg.noteLines.slice();
+		cfg.noteHeader = state.cfg.noteHeader || "";
+		cfg.noteFooter = state.cfg.noteFooter || "";
 		cfg.seed = saved.seed;
 		cfg.carryOver = saved.carryOver || null;
 		cfg.recentPools = (saved.recentPools || []).map((a) => a.slice());
@@ -5716,6 +5735,8 @@
 		const a = Object.assign({}, u.settings);
 		const b = CFG.make(state.cfg);
 		delete a.noteLines; delete b.noteLines;
+		delete a.noteHeader; delete b.noteHeader;
+		delete a.noteFooter; delete b.noteFooter;
 		delete a.biography; delete b.biography;
 		return JSON.stringify(a) === JSON.stringify(b);
 	}
@@ -5748,7 +5769,9 @@
 			   reads the live noteLines, not the frozen settings). */
 			if (universeNotesOnlyChange()) {
 				state.universe.settings = Object.assign({}, state.universe.settings,
-					{ noteLines: (state.cfg.noteLines || []).slice() });
+					{ noteLines: (state.cfg.noteLines || []).slice(),
+						noteHeader: state.cfg.noteHeader || "",
+						noteFooter: state.cfg.noteFooter || "" });
 				state.results = new Array(state.files.length).fill(null);
 				persist();
 				render();
