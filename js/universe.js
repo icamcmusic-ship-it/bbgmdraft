@@ -1974,58 +1974,58 @@
 		return entries[entries.length - 1];
 	}
 
-	/* HOW MUCH A LEVEL IS WORTH, MEASURED.
+	/* HOW MUCH A PROGRAM IS WORTH, MEASURED.
 
 	   The draw used to weight (level - 40)^2.2 over the top 40 programs while
 	   ageCarry pulled every level 18% a year toward the field's mean: 30
 	   guessed years gave 23 different champions, no program above two titles
 	   and a median champion ranked 28th by level, where a simulated 20
 	   seasons gave about 14 champions, one program with 3-5 titles and a
-	   median champion ranked 9th. These are the exponents of exp(k x level)
-	   fitted by maximum likelihood to 120 simulated seasons (six synthetic
-	   20-season worlds): the champion k = 0.20 (log-likelihood -450 against
-	   -708 for a flat draw; 0.21 is used, which balances a guess from an old
-	   tail against one from a young tail), the runner-up and the other two Final Four teams
-	   0.15, the final poll's No. 1 0.20, and the schools of the player of
-	   the year, the No. 1 pick and an All-American 0.13 / 0.09 / 0.12 (set
-	   against the rank percentiles of those schools in the simulated
-	   seasons). The whole field is in the draw: in a simulated season the
-	   champion was outside the top 40 by level 18% of the time.
-	   tools/tests/universe-realism-extrap.js re-measures all of this against
-	   a fresh simulated world.
+	   median champion ranked 9th.
 
-	   Measured against eight simulated 20-season worlds (guessed years from
-	   each one's tail): different champions in 20 years 13.3 against 14.0,
-	   most titles by one program 4.2 against 3.9, the top three's share
-	   0.45 against 0.41, median champion rank 6 against 9. From a 3-season
-	   tail over 17 years: 12.8 / 3.2 / 0.40 against 11.9 / 3.6 / 0.46 for
-	   simulated seasons 4-20. A final poll's No. 1, a repeat champion and
-	   the coaching and realignment counts were fitted the same way (see
-	   GUESS_MOMENTUM, GUESS_REALIGN_SCALE, GUESS_RECORD_SD). */
-	const GUESS_K = { champion: 0.21, runnerUp: 0.15, finalFour: 0.15, apOne: 0.20,
-		poy: 0.13, no1: 0.09, allAmerica: 0.12 };
+	   The odds are exp(a x level + b x prestige), fitted by maximum
+	   likelihood to 280 simulated seasons (twelve synthetic worlds, 20 and 30
+	   seasons), the program's season level and its static prestige
+	   (Colleges.prestigeOrLowMajor). Prestige matters on its own: level alone
+	   fits the champion at a log-likelihood of -1087, level and prestige at
+	   -1029, because a blue blood recruits like one in a down year (the
+	   season's level is a draw; the structure under it is not). The whole
+	   field is in the draw: in a simulated season the champion was outside
+	   the top 40 by level 18% of the time. GUESS_ODDS is [a, b] per role:
+	   champion .08/.09, runner-up .08/.07, the other two Final Four teams
+	   .07/.07, the final poll's No. 1 .11/.09, the No. 1 pick's school
+	   .04/.05 (all fitted); the player of the year's and an All-American's
+	   school .06/.07 and .06/.06 (set against the rank percentiles of those
+	   schools in the simulated seasons).
+	   tools/tests/universe-realism-extrap.js re-measures all of this against
+	   a fresh simulated world. */
+	const GUESS_ODDS = {
+		champion: [0.08, 0.09], runnerUp: [0.08, 0.07], finalFour: [0.07, 0.07],
+		apOne: [0.11, 0.09], poy: [0.06, 0.07], no1: [0.04, 0.05], allAmerica: [0.06, 0.06],
+	};
 	// How often the final poll's No. 1 is the champion (0.19 simulated).
 	const GUESS_AP_IS_CHAMPION = 0.15;
-	const GUESS_MOMENTUM = 1.2;
+	const oddsOf = (x, role) => role[0] * x.level + role[1] * x.prestige;
+	/* MOMENTUM, in the odds' own (log) units: each of the last few guessed
+	   champions is worth GUESS_MOMENTUM, fading by GUESS_MOMENTUM_FADE a year
+	   and capped at GUESS_MOMENTUM_CAP in all. */
+	const GUESS_MOMENTUM = 0.25;
 	const GUESS_MOMENTUM_FADE = 0.85;
-	const GUESS_MOMENTUM_CAP = 2;
+	const GUESS_MOMENTUM_CAP = 0.45;
 
 	/* The programs a missing season would have been about, strongest first,
-	   weighted for the champion (see GUESS_K). */
+	   weighted for the champion (see GUESS_ODDS). */
 	function contendersOf(carry) {
 		const levels = (carry && carry.levels) || {};
 		const out = Object.keys(levels)
-			.map((name) => ({ name, level: levels[name] }))
+			.map((name) => ({ name, level: levels[name], prestige: priorPrestige(name) }))
 			.filter((x) => Number.isFinite(x.level))
 			.sort((a, b) => b.level - a.level ||
 				cmpText(a.name, b.name));
-		/* MOMENTUM. A simulated champion repeats 11% of the time (7% for a
-		   draw off levels alone) and a program that has won recently wins
-		   again more than its level says, because a title is also a
-		   recruiting class and a roster that stays: the lag-2 to lag-5
-		   repeat rates ran 4-6% against 3-4%. Each of the last few guessed
-		   champions is worth GUESS_MOMENTUM levels, fading by
-		   GUESS_MOMENTUM_FADE a year and capped at GUESS_MOMENTUM_CAP in all
+		/* A simulated champion repeats 11% of the time (7% for a draw off the
+		   odds alone) and a program that has won recently wins again more
+		   than its level says, because a title is also a recruiting class and
+		   a roster that stays. The momentum is the last few guessed champions
 		   (carry.recentChamps, newest first; only a guessed year keeps one,
 		   see ageCarry and creditGuess; the defending champion alone when
 		   there is no history). Kept mild on purpose: at the full measured
@@ -2038,22 +2038,27 @@
 			bonus[name] = (bonus[name] || 0) + GUESS_MOMENTUM * Math.pow(GUESS_MOMENTUM_FADE, i);
 		});
 		for (const name of Object.keys(bonus)) bonus[name] = Math.min(GUESS_MOMENTUM_CAP, bonus[name]);
-		let boosted = -Infinity;
-		for (const x of out) boosted = Math.max(boosted, x.level + (bonus[x.name] || 0));
+		let top = -Infinity;
 		for (const x of out) {
-			x.w = Math.exp(GUESS_K.champion * (x.level + (bonus[x.name] || 0) - boosted));
+			x.score = oddsOf(x, GUESS_ODDS.champion) + (bonus[x.name] || 0);
+			if (x.score > top) top = x.score;
 		}
+		for (const x of out) x.w = Math.exp(x.score - top);
 		return out;
 	}
 
-	/* One program drawn from a field by exp(k x level), skipping `skip`. */
-	function pickByLevel(rng, field, k, skip) {
+	/* One program drawn from a field by exp(odds), skipping `skip`. */
+	function pickByLevel(rng, field, role, skip) {
 		let top = -Infinity;
-		for (const x of field) if (!(skip && skip.has(x.name)) && x.level > top) top = x.level;
+		for (const x of field) {
+			if (skip && skip.has(x.name)) continue;
+			const z = oddsOf(x, role);
+			if (z > top) top = z;
+		}
 		const pool = [];
 		for (const x of field) {
 			if (skip && skip.has(x.name)) continue;
-			pool.push({ x, w: Math.exp(k * (x.level - top)) });
+			pool.push({ x, w: Math.exp(oddsOf(x, role) - top) });
 		}
 		const hit = weightedPick(rng, pool);
 		return hit ? hit.x : null;
@@ -2111,13 +2116,13 @@
 		const field = contendersOf(carry);
 		if (!field.length) return null;
 		const champ = weightedPick(rng, field);
-		const runnerUp = pickByLevel(rng, field, GUESS_K.runnerUp, new Set([champ.name]));
+		const runnerUp = pickByLevel(rng, field, GUESS_ODDS.runnerUp, new Set([champ.name]));
 		/* THE FINAL FOUR is the champion, the runner-up and two more programs
 		   drawn the same way: a row used to carry just the two finalists. */
 		const semis = [];
 		const drawn = new Set([champ.name, runnerUp ? runnerUp.name : null]);
 		for (let i = 0; i < 2; i++) {
-			const s = pickByLevel(rng, field, GUESS_K.finalFour, drawn);
+			const s = pickByLevel(rng, field, GUESS_ODDS.finalFour, drawn);
 			if (!s) break;
 			semis.push(s);
 			drawn.add(s.name);
@@ -2125,7 +2130,7 @@
 		/* The poll No. 1 is the champion sometimes and otherwise the best
 		   programme by the same weighting, which is what a poll is. */
 		const apOne = rng.random() < GUESS_AP_IS_CHAMPION ? champ
-			: pickByLevel(rng, field, GUESS_K.apOne);
+			: pickByLevel(rng, field, GUESS_ODDS.apOne);
 		/* THE MEN. A year or two past the last class the carry still holds
 		   named star returners (returnerPool), and those are real men the
 		   world has met. After that nobody is left to name, and the season
@@ -2139,8 +2144,8 @@
 		const pool = returnerPool(carry);
 		const taken = new Set(pool.map((p) => p.name));
 		let slot = 0;
-		const invent = (k) => {
-			const school = pickByLevel(srng, field, k);
+		const invent = (role) => {
+			const school = pickByLevel(srng, field, role);
 			const name = guessName(baseSeed, season, slot++, taken);
 			taken.add(name);
 			return { name, school: school ? school.name : null, invented: true };
@@ -2149,7 +2154,7 @@
 		   weighted so the best man usually wins it and not always. */
 		const poy = pool.length
 			? weightedPick(srng, pool.slice(0, 12).map((p, i) => ({ p, w: Math.pow(0.78, i) }))).p
-			: invent(GUESS_K.poy);
+			: invent(GUESS_ODDS.poy);
 		const allAmerica = [];
 		const used = new Set([poy.name]);
 		for (const p of pool) {
@@ -2158,9 +2163,9 @@
 			used.add(p.name);
 			allAmerica.push(p);
 		}
-		while (allAmerica.length < 5) allAmerica.push(invent(GUESS_K.allAmerica));
+		while (allAmerica.length < 5) allAmerica.push(invent(GUESS_ODDS.allAmerica));
 		// The No. 1 pick is a prospect, never a carried returner: always invented.
-		const no1 = invent(GUESS_K.no1);
+		const no1 = invent(GUESS_ODDS.no1);
 		const confOf = carry.confOf || {};
 		const man = (p) => Object.assign({ name: p.name, school: p.school, club: null,
 			nonNcaa: false }, p.invented ? { invented: true } : null);
@@ -2358,11 +2363,11 @@
 		if (row.runnerUp) deep[row.runnerUp] = ["National Runner-Up", 5];
 		for (const n of row.finalFour || []) if (!deep[n]) deep[n] = ["Lost in the Final Four", 4];
 		const field = Object.keys(levels).filter((n) => Number.isFinite(levels[n]))
-			.sort().map((name) => ({ name, level: levels[name] }));
+			.sort().map((name) => ({ name, level: levels[name], prestige: priorPrestige(name) }));
 		const drng = rng.child("deep");
 		const skip = new Set(Object.keys(deep));
 		for (let i = 0; i < 12; i++) {
-			const x = pickByLevel(drng, field, 0.12, skip);
+			const x = pickByLevel(drng, field, GUESS_ODDS.finalFour, skip);
 			if (!x) break;
 			skip.add(x.name);
 			deep[x.name] = i < 4 ? ["Lost in the Elite Eight", 3] : ["Lost in the Sweet 16", 2];
@@ -4482,7 +4487,7 @@
 		playerId, biographyForFile, registryOf,
 		threads, moreThreads, records, exportUniverse, biographyOf, seedFor, resultFingerprint,
 		extrapolateGap, extrapolateSeason, topUpPartialSeason, extrapolatedAlumni,
-		contendersOf, returnerPool, creditGuess, GUESS_K,
+		contendersOf, returnerPool, creditGuess, GUESS_ODDS,
 		PARTIAL_CLASS_SHARE,
 		ageCarry, coachTreeStep, pruneCoachTree, nationalPOYSet, pickPOY, personalHonors, isPersonalHonor, setUniqueSynthNames, plural, GAP_WARN_YEARS, EXTRAPOLATE_MAX_YEARS, COACH_TREE_MAX_HIRES, recruitingCohorts,
 		peopleRecords, programHistory, programRowsOf, rivalryThreads,
