@@ -30,7 +30,11 @@ module.exports = function (ok, V) {
 		/* Plausibly solvable: the stretch goal's lever plus a variation
 		   within budget clears it, on the harness's realistic class. */
 		const lf = V.realisticClass(90, 70);
-		for (const date of ["2026-09-25", "2026-09-26", "2026-10-02"]) {
+		/* Dates that are solvable on this class under ENGINE_REV 3. A daily is
+		   solvable only by luck of the date's goals against the loaded file
+		   (11 of 13 dates scanned were not on this class: audit 2026-10-05, §4
+		   R4), so this pins two that are and says nothing about the rest. */
+		for (const date of ["2026-10-02", "2026-10-09"]) {
 			const ch = R.dailyChallenge(date);
 			const preds = ch.goals.map(E.parseRerollClause);
 			let solved = null;

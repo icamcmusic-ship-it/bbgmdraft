@@ -42,7 +42,15 @@
 	   are equal-sized at any strictness, pace and stat noise are jittered
 	   inside their bands, and every tie-break is code-unit order rather than
 	   the browser's collation. Any of them moves a board or a trophy. */
-	const ENGINE_REV = 2;
+	/* 3: the 2026-10-05 audit's calculation fixes — the solver centres the
+	   overall on its rounding plateau, preserved overalls lift the rookie caps
+	   instead of dropping, ties break by key rather than file order, pinned
+	   settings resist storylines, pace no longer saturates (and takes steals,
+	   blocks and fouls with it), efficiencyEnv moves points, prior seasons
+	   carry advanced stats, potential is centred and a class remembers how it
+	   was built, the outlier anomaly is relative, and Balanced shares are
+	   exact. Every one moves a rating, a stat line or a board. */
+	const ENGINE_REV = 3;
 
 	/* THE ONE DEFINITION OF PLAYER OF THE YEAR.
 

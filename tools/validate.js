@@ -930,14 +930,22 @@ function collect(nSeeds, cfgOverrides, fixture, seedBase, bandEra) {
 			const guards = all.filter((p) => p.newHgtInches < 76).map((p) => p.stats.bpg);
 			if (!bigs.length || !guards.length) return 8;
 			return mean(bigs) / Math.max(0.05, mean(guards));
-		})(), 4.5, 16],
+		/* The floor was 4.5 with the model sitting at 4.51-4.54: no margin.
+		   Steals and blocks now scale with pace and the league's blocks sit on
+		   the 3.5 anchor (audit 2026-10-05, C6), which moved the ratio to
+		   4.45-4.49. A floor of 4.2 still fails a model whose bigs do not
+		   block. */
+		})(), 4.2, 16],
 		/* The assist floor, conditioned on minutes: a wing playing 28+ a
 		   night in D-I basketball does not finish with 0.8 assists, and
 		   24% of the class used to. */
 		["APG p10 (28+ MPG)", (function () {
 			const v = all.filter((p) => p.stats.mpg >= 28).map((p) => p.stats.apg);
 			return v.length ? pct(v, 0.10) : 1.3;
-		})()].concat(within(1.45, 0.65)),
+		/* Centre 1.45 -> 1.40: assists follow possessions, and possessions now sit
+		   on the anchor instead of 2% above it (audit 2026-10-05, C5); the row
+		   had 0.05 of margin before. */
+		})()].concat(within(1.40, 0.65)),
 		["TS% mean", mean(g((p) => p.stats.ts)) * 100].concat(within(dy.ts.mean * 100, 1.8)),
 		/* THREE-POINT PERCENTAGE, measured against the population the anchor
 		   describes.
