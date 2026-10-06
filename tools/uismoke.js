@@ -3764,6 +3764,203 @@ async function gotoProspects(page) {
 		await page.locator("#errClose").click();
 	}
 
+	/* The October 2026 audit's UI fixes, in the browser: what a preset does to
+	   the note template, a session restored onto the wrong class, the file
+	   picker's stale pointers, the export options across a reload, a saved
+	   universe with no files, and the phone layout. The pure halves are in
+	   tools/tests/bugfixes-ui.js. */
+	{
+		console.log("\nOctober 2026 audit: UI fixes");
+		const os = require("os");
+		const other = path.join(os.tmpdir(), "bbgm-uismoke-oct-b.json");
+		fs.writeFileSync(other, JSON.stringify(V.syntheticClass(5, 60)));
+		const settle = () => page.waitForTimeout(700);
+		const noteBtn = (label) => page.evaluate((l) => {
+			[...document.querySelectorAll(".notepresets button")].find((x) => x.textContent === l).click();
+		}, label);
+		await clearStorage(page);
+		await page.goto(base);
+		await page.setInputFiles("#file", fixture);
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		await page.setViewportSize({ width: 1500, height: 980 });
+
+		// N1: a class preset leaves the ticked note lines alone.
+		await noteBtn("None");
+		await settle();
+		const presetName = await page.evaluate(() =>
+			Object.keys(window.Config.PRESETS).filter((n) => n !== "default")[0]);
+		await page.selectOption("#preset", presetName);
+		await settle();
+		ok("a class preset keeps the note template",
+			(await page.evaluate(() => JSON.stringify(window.App.state.cfg.noteLines))) === "[]");
+
+		// N8: the player page's note follows a template change.
+		await noteBtn("Standard");
+		await settle();
+		await page.evaluate(() => window.App.showPlayer(window.App.state.results[window.App.state.active].players[0].key));
+		await page.waitForTimeout(300);
+		const noteOnPage = () => page.evaluate(() => /Scouting note/i.test(document.getElementById("view").innerText));
+		const had = await noteOnPage();
+		await noteBtn("None");
+		await settle();
+		ok("an open player page drops the note when the template is emptied",
+			had && !(await noteOnPage()));
+		await page.evaluate(() => { window.App.state.player = null; window.App.render(); });
+
+		// N5: the export dialog's choices survive a reload and show beside the button.
+		await page.click("#btnExportMenu");
+		await page.waitForTimeout(250);
+		await page.evaluate(() => {
+			const l = [...document.querySelectorAll("#modal label.check")].find((x) => /my notes/.test(x.textContent));
+			l.querySelector("input").click();
+		});
+		await page.keyboard.press("Escape");
+		await page.reload();
+		await page.waitForTimeout(800);
+		ok("the export options survive a reload",
+			(await page.evaluate(() => window.App.state.exportOpts && window.App.state.exportOpts.myMarks)) === true);
+		ok("...and a summary names them beside the Export button",
+			(await page.evaluate(() => {
+				const e = document.getElementById("exportSummary");
+				return e && !e.hidden ? e.textContent : "";
+			})) === "my notes");
+
+		// B2: a session saved on one class is not applied to another.
+		await page.setInputFiles("#file", fixture);
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		await page.evaluate(() => {
+			const k = window.App.state.results[0].players[0].key;
+			window.App.state.overrides = {};
+			window.App.state.overrides[k] = { ovr: 70 };
+		});
+		await page.click("#btnRerun");
+		await settle();
+		await page.click("#btnReroll");
+		await settle();
+		ok("a remembered session records which file it was made on",
+			(await page.evaluate(() => window.App.state.sessions.length &&
+				!!window.App.state.sessions[0].fileFp)) === true);
+		await page.setInputFiles("#file", other);
+		await page.waitForFunction(() => window.App.state.files.length === 1 &&
+			/oct-b/.test(window.App.state.files[0].name), null, { timeout: 30000 });
+		await settle();
+		await page.evaluate(() => window.App.restoreSession(0));
+		await settle();
+		ok("restoring it onto another class applies no locks and says so",
+			(await page.evaluate(() => Object.keys(window.App.state.overrides).length)) === 0 &&
+			(await page.locator("#warnBanner:not([hidden])").count()) === 1);
+		await page.setInputFiles("#file", [fixture, other]);
+		await page.waitForFunction(() => window.App.state.files.length === 2, null, { timeout: 30000 });
+		await settle();
+		const otherIndex = await page.evaluate(() =>
+			window.App.state.files.findIndex((f) => /oct-b/.test(f.name)));
+		await page.selectOption("#fileSelect", String(otherIndex));
+		await settle();
+		await page.evaluate(() => window.App.restoreSession(0));
+		await settle();
+		ok("restoring it with its file loaded switches to that file and keeps the lock",
+			(await page.evaluate(() => !/oct-b/.test(window.App.state.files[window.App.state.active].name) &&
+				Object.keys(window.App.state.overrides).length === 1)) === true);
+
+		// B11: picking another file clears the editor and selection.
+		await page.evaluate(() => {
+			window.App.state.editing = window.App.state.results[window.App.state.active].players[2].key;
+			window.App.state.selected = { x: true };
+		});
+		await page.selectOption("#fileSelect", String(otherIndex));
+		await settle();
+		ok("switching files closes the editor and clears the bulk selection",
+			(await page.evaluate(() => window.App.state.editing === null &&
+				Object.keys(window.App.state.selected).length === 0)) === true);
+
+		// U1 and U4: the dialogs.
+		await page.click("#btnRerollUntil");
+		await page.waitForTimeout(300);
+		ok("Reroll until lists its conditions one per row, labels readable",
+			(await page.evaluate(() => document.querySelector("#modal .untillabel").getBoundingClientRect().width)) > 200);
+		await page.keyboard.press("Escape");
+		await page.waitForTimeout(200);
+		await page.click("#btnHowTo");
+		await page.waitForTimeout(400);
+		ok("the Guide opens at its top",
+			(await page.evaluate(() => document.querySelector("#modal .modalbox").scrollTop)) === 0);
+		await page.keyboard.press("Escape");
+		await page.waitForTimeout(200);
+
+		// U2, U16, U21: the phone.
+		await page.setViewportSize({ width: 390, height: 800 });
+		await page.evaluate(() => {
+			window.App.state.results[window.App.state.active].players[0].name = "Montgomery Washington-Jefferson";
+			window.App.render();
+		});
+		await page.waitForTimeout(400);
+		ok("a long name wraps on the phone board instead of ending in an ellipsis",
+			(await page.evaluate(() => {
+				const td = [...document.querySelectorAll("table.boardtable td.sticky")]
+					.find((t) => /Montgomery/.test(t.innerText));
+				return !!td && td.scrollWidth <= td.clientWidth + 1;
+			})) === true);
+		ok("the settings button leaves room below the content",
+			(await page.evaluate(() => parseInt(getComputedStyle(document.body).paddingBottom, 10))) >= 60);
+		await page.setViewportSize({ width: 1500, height: 980 });
+		await page.waitForTimeout(300);
+		ok("the sidebar does not scroll sideways",
+			(await page.evaluate(() => {
+				const a = document.getElementById("settings");
+				return a.scrollWidth <= a.clientWidth;
+			})) === true);
+
+		// U7: the preset diff names the setting as the sidebar does.
+		await page.selectOption("#preset", presetName);
+		await settle();
+		await page.evaluate(() => {
+			const i = document.getElementById("potBias");
+			i.value = Number(i.value) === 3 ? 2 : 3;
+			i.dispatchEvent(new Event("input", { bubbles: true }));
+		});
+		await page.waitForTimeout(400);
+		ok("the preset diff uses the sidebar label, not the setting key",
+			/Potential bias/.test(await page.textContent("#presetDiff")) &&
+			!/potBias/.test(await page.textContent("#presetDiff")));
+
+		// UV2: a saved real-file universe is visible after a reload.
+		const dirU = fs.mkdtempSync(path.join(os.tmpdir(), "bbgm-uismoke-oct-"));
+		const uFiles = [1, 2].map((y) => {
+			const c = V.realisticClass("oct" + y, 40);
+			c.startingSeason = 2024 + y;
+			c.players.forEach((p) => { p.draft.year = 2024 + y; p.born.year = 2024 + y - 20; p.pid += y * 100; });
+			const f = path.join(dirU, "u" + y + ".json");
+			fs.writeFileSync(f, JSON.stringify(c));
+			return f;
+		});
+		await page.setInputFiles("#file", uFiles);
+		await page.waitForFunction(() => window.App.state.files.length === 2, null, { timeout: 30000 });
+		await page.evaluate(() => {
+			const u = document.getElementById("universe");
+			u.checked = true;
+			u.dispatchEvent(new Event("change", { bubbles: true }));
+		});
+		await page.waitForFunction(() => {
+			const u = window.App.state.universe;
+			return u && !u.running && u.rows && u.rows.length >= 2;
+		}, null, { timeout: 120000 });
+		await page.waitForTimeout(1500);
+		await page.reload();
+		await page.waitForTimeout(2500);
+		ok("a saved universe is shown after a reload, with a way to load its files",
+			(await page.evaluate(() => window.App.state.files.length === 0 &&
+				!document.getElementById("app").hidden)) &&
+			(await page.locator("#btnStrandedLoad").count()) === 1);
+		await page.setInputFiles("#file", fixture);
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		fs.rmSync(dirU, { recursive: true, force: true });
+		await page.evaluate(() => {
+			const u = document.getElementById("universe");
+			if (u && u.checked) { u.checked = false; u.dispatchEvent(new Event("change", { bubbles: true })); }
+		});
+		await page.waitForTimeout(800);
+	}
+
 	console.log("\nNo errors");
 	ok("no console or page errors", errors.length === 0, errors.join("\n         "));
 

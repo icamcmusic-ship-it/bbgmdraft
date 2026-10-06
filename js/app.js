@@ -401,6 +401,8 @@
 			// The branch point, so a reload continues the lineage rather than
 			// starting a second root beside it. See rememberSession.
 			lastSessionId: state.lastSessionId,
+			// What the export dialog was left on; Export JSON and "e" use it.
+			exportOpts: state.exportOpts || null,
 			sort: state.sort,
 			tab: state.tab,
 			boardMode: state.boardMode,
@@ -681,6 +683,16 @@
 					tries: Number.isFinite(Number(saved.lastUntil.tries))
 						? Number(saved.lastUntil.tries) : 25,
 				};
+			}
+		}
+		{
+			const eo = V.cleanExportOpts(saved.exportOpts);
+			if (eo) {
+				state.exportOpts = eo;
+				if (eo.awardsScope) state.exportAwardsScope = eo.awardsScope;
+				if (eo.majorConferences && eo.majorConferences.length) {
+					state.exportMajorConfs = eo.majorConferences.slice();
+				}
 			}
 		}
 		const sort = validSortStack(saved.sort);
@@ -1792,10 +1804,45 @@
 		const note = $("presetDiff");
 		if (note) {
 			note.textContent = diff.length
-				? "changed from the preset: " + diff.join(", ")
+				? "changed from the preset: " + diff.map(labelDiffLine).join(", ")
 				: "";
 			note.hidden = !diff.length;
 		}
+	}
+
+	/* The sidebar's own name for a setting, for text a person reads (the
+	   preset diff, lock buttons' aria-labels, the reset dialog). The raw key
+	   ("archetypeDiversity") is a code identifier; the label is on screen. */
+	const SETTING_LABEL_EXTRA = {
+		noteLines: "Note template", archetypeWeights: "Archetype weights",
+		leagueWeights: "League weights", wEuroLeague: "EuroLeague weight",
+		wGLeague: "G League weight", wNBL: "NBL weight", anomalyPicks: "Anomaly picks",
+	};
+	const settingLabelCache = {};
+	function settingLabel(key) {
+		if (settingLabelCache[key]) return settingLabelCache[key];
+		let out = SETTING_LABEL_EXTRA[key] || "";
+		if (!out && typeof document !== "undefined") {
+			const input = $(key);
+			const lab = document.querySelector('label[for="' + cssEscape(key) + '"]') ||
+				(input && input.closest ? input.closest("label") : null);
+			if (lab) {
+				const c = lab.cloneNode(true);
+				for (const x of c.querySelectorAll("button, b, input, select, .unit, .rerun")) x.remove();
+				out = c.textContent.replace(/\s+/g, " ").trim();
+			}
+		}
+		// Only cache a real label: the sidebar may not be built yet.
+		if (!out) return key;
+		settingLabelCache[key] = out;
+		return out;
+	}
+
+	// "potBias 0 → 0.5" or "archetypeWeights (edited)", with the label for the key.
+	function labelDiffLine(line) {
+		const i = String(line).indexOf(" ");
+		if (i === -1) return settingLabel(line);
+		return settingLabel(line.slice(0, i)) + line.slice(i);
 	}
 
 	/* Every setting that differs from the selected preset, as "name: was → is".
@@ -1852,7 +1899,7 @@
 			const cfgOf = (n) => CFG.make(CFG.PRESETS[n] || state.customPresets[n] || {});
 			const rows = diffConfigs(cfgOf(left.value), cfgOf(right.value));
 			out.textContent = rows.length
-				? rows.join("\n")
+				? rows.map(labelDiffLine).join("\n")
 				: "These two presets are identical.";
 		};
 		left.addEventListener("change", paint);
@@ -3111,9 +3158,9 @@
 			b.textContent = locked ? "🔒" : "🔓";
 			b.classList.toggle("locked", locked);
 			b.title = locked
-				? "Locked: the randomizer will not touch " + key
-				: "Unlocked: the randomizer may move " + key;
-			b.setAttribute("aria-label", (locked ? "Unlock " : "Lock ") + key +
+				? "Locked: the randomizer will not touch " + settingLabel(key)
+				: "Unlocked: the randomizer may move " + settingLabel(key);
+			b.setAttribute("aria-label", (locked ? "Unlock " : "Lock ") + settingLabel(key) +
 				" against the randomizer");
 			b.setAttribute("aria-pressed", locked ? "true" : "false");
 		}
@@ -3233,7 +3280,10 @@
 			run();
 		});
 
-		const SESSION_TOGGLES = ["universe", "lockHeights", "narrative"];
+		/* noteLines is the Notes-tab template, a choice about the file being
+		   written rather than about the class, so a preset that does not name
+		   it (none of the built-ins do) leaves the ticked lines alone. */
+		const SESSION_TOGGLES = ["universe", "lockHeights", "narrative", "noteLines"];
 		const preset = $("preset");
 		preset.addEventListener("change", () => {
 			const p = CFG.PRESETS[preset.value] || state.customPresets[preset.value];
@@ -3316,7 +3366,7 @@
 				"Reset every setting?",
 				moved.length + " setting" + (moved.length === 1 ? " is" : "s are") +
 					" away from the default and will be reset: " +
-					moved.slice(0, 8).join(", ") +
+					moved.slice(0, 8).map(settingLabel).join(", ") +
 					(moved.length > 8 ? " and " + (moved.length - 8) + " more" : "") +
 					". Locks and the loaded file are kept.",
 				"Reset everything",
@@ -3682,7 +3732,13 @@
 				scheduleRun();
 			});
 			lab.appendChild(cb);
-			lab.appendChild(document.createTextNode(" " + label));
+			// One text span, so the label and its suffix flow as a sentence
+			// inside the flex label rather than becoming two columns.
+			const text = el("span", null, " " + label);
+			// Lines that print for only some players say so (N10).
+			const only = V.NOTE_LINE_NOTES && V.NOTE_LINE_NOTES[key];
+			if (only) text.appendChild(el("span", "unit notesuffix", only));
+			lab.appendChild(text);
 			box.appendChild(lab);
 		}
 
@@ -4298,7 +4354,7 @@
 		const append = !!(opts && opts.append) && state.files.length > 0;
 		if (append) { appendFiles(loaded, problems, opts); return; }
 		{
-			$("empty").classList.remove("busy");
+			$("empty").classList.remove("busy", "slim");
 			const ok = loaded.filter(Boolean);
 			if (problems.length) showError(new Error(problems.join("\n")));
 			else clearError();
@@ -4332,6 +4388,8 @@
 			state.compare = [null, null, null, null];
 			state.player = null;
 			state.logPlayer = null;
+			state.editing = null;
+			state.selected = {};
 			adoptLegacyUserKeys();
 			resetExportAll();
 			paintUndo();
@@ -4614,6 +4672,15 @@
 		}
 		$("fileSelect").addEventListener("change", (e) => {
 			state.active = Number(e.target.value);
+			/* Pointers into the class just left: an open editor, a bulk
+			   selection, the player page, compare slots and the game-log
+			   player are keyed by pid and would resolve to somebody else in
+			   this file. installFiles clears the same set. */
+			state.editing = null;
+			state.selected = {};
+			state.player = null;
+			state.compare = [null, null, null, null];
+			state.logPlayer = null;
 			checkLockFingerprint();
 			ensureResult(state.active);
 			render();
@@ -5206,15 +5273,24 @@
 		const b = $("btnExport");
 		if (!b) return;
 		const f = activeFile();
+		const sum = V.exportSummary(state.exportOpts);
+		const sumEl = $("exportSummary");
+		if (sumEl) {
+			sumEl.textContent = sum;
+			sumEl.hidden = !sum;
+			sumEl.title = "Export options in force (change them under More ▾)";
+		}
+		const tail = sum ? " · options: " + sum : "";
 		if (state.files.length < 2 || !f) {
 			b.textContent = "Export JSON";
-			b.removeAttribute("title");
+			if (sum) b.title = "Export options: " + sum;
+			else b.removeAttribute("title");
 			return;
 		}
 		const base = f.name.replace(/\.json(\.gz)?$|\.gz$/i, "");
 		const yr = f.data && f.data.startingSeason;
 		b.textContent = "Export " + (yr ? yr : base.length > 16 ? base.slice(0, 15) + "…" : base);
-		b.title = "Export " + base + "_customized.json" + (yr ? " (season " + yr + ")" : "");
+		b.title = "Export " + base + "_customized.json" + (yr ? " (season " + yr + ")" : "") + tail;
 	}
 
 	/* Whether the config changed since the universe's last full run is
@@ -5304,10 +5380,9 @@
 		}
 		writeHash();
 		persist();
-		/* The note text is only ever shown on the Notes tab, so a change that
-		   rebuilt nothing but the notes does not need a 70-row table rebuilt
-		   behind it. Everything else re-renders. */
-		const notesOnly = res.phasesRun.length === 1 && res.phasesRun[0] === "notes";
+		/* Always re-render, even when only the notes phase ran: the note is
+		   also the Draft-board row tooltip and the "Scouting note" block on
+		   the player page, so skipping the render left both on the old text. */
 		/* SAY WHAT THE STAGING ACTUALLY SAVED.
 
 		   The engine's whole shape is that a slider re-runs only the phases it
@@ -5325,7 +5400,7 @@
 			setStatus("Re-ran " + res.phasesRun.join(" → ") + " · " +
 				Math.round(ms) + "ms");
 		}
-		if (!(notesOnly && state.tab !== "notes")) render();
+		render();
 	}
 
 	/* The seed history, with a way out of it.
@@ -5409,6 +5484,8 @@
 		snap.flavor = res.flavor ? res.flavor.label : null;
 		snap.at = Date.now();
 		snap.file = activeFile() ? activeFile().name : null;
+		// Which FILE the locks and seed were made against; see restoreSession.
+		snap.fileFp = activeFile() ? activeFile().fingerprint || null : null;
 		snap.name = className(res);
 		snap.season = res.season;
 		snap.label = snap.name + " · " + fp;
@@ -5451,10 +5528,52 @@
 	}
 
 	function restoreSession(i) {
-		const snap = state.sessions[i];
-		if (!snap) return;
+		const saved = state.sessions[i];
+		if (!saved) return;
+		const snap = JSON.parse(JSON.stringify(saved));
+		/* A SESSION BELONGS TO THE FILE IT WAS MADE ON.
+
+		   Its locks are keyed by pid and its seed only means anything against
+		   that file; applied to another class they forced the wrong players
+		   (the failure checkLockFingerprint exists to prevent) and were then
+		   persisted. Switch to the file it came from when that file is loaded;
+		   otherwise keep the settings but drop the locks, and say so. */
+		let target = state.active;
+		let foreign = false;
+		if (snap.fileFp) {
+			target = state.files.findIndex((f) => f.fingerprint === snap.fileFp);
+		} else if (snap.file && (!activeFile() || activeFile().name !== snap.file)) {
+			// A session recorded before fingerprints: the file name is all there is.
+			target = state.files.findIndex((f) => f.name === snap.file);
+		}
+		if (target === -1) {
+			foreign = true;
+			target = state.active;
+		}
+		const nLocks = Object.keys(snap.overrides || {}).length;
+		if (foreign) snap.overrides = {};
 		pushUndo("returned to " + snap.label);
-		applySnapshot(JSON.parse(JSON.stringify(snap)), "Returned to");
+		if (target !== state.active) {
+			state.active = target;
+			const sel = $("fileSelect");
+			if (sel) sel.value = String(target);
+			state.editing = null;
+			state.selected = {};
+			state.player = null;
+			state.compare = [null, null, null, null];
+			state.logPlayer = null;
+		}
+		if (activeFile()) state.overrideFingerprint = activeFile().fingerprint;
+		applySnapshot(snap, "Returned to");
+		if (foreign) {
+			showWarning("“" + snap.label + "” was made from " +
+				(snap.file ? "“" + snap.file + "”" : "a file that is no longer loaded") +
+				", which is not loaded, so its settings were applied to this class " +
+				"and " + (nLocks
+					? nLocks + " lock" + (nLocks === 1 ? " was" : "s were") + " not restored"
+					: "its seed does not reproduce that class") +
+				". Load that file and return to it again for the real thing.");
+		}
 		/* The next class recorded branches from THIS one, not from whatever
 		   was newest — which is what makes the history a lineage rather than
 		   a stack. See rememberSession. */
@@ -5561,7 +5680,9 @@
 			"until the first one that satisfies every condition ticked below, " +
 			"or the try limit is reached. The search is seeded, so the same " +
 			"conditions from the same class find the same seed again."));
-		const list = el("div", "colpicker");
+		// Its own single-column list: .colpicker is a multi-column grid that
+		// squeezed each row's label to one word per line.
+		const list = el("div", "untillist");
 		const rows = [];
 		/* The last search's clauses, so running it again is one click rather
 		   than twelve. See state.lastUntil. */
@@ -8137,6 +8258,25 @@
 		const focus = sameDest ? captureFocus(view) : null;
 		view.innerHTML = "";
 		const res = ensureResult(state.active);
+		/* A saved timeline with no files loaded (a reload: files are not
+		   stored). The Universe tab shows it as it was; the rest have no class. */
+		if (!res && !state.files.length && state.universe && state.universe.rows &&
+			state.universe.rows.length && !state.universe.running) {
+			$("app").hidden = false;
+			$("empty").classList.add("slim");
+			if (state.tab === "universe") V.universe(view, null);
+			else {
+				const box = el("div", "empty-state");
+				box.appendChild(el("h3", null, "No class loaded"));
+				box.appendChild(el("p", "hint", "Load class files to use this tab. " +
+					"The saved timeline is on the Universe tab."));
+				const go = el("button", "primary", "Open the Universe tab");
+				go.addEventListener("click", () => showTab("universe"));
+				box.appendChild(go);
+				view.appendChild(box);
+			}
+			return;
+		}
 		if (!res) {
 			/* Universe mode with the chain still to run this file (see
 			   ensureResult): the Universe tab renders its own progress, and
@@ -8951,6 +9091,17 @@
 				return;
 			}
 			const first = m.querySelector(FOCUSABLE_SEL);
+			const box = m.querySelector(".modalbox");
+			/* A read-only dialog whose only control is its Close button sits
+			   at the BOTTOM of a long body; focusing it scrolled the Guide to
+			   its last step. Focus the heading instead and start at the top. */
+			if (!onOk && (!first || !$("modalBody").contains(first))) {
+				const h = $("modalTitle");
+				h.tabIndex = -1;
+				h.focus({ preventScroll: true });
+				if (box) box.scrollTop = 0;
+				return;
+			}
 			if (first) first.focus();
 		});
 	}
@@ -9500,11 +9651,9 @@
 	}
 
 	function exportNotes(res) {
-		const lines = ["name\tnote"];
-		for (const p of res.players.slice().sort((a, b) => b.newOvr - a.newOvr)) {
-			lines.push(p.name + "\t" + (p.note || "").replace(/\n/g, " · "));
-		}
-		download("notes.tsv", csvJoin(lines), "text/tab-separated-values");
+		/* Players with no note are left out, as on the Notes tab. */
+		download("notes.tsv", csvJoin(global.Views.noteCopyText(res.players, "tsv").split("\n")),
+			"text/tab-separated-values");
 		exported();
 	}
 
@@ -9522,6 +9671,8 @@
 		const board = res.players.slice()
 			.sort((a, b) => (a.boardRank || 999) - (b.boardRank || 999));
 		for (const p of board) {
+			// No note, no entry: the Notes tab leaves such players out too.
+			if (!String(p.note || "").trim()) continue;
 			out.push("## " + (p.boardRank ? p.boardRank + ". " : "") + p.name);
 			out.push("");
 			out.push("`" + p.newPos + "` **" + p.newOvr + "/" + p.newPot + "** · " +
@@ -9863,6 +10014,14 @@
 		return state.exportOpts || { ages: true, injuries: true, jerseys: true };
 	}
 
+	/* The dialog's choices, kept across reloads and echoed beside the Export
+	   button (they used to revert silently on reload). */
+	function rememberExportOpts(opts) {
+		state.exportOpts = opts;
+		persist();
+		paintExportLabel();
+	}
+
 	/* One sequence at a time, driven from the button's single listener. A
 	   second `onclick` handler beside the listener fired both on every
 	   "Export next" click, so file 0 downloaded again each time. */
@@ -9933,7 +10092,7 @@
 			   uses the same choices (see currentExportOpts). */
 			cb.checked = remembered && typeof remembered[key] === "boolean"
 				? remembered[key] : !!dflt;
-			cb.addEventListener("change", () => { state.exportOpts = exportOpts(); });
+			cb.addEventListener("change", () => { rememberExportOpts(exportOpts()); });
 			lab.appendChild(cb);
 			lab.appendChild(document.createTextNode(" " + label));
 			optBox.appendChild(lab);
@@ -9991,13 +10150,13 @@
 		};
 		scopeSel.addEventListener("change", () => {
 			state.exportAwardsScope = scopeSel.value;
-			state.exportOpts = exportOpts();
+			rememberExportOpts(exportOpts());
 			paintScope();
 		});
 		confInput.addEventListener("input", () => {
 			state.exportMajorConfs = confInput.value.split(",")
 				.map((x) => x.trim()).filter(Boolean);
-			state.exportOpts = exportOpts();
+			rememberExportOpts(exportOpts());
 			paintScope();
 		});
 		scopeWrap.appendChild(scopeLab);
@@ -10863,11 +11022,17 @@
 	paintConfig();
 	paintHistory();
 	paintUndo();
+	paintExportLabel();
 	if (saved) applyOpenGroups(saved.open);
 	/* The full autosave first, then a synthetic universe is rebuilt from
 	   whatever it restored: it has no files to re-drop, only its seed. */
 	const afterAutosave = () => {
 		try { restoreSyntheticUniverse(); } catch (e) { showError(e); }
+		// A saved real-file universe has no files to rebuild from: show it.
+		if (!state.files.length && state.universe.rows.length) {
+			if (state.tab !== "universe") state.tab = "universe";
+			render();
+		}
 	};
 	Promise.resolve().then(loadAutosave).then(afterAutosave, afterAutosave);
 

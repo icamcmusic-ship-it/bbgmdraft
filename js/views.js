@@ -3860,6 +3860,25 @@
 			"redrawn, a fired coach is replaced by a named first-year hire, and " +
 			"the build-pool memory spans the whole timeline. A universe re-runs " +
 			"from its seeds — the export stores seeds, not simulated output."));
+		/* A saved timeline after a reload: the files are not stored, so there is
+		   nothing to rebuild it from. It is readable as it stands. */
+		const stranded = !A().state.files.length && u.rows.length > 0 && !u.running;
+		if (stranded) {
+			const note = el("div", "card note-stranded");
+			note.setAttribute("role", "status");
+			note.appendChild(el("p", null,
+				"This is the timeline you saved (" + u.rows.length + " seasons), shown " +
+				"as it was. The class files are not kept between visits, so it cannot be " +
+				"rebuilt or extended until you load them again."));
+			const load = el("button", "primary", "Load class files…");
+			load.id = "btnStrandedLoad";
+			load.addEventListener("click", () => {
+				const inp = document.getElementById("file");
+				if (inp) inp.click();
+			});
+			note.appendChild(load);
+			view.appendChild(note);
+		}
 		if (u.rows.length) {
 			const nm = el("div", "filters");
 			nm.appendChild(el("span", "pill", "World: " + (u.name || "Universe")));
@@ -3896,7 +3915,7 @@
 		const run = el("button", u.running ? "warn" : on ? null : "primary",
 			u.running ? "Running… " + (u.done || 0) + "/" + (u.total || "?")
 				: on ? "Rebuild the timeline" : "Build a timeline (one-off)");
-		run.disabled = !!u.running;
+		run.disabled = !!u.running || stranded;
 		run.title = on
 			? "Universe mode is on: every tab already shows this world."
 			: "Universe mode is off, so this builds a timeline without changing " +
@@ -3909,6 +3928,7 @@
 		   a forty-season universe something you can actually tune. */
 		if (!u.running && Array.isArray(u.order) && u.order.length >= 3 && u.rows.length) {
 			const part = el("button", null, "Re-run from a season\u2026");
+			part.disabled = stranded;
 			part.title = "Hold the seasons before a chosen one and re-run the " +
 				"rest under the current settings.";
 			part.addEventListener("click", () => { A().resumeUniverseDialog(); });
@@ -3918,6 +3938,7 @@
 		if (!u.running && u.rows.length && u.tail && !u.broken) {
 			const fwd = el("button", null, "Simulate more seasons…");
 			fwd.id = "btnSimForward";
+			fwd.disabled = stranded;
 			fwd.title = "Play N more seasons past " + u.tail.lastSeason +
 				" on synthetic classes drawn from this world's seed.";
 			fwd.addEventListener("click", () => { A().simulateForwardDialog(); });
@@ -3949,7 +3970,7 @@
 		exp.addEventListener("click", () => { A().exportUniverse(false); });
 		bar.appendChild(exp);
 		const expAll = el("button", null, "Export with class files");
-		expAll.disabled = !u.rows.length || !!u.running || !!u.viewOnly;
+		expAll.disabled = !u.rows.length || !!u.running || !!u.viewOnly || stranded;
 		expAll.title = "The same file with the class exports inlined, so the " +
 			"whole universe is one file to hand somebody. Larger.";
 		expAll.addEventListener("click", () => { A().exportUniverse(true); });
@@ -3959,7 +3980,7 @@
 		   does not, and it takes one array — so the whole universe is one
 		   file. See Engine.universePlayersFile. */
 		const expPlayers = el("button", null, "Export universe players (BBGM)");
-		expPlayers.disabled = !u.rows.length || !!u.running || !!u.viewOnly;
+		expPlayers.disabled = !u.rows.length || !!u.running || !!u.viewOnly || stranded;
 		expPlayers.title = "One BBGM players file for the whole universe: every " +
 			"class at its own draft year, pids renumbered across the world, the " +
 			"seasons each man actually played, and father/son links. Load it with " +
@@ -5579,11 +5600,93 @@
 
 	/* ---------------------------------------------------------------- notes */
 
+	/* The three "copy every note" texts. Pure, so a test can read what lands
+	   on the clipboard. A prospect with no note is left out, as the cards
+	   leave him out: a name above nothing is noise in a pasted post. */
+	function notedPlayers(players) {
+		return (players || []).slice().sort((a, b) => b.newOvr - a.newOvr)
+			.filter((p) => String(p.note || "").trim());
+	}
+	function noteCopyText(players, kind) {
+		const list = notedPlayers(players);
+		if (kind === "tsv") {
+			return ["name\tnote"].concat(list.map((p) =>
+				[p.name, String(p.note).replace(/\n/g, " · ")].join("\t"))).join("\n");
+		}
+		if (kind === "md") {
+			return list.map((p) => "### " + p.name + " — " + p.newPos + ", " +
+				(p.proClub || p.newCollege) + "\n\n" +
+				String(p.note).split("\n").map((l) => l.trim()).filter(Boolean)
+					.map((l) => "- " + l).join("\n")).join("\n\n");
+		}
+		return list.map((p) => p.name + "\n" + p.note).join("\n\n");
+	}
+
+	/* The export dialog's choices, as they are stored in localStorage and read
+	   back. Anything that is not a plain boolean or a known scope is dropped,
+	   so a hand-edited or truncated payload cannot hand the export route a
+	   string where it expects a flag. Returns null when there is nothing to keep. */
+	const EXPORT_FLAGS = ["stats", "prior", "highs", "awards", "ages", "noteAppend",
+		"includeNotes", "myMarks", "injuries", "jerseys"];
+	function cleanExportOpts(v) {
+		if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+		const out = {};
+		for (const k of EXPORT_FLAGS) if (typeof v[k] === "boolean") out[k] = v[k];
+		if (v.awardsScope === "all" || v.awardsScope === "major") out.awardsScope = v.awardsScope;
+		if (Array.isArray(v.majorConferences)) {
+			out.majorConferences = v.majorConferences
+				.filter((x) => typeof x === "string" && x.trim())
+				.map((x) => x.trim().slice(0, 60)).slice(0, 40);
+		}
+		return Object.keys(out).length ? out : null;
+	}
+
+	/* One line saying what the Export JSON button will write beyond (or
+	   instead of) the defaults: ages, injuries and jerseys on, nothing else.
+	   "" when the options are the defaults, so the header stays quiet. */
+	function exportSummary(opts) {
+		const o = cleanExportOpts(opts);
+		if (!o) return "";
+		const on = [];
+		if (o.stats) on.push("statline");
+		if (o.prior) on.push("prior seasons");
+		if (o.highs) on.push("season highs");
+		if (o.awards) on.push(o.awardsScope === "major" ? "awards (major only)" : "awards");
+		if (o.myMarks) on.push("my notes");
+		if (o.noteAppend) on.push("keeps file notes");
+		const off = [];
+		if (o.includeNotes === false) off.push("notes");
+		if (o.ages === false) off.push("ages");
+		if (o.injuries === false) off.push("injuries");
+		if (o.jerseys === false) off.push("jerseys");
+		return on.join(", ") + (on.length && off.length ? " · " : "") +
+			(off.length ? "no " + off.join(", ") : "");
+	}
+
+	/* Lines of the note template that print for only some players. A ticked
+	   box that writes nothing for a third of the class looked like a bug; the
+	   suffix says so up front. Keyed by Engine.NOTE_LINES key. */
+	const NOTE_LINE_NOTES = {
+		team: " (also team style and a transfer's old school)",
+		path: " (only players with a story to tell)",
+		record: " (college teams; clubs abroad have none)",
+		ranks: " (college players only, and only some of them)",
+		march: " (any non-regular-season games, conference tournaments too)",
+		injury: " (college players who missed games; none abroad)",
+		coach: " (college players only)",
+		archetype: " (and left-handed, when he is)",
+		awards: " (college players with honors only; can take two lines)",
+		stock: " (this tool's board and mock, not BBGM's draft order)",
+	};
+
 	function viewNotes(view, res) {
 		const st = A().state;
 		view.appendChild(el("p", "legendline",
-			"This is exactly what gets written into each player's note field in the " +
-			"exported file. Choose which lines appear under “Note template” in the sidebar."));
+			"These are the notes built from the “Note template” in the sidebar. The " +
+			"exported file can differ: “Include college awards” with a scope rewrites " +
+			"the Honors lines, “My notes” is appended when ticked, and unticking " +
+			"“Include scouting notes” leaves them out of the file. Players with no note " +
+			"are not listed."));
 		const bar = el("div", "filters");
 		/* The Notes search used to share state.filter.q with the Prospects tab,
 		   so typing here silently filtered the table over there. */
@@ -5591,28 +5694,19 @@
 			() => st.noteQuery, (v) => { st.noteQuery = v; }));
 		const copy = el("button", null, "Copy all notes");
 		copy.addEventListener("click", () => {
-			A().copyText(res.players.slice().sort((a, b) => b.newOvr - a.newOvr)
-				.map((p) => p.name + "\n" + p.note).join("\n\n"), copy, "Copy all notes", "all scouting notes");
+			A().copyText(noteCopyText(res.players, "plain"), copy, "Copy all notes", "all scouting notes");
 		});
 		bar.appendChild(copy);
 		const tsv = el("button", null, "Copy as spreadsheet rows");
 		tsv.addEventListener("click", () => {
-			const rows = res.players.slice().sort((a, b) => b.newOvr - a.newOvr)
-				.map((p) => [p.name, (p.note || "").replace(/\n/g, " · ")].join("\t"));
-			A().copyText(["name\tnote"].concat(rows).join("\n"), tsv,
+			A().copyText(noteCopyText(res.players, "tsv"), tsv,
 				"Copy as spreadsheet rows", "notes as spreadsheet rows");
 		});
 		bar.appendChild(tsv);
 		const md = el("button", null, "Copy as markdown");
 		md.title = "Copy every note as a markdown document: a heading per prospect";
 		md.addEventListener("click", () => {
-			const text = res.players.slice().sort((a, b) => b.newOvr - a.newOvr)
-				.map((p) => "### " + p.name + " — " + p.newPos + ", " +
-					(p.proClub || p.newCollege) + "\n\n" +
-					String(p.note || "").split("\n").map((l) => l.trim()).filter(Boolean)
-						.map((l) => "- " + l).join("\n"))
-				.join("\n\n");
-			A().copyText(text, md, "Copy as markdown", "notes as markdown");
+			A().copyText(noteCopyText(res.players, "md"), md, "Copy as markdown", "notes as markdown");
 		});
 		bar.appendChild(md);
 		view.appendChild(bar);
@@ -7509,7 +7603,7 @@
 	global.Views = {
 		players: viewPlayers, teams: viewTeams, bracket: viewBracket, bulkBar,
 		awards: viewAwards, board: viewDraft, distribution: viewDistribution, tournamentCard,
-		notes: viewNotes, gamelog: viewGameLog, compare: viewCompare, mock: viewMock, proFor,
+		notes: viewNotes, noteCopyText, NOTE_LINE_NOTES, cleanExportOpts, exportSummary, gamelog: viewGameLog, compare: viewCompare, mock: viewMock, proFor,
 		news: viewNews, universe: viewUniverse, playerLink, teamLink, playerPage,
 		gamePage, gameKeyFor, quadBar, pollSpark, ballotCards,
 		COLUMNS, STAT_MODES, PCT_KEYS, DERIVED, derived, cellValue, statValue,

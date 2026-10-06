@@ -152,14 +152,17 @@ header h1 span { color: var(--accent); font-weight: 600; }
 .spacer { flex: 1 1 0; height: 0; }
 /* Six loose buttons in a row read as one undifferentiated bar. */
 .btngroup { display: inline-flex; gap: 0; align-items: center; }
+/* What Export JSON will write when it is not the default; see paintExportLabel. */
+.exportsum { font-size: 11px; color: var(--dim); max-width: 220px; white-space: nowrap;
+	overflow: hidden; text-overflow: ellipsis; }
 /* The note-template presets wrap: six buttons do not fit a 305px sidebar in a row. */
 .notepresets { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 8px; }
-.btngroup.wide { display: flex; gap: 6px; margin: 6px 0; }
+.btngroup.wide { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
 .btngroup > button, .btngroup > select { border-radius: 0; margin-left: -1px; }
 .btngroup > *:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
 .btngroup > *:last-child { border-radius: 0 6px 6px 0; }
 .btngroup > *:only-child { border-radius: 6px; }
-.btngroup.wide > * { border-radius: 6px; margin-left: 0; flex: 1; }
+.btngroup.wide > * { border-radius: 6px; margin-left: 0; flex: 1 1 auto; }
 button, select, input[type=text], input[type=number], input[type=search] {
 	font: inherit; color: var(--text); background: var(--panel-2);
 	border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px;
@@ -375,6 +378,7 @@ th.sortable:hover { color: var(--text); }
 .check { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--dim); }
 .checks { display: grid; gap: 4px; }
 .unit { font-size: 10.5px; color: var(--dim); margin: 2px 0 0; opacity: .85; }
+.unit.notesuffix { margin: 0; }
 tr.locked td.sticky, tr.locked td { background: rgba(162,96,26,.08); }
 tr.picked td.sticky, tr.picked td { background: rgba(9,105,218,.10); }
 tbody tr { cursor: pointer; }
@@ -606,6 +610,7 @@ tbody tr.editing td.sticky { background: rgba(9,105,218,.14); }
 @media (max-width: 560px) {
 	header .btngroup { flex: 1 1 auto; }
 	header h1 span { display: none; }
+	.exportsum { flex: 1 1 100%; max-width: none; white-space: normal; }
 	.filters { gap: 5px; }
 	.filters select, .filters button { font-size: 11px; }
 	.rangefilter { flex: 1 1 100%; }
@@ -614,8 +619,12 @@ tbody tr.editing td.sticky { background: rgba(9,105,218,.14); }
 	/* A 40-column table on a phone is a horizontal scroll no matter what, so
 	   make the row header narrower rather than pretending otherwise. */
 	th.sticky, td.sticky {
-		max-width: 120px; overflow: hidden; text-overflow: ellipsis;
+		max-width: 44vw; overflow: hidden; text-overflow: ellipsis;
 	}
+	/* The name wraps rather than collapsing to "☆ …" beside the star and the
+	   "?" button; the "?" (also on the player page) goes to make room. */
+	td.sticky { white-space: normal; overflow-wrap: anywhere; min-width: 92px; }
+	td.sticky .whybtn { display: none; }
 	.editgrid, .ratinggrid { grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); }
 }
 
@@ -1316,6 +1325,7 @@ tr.dnp > td.sticky, tr.dnp > td.num { font-style: normal; }
    One row per condition: a three-state sense control (off / must / must not)
    and the condition it applies to. Two checkboxes per row would have doubled
    the height of a dialog that is already a list. */
+.untillist { display: block; }
 .untilrow {
 	display: grid;
 	grid-template-columns: 92px 1fr;
@@ -1649,6 +1659,9 @@ details.grp > summary .grp-changed:not([hidden]) + .grp-reset { margin-left: 6px
 @media (max-width: 560px) { .drop { padding: 24px 16px; margin: 16px auto; } }
 /* Until a class is loaded the settings have nothing to act on: only the theme
    shows, with a line saying the rest will appear. */
+/* A saved universe with no files loaded: the drop box shrinks to its heading. */
+.drop.slim { padding: 12px 16px; margin: 8px auto; }
+#empty.slim > p, #empty.slim .emptyacts { display: none; }
 .noclassnote { display: none; }
 body.noclass #settings > :not(.themerow):not(.noclassnote) { display: none; }
 body.noclass #settings .noclassnote { display: block; }
@@ -1669,6 +1682,8 @@ body.settings-open .fab { display: none; }
 button.linky { min-height: 24px; }
 .whybtn { min-width: 24px; min-height: 24px; }
 body.noclass .fab { display: none; }
+/* Room below the last row for the FAB (44px + 16px) so it never covers content. */
+@media (max-width: 860px) { body:not(.noclass):not(.settings-open) { padding-bottom: 72px; } }
 @media print { .fab { display: none !important; } }
 
 /* The loaded-files line: one summary, the per-class detail on click. */
