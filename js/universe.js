@@ -1997,6 +1997,17 @@
 	   .04/.05 (all fitted); the player of the year's and an All-American's
 	   school .06/.07 and .06/.06 (set against the rank percentiles of those
 	   schools in the simulated seasons).
+
+	   Measured against eight simulated 20-season worlds (guessed years from
+	   each one's tail): different champions in 20 years 13.2 against 14.0,
+	   most titles by one program 4.2 against 3.9, the top three's share
+	   0.45 against 0.41, a repeat champion 12.5% against 11.2%, the same
+	   champion within 10 years 44% against 44%. From a 3-season tail over 17
+	   years: 12.3 / 3.5 / 0.44 against 11.9 / 3.6 / 0.46 for simulated
+	   seasons 4-20, and over 30 years 18.5 champions and 6.2 titles for the
+	   top program against 17.5 and 6.2. The champion sits higher in the
+	   level order than the simulated one does (median 4-7th against 9th):
+	   the odds weigh prestige too.
 	   tools/tests/universe-realism-extrap.js re-measures all of this against
 	   a fresh simulated world. */
 	const GUESS_ODDS = {
