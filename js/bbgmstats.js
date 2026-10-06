@@ -246,7 +246,15 @@
 		   ratio read PER about a quarter high, on a forty-eight-minute club
 		   about a sixth low. */
 		let leaguePaceMin = 0;
+		/* A team marked `extra` is scored AGAINST the league and is not part of
+		   it: the league totals, the league's minutes, its PER normalization
+		   and the average team all skip it, so adding one cannot move any other
+		   row. The export uses this for a prior season that has no simulated
+		   team behind it (a reconstructed year), which is given the field's
+		   own average team to be measured against. */
+		const inField = (t) => !t.extra;
 		for (const t of teams) {
+			if (!inField(t)) continue;
 			for (const k of LEAGUE_KEYS) league[k] += t.stats[k] || 0;
 			league.pace += (t.stats.pace || 0) * (t.stats.gp || 0);
 			leaguePaceMin += ((t.stats.pace || 0) / (((t.stats && t.stats.gameMinutes) || gameMinutes) || 1)) *
@@ -254,7 +262,7 @@
 		}
 		league.pace = league.gp > 0 ? league.pace / league.gp : 0;
 		leaguePaceMin = league.gp > 0 ? leaguePaceMin / league.gp : 0;
-		const numTeams = teams.filter((t) => (t.stats.gp || 0) > 0).length || 1;
+		const numTeams = teams.filter((t) => inField(t) && (t.stats.gp || 0) > 0).length || 1;
 
 		const out = players.map(() => ({}));
 		if (!players.length || !league.gp) return out;
@@ -306,10 +314,10 @@
 							ps.pf * (league.ft / league.pf - FT_TRIP * (league.fta / league.pf) * vop));
 				}
 				aPER[i] = fix(paceAdj * uPER);
-				leagueAPER += aPER[i] * ps.min;
+				if (inField(players[i].t)) leagueAPER += aPER[i] * ps.min;
 			}
 			let leagueMin = 0;
-			for (const t of teams) leagueMin += (t.stats.gp || 0) * gmOf(t);
+			for (const t of teams) if (inField(t)) leagueMin += (t.stats.gp || 0) * gmOf(t);
 			leagueAPER /= (leagueMin || league.gp * gameMinutes) * numPlayersOnCourt;
 			for (let i = 0; i < players.length; i++) {
 				const per = leagueAPER > 0 ? aPER[i] * (15 / leagueAPER) : 0;

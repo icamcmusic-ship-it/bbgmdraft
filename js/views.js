@@ -368,9 +368,13 @@
 	function potTooltip(p) {
 		const f = p.potFactors;
 		if (!f) return "Potential " + p.newPot;
+		if (f.fromFile) {
+			return "Potential " + p.newPot + " — kept from the file, which this tool already adjusted";
+		}
 		const label = {
 			arch: "archetype", age: "age", ageClass: "age within the class",
 			touch: "shooting touch (FT%)", frame: "frame", role: "role vs production",
+			centre: "class average (the file's own level is kept)",
 			bias: "your potential bias slider",
 		};
 		const bits = Object.keys(label)

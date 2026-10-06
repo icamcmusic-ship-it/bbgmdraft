@@ -1328,19 +1328,31 @@
 	   the two disagreed about the same game: a grind-it-out team and a
 	   run-and-gun team produced identical final scores, and the style a note
 	   named was a label on nothing anyone could see in a result. */
+	const PACE_REACH = { lo: 45, hi: 100 };
+	/* The box score's possessions (fga - orb + tov + 0.44 fta, overtime
+	   included) ran about 1.7 above the tempo a season was set at, at every
+	   setting (69.7 at 68, 59.8 at 58). The slider is labelled "possessions per
+	   40 minutes" and the default league scored 75.3 points on 60.0 attempts
+	   against the modern anchor's 73.6 on 57.5, so the tempo is read 1.7 low
+	   and a slider of N realises about N possessions (audit C5). Taken off
+	   here, where the tempo is read, and in the stat model's own read of it
+	   (js/stats.js), so cfg.pace and the effective settings stay what the user
+	   and the storylines made them. */
+	const PACE_OFFSET = 1.7;
 	function teamPace(t, cfg) {
 		// A professional club carries its own league's pace (see leagueEnv).
 		if (t && Number.isFinite(t.scorePace)) return t.scorePace;
 		const style = t && t.style && Number.isFinite(t.style.pace) ? t.style.pace : 0;
-		/* Clamped to the declared pace band (js/config.js CLAMP.pace), the
-		   same one the stat model and the prior-season schedules read. It
-		   was capped at 78 here while the slider went to 82, so the top of
-		   the slider moved nothing on the scoreboard; a user who dials a
-		   track-meet season gets one. At the default the fastest style still
-		   lands in the mid-seventies, where the fastest real programs sit. */
-		const band = (global.Config && global.Config.CLAMP && global.Config.CLAMP.pace) ||
-			{ lo: 55, hi: 82 };
-		return clamp((cfg.pace || 68) + (cfg.scoringEnv || 0) * 1.6 + style, band.lo, band.hi);
+		/* Clamped to PACE_REACH, NOT to the slider's band. The slider's band
+		   (js/config.js CLAMP.pace, 55-82) is what a USER may dial; the tempo
+		   a team plays at is that plus the class jitter, the scoring
+		   environment (+/-4.8) and the program's style (-4.5..+5.5), and
+		   clamping the sum to the slider's own ceiling flattened the top of
+		   the dial: 80 and 82 realised the same season (audit C5). The reach
+		   is wide enough that no combination of dials a user can set hits
+		   it, so the slider stays monotone over its whole range. */
+		return clamp((cfg.pace || 68) - PACE_OFFSET + (cfg.scoringEnv || 0) * 1.6 + style,
+			PACE_REACH.lo, PACE_REACH.hi);
 	}
 
 	/* The tempo a style-less team plays at in this run: the baseline the
@@ -1348,9 +1360,8 @@
 	   pace is its own baseline. */
 	function paceBaseline(t, cfg) {
 		if (t && Number.isFinite(t.scorePace)) return t.scorePace;
-		const band = (global.Config && global.Config.CLAMP && global.Config.CLAMP.pace) ||
-			{ lo: 55, hi: 82 };
-		return clamp((cfg.pace || 68) + (cfg.scoringEnv || 0) * 1.6, band.lo, band.hi);
+		return clamp((cfg.pace || 68) - PACE_OFFSET + (cfg.scoringEnv || 0) * 1.6,
+			PACE_REACH.lo, PACE_REACH.hi);
 	}
 
 	/* The home edge, in points. A flat 3.2 for every building in the country
@@ -1375,7 +1386,30 @@
 		const CAL = global.Calibration;
 		const e = CAL && CAL.eraInfo ? CAL.eraInfo(cfg && cfg.era) : null;
 		const t = e && e.team;
-		return t && t.poss > 0 ? t.pts / t.poss : 1.03;
+		const base = t && t.poss > 0 ? t.pts / t.poss : 1.03;
+		return base * efficiencyScale(cfg);
+	}
+
+	/* WHAT THE EFFICIENCY DIAL IS WORTH ON THE SCOREBOARD.
+
+	   efficiencyEnv moved the stat model's true shooting but not this
+	   scoreboard, and the box score is anchored to the scoreboard's points
+	   (anchorPointsToScoreboard in js/stats.js): the better a team shot, the
+	   fewer shots it had to take to land on the same points, so "everything
+	   falls" meant FEWER POSSESSIONS (74.4 at +3, 78.7 at -3) with team
+	   points fixed at 82.7, and the TS% response was +1.2 / -2.0 points at
+	   +/-3 (audit C7). Possessions are the pace dial's business.
+
+	   So the dial moves points per possession here too, linearly and
+	   symmetrically, by the same relative amount the stat model moves it:
+	   the model's envEff is 0.010 of true shooting per unit on a league
+	   that shoots .56, i.e. 1.8% of points per unit. Then the anchor has
+	   nothing to undo, the box keeps the possessions the pace dial set, and
+	   team points move with efficiency. */
+	const EFFICIENCY_POINTS_PER_UNIT = 0.018;
+	function efficiencyScale(cfg) {
+		const e = cfg && Number.isFinite(cfg.efficiencyEnv) ? cfg.efficiencyEnv : 0;
+		return 1 + EFFICIENCY_POINTS_PER_UNIT * clamp(e, -3, 3);
 	}
 
 	function playGameScore(rng, A, B, homeForA, cfg, when, postseason) {
@@ -2574,7 +2608,7 @@
 		buildPrograms, simulateRegularSeason, simulateConferenceTournaments,
 		prospectTalent, teamRating, winProb, playGame, playGameScore, ratingOn,
 		realign, MIN_CONF_MEMBERS, MAX_CONF_MEMBERS, makeCoach, COACH_SITUATIONS, COACH_PHILOSOPHIES, CONF_REGIONS, regionsOverlap,
-		gameStrength, TOP_KNEE, TOP_STRETCH, REGULAR_NOISE, teamPace, homeEdge,
+		gameStrength, TOP_KNEE, TOP_STRETCH, REGULAR_NOISE, teamPace, PACE_REACH, PACE_OFFSET, efficiencyScale, homeEdge,
 		capFillers, FILLER_GAP, conferenceDrift, programLevel, applyOutages, makeFiller,
 		driftStyle, seasonOf,
 		assignFillerSlots, slotTypeOf, SLOT_HGT, SLOT_TARGET,

@@ -159,7 +159,7 @@
 			(cfg.redshirtShare === undefined ? 8 : cfg.redshirtShare) / 100, 0, 1);
 		const reclassShare = clamp(
 			(cfg.reclassShare === undefined ? 7 : cfg.reclassShare) / 100, 0, 1);
-		const order = players.slice().sort((a, b) => b.origOvr - a.origOvr);
+		const order = players.slice().sort(byOvrThenKey);
 		const n = Math.max(1, order.length - 1);
 		const lowMajors = [];
 		const midMajors = [];
@@ -397,8 +397,13 @@
 			   a prospect from abroad carries more, because his region
 			   multipliers do. */
 			const leagueMass = out.reduce((a, o) => a + o.w, 0);
+			/* The reference mass is the TABLE's own, not the caller's weights:
+			   normalising by the edited weights cancelled them out of the
+			   share, so under "rewrite" every weight setting (and the
+			   International preset) changed only which league and never
+			   whether (audit C11). With the table's weights nothing moves. */
 			const usaMass = Object.keys(C.NON_NCAA).reduce((a, name) => name === "DII NCAA"
-				? a : a + C.leagueWeight(name, "Anytown, USA", weights[name], ds.regionPower), 0);
+				? a : a + C.leagueWeight(name, "Anytown, USA", undefined, ds.regionPower), 0);
 			const cols = [];
 			let colMass = 0;
 			for (const name of C.names) {
@@ -981,6 +986,12 @@
 		}
 		const out = { startingSeason: want, players };
 		if (leagueFile.version !== undefined) out.version = leagueFile.version;
+		/* The tool's mark for THIS class only (see potStampFor). */
+		const mark = potStampFor(leagueFile, want);
+		if (mark) {
+			out.bbgmdraft = withPotStamp(null, want,
+				{ potBias: mark.bias, potSpread: mark.spread, potModel: mark.model });
+		}
 		return out;
 	}
 
@@ -1051,6 +1062,18 @@
 	   Callers pass a fresh Set and walk the players in file order. The key of
 	   a FIRST occurrence is unchanged, so a well-formed file keys exactly as
 	   it always did. */
+	/* Board order: best overall first, and a TIE BROKEN BY KEY. Array.sort is
+	   stable, so equal overalls used to keep the file's own order, and that
+	   order fed the board loop (which build each player draws, the anti-repeat
+	   counts, which curve slot he gets): shuffling a file's players changed 7
+	   of 70 results (37 tied adjacent overalls). Keys are the same whatever
+	   order the file lists the players in. */
+	function byOvrThenKey(a, b) {
+		if (b.origOvr !== a.origOvr) return b.origOvr - a.origOvr;
+		const ka = String(a.key);
+		const kb = String(b.key);
+		return ka < kb ? -1 : ka > kb ? 1 : 0;
+	}
 	function playerKey(p, idx, seen) {
 		const pid = Number(p && p.pid);
 		if (!Number.isFinite(pid)) return "idx" + idx;
@@ -1276,6 +1299,20 @@
 		},
 	];
 
+	/* The tempo a season is set at, from the (bent) slider and the class
+	   jitter: the jitter is added BEFORE the clamp, and the clamp is the
+	   reach (T.PACE_REACH), not the slider's band, so the top of the dial is
+	   not flattened (audit C5). The draw is always taken so the stream is the
+	   same whatever the setting. The box score's possessions run about
+	   T.PACE_OFFSET above the tempo a season is set at; that is taken off where
+	   the tempo is read (teamPace in js/teams.js), not here, so this value is
+	   still "the slider plus what the year did to it" and the effective-settings
+	   box does not report a constant shift as if it were luck. */
+	function effectivePace(pace, envRng) {
+		const reach = T.PACE_REACH || { lo: PACE_MIN, hi: PACE_MAX };
+		return clamp(pace + envRng.normal(0, 2.5), reach.lo, reach.hi);
+	}
+
 	/* Draw the season's storylines and fold their bends into the config.
 
 	   Same rule as the class flavor: a setting the user has changed is left
@@ -1289,6 +1326,16 @@
 	   that: asked of the already-bent `cfg`, every setting the weirdness dial
 	   or the flavor had moved read as the user's, so the storyline — which is
 	   documented to get the last word on the season dials — never got it. */
+	/* Has the USER decided this setting? Moved off its default, or pinned at
+	   it (cfg.pinned, written by Config.make — see pinnedKeys there). Asking
+	   only `!== default` made a setting sitting at its default impossible to
+	   pin against a flavor, a storyline or the weirdness dial (audit C4). */
+	function userTouched(userCfg, key) {
+		const D = global.Config.DEFAULTS;
+		return userCfg[key] !== D[key] ||
+			(Array.isArray(userCfg.pinned) && userCfg.pinned.indexOf(key) !== -1);
+	}
+
 	function applyNarrative(cfg, rng, userCfg) {
 		if (!cfg || cfg.narrative === false) return { cfg, narrative: [] };
 		const pool = NARRATIVES.slice();
@@ -1313,7 +1360,7 @@
 				   explosion" being the slowest of all. */
 				const k = key === "paceShift" ? "pace" : key;
 				const want = key === "paceShift" ? D.pace + story.bend[key] : story.bend[key];
-				const touched = (userCfg || cfg)[k] !== D[k];
+				const touched = userTouched(userCfg || cfg, k);
 				if (touched) {
 					if (reach <= 0 || rng.random() >= reach) continue;
 					out[k] = cfg[k] + (want - cfg[k]) * 0.5 * reach;
@@ -1370,18 +1417,17 @@
 	function applyWeirdness(cfg) {
 		const w = clamp(Number(cfg && cfg.weirdness) || 0, -2, 3);
 		if (!w) return cfg;
-		const D = global.Config.DEFAULTS;
 		const out = Object.assign({}, cfg);
 		for (const [key, lo, mid, hi] of WEIRDNESS) {
 			// A setting the user has moved is the user's. Same rule as a flavor.
-			if (cfg[key] !== D[key]) continue;
+			if (userTouched(cfg, key)) continue;
 			const v = w < 0 ? mid + (mid - lo) * (w / 2) : mid + (hi - mid) * (w / 3);
 			out[key] = global.Config.isCount(key) ? Math.round(v) : v;
 		}
 		/* Storylines are a yes/no rather than a dial, and a world dialled all
 		   the way down should not be drawing three of them. Only from the
 		   default, like everything else here. */
-		if (cfg.narrative === D.narrative && w <= -1.5) out.narrative = false;
+		if (!userTouched(cfg, "narrative") && w <= -1.5) out.narrative = false;
 		return out;
 	}
 
@@ -1423,7 +1469,7 @@
 		for (const k of Object.keys(bend)) {
 			// Against the user's own settings, not the weirdness-bent ones —
 			// see applyNarrative.
-			const touched = user[k] !== D[k];
+			const touched = userTouched(user, k);
 			if (touched) {
 				if (!reachRng || reachRng.random() >= reach) continue;
 				/* Half of the way from the user's value to the authored one,
@@ -1511,11 +1557,13 @@
 		   make two classes with the same settings feel different. */
 		const envRng = rng.child("classEnv");
 		const jitteredCfg = Object.assign({}, cfg);
-		/* Jittered INSIDE the band: the floor alone left the top open, so at a
-		   slider of 82 the effective pace ran 78-85 and every consumer clamped
-		   the excess away, which made the realized mean ~81 and left a pace the
-		   effective-settings box could not honestly show. */
-		jitteredCfg.pace = clamp(cfg.pace + envRng.normal(0, 2.5), PACE_MIN, PACE_MAX);
+		/* Jittered, then clamped to the REACH (T.PACE_REACH) rather than to the
+		   slider's own band. Clamping the jittered value to the slider's
+		   ceiling made the realized mean 81.0 at a slider of 82 and left 80
+		   and 82 nearly the same season (audit C5); and every consumer then
+		   clamped the sum with the scoring environment and the style to the
+		   same ceiling again. */
+		jitteredCfg.pace = effectivePace(cfg.pace, envRng);
 		jitteredCfg.efficiencyEnv = clamp(
 			(cfg.efficiencyEnv || 0) + envRng.normal(0, 0.6), -3, 3);
 		/* A stat noise of exactly 0 is "stat lines follow ratings exactly", and
@@ -1659,13 +1707,21 @@
 		for (const p of players) describeTransfer(p);
 
 		// --- ratings ---------------------------------------------------
-		const order = players.slice().sort((a, b) => b.origOvr - a.origOvr);
+		const order = players.slice().sort(byOvrThenKey);
 		/* What this class has drawn so far, so one build cannot be half of it
 		   and the top of the board cannot be the same build twice. See
 		   RB.newDrawCounts. */
 		const drawCounts = RB.newDrawCounts();
+		/* How many of the class stay Balanced is exact, not a per-player
+		   chance (audit C10); see RB.planBalanced. Its own stream. */
+		if (RB.planBalanced) {
+			drawCounts.balanced = RB.planBalanced(
+				rng.child("balancedPlan" + vsalt), order.length, cfg.archetypeDiversity);
+		}
 		let curve = null;
 		if (cfg.ovrMode === "curve") curve = RB.classCurve(rng, players.length, cfg);
+		// Players whose built overall is not the one asked for (see below).
+		const buildMisses = [];
 
 		order.forEach((p, i) => {
 			const ov = p.override || {};
@@ -1708,7 +1764,16 @@
 			// what the college season is simulated off (see talentPot), so
 			// moving "Potential bias" never re-simulates a game.
 			let gap = Math.max(1, p.origPot - p.origOvr);
-			if (curve) gap = prng.truncNormal(17, 7, 2, 45);
+			/* The curve's gap FALLS with overall, as BBGM's potEstimator does
+			   (audit C12). It was one N(17, 7) for everybody, and the factor
+			   terms added on top rise with ovr, so the tool's gap climbed from
+			   15.0 at ovr 10-19 to 20.8 at 50-59 where BBGM's runs 21.5 -> 17.0
+			   (measured over 20 curve classes). The centre now has a slope of
+			   -0.26 a point (the factors' +0.145 and BBGM's -0.11 leave -0.11
+			   net) about ovr 33, the curve class's own mean, and a level of 19,
+			   which is where BBGM's own classes sit. Same single draw. */
+			if (curve) gap = prng.truncNormal(19 - 0.26 * (targetOvr - 33), 7, 2, 45);
+			p.gapFromFile = !curve;
 
 			// Size variance happens BEFORE the rebuild so the hgt rating and the
 			// listed height stay in sync (they'd otherwise drift up to 3 inches
@@ -1761,8 +1826,12 @@
 			p.buildCleanBase = built.cleanBase;
 			p.buildPinned = ov.ratings || null;
 			// The rookie caps this build ran under, for every later re-solve.
-			p.buildCaps = RB.rookieCaps(cfg);
+			// (After any lift for the file's own ratings or ovr: see RB.fitCaps.)
+			p.buildCaps = built.caps !== undefined ? built.caps : RB.rookieCaps(cfg);
 			p.newOvr = built.ovr;
+			if (built.ovr !== targetOvr) {
+				buildMisses.push({ name: p.name, asked: targetOvr, got: built.ovr });
+			}
 			p.ovrRange = built.ovrRange;
 			p.builtPot = built.pot;
 			p.baseGap = gap;
@@ -1805,10 +1874,31 @@
 			p.newPot = clamp(Math.round(targetOvr + gap), p.newOvr, 100);
 		});
 
+		/* A built overall that is not the asked-for one is said out loud. Under
+		   "Preserve each ovr" the asked-for overall is the file's own, and a
+		   prospect rebuilt at 83 from a file's 90 used to come back with
+		   nothing anywhere recording it (res.warnings was empty). The caps are
+		   lifted for preserve mode, so what is left is a height or a pinned
+		   rating the overall genuinely cannot be reached with. */
+		state.buildWarnings = [];
+		if (buildMisses.length) {
+			const shown = buildMisses.slice(0, 5).map(
+				(m) => m.name + " " + m.asked + " to " + m.got).join(", ");
+			state.buildWarnings.push(buildMisses.length + " player" +
+				(buildMisses.length === 1 ? " was" : "s were") +
+				" built to a different overall than asked for (" + shown +
+				(buildMisses.length > 5 ? ", ..." : "") + "; asked, then built). " +
+				"That overall is out of reach for the height, the pinned ratings or the rookie caps.");
+		}
+
 		state.players = players;
 		state.season = season;
 		assignRecruiting(players, rng.child("recruiting" + vsalt), season, cfg);
-		state.surprises = assignSurprises(players, rng.child("surprises" + vsalt), cfg,
+		/* Handed over in board order (overall, then key), not file order: a
+		   draw that picks "one of the eligible players" indexes into the list
+		   it was given, so the file's own order decided who an anomaly landed
+		   on (audit C14). */
+		state.surprises = assignSurprises(players.slice().sort(byOvrThenKey), rng.child("surprises" + vsalt), cfg,
 			{ cfg, flavor: state.flavor, pool: state.archetypePool, counts: drawCounts });
 		/* An anomaly can hand a man a rank outright (a hometown holdout at
 		   No. 12-40, a late bloomer at No. 1-9) or move him to another
@@ -1909,8 +1999,20 @@
 			   budget spends the slot on one that still says something. */
 			pick: (p, ctx) => !heightsLocked(ctx && ctx.cfg),
 			apply: (p, r, ctx) => {
-				const tall = r.random() < 0.66;
-				const inches = tall ? r.int(87, 89) : r.int(66, 68);
+				/* HALF A FOOT FROM HIS OWN HEIGHT (audit B1). This drew an
+				   absolute 66-68" or 87-89" for everyone, which moved the
+				   three outliers of a class by -9 to -15 inches (hgt ratings
+				   of 0-7) where the label says "physical outlier". Six inches
+				   up or down (five to seven), clamped to the height range; a
+				   man too near an end for one direction goes the other way
+				   rather than not moving. `tall` is still drawn first, so the
+				   stream is spent exactly as before. */
+				let tall = r.random() < 0.66;
+				const shift = r.int(5, 7);
+				const own = Number.isFinite(p.newHgtInches) ? p.newHgtInches : p.hgtInches;
+				if (tall && own + 5 > HGT_MAX_IN) tall = false;
+				else if (!tall && own - 5 < HGT_MIN_IN) tall = true;
+				const inches = clamp(own + (tall ? shift : -shift), HGT_MIN_IN, HGT_MAX_IN);
 				/* Height feeds BBGM's overall formula more heavily than any
 				   other rating, so moving it means re-solving: changing the
 				   vector and leaving ovr alone would put the number in the
@@ -1965,7 +2067,11 @@
 				p.newPos = re.pos;
 				p.newSkills = re.skills;
 				p.ovrRange = re.ovrRange;
-				p.newWeight = tall ? r.int(215, 245) : r.int(155, 175);
+				/* Weight follows the NEW height (it was an absolute 215-245 or
+				   155-175 lb): a lean build for a tall man, an ordinary one for
+				   a small man. */
+				const typical = RB.typicalWeight(inches);
+				p.newWeight = Math.round(tall ? typical - r.int(10, 40) : typical + r.int(-10, 10));
 				p.sizeOutlier = tall ? "tall" : "small";
 			},
 		},
@@ -2728,7 +2834,7 @@
 	}
 	function assignRecruiting(players, rng, season, cfg) {
 		const ncaa = players.filter((p) => !p.nonNcaa);
-		const order = ncaa.slice().sort((a, b) => b.origOvr - a.origOvr);
+		const order = ncaa.slice().sort(byOvrThenKey);
 		const n = Math.max(1, order.length);
 		/* Ranks a universe computed across every loaded file, keyed by
 		   player key (see Universe.recruitingCohorts). A file run inside
@@ -3549,7 +3655,8 @@
 		const CAL = global.Calibration;
 		const e = CAL && CAL.eraInfo ? CAL.eraInfo(cfg && cfg.era) : null;
 		const t = e && e.team;
-		return t && t.poss > 0 ? t.pts / t.poss : 1.03;
+		return (t && t.poss > 0 ? t.pts / t.poss : 1.03) *
+			(T.efficiencyScale ? T.efficiencyScale(cfg) : 1);
 	}
 
 	/* `ref` is the program's own draft-year regular season, when it has
@@ -3940,6 +4047,9 @@
 		const judged = state.players.map(potAgeOf).filter(Number.isFinite);
 		const classPotAge = judged.length
 			? judged.reduce((a, b) => a + b, 0) / judged.length : state.classAge;
+		const pending = [];
+		const baked = state.leagueFile
+			? potStampFor(state.leagueFile, classDraftYear(state.leagueFile.players || [], state.season)) : null;
 		for (const p of state.players) {
 			const ov = p.override || {};
 			const prng = rng.child("pot:" + p.key);
@@ -3950,6 +4060,25 @@
 			}
 			const spread = Math.max(0, cfg.potSpread);
 			const bias = cfg.potBias * 2.2;
+			/* A class the tool already wrote (see potStampFor): the gap in the
+			   file has had its factors, noise and bias applied once. Applying
+			   them again made the gap's spread grow every generation and the
+			   mean with it (audit B6). Only what the dials now ask for beyond
+			   what the file was written with is applied: the bias difference,
+			   and noise for any extra spread. With the same dials the gap is
+			   the file's own, exactly. A curve-drawn gap is not the file's. */
+			if (baked && p.gapFromFile !== false) {
+				const dBias = bias - baked.bias * 2.2;
+				const extraSd = 0.35 * Math.sqrt(Math.max(0, spread * spread - baked.spread * baked.spread));
+				const noise = extraSd > 0 ? prng.normal(0, extraSd) : 0;
+				p.potFactors = { arch: 0, age: 0, ageClass: 0, touch: 0, frame: 0, role: 0,
+					total: 0, centre: 0, bias: dBias, noise, fromFile: true };
+				const gap = dBias === 0 && noise === 0 ? p.baseGap
+					: RB.softBound(p.baseGap + dBias + noise, 1, 100, POT_GAP_BAND);
+				p.newPot = clamp(Math.round(p.newOvr + gap), Math.min(p.newOvr + 1, 100), 100);
+				if (RB.potForModel) p.newPot = RB.potForModel(cfg.potModel, p.newOvr, potAgeOf(p), p.newPot);
+				continue;
+			}
 			/* The age the ROLLED class year implies, when the file's ages
 			   carry no information (BBGM writes 19 for everyone). The gap
 			   used to be flat across class years — a rolled senior exported
@@ -3971,6 +4100,28 @@
 			   editor's breakdown. */
 			factors.total = RB.sumFactors(factors);
 			p.potFactors = factors;
+			pending.push({ p, factors, potAge, bias });
+		}
+		/* THE ADDITIVE FACTORS ARE CENTRED ON THE CLASS (audit B6).
+
+		   The gap is built from the FILE's own gap, so the factors can only
+		   be a redistribution of it: if they average anything but zero, every
+		   re-import of the tool's own output moves the whole class's upside
+		   by that amount again. They did — the archetype, age, frame and role
+		   terms average about -0.8 to -3.1 over a class (mostly the age term:
+		   a class of rolled 19-24 year-olds averages -3.4 against BBGM's 19,
+		   which the file's gap already reflects), and the gap series over six
+		   generations of the same file walked 11.0 -> 14.2. The class's mean
+		   total is taken out, so the term sorts players against each other
+		   and leaves the level to the file (or, in curve mode, to the curve).
+		   A class too small to have a meaningful mean (under 12) is centred
+		   proportionally to its size, so a one-player class keeps most of his
+		   own factors. */
+		const centre = pending.length
+			? (pending.reduce((a, x) => a + x.factors.total, 0) / pending.length) *
+				Math.min(1, pending.length / 12) : 0;
+		for (const { p, factors, potAge, bias } of pending) {
+			factors.centre = -centre;
 			/* A SOFT FLOOR, NOT A HARD ONE.
 
 			   `Math.max(1, ...)` piled every prospect whose additive terms came
@@ -3987,7 +4138,7 @@
 			   never returns a gap below 1. Same function the role-usage table
 			   uses; see js/ratings.js. */
 			const gap = RB.softBound(
-				p.baseGap + bias + factors.total * 0.55 + factors.noise,
+				p.baseGap + bias + (factors.total - centre) * 0.55 + factors.noise,
 				1, 100, POT_GAP_BAND);
 			p.newPot = clamp(Math.round(p.newOvr + gap), Math.min(p.newOvr + 1, 100), 100);
 			// The selected potential model (cfg.potModel; see RB.potForModel).
@@ -4731,6 +4882,8 @@
 				/* The anomaly shortlist, and the meta-dial that moves half of
 				   the settings above. Both reshape the class from here down. */
 				"anomalyChoices", "anomalyPicks", "weirdness",
+				// Which default-valued settings the user pinned (audit C4).
+				"pinned",
 				/* Universe mode is a whole-chain fact, not a phase input: the
 				   runner is handed a different seed and a carryOver when it is
 				   on. Declared here so that turning it on invalidates
@@ -5141,7 +5294,7 @@
 				   skips the build phase would lose the jitter. */
 				const envRng = new Rng(seed).child("classEnv");
 				const j = Object.assign({}, bent);
-				j.pace = clamp(bent.pace + envRng.normal(0, 2.5), PACE_MIN, PACE_MAX);
+				j.pace = effectivePace(bent.pace, envRng);
 				j.efficiencyEnv = clamp(
 					(bent.efficiencyEnv || 0) + envRng.normal(0, 0.6), -3, 3);
 				const noiseDraw = envRng.normal(0, 0.25);
@@ -5218,7 +5371,8 @@
 				surprises: state.surprises || [],
 				recruitingClasses: state.recruitingClasses || [],
 				realignment: state.realignment || [],
-				warnings: validation.warnings,
+				warnings: state.buildWarnings && state.buildWarnings.length
+					? validation.warnings.concat(state.buildWarnings) : validation.warnings,
 				phasesRun: ran,
 				leagueFile,
 			};
@@ -6726,12 +6880,88 @@
 		   alternative — normalizing one man's freshman year against a league
 		   of one team — is not an approximation of the right answer, it is a
 		   different number entirely. */
-		const adv = BS.leagueAdvanced(rosters, {
+		/* THE PRIOR SEASONS THAT HAVE NO TEAM BEHIND THEM (audit C8).
+
+		   A reconstructed prior year (cfg.priorSeasons = "reconstruct"), and
+		   the one simulated year in fourteen that could not be simulated, have
+		   real counting totals and no team-season, so every ratio against a
+		   team came out as the zero blankRow starts with: PER 0, ORtg 0, EWA 0
+		   beside 462 real minutes, in every BBGM table that shows them.
+
+		   They are measured against the field's own average team instead: the
+		   simulated team-season nearest the field's mean points and
+		   possessions, with the man dropped into the rotation slot whose
+		   minutes are closest to his (so the team the formulas see is
+		   average and contains him). The team is marked `extra`, so it is
+		   scored against the league and is not part of it: no other row moves.
+
+		   A reconstructed line carries no steals, blocks, turnovers or fouls
+		   (the row says 0, as it always has); the formulas need them, so the
+		   missing ones are taken off his draft-year line per minute for this
+		   calculation only. The counting columns the row prints are
+		   untouched. */
+		const fallbackRows = [];
+		let borrow = null;
+		for (const p of result.players || []) {
+			if (!Array.isArray(p.priorSeasons) || !p.stats) continue;
+			for (const row of p.priorSeasons) {
+				if (!row || row.redshirt || (row.box && row.lines)) continue;
+				if (!(row.gp > 0) || !(row.mpg > 0)) continue;
+				fallbackRows.push({ p, row });
+			}
+		}
+		if (fallbackRows.length) {
+			let bestD = Infinity;
+			for (const r of rosters) {
+				if (!r.stats || r.players.length < 8 || avg.pts <= 0 || avg.poss <= 0) continue;
+				const d = Math.abs(r.box.pts / avg.pts - 1) + Math.abs(r.box.poss / avg.poss - 1);
+				if (d < bestD) { bestD = d; borrow = r; }
+			}
+		}
+		const extras = [];
+		const extraFor = [];
+		if (borrow) {
+			for (const f of fallbackRows) {
+				const { p, row } = f;
+				const totals = rateTotals(row, p.stats, row.season, 40);
+				const ref = p.stats;
+				const perMin = (g, h) => (ref && ref.mpg > 0 && Number.isFinite(g) ? (g / ref.mpg) * row.mpg * totals.gp : h);
+				if (!Number.isFinite(row.spg)) totals.stl = Math.round(perMin(ref && ref.spg, 0));
+				if (!Number.isFinite(row.bpg)) totals.blk = Math.round(perMin(ref && ref.bpg, 0));
+				if (!Number.isFinite(row.topg)) totals.tov = Math.round(perMin(ref && ref.topg, 0));
+				if (!Number.isFinite(row.pfpg)) totals.pf = Math.round(perMin(ref && ref.pfpg, 0));
+				totals.trb = totals.orb + totals.drb;
+				// The slot whose minutes are nearest his.
+				let slot = 0;
+				let gap = Infinity;
+				borrow.players.forEach((pl, i) => {
+					const d = Math.abs(pl.stats.min - totals.min);
+					if (d < gap) { gap = d; slot = i; }
+				});
+				const players = borrow.players.slice();
+				players[slot] = {
+					pos: p.newPos || sizePos(ref && ref.bigness),
+					key: null, line: ref, games: null, zones: null, stats: totals,
+				};
+				const team = Object.assign({}, borrow, { extra: true, players });
+				extras.push(team);
+				f.slot = slot;
+				extraFor.push(f);
+			}
+		}
+		const adv = BS.leagueAdvanced(rosters.concat(extras), {
 			gameMinutes: 40, numPlayersOnCourt: 5,
 		});
 		let flat = 0;
 		for (const r of rosters) {
 			for (const pl of r.players) pl.adv = adv[flat++];
+		}
+		/* Keyed like the rows themselves, for seasonRow's fallback to read. */
+		const fallbackAdv = new Map();
+		for (let i = 0, at = flat; i < extras.length; i++) {
+			const f = extraFor[i];
+			fallbackAdv.set(f.p.key + "|" + f.row.season, adv[at + f.slot]);
+			at += extras[i].players.length;
 		}
 
 		/* Pass four: the rows themselves. */
@@ -6772,6 +7002,7 @@
 			}
 			rows.set(meta.key, { row, games: pl.games, meta });
 		}
+		rows.fallbackAdv = fallbackAdv;
 		SEASON_STATS.set(result, rows);
 		return rows;
 	}
@@ -6826,6 +7057,13 @@
 		row.ast = totals.ast; row.tov = totals.tov;
 		row.stl = totals.stl; row.blk = totals.blk;
 		row.pf = totals.pf; row.pts = totals.pts;
+		/* The derived statistics, against the field's average team (see
+		   collegeSeasonStats). Zero stays only where there is nothing to
+		   compute them from: a draft-year row with no team behind it. */
+		const fa = prior && built.fallbackAdv ? built.fallbackAdv.get(key) : null;
+		if (fa) {
+			for (const k of BS.STATS.derived) row[k] = Number.isFinite(fa[k]) ? fa[k] : 0;
+		}
 		row.__team = where;
 		return row;
 	}
@@ -7541,6 +7779,10 @@
 		   the game with a different one. Stamping the version the game is on
 		   skips all of it. */
 		if (num(file.version) === undefined) file.version = BB.LEAGUE_DATABASE_VERSION;
+		/* The mark that lets a re-import know the potential here is already
+		   adjusted (see potStampFor). The dials are the EFFECTIVE ones, the
+		   ones the gaps were actually built with. */
+		file.bbgmdraft = withPotStamp(src.bbgmdraft, exportSeason, result.effectiveCfg || result.cfg);
 		// Readable by the caller, never written into the file.
 		exportFile.passthroughs = passthroughs;
 		exportFile.sizeRewritten = sizeRewritten;
@@ -7740,6 +7982,7 @@
 		return {
 			version: full.version,
 			startingSeason: full.startingSeason,
+			bbgmdraft: full.bbgmdraft,
 			players,
 		};
 	}
@@ -7786,6 +8029,7 @@
 		const perFile = [];
 		let nextPid = Number.isFinite(opts.firstPid) ? Number(opts.firstPid) : 0;
 		let version = null;
+		const stamped = {};
 		const seen = new Map();
 		let duplicates = 0;
 		let fileNo = -1;
@@ -7793,6 +8037,7 @@
 			fileNo++;
 			const file = exportPlayersFile(res, opts);
 			if (version === null) version = file.version;
+			if (file.bbgmdraft && file.bbgmdraft.pot) Object.assign(stamped, file.bbgmdraft.pot);
 			const season = classDraftYear(file.players, res.season);
 			const rows = [];
 			for (const p of file.players) {
@@ -7913,6 +8158,7 @@
 			file: {
 				version: version === null ? undefined : version,
 				startingSeason: perFile.length ? perFile[0].season : undefined,
+				bbgmdraft: { v: 1, pot: stamped },
 				players,
 			},
 			seasons: perFile.map((f) => ({ season: f.season, players: f.players.length })),
@@ -8035,6 +8281,46 @@
 			}
 		}
 		return best === null ? fallback : best;
+	}
+
+	/* THE TOOL'S OWN MARK ON A FILE (audit B6).
+
+	   A class this tool wrote carries a root key, `bbgmdraft`, that says which
+	   draft year's potential it has already adjusted and with which dials:
+
+	       { v: 1, pot: { "2026": { bias, spread, model } } }
+
+	   Without it a re-import cannot tell the tool's own output from a BBGM
+	   export, and the potential model — which builds each gap from the file's
+	   own gap plus factors and noise — added the same spread to it again every
+	   generation (gap sd 5.0 -> 6.7 -> 9.7 -> 12.7 over three; the floor at 1
+	   then pushes the mean up: 11.0 -> 14.2 over six). A marked class's gap is
+	   taken as already adjusted: only the DIFFERENCE between the dials now and
+	   the dials it was written with is applied.
+
+	   The key is at the file's root, where BBGM looks only for the stores it
+	   knows (players, teams, gameAttributes, startingSeason, version, ...); its
+	   Draft -> Import and Create League both read those and ignore everything
+	   else (checked against zengm's createStream.ts, leagueFileUpload.ts and
+	   handleUploadedDraftClass). Nothing is written inside a player. */
+	function potStampFor(file, year) {
+		const m = file && file.bbgmdraft;
+		const e = m && typeof m === "object" && m.pot && typeof m.pot === "object"
+			? m.pot[String(year)] : null;
+		if (!e || typeof e !== "object") return null;
+		const bias = Number(e.bias);
+		const spread = Number(e.spread);
+		return Number.isFinite(bias) && Number.isFinite(spread)
+			? { bias, spread, model: e.model === "bbgm" ? "bbgm" : "tool" } : null;
+	}
+	function withPotStamp(prev, year, dials) {
+		const pot = Object.assign({}, prev && prev.pot);
+		pot[String(year)] = {
+			bias: Number(dials.potBias) || 0,
+			spread: Math.max(0, Number(dials.potSpread) || 0),
+			model: dials.potModel === "bbgm" ? "bbgm" : "tool",
+		};
+		return Object.assign({}, prev, { v: 1, pot });
 	}
 
 	function mergeIntoLeague(result, league, opts) {
@@ -8250,6 +8536,8 @@
 		}
 
 		const file = Object.assign({}, league, { players });
+		// The class's potential is adjusted once; see potStampFor.
+		file.bbgmdraft = withPotStamp(league.bbgmdraft, season, result.effectiveCfg || result.cfg);
 		const mergedPids = [];
 		for (const p of replacements.values()) mergedPids.push(Number(p.pid));
 		for (const p of added) mergedPids.push(Number(p.pid));

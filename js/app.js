@@ -969,6 +969,17 @@
 			JSON.stringify(b === undefined ? null : b);
 	}
 	function isDefaultSetting(k, v) { return sameSetting(k, v, defaultCfg()[k]); }
+	/* A control the user has touched is a setting they have decided, even when
+	   it sits at its default: pin it (cfg.pinned, see Config.make) so a class
+	   flavor, a season storyline or the weirdness dial leave it alone (audit
+	   C4). Putting it back to the default by the reset gestures un-pins it. */
+	function pinSetting(k, on) {
+		const list = Array.isArray(state.cfg.pinned) ? state.cfg.pinned.slice() : [];
+		const i = list.indexOf(k);
+		if (on && i === -1) list.push(k);
+		else if (!on && i !== -1) list.splice(i, 1);
+		state.cfg.pinned = list;
+	}
 	/* The part of a setting worth writing down: a weight table as only the
 	   entries that differ from the built-ins, anything else as itself.
 	   Undefined when the setting is at its default. */
@@ -1074,6 +1085,12 @@
 		} catch (e) { return null; }
 	}
 
+	/* The three "avoid repeating recent..." dials read the ring of classes the
+	   page has already made. Headless there is no ring, so they do nothing
+	   (audit C13). */
+	const MEMORY_NOTE = "; needs previous classes made in the page, so it has " +
+		"no effect from the command line";
+
 	const SLIDER_HINT = {
 		archetypePool: (v) => (v
 			? "this class is drawn from about " + v + " of the " +
@@ -1127,16 +1144,22 @@
 		classDepth: (v) => (v < 0 ? "top-heavy: stars, then a cliff"
 			: v > 0 ? "deep: fewer stars, more rotation players" : "an even curve"),
 		eliteCount: (v) => v === 0 ? "no genuine stars" : v + " prospect(s) get a star ceiling",
-		potBias: (v) => "ovr→pot gap shifted " + (v >= 0 ? "+" : "") + (v * 2.2).toFixed(1) +
-			" points (cosmetic: potential does not feed the season)",
+		potBias: (v) => "asks for the ovr→pot gap " + (v >= 0 ? "+" : "") + (v * 2.2).toFixed(1) +
+			" points" + (v < 0
+				? ", but no prospect's pot goes below ovr+1, so the class average falls less (measured: −3 gives about −4.7)"
+				: v > 0 ? " (measured: +3 gives about +7)" : "") +
+			" (cosmetic: potential does not feed the season)",
 		potSpread: (v) => "extra noise of " + (v * 0.35).toFixed(1) + " points sd on the ovr→pot gap, " +
-			"added to the build's own spread of about 5.6 (higher = more boom/bust; " +
-			"no effect under the bbgm potential model)",
+			"on top of the gap's own spread of about 5.9 (measured total: 5.9 at 0, 6.1 at 6, 7.5 at 16; " +
+			"higher = more boom/bust; no effect under the bbgm potential model)",
 		rookieSkillCap: (v) => v > 0
-			? "skill and shooting ratings ease in from " + (v - 10) + " and rarely pass " + v + " (hgt is never capped)"
+			? "skill and shooting ratings ease in from " + (v - 10) + " and rarely pass " + v +
+				" (hgt is never capped). Rebuilt classes follow it; with overalls preserved it only " +
+				"stops the tool adding to a rating, and lifts as far as the file's own ratings and overall need"
 			: "no cap: a specialist can come in with a 95",
 		rookiePhysCap: (v) => v > 0
-			? "stre/spd/jmp/endu ease in from " + (v - 10) + " and rarely pass " + v
+			? "stre/spd/jmp/endu ease in from " + (v - 10) + " and rarely pass " + v +
+				" (with overalls preserved, lifted as far as the file's own ratings and overall need)"
 			: "no cap on physicals",
 		rookieOvrCap: (v) => v > 0
 			? "re-simulated overalls (curve mode) ease in from " + (v - 10) +
@@ -1149,7 +1172,8 @@
 		// label a 30% overstatement are gone.
 		archetypeDiversity: (v) => (v === 0
 			? "0: every single player is Balanced — no builds at all. Legal, and probably not what you want."
-			: "exactly " + Math.round(100 - v) + "% of the class stays Balanced"),
+			: "exactly " + Math.round(100 - v) + "% of the class stays Balanced (rounded to a whole " +
+				"player: " + (100 - v) + "% of 70 is " + Math.round(0.7 * (100 - v)) + ")"),
 		classFlavor: (v) => v < 0.15 ? "every class has the same archetype mix"
 			: v > 1.5 ? "a class is unmistakably one thing"
 			: "each class leans guard-heavy, big-heavy, defensive…",
@@ -1163,11 +1187,11 @@
 		poolMemory: (v) => (v <= 0
 			? "each class draws its builds with no memory of the last"
 			: "a build in the last three classes is " +
-				Math.round(Math.pow(3, v)) + "x less likely to return"),
+				Math.round(Math.pow(3, v)) + "x less likely to return") + MEMORY_NOTE,
 		flavorMemory: (v) => (v <= 0
 			? "each class draws its flavor with no memory of the last"
 			: "a flavor drawn in the last three classes is " +
-				Math.round(Math.pow(3, v)) + "x less likely to return"),
+				Math.round(Math.pow(3, v)) + "x less likely to return") + MEMORY_NOTE,
 		teamMomentum: (v) => (v <= 0
 			? "every game is an independent draw around the team's rating"
 			: "a team on a run plays like one " + (2.6 * v).toFixed(1) +
@@ -1204,7 +1228,11 @@
 		pace: (v) => {
 			const CAL = global.Calibration;
 			const era = CAL.eraInfo(state.cfg.era) || CAL.eraInfo(CAL.DEFAULT_ERA);
-			return "≈" + Math.round((v * era.rotation.ortg) / 100) +
+			/* Measured over whole seasons (storylines off): a slider of N plays
+			   N - 1 possessions a game per team, 57 at 58 and 81 at 82, so the
+			   unit is what the label says. */
+			return "≈" + Math.round(v - 1) + " possessions and ≈" +
+				Math.round((v * era.rotation.ortg) / 100) +
 				" team points per game (Division I only)";
 		},
 		scoringEnv: (v) => (v >= 0 ? "+" : "") + (v * 1.6).toFixed(1) + " possessions per 40",
@@ -1231,7 +1259,7 @@
 		anomalyMemory: (v) => (v <= 0
 			? "each class draws its anomalies with no memory of the last"
 			: "an anomaly used last class is " + Math.round(Math.pow(3, v)) +
-				"x less likely to return"),
+				"x less likely to return") + MEMORY_NOTE,
 		flavorReach: (v) => (v <= 0
 			? "a flavor only moves settings you have left alone"
 			: "a flavor may also move about " + v + "% of the settings you have " +
@@ -2040,6 +2068,7 @@
 				for (const k of keys) {
 					const d = defaultOf(k);
 					state.cfg[k] = d;
+					pinSetting(k, false);
 					const inp = $(k);
 					if (inp) {
 						if (inp.type === "checkbox") inp.checked = !!d;
@@ -2146,6 +2175,7 @@
 					e.stopPropagation();
 					pushUndo("reverted " + key + " to default");
 					state.cfg[key] = defaultOf(key);
+					pinSetting(key, false);
 					markDirty();
 					// Update checkboxes and selects that paintConfig reads
 					const inp = $(key);
@@ -2188,6 +2218,7 @@
 				if (!numPushed) { pushUndo("moved " + key); numPushed = true; }
 				range.value = v;
 				state.cfg[key] = Number(range.value);
+				pinSetting(key, true);
 				markDirty();
 				paintConfig();
 				scheduleRun();
@@ -2223,6 +2254,7 @@
 				range.value = def;
 				num.value = def;
 				state.cfg[key] = def;
+				pinSetting(key, false);
 				markDirty();
 				paintConfig();
 				scheduleRun();
@@ -2266,7 +2298,7 @@
 	   reading is an irritation rather than a surprise. */
 	const RANDOM_SCOPES = ["gentle", "wide"].concat(Object.keys(RANDOM_GROUPS));
 	// The controls marked data-curve in index.html.
-	const CURVE_KEYS = ["classQuality", "classDepth", "eliteCount"];
+	const CURVE_KEYS = ["classQuality", "classDepth", "eliteCount", "rookieOvrCap"];
 	const RANDOM_KEYS = Object.keys(RANDOM_GROUPS)
 		.reduce((a, g) => a.concat(RANDOM_GROUPS[g]), []);
 
@@ -3175,6 +3207,7 @@
 			input.addEventListener("input", () => {
 				if (!pushed) { pushUndo("moved " + key); pushed = true; }
 				state.cfg[key] = Number(input.value);
+				pinSetting(key, true);
 				markDirty();
 				paintConfig();
 				scheduleRun();
@@ -3297,7 +3330,12 @@
 			const keep = {};
 			for (const k of SESSION_TOGGLES) if (!(k in p)) keep[k] = state.cfg[k];
 			const wasUniverse = !!state.cfg.universe;
-			state.cfg = fitEra(CFG.make(Object.assign({}, p, keep)));
+			/* The kept toggles are carried over as VALUES, not as decisions:
+			   `pinned` is explicit here so a toggle sitting at its default
+			   does not become pinned just because it was copied across. */
+			const pins = (Array.isArray(p.pinned) ? p.pinned : [])
+				.concat((state.cfg.pinned || []).filter((k) => k in keep));
+			state.cfg = fitEra(CFG.make(Object.assign({}, p, keep, { pinned: pins })));
 			state.cfg.seed = seed;
 			if (!!state.cfg.universe !== wasUniverse) state.universe.cfgs = {};
 			state.presetName = preset.value;
@@ -3769,6 +3807,11 @@
 			const d = settingDelta(k, state.cfg[k]);
 			if (d !== undefined) out[k] = d;
 		}
+		// The settings pinned AT their default (audit C4): a link is the whole
+		// state, and this is the part of it a delta cannot show.
+		const pinnedAtDefault = Array.isArray(state.cfg.pinned)
+			? state.cfg.pinned.filter((k) => isDefaultSetting(k, state.cfg[k])) : [];
+		if (pinnedAtDefault.length) out.pinned = pinnedAtDefault;
 		/* A rerolled class has no typed seed; the one it drew is the only
 		   thing that reproduces it, and a link without it opened a
 		   different class on another machine. */
@@ -3810,6 +3853,8 @@
 			lines.push("seed: " + payload.seed);
 		}
 		delete payload.seed;
+		const pinnedAtDefault = payload.pinned || [];
+		delete payload.pinned;
 		const keys = Object.keys(payload).sort();
 		lines.push("");
 		if (!keys.length) {
@@ -3833,6 +3878,10 @@
 					: def && typeof def === "object" ? JSON.stringify(def) : String(def);
 				lines.push("  " + k + ": " + shown + "  (default " + defShown + ")");
 			}
+		}
+		if (pinnedAtDefault.length) {
+			lines.push("pinned at their default (flavors and storylines leave them alone): " +
+				pinnedAtDefault.join(", "));
 		}
 		const locks = Object.keys(state.overrides).length;
 		if (locks) lines.push("", locks + " locked player" + (locks === 1 ? "" : "s") +
@@ -8933,6 +8982,10 @@
 
 	function potExplain(p) {
 		const f = p.potFactors;
+		if (f.fromFile) {
+			return "  potential kept from the file: this tool already adjusted it" +
+				(Math.abs(f.bias || 0) >= 0.3 ? ", then your bias slider " + (f.bias > 0 ? "+" : "") + f.bias.toFixed(1) : "");
+		}
 		const bits = [];
 		const add = (label, v) => {
 			if (Math.abs(v) < 0.3) return;
@@ -8944,6 +8997,7 @@
 		add("shooting touch (FT%)", f.touch);
 		add("frame", f.frame);
 		add("role vs production", f.role);
+		add("class average (the file's own level is kept)", f.centre || 0);
 		add("your bias slider", f.bias || 0);
 		return "  potential built from: " + (bits.length ? bits.join(", ") : "nothing notable");
 	}

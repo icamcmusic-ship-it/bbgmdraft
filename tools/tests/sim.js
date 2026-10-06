@@ -132,6 +132,12 @@ module.exports = function (ok, V) {
 			for (const k of Object.keys(a)) {
 				if (!Number.isFinite(a[k])) note("non-finite " + k, 0);
 			}
+			/* A prior season with no team behind it is scored against the
+			   field's average team (audit C8, `extra` in leagueAdvanced). Its
+			   line is a reconstruction, not a simulated rotation, so a 29%-of-
+			   team-shots line is possible there and the ceilings below are for
+			   the simulated field; it is held to being finite, above. */
+			if (c.t.extra) continue;
 			const bpm = a.obpm + a.dbpm;
 			const ws40 = ((a.ows + a.dws) * 40) / ps.min;
 			if (Math.abs(bpm) > 26) note("BPM", bpm);

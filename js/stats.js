@@ -50,10 +50,13 @@
 	const FT_TRIP = global.BBGMStats.FT_TRIP;
 	const BB = global.BBGM;
 	const CAL = global.Calibration;
-	/* The declared pace band, read from js/config.js like js/engine.js does,
-	   so the stat model cannot saturate somewhere the slider does not. */
-	const PACE_BAND = (global.Config && global.Config.CLAMP && global.Config.CLAMP.pace) ||
-		{ lo: 55, hi: 82 };
+	/* The reach of an EFFECTIVE tempo (slider + jitter + scoring environment +
+	   style), which is wider than the band a user may dial: clamping the sum
+	   to the slider's ceiling made 80 and 82 the same season (audit C5). The
+	   scoreboard in js/teams.js clamps to the same band. */
+	const PACE_REACH = (global.TeamsSim && global.TeamsSim.PACE_REACH) || { lo: 45, hi: 100 };
+	// What the box's possessions run above the tempo a season is set at; see teamPace.
+	const PACE_OFFSET = (global.TeamsSim && global.TeamsSim.PACE_OFFSET) || 0;
 
 	/* A CEILING THAT BENDS.
 
@@ -581,6 +584,13 @@
 		   exists to produce. */
 		BLK_CAP: 0.52,
 		STL_CAP: 0.42,
+		/* Division I's team steal and block pools as a multiple of the era's
+		   anchor (see teamPools, "STEALS, BLOCKS AND FOULS"). The old literal
+		   bases 6.8 / 4.0 realised 6.6 / 3.9 against 6.3 / 3.5, i.e. the pool
+		   is worth about 97% of its base once the caps and reconciliation are
+		   through; these are the factors that land the league on the anchor. */
+		STL_POOL_K: 1.038,
+		BLK_POOL_K: 1.041,
 		/* 0.28 let one player take 28% of a team's 16.6 fouls — 4.65 a
 		   game, past the number that ends a night. The real D-I leader in
 		   fouls per game sits around 3.6-3.8. */
@@ -2393,6 +2403,30 @@
 		const assistedShare = TUNING.ASSISTED_SHARE *
 			scale(agg("passing", 0.35), POOL_BASE.passing, 0.80, 0.72, 1.22);
 
+		/* STEALS, BLOCKS AND FOULS ARE PER POSSESSION EVENTS.
+
+		   Their pools were flat constants, so a team playing at 58 and one at
+		   82 recorded the same steals, blocks and fouls: correlation with the
+		   box's possessions 0.05 / 0.01 / -0.02, against 0.65-0.85 for
+		   turnovers, which already scale (audit C6). A steal is a defensive
+		   possession that ends in a takeaway, a block a contested attempt, a
+		   foul a stoppage in a possession, so each runs in proportion to the
+		   game's possessions (both teams play the same ones, so this team's
+		   tempo is the opponent's too).
+
+		   The reference is the era's own possessions for Division I and the
+		   league's own tempo for a professional club, so the LEAGUE level does
+		   not move with the ratio; the league bases were the literals 6.8 and
+		   4.0, which ran 6.6 against a 6.3 anchor and 3.9 against 3.5. They
+		   are the era's anchors now, times a measured pool-to-box factor
+		   (what the caps and the share reconciliation take off the pool). */
+		const paceRef = Number.isFinite(e.paceRef) && e.paceRef > 0
+			? e.paceRef : (CAL.TEAM && CAL.TEAM.poss > 0 ? CAL.TEAM.poss : 67.4);
+		const paceRatio = clamp(pace / paceRef, 0.6, 1.5);
+		const stlBase = Number.isFinite(e.paceRef) ? 6.8
+			: (CAL.TEAM && Number.isFinite(CAL.TEAM.stl) ? CAL.TEAM.stl : 6.3) * TUNING.STL_POOL_K;
+		const blkBase = Number.isFinite(e.paceRef) ? 4.0
+			: (CAL.TEAM && Number.isFinite(CAL.TEAM.blk) ? CAL.TEAM.blk : 3.5) * TUNING.BLK_POOL_K;
 		return {
 			orbRate,
 			orbPool,
@@ -2402,7 +2436,7 @@
 			   level and the team total was still unconstrained. */
 			toPool: chances * shape.tovShare,
 			astPool: teamFga * (1 - missShare) * assistedShare,
-			stlPool: 6.8 * scale(agg("stealing", 0.30), POOL_BASE.stealing, 1.00, 0.70, 1.45),
+			stlPool: stlBase * paceRatio * scale(agg("stealing", 0.30), POOL_BASE.stealing, 1.00, 0.70, 1.45),
 			/* Team blocks measured 4.57 a game against a real D-I 3.5, 31%
 			   high: a 5.3 base and a 2.80x ceiling on top of a 1.70 exponent
 			   compounded into a shot-blocking league. The shape is right (the
@@ -2423,7 +2457,7 @@
 			   real D-I maximum near 7. 4.0 * 1.75 = 7.0 is the sentence the
 			   comment already wrote. The floor is left alone: a team of guards
 			   blocking 1.8 a game is a real team. */
-			blkPool: 4.0 * scale(agg("blocking", 0.70), POOL_BASE.blocking, 2.30, 0.45, 1.75),
+			blkPool: blkBase * paceRatio * scale(agg("blocking", 0.70), POOL_BASE.blocking, 2.30, 0.45, 1.75),
 			/* THE ERA'S OWN FOULS, not one number for every era.
 
 			   TEAM_PF was a literal 16.6 — the modern game — and the era table
@@ -2440,7 +2474,7 @@
 
 			   The literal stays as the fallback for a caller with no era set. */
 			pfPool: (CAL.TEAM && Number.isFinite(CAL.TEAM.pf) ? CAL.TEAM.pf : TUNING.TEAM_PF) *
-				scale(agg("fouling", 0.20), POOL_BASE.fouling, 0.60, 0.80, 1.25),
+				paceRatio * scale(agg("fouling", 0.20), POOL_BASE.fouling, 0.60, 0.80, 1.25),
 		};
 	}
 
@@ -2797,7 +2831,8 @@
 		   halves of a season disagreed about the fastest game there was. */
 		const pace = env.pace !== null && env.pace !== undefined
 			? clamp(env.pace + (cfg.scoringEnv || 0) * 1.2 + stylePace, 50, 115)
-			: clamp(cfg.pace + cfg.scoringEnv * 1.6 + stylePace, PACE_BAND.lo, PACE_BAND.hi);
+			: clamp(cfg.pace - PACE_OFFSET + cfg.scoringEnv * 1.6 + stylePace,
+				PACE_REACH.lo, PACE_REACH.hi);
 		// Chances exceed possessions by the team's offensive rebounds; solve
 		// chances = poss + orbRate * missShare * chances for the multiplier.
 		// One pass on a nominal ORB rate, then refine with the roster's own.
@@ -2807,7 +2842,8 @@
 		   team actually played, which the engine works out from their rosters. */
 		const missShare = clamp(1 - (ctx.teamFg || CAL.chanceShape().fgp), 0.42, 0.64);
 		const oppMissShare = clamp(1 - (ctx.oppFg || (1 - missShare)), 0.42, 0.64);
-		const poolEnv = { missShare, oppMissShare };
+		const poolEnv = { missShare, oppMissShare,
+			paceRef: env.pace !== null && env.pace !== undefined ? env.pace : null };
 		/* chances = poss + ORB, and an offensive rebound comes off a MISSED FIELD
 		   GOAL, so ORB = orbRate * ORB_FT * missShare * FGA and FGA is the
 		   era's field-goal share of a chance:
@@ -2844,7 +2880,7 @@
 			? played
 			: env.pace !== null && env.pace !== undefined
 				? clamp(pace + paceAdj, 50, 118)
-				: clamp(pace + paceAdj, PACE_BAND.lo, PACE_BAND.hi);
+				: clamp(pace + paceAdj, PACE_REACH.lo, PACE_REACH.hi);
 		let chanceMult = mult(TUNING.ORB_RATE);
 		let pools = teamPools(comps, mins, jitteredPace, chanceMult, gameMinutes, poolEnv);
 		chanceMult = mult(pools.orbRate);

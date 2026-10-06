@@ -136,7 +136,47 @@ function coerce(key, raw) {
 		if (/^(false|0|no|off)$/i.test(raw)) return false;
 		throw new Error(key + " takes true or false, not \"" + raw + "\"");
 	}
-	if (t === "string" || D[key] === null) {
+	/* Settings whose default is null (audit C13). This branch took the raw
+	   string for them, and Config.make quietly drops a string where it wants a
+	   number or a table, so `--set leagueWeights=...` and `--set wEuroLeague=40`
+	   ran exactly like not giving them. The three legacy destination dials are
+	   numbers; the two weight tables are JSON objects of numbers; the rest are
+	   containers the page fills from the classes it has already made. */
+	if (D[key] === null) {
+		if (key === "wEuroLeague" || key === "wGLeague" || key === "wNBL") {
+			const n = Number(raw);
+			if (raw === "" || !Number.isFinite(n) || n < 0) {
+				throw new Error(key + " takes a number of 0 or more, not \"" + raw + "\"");
+			}
+			return n;
+		}
+		if (key === "leagueWeights" || key === "archetypeWeights") {
+			let obj;
+			try { obj = JSON.parse(raw); } catch (e) {
+				throw new Error(key + " takes a JSON object, e.g. " +
+					(key === "leagueWeights" ? "'{\"EuroLeague\": 60, \"JUCO\": 1}'" : "'{\"Sharpshooter\": 3}'") +
+					" — \"" + raw + "\" is not JSON (" + e.message + ")");
+			}
+			if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
+				throw new Error(key + " takes a JSON object of name: weight, not " +
+					(Array.isArray(obj) ? "a list" : String(raw)));
+			}
+			const known = key === "leagueWeights"
+				? Object.keys(global.Colleges.NON_NCAA)
+				: global.RatingsBuilder.ARCHETYPES.map((a) => a.name);
+			const bad = Object.keys(obj).filter((k) => known.indexOf(k) === -1);
+			if (bad.length) {
+				throw new Error(key + " has no entry called " + bad.map((k) => "\"" + k + "\"").join(", ") +
+					" (see: bbgmdraft settings " + key + ")");
+			}
+			const nan = Object.keys(obj).filter((k) => typeof obj[k] !== "number" || !Number.isFinite(obj[k]));
+			if (nan.length) throw new Error(key + " weights must be numbers (" + nan.join(", ") + ")");
+			return obj;
+		}
+		throw new Error(key + " cannot be set from the command line: it holds what the page " +
+			"has already generated (previous classes, picked anomalies, a biography)");
+	}
+	if (t === "string") {
 		// Config.make quietly resets a choice it does not know to the default,
 		// which made a typo run as if it had not been given.
 		const allowed = C.CHOICES && C.CHOICES[key] ? C.CHOICES[key]() : null;
@@ -427,12 +467,21 @@ function cmdSettings(args) {
 	for (const k of Object.keys(C.DEFAULTS)) {
 		if (name && k.toLowerCase().indexOf(name.toLowerCase()) === -1) continue;
 		const d = C.DEFAULTS[k];
-		if (d !== null && typeof d === "object") continue;
+		// A list (the note template) has its own option; null is a real
+		// setting whose value is a number or a JSON object (see coerce).
+		if (Array.isArray(d)) continue;
 		const r = C.sliderRange(k);
 		rows.push([k, JSON.stringify(d), r ? r.min : "", r ? r.max : ""]);
 	}
 	process.stdout.write(table(rows) + "\n");
-	if (!name) process.stdout.write("\nbbgmdraft settings presets  lists the presets\n");
+	if (!name) {
+		process.stdout.write("\nbbgmdraft settings presets  lists the presets\n" +
+			"A null default is a real setting: wEuroLeague, wGLeague and wNBL take a number; " +
+			"leagueWeights and archetypeWeights take a JSON object, e.g.\n" +
+			"  --set 'leagueWeights={\"EuroLeague\": 60, \"JUCO\": 1}'\n" +
+			"poolMemory, flavorMemory and anomalyMemory need the classes the page has already " +
+			"made, so they do nothing from the command line.\n");
+	}
 }
 
 const HELP = `BBGM Draft Class Workshop (command line, experimental)

@@ -146,8 +146,9 @@
 			<label for="potModel">Potential model</label>
 			<select id="potModel">
 				<option value="tool">Tool (default)</option>
-				<option value="bbgm">BBGM potEstimator (what the game will show)</option>
+				<option value="bbgm">BBGM potEstimator formula</option>
 			</select>
+			<p class="hint">The tool's model builds each gap from his build, age, frame, touch and production. BBGM's own formula (72.3 − 2.33 × age + 0.83 × ovr) is smoother: a steadier gap of about 3 points sd against about 6, and it shrinks as ovr rises. The game only uses it when a league turns on "use pot estimator" or has very many teams; otherwise it simulates development (monteCarloPot), and its own version of the formula adds ±2 of noise that this one leaves out.</p>
 		</div>
 		<div class="ctl"><label><input type="checkbox" id="signatureSkills"> Signature skills (builds reach their promised BBGM skill badge)</label></div>
 		<div class="ctl" data-curve><label for="classQuality">Class quality <b></b></label><input type="range" id="classQuality" min="-3" max="3" step="0.5"></div>
@@ -181,7 +182,7 @@
 		<div class="ctl"><label for="buildNoise">Build noise <b></b></label><input type="range" id="buildNoise" min="0" max="14" step="0.5"></div>
 		<div class="ctl"><label for="rookieSkillCap">Rookie skill cap <b></b></label><input type="range" id="rookieSkillCap" min="0" max="99" step="1"></div>
 		<div class="ctl"><label for="rookiePhysCap">Rookie physical cap <b></b></label><input type="range" id="rookiePhysCap" min="0" max="99" step="1"></div>
-		<div class="ctl"><label for="rookieOvrCap">Rookie overall cap <b></b></label><input type="range" id="rookieOvrCap" min="0" max="99" step="1"></div>
+		<div class="ctl" data-curve><label for="rookieOvrCap">Rookie overall cap <b></b></label><input type="range" id="rookieOvrCap" min="0" max="99" step="1"></div>
 		<div class="ctl">
 			<label for="flavorHint">Class flavor</label>
 			<select id="flavorHint"></select>
@@ -194,9 +195,9 @@
 		     forty-six builds drawn out of 385 do. See flavorMemoryFactor in
 		     js/ratings.js. -->
 		<div class="ctl"><label for="flavorMemory">Avoid repeating recent flavors <b></b></label><input type="range" id="flavorMemory" min="0" max="1" step="0.05"></div>
-		<div class="ctl"><label><input type="checkbox" id="varySize"> Let height &amp; weight drift with the build</label></div>
+		<div class="ctl"><label><input type="checkbox" id="varySize"> Let weight drift with the build (and height too, when heights are not kept below)</label></div>
 		<div class="ctl"><label><input type="checkbox" id="lockHeights"> Keep every imported height exactly as the file listed it</label></div>
-		<p class="hint">On, nothing the tool draws can move a player's height rating — not a reroll, not the size drift, not the 7'4" anomaly. A height you set by hand still moves it.</p>
+		<p class="hint">On, nothing the tool draws can move a player's height rating — not a reroll, not the size drift, not the physical-outlier anomaly (which is half a foot from his own height when it runs). Weight can still drift if the box above it is ticked. A height you set by hand still moves it.</p>
 		<p class="hint">Every rebuilt player is re-solved against BBGM's own ovr formula, so specializing a build never changes his overall.</p>
 	</details>
 
