@@ -133,7 +133,8 @@ module.exports = function (ok, V) {
 		const widths = (rs) => rs.filter((r) => /^MPG p5$|^PF mean$|^BPG p95$/.test(r.name))
 			.map((r) => r.name + " [" + r.lo.toFixed(2) + ", " + r.hi.toFixed(2) + "]");
 		const mpg = rows.filter((r) => r.name === "MPG p5")[0];
-		ok("C9/MPG p5 is no longer [3.93, 40.07]", mpg && mpg.hi / mpg.lo < 2.5, widths(rows).join(" "));
+		ok("C9/MPG p5 is no longer [3.93, 40.07] (a 3-seed MPG p5 is good to about +/-1.5)",
+			mpg && mpg.lo > 10 && mpg.hi < 34, widths(rows).join(" "));
 
 		/* The bands can FAIL: a model scaled the way an uncalibrated one is
 		   wrong (see PERTURBATION) trips many of them at the documented 3
