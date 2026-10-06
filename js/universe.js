@@ -345,11 +345,17 @@
 	   pure function of the finished season, so a replay draws the same one.
 
 	   How it reaches the sim: the carried level is what buildPrograms blends
-	   at 0.38. Adding PRESTIGE_GAIN x delta to it — 0.62 / 0.38 — makes the
-	   steady-state shift of the season's level exactly `delta`. */
+	   in at (1 - fresh weight). Adding prestigeGain() x delta to it — fresh /
+	   (1 - fresh) — makes the steady-state shift of the season's level
+	   exactly `delta`. */
 	const PRESTIGE_CAP = 8;
 	const PRESTIGE_DECAY = 0.85;
-	const PRESTIGE_GAIN = 0.62 / 0.38;
+	/* fresh / (1 - fresh), the fresh weight being the one buildPrograms uses
+	   (TeamsSim.CARRY_FRESH_WEIGHT, 0.36); 0.62 / 0.38 is the old mix. */
+	const prestigeGain = () => {
+		const w = global.TeamsSim && global.TeamsSim.CARRY_FRESH_WEIGHT;
+		return Number.isFinite(w) && w > 0 && w < 1 ? w / (1 - w) : 0.62 / 0.38;
+	};
 
 	function priorPrestige(name, fallback) {
 		const C = global.Colleges;
@@ -532,6 +538,24 @@
 			carry.titles[carry.champion] = (carry.titles[carry.champion] || 0) + 1;
 		}
 		carry.digest = digestStep(prev && prev.digest, res);
+		/* The season each school last changed conference, for the realignment
+		   cooldown (see realignWorld in js/teams.js). Only the recent ones:
+		   anything older is past the cooldown and need not ride the carry. */
+		{
+			const season = Number.isFinite(res.season) ? res.season
+				: res && res.leagueFile ? res.leagueFile.startingSeason : null;
+			const moved = {};
+			const was = (prev && prev.moved) || {};
+			if (Number.isFinite(season)) {
+				for (const k of Object.keys(was)) {
+					if (Number.isFinite(was[k]) && season - was[k] < 6) moved[k] = was[k];
+				}
+				for (const m of res.realignment || []) {
+					if (m && m.school) moved[m.school] = season;
+				}
+			}
+			carry.moved = moved;
+		}
 		/* Which programs have a vacancy. Read from the April carousel (a
 		   per-program draw over record, prestige, situation, tenure and age),
 		   not from the news feed: the feed carried at most one "coaching
@@ -568,7 +592,7 @@
 			const base = Number.isFinite(t.baseLevel) ? t.baseLevel : t.level - adj;
 			const d = prestigeStep(prevDelta[t.name], t);
 			carry.prestigeDelta[t.name] = d;
-			carry.levels[t.name] = Math.max(5, Math.min(99, base + PRESTIGE_GAIN * d));
+			carry.levels[t.name] = Math.max(5, Math.min(99, base + prestigeGain() * d));
 			carry.coaches[t.name] = {
 				coach: stripCoach(t.coach),
 				fired: fired.has(t.name),
@@ -648,8 +672,14 @@
 	const NEXT_YEAR = { Freshman: "Sophomore", Sophomore: "Junior", Junior: "Senior" };
 	const CARRY_RETIRE_AGE = 70;
 
-	function ageCarry(carry, years) {
+	/* `opts.guess` is the extrapolated years' own use of this (see
+	   extrapolateGap): the guessed world drifts its levels and prestige by
+	   the season model's own step (guessLevels, creditGuess), so only the
+	   coaches and the star returners are aged here. The chain's own carry
+	   across a gap is called without it and is exactly what it was. */
+	function ageCarry(carry, years, opts) {
 		if (!carry || !(years > 0)) return carry;
+		const guess = !!(opts && opts.guess);
 		const out = {
 			confOf: Object.assign({}, carry.confOf),
 			levels: {}, coaches: {}, returners: {},
@@ -673,9 +703,15 @@
 			out.extrapolatedTitles = Object.assign({}, carry.extrapolatedTitles);
 		}
 		for (const name of Object.keys(carry.prestigeDelta || {})) {
-			out.prestigeDelta[name] = Math.round(carry.prestigeDelta[name] *
-				Math.pow(PRESTIGE_DECAY, years) * 100) / 100;
+			out.prestigeDelta[name] = guess ? carry.prestigeDelta[name]
+				: Math.round(carry.prestigeDelta[name] *
+					Math.pow(PRESTIGE_DECAY, years) * 100) / 100;
 		}
+		/* The realignment cooldown (see realignWorld in js/teams.js) rides along
+		   through the guessed years only: the chain's own carry across a gap
+		   is untouched here, so a real season after a gap is not moved by
+		   this. */
+		if (guess && carry.moved) out.moved = Object.assign({}, carry.moved);
 		/* Regress toward THIS field's own mean, not a literal.
 
 		   The target was a hardcoded 55, which is only the middle of the range
@@ -696,7 +732,7 @@
 			// One step a year: an unplayed decade should not preserve a 94
 			// that nobody defended.
 			let lvl = carry.levels[name];
-			for (let y = 0; y < years; y++) lvl = lvl + (fieldMean - lvl) * 0.18;
+			if (!guess) for (let y = 0; y < years; y++) lvl = lvl + (fieldMean - lvl) * 0.18;
 			out.levels[name] = lvl;
 		}
 		for (const name of Object.keys(carry.coaches || {})) {
@@ -1879,8 +1915,10 @@
 	   and is not a history.
 
 	   Extrapolation fills those years with the one thing a season is
-	   remembered by — its awards: a champion, a runner-up, a poll No. 1 and a
-	   player of the year, plus a five-man All-America. It is NOT a simulation
+	   remembered by — its awards: a champion, a runner-up, a Final Four, a
+	   poll No. 1, a player of the year and a No. 1 pick, plus a five-man
+	   All-America, and the April coaching changes and the conference moves
+	   the simulated seasons have. It is NOT a simulation
 	   and does not pretend to be, and every row it produces is flagged
 	   `extrapolated: true` so the view, the records book and the export can
 	   say which seasons were played and which were inferred. Nothing derived
@@ -1896,12 +1934,19 @@
 	   produces the same missing years — the same contract every other part of
 	   the chain keeps.
 
-	   HOW FAR IT REACHES. The names come from the star returners the carry is
-	   holding, and ageCarry graduates them out one class year at a time — so
-	   the first missing year after a played one has a player of the year the
-	   world has met, and the fifth has a champion and a poll and nobody left
-	   to name. That is the right shape for the guess: a world five years past
-	   the last file it was given genuinely does not know who is playing.
+	   HOW FAR IT REACHES. The first missing years take their stars from the
+	   star returners the carry is holding (ageCarry graduates them out one
+	   class year at a time). A world five years past the last file does not
+	   know who is playing, and a season with no player of the year, no
+	   All-Americans, no No. 1 pick and a Final Four of two teams (which is
+	   what every guessed year past the first used to be) is not a more honest
+	   guess, only an emptier one: the men the carry cannot name are INVENTED
+	   (guessName, off the synthetic generator's deal, so they are
+	   deterministic and never repeat a name), placed at programs by level,
+	   and flagged `invented` on the row and `extrapolated` on every award and
+	   alumni entry. An invented man is never in the registry, has no career
+	   page, and is skipped by the threads, the Hall and every "real" count,
+	   exactly as an extrapolated champion is.
 
 	   `partial` is the other case this exists for, and it is the commoner one:
 	   a class file that covers only part of a season's field — a league export
@@ -1928,19 +1973,53 @@
 		return entries[entries.length - 1];
 	}
 
+	/* HOW MUCH A LEVEL IS WORTH, MEASURED.
+
+	   The draw used to weight (level - 40)^2.2 over the top 40 programs while
+	   ageCarry pulled every level 18% a year toward the field's mean: 30
+	   guessed years gave 23 different champions, no program above two titles
+	   and a median champion ranked 28th by level, where a simulated 20
+	   seasons gave about 14 champions, one program with 3-5 titles and a
+	   median champion ranked 9th. These are the exponents of exp(k x level)
+	   fitted by maximum likelihood to 120 simulated seasons (six synthetic
+	   20-season worlds): the champion k = 0.20 (log-likelihood -450 against
+	   -708 for a flat draw), the runner-up and the other two Final Four teams
+	   0.15, the final poll's No. 1 0.20, and the schools of the player of
+	   the year, the No. 1 pick and an All-American 0.13 / 0.09 / 0.12 (set
+	   against the rank percentiles of those schools in the simulated seasons). The whole
+	   field is in the draw: in a simulated season the champion was outside
+	   the top 40 by level one time in five. tools/tests/universe-realism-
+	   extrap.js re-measures all of this against a fresh simulated world. */
+	const GUESS_K = { champion: 0.20, runnerUp: 0.15, finalFour: 0.15, apOne: 0.20,
+		poy: 0.13, no1: 0.09, allAmerica: 0.12 };
+	// How often the final poll's No. 1 is the champion (0.19 simulated).
+	const GUESS_AP_IS_CHAMPION = 0.15;
+
 	/* The programs a missing season would have been about, strongest first,
-	   with a weight that is steep enough that a 90-level blue blood is a real
-	   favourite and flat enough that the same four teams do not win every
-	   unplayed year in a decade. */
+	   weighted for the champion (see GUESS_K). */
 	function contendersOf(carry) {
 		const levels = (carry && carry.levels) || {};
-		return Object.keys(levels)
+		const out = Object.keys(levels)
 			.map((name) => ({ name, level: levels[name] }))
 			.filter((x) => Number.isFinite(x.level))
 			.sort((a, b) => b.level - a.level ||
-				cmpText(a.name, b.name))
-			.slice(0, 40)
-			.map((x) => ({ name: x.name, level: x.level, w: Math.pow(Math.max(1, x.level - 40), 2.2) }));
+				cmpText(a.name, b.name));
+		const top = out.length ? out[0].level : 0;
+		for (const x of out) x.w = Math.exp(GUESS_K.champion * (x.level - top));
+		return out;
+	}
+
+	/* One program drawn from a field by exp(k x level), skipping `skip`. */
+	function pickByLevel(rng, field, k, skip) {
+		let top = -Infinity;
+		for (const x of field) if (!(skip && skip.has(x.name)) && x.level > top) top = x.level;
+		const pool = [];
+		for (const x of field) {
+			if (skip && skip.has(x.name)) continue;
+			pool.push({ x, w: Math.exp(k * (x.level - top)) });
+		}
+		const hit = weightedPick(rng, pool);
+		return hit ? hit.x : null;
 	}
 
 	/* The named men the carry says are still on a roster, best first. These
@@ -1966,32 +2045,89 @@
 
 	/* One extrapolated season. `carry` is the world as it stood going into it,
 	   already aged to that year by ageCarry. */
+	/* A NAME FOR A MAN WHO NEVER PLAYED, from the synthetic generator's own
+	   deal (see nameDeal): the first/last pairs not on REAL_NAMES, in a
+	   seed-shuffled order. Season s man i takes slot s x SYNTH_SIZE + i, the
+	   same slot scheme a synthetic class uses, so a guessed man cannot share
+	   a name with a man in any synthetic class of another season (and the
+	   season he is in has no class: that is why it is guessed). A name
+	   already in `taken` (a real returner the carry holds, another guessed
+	   man) moves to the next generation of the same slot ("Jr.", "III"), so a
+	   name is never used twice in a guessed world. Pure in (seed, season,
+	   slot, taken), so a replay names the same men. */
+	function guessName(baseSeed, season, slot, taken) {
+		const deal = nameDeal(baseSeed);
+		const P = deal.length;
+		let idx = season * SYNTH_SIZE + slot;
+		for (let guard = 0; guard < NAME_GENERATIONS.length; guard++, idx += P) {
+			const pair = deal[idx % P];
+			const name = pair[0] + " " + pair[1] +
+				NAME_GENERATIONS[Math.floor(idx / P) % NAME_GENERATIONS.length];
+			if (!taken.has(name)) return name;
+		}
+		return deal[idx % P].join(" ") + " " + season;
+	}
+
 	function extrapolateSeason(carry, season, baseSeed, opts) {
 		const rng = new global.BBGMRng.Rng(
 			String(baseSeed) + "|gap|" + season);
 		const field = contendersOf(carry);
 		if (!field.length) return null;
 		const champ = weightedPick(rng, field);
-		const rest = field.filter((x) => x.name !== (champ && champ.name));
-		const runnerUp = rest.length ? weightedPick(rng, rest) : null;
-		/* The poll No. 1 is the best programme most years and the champion
-		   sometimes, which is what a poll is. */
-		const apOne = rng.random() < 0.42 && champ ? champ
-			: (field[Math.min(field.length - 1, Math.floor(Math.pow(rng.random(), 2) * 6))] || champ);
+		const runnerUp = pickByLevel(rng, field, GUESS_K.runnerUp, new Set([champ.name]));
+		/* THE FINAL FOUR is the champion, the runner-up and two more programs
+		   drawn the same way: a row used to carry just the two finalists. */
+		const semis = [];
+		const out = new Set([champ.name, runnerUp ? runnerUp.name : null]);
+		for (let i = 0; i < 2; i++) {
+			const s = pickByLevel(rng, field, GUESS_K.finalFour, out);
+			if (!s) break;
+			semis.push(s);
+			out.add(s.name);
+		}
+		/* The poll No. 1 is the champion sometimes and otherwise the best
+		   programme by the same weighting, which is what a poll is. */
+		const apOne = rng.random() < GUESS_AP_IS_CHAMPION ? champ
+			: pickByLevel(rng, field, GUESS_K.apOne);
+		/* THE MEN. A year or two past the last class the carry still holds
+		   named star returners (returnerPool), and those are real men the
+		   world has met. After that nobody is left to name, and the season
+		   used to have no player of the year and no All-Americans: the rest
+		   are INVENTED, named off the synthetic generator's deal (guessName)
+		   and placed at programs by level, and every one of them is flagged
+		   `invented` here and `extrapolated` on the row, the award and the
+		   alumni entry, so that nothing counts him as a man who played: he
+		   has no file, no ratings, no registry entry and no career page. */
+		const srng = rng.child("stars");
 		const pool = returnerPool(carry);
+		const taken = new Set(pool.map((p) => p.name));
+		let slot = 0;
+		const invent = (k) => {
+			const school = pickByLevel(srng, field, k);
+			const name = guessName(baseSeed, season, slot++, taken);
+			taken.add(name);
+			return { name, school: school ? school.name : null, invented: true };
+		};
 		/* A player of the year comes from the top of the returner pool,
 		   weighted so the best man usually wins it and not always. */
 		const poy = pool.length
-			? weightedPick(rng, pool.slice(0, 12).map((p, i) => ({ p, w: Math.pow(0.78, i) }))).p
-			: null;
+			? weightedPick(srng, pool.slice(0, 12).map((p, i) => ({ p, w: Math.pow(0.78, i) }))).p
+			: invent(GUESS_K.poy);
 		const allAmerica = [];
-		const used = new Set(poy ? [poy.name] : []);
+		const used = new Set([poy.name]);
 		for (const p of pool) {
 			if (allAmerica.length >= 5) break;
 			if (used.has(p.name)) continue;
 			used.add(p.name);
 			allAmerica.push(p);
 		}
+		while (allAmerica.length < 5) allAmerica.push(invent(GUESS_K.allAmerica));
+		// The No. 1 pick is a prospect, never a carried returner: always invented.
+		const no1 = invent(GUESS_K.no1);
+		const confOf = carry.confOf || {};
+		const man = (p) => (p.invented ? { name: p.name, school: p.school, club: null,
+			nonNcaa: false, invented: true } : { name: p.name, school: p.school, club: null,
+			nonNcaa: false });
 		const awards = [];
 		if (poy) {
 			awards.push({ season, name: poy.name, school: poy.school,
@@ -2017,17 +2153,19 @@
 			runnerUp: runnerUp ? runnerUp.name : null,
 			champConf: (carry.confOf || {})[champ ? champ.name : ""] || null,
 			runnerUpConf: (carry.confOf || {})[runnerUp ? runnerUp.name : ""] || null,
-			finalFour: [champ, runnerUp].filter(Boolean).map((x) => x.name),
+			finalFour: [champ, runnerUp].concat(semis).filter(Boolean).map((x) => x.name),
 			apOne: apOne ? apOne.name : null,
-			poy: poy ? { name: poy.name, school: poy.school, club: null, nonNcaa: false } : null,
-			poyConf: poy ? (carry.confOf || {})[poy.school] || null : null,
-			no1: null,
-			no1Conf: null,
+			poy: man(poy),
+			poyConf: confOf[poy.school] || null,
+			no1: man(no1),
+			no1Conf: confOf[no1.school] || null,
 			realignment: [],
 			coachChanges: 0, coachFired: 0, coachRetired: 0, coachHiredAway: 0,
 			futureOnRosters: 0, futureHonors: 0,
 			awards,
-			allAmerica: allAmerica.map((p) => ({ name: p.name, school: p.school })),
+			allAmerica: allAmerica.map((p) => (p.invented
+				? { name: p.name, school: p.school, invented: true }
+				: { name: p.name, school: p.school })),
 			gap: 0,
 		};
 	}
@@ -2039,54 +2177,242 @@
 	   as the earlier season left it; it is aged one year per step so the
 	   fourth missing year is drawn against a world that has drifted four years
 	   rather than against the one the gap started from. */
-	function extrapolateGap(carry, fromSeason, toSeason, baseSeed) {
+	function extrapolateGap(carry, fromSeason, toSeason, baseSeed, opts) {
 		const out = [];
 		if (!carry || !Number.isFinite(fromSeason) || !Number.isFinite(toSeason)) return out;
 		let world = carry;
+		/* The guessed world carries the chain's settings (realignment rate,
+		   coaching turnover) and the seed its draws are keyed on. */
+		const o = Object.assign({}, opts, { baseSeed });
 		/* Never more than EXTRAPOLATE_MAX_YEARS rows from one hole: 499 guessed
 		   rows for a 2025 file next to a 2525 one is a typo, not a timeline. */
 		const last = Math.min(toSeason, fromSeason + 1 + EXTRAPOLATE_MAX_YEARS);
 		for (let y = fromSeason + 1; y < last; y++) {
-			world = ageCarry(world, 1);
-			const row = extrapolateSeason(world, y, baseSeed);
+			world = ageCarry(world, 1, { guess: true });
+			const year = startGuessYear(world, y, baseSeed, o);
+			const row = extrapolateSeason(year.world, y, baseSeed, o);
 			if (row) {
+				row.realignment = year.moves.map((m) => m.school + " → " + m.to);
 				out.push(row);
-				world = creditGuess(world, row);
+				world = creditGuess(year.world, row, o);
+			} else {
+				world = year.world;
 			}
+			if (o.onYear) o.onYear(year.world, row);
 		}
 		return out;
 	}
 
+	/* THE GUESSED WORLD MOVES THE WAY THE SIMULATED ONE DOES.
+
+	   Each guessed year used to be an independent draw off levels that
+	   ageCarry regressed 18% a year toward the field's mean, with a fixed
+	   +2.5 for the champion: the favourites melted into the field and the
+	   world had no coaches changing and no conferences moving. A year is now
+	   built with the season model's own pieces, so it stays in step with it
+	   (and with whatever the simulation's calibration does later):
+
+	     - conferences: TeamsSim.realign, on the world's own map and with the
+	       cooldown the carry holds (`moved`), at the chain's realignmentRate;
+	     - strength: TeamsSim.programLevel (prestige, the league's drifting
+	       strength, the down and breakout years) folded into the carried level
+	       by TeamsSim.carriedLevel, which is buildPrograms' own blend;
+	     - the sideline: a vacancy (a man fired, retired or hired away last
+	       April, or aged out by ageCarry) is filled by TeamsSim.makeCoach,
+	       and the April carousel is TeamsSim.coachingCarousel run on a record
+	       the level implies;
+	     - what a season does to a program: prestigeStep, the same function
+	       harvest folds a played season into the carry with.
+
+	   Everything is drawn off (seed, season, program), so it replays. With no
+	   TeamsSim loaded the levels simply hold and nothing realigns. */
+	const GUESS_GAMES = 32;
+	/* The measured residual of the record fit (see guessTeams) is 0.12; 0.15
+	   is what reproduces the simulated carousel (42 changes a year against
+	   44, fired 28 against 31): the carousel's shortfall test is convex, and
+	   a record drawn off the level alone has no conference schedule to
+	   spread it. */
+	const GUESS_RECORD_SD = 0.15;
+	/* The simulated seasons draw a class flavor first, and the flavors bend
+	   the realignment rate both ways ("a realignment year" to 1, a quiet one
+	   to 0). Seasons 2-20 of eight simulated 20-season worlds averaged 0.90
+	   moves a season and a move in 46% of them; a guessed year, which draws no
+	   flavor, gives that at 2x the chain's dial (0.35 -> 0.70). */
+	const GUESS_REALIGN_SCALE = 2.0;
+	function guessLevels(levels, confOf, rng) {
+		const T = global.TeamsSim;
+		const C = global.Colleges;
+		const out = {};
+		const names = Object.keys(levels);
+		if (!T || typeof T.programLevel !== "function" || typeof T.conferenceDrift !== "function") {
+			for (const n of names) out[n] = levels[n];
+			return out;
+		}
+		const blend = typeof T.carriedLevel === "function" ? T.carriedLevel
+			: (fresh, carried) => Math.max(12, Math.min(95, 0.62 * fresh + 0.38 * carried));
+		const strength = T.conferenceDrift(rng.child("confdrift"));
+		for (const name of names) {
+			const lv = levels[name];
+			if (!Number.isFinite(lv)) { out[name] = lv; continue; }
+			const conf = confOf[name] || (C && C.conferenceOf(name)) || "Independent";
+			out[name] = blend(T.programLevel(name, rng.child("prog:" + name), strength[conf]), lv);
+		}
+		return out;
+	}
+
+	/* The world at the start of a guessed year, after ageCarry: the map
+	   realigned, the vacancies filled, and `levels` now this season's
+	   (creditGuess turns them back into the carried ones). `moves` is the
+	   year's realignment, as TeamsSim.realign reports it. */
+	function startGuessYear(world, season, baseSeed, opts) {
+		const T = global.TeamsSim;
+		const rng = new global.BBGMRng.Rng(String(baseSeed) + "|gap|" + season + "|world");
+		const out = Object.assign({}, world, {
+			confOf: Object.assign({}, world.confOf),
+			coaches: Object.assign({}, world.coaches),
+			moved: Object.assign({}, world.moved),
+		});
+		let moves = [];
+		if (T && typeof T.realign === "function") {
+			try {
+				const cfg = { carryOver: { confOf: out.confOf, moved: out.moved },
+					__season: season, realignmentMemory: 100 };
+				const st = opts && opts.settings;
+				cfg.realignmentRate = Math.min(1, GUESS_REALIGN_SCALE *
+					(st && st.realignmentRate !== undefined ? st.realignmentRate : 0.35));
+				const r = T.realign(rng.child("realign"), cfg);
+				if (r && r.confOf) Object.assign(out.confOf, r.confOf);
+				moves = (r && r.moves) || [];
+			} catch (e) { moves = []; }
+		}
+		for (const k of Object.keys(out.moved)) {
+			if (!(season - out.moved[k] < 6)) delete out.moved[k];
+		}
+		for (const m of moves) out.moved[m.school] = season;
+		if (T && typeof T.makeCoach === "function") {
+			const used = new Set();
+			for (const n of Object.keys(out.coaches)) {
+				const rec = out.coaches[n];
+				if (rec && rec.coach && rec.coach.name) used.add(rec.coach.name);
+			}
+			for (const name of Object.keys(out.coaches).sort()) {
+				const rec = out.coaches[name];
+				if (!rec || (rec.coach && !rec.fired)) continue;
+				const lvl = world.levels ? world.levels[name] : null;
+				const hire = T.makeCoach(rng.child("coach:" + name), Number.isFinite(lvl) ? lvl : 50,
+					priorPrestige(name), used);
+				hire.tenure = 1;
+				out.coaches[name] = { coach: stripCoach(hire), fired: false, reason: null,
+					replaced: rec.coach ? rec.coach.name : null };
+			}
+		}
+		out.levels = guessLevels(world.levels || {}, out.confOf, rng);
+		return { world: out, moves };
+	}
+
+	/* The programs of a guessed year as TeamsSim and prestigeStep read them:
+	   a record the level implies (a straight fit to simulated seasons,
+	   winPct = 0.236 + 0.0058 x level, residual sd 0.12 once conference play
+	   is in), and a March result for the programs the row names plus a
+	   dozen more drawn the same way (the Elite Eight and the Sweet 16). */
+	function guessTeams(world, row, rng) {
+		const levels = world.levels || {};
+		const deep = {};
+		deep[row.champion] = ["National Champion", 6];
+		if (row.runnerUp) deep[row.runnerUp] = ["National Runner-Up", 5];
+		for (const n of row.finalFour || []) if (!deep[n]) deep[n] = ["Lost in the Final Four", 4];
+		const field = Object.keys(levels).filter((n) => Number.isFinite(levels[n]))
+			.sort().map((name) => ({ name, level: levels[name] }));
+		const drng = rng.child("deep");
+		const skip = new Set(Object.keys(deep));
+		for (let i = 0; i < 12; i++) {
+			const x = pickByLevel(drng, field, 0.12, skip);
+			if (!x) break;
+			skip.add(x.name);
+			deep[x.name] = i < 4 ? ["Lost in the Elite Eight", 3] : ["Lost in the Sweet 16", 2];
+		}
+		const teams = {};
+		for (const x of field) {
+			const pct = Math.max(0.08, Math.min(0.97,
+				0.236 + 0.0058 * x.level + rng.child("rec:" + x.name).normal(0, GUESS_RECORD_SD)));
+			let w = Math.round(GUESS_GAMES * pct);
+			if (deep[x.name]) w = Math.max(w, Math.round(GUESS_GAMES * 0.72));
+			const t = { name: x.name, w, l: GUESS_GAMES - w, games: GUESS_GAMES,
+				prestige: priorPrestige(x.name),
+				ncaaResult: deep[x.name] ? deep[x.name][0] : "",
+				ncaaWins: deep[x.name] ? deep[x.name][1] : 0 };
+			const rec = (world.coaches || {})[x.name];
+			if (rec && rec.coach) {
+				const c = Object.assign({}, rec.coach);
+				const roll = rng.child("sit:" + x.name).random();
+				c.situation = (c.tenure || 1) === 1 ? "first year"
+					: (c.tenure || 1) >= 16 && roll < 0.55 ? "fixture"
+					: x.level < t.prestige - 12 && roll < 0.40 ? "hot seat" : "settled";
+				t.coach = c;
+			}
+			teams[x.name] = t;
+		}
+		return teams;
+	}
+
 	/* A GUESSED TITLE IS STILL A TITLE IN THE GUESSED WORLD.
 
-	   Each missing year was drawn against the carry aged one more year, and
-	   nothing the previous missing year produced was credited to it — so the
+	   Each missing year was once drawn against the carry aged one more year,
+	   with nothing the previous missing year produced credited to it, so the
 	   champion of 2031 was no stronger going into 2032 than a team that lost
-	   in the first round, and ten years past the last file could never
-	   produce a dynasty: every year was an independent draw off a field
-	   regressing to its mean. The records book, meanwhile, counted those
-	   titles off the rows. The guessed world now credits them — a banner, a
-	   bump in level for the champion and a smaller one for the runner-up —
-	   and keeps a separate `extrapolatedTitles` tally so nothing mistakes an
-	   inferred banner for a played one. This is the EXTRAPOLATION's world
-	   only: the chain's own carry across a gap is still ageCarry's (see
-	   runUniverse), so turning extrapolation off still changes what is
-	   displayed and not what is simulated. */
-	function creditGuess(world, row) {
+	   in the first round. The guessed world credits a year now the way
+	   harvest credits a played one: a banner (with a separate
+	   `extrapolatedTitles` tally so nothing mistakes an inferred banner for
+	   a played one), the prestige drift prestigeStep gives a champion, a
+	   runner-up and a Final Four team (up to PRESTIGE_CAP x prestigeGain(),
+	   decaying 15% a year), and the carried level that becomes next year's
+	   starting point. A dynasty is therefore possible in the guessed years
+	   for the reason it is in the simulated ones: a program's prestige and a
+	   run of March results keep its level up, against a field that
+	   carriedLevel keeps moving a few points a year. The April carousel is
+	   drawn on the same teams and written onto the row. This is the
+	   EXTRAPOLATION's world only: the chain's own carry across a gap is still
+	   ageCarry's (see runUniverse), so turning extrapolation off still
+	   changes what is displayed and not what is simulated. */
+	function creditGuess(world, row, opts) {
 		if (!world || !row || !row.champion) return world;
 		const out = Object.assign({}, world, {
 			titles: Object.assign({}, world.titles || {}),
 			extrapolatedTitles: Object.assign({}, world.extrapolatedTitles || {}),
 			levels: Object.assign({}, world.levels || {}),
+			prestigeDelta: Object.assign({}, world.prestigeDelta || {}),
+			coaches: Object.assign({}, world.coaches || {}),
 			champion: row.champion,
 		});
 		out.titles[row.champion] = (out.titles[row.champion] || 0) + 1;
 		out.extrapolatedTitles[row.champion] = (out.extrapolatedTitles[row.champion] || 0) + 1;
-		if (Number.isFinite(out.levels[row.champion])) {
-			out.levels[row.champion] = Math.min(95, out.levels[row.champion] + 2.5);
+		const rng = new global.BBGMRng.Rng(String((opts && opts.baseSeed) || "guess") +
+			"|gap|" + row.season + "|result");
+		const teams = guessTeams(world, row, rng);
+		const gain = prestigeGain();
+		for (const name of Object.keys(out.levels)) {
+			const t = teams[name];
+			if (!t) continue;
+			const d = prestigeStep(out.prestigeDelta[name], t);
+			out.prestigeDelta[name] = d;
+			out.levels[name] = Math.max(5, Math.min(99, out.levels[name] + gain * d));
 		}
-		if (row.runnerUp && Number.isFinite(out.levels[row.runnerUp])) {
-			out.levels[row.runnerUp] = Math.min(95, out.levels[row.runnerUp] + 1);
+		const T = global.TeamsSim;
+		if (T && typeof T.coachingCarousel === "function") {
+			const withCoach = {};
+			for (const name of Object.keys(teams)) if (teams[name].coach) withCoach[name] = teams[name];
+			const list = T.coachingCarousel(withCoach, rng.child("carousel"),
+				(opts && opts.settings) || {}) || [];
+			for (const c of list) {
+				const rec = out.coaches[c.school];
+				if (rec && rec.coach) {
+					out.coaches[c.school] = { coach: rec.coach, fired: true, reason: c.reason };
+				}
+			}
+			row.coachChanges = list.length;
+			row.coachFired = list.filter((c) => c.reason === "fired" || c.reason === "not retained").length;
+			row.coachRetired = list.filter((c) => c.reason === "retired").length;
+			row.coachHiredAway = list.filter((c) => c.reason === "hired away").length;
 		}
 		row.titlesAfter = out.titles[row.champion];
 		return out;
@@ -2207,14 +2533,26 @@
 		const apOnes = {};
 		const poys = {};
 		const no1s = {};
-		/* Titles are the one record that counts the guesses (flagged above).
-		   Everything else is a record of seasons somebody simulated: title
-		   games, AP No. 1s, players of the year, No. 1 picks, the AP streak and
-		   the best season were counting invented years with no flag at all.
+		/* Titles and title games are the records that count the guesses (both
+		   flagged). Everything else is a record of seasons somebody simulated:
+		   AP No. 1s, players of the year, No. 1 picks, the AP streak and the
+		   best season were counting invented years with no flag at all.
 		   `rows` stays the full list for the Hall's size below. */
 		const allRows = rows;
+		/* A guessed champion has a guessed final: his title and the title game
+		   he won are counted together (the runner-up's appearance too), so a
+		   program can never show more titles than title games. Flagged
+		   apart, like the titles. */
+		const guessedFinals = {};
 		for (const r of allRows) {
 			if (r.champion) titles[r.champion] = (titles[r.champion] || 0) + 1;
+			if (r.extrapolated) {
+				for (const name of [r.champion, r.runnerUp]) {
+					if (!name) continue;
+					finals[name] = (finals[name] || 0) + 1;
+					guessedFinals[name] = (guessedFinals[name] || 0) + 1;
+				}
+			}
 		}
 		rows = allRows.filter((r) => !r.extrapolated);
 		for (const r of rows) {
@@ -2313,9 +2651,11 @@
 
 		const titleLeaders = leaders(titles, "titles");
 		for (const x of titleLeaders) x.extrapolated = guessedTitles[x.team] || 0;
+		const finalLeaders = leaders(finals, "title games");
+		for (const x of finalLeaders) x.extrapolated = guessedFinals[x.team] || 0;
 		return {
 			titles: titleLeaders,
-			finals: leaders(finals, "title games"),
+			finals: finalLeaders,
 			apOnes: leaders(apOnes, "seasons at AP No. 1"),
 			poys: leaders(poys, "players of the year"),
 			no1s: leaders(no1s, "No. 1 picks"),
@@ -3458,7 +3798,8 @@
 			   timeline, and NOT fed back into the chain: `carry` below is
 			   still ageCarry's. See extrapolateGap. */
 			if (gap > 0 && spec.extrapolateGaps !== false) {
-				const guessed = extrapolateGap(carry, lastSeason, d.season, baseSeed);
+				const guessed = extrapolateGap(carry, lastSeason, d.season, baseSeed,
+					{ settings: frozen });
 				for (const row of guessed) u.rows.push(row);
 				u.alumni = u.alumni.concat(extrapolatedAlumni(guessed));
 			}
@@ -3596,7 +3937,8 @@
 			}
 			const n = Math.max(0, Math.round(years || 0));
 			if (!n || !carry || !Number.isFinite(lastSeason)) return 0;
-			const guessed = extrapolateGap(carry, lastSeason, lastSeason + n + 1, baseSeed);
+			const guessed = extrapolateGap(carry, lastSeason, lastSeason + n + 1, baseSeed,
+				{ settings: frozen });
 			for (const row of guessed) u.rows.push(row);
 			u.alumni = u.alumni.concat(extrapolatedAlumni(guessed));
 			return guessed.length;
@@ -4103,6 +4445,7 @@
 		playerId, biographyForFile, registryOf,
 		threads, moreThreads, records, exportUniverse, biographyOf, seedFor, resultFingerprint,
 		extrapolateGap, extrapolateSeason, topUpPartialSeason, extrapolatedAlumni,
+		contendersOf, returnerPool, creditGuess, GUESS_K,
 		PARTIAL_CLASS_SHARE,
 		ageCarry, coachTreeStep, pruneCoachTree, nationalPOYSet, pickPOY, personalHonors, isPersonalHonor, setUniqueSynthNames, plural, GAP_WARN_YEARS, EXTRAPOLATE_MAX_YEARS, COACH_TREE_MAX_HIRES, recruitingCohorts,
 		peopleRecords, programHistory, programRowsOf, rivalryThreads,

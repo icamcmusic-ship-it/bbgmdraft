@@ -934,7 +934,8 @@ console.log("\nThe carry: gaps, guesses, levels, the carousel");
 	for (const t of Object.values(res0.teams)) {
 		if (!t || !t.log || !t.coach || !t.coach.levelAdj) continue;
 		const want = t.level - t.coach.levelAdj + U.PRESTIGE_CAP * 0 +
-			(0.62 / 0.38) * carry0.prestigeDelta[t.name];
+			(global.TeamsSim.CARRY_FRESH_WEIGHT / (1 - global.TeamsSim.CARRY_FRESH_WEIGHT)) *
+			carry0.prestigeDelta[t.name];
 		if (want < 5 || want > 99) continue;
 		checked++;
 		if (Math.abs(carry0.levels[t.name] - want) > 1e-9) wrong++;

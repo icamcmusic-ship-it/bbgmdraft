@@ -3195,21 +3195,33 @@
 		],
 	});
 
+	// What a program gained on the level it carried in, coach adjustment removed.
+	const programGain = (t, carry) => {
+		const adj = t.coach && Number.isFinite(t.coach.levelAdj) ? t.coach.levelAdj : 0;
+		const own = Number.isFinite(t.baseLevel) ? t.baseLevel : t.level - adj;
+		return own - carry.levels[t.name];
+	};
+
 	TPL({
 		kind: "program on the rise", group: "universe", p: 0.6, when: -0.18,
 		find: (ctx) => {
 			const carry = ctx.res.cfg && ctx.res.cfg.carryOver;
 			if (!carry || !carry.levels) return null;
+			/* The program's own level, not the coached one: a first-year
+			   coach's rebuild adjustment is a fact about the sideline and is
+			   not strength the program gained. A carried program now moves a
+			   few points a year (see carriedLevel in js/teams.js), so five is
+			   already the top tenth of the league. */
 			const up = ctx.teamList.filter((t) =>
 				Number.isFinite(carry.levels[t.name]) &&
-				t.level - carry.levels[t.name] >= 6);
+				programGain(t, carry) >= 5);
 			return up.length ? ctx.rng.pick(up) : null;
 		},
 		slots: (t, ctx) => {
 			const carry = ctx.res.cfg.carryOver;
 			return {
 				team: TM(t.name), conf: T(t.conf),
-				gain: T(String(Math.round(t.level - carry.levels[t.name]))),
+				gain: T(String(Math.round(programGain(t, carry)))),
 				coach: T(t.coach ? t.coach.name : "the staff"),
 			};
 		},
@@ -3220,9 +3232,9 @@
 			"Nobody in the {conf} wants to play {team} now",
 		],
 		bodies: [
-			"{team} is measurably stronger than last season — about {gain} points of programme strength — and it is not one recruiting class doing it.",
-			"{coach} has moved {team} up {gain} points in a year. The {conf} noticed some time around January.",
-			"A programme improves in one of two ways and {team} has done the slower one: everybody who was here last year is better.",
+			"{team} is measurably stronger than last season: about {gain} points of programme strength.",
+			"{team} is up {gain} points in a year under {coach}. The {conf} noticed some time around January.",
+			"The ratings have {team} {gain} points better than a year ago. What changed is for the staff to say; that it did is not in doubt.",
 			"{gain} points in a season. {team} has gone from a team that could beat you to a team that is supposed to.",
 		],
 	});

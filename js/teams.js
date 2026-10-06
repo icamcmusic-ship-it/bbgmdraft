@@ -73,6 +73,30 @@
 	// harness and tools/validate.js report it.
 	const PROGRAM_VOL = 6.5;
 	const DOWN_YEAR_RATE = 0.09;
+	/* A CARRIED PROGRAM PERSISTS. A universe program's level is last season's
+	   level plus a fraction of the way to this season's fresh draw, not a
+	   62/38 mix of the two: that mix let a program move p90 +10.8 and p99
+	   +20.2 points in a year (50 teams in 14 seasons jumped 20 or more, Mercer
+	   14.0 -> 43.5), which is a roster-and-staff turnover no recruiting class
+	   produces. Real program ratings move about 4-5 points a year (sd) and
+	   rarely more than a dozen. 0.36 fresh weight, and a soft knee past 4
+	   points that passes 40% of the rest, measured on 14- and 20-season
+	   synthetic worlds: p90 5.9 / p99 10.0 (absolute), no jump of 20, level sd
+	   16.5 -> 14.9. A program with no carry (a standalone class, a
+	   universe's first season, a school new to the file) still takes the
+	   fresh draw whole. universe.js reads CARRY_FRESH_WEIGHT for the prestige
+	   gain, which has to be fresh / (1 - fresh) for a drift of d to settle at d. */
+	const CARRY_FRESH_WEIGHT = 0.36;
+	const CARRY_STEP_KNEE = 4;
+	const CARRY_STEP_SLOPE = 0.4;
+	function carriedLevel(fresh, carried) {
+		let step = CARRY_FRESH_WEIGHT * (fresh - carried);
+		if (Math.abs(step) > CARRY_STEP_KNEE) {
+			step = Math.sign(step) *
+				(CARRY_STEP_KNEE + CARRY_STEP_SLOPE * (Math.abs(step) - CARRY_STEP_KNEE));
+		}
+		return clamp(carried + step, 12, 95);
+	}
 	const BREAKOUT_RATE = 0.09;
 
 	/* This season's conference strengths. CONFERENCES[x].strength is a constant
@@ -775,6 +799,264 @@
 		if (!ra || !rb) return true;
 		return ra.some((r) => rb.indexOf(r) !== -1);
 	}
+	/* WHERE EACH SCHOOL IS. CONF_REGIONS above is a fact about a league; a
+	   school needs its own, because the national leagues overlap everything
+	   and "overlaps the raider" lets Detroit Mercy, Tennessee State and
+	   Western Kentucky reach the Pac-12. One of ten regions per school (the
+	   regions CONF_REGIONS names), authored from where the campus is. The
+	   regions sit on a graph, REGION_ADJ, and a school's distance to a league
+	   is hops across it: the Great Lakes touch the Mid-Atlantic, the
+	   Carolinas, Tennessee and the Plains, and the Pacific coast touches
+	   only the Mountain West. */
+	const SCHOOL_REGION_SRC = {
+		NE: "Boston College; Boston University; Brown; Bryant University; Central Connecticut State; Connecticut; Dartmouth; Fairfield; Harvard; Holy Cross; Maine; Massachusetts; Massachusetts-Lowell; Merrimack; New Hampshire; New Haven; Northeastern; Providence; Quinnipiac; Rhode Island; Sacred Heart; Stonehill; Vermont; Yale",
+		MA: "Albany; American University; Army; Binghamton; Bucknell; Buffalo; Canisius; Colgate; Columbia; Coppin State; Cornell; Delaware; Delaware State; Drexel; Duquesne; Fairleigh Dickinson; Fordham; George Mason; George Washington; Georgetown; Hofstra; Howard; Iona; La Salle; Lafayette; Le Moyne; Lehigh; LIU; Loyola (MD); Manhattan; Marist; Maryland; Maryland-Eastern Shore; Mercyhurst; Monmouth; Morgan State; Mount St. Mary's; N.J.I.T.; Navy; Niagara; Pennsylvania; Penn State; Pittsburgh; Princeton; Rider; Robert Morris; Rutgers; Saint Joseph's (PA); Seton Hall; Siena; St. Bonaventure; St. John's; St. Peter's; Stony Brook; Syracuse; Temple; Towson; UMBC; Villanova; Wagner; West Virginia",
+		CAR: "Appalachian State; Campbell; Charleston; Charleston Southern; Charlotte; Citadel; Clemson; Coastal Carolina; Davidson; Duke; East Carolina; Elon; Furman; Gardner-Webb; Hampton; High Point; James Madison; Liberty; Longwood; Marshall; North Carolina; North Carolina A&T; North Carolina Central; North Carolina State; North Carolina-Wilmington; Norfolk State; Old Dominion; Presbyterian; Queens; Radford; Richmond; South Carolina; South Carolina State; UNC Asheville; UNC Greensboro; USC Upstate; Virginia; Virginia Military; Virginia Tech; VCU; Wake Forest; Western Carolina; William & Mary; Winthrop; Wofford",
+		SE: "Alabama; Alabama A&M; Alabama State; Alcorn State; Auburn; Bethune-Cookman; Florida; Florida A&M; Florida Atlantic; Florida Gulf Coast; Florida International; Florida State; Georgia; Georgia Southern; Georgia State; Georgia Tech; Jackson State; Jacksonville; Jacksonville State; Kennesaw State; Mercer; Miami (FL); Mississippi State; Mississippi Valley State; North Alabama; North Florida; Ole Miss; Samford; South Alabama; South Florida; Southern Miss; Stetson; Troy; UAB; UCF; West Georgia",
+		TN: "Austin Peay; Bellarmine; Belmont; Chattanooga; East Tennessee State; Eastern Kentucky; Kentucky; Lipscomb; Louisville; Memphis; Middle Tennessee; Morehead State; Murray State; Northern Kentucky; Tennessee; Tennessee State; Tennessee Tech; Tennessee-Martin; Vanderbilt; Western Kentucky",
+		OH: "Akron; Ball State; Bowling Green; Butler; Central Michigan; Cincinnati; Cleveland State; Dayton; Detroit Mercy; Eastern Michigan; Evansville; Indiana; Indiana State; IU Indianapolis; Kent State; Miami (OH); Michigan; Michigan State; Notre Dame; Oakland; Ohio; Ohio State; Purdue; Purdue Fort Wayne; Southern Indiana; Toledo; Valparaiso; Western Michigan; Wright State; Xavier; Youngstown State",
+		MW: "Bradley; Chicago State; Creighton; DePaul; Drake; Eastern Illinois; Green Bay; Illinois; Illinois State; Illinois-Chicago; Iowa; Iowa State; Kansas; Kansas City; Kansas State; Lindenwood; Loyola Chicago; Marquette; Milwaukee; Minnesota; Missouri; Missouri State; Nebraska; North Dakota; North Dakota State; Northern Illinois; Northern Iowa; Northwestern; Omaha; SIU-Edwardsville; Saint Louis; South Dakota; South Dakota State; Southeast Missouri State; Southern Illinois; St. Thomas; Western Illinois; Wichita State; Wisconsin",
+		TX: "Abilene Christian; Arkansas; Arkansas State; Arkansas-Pine Bluff; Baylor; Central Arkansas; East Texas A&M; Grambling State; Houston; Houston Christian; Incarnate Word; Lamar; Little Rock; Louisiana; Louisiana Tech; Louisiana-Monroe; LSU; McNeese State; New Orleans; Nicholls State; North Texas; Northwestern State; Oklahoma; Oklahoma State; Oral Roberts; Prairie View A&M; Rice; Sam Houston State; SMU; Southeastern Louisiana; Southern University; Stephen F. Austin; Tarleton State; TCU; Texas; Texas A&M; Texas A&M-CC; Texas Southern; Texas State; Texas Tech; Texas-Arlington; Tulane; Tulsa; UT Rio Grande Valley; UTEP; UTSA",
+		MTN: "Air Force; Arizona; Arizona State; BYU; Boise State; Colorado; Colorado State; Denver; Grand Canyon; Idaho; Idaho State; Montana; Montana State; New Mexico; New Mexico State; Northern Arizona; Northern Colorado; Southern Utah; UNLV; Utah; Utah State; Utah Tech; Utah Valley; Weber State; Wyoming",
+		W: "Cal Poly; Cal State Bakersfield; Cal State Fullerton; Cal State Northridge; California; California Baptist; Eastern Washington; Fresno State; Gonzaga; Hawaii; Long Beach State; Loyola Marymount; Nevada; Oregon; Oregon State; Pacific; Pepperdine; Portland; Portland State; Sacramento State; Saint Mary's; San Diego; San Diego State; San Francisco; San Jose State; Santa Clara; Seattle; Stanford; UC Davis; UC Irvine; UC Riverside; UC San Diego; UC Santa Barbara; UCLA; USC; Washington; Washington State",
+	};
+	const REGION_ADJ = {
+		NE: ["MA"], MA: ["NE", "CAR", "OH"], CAR: ["MA", "SE", "TN", "OH"],
+		SE: ["CAR", "TN", "TX"], TN: ["CAR", "SE", "OH", "MW", "TX"],
+		OH: ["MA", "CAR", "TN", "MW"], MW: ["OH", "TN", "TX", "MTN"],
+		TX: ["SE", "TN", "MW", "MTN"], MTN: ["MW", "TX", "W"], W: ["MTN"],
+	};
+	const SCHOOL_REGION = {};
+	for (const r of Object.keys(SCHOOL_REGION_SRC)) {
+		for (const n of SCHOOL_REGION_SRC[r].split("; ")) SCHOOL_REGION[n] = r;
+	}
+	const REGION_HOPS = (() => {
+		const out = {};
+		for (const a of Object.keys(REGION_ADJ)) {
+			out[a] = { [a]: 0 };
+			const queue = [a];
+			while (queue.length) {
+				const r = queue.shift();
+				for (const nx of REGION_ADJ[r]) {
+					if (out[a][nx] === undefined) { out[a][nx] = out[a][r] + 1; queue.push(nx); }
+				}
+			}
+		}
+		return out;
+	})();
+	// A school the table does not carry sits where its home league does.
+	function regionOfSchool(name) {
+		return SCHOOL_REGION[name] ||
+			(CONF_REGIONS[C.conferenceOf(name)] || [])[0] || "MW";
+	}
+	function regionHops(a, b) {
+		return REGION_HOPS[a] && REGION_HOPS[a][b] !== undefined ? REGION_HOPS[a][b] : 4;
+	}
+	/* How close a school is to a group of schools: the fewest hops to any of
+	   them, and the share within one hop. */
+	function nearness(name, group) {
+		const r = regionOfSchool(name);
+		let near = 9;
+		let within = 0;
+		let total = 0;
+		for (const m of group) {
+			if (m === name) continue;
+			const h = regionHops(r, regionOfSchool(m));
+			total++;
+			if (h < near) near = h;
+			if (h <= 1) within++;
+		}
+		return total ? { near, share: within / total } : { near: 0, share: 1 };
+	}
+	/* A school that moved cannot move again for this many seasons, and the
+	   big leagues do not shrink below this many members without a backfill. */
+	const REALIGN_COOLDOWN = 3;
+	const BIG_CONF_FLOOR = 10;
+	/* UNIVERSE REALIGNMENT (UV12).
+
+	   The standalone model above is geography-blind and memoryless: Detroit
+	   Mercy, Tennessee State, Western Kentucky, Bradley and Long Beach State
+	   went to the Pac-12 in one sampled universe, Washington State and
+	   DePaul to the SEC, a school could move twice in one pass (Bowling Green
+	   four times in five seasons), the Big East swung 16-18 and all four big
+	   leagues ended at 18 with nowhere left to go. A universe season (one
+	   run with `cfg.carryOver`, null in its first season) uses this instead;
+	   a standalone class keeps the old model so its output does not move.
+
+	   - A school is taken only into a league at least 30% of whose
+	     members are in its own region or the next one (REGION_HOPS), and
+	     the draw is weighted by that share squared; a return to its home
+	     league counts triple.
+	   - Each school moves at most once a pass, and not again for
+	     REALIGN_COOLDOWN seasons (`carryOver.moved`, written by harvest).
+	   - A raid is one to four schools. Some raids (3 in 10, among the
+	     strongest leagues) take from a PEER league, which is how a big
+	     league shrinks; the league that lost members backfills from the
+	     nearest mid-majors back to BIG_CONF_FLOOR, and a big league that
+	     starts below the floor (the Pac-12 does) rebuilds the same way.
+	   - A league that has grown well past its founding size still sheds its
+	     weakest addition, now to a league in reach, never one that is full. */
+	function realignWorld(rng, cfg, confOf, rate) {
+		const members = {};
+		for (const name of C.names) {
+			(members[confOf[name]] = members[confOf[name]] || []).push(name);
+		}
+		const strength = (conf) =>
+			(C.CONFERENCES[conf] ? C.CONFERENCES[conf].strength : 50);
+		const prestige = (n) => C.prestigeOrLowMajor(n);
+		const season = seasonOf(cfg);
+		const last = (cfg.carryOver && cfg.carryOver.moved) || {};
+		const touched = new Set();
+		const free = (n) => !touched.has(n) &&
+			!(season && Number.isFinite(last[n]) && season - last[n] < REALIGN_COOLDOWN);
+		const floorOf = (c) => c !== "Independent" && strength(c) >= 74
+			? BIG_CONF_FLOOR : MIN_CONF_MEMBERS;
+		const baseSize = {};
+		for (const name of C.names) {
+			const b = C.conferenceOf(name) || "Independent";
+			baseSize[b] = (baseSize[b] || 0) + 1;
+		}
+		const raids = [];
+		const fills = [];
+		const sheds = [];
+		const shift = (name, to, into, extra) => {
+			const from = confOf[name];
+			members[from].splice(members[from].indexOf(name), 1);
+			(members[to] = members[to] || []).push(name);
+			confOf[name] = to;
+			touched.add(name);
+			into.push(Object.assign({ school: name, from, to }, extra || {}));
+		};
+		/* 0 for a league whose members are mostly far from the school (under
+		   30% of them within one region hop); up to 1 for one full of
+		   neighbours. Read against the league as the pass FOUND it, so a
+		   school taken a moment ago cannot be the stepping stone that makes
+		   the next, farther one "near" (Bradley, then Detroit Mercy, then
+		   Tennessee State, in one raid). */
+		const found = {};
+		for (const c of Object.keys(members)) found[c] = members[c].slice();
+		const reach = (n, conf) => {
+			const g = nearness(n, (found[conf] || []).filter((m) => confOf[m] === conf));
+			return g.near <= 1 && g.share >= 0.3 ? g.share * g.share : 0;
+		};
+		const homeBonus = (n, conf) => ((C.conferenceOf(n) || "Independent") === conf ? 3 : 1);
+		const backfill = (frng, conf, need) => {
+			for (let i = 0; i < need; i++) {
+				const pool = [];
+				for (const n of C.names) {
+					const from = confOf[n];
+					if (!free(n) || from === conf || prestige(n) < 25) continue;
+					if (members[from].length <= floorOf(from)) continue;
+					const sf = strength(from);
+					if (!(sf < strength(conf) && sf > strength(conf) - 30)) continue;
+					const w = (prestige(n) + 10) * reach(n, conf) * homeBonus(n, conf);
+					if (w > 0) pool.push({ n, w });
+				}
+				if (!pool.length) return;
+				shift(frng.weighted(pool).n, conf, fills);
+			}
+		};
+
+		// A raid: a strong league with room takes one to four good programs.
+		const raiders = Object.keys(members).filter((c) =>
+			c !== "Independent" && strength(c) >= 62 && members[c].length < MAX_CONF_MEMBERS);
+		if (raiders.length && rng.child("raid").random() < rate) {
+			const rr = rng.child("raid-draw");
+			const to = rr.weighted(raiders, (c) =>
+				Math.pow(strength(c) - 55, 2) * (MAX_CONF_MEMBERS + 1 - members[c].length));
+			const wanted = rr.int(1, 4);
+			const peer = strength(to) >= 85 && rr.random() < 0.3;
+			const taken = new Set();
+			const victims = [];
+			for (let i = 0; i < wanted && members[to].length < MAX_CONF_MEMBERS; i++) {
+				const pool = [];
+				for (const n of C.names) {
+					const from = confOf[n];
+					if (!free(n) || from === to || taken.has(n)) continue;
+					if (members[from].length <= Math.max(MIN_CONF_MEMBERS, floorOf(from) - 2)) continue;
+					const sf = strength(from);
+					const tier = peer
+						? sf <= strength(to) + 1 && sf >= strength(to) - 6 && prestige(n) >= 55
+						: sf < strength(to) - 4 && sf > strength(to) - 26 && prestige(n) >= 60;
+					if (!tier) continue;
+					const w = Math.pow(prestige(n), 1.5) * reach(n, to) * homeBonus(n, to);
+					if (w > 0) pool.push({ n, w });
+				}
+				if (!pool.length) break;
+				const pick = rr.weighted(pool).n;
+				if (victims.indexOf(confOf[pick]) === -1) victims.push(confOf[pick]);
+				shift(pick, to, raids);
+				taken.add(pick);
+			}
+			// The league that lost members backfills from the leagues below it.
+			const brng = rng.child("backfill");
+			for (const v of victims.sort()) {
+				const need = floorOf(v) - members[v].length;
+				if (need > 0) backfill(brng.child(v), v, need);
+			}
+		}
+		// A big league that sits under its floor rebuilds, drawing from nearby mid-majors.
+		const deficit = Object.keys(members).filter((c) => members[c].length < floorOf(c))
+			.sort((a, b) => (floorOf(b) - members[b].length) - (floorOf(a) - members[a].length) ||
+				(a < b ? -1 : 1));
+		const rebuild = rng.child("rebuild");
+		if (deficit.length && rebuild.random() < 0.5) {
+			backfill(rebuild.child(deficit[0]), deficit[0], 1 + (rebuild.random() < 0.3 ? 1 : 0));
+		}
+		/* THE WAY BACK DOWN. A league past its founding size occasionally
+		   releases its weakest addition, preferably to the league it came
+		   from, else to a weaker league in reach with room. */
+		const rrng = rng.child("reverse");
+		const bloated = Object.keys(members)
+			.filter((c) => c !== "Independent" && members[c].length > (baseSize[c] || 0) + 2)
+			.sort((a, b) => (members[b].length - (baseSize[b] || 0)) -
+				(members[a].length - (baseSize[a] || 0)) || (a < b ? -1 : 1));
+		const shedChance = 0.35 * rate +
+			(bloated.length && members[bloated[0]].length > MAX_CONF_MEMBERS - 2 ? 0.4 : 0);
+		if (bloated.length && rrng.random() < shedChance) {
+			const from = bloated[0];
+			const added = members[from]
+				.filter((n) => free(n) && (C.conferenceOf(n) || "Independent") !== from)
+				.sort((a, b) => prestige(a) - prestige(b) || (a < b ? -1 : 1));
+			const name = added[0];
+			if (name) {
+				const home = C.conferenceOf(name) || "Independent";
+				const fits = (c) => c !== from && members[c] &&
+					members[c].length < MAX_CONF_MEMBERS &&
+					strength(c) < strength(from) && reach(name, c) > 0;
+				const dest = fits(home) ? home
+					: Object.keys(members).filter(fits)
+						.sort((a, b) => reach(name, b) - reach(name, a) ||
+							strength(b) - strength(a) || (a < b ? -1 : 1))[0];
+				if (dest) shift(name, dest, sheds, { down: true });
+			}
+		}
+		/* A FULL LEAGUE TRIMS. At the ceiling a big league cannot raid, and
+		   with nothing leaving, all four ended at eighteen for good. Now and
+		   then one lets its lowest-prestige program go to a weaker league in
+		   reach (revenue share, a program that stopped drawing); it then has
+		   room to raid again, so sizes wander between 15 and 18. */
+		const trng = rng.child("trim");
+		const full = Object.keys(members).filter((c) =>
+			c !== "Independent" && members[c].length >= MAX_CONF_MEMBERS - 1 &&
+			members[c].length > floorOf(c) + 3).sort();
+		if (full.length && trng.random() < 0.2 * rate) {
+			const from = trng.pick(full);
+			for (let i = trng.random() < 0.3 ? 2 : 1; i > 0; i--) {
+				const name = members[from].filter(free)
+					.sort((a, b) => prestige(a) - prestige(b) || (a < b ? -1 : 1))[0];
+				if (!name) break;
+				const dests = Object.keys(members).filter((c) => c !== from &&
+					members[c].length < MAX_CONF_MEMBERS && strength(c) < strength(from) &&
+					strength(c) > strength(from) - 30 && reach(name, c) > 0);
+				if (!dests.length) break;
+				const dest = trng.weighted(dests.map((c) => ({ c, w: reach(name, c) *
+					homeBonus(name, c) * (strength(c) - strength(from) + 31) })), (x) => x.w).c;
+				shift(name, dest, sheds, { down: true });
+			}
+		}
+		return { confOf, moves: raids.concat(fills, sheds) };
+	}
 	function realign(rng, cfg) {
 		const confOf = {};
 		/* Universe carry-over: realignment has MEMORY when a previous season's
@@ -809,6 +1091,9 @@
 			cfg && cfg.realignmentRate !== undefined ? cfg.realignmentRate : 0.35, 0, 1);
 		const moves = [];
 		if (rate <= 0) return { confOf, moves };
+		/* A universe season (carryOver is null in its first season and absent
+		   from a standalone run) realigns by geography and with a cooldown. */
+		if (cfg && cfg.carryOver !== undefined) return realignWorld(rng, cfg, confOf, rate);
 		const members = {};
 		for (const name of C.names) {
 			(members[confOf[name]] = members[confOf[name]] || []).push(name);
@@ -933,9 +1218,10 @@
 			   season instead of being redrawn from the static prior — a
 			   program that broke out stays partly broken out, one that fell
 			   apart climbs back rather than teleporting. The fresh draw keeps
-			   the season honest; the blend keeps it continuous. */
+			   the season honest; the blend keeps it continuous (see
+			   carriedLevel). */
 			if (carry && carry.levels && Number.isFinite(carry.levels[name])) {
-				level = clamp(0.62 * level + 0.38 * carry.levels[name], 12, 95);
+				level = carriedLevel(level, carry.levels[name]);
 			}
 			const onRoster = prospectsBySchool[name] || [];
 			/* This class's prospects, and — in a universe — the men from
@@ -2607,12 +2893,13 @@
 	global.TeamsSim = {
 		buildPrograms, simulateRegularSeason, simulateConferenceTournaments,
 		prospectTalent, teamRating, winProb, playGame, playGameScore, ratingOn,
-		realign, MIN_CONF_MEMBERS, MAX_CONF_MEMBERS, makeCoach, COACH_SITUATIONS, COACH_PHILOSOPHIES, CONF_REGIONS, regionsOverlap,
+		realign, realignWorld, regionOfSchool, regionHops, REGION_ADJ, SCHOOL_REGION, REALIGN_COOLDOWN, BIG_CONF_FLOOR, MIN_CONF_MEMBERS, MAX_CONF_MEMBERS, makeCoach, COACH_SITUATIONS, COACH_PHILOSOPHIES, CONF_REGIONS, regionsOverlap,
 		gameStrength, TOP_KNEE, TOP_STRETCH, REGULAR_NOISE, teamPace, PACE_REACH, PACE_OFFSET, efficiencyScale, homeEdge,
 		capFillers, FILLER_GAP, conferenceDrift, programLevel, applyOutages, makeFiller,
 		driftStyle, seasonOf,
 		assignFillerSlots, slotTypeOf, SLOT_HGT, SLOT_TARGET,
 		PROGRAM_VOL, DOWN_YEAR_RATE, BREAKOUT_RATE, STAR_RETURNER_RATE,
+		CARRY_FRESH_WEIGHT, CARRY_STEP_KNEE, CARRY_STEP_SLOPE, carriedLevel,
 		rotationWeights, rotationWeightAt, ROTATION_SHAPE, pairUp, scheduleDates, SEASON_DAYS,
 		REMATCH_GAP, record, recordPostseason, finalizeSchedule,
 		momentumArc, arcAt, ARC_KNOTS,
