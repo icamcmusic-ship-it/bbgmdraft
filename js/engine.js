@@ -522,6 +522,16 @@
 	function findSeason(lf) {
 		const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 1900 &&
 			Number(v) < 3000 ? Number(v) : null);
+		/* A league-shaped file keeps its founding year in the top-level
+		   startingSeason and the season it is IN under gameAttributes.season,
+		   so there the latter wins: reading startingSeason made a 2026 league
+		   look like 2020, the merge's "that draft has already happened"
+		   warning never fired, and the oversized-league class fallback offered
+		   the founding year's class. A plain class file keeps the old order. */
+		if (lf.gameAttributes && !lf.__ga && isLeagueFile(lf)) {
+			const inLeague = findSeason({ gameAttributes: lf.gameAttributes, __ga: true });
+			if (inLeague !== null) return inLeague;
+		}
 		const direct = num(lf.startingSeason) !== null ? num(lf.startingSeason) : num(lf.season);
 		if (direct !== null) return direct;
 		const ga = lf.gameAttributes;
@@ -1086,6 +1096,15 @@
 		return Number.isFinite(n) ? n : undefined;
 	}
 
+	/* A rename override must be text. An object came out as the literal
+	   "[object Object]" (a crafted share link can carry one) and a five
+	   thousand character name was accepted; both are ignored or capped. */
+	const MAX_NAME_LENGTH = 100;
+	function cleanOverrideName(v) {
+		if (typeof v !== "string") return "";
+		return v.trim().slice(0, MAX_NAME_LENGTH).trim();
+	}
+
 	/* One ratings row with every numeric field coerced. Returns a copy: the
 	   caller's object is never edited. */
 	function coerceRatingsRow(r) {
@@ -1618,7 +1637,8 @@
 			p.override = ov;
 			// A renamed prospect keeps the new name everywhere, including in
 			// the exported file.
-			if (ov.name && String(ov.name).trim()) p.name = String(ov.name).trim();
+			const ovName = cleanOverrideName(ov.name);
+			if (ovName) p.name = ovName;
 			/* The universe's own record of where he went, when it has one —
 			   the same argument as the class year above: a shared universe has
 			   to replay the same men. An override still wins, because that is
@@ -4555,7 +4575,12 @@
 
 	function phaseNotes(state) {
 		for (const p of state.players) {
-			p.note = buildNote(p, state.teams, state.season, state.cfg, state);
+			/* The seasons a note names are the seasons the export labels its
+			   stats rows with: the class's own year, which is the draft year
+			   on its players and differs from startingSeason for a class a
+			   year ahead (exportFile shifts by the same amount). */
+			const shift = classDraftYear(state.leagueFile.players, state.season) - state.season;
+			p.note = buildNote(p, state.teams, state.season, state.cfg, state, shift);
 		}
 		return state;
 	}
@@ -5846,6 +5871,25 @@
 		return at < 0 ? t : t.slice(0, at).replace(/\s+$/, "");
 	}
 
+	/* "Keep any note already in the file" (opts.noteAppend) writes the file's
+	   own text first and the generated note after a label of ours, for the same
+	   reason My notes has one: a re-export reads the previous export's note back
+	   as "the file's own", and without a mark each round stacked another
+	   generated block above the last (three rounds, three contradictory notes). */
+	const GEN_NOTES_LABEL = "Generated scouting notes:";
+	function stripGeneratedNotes(text) {
+		const t = String(text || "");
+		const at = t.search(/(^|\n)Generated scouting notes:/);
+		return at < 0 ? t : t.slice(0, at).replace(/\s+$/, "");
+	}
+	/* What of an existing note is the person's: not our My notes block, not a
+	   previous generated block, not our Honors lines. */
+	function ownNoteText(text) {
+		return stripGeneratedNotes(stripMyNotes(text)).split("\n")
+			.filter((l) => l.indexOf("Honors:") !== 0 && l.indexOf("Earlier honors:") !== 0)
+			.join("\n").trim();
+	}
+
 	/* The note's opening sentence. It used to start "School (Conf) · Year"
 	   and go straight to stat lines, which reads like a stat export; a
 	   scout's note opens with what the player IS. Built from the things
@@ -5916,8 +5960,10 @@
 		return rng.pick(variants)();
 	}
 
-	function buildNote(p, teams, season, cfg, state) {
+	function buildNote(p, teams, season, cfg, state, seasonShift) {
 		const s = p.stats;
+		// Seasons are printed as the export labels them; see phaseNotes.
+		const shift = Number.isFinite(seasonShift) ? seasonShift : 0;
 		const lines = [];
 		const want = (cfg && Array.isArray(cfg.noteLines) ? cfg.noteLines : DEFAULT_NOTE_LINES);
 		const on = (k) => want.indexOf(k) !== -1;
@@ -6016,7 +6062,7 @@
 		}
 		if (s && on("stats")) {
 			lines.push(
-				season + ": " + s.gp + " GP, " + n1(s.mpg) + " MPG, " + n1(s.ppg) +
+				(season + shift) + ": " + s.gp + " GP, " + n1(s.mpg) + " MPG, " + n1(s.ppg) +
 				" PPG, " + n1(s.rpg) + " RPG, " + n1(s.apg) + " APG, " + n1(s.spg) +
 				" SPG, " + n1(s.bpg) + " BPG",
 			);
@@ -6076,14 +6122,21 @@
 			   junior's sophomore high is a scouting fact too. */
 			const earlier = (p.priorSeasons || []).filter((r) => r.highs && r.season);
 			for (const r of earlier) {
-				bits.push(r.season + " highs " + r.highs.pts + "p / " + r.highs.reb +
+				bits.push((Number.isFinite(r.exportSeason) ? r.exportSeason : r.season + shift) +
+					" highs " + r.highs.pts + "p / " + r.highs.reb +
 					"r / " + r.highs.ast + "a");
 			}
 			lines.push(bits.join(" · "));
 		}
 		if (on("march") && p.gameLog && p.gameLog.postseason) {
 			const ps = p.gameLog.postseason;
-			lines.push("Postseason: " + Text.plural(ps.gp, "game") + ", " + n1(ps.ppg) + " PPG, " +
+			/* The split counts every game after the regular season, the
+			   conference tournament included, so a team whose record line says
+			   "no postseason" still has some. Those games are labelled for
+			   what they were rather than contradicting that line. */
+			const noPost = team && !p.nonNcaa && !team.ncaaSeed && !team.nitBid && !team.bid;
+			lines.push((noPost ? "Conference tournament: " : "Postseason: ") +
+				Text.plural(ps.gp, "game") + ", " + n1(ps.ppg) + " PPG, " +
 				n1(ps.rpg) + " RPG, " + n1(ps.apg) + " APG");
 		}
 		if (on("injury") && p.gameLog && p.gameLog.injury) {
@@ -6123,7 +6176,10 @@
 			/* The seasons before this one, newest first, top three: a
 			   two-time all-conference pick reads as one. */
 			lines.push(earlierHonorsLine(
-				p.priorAwards.map((a) => ({ season: a.season, name: a.award }))));
+				p.priorAwards.map((a) => ({
+					season: Number.isFinite(a.exportSeason) ? a.exportSeason : a.season + shift,
+					name: a.award,
+				}))));
 		}
 		if (on("stock") && p.boardRank) {
 			const move = p.stockMove > 0 ? "up " + p.stockMove
@@ -6948,6 +7004,9 @@
 		   position. mergeIntoLeague overlays size onto a league player only
 		   for these — see the overlay comment there. */
 		const sizeRewritten = new Set();
+		/* Rows whose `note` this export decided (all but a passthrough), so a
+		   league merge knows "no note here" means clear it and not "untouched". */
+		const noteDecided = new Set();
 		// Rows whose born.year this export rewrote (class-year age, an
 		// anomaly's age, a floored age) — mergeIntoLeague reads it.
 		const bornRewritten = new Set();
@@ -6955,8 +7014,9 @@
 		   three number 23s. Seeded with whatever the source file had. */
 		const jerseysTaken = new Set();
 		for (const orig of src.players) {
-			const n = Number(orig && orig.jerseyNumber);
-			if (Number.isFinite(n)) jerseysTaken.add(n);
+			// num(): a blank or null number is a missing one, not number 0.
+			const n = num(orig && orig.jerseyNumber);
+			if (n !== undefined) jerseysTaken.add(n);
 		}
 
 		const players = src.players.map((orig, i) => {
@@ -6990,8 +7050,9 @@
 			   read off somebody else's stats. */
 			out.experience = 0;
 			const ov = p.override || {};
-			if (ov.name && String(ov.name).trim()) {
-				const parts = String(ov.name).trim().split(/\s+/);
+			const ovName = cleanOverrideName(ov.name);
+			if (ovName) {
+				const parts = ovName.split(/\s+/);
 				out.firstName = parts.shift();
 				out.lastName = parts.join(" ");
 			}
@@ -7007,8 +7068,15 @@
 			   someone who remembered it existed. SIZE_OVERRIDE_KEYS is the
 			   one place that fact lives, and buildOverride() below is checked
 			   against it by tools/test.js. */
+			/* A size the run itself changed counts as a rewrite too: the
+			   "physical outlier" anomaly re-draws a man's height and weight
+			   when heights are unlocked, and exporting only on varySize left
+			   the ratings row and the note saying 5'6" over a file that still
+			   listed him at 6'9". */
 			const sized = result.cfg.varySize ||
-				SIZE_OVERRIDE_KEYS.some((k) => Number.isFinite(ov[k]));
+				SIZE_OVERRIDE_KEYS.some((k) => Number.isFinite(ov[k])) ||
+				(Number.isFinite(p.newHgtInches) && p.newHgtInches !== p.hgtInches) ||
+				(Number.isFinite(p.newWeight) && p.newWeight !== p.weight);
 			if (sized || num(orig.hgt) === undefined) {
 				out.hgt = p.newHgtInches;
 				sizeRewritten.add(i);
@@ -7098,7 +7166,7 @@
 			   single digits and the low teens, wings the teens and twenties,
 			   bigs the thirties, forties and fifties. Unique within the class
 			   because a class becomes a roster. */
-			if (opts.jerseys !== false && !Number.isFinite(Number(orig.jerseyNumber))) {
+			if (opts.jerseys !== false && num(orig.jerseyNumber) === undefined) {
 				out.jerseyNumber = String(jerseyFor(p, jerseysTaken));
 			}
 			/* INJURY HISTORY. BBGM's player schema carries `injuries[]` as
@@ -7120,26 +7188,41 @@
 				});
 				out.injuries = rows;
 			}
-			/* opts.noteAppend: keep a note the file already carried and put
-			   the generated one underneath. Off by default, because the
-			   generated note is a complete replacement and a user who never
-			   edited notes in BBGM does not want two of them — but a user who
-			   DID edit them had no way to keep his own, and the export
-			   silently overwrote them. Any previous Honors: line is dropped
-			   either way; that one is ours. */
-			if (opts.noteAppend && String(orig.note || "").trim()) {
-				const keep = stripMyNotes(String(orig.note)).split("\n")
-					.filter((l) => l.indexOf("Honors:") !== 0 &&
-						l.indexOf("Earlier honors:") !== 0).join("\n").trim();
-				const gen = String(p.note || "").trim();
-				out.note = keep && keep !== gen
-					? (gen ? keep + "\n\n" + p.note : keep) : p.note;
-			} else if (String(p.note || "").trim()) {
+			/* THE NOTE FIELD HAS ONE RULE: it is the template's output.
+			   Whatever the template wrote for this player replaces the note
+			   the file carried; a player the template wrote nothing for ends
+			   up with NO note (so the Notes tab's "no notes" and the file
+			   agree, and a stale note from an earlier export never sits
+			   beside fresh ones for the players the template did cover).
+			   Two switches change that, both about the file's OWN text:
+
+			     opts.noteAppend    keep the file's note and put the
+			                        generated one under a label (see
+			                        GEN_NOTES_LABEL, so re-exports replace
+			                        it instead of stacking);
+			     opts.includeNotes === false  write no generated note at all
+			                        and leave the file's note as it was,
+			                        minus the blocks that are ours (the
+			                        previous generated block, Honors lines,
+			                        My notes), which are rebuilt or dropped.
+
+			   `seedNote` is the note that counts as "the file's own": the
+			   class file's, or on a league merge the league prospect's
+			   (opts.noteSeed), because that is the note the person sees in
+			   the game and the one the merge is about to write over. */
+			const seedNote = typeof opts.noteSeed === "function"
+				? opts.noteSeed(i, orig) : orig.note;
+			const gen = String(p.note || "").trim();
+			if (opts.noteAppend) {
+				const keep = ownNoteText(seedNote);
+				out.note = gen
+					? (keep ? keep + "\n\n" : "") + GEN_NOTES_LABEL + "\n" + p.note
+					: keep;
+			} else if (gen) {
 				out.note = p.note;
+			} else {
+				delete out.note;
 			}
-			/* else: the template wrote nothing (every box unticked), so the
-			   file's own note, if it had one, is left alone rather than
-			   replaced with an empty string. */
 
 			/* Guarded on the FLAG, not on whether this player won anything.
 			   Keying it on p.awards.length left a man who was an All-American in
@@ -7286,9 +7369,11 @@
 			   into it, unchecks this at export time rather than clearing
 			   noteLines and losing the notes altogether. */
 			if (opts.includeNotes === false) {
-				delete out.note;
+				const own = ownNoteText(seedNote);
+				if (own) out.note = own; else delete out.note;
 				delete out.noteBool;
 			}
+			noteDecided.add(i);
 			if (mine) {
 				const base = stripMyNotes(out.note || "").replace(/\s+$/, "");
 				out.note = (base ? base + "\n\n" : "") + MY_NOTES_LABEL + " " + mine;
@@ -7367,9 +7452,32 @@
 			   as ZERO players, with no error on either side. Applied only to
 			   the rows of this class's own draft year, so a file that also
 			   carries other players is left alone. */
+			/* A file whose players carry no draft year at all (hand-built or
+			   third-party classes; validateLeagueFile accepts them) used to skip
+			   this and export without a tid, which Draft -> Import drops the same
+			   way. Such a row is this class's own: it gets the class's year and
+			   BBGM's undrafted slot (round 0, pick 0, team -1), and tid -2. A row
+			   that names ANOTHER draft year is still left alone. */
+			if (num(out.draft && out.draft.year) === undefined) {
+				const d = Object.assign({}, out.draft);
+				d.year = exportSeason;
+				for (const k of ["round", "pick"]) if (num(d[k]) === undefined) d[k] = 0;
+				for (const k of ["tid", "originalTid"]) if (num(d[k]) === undefined) d[k] = -1;
+				out.draft = d;
+			}
 			if (Number(out.draft && out.draft.year) === Number(exportSeason)) {
 				out.tid = -2;
 			}
+			/* The ratings were rewritten, so the numbers BBGM derived from the
+			   old ones — value, its fuzzed and no-potential variants, and the
+			   rookie contract priced off them — describe somebody else. Left in
+			   place, AI draft order and trade value followed the OLD ratings
+			   (ovr 49 -> 51, still "value 40"). Dropped, as the Import players
+			   file already does, so the game recomputes them. The Import
+			   players route keeps `contract` (its importer copies it), so
+			   exportPlayersFile asks for it to stay (opts.keepContract). */
+			for (const k of STALE_VALUE_KEYS) delete out[k];
+			if (!opts.keepContract) delete out.contract;
 			/* BBGM needs an injury object; the tool knew the season's
 			   availability and never wrote one. A prospect arrives HEALTHY —
 			   games remaining would carry into a league that has not played
@@ -7437,6 +7545,7 @@
 		exportFile.passthroughs = passthroughs;
 		exportFile.sizeRewritten = sizeRewritten;
 		exportFile.bornRewritten = bornRewritten;
+		exportFile.noteDecided = noteDecided;
 		return file;
 	}
 
@@ -7604,6 +7713,8 @@
 	   player's own tid, which is UNDRAFTED, and the class arrives as a draft
 	   class. (BBGM's own player exports carry a real team's tid on that row,
 	   which is why the field works for them and not for us.) */
+	const STALE_VALUE_KEYS = ["value", "valueFuzz", "valueNoPot", "valueNoPotFuzz",
+		"valueWithContract"];
 	const PLAYERS_FILE_STRIP = [
 		"gamesUntilTradable", "numDaysFreeAgent", "ptModifier", "rosterOrder",
 		"statsTids", "value", "valueFuzz", "valueNoPot", "valueNoPotFuzz",
@@ -7613,7 +7724,8 @@
 	function exportPlayersFile(result, opts) {
 		/* `awards` does not survive Tools -> Import players, so the honors go
 		   into the note here whatever the note template says. */
-		const full = exportFile(result, Object.assign({}, opts, { honorsInNote: true }));
+		const full = exportFile(result, Object.assign({}, opts,
+			{ honorsInNote: true, keepContract: true }));
 		const players = full.players.map((p) => {
 			const out = JSON.parse(JSON.stringify(p));
 			for (const key of PLAYERS_FILE_STRIP) delete out[key];
@@ -7676,14 +7788,36 @@
 		let version = null;
 		const seen = new Map();
 		let duplicates = 0;
+		let fileNo = -1;
 		for (const res of ordered) {
+			fileNo++;
 			const file = exportPlayersFile(res, opts);
 			if (version === null) version = file.version;
 			const season = classDraftYear(file.players, res.season);
 			const rows = [];
 			for (const p of file.players) {
-				const idKey = ((p.firstName || "") + "|" + (p.lastName || "") + "|" +
-					(p.born && p.born.year)).toLowerCase();
+				/* ONE MAN = ONE (file, pid). The old key was first|last|born.year,
+				   which merged different men who share a name and a birth year
+				   (the name pools are small): the earlier man's row, stats and
+				   awards were lost and the status line reported them as
+				   "duplicates". A man now only collapses into an earlier row when
+				   it is a RE-ENTRY: the same name and the same college, a later
+				   draft year, and a birth year within two (an undrafted senior
+				   who came back, or a reclassification). Two men in one file never
+				   merge. */
+				const nameKey = ((p.firstName || "") + "|" + (p.lastName || "") + "|" +
+					(p.college || "")).toLowerCase();
+				const bornYear = p.born && Number.isFinite(p.born.year) ? p.born.year : null;
+				const earlier = seen.get(nameKey);
+				const bornGap = bornYear === null || earlier === undefined || earlier.born === null
+					? 0 : Math.abs(bornYear - earlier.born);
+				/* A returner comes back two classes on (he plays the next season as
+				   a past senior and re-enters the one after); one class on is only
+				   the same export loaded again, which keeps its pid (the export
+				   rewrites the birth year from the class, so that is not compared). */
+				const reEntry = !!(earlier && p.college && !(p.draft && p.draft.round > 0) &&
+					earlier.fileNo !== fileNo && earlier.season < season &&
+					((season - earlier.season >= 2 && bornGap <= 2) || p.pid === earlier.srcPid));
 				/* Awards: deduped on {season, type}. exportFile has already
 				   shifted each row to the season it belongs to, so the dedupe
 				   is over rows that are already in universe time. */
@@ -7726,21 +7860,48 @@
 				   object never reached the file, and the son's link pointed at
 				   a man with no link back. The later row now moves into this
 				   season's list and out of the old one. */
-				if (seen.has(idKey)) {
+				if (reEntry) {
 					duplicates++;
-					const prev = seen.get(idKey);
+					const prev = earlier;
+					/* What the earlier row carries (his first season's line and
+					   honors) is kept: it is the same man's life. */
+					const fold = (mine, theirs, keyOf) => {
+						if (!Array.isArray(theirs) || !theirs.length) return mine;
+						const out = [];
+						const has = new Set();
+						for (const r of (theirs || []).concat(mine || [])) {
+							if (!r) continue;
+							const k = keyOf(r);
+							if (has.has(k)) continue;
+							has.add(k);
+							out.push(r);
+						}
+						return out;
+					};
+					if (Array.isArray(prev.obj.awards)) {
+						p.awards = fold(p.awards, prev.obj.awards, (a) => a.season + "|" + a.type);
+					}
+					if (Array.isArray(prev.obj.stats)) {
+						p.stats = fold(p.stats, prev.obj.stats,
+							(r) => r.season + "|" + r.tid + "|" + (r.playoffs ? 1 : 0));
+					}
+					prev.srcPid = p.pid;
 					p.pid = prev.pid;
 					players[prev.at] = p;
 					const was = prev.rows.indexOf(prev.obj);
 					if (was !== -1) prev.rows.splice(was, 1);
 					prev.season = season;
+					prev.fileNo = fileNo;
+					prev.born = bornYear;
 					prev.rows = rows;
 					prev.obj = p;
 					rows.push(p);
 					continue;
 				}
+				const srcPid = p.pid;
 				p.pid = nextPid++;
-				seen.set(idKey, { pid: p.pid, at: players.length, season, rows, obj: p });
+				seen.set(nameKey, { pid: p.pid, at: players.length, season, rows, obj: p,
+					fileNo, born: bornYear, srcPid });
 				rows.push(p);
 				players.push(p);
 			}
@@ -7880,10 +8041,11 @@
 		if (!league || typeof league !== "object" || !Array.isArray(league.players)) {
 			throw new Error("That file has no players array — it is not a BBGM league file.");
 		}
-		const ours = exportFile(result, opts).players;
-		const sized = exportFile.sizeRewritten || new Set();
-		const aged = exportFile.bornRewritten || new Set();
-		const season = classDraftYear(ours, result.season);
+		/* The class's own draft year, read off the file the class came from
+		   (exportFile writes the same one: it fills a missing draft.year with
+		   it), so the league's prospects can be matched BEFORE the export runs
+		   and their notes handed to it as the notes to keep. */
+		const season = classDraftYear(result.leagueFile.players, result.season);
 		/* Players an earlier class in the same merge already wrote. They look
 		   exactly like the generated prospects this pass is replacing, so
 		   without this the second class of a two-class merge would delete the
@@ -7905,6 +8067,18 @@
 			const pid = Number(p.pid);
 			if (Number.isFinite(pid) && isProspect(p)) byPid.set(pid, p);
 		}
+		/* Which league prospect each class row will overlay, by pid and name,
+		   so "Keep any note already in the file" keeps the LEAGUE's note — the
+		   one the person sees in the game — and not the class file's. */
+		const noteSeed = (i, orig) => {
+			const t = orig && byPid.get(Number(orig.pid));
+			return t && sameName(t, orig) && String(t.note || "").trim()
+				? t.note : (orig && orig.note);
+		};
+		const ours = exportFile(result, Object.assign({}, opts, { noteSeed })).players;
+		const sized = exportFile.sizeRewritten || new Set();
+		const aged = exportFile.bornRewritten || new Set();
+		const noted = exportFile.noteDecided || new Set();
 		let maxPid = -1;
 		for (const p of league.players) {
 			const pid = Number(p.pid);
@@ -7919,7 +8093,7 @@
 		   actually produced goes on top of him. statsTids is the one field
 		   that has to be recomputed rather than kept, because the rows being
 		   written name a team the player has no history with. */
-		const overlay = (target, p, sized, aged) => {
+		const overlay = (target, p, sized, aged, noted) => {
 			/* A WHITELIST, not a spread.
 
 			   This used to be Object.assign({}, target, p) — the whole
@@ -7939,7 +8113,21 @@
 				"stats", "moodTraits", "jerseyNumber", "experience"]) {
 				if (src2[key] !== undefined) out[key] = src2[key];
 			}
+			/* The export decided this player's note and wrote none (the
+			   template said nothing for him, or Include notes is off and
+			   there was nothing of the file's own to keep): the league's
+			   generated note must not outlive the export that replaced it. */
+			if (noted && src2.note === undefined) delete out.note;
+			/* His ratings row is replaced below, so the value the league
+			   derived from the old one is stale — see exportFile. His rookie
+			   contract is the league's and stays: BBGM sets it again when he
+			   is drafted. */
+			for (const k of STALE_VALUE_KEYS) delete out[k];
 			if (src2.noteBool === undefined) delete out.noteBool;
+			/* The star: BBGM's Draft -> Import and a league file both keep
+			   it. Set, never unset: a class file that says nothing about it
+			   must not wipe the league's own. */
+			if (src2.watch) out.watch = src2.watch;
 			/* Size only when the tool rewrote it (Vary size, a hand-set
 			   height, or a source file that listed none). Otherwise the
 			   league's own listing stands. */
@@ -8012,7 +8200,7 @@
 			   used to write the second over the first and lose a player,
 			   past the guard below, which only counts the league's side. */
 			if (target && sameName(target, p) && !replacements.has(target)) {
-				replacements.set(target, overlay(target, p, sized.has(oi), aged.has(oi)));
+				replacements.set(target, overlay(target, p, sized.has(oi), aged.has(oi), noted.has(oi)));
 			} else {
 				const copy = JSON.parse(JSON.stringify(p));
 				copy.pid = ++maxPid;

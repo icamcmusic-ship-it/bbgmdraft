@@ -230,8 +230,11 @@ module.exports = function (ok, V) {
 			merged.replaced + " replaced, " + merged.added + " added");
 		ok("merge/the league's contract is not overwritten",
 			p.contract && p.contract.amount === 1500, JSON.stringify(p.contract));
-		ok("merge/the league's value / relatives / face survive",
-			p.value === 48 && p.valueFuzz === 47 && p.relatives && p.face &&
+		/* The league's value was computed from the ratings this merge just
+		   replaced, so it is dropped for the game to recompute (audit B5);
+		   everything else about him is the league's. */
+		ok("merge/the league's relatives / face survive; the stale value is dropped",
+			p.value === undefined && p.valueFuzz === undefined && p.relatives && p.face &&
 			p.face.head.id === "h");
 		ok("merge/the league's own size and birth year survive",
 			p.hgt === 79 && p.weight === 222 && p.born.year === 2006 &&

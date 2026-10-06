@@ -434,6 +434,9 @@
 				out.push("");
 			}
 			for (const line of String(p.note || "").split("\n")) {
+				/* The capsule's own Honors line above is the whole scoped
+				   list; the note's top-six copy printed it twice. */
+				if (honors.length && line.indexOf("Honors:") === 0) continue;
 				if (line.trim()) { out.push(line.trim()); out.push(""); }
 			}
 		}

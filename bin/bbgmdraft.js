@@ -43,13 +43,17 @@ const NOTE_PRESETS = {
 		"highs", "ranks"],
 	all: null,
 };
+// The page's own names for the same presets (its Notes tab: "Stat sheet",
+// "Everything"), so what the page calls them works here too.
+NOTE_PRESETS["stat sheet"] = NOTE_PRESETS["stat-sheet"] = NOTE_PRESETS.stat;
+NOTE_PRESETS.everything = null;
 
 const FLAGS = {
 	// name: takes a value?
 	"--seed": true, "--preset": true, "--set": true, "--year": true, "--notes": true,
 	"--out": true, "-n": true, "--stats": false, "--prior": false, "--highs": false,
 	"--awards": false, "--awards-major": false, "--no-ages": false, "--no-jerseys": false,
-	"--no-injuries": false, "--csv": false, "--json": false,
+	"--no-injuries": false, "--no-notes": false, "--keep-notes": false, "--csv": false, "--json": false,
 	"--quiet": false, "-q": false, "--no-gaps": false, "--help": false, "-h": false,
 };
 
@@ -76,8 +80,13 @@ function parseArgs(argv) {
 
 /* ------------------------------------------------------------ the files */
 
-function readClassFile(file, year) {
+function readClassFile(file, year, opts) {
 	if (!file) throw new Error("no file given");
+	if (year !== undefined) {
+		const y = String(year).trim();
+		if (!/^\d{4}$/.test(y)) throw new Error("--year takes a four-digit year, not \"" + year + "\"");
+		year = Number(y);
+	}
 	let buf = fs.readFileSync(file);
 	if (buf[0] === 0x1f && buf[1] === 0x8b) buf = zlib.gunzipSync(buf);
 	const text = buf.toString("utf8").replace(/^﻿/, "");
@@ -92,10 +101,15 @@ function readClassFile(file, year) {
 		if (!found.length) throw new Error("no draft class found in the league file " + file);
 		if (year === undefined) {
 			if (found.length === 1) year = found[0].year;
+			else if (opts && opts.listClasses) return { league: true, classes: found, leagueData: data };
 			else throw new Error(file + " is a league with " + found.length + " draft classes (" +
 				found.map((c) => c.year).join(", ") + "); choose one with --year");
 		}
 		return { data: E.extractDraftClass(data, Number(year)), league: true, leagueData: data };
+	}
+	if (year !== undefined) {
+		process.stderr.write("bbgmdraft: note: --year only chooses a class of a league file; " +
+			file + " is a plain class file, so it is ignored\n");
 	}
 	return { data, league: false };
 }
@@ -103,6 +117,7 @@ function readClassFile(file, year) {
 /* ---------------------------------------------------------- the settings */
 
 function coerce(key, raw) {
+	const C = global.Config;
 	const D = global.Config.DEFAULTS;
 	if (!(key in D)) {
 		const near = Object.keys(D).filter((k) => k.toLowerCase().indexOf(key.toLowerCase()) !== -1 ||
@@ -121,7 +136,16 @@ function coerce(key, raw) {
 		if (/^(false|0|no|off)$/i.test(raw)) return false;
 		throw new Error(key + " takes true or false, not \"" + raw + "\"");
 	}
-	if (t === "string" || D[key] === null) return raw;
+	if (t === "string" || D[key] === null) {
+		// Config.make quietly resets a choice it does not know to the default,
+		// which made a typo run as if it had not been given.
+		const allowed = C.CHOICES && C.CHOICES[key] ? C.CHOICES[key]() : null;
+		if (allowed && allowed.indexOf(raw) === -1) {
+			throw new Error(key + " takes one of: " + allowed.map((v) => v === "" ? "\"\"" : v).join(", ") +
+				" — not \"" + raw + "\"");
+		}
+		return raw;
+	}
 	throw new Error(key + " cannot be set from the command line (use a preset, or --notes for the note template)");
 }
 
@@ -129,6 +153,7 @@ function buildConfig(args) {
 	const C = global.Config;
 	const f = args.flags;
 	const cfg = {};
+	const setKeys = [];
 	if (f["--preset"]) {
 		const names = Object.keys(C.PRESETS);
 		const name = names.find((n) => n.toLowerCase() === String(f["--preset"]).toLowerCase());
@@ -139,13 +164,15 @@ function buildConfig(args) {
 		const eq = s.indexOf("=");
 		if (eq < 1) throw new Error("--set takes key=value, not \"" + s + "\"");
 		cfg[s.slice(0, eq)] = coerce(s.slice(0, eq), s.slice(eq + 1));
+		setKeys.push(s.slice(0, eq));
 	}
 	if (f["--notes"] !== undefined) {
 		const all = global.Engine.NOTE_LINES.map((x) => x[0]);
 		const v = String(f["--notes"]);
 		const named = v.toLowerCase();
 		if (named in NOTE_PRESETS) {
-			cfg.noteLines = NOTE_PRESETS[named] || (named === "all" ? all : C.DEFAULTS.noteLines.slice());
+			cfg.noteLines = NOTE_PRESETS[named] ||
+				(named === "all" || named === "everything" ? all : C.DEFAULTS.noteLines.slice());
 		} else {
 			const lines = v.split(",").map((x) => x.trim()).filter(Boolean);
 			const bad = lines.filter((x) => all.indexOf(x) === -1);
@@ -154,7 +181,17 @@ function buildConfig(args) {
 		}
 	}
 	if (f["--seed"] !== undefined) cfg.seed = String(f["--seed"]);
-	return C.make(cfg);
+	const made = C.make(cfg);
+	/* Config.make clamps a number to the band the page's slider offers and
+	   rounds a count; say so, or classQuality=99 looks like it was honoured. */
+	for (const k of setKeys) {
+		if (typeof cfg[k] === "number" && made[k] !== cfg[k]) {
+			const r = C.sliderRange(k);
+			say(args, "note: " + k + "=" + cfg[k] + " is outside what the page allows" +
+				(r ? " (" + r.min + " to " + r.max + ")" : "") + "; using " + made[k]);
+		}
+	}
+	return made;
 }
 
 function exportOptions(args) {
@@ -164,6 +201,9 @@ function exportOptions(args) {
 		stats: !!f["--stats"], prior: !!f["--prior"], highs: !!f["--highs"],
 		awards: !!f["--awards"] || !!f["--awards-major"],
 		awardsScope: f["--awards-major"] ? "major" : "all",
+		// The page's "Include scouting notes" (off: write none of ours, leave the
+		// file's own) and "Keep any note already in the file".
+		includeNotes: !f["--no-notes"], noteAppend: !!f["--keep-notes"],
 	};
 }
 
@@ -225,7 +265,11 @@ function cmdBatch(args) {
 	const file = args.positional[1];
 	const { data } = readClassFile(file, args.flags["--year"]);
 	const cfg = buildConfig(args);
-	const n = Math.max(1, Math.round(Number(args.flags["-n"] || 10)));
+	const rawN = args.flags["-n"] === undefined ? "10" : String(args.flags["-n"]).trim();
+	const n = Number(rawN);
+	if (!/^\d+$/.test(rawN) || !Number.isSafeInteger(n) || n < 1) {
+		throw new Error("-n takes a whole number of 1 or more, not \"" + rawN + "\"");
+	}
 	const B = global.BatchStats;
 	const base = B.batchSeed(cfg, cfg.seed);
 	const runner = global.Engine.createRunner(data);
@@ -348,7 +392,15 @@ function cmdMock(args) {
 }
 
 function cmdCheck(args) {
-	const { data, league } = readClassFile(args.positional[1], args.flags["--year"]);
+	const read = readClassFile(args.positional[1], args.flags["--year"], { listClasses: true });
+	if (read.classes) {
+		// A league with several draft classes: say which, instead of refusing.
+		process.stdout.write("league file with " + read.classes.length + " draft classes: " +
+			read.classes.map((c) => c.year + " (" + c.count + " players)").join(", ") + "\n");
+		process.stdout.write("check one with --year <year>\n");
+		return;
+	}
+	const { data, league } = read;
 	let v;
 	try { v = global.Engine.validateLeagueFile(data); } catch (e) {
 		process.stdout.write("REJECTED: " + e.message + "\n");
@@ -399,8 +451,8 @@ Options (run, batch)
   --seed S           the seed (a class is reproducible from file + seed + settings)
   --preset NAME      a built-in preset (bbgmdraft settings presets)
   --set key=value    a setting, repeatable (bbgmdraft settings lists them)
-  --notes WHAT       the note template: none, short, forum, standard, stat, all,
-                     or lines such as summary,stats,awards
+  --notes WHAT       the note template: none, short, forum, standard, stat sheet
+                     (or stat), everything (or all), or lines such as summary,stats,awards
   --year Y           which draft class of a league file
 
 Options (run)
@@ -408,6 +460,10 @@ Options (run)
   --stats --prior --highs     write the college statline, earlier seasons, season highs
   --awards | --awards-major   write honors (all, or national and major-conference only)
   --no-ages --no-jerseys --no-injuries   leave those fields as they came
+  --no-notes         write none of the generated notes and leave the file's own
+                     notes as they were (the page's "Include scouting notes" off)
+  --keep-notes       keep a note the file already has and put the generated one
+                     under it ("Keep any note already in the file")
   --json             print the summary as JSON on stderr
   -q                 no summary
 
@@ -419,6 +475,13 @@ Options (universe)
 Options (batch)
   -n N               how many classes (default 10)
   --csv | --json     machine-readable output on stdout
+
+A player the note template writes nothing for ends up with no note, unless
+--keep-notes or --no-notes keeps the file's own.
+
+One difference from the page: the page draws a face for every player and writes it
+into the file; the command line does not load the face library, so a class made
+here has no face field (BBGM draws its own on import). Everything else is the same.
 
 Exit status is non-zero if the file is rejected or an option is wrong.`;
 

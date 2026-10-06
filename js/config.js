@@ -859,5 +859,5 @@
 	}
 
 	global.Config = { DEFAULTS, PRESETS, make, defaultLeagueWeights, COUNTS, isCount,
-		CLAMP, sliderRange, LEAGUE_WEIGHT_MAX, ARCH_WEIGHT_MAX };
+		CLAMP, CHOICES, sliderRange, LEAGUE_WEIGHT_MAX, ARCH_WEIGHT_MAX };
 })(typeof window !== "undefined" ? window : self);

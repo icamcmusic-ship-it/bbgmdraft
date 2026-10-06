@@ -5742,7 +5742,8 @@
 			box.appendChild(el("p", "hint", q
 				? "The search covers names and note text. Clear it to see every note."
 				: "Every line of the note template is off, or the class is empty. " +
-					"Tick lines under “Note template” in the sidebar to write notes."));
+					"Tick lines under “Note template” in the sidebar to write notes. " +
+					"A note already in the file is cleared on export unless \"Keep any note already in the file\" is on."));
 			if (q) {
 				const clear = el("button", "tiny", "Clear the search");
 				clear.addEventListener("click", () => { st.noteQuery = ""; A().render(); });

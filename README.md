@@ -51,10 +51,16 @@ node bin/bbgmdraft.js settings            # every setting, its default and range
 says; `-` is stdout) and prints the seed and the top five. It takes a draft
 class or a league export (`--year` picks the class of a league), `.json` or
 `.json.gz`, and a preset (`--preset`), any setting (`--set key=value`) and the
-export options the page's dialog has (`--stats --prior --highs --awards`).
-Because the engine is deterministic, the same file, seed and settings give the
-page's class byte for byte, and `tools/tests/cli.js` checks that against the
-engine itself. `universe` runs several classes as one continuous world, as the
+export options the page's dialog has (`--stats --prior --highs --awards`,
+`--no-notes` for "Include scouting notes" off, `--keep-notes` for "Keep any
+note already in the file"). Because the engine is deterministic, the same file,
+seed and settings give the page's class byte for byte, and
+`tools/tests/cli.js` checks that against the engine itself. The one
+difference is the portrait: the page writes a `face` for every player and the
+command line does not load the face library, so its files have none (BBGM draws
+its own on import). The options are checked: a non-numeric `-n` or `--year`, or
+a `--set` choice that is not one of the setting's choices, is an error, and a
+number outside the page's slider range is reported when it is clamped. `universe` runs several classes as one continuous world, as the
 page's Universe mode does (same seeds, same timeline, checked row for row
 against the page in `tools/uismoke.js`), prints the timeline and writes the
 universe export the Universe tab imports; it does not yet write the players
@@ -512,7 +518,14 @@ postseason result, the stat line, shooting splits, advanced numbers, the defensi
 line, the best single game of his season, season highs and streaks, postseason
 splits, games missed and why, the archetype, honors, and his position on the draft
 board. This goes into the player's `note` field, which BBGM displays on the player
-page.
+page. The field is the template's output: a note already in the file is replaced,
+and a player the template writes nothing for ends up with no note. *Keep any note
+already in the file* keeps it instead (the generated text goes under a
+"Generated scouting notes:" line, so a re-export replaces that block rather than
+stacking another on top; on a league merge the league's own note is the one
+kept), and *Include scouting notes* off writes none of ours and leaves the file's
+notes as they were. Seasons in the note are the ones the exported statline rows
+carry, which for a class a year ahead is the draft year.
 
 **5. Hands out honors — about a hundred distinguishable ones.** The six named
 national player-of-the-year trophies (Naismith, Wooden, Oscar Robertson, AP, NABC,
