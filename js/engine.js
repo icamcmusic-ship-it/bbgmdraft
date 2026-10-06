@@ -7815,7 +7815,7 @@
 				   a past senior and re-enters the one after); one class on is only
 				   the same export loaded again, which keeps its pid (the export
 				   rewrites the birth year from the class, so that is not compared). */
-				const reEntry = !!(earlier && p.college && !(p.draft && p.draft.round > 0) &&
+				const reEntry = !!(earlier && p.college &&
 					earlier.fileNo !== fileNo && earlier.season < season &&
 					((season - earlier.season >= 2 && bornGap <= 2) || p.pid === earlier.srcPid));
 				/* Awards: deduped on {season, type}. exportFile has already

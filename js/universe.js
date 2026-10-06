@@ -61,6 +61,44 @@
 		return (p.awards || []).some((a) => set.has(a));
 	}
 
+	/* ONE MAN PER SEASON. Seven trophies are minted and different men often
+	   hold different ones, so "the first holder of any of them" named a man
+	   with only the AP award while another held six including the Consensus
+	   trophy. The player of the year is the Consensus holder (there can be only
+	   one: it needs four of the six), else the man with the most of the
+	   trophies; ties go to the better board rank and then to the first in the
+	   result's own order, which is deterministic. */
+	function pickPOY(players, set) {
+		const POY = set || nationalPOYSet();
+		let best = null;
+		let bestKey = null;
+		for (const p of players || []) {
+			const held = (p.awards || []).filter((a) => POY.has(a));
+			if (!held.length) continue;
+			const k = [held.includes("Consensus National Player of the Year") ? 1 : 0,
+				held.length, -(p.boardRank || 999)];
+			if (!bestKey || k[0] > bestKey[0] || (k[0] === bestKey[0] &&
+				(k[1] > bestKey[1] || (k[1] === bestKey[1] && k[2] > bestKey[2])))) {
+				best = p;
+				bestKey = k;
+			}
+		}
+		return best;
+	}
+
+	/* TEAM TROPHIES ARE NOT PERSONAL HONORS. A player's award list carries the
+	   title his TEAM won ("MEAC Regular-Season Champion", "NCAA National
+	   Runner-Up", "NIT Champion", a club's "Cup Winner") and the academic roll;
+	   counted as honors they put a reserve on a 40-win team at "42 honors" and
+	   made a man "honoured 15 times". Only individual awards count. */
+	const TEAM_HONOR = /( Champion| Cup Winner|National Runner-Up)$|^Academic All-American$/;
+	function isPersonalHonor(h) {
+		return !TEAM_HONOR.test(String(h && h.award != null ? h.award : h || ""));
+	}
+	function personalHonors(x) {
+		return ((x && x.honors) || []).filter(isPersonalHonor);
+	}
+
 	/* THE SEED FOR ONE SEASON OF A CHAIN.
 
 	   It used to be baseSeed + "#" + (d.season || k), which is a seed keyed on
@@ -96,9 +134,13 @@
 
 	function resultFingerprint(res) {
 		if (!res) return null;
+		/* Deliberately the ORIGINAL first-holder pick, not pickPOY: this value
+		   is stored in every export and compared on import, and the timeline's
+		   choice of POY is a presentation fix that must not make every
+		   previously exported universe look like a different world. */
 		const poySet = nationalPOYSet();
 		const poy = (res.players || []).filter((p) => isNationalPOY(p, poySet))[0];
-		const board = (res.players || []).slice()
+		const board =(res.players || []).slice()
 			.sort((a, b) => (a.boardRank || 999) - (b.boardRank || 999))
 			.slice(0, 10).map((p) => p.key || p.name).join(",");
 		const t = res.tourney;
@@ -198,6 +240,14 @@
 				ordered[i].warnings.push(gap - 1 + " season" + (gap > 2 ? "s" : "") +
 					" between " + ordered[i - 1].season + " and " + ordered[i].season +
 					" with no file — the carry-over is aged across the gap");
+				/* A hundred missing years is almost always a typo in a
+				   startingSeason (2205 for 2025), not a plan. */
+				if (gap - 1 > GAP_WARN_YEARS) {
+					ordered[i].warnings.push("that is more than " + GAP_WARN_YEARS +
+						" missing seasons — check the starting season of " + ordered[i].name +
+						" (or " + ordered[i - 1].name + "); at most " + EXTRAPOLATE_MAX_YEARS +
+						" of them are extrapolated");
+				}
 			}
 		}
 		// Cross-file duplicate pids: legitimate between separate BBGM exports
@@ -560,7 +610,7 @@
 			if (name) at(name).ff = season;
 		}
 		const set = nationalPOYSet();
-		const poy = (res.players || []).filter((p) => isNationalPOY(p, set))[0];
+		const poy = pickPOY(res.players, set);
 		if (poy && poy.newCollege && !poy.nonNcaa) {
 			const e = at(poy.newCollege);
 			e.poy = season;
@@ -740,8 +790,16 @@
 			if (!tree.by[mentor.name]) tree.by[mentor.name] = [];
 			tree.by[mentor.name].push({ season, coach: hire.coach, school: hire.school });
 		}
+		/* The tree is persisted whole (about 8 KB a season), so it keeps the most
+		   recent COACH_TREE_MAX_HIRES hires: some 25 seasons' worth, which only
+		   the longest universes ever reach. */
+		if (tree.hires.length > COACH_TREE_MAX_HIRES) {
+			tree.hires = tree.hires.slice(-COACH_TREE_MAX_HIRES);
+			rebuildTreeIndex(tree);
+		}
 		return tree;
 	}
+	const COACH_TREE_MAX_HIRES = 1000;
 
 	function rebuildTreeIndex(tree) {
 		tree.by = {};
@@ -812,10 +870,7 @@
 		   AW.NATIONAL_POY is the list the awards module actually mints from,
 		   plus the consensus row it derives; reading it here means a trophy
 		   added there is picked up rather than missed. */
-		const nationalPOY = nationalPOYSet();
-		for (const p of res.players || []) {
-			if (isNationalPOY(p, nationalPOY)) add(p, "player of the year");
-		}
+		add(pickPOY(res.players, nationalPOYSet()), "player of the year");
 		const board = (res.players || []).slice()
 			.sort((a, b) => (a.boardRank || 999) - (b.boardRank || 999));
 		for (const p of board.slice(0, 3)) add(p, "top of the board");
@@ -834,8 +889,7 @@
 		   nationalPOYSet. This used to be a second hardcoded pair of trophy
 		   names, so the timeline column and the alumni index could name two
 		   different men for the same season. */
-		const poySet = nationalPOYSet();
-		const poy = (res.players || []).filter((p) => isNationalPOY(p, poySet))[0];
+		const poy = pickPOY(res.players, nationalPOYSet());
 		const no1 = (res.players || []).filter((p) => p.boardRank === 1)[0];
 		return Object.assign({
 			season: res.leagueFile ? res.leagueFile.startingSeason : null,
@@ -867,9 +921,11 @@
 				.filter((c) => c.reason === "hired away").length,
 			/* Later classes' underclassmen who played this season, and the
 			   honors they took — the seam between two class files. */
-			futureOnRosters: (res.futurePlayers || []).length,
-			futureHonors: (res.futurePlayers || [])
-				.reduce((a, p) => a + ((p.awards || []).length), 0),
+			/* ...not the undrafted returners (`past`), who are from an EARLIER
+			   class, and not a team's trophy, which is not his honor. */
+			futureOnRosters: (res.futurePlayers || []).filter((p) => !p.past).length,
+			futureHonors: (res.futurePlayers || []).filter((p) => !p.past)
+				.reduce((a, p) => a + (p.awards || []).filter(isPersonalHonor).length, 0),
 			strange: strangeOf(res),
 		}, extraTracking(res, poy, no1));
 	}
@@ -1120,11 +1176,12 @@
 		for (const id of Object.keys(registry || {}).sort()) {
 			const x = registry[id];
 			if (!x || !x.name) continue;
-			const honorSeasons = Array.from(new Set((x.honors || []).map((h) => h.season)
+			const honors = personalHonors(x);
+			const honorSeasons = Array.from(new Set(honors.map((h) => h.season)
 				.filter(Number.isFinite))).sort((a, b) => a - b);
 			const back = (x.returned || []).filter(Number.isFinite);
 			if (!back.length && honorSeasons.length < 2) continue;
-			const backHonors = (x.honors || []).filter((h) => back.indexOf(h.season) !== -1).length;
+			const backHonors = honors.filter((h) => back.indexOf(h.season) !== -1).length;
 			/* A returner nobody honoured is a roster line, not a story. */
 			if (back.length && !backHonors && honorSeasons.length < 2) continue;
 			const last = (x.seasons || []).filter((s) => s && s.school).slice(-1)[0];
@@ -1144,6 +1201,9 @@
 		return out.slice(0, 6).map((t) => { delete t.score; return t; });
 	}
 	function countOf(n, w) { return n + " " + w + (n === 1 ? "" : "s"); }
+	/* The word for a count: plural("title", "titles", 1) is "title". For the
+	   views, which print their own units beside a number. */
+	function plural(n, one, many) { return n === 1 ? one : many || one + "s"; }
 
 	/* RIVALRIES AS THREADS.
 
@@ -1221,6 +1281,11 @@
 		};
 		const byName = (a, b) => cmpText(a, b, true);
 		const keys = (map) => Object.keys(map).sort(byName);
+		/* The schools that changed conference in a season, each once: a
+		   realignment pass can move one school twice ("A → B", then "B → C"),
+		   and that is one change of conference in that season. */
+		const movedOf = (r) => Array.from(new Set((r.realignment || [])
+			.map((m) => String(m).split(" → ")[0])));
 		const list = (names) => names.length === 1 ? names[0]
 			: names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
 
@@ -1253,9 +1318,7 @@
 			push(no1Conf, r.no1Conf, r.season);
 			push(flavors, r.flavorName, r.season);
 			for (const a of r.anomalies || []) push(anomalies, a, r.season);
-			for (const m of r.realignment || []) {
-				push(moved, String(m).split(" → ")[0], r.season);
-			}
+			for (const school of movedOf(r)) push(moved, school, r.season);
 		}
 
 		// --- titles, finals and the shape of a dynasty ----------------------
@@ -1291,8 +1354,9 @@
 				add("firstTitle", late.length === 1 ? late[0] : null,
 					late.map((n) => first[n]).sort((a, b) => a - b), late.length,
 					late.length + " programme" + (late.length === 1 ? "" : "s") +
-					" won a first title inside this timeline: " +
-					list(late.slice(0, 4).map((n) => n + " (" + first[n] + ")")));
+					" won a first title of this timeline: " +
+					list(late.slice(0, 4).map((n) => n + " (" + first[n] + ")")) +
+					(late.length > 4 ? " and " + (late.length - 4) + " more" : ""));
 			}
 		}
 		for (const name of keys(finals)) {
@@ -1406,10 +1470,20 @@
 			const bests = played.filter((r) => r.bestRecord).slice()
 				.sort((a, b) => b.bestRecord.w - a.bestRecord.w);
 			if (bests.length && bests[0].bestRecord.w >= 30) {
+				/* "The most" is one team's claim: when two seasons share the top
+				   win total the thread says they tied rather than crowning both. */
+				const top = bests.filter((r) => r.bestRecord.w === bests[0].bestRecord.w);
 				const b = bests[0];
-				add("bestRecord", b.bestRecord.team, [b.season], b.bestRecord.w,
-					b.bestRecord.team + " won " + b.bestRecord.w + " games in " + b.season +
-					", the most in the timeline");
+				if (top.length === 1) {
+					add("bestRecord", b.bestRecord.team, [b.season], b.bestRecord.w,
+						b.bestRecord.team + " won " + b.bestRecord.w + " games in " + b.season +
+						", the most in the timeline");
+				} else {
+					add("bestRecord", null, top.map((r) => r.season).sort((x, y) => x - y),
+						b.bestRecord.w,
+						list(top.map((r) => r.bestRecord.team + " (" + r.season + ")")) +
+						" each won " + b.bestRecord.w + " games, tied for the most in the timeline");
+				}
 			}
 			const nits = {};
 			for (const r of played) push(nits, r.nitChampion, r.season);
@@ -1580,16 +1654,16 @@
 
 		// --- realignment ------------------------------------------------------
 		{
-			const total = played.reduce((a, r) => a + (r.realignment || []).length, 0);
+			const total = played.reduce((a, r) => a + movedOf(r).length, 0);
 			if (total >= 6) {
 				add("realignmentEra", null,
-					played.filter((r) => (r.realignment || []).length).map((r) => r.season),
+					played.filter((r) => movedOf(r).length).map((r) => r.season),
 					total, total + " programmes changed conference across the timeline");
 			}
-			const waves = played.filter((r) => (r.realignment || []).length >= 4);
+			const waves = played.filter((r) => movedOf(r).length >= 4);
 			for (const r of waves.slice(0, 3)) {
-				add("realignmentWave", null, [r.season], r.realignment.length,
-					r.realignment.length + " programmes moved conference in " + r.season);
+				add("realignmentWave", null, [r.season], movedOf(r).length,
+					movedOf(r).length + " programmes moved conference in " + r.season);
 			}
 			for (const n of keys(moved)) {
 				if (moved[n].length >= 2) {
@@ -1950,6 +2024,9 @@
 		};
 	}
 
+	const GAP_WARN_YEARS = 15;
+	const EXTRAPOLATE_MAX_YEARS = 30;
+
 	/* Every season between two played ones, extrapolated. `carry` is the world
 	   as the earlier season left it; it is aged one year per step so the
 	   fourth missing year is drawn against a world that has drifted four years
@@ -1958,7 +2035,10 @@
 		const out = [];
 		if (!carry || !Number.isFinite(fromSeason) || !Number.isFinite(toSeason)) return out;
 		let world = carry;
-		for (let y = fromSeason + 1; y < toSeason; y++) {
+		/* Never more than EXTRAPOLATE_MAX_YEARS rows from one hole: 499 guessed
+		   rows for a 2025 file next to a 2525 one is a typo, not a timeline. */
+		const last = Math.min(toSeason, fromSeason + 1 + EXTRAPOLATE_MAX_YEARS);
+		for (let y = fromSeason + 1; y < last; y++) {
 			world = ageCarry(world, 1);
 			const row = extrapolateSeason(world, y, baseSeed);
 			if (row) {
@@ -2140,8 +2220,13 @@
 				no1s[r.no1.school] = (no1s[r.no1.school] || 0) + 1;
 			}
 		}
+		/* "1 titles" is wrong, and the label is what a reader sees beside the count. */
+		const SINGULAR = { titles: "title", "title games": "title game",
+			"seasons at AP No. 1": "season at AP No. 1",
+			"players of the year": "player of the year", "No. 1 picks": "No. 1 pick" };
 		const leaders = (map, label) => Object.keys(map)
-			.map((team) => ({ team, count: map[team], label }))
+			.map((team) => ({ team, count: map[team],
+				label: map[team] === 1 && SINGULAR[label] ? SINGULAR[label] : label }))
 			.sort((a, b) => b.count - a.count ||
 				cmpText(a.team, b.team, true))
 			.slice(0, 10);
@@ -2337,10 +2422,11 @@
 		const byName = (a, b) => cmpText(a.name, b.name);
 		const brief = (x, extra) => Object.assign({ id: x.id, name: x.name,
 			span: x.span || 0, school: x.draft ? x.draft.school || null : null }, extra);
-		const mostHonors = men.filter((x) => (x.honors || []).length)
-			.sort((a, b) => b.honors.length - a.honors.length || b.span - a.span || byName(a, b))
-			.slice(0, 10).map((x) => brief(x, { count: x.honors.length,
-				seasons: Array.from(new Set(x.honors.map((h) => h.season))).sort() }));
+		const mostHonors = men.filter((x) => personalHonors(x).length)
+			.sort((a, b) => personalHonors(b).length - personalHonors(a).length ||
+				b.span - a.span || byName(a, b))
+			.slice(0, 10).map((x) => brief(x, { count: personalHonors(x).length,
+				seasons: Array.from(new Set(personalHonors(x).map((h) => h.season))).sort() }));
 		const mostSeasons = men.filter((x) => (x.seasons || []).length >= 2)
 			.sort((a, b) => b.seasons.length - a.seasons.length || b.span - a.span || byName(a, b))
 			.slice(0, 10).map((x) => brief(x, { count: x.seasons.length,
@@ -2350,7 +2436,7 @@
 			const back = (x.seasons || []).filter((s) => s.as === "returned undrafted");
 			if (!back.length) continue;
 			const ppg = back.reduce((a, s) => Math.max(a, Number.isFinite(s.ppg) ? s.ppg : 0), 0);
-			const honors = (x.honors || []).filter((h) => (x.returned || []).indexOf(h.season) !== -1).length;
+			const honors = personalHonors(x).filter((h) => (x.returned || []).indexOf(h.season) !== -1).length;
 			returners.push(brief(x, { returned: back.map((s) => s.season), bestPpg: ppg, honors,
 				score: back.length * 10 + honors * 6 + ppg }));
 		}
@@ -2358,7 +2444,7 @@
 		let bestSeason = null;
 		for (const x of men) {
 			const per = {};
-			for (const h of x.honors || []) per[h.season] = (per[h.season] || 0) + 1;
+			for (const h of personalHonors(x)) per[h.season] = (per[h.season] || 0) + 1;
 			for (const season of Object.keys(per)) {
 				if (!bestSeason || per[season] > bestSeason.count) {
 					bestSeason = brief(x, { season: Number(season), count: per[season] });
@@ -2699,7 +2785,7 @@
 					ovr: p.newOvr, pot: p.newPot,
 				};
 				if (Number.isFinite(season)) e.seasons.push({ season, as: "draft class" });
-				for (const a of p.awards || []) e.honors.push({ season, award: a });
+				for (const a of p.awards || []) if (isPersonalHonor(a)) e.honors.push({ season, award: a });
 			}
 			/* And every season he played that is not his own file's. The
 			   forward link and the reverse link both land here — they are the
@@ -2726,7 +2812,7 @@
 					});
 					if (fp.past) e.returned.push(season);
 				}
-				for (const a of fp.awards || []) e.honors.push({ season, award: a });
+				for (const a of fp.awards || []) if (isPersonalHonor(a)) e.honors.push({ season, award: a });
 			}
 		});
 		for (const id of Object.keys(out)) {
@@ -2965,9 +3051,65 @@
 		return "syn" + hashString(String(seed) + "|" + season) +
 			hashString(season + "|" + String(seed));
 	}
+	/* NAMES THAT DO NOT REPEAT ACROSS A CHAIN.
+
+	   Sample.makeClass keeps names unique inside ONE class only; its pools are
+	   50 x 44, so a 20-season world carried ~80 repeated names (the same
+	   "Devin Jokic" three times). A synthetic season is regenerable from
+	   (seed, season) alone, so de-duplication cannot look at earlier seasons;
+	   it is made a pure function of that pair instead. Every first/last pair
+	   not on REAL_NAMES is dealt out in a seed-shuffled order, and season s
+	   man i takes slot (s * size + i): consecutive classes draw consecutive,
+	   never-repeating slots. When the deal wraps (about 30 seasons), the next
+	   pass carries a generation suffix (Jr., III, ...) so a name is still
+	   never reused. Switchable: setUniqueSynthNames(false) restores the names
+	   Sample.makeClass drew (which moves every synthetic name, see the
+	   fingerprint note in the tests). */
+	const SYNTH_FIRST = ["Jalen", "Marcus", "Tyrese", "Cameron", "Isaiah", "Jaylen", "Devin",
+		"Kobe", "Darius", "Elijah", "Malik", "Zion", "Trey", "Caleb", "Amari", "Jaden",
+		"Bryce", "Keon", "Tariq", "Josh", "Nikola", "Luka", "Dario", "Matteo", "Tomas",
+		"Kai", "Andre", "Xavier", "Micah", "Reece", "Cole", "Tyler", "Chris", "Julian",
+		"Omar", "Rasheed", "Grant", "Ethan", "Nate", "Dominic", "Cody", "Terrence",
+		"Jordan", "Aaron", "Dylan", "Ian", "Sam", "Miles", "Jamal", "Vince"];
+	const SYNTH_LAST = ["Williams", "Johnson", "Carter", "Brooks", "Mitchell", "Hendricks",
+		"Okafor", "Thompson", "Reeves", "Garland", "Bates", "Coleman", "Diallo", "Foster",
+		"Grant", "Harris", "Jenkins", "Kessler", "Lawson", "Morgan", "Nwosu", "Osei",
+		"Pierce", "Quinn", "Ramirez", "Sanders", "Turner", "Vaughn", "Walker", "Young",
+		"Jokic", "Petrovic", "Bogdanovic", "Markkanen", "Sarr", "Ndiaye", "Abdullahi",
+		"Kuminga", "Wembanyama", "Daniels", "Hardaway", "Whitmore", "Sheppard", "Castle"];
+	const NAME_GENERATIONS = ["", " Jr.", " III", " IV", " V", " VI", " VII", " VIII"];
+	let uniqueSynthNames = true;
+	const nameDeals = new Map();
+	function setUniqueSynthNames(on) { uniqueSynthNames = !!on; }
+	function nameDeal(seed) {
+		const key = String(seed);
+		let deal = nameDeals.get(key);
+		if (deal) return deal;
+		const real = (global.Sample && global.Sample.REAL_NAMES) || new Set();
+		const pairs = [];
+		for (const f of SYNTH_FIRST) {
+			for (const l of SYNTH_LAST) if (!real.has(f + " " + l)) pairs.push([f, l]);
+		}
+		deal = new global.BBGMRng.Rng("synth-names|" + key).shuffle(pairs);
+		if (nameDeals.size > 8) nameDeals.clear();
+		nameDeals.set(key, deal);
+		return deal;
+	}
+	function uniqueNames(data, seed, season, n) {
+		const deal = nameDeal(seed);
+		const P = deal.length;
+		const stride = Math.max(1, n);
+		(data.players || []).forEach((p, i) => {
+			const idx = season * stride + (Number.isFinite(p.pid) ? p.pid : i);
+			const pair = deal[idx % P];
+			p.firstName = pair[0];
+			p.lastName = pair[1] + NAME_GENERATIONS[Math.floor(idx / P) % NAME_GENERATIONS.length];
+		});
+	}
 	function synthFile(seed, season, size) {
 		const n = Number.isFinite(size) ? size : SYNTH_SIZE;
 		const data = global.Sample.makeClass(hashString(String(seed) + "|" + season), n, season);
+		if (uniqueSynthNames) uniqueNames(data, seed, season, data.players.length);
 		return {
 			name: "synthetic-" + season + ".json", data, base: data,
 			fingerprint: synthFingerprint(seed, season),
@@ -3883,7 +4025,7 @@
 			if (!x || !x.id || !x.draft) continue;
 			const pro = proOutcome(x);
 			if (!pro) continue;
-			const college = (x.honors || []).length * 2 + (x.span || 0);
+			const college = personalHonors(x).length * 2 + (x.span || 0);
 			out.push({ id: x.id, name: x.name, school: x.draft.school || null,
 				season: x.draft.season, pro, college, score: college + pro.score * 1.5 });
 		}
@@ -3954,7 +4096,7 @@
 		threads, moreThreads, records, exportUniverse, biographyOf, seedFor, resultFingerprint,
 		extrapolateGap, extrapolateSeason, topUpPartialSeason, extrapolatedAlumni,
 		PARTIAL_CLASS_SHARE,
-		ageCarry, coachTreeStep, pruneCoachTree, nationalPOYSet, recruitingCohorts,
+		ageCarry, coachTreeStep, pruneCoachTree, nationalPOYSet, pickPOY, personalHonors, isPersonalHonor, setUniqueSynthNames, plural, GAP_WARN_YEARS, EXTRAPOLATE_MAX_YEARS, COACH_TREE_MAX_HIRES, recruitingCohorts,
 		peopleRecords, programHistory, programRowsOf, rivalryThreads,
 		returnerSource, pastRosterFrom, beginChain, rowKeys, replayPlan,
 		restoreImported, viewOnlyUniverse, segmentSettings, mergeRegistry, pruneRegistry,

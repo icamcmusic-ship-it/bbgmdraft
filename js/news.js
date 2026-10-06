@@ -3788,7 +3788,11 @@
 	TPL({
 		kind: "underclassman award", group: "universe", p: 0.85, when: 1.235,
 		find: (ctx) => {
-			const fh = (ctx.res.fieldHonors || []).filter((h) => h.futureClass);
+			/* Only a LATER class: a returner (an undrafted man who came back) also
+			   carries his class season, which is in the past, and the story
+			   below says he "will not be eligible until" it. */
+			const fh = (ctx.res.fieldHonors || []).filter((h) => h.futureClass &&
+				!(Number(h.futureClass) <= Number(ctx.res.season)));
 			if (!fh.length) return null;
 			return fh.sort((a, b) => (global.Awards.awardRank(a.award) - global.Awards.awardRank(b.award)))[0];
 		},
@@ -3844,7 +3848,7 @@
 		bodies: [
 			"{player} finishes the season as a national champion. He averaged {line} for {team}, and the scouts who spent the year arguing about him now have to do it about a player with a title.",
 			"The last shot of the season belonged to {team}, and {player} was on the floor for it. A {year} averaging {line}, he goes into the draft with the one line on a résumé nobody can take back.",
-			"{team} are national champions and {player} is the prospect who came out of it. {line} across the season; a ring at the end of it.",
+			"National champions: {team}. {player} is the prospect who came out of it. {line} across the season; a ring at the end of it.",
 		],
 	});
 
@@ -8780,7 +8784,7 @@
 				articles.push({
 					when: 1.2, kind: "champion",
 					headline: fill(rng.pick([
-						"{champ} are national champions",
+						"National champions: {champ}",
 						"The nets come down for {champ}",
 					]), { champ: TM(t.champion.team.name) }),
 					body: segs,
@@ -9648,7 +9652,7 @@
 			}
 			articles.unshift({
 				when: -1, kind: "followed program", group: "the season", lead: true,
-				headline: fill(lead.title ? "{school} are national champions"
+				headline: fill(lead.title ? "{school}: national champions"
 					: "Your program: {school}, " + lead.record, { school: TM(followed) }),
 				body, year: season || null,
 				dateline: "Your program" + (season ? " " + season : ""),

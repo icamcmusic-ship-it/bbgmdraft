@@ -2895,7 +2895,7 @@
 			const td = el("td");
 			td.appendChild(programLink(r.team));
 			tr.appendChild(td);
-			tr.appendChild(el("td", "num", String(r.count) + " " + unit));
+			tr.appendChild(el("td", "num", String(r.count) + " " + (r.count === 1 ? unit.replace(/ies$/, "y").replace(/s$/, "") : unit)));
 			tb.appendChild(tr);
 		}
 		table.appendChild(tb);
@@ -3054,7 +3054,7 @@
 		const people = Object.keys(reg).map((id) => reg[id])
 			.filter((x) => x.span >= 2)
 			.sort((a, b) => b.span - a.span ||
-				(b.honors ? b.honors.length : 0) - (a.honors ? a.honors.length : 0) ||
+				(global.Universe.personalHonors(b).length) - (global.Universe.personalHonors(a).length) ||
 				String(a.name).localeCompare(String(b.name)));
 		if (!people.length) {
 			explain("Nobody in this world appears in more than one season. A " +
@@ -3096,7 +3096,7 @@
 			tr.appendChild(el("td", "num", String(x.span)));
 			tr.appendChild(el("td", "num", x.draft && Number.isFinite(x.draft.boardRank)
 				? "No. " + x.draft.boardRank : "—"));
-			tr.appendChild(el("td", "num", String(x.honors.length)));
+			tr.appendChild(el("td", "num", String(global.Universe.personalHonors(x).length)));
 			tr.appendChild(wrapCell(x.seasons
 				.map((s) => s.season + " " + s.as).join(" · ")));
 			tr.appendChild(el("td", "pro-career", global.Universe.proText(global.Universe.proOutcome(x))));
