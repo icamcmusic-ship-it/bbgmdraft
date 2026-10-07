@@ -6,6 +6,9 @@
    that quietly rots.
 
    Usage: node tools/validate.js [nSeeds] [--json] [--era=modern]
+          [--seed-base=N] [--baseline | --write-baseline]
+          [--write-sd[=K]]   record each row's sampling sd (tools/calibration-sd.json)
+          [--self-test[=N]]  check the bands can fail: a deliberately wrong model must
    Exits non-zero if any check falls outside its tolerance band.
 
    Also importable: require("./validate.js") exposes syntheticClass/loadEngine
@@ -183,6 +186,76 @@ const sd = (v) => {
 	return Math.sqrt(mean(v.map((x) => (x - m) * (x - m))));
 };
 
+/* BAND WIDTHS FROM SAMPLING SD (audit C9). See `band` in collect().
+
+   tools/calibration-sd.json holds, for every row, the sd of its value over
+   single-seed runs (node tools/validate.js --write-sd), so the standard error
+   of a row at n seeds is that sd / sqrt(n). A 20-seed band is the model's
+   tolerance around the era's anchor: a model whose TRUE value sits on its
+   edge is acceptable, and a sample of n seeds lands within a few standard
+   errors of the truth, so at n < 20 each edge moves out by BAND_Z standard
+   errors of this row and no further. That replaces multiplying the whole band
+   (anchor tolerance included) by sqrt(20 / n), which is also the cap on width:
+   never narrower than the 20-seed band and never wider than the old rule.
+   The 20-seed bands themselves are the typed-in modelling tolerances around
+   the era's anchors and are not touched here. */
+const BAND_REF_SEEDS = 20;
+/* Four standard errors, not the usual two or three: this is a maximum-of-362
+   comparison, the sd itself is estimated from 20 single-seed runs, and the
+   tail rows (p99s, maxima) are heavier than a normal's. Measured on the
+   committed model at 3 seeds, z = 3 failed a heavy-tailed row ("Plus/minus per
+   game, p99") in one of four independent samples. */
+const BAND_Z = 4;
+/* Rows that really are signed (correlations, differences, plus/minus): every
+   other row is a count, a rate, a mean or a percentile of something that
+   cannot be below zero, and its lower edge is floored there. */
+const SIGNED_ROW = /corr\(|minus|BPM|On\/off|mean vs source|\bshift\b/i;
+const SD_FILE = path.join(__dirname, "calibration-sd.json");
+let sdCache;
+function sdTable() {
+	if (sdCache === undefined) {
+		try { sdCache = JSON.parse(fs.readFileSync(SD_FILE, "utf8")); } catch (e) { sdCache = null; }
+	}
+	return sdCache;
+}
+function resolveBand(name, a, b, nSeeds, group) {
+	let lo = a;
+	let hi = b;
+	const t = sdTable();
+	const sd1 = t && t.values ? t.values[group + " \u00b7 " + name] : undefined;
+	if (typeof a === "number" && typeof b === "number" && a < b &&
+		nSeeds < BAND_REF_SEEDS && Number.isFinite(sd1) && sd1 > 0) {
+		/* A band typed in as two numbers has the same sampling problem as the
+		   helpers' (BLK big:guard ratio [4.5, 16] failed two of four 3-seed
+		   samples of a model that passes at 20): widened the same way, about
+		   its own middle. A row with no sampling sd (an exact count: [0, 0]) is
+		   left exactly as written. */
+		const c = (a + b) / 2;
+		const h20 = (b - a) / 2;
+		const h = Math.min(h20 + (BAND_Z * sd1) / Math.sqrt(nSeeds),
+			h20 * Math.sqrt(BAND_REF_SEEDS / nSeeds));
+		lo = c - h;
+		hi = c + h;
+	}
+	if (a && typeof a === "object") {
+		lo = a.lo;
+		hi = a.hi;
+		if ((a.kind === "scaled" || a.kind === "corr" || a.kind === "rate") &&
+			nSeeds < BAND_REF_SEEDS && Number.isFinite(sd1) && sd1 > 0) {
+			const c = (a.nlo + a.nhi) / 2;
+			const h20 = (a.nhi - a.nlo) / 2;
+			const h = Math.min(h20 + (BAND_Z * sd1) / Math.sqrt(nSeeds),
+				h20 * Math.sqrt(BAND_REF_SEEDS / nSeeds));
+			lo = c - h;
+			hi = c + h;
+			if (a.kind === "corr") { lo = Math.max(-1, lo); hi = Math.min(1, hi); }
+			if (a.kind === "rate") { lo = lo < 0.05 ? 0 : lo; hi = Math.min(1, hi); }
+		}
+	}
+	if (lo < 0 && !SIGNED_ROW.test(name)) lo = 0;
+	return [lo, hi];
+}
+
 /* Run nSeeds classes and return every check row plus the raw samples.
 
    `fixture` names the class shape (see FIXTURES above); it defaults to the
@@ -198,11 +271,13 @@ const sd = (v) => {
                 checked on both.
      structure  about the engine rather than the season (schedule integrity,
                 award plumbing, reconciliation). Also fixture-independent. */
-function collect(nSeeds, cfgOverrides, fixture) {
+function collect(nSeeds, cfgOverrides, fixture, seedBase, bandEra) {
 	const makeFixture = FIXTURES[fixture] || FIXTURES.realistic;
 	const CAL = global.Calibration;
+	/* `bandEra` judges the model against ANOTHER era's anchors (the
+	   self-test's way of building a model that is wrong about the present). */
 	const era = CAL.eraInfo(
-		(cfgOverrides && cfgOverrides.era) || global.Config.DEFAULTS.era);
+		bandEra || (cfgOverrides && cfgOverrides.era) || global.Config.DEFAULTS.era);
 	/* Bands are DERIVED from the era anchor rather than typed in, so switching
 	   era moves the model and the harness together — which is the whole point
 	   of the era table. A band typed in by hand is a band that silently belongs
@@ -232,8 +307,33 @@ function collect(nSeeds, cfgOverrides, fixture) {
 	   same "the harness disagrees with itself depending on how you invoke it"
 	   fault this scaling exists to fix. */
 	const noiseK = Math.max(1, Math.sqrt(REF_SEEDS / Math.max(1, nSeeds)));
-	const near = (v, pct_) => [v * (1 - pct_ * noiseK), v * (1 + pct_ * noiseK)];
-	const within = (v, d) => [v - d * noiseK, v + d * noiseK];
+	/* A BAND CARRIES WHAT IT WAS DERIVED FROM (audit C9).
+
+	   These helpers returned a bare [lo, hi] already multiplied by noiseK, so
+	   by the time a row existed the tolerance (how far the MODEL may sit from
+	   the anchor) and the sampling allowance (how far a sample of this many
+	   seeds may wander) were one number, inflated together: at 3 seeds every
+	   mean-type band was 2.58x its 20-seed width, 58 of 362 had a negative
+	   lower edge on a statistic that cannot be negative ("25+ PPG
+	   scorers/class [-2.11, 6.41]") and 79 spanned more than 2.5x lower to
+	   upper ("MPG p5 [3.93, 40.07]"), so "all checks passed" certified almost
+	   nothing at the invocation the README documents.
+
+	   A band is now an object (kept whole by concat, see below) holding the
+	   nominal 20-seed band (`nlo`, `nhi`: the anchor and the model tolerance,
+	   which do not depend on how many seeds were run) and the old scaled band
+	   (`lo`, `hi`). resolveBand() widens the nominal band by the sampling
+	   sd of THIS row, read from tools/calibration-sd.json, instead of by a
+	   seed-count multiplier. */
+	const band = (kind, nlo, nhi, lo, hi) => {
+		const b = { kind, nlo, nhi, lo, hi };
+		// `[name, value].concat(band)` appends the object whole, not its keys.
+		b[Symbol.isConcatSpreadable] = false;
+		return b;
+	};
+	const near = (v, pct_) => band("scaled", v * (1 - pct_), v * (1 + pct_),
+		v * (1 - pct_ * noiseK), v * (1 + pct_ * noiseK));
+	const within = (v, d) => band("scaled", v - d, v + d, v - d * noiseK, v + d * noiseK);
 	/* A band on an extreme value. The expected maximum of a sample grows like
 	   log(n), so a band fixed at one seed count is wrong at every other one:
 	   the assist leader over 1121 player-seasons is not the assist leader over
@@ -275,24 +375,31 @@ function collect(nSeeds, cfgOverrides, fixture) {
 	/* A band on a per-class count or rate, which is a mean over nSeeds classes
 	   and so is far noisier at 3 seeds than at 20. Rates are clamped to [0, 1]
 	   because a proportion cannot leave it. */
-	const perClass = (lo, hi) => {
+	const perClassArr = (lo, hi) => {
 		const mid = (lo + hi) / 2;
 		const half = ((hi - lo) / 2) * noiseK;
 		return [mid - half, mid + half];
 	};
+	const perClass = (lo, hi) => {
+		const b = perClassArr(lo, hi);
+		return band("scaled", lo, hi, b[0], b[1]);
+	};
 	/* A correlation's standard error goes as 1/sqrt(N) too, and N here is the
 	   pooled player count, which is proportional to the seed count. */
 	const corrBand = (lo, hi) => {
-		const b = perClass(lo, hi);
-		return [Math.max(-1, b[0]), Math.min(1, b[1])];
+		const b = perClassArr(lo, hi);
+		return band("corr", Math.max(-1, lo), Math.min(1, hi),
+			Math.max(-1, b[0]), Math.min(1, b[1]));
 	};
+	/* A floor that has scaled below 5% is a floor a four-seed run can
+	   miss on the draw alone (no 1 seed won in four Marches happens
+	   about one run in twenty at a true 45%), which is how a developer
+	   learns to ignore the harness. Below that the floor is zero. */
+	const rateFloor = (b) => [b[0] < 0.05 ? 0 : b[0], Math.min(1, b[1])];
 	const rateBand = (lo, hi) => {
-		const b = perClass(lo, hi);
-		/* A floor that has scaled below 5% is a floor a four-seed run can
-		   miss on the draw alone (no 1 seed won in four Marches happens
-		   about one run in twenty at a true 45%), which is how a developer
-		   learns to ignore the harness. Below that the floor is zero. */
-		return [b[0] < 0.05 ? 0 : b[0], Math.min(1, b[1])];
+		const b = rateFloor(perClassArr(lo, hi));
+		const n = rateFloor([lo, hi]);
+		return band("rate", n[0], n[1], b[0], b[1]);
 	};
 	/* A rate estimated from ONE observation per class — a champion's seed, say
 	   — can only take the values k / nSeeds, and a band whose bound falls
@@ -306,9 +413,11 @@ function collect(nSeeds, cfgOverrides, fixture) {
 	   seeds, 0.05 at twenty, 0.025 at forty. Only for the per-tournament rows
 	   — the pooled ones have hundreds of observations behind them. */
 	const tourneyBand = (lo, hi) => {
-		const b = rateBand(lo, hi);
+		const b = rateFloor(perClassArr(lo, hi));
 		const grain = 1 / Math.max(1, nSeeds);
-		return [Math.max(0, b[0] - grain), Math.min(1, b[1] + grain)];
+		// One observation per class: the slack is arithmetic, not statistical,
+		// so the band is not re-derived from a sampling sd (kind "fixed").
+		return band("fixed", 0, 1, Math.max(0, b[0] - grain), Math.min(1, b[1] + grain));
 	};
 	/* Tags for a player's build. Read off the archetype table rather than off
 	   the player, because a player carries the build's NAME and the tags are
@@ -404,7 +513,8 @@ function collect(nSeeds, cfgOverrides, fixture) {
 	   with the losers moved down; it used to be re-derived from two games
 	   of results, which put a 2-0 Colgate at No. 2. */
 	const pollWeek1 = [];
-	for (let s = 0; s < nSeeds; s++) {
+	const firstSeed = Number.isFinite(seedBase) ? seedBase : 0;
+	for (let s = firstSeed; s < firstSeed + nSeeds; s++) {
 		const lf = makeFixture(s, 70);
 		/* NARRATIVES OFF, deliberately.
 
@@ -820,14 +930,22 @@ function collect(nSeeds, cfgOverrides, fixture) {
 			const guards = all.filter((p) => p.newHgtInches < 76).map((p) => p.stats.bpg);
 			if (!bigs.length || !guards.length) return 8;
 			return mean(bigs) / Math.max(0.05, mean(guards));
-		})(), 4.5, 16],
+		/* The floor was 4.5 with the model sitting at 4.51-4.54: no margin.
+		   Steals and blocks now scale with pace and the league's blocks sit on
+		   the 3.5 anchor (audit 2026-10-05, C6), which moved the ratio to
+		   4.45-4.49. A floor of 4.2 still fails a model whose bigs do not
+		   block. */
+		})(), 4.2, 16],
 		/* The assist floor, conditioned on minutes: a wing playing 28+ a
 		   night in D-I basketball does not finish with 0.8 assists, and
 		   24% of the class used to. */
 		["APG p10 (28+ MPG)", (function () {
 			const v = all.filter((p) => p.stats.mpg >= 28).map((p) => p.stats.apg);
 			return v.length ? pct(v, 0.10) : 1.3;
-		})()].concat(within(1.45, 0.65)),
+		/* Centre 1.45 -> 1.40: assists follow possessions, and possessions now sit
+		   on the anchor instead of 2% above it (audit 2026-10-05, C5); the row
+		   had 0.05 of margin before. */
+		})()].concat(within(1.40, 0.65)),
 		["TS% mean", mean(g((p) => p.stats.ts)) * 100].concat(within(dy.ts.mean * 100, 1.8)),
 		/* THREE-POINT PERCENTAGE, measured against the population the anchor
 		   describes.
@@ -1531,9 +1649,11 @@ function collect(nSeeds, cfgOverrides, fixture) {
 	];
 
 	function lineRate(v) { return v[1] ? v[0] / v[1] : 1; }
-	const tag = (list, scope) => list.map((r) => ({
-		name: r[0], value: r[1], lo: r[2], hi: r[3], scope,
-	}));
+	const eraName = bandEra || (cfgOverrides && cfgOverrides.era) || global.Config.DEFAULTS.era;
+	const tag = (list, scope) => list.map((r) => {
+		const b = resolveBand(r[0], r[2], r[3], nSeeds, eraName + "/" + (fixture || "realistic"));
+		return { name: r[0], value: r[1], lo: b[0], hi: b[1], scope };
+	});
 	const rows = [].concat(
 		tag(prospectRows, "prospect"),
 		tag(fieldRows, "field"),
@@ -1634,13 +1754,60 @@ function main() {
 	   run as a second fixture for the whole-field and structural rows, where a
 	   class of uniformly good players is a useful second load on the model.
 	   `--fixture=realistic` halves the runtime for a quick local check. */
+	/* --seed-base=N starts the seeds at N instead of 0: another sample of the
+	   same size, for asking whether a band flakes. */
+	const seedBase = Number((args.filter((a) => a.startsWith("--seed-base="))[0] || "").slice(12)) || 0;
 	const fixArg = (args.filter((a) => a.startsWith("--fixture="))[0] || "").slice(10);
 	const fixtures = fixArg ? fixArg.split(",") : ["realistic", "synthetic"];
+
+	/* --write-sd[=K]: record each row's sampling sd (see resolveBand), from K
+	   single-seed runs per era and fixture, into tools/calibration-sd.json.
+	   Re-run it after a deliberate re-fit, with --write-baseline. */
+	const sdArg = args.filter((a) => a.startsWith("--write-sd"))[0];
+	if (sdArg) {
+		const K = Number(sdArg.split("=")[1]) || 10;
+		const values = {};
+		for (const era of eras) {
+			for (const fixture of fixtures) {
+				const per = {};
+				for (let k = 0; k < K; k++) {
+					const { rows } = collect(1, { era }, fixture, SD_SEED_BASE + k);
+					for (const r of rows) {
+						if (fixture !== "realistic" && r.scope === "prospect") continue;
+						(per[r.name] = per[r.name] || []).push(r.value);
+					}
+				}
+				for (const name of Object.keys(per)) {
+					const v = per[name].filter(Number.isFinite);
+					if (v.length < 2) continue;
+					const m = mean(v);
+					const sdv = Math.sqrt(v.reduce((a, x) => a + (x - m) * (x - m), 0) / (v.length - 1));
+					values[era + "/" + fixture + " \u00b7 " + name] = Math.round(sdv * 1e5) / 1e5;
+				}
+			}
+		}
+		fs.writeFileSync(SD_FILE, JSON.stringify({ runs: K, seedBase: SD_SEED_BASE, values }, null, 1) + "\n");
+		console.log("wrote " + SD_FILE + " (" + Object.keys(values).length + " rows from " + K +
+			" single-seed runs each)");
+		return;
+	}
+	/* --self-test[=N]: the bands must be able to FAIL. Runs N seeds (default
+	   3) on the model as it is and on a deliberately broken one, and exits
+	   non-zero unless the first fails nothing and the second fails several. */
+	const stArg = args.filter((a) => a.startsWith("--self-test"))[0];
+	if (stArg) {
+		const r = selfTest(Number(stArg.split("=")[1]) || 3);
+		console.log("model as is: " + r.base.length + " rows outside their band" +
+			(r.base.length ? " (" + r.base.map((x) => x.name).join(", ") + ")" : ""));
+		console.log("perturbed " + JSON.stringify(PERTURBATION) + ": " + r.bad.length +
+			" rows outside their band (" + r.bad.map((x) => x.name).join(", ") + ")");
+		process.exit(r.base.length === 0 && r.bad.length >= SELF_TEST_MIN ? 0 : 1);
+	}
 
 	const perEra = [];
 	for (const era of eras) {
 		for (const fixture of fixtures) {
-			const { rows, all } = collect(nSeeds, { era }, fixture);
+			const { rows, all } = collect(nSeeds, { era }, fixture, seedBase);
 			/* Prospect rows describe a draft class, so they are only asked of a
 			   fixture shaped like one. Everything else is fixture-independent
 			   and is asked of both. */
@@ -2024,9 +2191,46 @@ function main() {
 	process.exit(fail ? 1 : 0);
 }
 
+/* A deliberately wrong model. The dial extremes (efficiencyEnv -3, scoringEnv
+   3, ...) move a band's statistic by less than a 3-seed sample's noise, which
+   is the honest answer for dials but a poor test of the bands, so the
+   perturbation is the failure the bands exist for: the stat phase's output
+   scaled the way an uncalibrated model is wrong (scoring and rebounding +50%,
+   assists -50%, blocks doubled, steals +60%, minutes -20%). At 3 seeds a band
+   is wide (a 3-seed PPG mean is good to about +/-15%), so this is the size of
+   error the documented invocation can be asked to see; at 20 seeds a 20% error
+   fails the same rows. A model this far off has to fail a good many of them or
+   the bands cannot see a broken model at all. */
+const PERTURBATION = { ppg: 1.5, rpg: 1.5, apg: 0.5, bpg: 2, spg: 1.6, mpg: 0.8 };
+const SELF_TEST_MIN = 10;
+const SD_SEED_BASE = 5000;
+function selfTest(nSeeds) {
+	const outside = (rows) => rows.filter((r) => !(r.value >= r.lo && r.value <= r.hi));
+	const era = global.Config.DEFAULTS.era;
+	const base = outside(collect(nSeeds, { era }, "realistic").rows);
+	const phase = global.Engine.PHASES.filter((p) => p.name === "stats")[0];
+	const real = phase.run;
+	phase.run = (state) => {
+		const out = real(state);
+		for (const p of out.players) {
+			if (!p.stats) continue;
+			for (const k of Object.keys(PERTURBATION)) {
+				if (Number.isFinite(p.stats[k])) p.stats[k] *= PERTURBATION[k];
+			}
+		}
+		return out;
+	};
+	try {
+		return { base, bad: outside(collect(nSeeds, { era }, "realistic").rows) };
+	} finally {
+		phase.run = real;
+	}
+}
+
 module.exports = {
 	loadEngine, syntheticClass, realisticClass, makeClass, FIXTURES,
-	collect, reconcileError, pct, mean,
+	collect, reconcileError, pct, mean, resolveBand, selfTest, PERTURBATION,
+	SELF_TEST_MIN, SD_FILE,
 };
 
 if (require.main === module) main();

@@ -3195,21 +3195,33 @@
 		],
 	});
 
+	// What a program gained on the level it carried in, coach adjustment removed.
+	const programGain = (t, carry) => {
+		const adj = t.coach && Number.isFinite(t.coach.levelAdj) ? t.coach.levelAdj : 0;
+		const own = Number.isFinite(t.baseLevel) ? t.baseLevel : t.level - adj;
+		return own - carry.levels[t.name];
+	};
+
 	TPL({
 		kind: "program on the rise", group: "universe", p: 0.6, when: -0.18,
 		find: (ctx) => {
 			const carry = ctx.res.cfg && ctx.res.cfg.carryOver;
 			if (!carry || !carry.levels) return null;
+			/* The program's own level, not the coached one: a first-year
+			   coach's rebuild adjustment is a fact about the sideline and is
+			   not strength the program gained. A carried program now moves a
+			   few points a year (see carriedLevel in js/teams.js), so five is
+			   already the top tenth of the league. */
 			const up = ctx.teamList.filter((t) =>
 				Number.isFinite(carry.levels[t.name]) &&
-				t.level - carry.levels[t.name] >= 6);
+				programGain(t, carry) >= 5);
 			return up.length ? ctx.rng.pick(up) : null;
 		},
 		slots: (t, ctx) => {
 			const carry = ctx.res.cfg.carryOver;
 			return {
 				team: TM(t.name), conf: T(t.conf),
-				gain: T(String(Math.round(t.level - carry.levels[t.name]))),
+				gain: T(String(Math.round(programGain(t, carry)))),
 				coach: T(t.coach ? t.coach.name : "the staff"),
 			};
 		},
@@ -3220,9 +3232,9 @@
 			"Nobody in the {conf} wants to play {team} now",
 		],
 		bodies: [
-			"{team} is measurably stronger than last season — about {gain} points of programme strength — and it is not one recruiting class doing it.",
-			"{coach} has moved {team} up {gain} points in a year. The {conf} noticed some time around January.",
-			"A programme improves in one of two ways and {team} has done the slower one: everybody who was here last year is better.",
+			"{team} is measurably stronger than last season: about {gain} points of programme strength.",
+			"{team} is up {gain} points in a year under {coach}. The {conf} noticed some time around January.",
+			"The ratings have {team} {gain} points better than a year ago. What changed is for the staff to say; that it did is not in doubt.",
 			"{gain} points in a season. {team} has gone from a team that could beat you to a team that is supposed to.",
 		],
 	});
@@ -3788,7 +3800,11 @@
 	TPL({
 		kind: "underclassman award", group: "universe", p: 0.85, when: 1.235,
 		find: (ctx) => {
-			const fh = (ctx.res.fieldHonors || []).filter((h) => h.futureClass);
+			/* Only a LATER class: a returner (an undrafted man who came back) also
+			   carries his class season, which is in the past, and the story
+			   below says he "will not be eligible until" it. */
+			const fh = (ctx.res.fieldHonors || []).filter((h) => h.futureClass &&
+				!(Number(h.futureClass) <= Number(ctx.res.season)));
 			if (!fh.length) return null;
 			return fh.sort((a, b) => (global.Awards.awardRank(a.award) - global.Awards.awardRank(b.award)))[0];
 		},
@@ -3844,7 +3860,7 @@
 		bodies: [
 			"{player} finishes the season as a national champion. He averaged {line} for {team}, and the scouts who spent the year arguing about him now have to do it about a player with a title.",
 			"The last shot of the season belonged to {team}, and {player} was on the floor for it. A {year} averaging {line}, he goes into the draft with the one line on a résumé nobody can take back.",
-			"{team} are national champions and {player} is the prospect who came out of it. {line} across the season; a ring at the end of it.",
+			"National champions: {team}. {player} is the prospect who came out of it. {line} across the season; a ring at the end of it.",
 		],
 	});
 
@@ -8780,7 +8796,7 @@
 				articles.push({
 					when: 1.2, kind: "champion",
 					headline: fill(rng.pick([
-						"{champ} are national champions",
+						"National champions: {champ}",
 						"The nets come down for {champ}",
 					]), { champ: TM(t.champion.team.name) }),
 					body: segs,
@@ -9648,7 +9664,7 @@
 			}
 			articles.unshift({
 				when: -1, kind: "followed program", group: "the season", lead: true,
-				headline: fill(lead.title ? "{school} are national champions"
+				headline: fill(lead.title ? "{school}: national champions"
 					: "Your program: {school}, " + lead.record, { school: TM(followed) }),
 				body, year: season || null,
 				dateline: "Your program" + (season ? " " + season : ""),

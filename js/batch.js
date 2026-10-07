@@ -18,6 +18,29 @@
 		return "batch" + Math.floor(Math.random() * 1e9).toString(36);
 	}
 
+	/* What a contact sheet needs to tell one class from another without opening
+	   it: the five best prospects, how strange the class is (the engine's own
+	   score) and whether it has a 7'2" or taller player in its top five. Plain
+	   data, so it survives the worker's structured clone. */
+	function contactFields(res) {
+		const board = (res.board && res.board.length ? res.board
+			: res.players.slice().sort((a, b) => b.newOvr - a.newOvr)).slice(0, 5);
+		const E = global.Engine;
+		let strange = null;
+		let kinds = [];
+		try {
+			const sc = E && E.strangeness ? E.strangeness(res) : null;
+			if (sc) { strange = sc.score; kinds = sc.kinds.slice(); }
+		} catch (e) { /* a class the score cannot read is just unscored */ }
+		return {
+			top5: board.map((p) => ({ name: p.name, pos: p.newPos, ovr: p.newOvr, pot: p.newPot,
+				hgt: p.newHgtInches || null })),
+			strangeness: strange,
+			strangeKinds: kinds,
+			tallBig: board.some((p) => (p.newHgtInches || 0) >= 86),
+		};
+	}
+
 	function summarize(res) {
 		const withStats = res.players.filter((p) => p.stats);
 		/* NCAA only for the per-player rows. They used to be averaged over
@@ -30,7 +53,7 @@
 		const ncaa = withStats.filter((p) => !p.nonNcaa);
 		const abroad = withStats.filter((p) => p.nonNcaa);
 		const teams = Object.values(res.teams).filter((t) => t.teamTotals);
-		return {
+		return Object.assign({
 			seed: res.seed,
 			flavor: res.flavor ? res.flavor.label : null,
 			ovr: mean(res.players.map((p) => p.newOvr)),
@@ -60,7 +83,7 @@
 			ffOneSeeds: res.tourney && res.tourney.finalFour
 				? res.tourney.finalFour.filter((x) => x.seed === 1).length : null,
 			r64Upsets: r64Upsets(res.tourney),
-		};
+		}, contactFields(res));
 	}
 
 	function r64Upsets(t) {

@@ -1694,15 +1694,55 @@
 		return K + span * (1 - expNeg((v - K) / span));
 	}
 	/* The caps a build runs under, or null for none. 0 turns one off. */
+	/* `preserve` marks a build made under "Preserve each ovr". There the caps
+	   exist to stop the TOOL pushing a rookie's ratings up, not to rewrite a
+	   file's own numbers or to lower the overall the file came in with, so
+	   rebuild() lifts them to what the file needs (see fitCaps); the flag
+	   travels with the caps so a later re-solve (a size surprise) can do the
+	   same. `keys` is a per-rating cap that replaces the pair for the ratings
+	   the file already carries above it. */
 	function rookieCaps(cfg) {
 		if (!cfg) return null;
 		const skill = Number(cfg.rookieSkillCap) || 0;
 		const phys = Number(cfg.rookiePhysCap) || 0;
-		return skill > 0 || phys > 0 ? { skill, phys } : null;
+		if (!(skill > 0 || phys > 0)) return null;
+		const out = { skill, phys };
+		if (cfg.ovrMode !== "curve") out.preserve = true;
+		return out;
 	}
 	function capFor(caps, key) {
 		if (!caps || key === "hgt") return 0;
+		if (caps.keys && caps.keys[key] > 0) return caps.keys[key];
 		return PHYSICAL.has(key) ? caps.phys : caps.skill;
+	}
+	/* The caps lifted just far enough that a rating the file already has
+	   comes through untouched: the soft cap is the identity up to CAP_KNEE
+	   under it, so a per-rating cap of orig + CAP_KNEE leaves that rating
+	   exactly where it is and still eases anything pushed ABOVE it toward
+	   orig + CAP_KNEE + CAP_HEADROOM. Ratings the file has under the cap keep
+	   the cap as configured. */
+	function liftCapsToRatings(caps, orig) {
+		if (!caps || !caps.preserve || !orig) return caps;
+		let keys = null;
+		for (const key of BB.RATING_KEYS) {
+			if (key === "hgt") continue;
+			const c = capFor(caps, key);
+			if (!(c > 0)) continue;
+			const need = Math.ceil(Number(orig[key]) + CAP_KNEE);
+			if (need > c) { keys = keys || {}; keys[key] = need; }
+		}
+		return keys ? Object.assign({}, caps, { keys: Object.assign({}, caps.keys, keys) }) : caps;
+	}
+	// Every cap in the set raised by d points (0 stays off).
+	function raiseCaps(caps, d) {
+		const out = { skill: caps.skill > 0 ? caps.skill + d : 0,
+			phys: caps.phys > 0 ? caps.phys + d : 0 };
+		if (caps.preserve) out.preserve = true;
+		if (caps.keys) {
+			out.keys = {};
+			for (const k of Object.keys(caps.keys)) out.keys[k] = caps.keys[k] + d;
+		}
+		return out;
 	}
 
 	/* BBGM's usage composite, which decides how much of an offense a player is
@@ -3014,6 +3054,37 @@
 		return f;
 	}
 
+	/* WHICH RANKS STAY BALANCED, decided once per class (audit C10).
+
+	   "Exactly N% of the class stays Balanced" was a per-player coin flip, so
+	   a 70-man class at the default drew anywhere from 2 to 14 Balanced
+	   players (13.3% on average against a promised 15%), and at diversity 0,
+	   where the label says every single player is Balanced, the top-ten
+	   softening below still handed 4-6 of them a build. Now the COUNT is the
+	   promise and the draw only decides who: round(n * (1 - diversity))
+	   ranks are Balanced, picked without replacement and weighted the way the
+	   top-of-board softening always weighted them (the No. 1 pick is the
+	   least likely to be the class's man with no identity). A player no
+	   specialist build can be (his height fits none) is Balanced regardless,
+	   so the count can only be exceeded, and only in that case. */
+	function planBalanced(rng, n, diversityPct) {
+		const asked = Number(diversityPct);
+		const d = clamp(Number.isFinite(asked) ? asked : 85, 0, 100);
+		const want = Math.round((n * (100 - d)) / 100);
+		const plan = new Set();
+		if (want <= 0 || n <= 0) return plan;
+		const keyed = [];
+		for (let i = 0; i < n; i++) {
+			const w = i < 10 ? 0.25 + 0.075 * i : 1;
+			// Efraimidis-Spirakis: the largest u^(1/w) is a weighted draw
+			// without replacement.
+			keyed.push({ i, k: Math.pow(Math.max(1e-12, rng.random()), 1 / w) });
+		}
+		keyed.sort((a, b) => b.k - a.k || a.i - b.i);
+		for (let j = 0; j < Math.min(want, n); j++) plan.add(keyed[j].i);
+		return plan;
+	}
+
 	function pickArchetype(rng, hgtRating, cfg, flavor, pool, rank, bio, counts) {
 		const source = pool && pool.length ? pool.concat(BALANCED) : ARCHETYPES;
 		const eligible = source.filter(
@@ -3039,6 +3110,21 @@
 		}
 		const wOf = (a) => archetypeWeight(a, cfg, flavor) *
 			drawPenalty(a.name, counts, rank);
+		/* The class's plan, when the engine made one (see planBalanced): the
+		   rank is Balanced or it is not, and the draw is among builds. The
+		   weighted draw below is still made first-class for a lone call
+		   (a reroll, an anomaly's redraw) that has no plan. */
+		if (counts && counts.balanced && Number.isFinite(rank) && rank >= 0) {
+			const bal = eligible.filter((a) => a.name === "Balanced")[0] || BALANCED_ONE;
+			const spec = eligible.filter((a) => a.name !== "Balanced");
+			if (counts.balanced.has(rank) || !spec.length) {
+				// Draw consumed, so a plan never shifts the stream behind it.
+				rng.random();
+				return bal;
+			}
+			const total = spec.reduce((s, a) => s + wOf(a), 0) || 1;
+			return rng.weighted(spec, (a) => wOf(a) / total);
+		}
 		/* Balanced keeps exactly (1 - diversity) of the probability mass however
 		   many specialist builds are eligible; the rest is split by rarity
 		   weight.
@@ -3262,6 +3348,23 @@
 		return out;
 	}
 
+	/* BBGM's overall BEFORE rounding and clamping: bbgm.js's ovr() is
+	   Math.round of this, clamped to 0-100 (tools/tests/calcfix-ratings.js
+	   checks the two agree on random vectors, so a drift in the fudge shows up
+	   there). It is continuous and non-decreasing in every rating, which is
+	   what lets the solver aim at the MIDDLE of an integer overall's rounding
+	   plateau instead of its left edge. */
+	function ovrExact(r) {
+		const x = BB.ovrRaw(r);
+		let f;
+		if (x >= 68) f = 8;
+		else if (x >= 50) f = 4 + (x - 50) * (4 / 18);
+		else if (x >= 42) f = -5 + (x - 42) * (9 / 8);
+		else if (x >= 31) f = -5 - (42 - x) * (5 / 11);
+		else f = -10;
+		return x + f;
+	}
+
 	/* The last point. A uniform shift over an integer base moves every
 	   rating across .5 at the same k when the scales are equal (Balanced),
 	   so ovr steps by two or three at once and bisection cannot land on the
@@ -3275,16 +3378,33 @@
 	   every key this loop can reach. */
 	function touchUp(ratings, targetOvr, pinned, caps) {
 		let cur = BB.ovr(ratings);
+		const keys = BB.RATING_KEYS.filter((k) => k !== "hgt");
 		for (let iter = 0; iter < 8 && cur !== targetOvr; iter++) {
+			/* Either direction: the solver can now hand this a vector on
+			   either side of the target (it lands in the middle of the
+			   plateau, not on its left edge), and the point is spent the way
+			   the gap points, down as readily as up. */
 			const dir = targetOvr > cur ? 1 : -1;
 			let best = null;
 			let bestGap = Math.abs(cur - targetOvr);
+			/* WHICH RATING TAKES THE POINT IS SPREAD, NOT FIRST-IN-LIST.
+			   Scanning stre, spd, jmp ... in order and keeping the first
+			   strict improvement gave stre/spd nearly every touch-up (observed
+			   12 stre, 5 spd, 1 oiq). The scan now starts at a key chosen by a
+			   hash of the vector itself, so it is deterministic (the same
+			   vector always takes the same point, whatever order the file or
+			   the code visits players in) and different vectors start in
+			   different places. */
+			let h = targetOvr * 7 + iter;
+			for (const key of keys) h = (h * 31 + ratings[key]) % 99991;
+			const start = h % keys.length;
 			/* One point of one rating can leave the rounded ovr where it
 			   was, so the step is allowed to grow to three; the smallest
 			   step that closes the gap wins. */
 			for (let step = 1; step <= 3 && !best; step++) {
-				for (const key of BB.RATING_KEYS) {
-					if (key === "hgt" || (pinned && Number.isFinite(pinned[key]))) continue;
+				for (let j = 0; j < keys.length; j++) {
+					const key = keys[(start + j) % keys.length];
+					if (pinned && Number.isFinite(pinned[key])) continue;
 					const v = ratings[key] + dir * step;
 					if (v < 1 || v > 99) continue;
 					// The last point is not spent pushing a rating past its cap.
@@ -3330,6 +3450,31 @@
 		};
 	}
 
+	/* Under preserve mode, the caps raised by the smallest uniform amount that
+	   makes `targetOvr` reachable at this base (and unchanged when it already
+	   is). Max reach is non-decreasing in the caps, so this bisects. A target
+	   no cap can reach (the height decides it) comes back with the caps
+	   effectively off and is reported as a shortfall by the caller. */
+	function fitCaps(caps, cleanBase, arch, pinned, lean, targetOvr) {
+		if (!caps || !caps.preserve) return caps;
+		/* Reach is measured UNROUNDED: the target counts as reachable when
+		   the best vector the caps allow is at least target, not merely at
+		   least target - 0.5 (which rounds to it). Lifting only to the
+		   rounding edge would leave the solver nowhere to centre the build. */
+		const up = arch ? shiftScales(arch, true, pinned, lean) : SHIFT_SCALE;
+		const reach = (c) => ovrExact(applyShift(cleanBase, SHIFT_RANGE, up, pinned, c));
+		if (reach(caps) >= targetOvr) return caps;
+		if (reach(raiseCaps(caps, 100)) < targetOvr) return raiseCaps(caps, 100);
+		let lo = 0;
+		let hi = 100;
+		while (hi - lo > 1) {
+			const mid = (lo + hi) >> 1;
+			if (reach(raiseCaps(caps, mid)) >= targetOvr) hi = mid;
+			else lo = mid;
+		}
+		return raiseCaps(caps, hi);
+	}
+
 	/* Re-solve a built player after one of his base ratings has been changed
 	   outside the builder — a forced height, in practice. Returns the same
 	   shape rebuild() does for the fields that move. */
@@ -3368,6 +3513,7 @@
 		   disagree. `ovrShortfall` is the signed gap, so an editor can report
 		   an impossible request instead of appearing to grant it. */
 		const lean = signatureLean(arch, cfg);
+		caps = fitCaps(caps, cleanBase || base, arch, pinned, lean, targetOvr);
 		const range = ovrRange(cleanBase || base, arch, pinned, lean, caps);
 		const reachable = Number.isFinite(range.min) && Number.isFinite(range.max)
 			? clamp(targetOvr, range.min, range.max) : targetOvr;
@@ -3382,6 +3528,8 @@
 			skills: BB.skills(Object.assign({ fuzz }, solved)),
 			ovrRange: range,
 			ovrShortfall: (reachable - targetOvr) || 0,
+			// The caps this solve ran under (see fitCaps), for the next re-solve.
+			caps,
 		};
 	}
 
@@ -3421,15 +3569,63 @@
 		};
 		if (BB.ovr(shift(lo)) > targetOvr) return miss(shift(lo));
 		if (BB.ovr(shift(hi)) < targetOvr) return miss(shift(hi));
+		/* A BUILD THAT ALREADY HITS THE TARGET IS LEFT ALONE. At zero shift
+		   the vector is the base itself (the file's own ratings at
+		   specialization 0 and no noise), and rewriting it to chase the
+		   middle of the plateau would move ratings that were already right.
+		   The base is a deliberate vector, not an artifact of the search, so
+		   it is not biased towards either edge. */
+		if (BB.ovr(shift(0)) === targetOvr) {
+			const same = shift(0);
+			Object.defineProperty(same, "solveShift", {
+				value: 0, enumerable: false, configurable: true,
+			});
+			return same;
+		}
+		/* THE LEFT EDGE OF THE PLATEAU, then its middle.
+
+		   This bisects for the smallest k whose ROUNDED ovr reaches the
+		   target, which is the left edge of the plateau of vectors that round
+		   to it, and returning that put the unrounded overall at target - 0.5:
+		   a rebuilt prospect was ~0.4 weaker underneath than a centred solve
+		   (mean -0.42 over 150k solves; 82% of them at -0.5 exactly).
+
+		   The unrounded overall is continuous and non-decreasing in k (every
+		   weight is positive and every rating non-decreasing in k), so a
+		   second bisection finds where it crosses the target exactly, which is
+		   the middle of the plateau in the sense that matters: the two integer
+		   vectors that straddle that crossing are the ones closest to
+		   target + 0.0. If the plateau is never crossed (the target is the
+		   top of the reachable range) the goal is the best the build can
+		   reach. */
 		for (let i = 0; i < 52; i++) {
 			const mid = (lo + hi) / 2;
 			if (BB.ovr(shift(mid)) < targetOvr) lo = mid;
 			else hi = mid;
 		}
-		const a = shift(lo);
-		const b = shift(hi);
-		const useLo = Math.abs(BB.ovr(a) - targetOvr) <= Math.abs(BB.ovr(b) - targetOvr);
+		const edge = hi;
+		const goal = Math.min(targetOvr, ovrExact(shift(SHIFT_RANGE)));
+		let lo2 = edge;
+		let hi2 = SHIFT_RANGE;
+		if (ovrExact(shift(edge)) >= goal) hi2 = edge;
+		else {
+			for (let i = 0; i < 52; i++) {
+				const mid = (lo2 + hi2) / 2;
+				if (ovrExact(shift(mid)) < goal) lo2 = mid;
+				else hi2 = mid;
+			}
+		}
+		const a = shift(lo2);
+		const b = shift(hi2);
+		/* The straddling pair, best first: a vector that rounds to the target
+		   beats one that does not, then the closer unrounded overall wins. */
+		const score = (r) => [Math.abs(BB.ovr(r) - targetOvr),
+			Math.abs(ovrExact(r) - targetOvr)];
+		const sa = score(a);
+		const sb = score(b);
+		const useLo = sa[0] < sb[0] || (sa[0] === sb[0] && sa[1] <= sb[1]);
 		const near = useLo ? a : b;
+		const shiftAt = useLo ? lo2 : hi2;
 		/* HOW FAR THE SOLVE HAD TO MOVE, so the size of the correction is
 		   measurable and not just its success. An exactness count cannot see a
 		   badly posed problem — the solver hits the target either way — and
@@ -3439,7 +3635,7 @@
 		   ovrShortfall above: callers still see fourteen ratings. */
 		const out = BB.ovr(near) === targetOvr ? near : touchUp(near, targetOvr, pinned, caps);
 		Object.defineProperty(out, "solveShift", {
-			value: useLo ? lo : hi, enumerable: false, configurable: true,
+			value: shiftAt, enumerable: false, configurable: true,
 		});
 		return out;
 	}
@@ -3663,7 +3859,16 @@
 		}
 
 		const lean = signatureLean(arch, cfg);
-		const caps = rookieCaps(cfg);
+		/* UNDER "PRESERVE EACH OVR" THE CAPS DO NOT CHANGE THE FILE'S OVR.
+		   Default skill/physical caps of 70/80 limited how high a build could
+		   reach (about 83 at mid height), so a file overall of 84-95 was
+		   silently rebuilt at 83, and a prospect with a 95 spd was rewritten
+		   to 83 even at specialization 0. Lifted first to the file's own
+		   ratings (a rating the file already has comes through untouched),
+		   then, if the target is still out of reach, by the smallest uniform
+		   amount that makes it reachable. Curve mode keeps the caps as set. */
+		const caps = fitCaps(liftCapsToRatings(rookieCaps(cfg), orig),
+			cleanBase, arch, pinned, lean, targetOvr);
 		const range = ovrRange(cleanBase, arch, pinned, lean, caps);
 		/* AN UNREACHABLE TARGET IS SOLVED TO THE NEAREST REACHABLE ONE.
 
@@ -3756,6 +3961,9 @@
 			// be built to: the signed distance from the asked-for overall to
 			// the one he was actually solved to.
 			ovrShortfall: shortfall || 0,
+			// The caps this build ran under, after any lift (see fitCaps), so
+			// a later re-solve keeps them.
+			caps,
 			// How far the bisection had to shift the vector to land on target.
 			// A diagnostic, not an output: tools/validate.js bands its median
 			// per specialization, which is the check that sees a distorted
@@ -3772,7 +3980,7 @@
 		// needs — both properties OF THIS FUNCTION, not of a class built with
 		// it, and neither reachable through the public entry points.
 		rebuild, classCurve, pickArchetype, solveToOvr, shiftScales, applyShift, ovrRange, resolveTo,
-		rookieCaps, softCap,
+		rookieCaps, softCap, touchUp, ovrExact,
 		potAdjust, potFactors, sumFactors, POT_MODELS, POT_MODEL_DEFAULT, bbgmPotEstimate, potForModel, potFromRole, ROLE_USG_CENTER, POT_BY_ARCHETYPE, computePotGap,
 		POT_SKILL_W, POT_INTENT, POT_LEVEL_ANCHOR, POT_RAW_FLOOR, POT_HAND, typicalWeight,
 		ROLE_USAGE, roleUsage, computeRoleUsage, usageCompositeDelta, creationDelta,
@@ -3786,6 +3994,6 @@
 		archetypeWeight, poolWeight, RARITY_COMPRESS, CENTER_MIN, CENTER_IN_POOL,
 		centersInPool, CENTER_POOL_SHARE, POOL_PROBES, MIN_PER_BAND, minPerBand,
 		WEIGHT_CAL, bioShare, bioFits, CLASS_YEAR_MIX, PRO_OR_RETURNED_SHARE,
-		newDrawCounts, DRAW_SOFT_CAP, TOP_OF_BOARD, ROLE_U0,
+		newDrawCounts, planBalanced, DRAW_SOFT_CAP, TOP_OF_BOARD, ROLE_U0,
 	};
 })(typeof window !== "undefined" ? window : self);

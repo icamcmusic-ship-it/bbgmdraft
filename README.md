@@ -43,6 +43,7 @@ node bin/bbgmdraft.js run   class.json --seed demo --notes short --stats --award
 node bin/bbgmdraft.js batch class.json -n 50 --set pace=72 --csv > batch.csv
 node bin/bbgmdraft.js universe 2025.json 2026.json 2027.json --seed demo --out world.json
 node bin/bbgmdraft.js mock class.json --seed demo   # two-round mock draft with pro projections
+node bin/bbgmdraft.js seek class.json --want tallTop5 --not abroadNo1 --tries 60 --seed hunt
 node bin/bbgmdraft.js check class.json
 node bin/bbgmdraft.js settings            # every setting, its default and range
 ```
@@ -51,16 +52,59 @@ node bin/bbgmdraft.js settings            # every setting, its default and range
 says; `-` is stdout) and prints the seed and the top five. It takes a draft
 class or a league export (`--year` picks the class of a league), `.json` or
 `.json.gz`, and a preset (`--preset`), any setting (`--set key=value`) and the
-export options the page's dialog has (`--stats --prior --highs --awards`).
-Because the engine is deterministic, the same file, seed and settings give the
-page's class byte for byte, and `tools/tests/cli.js` checks that against the
-engine itself. `universe` runs several classes as one continuous world, as the
+export options the page's dialog has (`--stats --prior --highs --awards`,
+`--no-notes` for "Include scouting notes" off, `--keep-notes` for "Keep any
+note already in the file"). Because the engine is deterministic, the same file,
+seed and settings give the page's class byte for byte, and
+`tools/tests/cli.js` checks that against the engine itself. The one
+difference is the portrait: the page writes a `face` for every player and the
+command line does not load the face library, so its files have none (BBGM draws
+its own on import). The options are checked: a non-numeric `-n` or `--year`, or
+a `--set` choice that is not one of the setting's choices, is an error, and a
+number outside the page's slider range is reported when it is clamped. `universe` runs several classes as one continuous world, as the
 page's Universe mode does (same seeds, same timeline, checked row for row
 against the page in `tools/uismoke.js`), prints the timeline and writes the
 universe export the Universe tab imports; it does not yet write the players
 file, which needs the career links the page adds after the chain.
 Experimental: the flags may change. `node bin/bbgmdraft.js help`
 lists them all.
+
+More flags, each checked against the engine or the page in
+`tools/tests/quickwins-engine.js`:
+
+* **Settings and locks.** `--settings file.json` takes the page's "Export
+  settings JSON" (`{format, v, cfg}`), or a class file written with
+  `--recipe`, and applies it after `--preset` and before `--set`, `--notes` and
+  `--seed`. `--locks file.csv` reads the page's locks CSV (`key`, `name`,
+  `ovr`, `pot`, `archetype`, `college`) the way its import does and locks those
+  prospects; it says how many rows applied, were refused or matched nobody.
+* **Pipes and files.** A class file of `-` is standard input (gzip is
+  recognised), and a class that came from a pipe goes back out stdout.
+  `--gzip` writes gzip (`class_customized.json.gz`). `--count N` writes N
+  classes, seeds `<base>#0` to `#N-1` (the seeds `batch` runs), into the
+  directory `--out` names.
+* **Other outputs of `run`.** `--merge league.json` merges the class into that
+  league (`league_merged.json`), `--players-file` writes the Tools -> Import
+  players file and `--fragment` the college-league fragment. They are
+  alternatives: choose one.
+* **Opt-in extras on the export.** `--fuzz keep|zero|regenerate` (with
+  `--scouting N`) for BBGM's scouting fuzz, `--recipe` to embed the seed,
+  engine revision, settings and source fingerprint in the file's `bbgmdraft`
+  key, `--hometowns` for a "City, ST, USA" birthplace weighted by the school's
+  region where the file has none, and `--pro-lines` for "Pro projection:" and
+  "Mock:" lines in each note. Without them the file is the one it always was.
+* **`mock --rounds N`** sets the rounds of the mock draft.
+* **`seek`** prints the first seed whose class meets every `--want` and none
+  of the `--not` conditions, trying `--tries N` seeds `<--seed>#0, #1, ...`,
+  and exits 1 when none does. The conditions are the page's "reroll until"
+  ones (`tallTop5`, `abroadNo1`, `deepClass`, `strangeness:N`, ...) plus
+  `topOvr:N`, `count50:N`, `pos1:C`, `archetype:Name`, `school:Name`,
+  `height:N` (inches) and `freshmen:N`.
+
+`node tools/bundle.js` (or `npm run bundle`) writes the whole tool as one HTML
+file, `dist/bbgm-draft-workshop.html` (about 3.5 MB: the stylesheet and every
+script inlined, no dependencies), for email or a USB stick; a page opened from
+a disk cannot run the batch worker, which the page already allows for.
 
 ## What it does
 
@@ -512,7 +556,14 @@ postseason result, the stat line, shooting splits, advanced numbers, the defensi
 line, the best single game of his season, season highs and streaks, postseason
 splits, games missed and why, the archetype, honors, and his position on the draft
 board. This goes into the player's `note` field, which BBGM displays on the player
-page.
+page. The field is the template's output: a note already in the file is replaced,
+and a player the template writes nothing for ends up with no note. *Keep any note
+already in the file* keeps it instead (the generated text goes under a
+"Generated scouting notes:" line, so a re-export replaces that block rather than
+stacking another on top; on a league merge the league's own note is the one
+kept), and *Include scouting notes* off writes none of ours and leaves the file's
+notes as they were. Seasons in the note are the ones the exported statline rows
+carry, which for a class a year ahead is the draft year.
 
 **5. Hands out honors — about a hundred distinguishable ones.** The six named
 national player-of-the-year trophies (Naismith, Wooden, Oscar Robertson, AP, NABC,
@@ -650,7 +701,7 @@ pixels the table becomes one card per prospect.
 | **Earlier seasons** | `Simulate` runs each of a prospect's previous college years through the same stat model the draft year goes through. `Reconstruct` is the older behavior: a backward-scaled copy of the draft-year line. |
 | **Build noise** | Per-rating jitter. |
 | **Vary size** | Lets listed height and weight drift with the build. |
-| **Keep imported heights** | On by default. Pins every player's height rating and listed height to the value his file carried, so nothing the tool draws — a reroll, the variation dial, the size drift above, the 7'4" physical-outlier anomaly — can move either. A height you set by hand on a player still moves it: that is you saying how tall he is, not a draw. Off restores the old behavior, where heights are part of what a reroll redraws. |
+| **Keep imported heights** | On by default. Pins every player's height rating and listed height to the value his file carried, so nothing the tool draws — a reroll, the variation dial, the size drift above, the physical-outlier anomaly (half a foot either way of his own height) — can move either. A height you set by hand on a player still moves it: that is you saying how tall he is, not a draw. Off restores the old behavior, where heights are part of what a reroll redraws. |
 | **Freshmen / transfers / redshirts / reclassified** | Who is in what year, and how they got there. Freshmen reaches 100 (the draw's lean toward freshmen at the top of the board flattens out above 50). Transfers is the share of upperclassmen who arrived from another program — seniors most, sophomores least; at the default mix 34 now gives about a third (it gave about half before the year weights were renormalized). |
 | **Destination weights** | Where blank-college prospects go, per league — grouped by region, each group collapsible with its own ×2 / ×½, because what anybody actually wants from thirty-odd number boxes is "more Europe". The grouping is derived from each league's own birthplace multipliers, so adding a league to `js/colleges.js` files it correctly with no second edit. |
 | **Scouting traits per prospect** | How many traits from the ~227-row table each prospect carries (see above). 0 turns the layer off, along with the per-player volatility, the offensive-glass bias and the medical file. |
@@ -1177,13 +1228,18 @@ carry-over was already aged across the hole — coaches age and the oldest
 leave, program levels regress toward the field's own mean, star returners
 advance a class year and graduate out — and the timeline still skipped from
 2026 to 2031 as though nothing had happened between them. **Extrapolated
-seasons** fill the gap with what a season is remembered by: a champion and a
-runner-up drawn against program strength, a poll No. 1, a player of the year
-and a five-man All-America taken from the named star returners the carry is
-holding. It is not a simulation and does not pretend to be — every row is
-flagged (a `*` on the timeline), nothing derived from one is fed back into the
-chain, and the names run out as the gap lengthens, because a world five years
-past the last file it was given genuinely does not know who is playing. The
+seasons** fill the gap with what a season is remembered by: a champion, a
+runner-up and a Final Four drawn against program strength (a level is worth
+what it is worth in the simulated seasons: the draw was fitted to them), a poll
+No. 1, a player of the year, a No. 1 pick and a five-man All-America, plus the
+April coaching changes and the conference moves, which come from the same
+season model the played years use. The named star returners the carry is
+holding are used first; after them the men are invented, named off the
+synthetic generator's deal so no name repeats, and flagged. It is not a
+simulation and does not pretend to be — every row is flagged (a `*` on the
+timeline), an invented man has no file, no career page and no place in the
+records, the Hall or the threads, and nothing derived from a guessed year is
+fed back into the chain. The
 same machinery **tops up a partial class**: a league export whose future draft
 class is forty men produces a real season whose honours were drawn from a thin
 field, and the All-America places that field could not fill are added and

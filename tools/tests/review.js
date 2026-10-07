@@ -271,7 +271,8 @@ module.exports = function (ok, V) {
 	   the empty-state card — the list of what is hiding rows, and the reset. */
 	{
 		ok("the filter reset restores every filter key, archetype included",
-			/function clearFilters\(\)[\s\S]{0,400}archetype: ""/.test(VIEWS));
+			/function clearFilters\(\)[\s\S]{0,200}emptyFilter\(\)/.test(VIEWS) &&
+			/function emptyFilter\(\)[\s\S]{0,200}archetype: ""/.test(VIEWS));
 		ok("the empty state names the archetype filter among the active ones",
 			/function describeFilters\(\)[\s\S]{0,600}f\.archetype/.test(VIEWS));
 		ok("the filter bar carries its own reset",

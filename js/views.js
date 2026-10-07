@@ -85,7 +85,7 @@
 		{ key: "seed", label: "Seed", num: true, off: true, title: "His team's NCAA tournament seed" },
 		// Physicals, which varySize can change and which were never displayed.
 		{ key: "hgtInches", label: "Ht", num: true, off: true, phys: true, title: "Listed height" },
-		{ key: "weight", label: "Wt", num: true, off: true, phys: true, title: "Listed weight in pounds" },
+		{ key: "weight", label: "Wt", num: true, off: true, phys: true, title: "Listed weight in pounds (kilograms with the cm / kg switch)" },
 		{ key: "gp", label: "GP", num: true, stat: true },
 		{ key: "mpg", label: "MPG", num: true, stat: true },
 		{ key: "ppg", label: "PPG", num: true, stat: true },
@@ -206,6 +206,9 @@
 	   context field or a physical. One function so the table, the CSV, the
 	   range filters and the sort all agree on what a column means. */
 	function cellValue(p, key, res, mode) {
+		// Skills, the file's own overall, the pro projection, ratings…: one
+		// table of getters (EXTRA_VALUE) feeds the screen and the CSV.
+		if (EXTRA_VALUE[key]) return EXTRA_VALUE[key](p, res);
 		const s = p.stats;
 		const team = res && res.teams ? res.teams[p.newCollege] : null;
 		switch (key) {
@@ -232,6 +235,7 @@
 	/* Height as a person reads it. */
 	function feet(inches) {
 		if (!Number.isFinite(inches)) return "";
+		if (metricUnits()) return Math.round(inches * 2.54) + " cm";
 		// Round the whole height first: 6'11.6" is 6'12" otherwise.
 		const t = Math.round(inches);
 		return Math.floor(t / 12) + "'" + (t % 12) + '"';
@@ -368,9 +372,13 @@
 	function potTooltip(p) {
 		const f = p.potFactors;
 		if (!f) return "Potential " + p.newPot;
+		if (f.fromFile) {
+			return "Potential " + p.newPot + " — kept from the file, which this tool already adjusted";
+		}
 		const label = {
 			arch: "archetype", age: "age", ageClass: "age within the class",
 			touch: "shooting touch (FT%)", frame: "frame", role: "role vs production",
+			centre: "class average (the file's own level is kept)",
 			bias: "your potential bias slider",
 		};
 		const bits = Object.keys(label)
@@ -483,6 +491,7 @@
 	function whyButton(p, res) {
 		const btn = el("button", "whybtn tiny", "?");
 		btn.type = "button";
+		btn.dataset.nocopy = "";
 		btn.title = "Why is " + p.name + " here?";
 		btn.setAttribute("aria-label", "Why is " + p.name + " here?");
 		btn.setAttribute("aria-haspopup", "dialog");
@@ -536,6 +545,910 @@
 			.concat(rows.map((r) => "| " + r.map(cell).join(" | ") + " |"))
 			.join("\n");
 	}
+
+	/* ======================================================================
+	   SMALL TABLE, EXPORT AND SEARCH HELPERS (the October 2026 quick wins)
+
+	   Everything in this block is pure — no DOM unless a function says so — so
+	   tools/tests/quickwins-ui.js can drive it in Node.
+	   ====================================================================== */
+
+	/* Q22. A table as text: tab-separated (what a spreadsheet splits into
+	   cells on paste) or a markdown table. Tabs and line breaks inside a cell
+	   would shift every column after it, so they become spaces. */
+	function tableText(heads, rows, fmt) {
+		if (fmt === "md") return markdownTable(heads, rows);
+		const clean = (v) => String(v === undefined || v === null ? "" : v)
+			.replace(/[\t\r\n]+/g, " ").trim();
+		return [heads].concat(rows).map((r) => r.map(clean).join("\t")).join("\n");
+	}
+
+	/* The visible text of a cell: everything except nodes marked
+	   data-nocopy (the star, the "why" button, the row's Edit link). */
+	function cellText(node) {
+		let out = "";
+		for (const c of Array.prototype.slice.call(node.childNodes || [])) {
+			if (c.nodeType === 3) out += c.nodeValue;
+			else if (c.nodeType === 1 && !(c.dataset && c.dataset.nocopy !== undefined)) {
+				out += cellText(c);
+			}
+		}
+		return out.replace(/\s+/g, " ").trim();
+	}
+
+	/* The headings and rows of a rendered table, in the order and with the
+	   filter the screen shows. A column with no heading (the selection
+	   checkbox) is dropped; the sort arrow in a heading is not part of its
+	   name. Rows that are one spanning cell (a round divider) are skipped. */
+	function tableParts(table) {
+		const headRow = table.tHead && table.tHead.rows[table.tHead.rows.length - 1];
+		const headCells = headRow ? Array.prototype.slice.call(headRow.cells) : [];
+		const heads = headCells.map((th) => (th.dataset && th.dataset.label
+			? th.dataset.label : cellText(th)).replace(/\s*[▾▴]\s*$/, "").trim());
+		const keep = heads.map((h) => h !== "");
+		const rows = [];
+		for (const body of Array.prototype.slice.call(table.tBodies || [])) {
+			for (const tr of Array.prototype.slice.call(body.rows)) {
+				if (tr.classList && tr.classList.contains("bandrow")) continue;
+				const cells = Array.prototype.slice.call(tr.cells);
+				if (cells.length === 1 && cells[0].colSpan > 1) continue;
+				rows.push(cells.map((td) => cellText(td)).filter((x, i) => keep[i] !== false));
+			}
+		}
+		return { heads: heads.filter((h) => h !== ""), rows };
+	}
+
+	function domTableText(table, fmt) {
+		const t = tableParts(table);
+		return tableText(t.heads, t.rows, fmt);
+	}
+
+	/* Q22. A "Copy as TSV / markdown" strip above every real table in the
+	   current view: one pass after the view is built, so a table needs no
+	   wiring of its own and a new one is covered the day it is added.
+	   A table opts out with data-nocopy; very short tables are left alone. */
+	function decorateTables(root) {
+		if (!root || !root.querySelectorAll) return 0;
+		let made = 0;
+		for (const table of Array.prototype.slice.call(root.querySelectorAll("table"))) {
+			/* The board and the prospect table have buttons of their own (Copy for
+			   spreadsheet, Copy table) beside their filters. */
+			if (table.dataset.nocopy !== undefined || table.classList.contains("boardtable") ||
+				table.closest(".tablesplit")) continue;
+			if (!table.tHead || !table.tBodies.length) continue;
+			const nBody = table.tBodies[0].rows.length;
+			if (table.dataset.copyable === undefined && nBody < 4) continue;
+			if (!nBody) continue;
+			const host = table.closest(".scroll") || table;
+			if (!host.parentNode) continue;
+			const prev = host.previousElementSibling;
+			if (prev && prev.classList.contains("tablecopy")) continue;
+			const bar = el("div", "tablecopy");
+			bar.appendChild(el("span", "unit", "Copy this table:"));
+			for (const [fmt, label, what] of [["tsv", "TSV", "the table as tab-separated text"],
+				["md", "Markdown", "the table as a markdown table"]]) {
+				const b = el("button", "tiny", label);
+				b.type = "button";
+				b.title = "Copy " + what + " — the rows as sorted and filtered on screen";
+				b.addEventListener("click", () => {
+					A().copyText(domTableText(table, fmt), b, label, what);
+				});
+				bar.appendChild(b);
+			}
+			host.parentNode.insertBefore(bar, host);
+			made++;
+		}
+		return made;
+	}
+
+	/* Q6. A ZIP with every member stored (method 0): no compression, so no
+	   library. The format is a local header and the bytes per file, then a
+	   central directory, then one end record. Names are UTF-8 (flag bit 11).
+	   Sizes and offsets are 32-bit, so a set past 4 GB or 65,535 members is
+	   refused rather than written wrong. */
+	let crcTable = null;
+	function crc32(bytes) {
+		if (!crcTable) {
+			crcTable = new Uint32Array(256);
+			for (let n = 0; n < 256; n++) {
+				let c = n;
+				for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+				crcTable[n] = c >>> 0;
+			}
+		}
+		let c = 0xFFFFFFFF;
+		for (let i = 0; i < bytes.length; i++) c = crcTable[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+		return (c ^ 0xFFFFFFFF) >>> 0;
+	}
+
+	function utf8Bytes(s) {
+		return new TextEncoder().encode(String(s));
+	}
+
+	/* Two files with one name would overwrite each other on extraction; the
+	   second becomes "name (2).ext". */
+	function uniqueNames(names) {
+		const seen = {};
+		return names.map((n) => {
+			let out = n;
+			let i = 1;
+			while (seen[out.toLowerCase()]) {
+				i++;
+				out = n.replace(/(\.[^.\/]*)?$/, " (" + i + ")$1");
+			}
+			seen[out.toLowerCase()] = true;
+			return out;
+		});
+	}
+
+	function zipStore(files, when) {
+		const d = when instanceof Date && !isNaN(when) ? when : new Date();
+		const year = Math.max(1980, d.getFullYear());
+		const dosTime = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+		const dosDate = ((year - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+		if (files.length > 65535) throw new Error("A zip holds at most 65,535 files.");
+		const names = uniqueNames(files.map((f) => String(f.name)));
+		const parts = [];
+		const central = [];
+		let offset = 0;
+		const u16 = (v) => [v & 255, (v >>> 8) & 255];
+		const u32 = (v) => [v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255];
+		files.forEach((f, i) => {
+			const nameBytes = utf8Bytes(names[i]);
+			const data = typeof f.data === "string" ? utf8Bytes(f.data) : f.data;
+			if (offset + data.length + nameBytes.length + 30 > 0xFFFFFFFF) {
+				throw new Error("That is more than a zip (4 GB) can hold without ZIP64.");
+			}
+			const crc = crc32(data);
+			const head = Uint8Array.from([].concat(
+				u32(0x04034b50), u16(20), u16(0x0800), u16(0), u16(dosTime), u16(dosDate),
+				u32(crc), u32(data.length), u32(data.length), u16(nameBytes.length), u16(0)));
+			parts.push(head, nameBytes, data);
+			central.push(Uint8Array.from([].concat(
+				u32(0x02014b50), u16(20), u16(20), u16(0x0800), u16(0), u16(dosTime), u16(dosDate),
+				u32(crc), u32(data.length), u32(data.length), u16(nameBytes.length),
+				u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset))), nameBytes);
+			offset += head.length + nameBytes.length + data.length;
+		});
+		let cdSize = 0;
+		for (const c of central) { parts.push(c); cdSize += c.length; }
+		parts.push(Uint8Array.from([].concat(
+			u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length),
+			u32(cdSize), u32(offset), u16(0))));
+		const total = parts.reduce((a, p) => a + p.length, 0);
+		const out = new Uint8Array(total);
+		let at = 0;
+		for (const p of parts) { out.set(p, at); at += p.length; }
+		return out;
+	}
+
+	/* Q5. The export file name: a template with {file} {seed} {season}
+	   {flavor} {fp}. Whatever the tokens hold, the result is one safe file
+	   name (no path separators, no characters a file system refuses, no
+	   leading or trailing dots) with the extension added once. */
+	const EXPORT_NAME_DEFAULT = "{file}_customized";
+	const NAME_BAD = /[\\/:*?"<>|\u0000-\u001f]+/g;
+	function nameToken(v) {
+		return String(v === undefined || v === null ? "" : v)
+			.replace(NAME_BAD, "").replace(/\s+/g, "-").replace(/^-+|-+$/g, "");
+	}
+	function exportFilename(template, tokens, ext) {
+		const tpl = typeof template === "string" && template.trim() ? template.trim() : EXPORT_NAME_DEFAULT;
+		const t = tokens || {};
+		let name = tpl.replace(/\{(file|seed|season|flavor|fp)\}/g, (m, k) => nameToken(t[k]));
+		name = name.replace(/[{}]/g, "").replace(NAME_BAD, "-").replace(/\s+/g, " ")
+			.replace(/\.json(\.gz)?$/i, "").replace(/^[\s.]+|[\s.]+$/g, "").slice(0, 120)
+			.replace(/[\s.]+$/, "");
+		if (!name || /^[-_.\s]+$/.test(name)) name = nameToken(t.file) || "class";
+		return name + (ext === undefined ? ".json" : ext);
+	}
+	function cleanFilenameTemplate(v) {
+		if (typeof v !== "string") return null;
+		const s = v.trim().slice(0, 120);
+		return s && s !== EXPORT_NAME_DEFAULT ? s : null;
+	}
+
+	/* Q23. Height and weight in one place. Display only: every stored and
+	   exported number stays in inches and pounds. */
+	function metricUnits() {
+		const a = A();
+		return !!(a && a.state && a.state.units === "metric");
+	}
+	function weightText(lb) {
+		if (!Number.isFinite(lb)) return "";
+		return metricUnits() ? String(Math.round(lb * 0.45359237)) : String(lb);
+	}
+
+	/* Q18/Q1. Columns the table gained from fields the model already carried:
+	   skills, the file's own overall and potential and the change from them,
+	   the pro projection, the jersey number, mood traits, birthplace and the
+	   fifteen ratings. ONE table feeds the screen, the range filter, the sort
+	   and the CSV, so the file and the table cannot disagree. */
+	function jerseyOf(p) {
+		const raw = p.src && p.src.jerseyNumber;
+		if (raw === undefined || raw === null || String(raw).trim() === "") return undefined;
+		return String(raw).trim();
+	}
+	function projectionOf(p, res) {
+		const pr = proFor(res);
+		return pr && pr.projections ? pr.projections[p.key] : undefined;
+	}
+	const EXTRA_VALUE = {
+		skills: (p) => (Array.isArray(p.newSkills) ? p.newSkills.join(" ") : ""),
+		origOvr: (p) => (Number.isFinite(p.origOvr) ? p.origOvr : undefined),
+		origPot: (p) => (Number.isFinite(p.origPot) ? p.origPot : undefined),
+		ovrDelta: (p) => (Number.isFinite(p.origOvr) ? p.newOvr - p.origOvr : undefined),
+		potDelta: (p) => (Number.isFinite(p.origPot) ? p.newPot - p.origPot : undefined),
+		proPeak: (p, res) => {
+			const x = projectionOf(p, res);
+			return x && Number.isFinite(x.peak) ? x.peak : undefined;
+		},
+		proVerdict: (p, res) => {
+			const x = projectionOf(p, res);
+			return x && x.verdict ? x.verdict : "";
+		},
+		jersey: (p) => jerseyOf(p),
+		mood: (p) => (Array.isArray(p.moodTraits) ? p.moodTraits.join(" ") : ""),
+		birthplace: (p) => (p.born && p.born.loc ? String(p.born.loc) : ""),
+	};
+	const RATING_COLUMN_KEYS = ["hgt", "stre", "spd", "jmp", "endu", "ins", "dnk", "ft",
+		"fg", "tp", "oiq", "diq", "drb", "pss", "reb"];
+	for (const k of RATING_COLUMN_KEYS) {
+		EXTRA_VALUE["r_" + k] = (p) => (p.newRatings && Number.isFinite(p.newRatings[k])
+			? p.newRatings[k] : undefined);
+	}
+	/* [CSV header, column key] for each. The header is the key itself except
+	   for a rating, which keeps BBGM's own name. */
+	const CSV_EXTRA = Object.keys(EXTRA_VALUE).map((key) =>
+		[key.indexOf("r_") === 0 ? key.slice(2) : key, key]);
+	function csvExtras(p, res) {
+		return CSV_EXTRA.map((x) => EXTRA_VALUE[x[1]](p, res));
+	}
+	function extraCell(p, col, res) {
+		const v = EXTRA_VALUE[col.key](p, res);
+		const key = col.key;
+		let td;
+		if (key === "ovrDelta" || key === "potDelta") {
+			td = el("td", "num");
+			if (Number.isFinite(v)) {
+				td.appendChild(el("span", v > 0 ? "up" : v < 0 ? "down" : "",
+					v === 0 ? "—" : (v > 0 ? "+" : "") + v));
+			}
+		} else if (key === "proVerdict" || key === "skills" || key === "mood" ||
+			key === "birthplace" || key === "jersey") {
+			td = el("td", null, v === undefined ? "" : String(v));
+			if (key === "mood" && v) {
+				td.title = String(v).split(" ").map((t) => ({
+					F: "Fame", L: "Loyalty", $: "Money", W: "Winning" })[t] || t).join(", ");
+			}
+			if (key === "proVerdict") {
+				const x = projectionOf(p, res);
+				if (x) td.title = "Peak " + x.peak + " (" + x.peakLow + "-" + x.peakHigh + ")";
+			}
+		} else {
+			td = el("td", "num", Number.isFinite(v) ? String(v) : "");
+		}
+		return td;
+	}
+	function extraSortValue(p, key, res) {
+		const v = EXTRA_VALUE[key](p, res);
+		if (key === "jersey") {
+			const n = parseInt(v, 10);
+			return Number.isFinite(n) ? n : undefined;
+		}
+		return v;
+	}
+
+	/* Q19. Path facts about a prospect, from the biography the engine drew. */
+	function pathFlags(p) {
+		const kind = p.transfer && p.transfer.kind ? String(p.transfer.kind) : "";
+		const from = p.transfer && p.transfer.from ? String(p.transfer.from) : "";
+		return {
+			transfer: !!(p.transfer && p.transfer.from),
+			juco: /juco|junior college/i.test(kind + " " + from),
+			redshirt: !!p.redshirt,
+			reclass: !!p.reclassified,
+			fivestar: !!(p.recruiting && p.recruiting.stars >= 5),
+			fifthyear: !!(p.transfer && p.transfer.fifthYear),
+			walkon: /walk-on/i.test(kind),
+		};
+	}
+	const PATH_FILTERS = [["transfer", "transfer"], ["juco", "JUCO"], ["redshirt", "redshirt"],
+		["reclass", "reclassified"], ["fivestar", "5-star recruit"], ["fifthyear", "fifth-year"],
+		["walkon", "walk-on"]];
+	const PLAYER_TAGS = ["sleeper", "bust risk", "my guy"];
+
+	/* Q20. The search box's syntax. Plain words work as they always did (a
+	   substring of the name, school, build, class year or an honor); on top
+	   of that:
+	     pos:C  school:Duke  arch:"Rim Protector"  year:sr  skill:3  tag:sleeper
+	     ovr>=55  pot<60  age<=20  ppg>15  ht>=82  ovr:50-60
+	     is:locked  is:starred  is:transfer  is:redshirt  is:abroad
+	     -transfer  -school:Duke  -is:locked        (a leading - negates)
+	   A comma lists alternatives (pos:PG,SG). Several terms all have to hold. */
+	const QUERY_TEXT = {
+		name: "name", school: "school", college: "school", club: "school", team: "school",
+		conf: "conf", conference: "conf", league: "conf", pos: "pos", position: "pos",
+		arch: "arch", archetype: "arch", build: "arch", year: "year", class: "year",
+		skill: "skill", skills: "skill", tag: "tag", tags: "tag", hand: "hand",
+		path: "path", award: "award", honor: "award", honors: "award", awards: "award",
+		note: "note", from: "from", born: "born", birthplace: "born", hometown: "born",
+	};
+	const QUERY_IS = {
+		locked: "locked", lock: "locked", starred: "starred", star: "starred",
+		watched: "starred", watchlist: "starred", changed: "changed", moved: "changed",
+		reassigned: "changed", transfer: "transfer", juco: "juco", redshirt: "redshirt",
+		reclass: "reclass", reclassified: "reclass", "5star": "fivestar",
+		fivestar: "fivestar", fifthyear: "fifthyear", walkon: "walkon",
+		abroad: "abroad", pro: "abroad", intl: "abroad", international: "abroad",
+		college: "college", played: "played", dnp: "dnp", didnotplay: "dnp",
+		lefty: "lefty", left: "lefty",
+	};
+	const YEAR_ALIAS = { fr: "freshman", fresh: "freshman", so: "sophomore", soph: "sophomore",
+		jr: "junior", sr: "senior", gr: "graduate", grad: "graduate" };
+	const QUERY_NUM_ALIAS = { ovr: "newOvr", pot: "newPot", ht: "hgtInches", height: "hgtInches",
+		wt: "weight", rank: "board", brd: "board", ap: "apRank" };
+	const QUERY_PATH_WORDS = { transfer: "transfer", juco: "juco", redshirt: "redshirt",
+		reclassified: "reclass", reclass: "reclass", "walk-on": "walkon", walkon: "walkon" };
+
+	function queryNumericKey(name) {
+		const n = String(name).toLowerCase();
+		if (QUERY_NUM_ALIAS[n]) return QUERY_NUM_ALIAS[n];
+		for (const c of COLUMNS) {
+			if (!c.num || c.fixed || !c.key) continue;
+			if (c.key.toLowerCase() === n) return c.key;
+		}
+		for (const c of COLUMNS) {
+			if (!c.num || c.fixed || !c.label) continue;
+			if (c.label.toLowerCase().replace(/[^a-z0-9]/g, "") === n.replace(/[^a-z0-9]/g, "")) {
+				return c.key;
+			}
+		}
+		return null;
+	}
+
+	function queryTokens(q) {
+		const out = [];
+		const re = /"([^"]*)"|(\S+)/g;
+		let m;
+		// A quoted phrase may sit after a field: school:"Michigan State".
+		const src = String(q).replace(/([a-z0-9_]+(?::|>=|<=|!=|==|=|>|<))"([^"]*)"/gi,
+			(all, head, val) => head + val.replace(/\s+/g, " "));
+		while ((m = re.exec(src))) out.push(m[1] !== undefined ? m[1] : m[2]);
+		return out.map((t) => t.replace(/ /g, " "));
+	}
+
+	const parseCache = { q: null, parsed: null };
+	function parseQuery(q) {
+		if (parseCache.q === q && parseCache.parsed) return parseCache.parsed;
+		const parsed = { q: String(q || ""), words: [], terms: [], ignored: [], structured: false };
+		for (let raw of queryTokens(parsed.q)) {
+			let neg = false;
+			if (raw.length > 1 && raw.charAt(0) === "-") { neg = true; raw = raw.slice(1); }
+			const m = /^([A-Za-z][A-Za-z0-9_]*)(>=|<=|!=|==|=|:|>|<)(.+)$/.exec(raw);
+			if (m) {
+				const field = m[1].toLowerCase();
+				const op = m[2] === ":" || m[2] === "==" ? "=" : m[2];
+				const value = m[3];
+				if (field === "is" || field === "has") {
+					const flag = QUERY_IS[value.toLowerCase()];
+					if (flag && op === "=") {
+						parsed.terms.push({ kind: "is", flag, neg });
+						parsed.structured = true;
+					} else parsed.ignored.push(raw);
+					continue;
+				}
+				if (QUERY_TEXT[field] && (op === "=" || op === "!=")) {
+					parsed.terms.push({ kind: "text", field: QUERY_TEXT[field],
+						values: value.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
+						neg: op === "!=" ? !neg : neg });
+					parsed.structured = true;
+					continue;
+				}
+				const nk = queryNumericKey(field);
+				if (nk) {
+					const rng = /^(-?\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)$/.exec(value);
+					if (rng && op === "=") {
+						parsed.terms.push({ kind: "num", key: nk, op: "range",
+							a: Number(rng[1]), b: Number(rng[2]), neg });
+						parsed.structured = true;
+						continue;
+					}
+					const num = Number(value);
+					if (value !== "" && Number.isFinite(num)) {
+						parsed.terms.push({ kind: "num", key: nk, op, value: num, neg });
+						parsed.structured = true;
+						continue;
+					}
+				}
+			}
+			parsed.words.push({ text: raw.toLowerCase(), neg });
+		}
+		// Only plain, un-negated words: keep the whole text as one substring,
+		// exactly as the box always worked ("michigan state").
+		parsed.plain = !parsed.structured && !parsed.ignored.length && parsed.words.every((w) => !w.neg);
+		parseCache.q = q;
+		parseCache.parsed = parsed;
+		return parsed;
+	}
+
+	function queryHay(p) {
+		return (p.name + " " + p.newCollege + " " + (p.proClub || "") + " " +
+			p.archetype + " " + p.classYear + " " + (p.awards || []).join(" ")).toLowerCase();
+	}
+
+	/* ctx: { locked(p), starred(p), tags(p), hay?: string } — the parts that
+	   live in the browser's own state. */
+	function queryMatch(parsed, p, res, ctx) {
+		const c = ctx || {};
+		const hay = c.hay !== undefined ? c.hay : queryHay(p);
+		if (parsed.plain) return !parsed.q.trim() || hay.indexOf(parsed.q.toLowerCase().trim()) !== -1;
+		const flags = pathFlags(p);
+		for (const w of parsed.words) {
+			let hit = hay.indexOf(w.text) !== -1;
+			if (!hit && QUERY_PATH_WORDS[w.text]) hit = !!flags[QUERY_PATH_WORDS[w.text]];
+			if (hit === w.neg) return false;
+		}
+		for (const t of parsed.terms) {
+			let hit;
+			if (t.kind === "is") {
+				switch (t.flag) {
+				case "locked": hit = !!(c.locked && c.locked(p)); break;
+				case "starred": hit = !!(c.starred && c.starred(p)); break;
+				case "changed": hit = !!p.collegeChanged; break;
+				case "abroad": hit = !!p.nonNcaa; break;
+				case "college": hit = !p.nonNcaa; break;
+				case "played": hit = !!(p.stats && p.stats.gp > 0); break;
+				case "dnp": hit = !(p.stats && p.stats.gp > 0); break;
+				case "lefty": hit = p.hand === "left"; break;
+				default: hit = !!flags[t.flag];
+				}
+			} else if (t.kind === "text") {
+				const team = res && res.teams ? res.teams[p.newCollege] : null;
+				const any = (fn) => t.values.some(fn);
+				switch (t.field) {
+				case "name": hit = any((v) => p.name.toLowerCase().indexOf(v) !== -1); break;
+				case "school": hit = any((v) => (p.newCollege + " " + (p.proClub || ""))
+					.toLowerCase().indexOf(v) !== -1); break;
+				case "conf": {
+					const conf = team ? team.conf : (p.nonNcaa ? p.newCollege : "");
+					hit = any((v) => String(conf).toLowerCase().indexOf(v) !== -1);
+					break;
+				}
+				case "pos": hit = any((v) => String(p.newPos).toLowerCase() === v); break;
+				case "arch": hit = any((v) => String(p.archetype).toLowerCase().indexOf(v) !== -1); break;
+				case "year": hit = any((v) => String(p.classYear).toLowerCase()
+					.indexOf(YEAR_ALIAS[v] || v) !== -1); break;
+				case "skill": hit = any((v) => (p.newSkills || []).some((s) => String(s).toLowerCase() === v)); break;
+				case "tag": hit = any((v) => ((c.tags && c.tags(p)) || [])
+					.some((s) => String(s).toLowerCase().indexOf(v) !== -1)); break;
+				case "hand": hit = any((v) => (p.hand || "right").toLowerCase().indexOf(v) === 0 ||
+					(v === "l" && p.hand === "left")); break;
+				case "path": hit = any((v) => !!flags[QUERY_PATH_WORDS[v] || v]); break;
+				case "award": hit = any((v) => (p.awards || []).join(" ").toLowerCase().indexOf(v) !== -1); break;
+				case "note": hit = any((v) => String(p.note || "").toLowerCase().indexOf(v) !== -1); break;
+				case "from": hit = any((v) => String(p.transfer && p.transfer.from || "")
+					.toLowerCase().indexOf(v) !== -1); break;
+				case "born": hit = any((v) => String(p.born && p.born.loc || "")
+					.toLowerCase().indexOf(v) !== -1); break;
+				default: hit = false;
+				}
+			} else {
+				const raw = cellValue(p, t.key, res, "perGame");
+				if (raw === undefined || raw === null || !Number.isFinite(raw)) return false;
+				const v = PCT_KEYS[t.key] ? raw * 100 : raw;
+				switch (t.op) {
+				case "range": hit = v >= t.a && v <= t.b; break;
+				case ">": hit = v > t.value; break;
+				case ">=": hit = v >= t.value; break;
+				case "<": hit = v < t.value; break;
+				case "<=": hit = v <= t.value; break;
+				case "!=": hit = v !== t.value; break;
+				default: hit = Math.abs(v - t.value) < 1e-9;
+				}
+			}
+			if (hit === t.neg) return false;
+		}
+		return true;
+	}
+
+	function queryCtx() {
+		const a = A();
+		const st = a.state;
+		return {
+			locked: (p) => !!(st.overrides && st.overrides[p.key]),
+			starred: (p) => !!(st.watch && st.watch[a.userKey(p)]),
+			tags: (p) => (st.tags && st.tags[a.userKey(p)]) || [],
+		};
+	}
+
+	/* Q4. The prospects either side of this one, in board order (the board
+	   if the class has one, else the file's order). Wraps at the ends. */
+	function neighborKeys(res, key) {
+		const list = (res.board && res.board.length ? res.board : res.players) || [];
+		const i = list.findIndex((x) => x.key === key);
+		if (i === -1) return { prev: null, next: null, index: -1, total: list.length };
+		const n = list.length;
+		return { prev: list[(i - 1 + n) % n].key, next: list[(i + 1) % n].key, index: i, total: n };
+	}
+
+	/* Q16. The tags on one prospect, from the browser's own state. */
+	function tagsOf(p) {
+		const a = A();
+		const t = a.state.tags && a.state.tags[a.userKey(p)];
+		return Array.isArray(t) ? t : [];
+	}
+	function cleanTags(v) {
+		if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+		const out = {};
+		for (const k of Object.keys(v)) {
+			if (!Array.isArray(v[k])) continue;
+			const list = v[k].filter((t) => PLAYER_TAGS.indexOf(t) !== -1)
+				.filter((t, i, a) => a.indexOf(t) === i);
+			if (list.length) out[k] = list;
+		}
+		return out;
+	}
+
+	/* PINNED SETTINGS (audit Q5). The list is stored in the persisted payload
+	   and read back from it, so it is checked on the way in: only strings that
+	   name a real setting (isKnown), each once, in order, at most `max`. */
+	const PIN_MAX = 8;
+	function cleanStarredSettings(v, isKnown, max) {
+		const cap = Number.isFinite(max) && max > 0 ? Math.floor(max) : PIN_MAX;
+		if (!Array.isArray(v)) return [];
+		const out = [];
+		for (const k of v) {
+			if (typeof k !== "string" || out.indexOf(k) !== -1) continue;
+			const known = typeof isKnown === "function"
+				? !!isKnown(k) : /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(k);
+			if (!known) continue;
+			out.push(k);
+			if (out.length >= cap) break;
+		}
+		return out;
+	}
+
+	/* "5 minutes ago" for the Restore card. `then` and `now` are epoch
+	   milliseconds (or anything Date.parse reads); a clock that ran backwards
+	   reads as "just now" rather than as a negative span. */
+	function timeAgo(then, now) {
+		const t = typeof then === "number" ? then : Date.parse(then);
+		const n = typeof now === "number" ? now : Date.now();
+		if (!Number.isFinite(t)) return "a while ago";
+		const s = Math.max(0, (n - t) / 1000);
+		const plural = (x, w) => x + " " + w + (x === 1 ? "" : "s") + " ago";
+		if (s < 45) return "just now";
+		if (s < 90) return "a minute ago";
+		if (s < 45 * 60) return plural(Math.round(s / 60), "minute");
+		if (s < 90 * 60) return "an hour ago";
+		if (s < 22 * 3600) return plural(Math.round(s / 3600), "hour");
+		if (s < 36 * 3600) return "yesterday";
+		if (s < 45 * 86400) return plural(Math.round(s / 86400), "day");
+		return plural(Math.round(s / (30 * 86400)), "month");
+	}
+
+	/* REMEMBERING THE SESSION (audit Q1). What goes to IndexedDB: the files as
+	   the JSON they were loaded from (a string each, so the size is a plain sum
+	   and nothing has to be structure-cloned), the active index and a snapshot
+	   of the persisted payload. Pure: the page decides when to write.
+
+	   Two records, so a settings change rewrites kilobytes rather than the
+	   files: "state" (small, read to draw the card) and "files" (large, read
+	   only on Restore). They carry the same `sig`, and a restore refuses a pair
+	   whose sigs differ. Over the cap (counted in characters of JSON, which is
+	   bytes for everything but the odd accented name) the session is skipped;
+	   a league file that alone breaks the cap is dropped first, since the
+	   classes were cut out of it and still load without it. A synthetic
+	   universe world is not stored: it is regenerated from its seeds. */
+	const SESSION_MAX_BYTES = 60 * 1024 * 1024;
+	function sessionShape(files, opts) {
+		const o = opts || {};
+		const max = Number.isFinite(o.maxBytes) ? o.maxBytes : SESSION_MAX_BYTES;
+		const cache = o.cache || null;
+		const list = Array.isArray(files) ? files : [];
+		if (!list.length || list.some((f) => !f || !f.data || typeof f.data !== "object")) {
+			return { skip: "empty" };
+		}
+		if (list.some((f) => f.synthetic)) return { skip: "synthetic" };
+		try {
+			const str = (obj) => {
+				if (cache && cache.has(obj)) return cache.get(obj);
+				const s = JSON.stringify(obj);
+				if (cache) cache.set(obj, s);
+				return s;
+			};
+			let bytes = 0;
+			const recFiles = [];
+			for (const f of list) {
+				const json = str(f.data);
+				bytes += json.length;
+				if (bytes > max) return { skip: "toobig", bytes };
+				recFiles.push({
+					name: String(f.name || ""), json,
+					fingerprint: typeof f.fingerprint === "string" ? f.fingerprint : null,
+					warnings: (f.warnings || []).filter((w) => typeof w === "string").slice(0, 20),
+					league: -1,
+				});
+			}
+			const leagues = [];
+			const at = new Map();
+			let leagueDropped = false;
+			let leagueBytes = 0;
+			list.forEach((f, i) => {
+				const lg = f.league && f.league.data && typeof f.league.data === "object"
+					? f.league : null;
+				if (!lg) return;
+				if (!at.has(lg.data)) {
+					// false in the cache: known to break the cap on its own.
+					let json = cache && cache.has(lg.data) ? cache.get(lg.data) : undefined;
+					if (json === undefined) {
+						json = JSON.stringify(lg.data);
+						if (cache) cache.set(lg.data, json.length > max ? false : json);
+						if (json.length > max) json = false;
+					}
+					if (json === false) at.set(lg.data, -1);
+					else {
+						at.set(lg.data, leagues.length);
+						leagues.push({ name: String(lg.name || ""), json });
+						leagueBytes += json.length;
+					}
+				}
+				recFiles[i].league = at.get(lg.data);
+			});
+			if (bytes + leagueBytes > max) {
+				leagues.length = 0;
+				for (const rf of recFiles) rf.league = -1;
+				leagueBytes = 0;
+			}
+			leagueDropped = list.some((f) => f.league && f.league.data) &&
+				recFiles.every((rf) => rf.league === -1);
+			const total = bytes + leagueBytes;
+			const sig = list.map((f, i) => (f.name || "") + "|" + (f.fingerprint || "") + "|" +
+				recFiles[i].json.length).join("␞") + "␞" + leagues.length;
+			const names = list.map((f) => String(f.name || ""));
+			const players = list.reduce((a, f) => a +
+				(Array.isArray(f.data.players) ? f.data.players.length : 0), 0);
+			return {
+				skip: null, bytes: total, sig, leagueDropped,
+				state: {
+					id: "state", v: 1, sig, savedAt: Number.isFinite(o.now) ? o.now : Date.now(),
+					active: Number.isInteger(o.active) ? o.active : 0,
+					names, players, count: list.length, leagueDropped,
+					payload: typeof o.payloadJson === "string" ? o.payloadJson : null,
+				},
+				files: { id: "files", v: 1, sig, files: recFiles, leagues },
+			};
+		} catch (e) {
+			return { skip: "error", error: String(e && e.message || e) };
+		}
+	}
+
+	/* The files back out of a "files" record, shaped like the ones a drop
+	   builds (installFiles recomputes the fingerprints). Null for anything
+	   that does not parse, so a damaged record is "no session". */
+	function sessionFiles(rec) {
+		if (!rec || !Array.isArray(rec.files) || !rec.files.length) return null;
+		try {
+			const leagues = (Array.isArray(rec.leagues) ? rec.leagues : []).map((l) =>
+				(l && typeof l.json === "string"
+					? { name: String(l.name || ""), data: JSON.parse(l.json) } : null));
+			const out = [];
+			for (const f of rec.files) {
+				if (!f || typeof f.json !== "string") return null;
+				const data = JSON.parse(f.json);
+				if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+				const file = {
+					name: String(f.name || "class.json"), data,
+					warnings: (Array.isArray(f.warnings) ? f.warnings : [])
+						.filter((w) => typeof w === "string"),
+				};
+				if (Number.isInteger(f.league) && f.league >= 0 && leagues[f.league]) {
+					file.league = leagues[f.league];
+				}
+				out.push(file);
+			}
+			return out;
+		} catch (e) { return null; }
+	}
+
+	/* The card's sentence, from the small "state" record. */
+	function sessionLabel(meta, now) {
+		if (!meta || !Array.isArray(meta.names) || !meta.names.length) return "";
+		const names = meta.names.map(String);
+		const shown = names.slice(0, 3).join(", ") +
+			(names.length > 3 ? " and " + (names.length - 3) + " more" : "");
+		const n = Number(meta.players) || 0;
+		return "Restore last session: " + shown + ", " + n + " player" + (n === 1 ? "" : "s") +
+			", saved " + timeAgo(meta.savedAt, now);
+	}
+
+	/* Q21. The filter state, canonical, for saving under a name and for
+	   restoring a save from an older build (missing keys fill in empty). */
+	function emptyFilter() {
+		return {
+			q: "", pos: "", conf: "", archetype: "",
+			changedOnly: false, lockedOnly: false,
+			playedOnly: false, didNotPlayOnly: false, ranges: [],
+			skills: [], classYear: "", path: "", tag: "",
+		};
+	}
+	function cleanFilter(v) {
+		const out = emptyFilter();
+		if (!v || typeof v !== "object" || Array.isArray(v)) return out;
+		for (const k of ["q", "pos", "conf", "archetype", "classYear", "path", "tag"]) {
+			if (typeof v[k] === "string") out[k] = v[k].slice(0, 200);
+		}
+		for (const k of ["changedOnly", "lockedOnly", "playedOnly", "didNotPlayOnly"]) {
+			out[k] = !!v[k];
+		}
+		if (Array.isArray(v.skills)) {
+			out.skills = v.skills.filter((s) => typeof s === "string").slice(0, 12);
+		}
+		if (Array.isArray(v.ranges)) {
+			out.ranges = v.ranges.filter((r) => r && typeof r.key === "string").slice(0, 12)
+				.map((r) => ({
+					key: r.key,
+					min: Number.isFinite(r.min) ? r.min : undefined,
+					max: Number.isFinite(r.max) ? r.max : undefined,
+				}));
+		}
+		return out;
+	}
+	function cleanFilterViews(v) {
+		if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+		const out = {};
+		for (const name of Object.keys(v).slice(0, 40)) {
+			if (!name.trim() || name.length > 60) continue;
+			out[name] = cleanFilter(v[name]);
+		}
+		return out;
+	}
+
+	/* Q12. Names pasted one per line, applied in BOARD ORDER: line 1 renames
+	   the No. 1 prospect, line 2 the No. 2, and so on. A blank line or a lone
+	   dash keeps that prospect's name; a leading "12." or bullet is dropped; a
+	   list longer than the class is cut. Returns what would change, for a
+	   preview, and the names that would then appear twice. */
+	function planRenames(text, board) {
+		const lines = String(text || "").split(/\r?\n/);
+		while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+		const names = lines.map((l) => l.replace(/^\s*(?:\d+\s*[.):\-]|[-*\u2022])\s+/, "")
+			.replace(/^\s*\d+\s*[.):]\s*/, "").replace(/\s+/g, " ").trim().slice(0, 100).trim());
+		const rows = [];
+		let kept = 0;
+		const finalNames = board.map((p) => p.name);
+		names.forEach((n, i) => {
+			const p = board[i];
+			if (!p) return;
+			if (!n || n === "-" || n === p.name) { kept++; return; }
+			rows.push({ key: p.key, rank: i + 1, from: p.name, to: n });
+			finalNames[i] = n;
+		});
+		const count = {};
+		for (const n of finalNames) count[n.toLowerCase()] = (count[n.toLowerCase()] || 0) + 1;
+		const changed = {};
+		for (const r of rows) changed[r.to.toLowerCase()] = true;
+		const duplicates = Object.keys(count).filter((n) => count[n] > 1 && changed[n]);
+		return { rows, kept, extra: Math.max(0, names.length - board.length),
+			lines: names.length, duplicates };
+	}
+
+	/* Q11. The locks CSV, parsed rows in, a plan out. Columns (matched by
+	   header, any order): key and/or name to find the prospect; then
+	   ovr, pot, archetype, college, newname (the new name), hgtinches,
+	   weight and the fifteen ratings hgt, stre, spd, jmp, endu, ins, dnk, ft,
+	   fg, tp, oiq, diq, drb, pss, reb. An empty cell is no lock. Anything out
+	   of range or unknown is refused and listed, never half-applied. */
+	function planLockRows(rows, players, lists) {
+		if (!rows || !rows.length) return { error: "That CSV has no rows." };
+		const head = rows[0].map((h) => String(h).trim().toLowerCase());
+		const idx = (name) => head.indexOf(name);
+		const byKey = {};
+		const byName = {};
+		for (const p of players) {
+			byKey[p.key] = p;
+			byName[p.name.toLowerCase()] = p;
+		}
+		const cols = {
+			key: idx("key"), name: idx("name"), ovr: idx("ovr"), pot: idx("pot"),
+			archetype: idx("archetype"), college: idx("college"), newname: idx("newname"),
+			hgtinches: idx("hgtinches"), weight: idx("weight"),
+		};
+		if (cols.key < 0 && cols.name < 0) {
+			return { error: "The CSV needs a `key` or `name` column to match players." };
+		}
+		const L = lists || {};
+		const applied = [];
+		const unmatched = [];
+		const rejected = [];
+		let total = 0;
+		for (let i = 1; i < rows.length; i++) {
+			const r = rows[i];
+			if (!r.length || r.every((c) => !String(c).trim())) continue;
+			total++;
+			const cell = (c) => (c >= 0 && r[c] !== undefined ? String(r[c]).trim() : "");
+			const k = cols.key >= 0 ? cell(cols.key) : null;
+			const nm = cols.name >= 0 ? cell(cols.name).toLowerCase() : null;
+			const p = (k && byKey[k]) || (nm && byName[nm]);
+			if (!p) { unmatched.push(k || nm); continue; }
+			const patch = {};
+			// An empty cell is no lock, not a lock at 0 (Number("") is 0).
+			const num = (c) => {
+				const t = cell(c);
+				const v = Number(t);
+				return t !== "" && Number.isFinite(v) ? v : null;
+			};
+			if (num(cols.ovr) !== null) patch.ovr = num(cols.ovr);
+			if (num(cols.pot) !== null) patch.pot = num(cols.pot);
+			/* A name the tool does not know is refused here, not applied:
+			   an unknown archetype fell back to the rolled build while the
+			   lock badge said otherwise, and an unknown school was written
+			   verbatim into the export with no team behind it. */
+			const a = cell(cols.archetype);
+			if (a) {
+				if (!L.archetypes || L.archetypes.has(a)) patch.archetype = a;
+				else rejected.push(p.name + ": unknown archetype \u201c" + a + "\u201d");
+			}
+			const c = cell(cols.college);
+			if (c) {
+				if (!L.schools || L.schools.has(c)) patch.college = c;
+				else rejected.push(p.name + ": unknown school \u201c" + c + "\u201d");
+			}
+			const nn = cell(cols.newname).replace(/\s+/g, " ").slice(0, 100).trim();
+			if (nn && nn !== p.name) patch.name = nn;
+			const h = num(cols.hgtinches);
+			if (h !== null) {
+				if (h >= 58 && h <= 96) patch.hgtInches = Math.round(h);
+				else rejected.push(p.name + ": hgtinches " + h + " is outside 58-96");
+			}
+			const w = num(cols.weight);
+			if (w !== null) {
+				if (w >= 120 && w <= 400) patch.weight = Math.round(w);
+				else rejected.push(p.name + ": weight " + w + " is outside 120-400");
+			}
+			const ratings = {};
+			for (const rk of RATING_COLUMN_KEYS) {
+				const v = num(idx(rk));
+				if (v === null) continue;
+				if (v >= 0 && v <= 100) ratings[rk] = Math.round(v);
+				else rejected.push(p.name + ": " + rk + " " + v + " is outside 0-100");
+			}
+			if (Object.keys(ratings).length) patch.ratings = ratings;
+			if (!Object.keys(patch).length) continue;
+			applied.push({ player: p, patch });
+		}
+		return { applied, unmatched, rejected, total };
+	}
+
+	/* One lock patch as a line for the import preview. */
+	function lockPatchText(patch) {
+		return Object.keys(patch).map((k) => {
+			const v = patch[k];
+			if (k === "ratings") {
+				return "ratings " + Object.keys(v).map((r) => r + " " + v[r]).join(", ");
+			}
+			return k + " = " + v;
+		}).join("; ");
+	}
+
+	/* The columns the quick wins add, spliced in after Archetype. All start
+	   hidden (`off`), like every other column that is not on a fresh install. */
+	const EXTRA_COLUMNS = [
+		{ key: "skills", label: "Skills", num: false, off: true, title: "BBGM's skill tags: 3, A, B, Di, Dp, Po, Ps, R, V" },
+		{ key: "origOvr", label: "Ovr0", num: true, off: true, title: "Overall in the file you loaded" },
+		{ key: "origPot", label: "Pot0", num: true, off: true, title: "Potential in the file you loaded" },
+		{ key: "ovrDelta", label: "\u0394Ovr", num: true, off: true, title: "New overall minus the file's" },
+		{ key: "potDelta", label: "\u0394Pot", num: true, off: true, title: "New potential minus the file's" },
+		{ key: "proPeak", label: "Peak", num: true, off: true, title: "Median projected pro peak overall, from 41 simulated careers" },
+		{ key: "proVerdict", label: "Verdict", num: false, off: true, title: "The pro projection's verdict (the Mock draft tab explains it)" },
+		{ key: "jersey", label: "#", num: false, off: true, title: "Jersey number in the file; blank means the export assigns one by position" },
+		{ key: "mood", label: "Mood", num: false, off: true, title: "BBGM mood traits: F fame, L loyalty, $ money, W winning" },
+		{ key: "birthplace", label: "Born", num: false, off: true, title: "Birthplace (blank becomes USA in the export)" },
+	].concat(RATING_COLUMN_KEYS.map((k) => ({
+		key: "r_" + k, label: k, num: true, off: true, title: "Rating: " + k,
+	})));
+	COLUMNS.splice(COLUMNS.findIndex((c) => c.key === "archetype") + 1, 0, ...EXTRA_COLUMNS);
 
 	/* Class year as an ordinal, so "Year" sorts Freshman → Graduate rather
 	   than alphabetically (Graduate, Junior, Redshirt …, Senior, Sophomore).
@@ -933,14 +1846,18 @@
 
 	function matchesFilter(p, res) {
 		const f = A().state.filter;
-		if (f.q) {
-			const hay = (p.name + " " + p.newCollege + " " + (p.proClub || "") + " " +
-				p.archetype + " " + p.classYear + " " +
-				(p.awards || []).join(" ")).toLowerCase();
-			if (hay.indexOf(f.q.toLowerCase()) === -1) return false;
-		}
+		/* Plain words, or the search syntax (pos:C ovr>=55 is:locked -transfer);
+		   see parseQuery. */
+		if (f.q && !queryMatch(parseQuery(f.q), p, res, queryCtx())) return false;
 		if (f.pos && p.newPos !== f.pos) return false;
 		if (f.archetype && p.archetype !== f.archetype) return false;
+		/* Q19: skill tags (a man must have every one ticked), class year, and
+		   how he got here (transfer, JUCO, redshirt, reclassified, 5-star…). */
+		if (f.skills && f.skills.length &&
+			!f.skills.every((s) => (p.newSkills || []).indexOf(s) !== -1)) return false;
+		if (f.classYear && p.classYear !== f.classYear) return false;
+		if (f.path && !pathFlags(p)[f.path]) return false;
+		if (f.tag && tagsOf(p).indexOf(f.tag) === -1) return false;
 		if (f.conf) {
 			const t = res.teams[p.newCollege];
 			const conf = t ? t.conf : (p.nonNcaa ? p.newCollege : "");
@@ -1090,14 +2007,87 @@
 		return q;
 	}
 
+	const SKILL_TAGS = ["3", "A", "B", "Di", "Dp", "Po", "Ps", "R", "V"];
+	const SEARCH_HELP = "Plain words match the name, school, build, class year and honors. " +
+		"Or: pos:C school:Duke arch:\"Rim Protector\" year:sr skill:3 tag:sleeper " +
+		"ovr>=55 age<=20 ppg>15 ovr:50-60 is:locked is:starred is:transfer — " +
+		"a leading - negates (-transfer, -school:Duke), a comma lists alternatives (pos:PG,SG).";
+
+	/* Q21. Saved filter views, the way column layouts are saved: pick one to
+	   apply it, save the current filter under a name, delete one. */
+	function filterViewControls(bar) {
+		const st = A().state;
+		const saved = st.filterViews || (st.filterViews = {});
+		const names = sortedNames(Object.keys(saved));
+		if (names.length) {
+			const sel = el("select");
+			sel.setAttribute("aria-label", "Saved filter view");
+			sel.title = "Your saved filters";
+			sel.appendChild(new Option("saved filter…", ""));
+			for (const n of names) sel.appendChild(new Option(n, n));
+			sel.addEventListener("change", () => {
+				const v = sel.value;
+				sel.value = "";
+				if (!v || !saved[v]) return;
+				st.filter = cleanFilter(saved[v]);
+				A().persist();
+				A().render();
+			});
+			bar.appendChild(sel);
+		}
+		const save = el("button", null, "Save filter…");
+		save.type = "button";
+		save.title = "Save the current search, filters and ranges under a name";
+		save.addEventListener("click", () => {
+			A().promptModal("Save this filter", "Name for this filter", "", (name) => {
+				st.filterViews = st.filterViews || {};
+				st.filterViews[name] = cleanFilter(st.filter);
+				A().persist();
+				A().setStatus("Saved the filter “" + name + "”.");
+				A().render();
+			}, {
+				okLabel: "Save",
+				check: (v) => (!v ? "Type a name first." : v.length > 60 ? "At most 60 characters." : ""),
+			});
+		});
+		bar.appendChild(save);
+		if (names.length) {
+			const del = el("button", "tiny", "Delete a saved filter…");
+			del.type = "button";
+			del.addEventListener("click", () => {
+				const box = el("div");
+				box.appendChild(el("p", "hint", "Delete which saved filter?"));
+				for (const n of names) {
+					const b = el("button", "tiny", "Delete “" + n + "”");
+					b.type = "button";
+					b.addEventListener("click", () => {
+						delete st.filterViews[n];
+						A().persist();
+						A().closeModal();
+						A().render();
+					});
+					box.appendChild(b);
+				}
+				A().modal("Saved filters", box, null, "Close");
+			});
+			bar.appendChild(del);
+		}
+	}
+
 	function filterBar(res) {
 		const st = A().state;
 		const bar = el("div", "filters");
 		const search = searchInput(
-			"Search name, school, archetype, honor…", "Search prospects",
+			"Search name, school… or pos:C ovr>=55 is:locked", "Search prospects",
 			() => st.filter.q, (v) => { st.filter.q = v; });
 		// So "/" has something to focus.
 		search.id = "prospectSearch";
+		search.title = SEARCH_HELP;
+		const ignored = parseQuery(st.filter.q).ignored;
+		if (ignored.length) {
+			search.title = "Not understood, and left out: " + ignored.join(" ") + ". " + SEARCH_HELP;
+			search.classList.add("badquery");
+		}
 		bar.appendChild(search);
 
 		/* Step through the class one build at a time. Reading a class by
@@ -1142,6 +2132,51 @@
 		confSel.addEventListener("change", () => { st.filter.conf = confSel.value; A().render(); });
 		bar.appendChild(confSel);
 
+		/* Q19: class year, how he got here, and skill tags. */
+		const yearSel = el("select");
+		yearSel.setAttribute("aria-label", "Filter by class year");
+		yearSel.appendChild(new Option("all class years", ""));
+		const yearsHere = {};
+		for (const p of res.players) if (p.classYear) yearsHere[p.classYear] = true;
+		for (const y of CLASS_YEAR_ORDER) if (yearsHere[y]) yearSel.appendChild(new Option(y, y));
+		yearSel.value = st.filter.classYear || "";
+		yearSel.addEventListener("change", () => { st.filter.classYear = yearSel.value; A().render(); });
+		bar.appendChild(yearSel);
+		const pathSel = el("select");
+		pathSel.setAttribute("aria-label", "Filter by how he got here");
+		pathSel.appendChild(new Option("any path", ""));
+		for (const [k, l] of PATH_FILTERS) pathSel.appendChild(new Option(l, k));
+		pathSel.value = st.filter.path || "";
+		pathSel.addEventListener("change", () => { st.filter.path = pathSel.value; A().render(); });
+		bar.appendChild(pathSel);
+		const skillBox = el("span", "chips skillchips");
+		skillBox.setAttribute("role", "group");
+		skillBox.setAttribute("aria-label", "Filter by skill tags (every ticked skill)");
+		for (const sk of SKILL_TAGS) {
+			const on = (st.filter.skills || []).indexOf(sk) !== -1;
+			const b = el("button", "chip" + (on ? " on" : ""), sk);
+			b.type = "button";
+			b.setAttribute("aria-pressed", on ? "true" : "false");
+			b.title = "Only players with the " + sk + " skill" + (on ? " (on)" : "");
+			b.addEventListener("click", () => {
+				const cur = st.filter.skills || (st.filter.skills = []);
+				const i = cur.indexOf(sk);
+				if (i === -1) cur.push(sk); else cur.splice(i, 1);
+				A().render();
+			});
+			skillBox.appendChild(b);
+		}
+		bar.appendChild(skillBox);
+		if (st.tags && Object.keys(st.tags).length) {
+			const tagSel = el("select");
+			tagSel.setAttribute("aria-label", "Filter by tag");
+			tagSel.appendChild(new Option("any tag", ""));
+			for (const t of PLAYER_TAGS) tagSel.appendChild(new Option(t, t));
+			tagSel.value = st.filter.tag || "";
+			tagSel.addEventListener("change", () => { st.filter.tag = tagSel.value; A().render(); });
+			bar.appendChild(tagSel);
+		}
+
 		for (const [key, label] of [["changedOnly", "reassigned colleges only"],
 			["lockedOnly", "locked players only"],
 			["playedOnly", "played a season"],
@@ -1178,6 +2213,21 @@
 			A().render();
 		});
 		bar.appendChild(dens);
+
+		// Q23: height and weight as cm and kg. Display only.
+		const unitSel = el("select");
+		unitSel.setAttribute("aria-label", "Height and weight units");
+		unitSel.appendChild(new Option("ft / lb", "imperial"));
+		unitSel.appendChild(new Option("cm / kg", "metric"));
+		unitSel.value = st.units === "metric" ? "metric" : "imperial";
+		unitSel.title = "Show height and weight in feet and pounds or in centimetres and kilograms " +
+			"(display only: files and exports keep inches and pounds)";
+		unitSel.addEventListener("change", () => {
+			st.units = unitSel.value;
+			A().persist();
+			A().render();
+		});
+		bar.appendChild(unitSel);
 
 		/* The card/table switch. Only shown where it is a real choice — on a
 		   wide desktop the table is obviously right and the control is noise. */
@@ -1257,6 +2307,17 @@
 		const cols = el("button", null, "Columns…");
 		cols.addEventListener("click", () => columnPicker());
 		bar.appendChild(cols);
+		filterViewControls(bar);
+		// Q22: the table as it is on screen, for a spreadsheet.
+		const copyTsv = el("button", null, "Copy table");
+		copyTsv.type = "button";
+		copyTsv.title = "Copy the visible columns and rows as tab-separated text, for a spreadsheet";
+		copyTsv.addEventListener("click", () => {
+			const t = document.querySelector("#view .tablesplit table");
+			if (!t) { A().setStatus("There is no table to copy."); return; }
+			A().copyText(domTableText(t, "tsv"), copyTsv, "Copy table", "the prospect table");
+		});
+		bar.appendChild(copyTsv);
 		/* CLEARING THEM WITHOUT EMPTYING THE TABLE FIRST.
 
 		   There are nine filters on this bar and as many range rows under it,
@@ -1336,7 +2397,10 @@
 	   column not named here lands under Advanced. */
 	const COLUMN_GROUPS = [
 		["Identity", ["face", "pos", "year", "board", "move", "newOvr", "newPot",
-			"archetype", "hand", "age", "hgtInches", "weight"]],
+			"archetype", "hand", "age", "hgtInches", "weight", "skills", "origOvr", "origPot",
+			"ovrDelta", "potDelta", "jersey", "mood", "birthplace"]],
+		["Pro projection", ["proPeak", "proVerdict"]],
+		["Ratings", RATING_COLUMN_KEYS.map((k) => "r_" + k)],
 		["Recruiting", ["recRank", "stars", "composite", "caps", "continental"]],
 		["Team", ["college", "conf", "record", "apRank", "seed", "awards"]],
 		["Box", ["gp", "mpg", "ppg", "trend", "rpg", "orpg", "drpg", "apg", "spg",
@@ -1673,7 +2737,10 @@
 			const sortVals = {};
 			for (const col of columns) {
 				let td;
-				switch (col.key) {
+				if (EXTRA_VALUE[col.key]) {
+					td = extraCell(p, col, res);
+					sortVals[col.key] = extraSortValue(p, col.key, res);
+				} else switch (col.key) {
 				case "pick": {
 					td = el("td");
 					const cb = el("input");
@@ -1877,8 +2944,7 @@
 					sortVals.hgtInches = p.newHgtInches;
 					break;
 				case "weight":
-					td = el("td", "num",
-						Number.isFinite(p.newWeight) ? String(p.newWeight) : "");
+					td = el("td", "num", weightText(p.newWeight));
 					sortVals.weight = p.newWeight;
 					break;
 				case "trend": {
@@ -2132,6 +3198,13 @@
 		if (f.lockedOnly) on.push("locked players only");
 		if (f.playedOnly) on.push("played a season");
 		if (f.didNotPlayOnly) on.push("did not play");
+		if (f.skills && f.skills.length) on.push("skills " + f.skills.join(" + "));
+		if (f.classYear) on.push("class year " + f.classYear);
+		if (f.path) {
+			const pf = PATH_FILTERS.filter((x) => x[0] === f.path)[0];
+			on.push("path: " + (pf ? pf[1] : f.path));
+		}
+		if (f.tag) on.push("tag " + f.tag);
 		for (const r of f.ranges || []) {
 			if (!r.key) continue;
 			const col = COLUMNS.filter((c) => c.key === r.key)[0];
@@ -2149,11 +3222,7 @@
 	   session starts with. */
 	function clearFilters() {
 		const st = A().state;
-		st.filter = {
-			q: "", pos: "", conf: "", archetype: "",
-			changedOnly: false, lockedOnly: false,
-			playedOnly: false, didNotPlayOnly: false, ranges: [],
-		};
+		st.filter = emptyFilter();
 		A().persist();
 		A().render();
 	}
@@ -2173,6 +3242,11 @@
 	}
 
 	/* ------------------------------------------------------------ bulk edit */
+
+	/* The class years a lock can name (the engine reads the same list as
+	   ov.classYear and ignores anything else). */
+	const CLASS_YEAR_CHOICES = ["Freshman", "Sophomore", "Junior", "Senior", "Graduate",
+		"Redshirt Freshman", "Redshirt Sophomore", "Redshirt Junior", "Redshirt Senior"];
 
 	function bulkBar(res) {
 		const st = A().state;
@@ -2244,6 +3318,17 @@
 		});
 		bar.appendChild(colSel);
 
+		const yearSel = el("select");
+		yearSel.setAttribute("aria-label", "Set class year for the selection");
+		yearSel.appendChild(new Option("set class year…", ""));
+		for (const y of CLASS_YEAR_CHOICES) yearSel.appendChild(new Option(y, y));
+		yearSel.addEventListener("change", () => {
+			if (!yearSel.value) return;
+			A().bulkApply({ classYear: yearSel.value },
+				"set class year to " + yearSel.value + " for " + count + " prospects");
+		});
+		bar.appendChild(yearSel);
+
 		const shift = el("input");
 		shift.type = "number";
 		shift.value = "0";
@@ -2258,6 +3343,42 @@
 			A().bulkShiftOvr(d);
 		});
 		bar.appendChild(shiftBtn);
+
+		/* Q15: the same for potential and for height, and a reroll for the
+		   whole selection. Each one is a lock (a hand-set value or a reroll
+		   counter), so a later reroll of the class leaves it alone. */
+		const potShift = el("input");
+		potShift.type = "number";
+		potShift.value = "0";
+		potShift.step = "1";
+		potShift.style.width = "70px";
+		potShift.setAttribute("aria-label", "Potential adjustment for the selection");
+		bar.appendChild(potShift);
+		const potBtn = el("button", "tiny", "Shift pot");
+		potBtn.title = "Add this to each selected prospect's potential (never below his overall)";
+		potBtn.addEventListener("click", () => {
+			const d = Number(potShift.value) || 0;
+			if (d) A().bulkShiftPot(d);
+		});
+		bar.appendChild(potBtn);
+		const hgtShift = el("input");
+		hgtShift.type = "number";
+		hgtShift.value = "0";
+		hgtShift.step = "1";
+		hgtShift.style.width = "70px";
+		hgtShift.setAttribute("aria-label", "Height adjustment in inches for the selection");
+		bar.appendChild(hgtShift);
+		const hgtBtn = el("button", "tiny", "Shift height");
+		hgtBtn.title = "Add this many inches to each selected prospect (58 to 96 inches)";
+		hgtBtn.addEventListener("click", () => {
+			const d = Number(hgtShift.value) || 0;
+			if (d) A().bulkShiftHeight(d);
+		});
+		bar.appendChild(hgtBtn);
+		const rerollSel = el("button", "tiny", "Reroll selected");
+		rerollSel.title = "Redraw every selected prospect (build, school, ratings) and leave the rest of the class alone";
+		rerollSel.addEventListener("click", () => A().bulkReroll());
+		bar.appendChild(rerollSel);
 
 		/* Lock verbs. You could set a field for a selection but not FREEZE what
 		   the selection already had, so "keep the top fifteen exactly as they
@@ -2295,6 +3416,8 @@
 		const ths = table.querySelectorAll("thead th");
 		const tbody = table.querySelector("tbody");
 		if (!tbody) return table;
+		// Q22: a sortable table is a real table; decorateTables gives it a copy strip.
+		table.dataset.copyable = "1";
 		const original = Array.prototype.slice.call(tbody.rows);
 		const apply = () => {
 			const st = tableSorts[key];
@@ -2895,7 +4018,7 @@
 			const td = el("td");
 			td.appendChild(programLink(r.team));
 			tr.appendChild(td);
-			tr.appendChild(el("td", "num", String(r.count) + " " + unit));
+			tr.appendChild(el("td", "num", String(r.count) + " " + (r.count === 1 ? unit.replace(/ies$/, "y").replace(/s$/, "") : unit)));
 			tb.appendChild(tr);
 		}
 		table.appendChild(tb);
@@ -3054,7 +4177,7 @@
 		const people = Object.keys(reg).map((id) => reg[id])
 			.filter((x) => x.span >= 2)
 			.sort((a, b) => b.span - a.span ||
-				(b.honors ? b.honors.length : 0) - (a.honors ? a.honors.length : 0) ||
+				(global.Universe.personalHonors(b).length) - (global.Universe.personalHonors(a).length) ||
 				String(a.name).localeCompare(String(b.name)));
 		if (!people.length) {
 			explain("Nobody in this world appears in more than one season. A " +
@@ -3096,7 +4219,7 @@
 			tr.appendChild(el("td", "num", String(x.span)));
 			tr.appendChild(el("td", "num", x.draft && Number.isFinite(x.draft.boardRank)
 				? "No. " + x.draft.boardRank : "—"));
-			tr.appendChild(el("td", "num", String(x.honors.length)));
+			tr.appendChild(el("td", "num", String(global.Universe.personalHonors(x).length)));
 			tr.appendChild(wrapCell(x.seasons
 				.map((s) => s.season + " " + s.as).join(" · ")));
 			tr.appendChild(el("td", "pro-career", global.Universe.proText(global.Universe.proOutcome(x))));
@@ -3860,6 +4983,25 @@
 			"redrawn, a fired coach is replaced by a named first-year hire, and " +
 			"the build-pool memory spans the whole timeline. A universe re-runs " +
 			"from its seeds — the export stores seeds, not simulated output."));
+		/* A saved timeline after a reload: the files are not stored, so there is
+		   nothing to rebuild it from. It is readable as it stands. */
+		const stranded = !A().state.files.length && u.rows.length > 0 && !u.running;
+		if (stranded) {
+			const note = el("div", "card note-stranded");
+			note.setAttribute("role", "status");
+			note.appendChild(el("p", null,
+				"This is the timeline you saved (" + u.rows.length + " seasons), shown " +
+				"as it was. The class files are not kept between visits, so it cannot be " +
+				"rebuilt or extended until you load them again."));
+			const load = el("button", "primary", "Load class files…");
+			load.id = "btnStrandedLoad";
+			load.addEventListener("click", () => {
+				const inp = document.getElementById("file");
+				if (inp) inp.click();
+			});
+			note.appendChild(load);
+			view.appendChild(note);
+		}
 		if (u.rows.length) {
 			const nm = el("div", "filters");
 			nm.appendChild(el("span", "pill", "World: " + (u.name || "Universe")));
@@ -3896,7 +5038,7 @@
 		const run = el("button", u.running ? "warn" : on ? null : "primary",
 			u.running ? "Running… " + (u.done || 0) + "/" + (u.total || "?")
 				: on ? "Rebuild the timeline" : "Build a timeline (one-off)");
-		run.disabled = !!u.running;
+		run.disabled = !!u.running || stranded;
 		run.title = on
 			? "Universe mode is on: every tab already shows this world."
 			: "Universe mode is off, so this builds a timeline without changing " +
@@ -3909,6 +5051,7 @@
 		   a forty-season universe something you can actually tune. */
 		if (!u.running && Array.isArray(u.order) && u.order.length >= 3 && u.rows.length) {
 			const part = el("button", null, "Re-run from a season\u2026");
+			part.disabled = stranded;
 			part.title = "Hold the seasons before a chosen one and re-run the " +
 				"rest under the current settings.";
 			part.addEventListener("click", () => { A().resumeUniverseDialog(); });
@@ -3918,6 +5061,7 @@
 		if (!u.running && u.rows.length && u.tail && !u.broken) {
 			const fwd = el("button", null, "Simulate more seasons…");
 			fwd.id = "btnSimForward";
+			fwd.disabled = stranded;
 			fwd.title = "Play N more seasons past " + u.tail.lastSeason +
 				" on synthetic classes drawn from this world's seed.";
 			fwd.addEventListener("click", () => { A().simulateForwardDialog(); });
@@ -3949,7 +5093,7 @@
 		exp.addEventListener("click", () => { A().exportUniverse(false); });
 		bar.appendChild(exp);
 		const expAll = el("button", null, "Export with class files");
-		expAll.disabled = !u.rows.length || !!u.running || !!u.viewOnly;
+		expAll.disabled = !u.rows.length || !!u.running || !!u.viewOnly || stranded;
 		expAll.title = "The same file with the class exports inlined, so the " +
 			"whole universe is one file to hand somebody. Larger.";
 		expAll.addEventListener("click", () => { A().exportUniverse(true); });
@@ -3959,7 +5103,7 @@
 		   does not, and it takes one array — so the whole universe is one
 		   file. See Engine.universePlayersFile. */
 		const expPlayers = el("button", null, "Export universe players (BBGM)");
-		expPlayers.disabled = !u.rows.length || !!u.running || !!u.viewOnly;
+		expPlayers.disabled = !u.rows.length || !!u.running || !!u.viewOnly || stranded;
 		expPlayers.title = "One BBGM players file for the whole universe: every " +
 			"class at its own draft year, pids renumbered across the world, the " +
 			"seasons each man actually played, and father/son links. Load it with " +
@@ -4957,8 +6101,9 @@
 		   while the page scrolls the table under it. */
 		const bf = boardFilter;
 		const fbar = el("div", "filters boardfilters");
-		const q = searchInput("Find a prospect, school or club…", "Search the board",
+		const q = searchInput("Name, school, or pos:C ovr>=55", "Search the board",
 			() => bf.q, (v) => { bf.q = v; });
+		q.title = SEARCH_HELP;
 		fbar.appendChild(q);
 		const posSel = el("select");
 		posSel.setAttribute("aria-label", "Board position filter");
@@ -4985,6 +6130,17 @@
 		starChip.title = "Show only the prospects on your watchlist (click ☆ beside a name to add one)";
 		starChip.addEventListener("click", () => { bf.starred = !bf.starred; A().render(); });
 		fbar.appendChild(starChip);
+		/* Q16: one chip per tag in use in this class; click to show only those. */
+		for (const t of PLAYER_TAGS) {
+			const n = (res.board || []).filter((p) => tagsOf(p).indexOf(t) !== -1).length;
+			if (!n && bf.tag !== t) continue;
+			const tb = el("button", "chip tagchip" + (bf.tag === t ? " on" : ""), "# " + t + " (" + n + ")");
+			tb.type = "button";
+			tb.setAttribute("aria-pressed", bf.tag === t ? "true" : "false");
+			tb.title = "Show only prospects you tagged “" + t + "”";
+			tb.addEventListener("click", () => { bf.tag = bf.tag === t ? "" : t; A().render(); });
+			fbar.appendChild(tb);
+		}
 		const heatChip = el("button", "chip" + (st0.boardHeat ? " on" : ""), "Heatmap");
 		heatChip.type = "button";
 		heatChip.setAttribute("aria-pressed", st0.boardHeat ? "true" : "false");
@@ -5034,6 +6190,22 @@
 				lines.join("\n"), top, "Copy top 30", "the top 30 as a markdown list");
 		});
 		fbar.appendChild(top);
+		/* Q22: the board as it is on screen — the rows after the search, the
+		   position and tag chips and the sort — as tab-separated text. */
+		const sheet = el("button", null, "Copy for spreadsheet");
+		sheet.type = "button";
+		sheet.title = "Copy the visible rows and columns as tab-separated text, for a spreadsheet";
+		sheet.addEventListener("click", () => {
+			const t = document.querySelector("#view table.boardtable");
+			if (!t) return;
+			A().copyText(domTableText(t, "tsv"), sheet, "Copy for spreadsheet", "the board for a spreadsheet");
+		});
+		fbar.appendChild(sheet);
+		const rename = el("button", null, "Paste names…");
+		rename.type = "button";
+		rename.title = "Paste a list of names, one per line, and rename the prospects in board order";
+		rename.addEventListener("click", () => A().renameDialog());
+		fbar.appendChild(rename);
 		view.appendChild(fbar);
 
 		/* One sort value per heading. Pick is the overall mock slot
@@ -5051,12 +6223,18 @@
 		const ASC_FIRST = { Board: 1, Rd: 1, Pick: 1, Player: 1, Pos: 1, Year: 1,
 			"School / club": 1, Preseason: 1 };
 		const needle = bf.q.trim().toLowerCase();
+		const parsedQ = parseQuery(bf.q);
+		const qctx = queryCtx();
 		let list = (res.board || []).filter((p) => {
 			if (bf.pos && p.newPos !== bf.pos) return false;
 			if (bf.starred && !A().state.watch[A().userKey(p)]) return false;
+			if (bf.tag && tagsOf(p).indexOf(bf.tag) === -1) return false;
 			if (!needle) return true;
-			return (p.name + " " + (p.newCollege || "") + " " + (p.proClub || "") + " " +
-				(p.archetype || "")).toLowerCase().indexOf(needle) !== -1;
+			// The board's plain search has always been name, school, club and
+			// build only; the syntax (pos:C ovr>=55) is on top of that.
+			qctx.hay = (p.name + " " + (p.newCollege || "") + " " + (p.proClub || "") + " " +
+				(p.archetype || "")).toLowerCase();
+			return queryMatch(parsedQ, p, res, qctx);
 		});
 		const total = (res.board || []).length;
 		count.textContent = list.length === total ? total + " prospects" : list.length + " of " + total;
@@ -5210,12 +6388,19 @@
 			const nameTd = el("td", "sticky");
 			nameTd.appendChild(watchStar(p));
 			nameTd.appendChild(playerLink(p));
+			for (const t of tagsOf(p)) {
+				const tg = el("span", "tag tagmark", t);
+				tg.title = "Your tag: " + t;
+				tg.dataset.nocopy = "";
+				nameTd.appendChild(tg);
+			}
 			nameTd.appendChild(whyButton(p, res));
 			/* Player Edit was a mode toggle nobody found; each row now
 			   offers the editor for its own prospect. */
 			const ed = el("button", "rowedit linky", "✎");
 			ed.appendChild(el("span", "roweditword", " Edit"));
 			ed.type = "button";
+			ed.dataset.nocopy = "";
 			ed.title = "Edit " + p.name + " in Player Edit";
 			ed.setAttribute("aria-label", "Edit " + p.name);
 			ed.addEventListener("click", () => { A().revealPlayer(p); });
@@ -5279,11 +6464,14 @@
 	// Disclosure states that should survive a re-render but are not settings.
 	const uiMemo = { classInfoOpen: false, filtersOpen: false };
 	// The board's own search, position filter and sort (see viewBoard).
-	const boardFilter = { q: "", pos: "", sort: null, starred: false };
+	const boardFilter = { q: "", pos: "", sort: null, starred: false, tag: "" };
 
 	/* --------------------------------------------------------- distributions */
 
-	function histogram(title, values, buckets, fmt) {
+	/* `overlay` (optional): a second set of values drawn as an outline over the
+	   same buckets, on the same scale — the original ratings behind the rebuilt
+	   ones. Without it the card is exactly what it always was. */
+	function histogram(title, values, buckets, fmt, overlay) {
 		const box = el("div", "card");
 		box.appendChild(el("h4", null, title));
 		const finite = values.filter((v) => Number.isFinite(v));
@@ -5292,14 +6480,18 @@
 			return box;
 		}
 		values = finite;
-		const lo = Math.min.apply(null, values);
-		const hi = Math.max.apply(null, values);
+		const ghost = Array.isArray(overlay) ? overlay.filter((v) => Number.isFinite(v)) : [];
+		const both = ghost.length ? values.concat(ghost) : values;
+		const lo = Math.min.apply(null, both);
+		const hi = Math.max.apply(null, both);
 		const n = buckets || 12;
 		const width = (hi - lo) / n || 1;
 		const counts = new Array(n).fill(0);
 		for (const v of values) counts[Math.min(n - 1, Math.floor((v - lo) / width))]++;
-		const max = Math.max.apply(null, counts);
-		const chart = el("div", "hist");
+		const ghostCounts = new Array(n).fill(0);
+		for (const v of ghost) ghostCounts[Math.min(n - 1, Math.floor((v - lo) / width))]++;
+		const max = Math.max.apply(null, counts.concat(ghostCounts));
+		const chart = el("div", "hist" + (ghost.length ? " ghosted" : ""));
 		chart.setAttribute("role", "img");
 		const sorted = values.slice().sort((a, b) => a - b);
 		const q = (p) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
@@ -5313,8 +6505,16 @@
 			bar.style.width = (max ? (100 * c) / max : 0) + "%";
 			bar.title = c + " prospects between " + (lo + i * width).toFixed(1) +
 				" and " + (lo + (i + 1) * width).toFixed(1);
-			row.appendChild(bar);
-			row.appendChild(el("span", "histcount", String(c)));
+			if (ghost.length) {
+				const track = el("span", "histtrack");
+				track.appendChild(bar);
+				const g = el("span", "histbar histghost");
+				g.style.width = (max ? (100 * ghostCounts[i]) / max : 0) + "%";
+				g.title = ghostCounts[i] + " originally";
+				track.appendChild(g);
+				row.appendChild(track);
+			} else row.appendChild(bar);
+			row.appendChild(el("span", "histcount", ghost.length ? c + " (" + ghostCounts[i] + ")" : String(c)));
 			chart.appendChild(row);
 		});
 		box.appendChild(chart);
@@ -5332,6 +6532,10 @@
 		box.appendChild(el("div", "note",
 			"min " + lo.toFixed(1) + " · median " + q(0.5).toFixed(1) +
 			" · p90 " + q(0.9).toFixed(1) + " · max " + hi.toFixed(1)));
+		if (ghost.length) {
+			box.appendChild(el("p", "hint", "Bars are the rebuilt ratings; the outline (and the " +
+				"bracketed count) is the original, on the same scale."));
+		}
 		return box;
 	}
 
@@ -5391,13 +6595,148 @@
 		return box;
 	}
 
+	/* A BBGM-typical class, as the engine's own curve model draws one: the mean
+	   of the default settings' class curve over a handful of fixed seeds, so the
+	   noise averages out and the same class size always gives the same line. */
+	const refCurveCache = {};
+	function referenceCurve(n) {
+		if (refCurveCache[n]) return refCurveCache[n];
+		const RB = global.RatingsBuilder;
+		const R = global.BBGMRng;
+		const C = global.Config;
+		if (!RB || !RB.classCurve || !R || !C) return null;
+		const cfg = C.make();
+		const sum = new Array(n).fill(0);
+		const draws = 24;
+		for (let k = 0; k < draws; k++) {
+			const curve = RB.classCurve(new R.Rng("class-curve-ref|" + k), n, cfg);
+			for (let i = 0; i < n; i++) sum[i] += curve[i];
+		}
+		return (refCurveCache[n] = sum.map((x) => x / draws));
+	}
+
+	/* The three class curves in one chart: the k-th best prospect's rating,
+	   original against rebuilt against a typical BBGM class. "Did I flatten
+	   the draft?" is whether the blue line sits on the grey one. */
+	function curveCard(res) {
+		const box = el("div", "card curvecard");
+		box.appendChild(el("h4", null, "Rating by pick: original, rebuilt and a typical class"));
+		const n = res.players.length;
+		if (n < 3) { box.appendChild(el("p", "hint", "Too few prospects to draw a curve.")); return box; }
+		const desc = (key) => res.players.map((p) => Number(p[key])).filter(Number.isFinite)
+			.sort((a, b) => b - a);
+		const series = {
+			ovr: { orig: desc("origOvr"), rebuilt: desc("newOvr"), ref: referenceCurve(n) },
+			pot: { orig: desc("origPot"), rebuilt: desc("newPot"), ref: null },
+		};
+		const which = el("select");
+		which.setAttribute("aria-label", "Curve for");
+		which.appendChild(new Option("Overall", "ovr"));
+		which.appendChild(new Option("Potential", "pot"));
+		const bar = el("div", "filters");
+		bar.appendChild(which);
+		box.appendChild(bar);
+		const key = el("div", "curvekey");
+		key.innerHTML = "<span><i></i>original</span><span><i class=\"rebuilt\"></i>rebuilt</span>" +
+			"<span><i class=\"ref\"></i>a typical BBGM class (the default curve)</span>";
+		box.appendChild(key);
+		const holder = el("div");
+		box.appendChild(holder);
+		const note = el("div", "note");
+		box.appendChild(note);
+		const draw = () => {
+			const m = which.value;
+			const set = series[m];
+			holder.innerHTML = "";
+			const lines = [["orig", set.orig], ["rebuilt", set.rebuilt]].concat(set.ref ? [["ref", set.ref]] : []);
+			const all = [].concat.apply([], lines.map((l) => l[1]));
+			const lo = Math.floor(Math.min.apply(null, all) / 5) * 5;
+			const hi = Math.ceil(Math.max.apply(null, all) / 5) * 5;
+			const W = 640;
+			const H = 240;
+			const L = 30;
+			const B = 22;
+			const x = (i) => L + (n < 2 ? 0 : (i / (n - 1)) * (W - L - 8));
+			const y = (v) => 8 + (1 - (v - lo) / ((hi - lo) || 1)) * (H - B - 8);
+			const svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, class: "curvesvg", role: "img",
+				"aria-label": (m === "ovr" ? "Overall" : "Potential") + " by pick, " + n + " prospects, original " +
+					set.orig[0] + " to " + set.orig[n - 1] + ", rebuilt " + set.rebuilt[0] + " to " + set.rebuilt[n - 1] });
+			for (let v = lo; v <= hi; v += 5) {
+				svg.appendChild(svgEl("line", { x1: L, x2: W - 8, y1: y(v), y2: y(v), class: "axis", opacity: v === lo ? 1 : 0.4 }));
+				svg.appendChild(svgEl("text", { x: L - 4, y: y(v) + 3, "text-anchor": "end", class: "tick" }, String(v)));
+			}
+			for (const i of [0, Math.round((n - 1) / 4), Math.round((n - 1) / 2), Math.round(3 * (n - 1) / 4), n - 1]) {
+				svg.appendChild(svgEl("text", { x: x(i), y: H - 6, "text-anchor": "middle", class: "tick" }, String(i + 1)));
+			}
+			for (const [cls, vals] of lines) {
+				const d = vals.map((v, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(v).toFixed(1)).join(" ");
+				svg.appendChild(svgEl("path", { d, class: "ln " + cls }));
+			}
+			holder.appendChild(svg);
+			const top = (v) => v.slice(0, 5).reduce((a, b) => a + b, 0) / Math.min(5, v.length);
+			const at = (v, i) => v[Math.min(v.length - 1, i)];
+			note.textContent = "top five average: original " + top(set.orig).toFixed(1) + " · rebuilt " +
+				top(set.rebuilt).toFixed(1) + (set.ref ? " · typical " + top(set.ref).toFixed(1) : "") +
+				"\n30th best: original " + at(set.orig, 29) + " · rebuilt " + at(set.rebuilt, 29) +
+				(set.ref ? " · typical " + at(set.ref, 29).toFixed(0) : "") +
+				"\nlast: original " + set.orig[n - 1] + " · rebuilt " + set.rebuilt[n - 1];
+		};
+		which.addEventListener("change", draw);
+		draw();
+		return box;
+	}
+
+	/* Counts as rows of bars, for things that are categories and not a range. */
+	function countBars(title, rows, hint) {
+		const box = el("div", "card");
+		box.appendChild(el("h4", null, title));
+		const max = Math.max.apply(null, rows.map((r) => r[1]).concat([1]));
+		const chart = el("div", "hist");
+		for (const [label, count] of rows) {
+			const row = el("div", "histrow");
+			row.appendChild(el("span", "histlabel", label));
+			const bar = el("span", "histbar");
+			bar.style.width = (100 * count / max) + "%";
+			row.appendChild(bar);
+			row.appendChild(el("span", "histcount", String(count)));
+			chart.appendChild(row);
+		}
+		box.appendChild(chart);
+		if (hint) box.appendChild(el("p", "hint", hint));
+		return box;
+	}
+
 	function viewDistribution(view, res) {
 		view.appendChild(el("p", "legendline",
 			"Eyeball the shape of a class in one second instead of reading 70 rows."));
 		const cards = el("div", "cards");
 		const withStats = res.players.filter((p) => p.stats);
-		cards.appendChild(histogram("Overall rating", res.players.map((p) => p.newOvr), 12));
+		cards.appendChild(curveCard(res));
+		cards.appendChild(histogram("Overall rating", res.players.map((p) => p.newOvr), 12, null,
+			res.players.map((p) => p.origOvr)));
 		cards.appendChild(histogram("Potential", res.players.map((p) => p.newPot), 12));
+		{
+			const pos = {};
+			for (const p of res.players) pos[p.newPos || "?"] = (pos[p.newPos || "?"] || 0) + 1;
+			const order = ["PG", "G", "SG", "GF", "SF", "F", "PF", "FC", "C"];
+			cards.appendChild(countBars("Position mix", Object.keys(pos).sort((a, b) =>
+				(order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99)).map((k) => [k, pos[k]])));
+			cards.appendChild(histogram("Height (inches)", res.players.map((p) => p.newHgtInches), 10,
+				(v) => feet(Math.round(v))));
+			cards.appendChild(histogram("Weight (lb)", res.players.map((p) => p.newWeight), 10,
+				(v) => String(Math.round(v))));
+			const sk = {};
+			let nSk = 0;
+			for (const p of res.players) {
+				const list = p.newSkills || [];
+				nSk += list.length;
+				for (const k of list) sk[k] = (sk[k] || 0) + 1;
+			}
+			cards.appendChild(countBars("Skills", Object.keys(sk).sort((a, b) => sk[b] - sk[a])
+				.map((k) => [k, sk[k]]),
+				"Prospects with each BBGM skill tag; " + (nSk / Math.max(1, res.players.length)).toFixed(1) +
+				" tags per prospect on average."));
+		}
 		cards.appendChild(histogram("Points per game", withStats.map((p) => p.stats.ppg), 12));
 		cards.appendChild(histogram("Minutes per game", withStats.map((p) => p.stats.mpg), 12));
 		cards.appendChild(histogram("Usage rate", withStats.map((p) => p.stats.usg * 100), 12));
@@ -5467,8 +6806,141 @@
 		return x ? x.peak + " (" + x.peakLow + "-" + x.peakHigh + ")" : "—";
 	}
 
+	/* What the Mock tab was last left on. A salt of 0 and a noise of 1.2 are the
+	   engine's own draft, and that is the one proFor caches. */
+	const MOCK_NOISE = 1.2;
+	const mockUi = { rounds: 2, salt: 0, noise: MOCK_NOISE, team: "" };
+	const mockCache = new WeakMap();
+
+	/* The engine's redraft options (a salt for the pick streams, a taste-noise
+	   dial) and its per-team target list are optional on its side; the controls
+	   appear only when the loaded engine has them. */
+	function mockSupports() {
+		const P = global.Pro;
+		const src = P && P.mockDraft ? String(P.mockDraft) : "";
+		return { redraft: /\bsalt\b/.test(src) && /\bnoise\b/.test(src),
+			targets: !!(P && typeof P.targetsFor === "function") };
+	}
+
+	function mockFor(res, base) {
+		const sup = mockSupports();
+		const rounds = mockUi.rounds;
+		const salt = sup.redraft ? mockUi.salt : 0;
+		const noise = sup.redraft ? mockUi.noise : MOCK_NOISE;
+		if (rounds === 2 && !salt && noise === MOCK_NOISE) return base.mock;
+		let m = mockCache.get(res);
+		if (!m) { m = new Map(); mockCache.set(res, m); }
+		const key = rounds + "|" + salt + "|" + noise;
+		if (!m.has(key)) {
+			if (m.size > 12) m.clear();
+			const st = A().state;
+			const f = st.files[Number.isFinite(res.fileIndex) ? res.fileIndex : st.active];
+			const league = f && f.league && f.league.data ? f.league.data : null;
+			const opts = { projections: base.projections, league, rounds };
+			if (salt) opts.salt = salt;
+			if (noise !== MOCK_NOISE) opts.noise = noise;
+			m.set(key, global.Pro.mockDraft(res, opts));
+		}
+		return m.get(key);
+	}
+
+	const csvCell = (v) => {
+		const t = v === null || v === undefined ? "" : String(v);
+		return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+	};
+
+	// The mock draft as one CSV, a row a pick.
+	function mockCsv(mock) {
+		const head = ["pick", "round", "team", "via", "team plan", "team need", "team ovr", "player", "pos",
+			"ovr", "pot", "board rank", "reach", "peak", "peak low", "peak high", "verdict", "why"];
+		const lines = [head.join(",")];
+		for (const k of mock.picks) {
+			const x = k.projection;
+			lines.push([k.pick, k.round, k.team, k.via || "", k.teamPlan, k.teamNeed,
+				k.teamOvr === null || k.teamOvr === undefined ? "" : k.teamOvr, k.name, k.pos, k.ovr, k.pot,
+				k.consensus || "", k.reach || 0, x ? x.peak : "", x ? x.peakLow : "", x ? x.peakHigh : "",
+				x ? x.verdict : "", k.why].map(csvCell).join(","));
+		}
+		return lines.join("\r\n") + "\r\n";
+	}
+
+	/* The picture's rows: one round of the Pro mock, with the team that took
+	   him and the school behind each name. */
+	function mockImageItems(res, mock, round) {
+		const byKey = {};
+		for (const p of res.players) byKey[p.key] = p;
+		return mock.picks.filter((k) => k.round === round).map((k) => {
+			const p = byKey[k.key] || {};
+			return { n: k.inRound || k.pick, name: k.name,
+				sub: [k.team + (k.via ? " (via " + k.via + ")" : ""),
+					k.pos, p.proClub || p.newCollege, p.classYear].filter(Boolean).join(" · "),
+				note: k.reach >= 8 ? "reach" : k.reach <= -8 ? "steal" : "" };
+		});
+	}
+
+	function mockExtras(view, res, mock, sup) {
+		const cards = el("div", "cards");
+		// Reaches and steals: where the mock took somebody far from the board's order.
+		const rs = el("div", "card");
+		rs.appendChild(el("h4", null, "Reaches and steals"));
+		const picks = mock.picks.filter((k) => k.consensus);
+		const line = (k) => "No. " + k.pick + " " + k.name + " (" + k.team + "), No. " + k.consensus + " on the board";
+		const reaches = picks.filter((k) => k.reach >= 8).sort((a, b) => b.reach - a.reach).slice(0, 5);
+		const steals = picks.filter((k) => k.reach <= -8).sort((a, b) => a.reach - b.reach).slice(0, 5);
+		rs.appendChild(el("div", "note", "Biggest reaches (taken well above the board)\n" +
+			(reaches.length ? reaches.map((k) => "  " + line(k)).join("\n") : "  none") +
+			"\n\nBiggest steals (still there well below it)\n" +
+			(steals.length ? steals.map((k) => "  " + line(k)).join("\n") : "  none")));
+		rs.appendChild(el("p", "hint", "A reach or a steal is a gap of eight or more places between the pick and the board's own ranking."));
+		cards.appendChild(rs);
+
+		if (mockUi.team && sup.targets) {
+			const t = el("div", "card mytargets");
+			t.appendChild(el("h4", null, "Top targets for " + mockUi.team));
+			let targets = [];
+			try { targets = global.Pro.targetsFor(mock, mockUi.team) || []; } catch (e) { targets = []; }
+			const first = mock.picks.filter((k) => k.team === mockUi.team)[0];
+			if (!targets.length) t.appendChild(el("p", "hint", "This team has no pick in this mock."));
+			else {
+				t.appendChild(el("div", "note", targets.slice(0, 5).map((x, i) =>
+					(i + 1) + ". " + x.name + " " + x.pos + " " + x.ovr + "/" + x.pot + " — " + x.why +
+					" (fit " + (x.fit >= 0 ? "+" : "") + x.fit + ")" + (x.taken ? " ← taken" : "")).join("\n")));
+				t.appendChild(el("p", "hint", "At its first pick" + (first ? " (No. " + first.pick + ")" : "") +
+					": the same value the mock draft used, so the first target is who it took. " +
+					"Highlighted rows below are its picks."));
+			}
+			cards.appendChild(t);
+		}
+
+		const tm = el("details", "card mockteams");
+		tm.appendChild(el("summary", null, "Teams (" + mock.teams.length + "): plan, need, rating, depth"));
+		const mine = {};
+		for (const k of mock.picks) mine[k.team] = (mine[k.team] || 0) + 1;
+		const table = el("table", "mini");
+		const hr = el("tr");
+		for (const h of ["Team", "Plan", "Need", "Ovr", "Depth G · W · B", "Picks"]) hr.appendChild(el("th", null, h));
+		table.appendChild(hr);
+		for (const t of mock.teams) {
+			const tr = el("tr", t.name === mockUi.team ? "myteam" : "");
+			tr.appendChild(el("td", null, t.name));
+			tr.appendChild(el("td", null, t.plan));
+			tr.appendChild(el("td", null, t.need));
+			tr.appendChild(el("td", "num", t.ovr === null || t.ovr === undefined ? "—" : String(t.ovr)));
+			tr.appendChild(el("td", "num", t.depth || "—"));
+			tr.appendChild(el("td", "num", String(mine[t.name] || 0)));
+			table.appendChild(tr);
+		}
+		const wrap = el("div", "tablewrap");
+		wrap.appendChild(table);
+		tm.appendChild(wrap);
+		cards.appendChild(tm);
+		view.appendChild(cards);
+	}
+
 	function viewMock(view, res) {
-		const { mock } = proFor(res);
+		const base = proFor(res);
+		const sup = mockSupports();
+		const mock = mockFor(res, base);
 		view.appendChild(el("p", "legendline", (mock.fromLeague
 			? "Your league's teams draft this class: each team's rating is BBGM's team " +
 				"rating from its current roster, its need is its depth at guard, wing and " +
@@ -5499,6 +6971,62 @@
 				"the mock draft as markdown");
 		});
 		bar.appendChild(md);
+		const csvBtn = el("button", null, "Download CSV");
+		csvBtn.title = "The whole mock draft, a row a pick, for a spreadsheet";
+		csvBtn.addEventListener("click", () => A().downloadText("mock_draft_" + res.seed + ".csv",
+			mockCsv(mock), "text/csv"));
+		bar.appendChild(csvBtn);
+		for (const round of [1, 2]) {
+			const items = mockImageItems(res, mock, round);
+			if (!items.length) continue;
+			const png = el("button", null, "Round " + round + " as PNG");
+			png.title = "Round " + round + " of this mock as a picture (" + items.length + " picks), for a forum post";
+			png.addEventListener("click", () => A().exportMockImage(res, { items, round,
+				title: "Mock draft, round " + round }));
+			bar.appendChild(png);
+		}
+		const rounds = el("select");
+		rounds.id = "mockRounds";
+		rounds.setAttribute("aria-label", "Rounds in the mock");
+		for (let r = 1; r <= 4; r++) rounds.appendChild(new Option(r + (r === 1 ? " round" : " rounds"), String(r)));
+		rounds.value = String(mockUi.rounds);
+		if (mock.fromLeague) {
+			rounds.disabled = true;
+			rounds.title = "A league's own picks decide how many rounds there are";
+		}
+		rounds.addEventListener("change", () => { mockUi.rounds = Number(rounds.value) || 2; A().render(); });
+		bar.appendChild(rounds);
+		const myTeam = el("select");
+		myTeam.id = "mockTeam";
+		myTeam.setAttribute("aria-label", "My team");
+		myTeam.appendChild(new Option("My team: none", ""));
+		for (const t of mock.teams) myTeam.appendChild(new Option(t.name, t.name));
+		myTeam.value = mock.teams.some((t) => t.name === mockUi.team) ? mockUi.team : "";
+		myTeam.addEventListener("change", () => { mockUi.team = myTeam.value; A().render(); });
+		bar.appendChild(myTeam);
+		if (sup.redraft) {
+			const redo = el("button", null, "Redraft");
+			redo.id = "mockRedraft";
+			redo.title = "Draw the teams' tastes again: same teams, same order, different picks";
+			redo.addEventListener("click", () => { mockUi.salt = (mockUi.salt || 0) + 1; A().render(); });
+			bar.appendChild(redo);
+			const taste = el("label", "mocktaste", "Taste ");
+			const range = el("input");
+			range.type = "range";
+			range.min = "0";
+			range.max = "3";
+			range.step = "0.1";
+			range.value = String(mockUi.noise);
+			range.id = "mockNoise";
+			range.setAttribute("aria-label", "How much each team's taste varies");
+			const shown = el("span", "dim", Number(mockUi.noise).toFixed(1));
+			range.addEventListener("input", () => { shown.textContent = Number(range.value).toFixed(1); });
+			range.addEventListener("change", () => { mockUi.noise = Number(range.value); A().render(); });
+			taste.appendChild(range);
+			taste.appendChild(shown);
+			taste.title = "0 is every team valuing a player the same way; 1.2 is the default draft";
+			bar.appendChild(taste);
+		}
 		view.appendChild(bar);
 
 		const table = el("table", "mocktable");
@@ -5520,7 +7048,7 @@
 				rr.appendChild(td);
 				tbody.appendChild(rr);
 			}
-			const tr = el("tr");
+			const tr = el("tr", k.team === mockUi.team ? "myteam" : "");
 			const x = k.projection;
 			tr.appendChild(el("td", "num", String(k.pick)));
 			const team = el("td", null, k.team + (k.via ? " (via " + k.via + ")" : ""));
@@ -5552,6 +7080,7 @@
 		if (mock.undrafted.length) {
 			view.appendChild(el("p", "hint", mock.undrafted.length + " prospects go undrafted in this mock."));
 		}
+		mockExtras(view, res, mock, sup);
 	}
 
 	/* The projection block on a player page. */
@@ -5579,11 +7108,97 @@
 
 	/* ---------------------------------------------------------------- notes */
 
+	/* The three "copy every note" texts. Pure, so a test can read what lands
+	   on the clipboard. A prospect with no note is left out, as the cards
+	   leave him out: a name above nothing is noise in a pasted post. */
+	function notedPlayers(players) {
+		return (players || []).slice().sort((a, b) => b.newOvr - a.newOvr)
+			.filter((p) => String(p.note || "").trim());
+	}
+	function noteCopyText(players, kind) {
+		const list = notedPlayers(players);
+		if (kind === "tsv") {
+			return ["name\tnote"].concat(list.map((p) =>
+				[p.name, String(p.note).replace(/\n/g, " · ")].join("\t"))).join("\n");
+		}
+		if (kind === "md") {
+			return list.map((p) => "### " + p.name + " — " + p.newPos + ", " +
+				(p.proClub || p.newCollege) + "\n\n" +
+				String(p.note).split("\n").map((l) => l.trim()).filter(Boolean)
+					.map((l) => "- " + l).join("\n")).join("\n\n");
+		}
+		return list.map((p) => p.name + "\n" + p.note).join("\n\n");
+	}
+
+	/* The export dialog's choices, as they are stored in localStorage and read
+	   back. Anything that is not a plain boolean or a known scope is dropped,
+	   so a hand-edited or truncated payload cannot hand the export route a
+	   string where it expects a flag. Returns null when there is nothing to keep. */
+	const EXPORT_FLAGS = ["stats", "prior", "highs", "awards", "ages", "noteAppend",
+		"includeNotes", "myMarks", "injuries", "jerseys"];
+	function cleanExportOpts(v) {
+		if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+		const out = {};
+		for (const k of EXPORT_FLAGS) if (typeof v[k] === "boolean") out[k] = v[k];
+		if (v.awardsScope === "all" || v.awardsScope === "major") out.awardsScope = v.awardsScope;
+		// Q5: the file-name template. The default is not stored.
+		const fn = cleanFilenameTemplate(v.filename);
+		if (fn) out.filename = fn;
+		if (Array.isArray(v.majorConferences)) {
+			out.majorConferences = v.majorConferences
+				.filter((x) => typeof x === "string" && x.trim())
+				.map((x) => x.trim().slice(0, 60)).slice(0, 40);
+		}
+		return Object.keys(out).length ? out : null;
+	}
+
+	/* One line saying what the Export JSON button will write beyond (or
+	   instead of) the defaults: ages, injuries and jerseys on, nothing else.
+	   "" when the options are the defaults, so the header stays quiet. */
+	function exportSummary(opts) {
+		const o = cleanExportOpts(opts);
+		if (!o) return "";
+		const on = [];
+		if (o.stats) on.push("statline");
+		if (o.prior) on.push("prior seasons");
+		if (o.highs) on.push("season highs");
+		if (o.awards) on.push(o.awardsScope === "major" ? "awards (major only)" : "awards");
+		if (o.myMarks) on.push("my notes");
+		if (o.noteAppend) on.push("keeps file notes");
+		if (o.filename) on.push("file name " + o.filename);
+		const off = [];
+		if (o.includeNotes === false) off.push("notes");
+		if (o.ages === false) off.push("ages");
+		if (o.injuries === false) off.push("injuries");
+		if (o.jerseys === false) off.push("jerseys");
+		return on.join(", ") + (on.length && off.length ? " · " : "") +
+			(off.length ? "no " + off.join(", ") : "");
+	}
+
+	/* Lines of the note template that print for only some players. A ticked
+	   box that writes nothing for a third of the class looked like a bug; the
+	   suffix says so up front. Keyed by Engine.NOTE_LINES key. */
+	const NOTE_LINE_NOTES = {
+		team: " (also team style and a transfer's old school)",
+		path: " (only players with a story to tell)",
+		record: " (college teams; clubs abroad have none)",
+		ranks: " (college players only, and only some of them)",
+		march: " (any non-regular-season games, conference tournaments too)",
+		injury: " (college players who missed games; none abroad)",
+		coach: " (college players only)",
+		archetype: " (and left-handed, when he is)",
+		awards: " (college players with honors only; can take two lines)",
+		stock: " (this tool's board and mock, not BBGM's draft order)",
+	};
+
 	function viewNotes(view, res) {
 		const st = A().state;
 		view.appendChild(el("p", "legendline",
-			"This is exactly what gets written into each player's note field in the " +
-			"exported file. Choose which lines appear under “Note template” in the sidebar."));
+			"These are the notes built from the “Note template” in the sidebar. The " +
+			"exported file can differ: “Include college awards” with a scope rewrites " +
+			"the Honors lines, “My notes” is appended when ticked, and unticking " +
+			"“Include scouting notes” leaves them out of the file. Players with no note " +
+			"are not listed."));
 		const bar = el("div", "filters");
 		/* The Notes search used to share state.filter.q with the Prospects tab,
 		   so typing here silently filtered the table over there. */
@@ -5591,28 +7206,19 @@
 			() => st.noteQuery, (v) => { st.noteQuery = v; }));
 		const copy = el("button", null, "Copy all notes");
 		copy.addEventListener("click", () => {
-			A().copyText(res.players.slice().sort((a, b) => b.newOvr - a.newOvr)
-				.map((p) => p.name + "\n" + p.note).join("\n\n"), copy, "Copy all notes", "all scouting notes");
+			A().copyText(noteCopyText(res.players, "plain"), copy, "Copy all notes", "all scouting notes");
 		});
 		bar.appendChild(copy);
 		const tsv = el("button", null, "Copy as spreadsheet rows");
 		tsv.addEventListener("click", () => {
-			const rows = res.players.slice().sort((a, b) => b.newOvr - a.newOvr)
-				.map((p) => [p.name, (p.note || "").replace(/\n/g, " · ")].join("\t"));
-			A().copyText(["name\tnote"].concat(rows).join("\n"), tsv,
+			A().copyText(noteCopyText(res.players, "tsv"), tsv,
 				"Copy as spreadsheet rows", "notes as spreadsheet rows");
 		});
 		bar.appendChild(tsv);
 		const md = el("button", null, "Copy as markdown");
 		md.title = "Copy every note as a markdown document: a heading per prospect";
 		md.addEventListener("click", () => {
-			const text = res.players.slice().sort((a, b) => b.newOvr - a.newOvr)
-				.map((p) => "### " + p.name + " — " + p.newPos + ", " +
-					(p.proClub || p.newCollege) + "\n\n" +
-					String(p.note || "").split("\n").map((l) => l.trim()).filter(Boolean)
-						.map((l) => "- " + l).join("\n"))
-				.join("\n\n");
-			A().copyText(text, md, "Copy as markdown", "notes as markdown");
+			A().copyText(noteCopyText(res.players, "md"), md, "Copy as markdown", "notes as markdown");
 		});
 		bar.appendChild(md);
 		view.appendChild(bar);
@@ -5648,7 +7254,8 @@
 			box.appendChild(el("p", "hint", q
 				? "The search covers names and note text. Clear it to see every note."
 				: "Every line of the note template is off, or the class is empty. " +
-					"Tick lines under “Note template” in the sidebar to write notes."));
+					"Tick lines under “Note template” in the sidebar to write notes. " +
+					"A note already in the file is cleared on export unless \"Keep any note already in the file\" is on."));
 			if (q) {
 				const clear = el("button", "tiny", "Clear the search");
 				clear.addEventListener("click", () => { st.noteQuery = ""; A().render(); });
@@ -6041,6 +7648,7 @@
 		const on = !!st.watch[uk];
 		const b = el("button", "watchstar" + (on ? " on" : ""), on ? "★" : "☆");
 		b.type = "button";
+		b.dataset.nocopy = "";
 		b.setAttribute("aria-pressed", on ? "true" : "false");
 		b.setAttribute("aria-label", (on ? "Remove " : "Add ") + p.name + (on ? " from" : " to") + " your watchlist");
 		b.title = on ? "On your watchlist — click to remove" : "Add to your watchlist";
@@ -6083,6 +7691,22 @@
 		const back = el("button", "tiny", "← All prospects");
 		back.addEventListener("click", () => { A().showPlayer(null); });
 		box.appendChild(back);
+		/* Q4: step through the class without going back to the list. Board
+		   order; j and k do the same from the keyboard, Esc goes back. */
+		const nb = neighborKeys(res, key);
+		if (nb.total > 1) {
+			for (const [dir, label, target, tip] of [
+				["prev", "‹ Prev", nb.prev, "Previous prospect (k)"],
+				["next", "Next ›", nb.next, "Next prospect (j)"]]) {
+				const b = el("button", "tiny", label);
+				b.type = "button";
+				b.title = tip;
+				b.dataset.nav = dir;
+				b.addEventListener("click", () => { A().showPlayer(target); });
+				box.appendChild(b);
+			}
+			box.appendChild(el("span", "unit", " " + (nb.index + 1) + " of " + nb.total));
+		}
 		if (!p && /^field:/.test(String(key))) return fieldPlayerPage(box, res, key);
 		if (!p && /^future:/.test(String(key))) return futurePlayerPage(box, res, key);
 		if (!p) {
@@ -6107,7 +7731,7 @@
 		const wt = Number.isFinite(p.newWeight) ? p.newWeight : p.weight;
 		line.appendChild(document.createTextNode(
 			" · " + p.classYear + " · " + p.newPos + " · " + feet(p.newHgtInches) +
-			(Number.isFinite(wt) ? ", " + wt + " lb" : "") + " · " + p.archetype));
+			(Number.isFinite(wt) ? ", " + weightText(wt) + (metricUnits() ? " kg" : " lb") : "") + " · " + p.archetype));
 		idbox.appendChild(line);
 		const pills = el("div", "rowflex");
 		pills.appendChild(el("span", "pill", "ovr " + p.newOvr + " · pot " + p.newPot));
@@ -6123,6 +7747,16 @@
 		cmp.title = "Open the Compare tab with " + p.name + " in it";
 		cmp.addEventListener("click", () => compareWith(p, res));
 		acts.appendChild(cmp);
+		const card = el("button", "tiny", "Share card");
+		card.type = "button";
+		card.title = "Save " + p.name + " as a picture (PNG)";
+		card.addEventListener("click", () => A().exportPlayerCard(res, p.key));
+		acts.appendChild(card);
+		const plink = el("button", "tiny", "Copy link");
+		plink.type = "button";
+		plink.title = "Copy a link that opens this prospect's page on the same class";
+		plink.addEventListener("click", () => A().copyLink(plink));
+		acts.appendChild(plink);
 		idbox.appendChild(acts);
 		head.appendChild(idbox);
 		box.appendChild(head);
@@ -6377,6 +8011,7 @@
 		   keeps him keeps what was written. */
 		box.appendChild(el("h4", null, "My notes"));
 		const myNote = el("textarea", "mynote");
+		myNote.id = "myNote";
 		myNote.rows = 3;
 		myNote.maxLength = 2000;
 		myNote.placeholder = "Your own read on " + p.name + " — saved in this browser.";
@@ -6393,6 +8028,21 @@
 		starRow.appendChild(watchStar(p));
 		starRow.appendChild(el("span", "hint", "Watchlist"));
 		box.appendChild(starRow);
+		/* Q16: tags, several at once, beside the star. Kept in this browser,
+		   scoped to the class like the star and the note. */
+		const tagRow = el("div", "rowflex tagrow");
+		tagRow.setAttribute("role", "group");
+		tagRow.setAttribute("aria-label", "Tags for " + p.name);
+		tagRow.appendChild(el("span", "hint", "Tags"));
+		for (const t of PLAYER_TAGS) {
+			const on = tagsOf(p).indexOf(t) !== -1;
+			const b = el("button", "chip tagchip" + (on ? " on" : ""), "# " + t);
+			b.type = "button";
+			b.setAttribute("aria-pressed", on ? "true" : "false");
+			b.addEventListener("click", () => A().toggleTag(p, t));
+			tagRow.appendChild(b);
+		}
+		box.appendChild(tagRow);
 
 		const actions = el("div", "rowflex");
 		const edit = el("button", null, "Edit this prospect…");
@@ -7509,13 +9159,21 @@
 	global.Views = {
 		players: viewPlayers, teams: viewTeams, bracket: viewBracket, bulkBar,
 		awards: viewAwards, board: viewDraft, distribution: viewDistribution, tournamentCard,
-		notes: viewNotes, gamelog: viewGameLog, compare: viewCompare, mock: viewMock, proFor,
+		notes: viewNotes, noteCopyText, mockCsv, mockImageItems, CLASS_YEAR_CHOICES, NOTE_LINE_NOTES, cleanExportOpts, exportSummary, gamelog: viewGameLog, compare: viewCompare, mock: viewMock, proFor,
 		news: viewNews, universe: viewUniverse, playerLink, teamLink, playerPage,
 		gamePage, gameKeyFor, quadBar, pollSpark, ballotCards,
 		COLUMNS, STAT_MODES, PCT_KEYS, DERIVED, derived, cellValue, statValue,
 		CARD_COLUMNS, CARD_BREAKPOINT, cardMode, orderedColumns, moveColumn,
 		dropColumn, setColumnOrder,
 		matchesFilter, numericColumns, histogram, feet, closeRowMenu,
+		// Quick wins: table text, zip, file names, search syntax, tags, filter views, units.
+		tableText, tableParts, domTableText, decorateTables, crc32, zipStore, exportFilename,
+		EXPORT_NAME_DEFAULT, cleanFilenameTemplate, parseQuery, queryMatch, queryCtx,
+		EXTRA_VALUE, EXTRA_COLUMNS, CSV_EXTRA, csvExtras, pathFlags, PATH_FILTERS, PLAYER_TAGS,
+		PIN_MAX, cleanStarredSettings, timeAgo, SESSION_MAX_BYTES, sessionShape, sessionFiles, sessionLabel,
+		cleanTags, tagsOf, emptyFilter, cleanFilter, cleanFilterViews, metricUnits, weightText,
+		SEARCH_HELP, SKILL_TAGS, neighborKeys, planRenames, planLockRows, lockPatchText,
+		RATING_COLUMN_KEYS,
 		sortRows, classYearRank, CLASS_YEAR_ORDER, defaultHiddenColumns, closeWhy,
 		currentColumnPreset, COLUMN_PRESETS,
 		compareWith, sortableTable,

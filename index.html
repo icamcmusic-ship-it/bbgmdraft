@@ -32,6 +32,9 @@
 		     universe whose new classes are all later than its last season is
 		     extended rather than redrawn. See appendFiles. -->
 		<button id="btnAddFiles" hidden title="Add more draft classes, keeping the ones already loaded">Add classes…</button>
+		<!-- A synthetic class of a size, year and seed you choose, added beside
+		     whatever is loaded (or on its own when nothing is). -->
+		<button id="btnNewClass" title="Make a new synthetic class — size, year and seed — and add it to the classes already loaded">New class…</button>
 		<select id="fileSelect" hidden aria-label="Loaded file"></select>
 	</div>
 	<span class="spacer"></span>
@@ -58,6 +61,7 @@
 		     used to wear a "?" while the ? KEY opened the shortcuts. -->
 		<button id="btnHowTo" class="iconbtn" title="How to play — what everything does and a sensible order to do it in" aria-label="Guide">📖</button>
 		<button id="btnKeys" class="iconbtn" title="Keyboard shortcuts (press ?)" aria-label="Keyboard shortcuts">⌨</button>
+		<button id="btnPrint" class="iconbtn" title="Print this page, or save it as a PDF, under a header with the class name, seed, fingerprint and date" aria-label="Print or save as PDF">🖨</button>
 	</div>
 	<div class="btngroup" role="group" aria-label="Export">
 		<button id="btnExport" class="primary" disabled>Export JSON</button>
@@ -69,6 +73,7 @@
 			title="CSV, season data, locked prospects and the settings JSON">More ▾</button>
 		<button id="btnExportAll" disabled hidden>Export all</button>
 	</div>
+	<span id="exportSummary" class="exportsum" hidden></span>
 	<!-- Below 560px the tool buttons fold behind this; see bindHeaderMore. -->
 	<button id="btnHeaderMore" class="iconbtn headmore" type="button" aria-expanded="false"
 		aria-controls="headerTools" aria-label="More tools" title="More tools">⋯</button>
@@ -131,6 +136,14 @@
 		<p class="unit" id="settingSearchNote"></p>
 	</div>
 
+	<!-- Settings starred with the star on their label are MOVED here (the real
+	     controls, so every id stays unique and everything bound to them keeps
+	     working) and moved back when unstarred. See applyStarredSettings. -->
+	<details class="grp" id="grp-pinned" open>
+		<summary>Pinned</summary>
+		<p class="hint" id="pinnedHint">Star a setting to keep it here.</p>
+	</details>
+
 	<details class="grp" id="grp-quality" open>
 		<summary>Class quality &amp; depth</summary>
 		<div class="ctl">
@@ -145,8 +158,9 @@
 			<label for="potModel">Potential model</label>
 			<select id="potModel">
 				<option value="tool">Tool (default)</option>
-				<option value="bbgm">BBGM potEstimator (what the game will show)</option>
+				<option value="bbgm">BBGM potEstimator formula</option>
 			</select>
+			<p class="hint">The tool's model builds each gap from his build, age, frame, touch and production. BBGM's own formula (72.3 − 2.33 × age + 0.83 × ovr) is smoother: a steadier gap of about 3 points sd against about 6, and it shrinks as ovr rises. The game only uses it when a league turns on "use pot estimator" or has very many teams; otherwise it simulates development (monteCarloPot), and its own version of the formula adds ±2 of noise that this one leaves out.</p>
 		</div>
 		<div class="ctl"><label><input type="checkbox" id="signatureSkills"> Signature skills (builds reach their promised BBGM skill badge)</label></div>
 		<div class="ctl" data-curve><label for="classQuality">Class quality <b></b></label><input type="range" id="classQuality" min="-3" max="3" step="0.5"></div>
@@ -180,7 +194,7 @@
 		<div class="ctl"><label for="buildNoise">Build noise <b></b></label><input type="range" id="buildNoise" min="0" max="14" step="0.5"></div>
 		<div class="ctl"><label for="rookieSkillCap">Rookie skill cap <b></b></label><input type="range" id="rookieSkillCap" min="0" max="99" step="1"></div>
 		<div class="ctl"><label for="rookiePhysCap">Rookie physical cap <b></b></label><input type="range" id="rookiePhysCap" min="0" max="99" step="1"></div>
-		<div class="ctl"><label for="rookieOvrCap">Rookie overall cap <b></b></label><input type="range" id="rookieOvrCap" min="0" max="99" step="1"></div>
+		<div class="ctl" data-curve><label for="rookieOvrCap">Rookie overall cap <b></b></label><input type="range" id="rookieOvrCap" min="0" max="99" step="1"></div>
 		<div class="ctl">
 			<label for="flavorHint">Class flavor</label>
 			<select id="flavorHint"></select>
@@ -193,9 +207,9 @@
 		     forty-six builds drawn out of 385 do. See flavorMemoryFactor in
 		     js/ratings.js. -->
 		<div class="ctl"><label for="flavorMemory">Avoid repeating recent flavors <b></b></label><input type="range" id="flavorMemory" min="0" max="1" step="0.05"></div>
-		<div class="ctl"><label><input type="checkbox" id="varySize"> Let height &amp; weight drift with the build</label></div>
+		<div class="ctl"><label><input type="checkbox" id="varySize"> Let weight drift with the build (and height too, when heights are not kept below)</label></div>
 		<div class="ctl"><label><input type="checkbox" id="lockHeights"> Keep every imported height exactly as the file listed it</label></div>
-		<p class="hint">On, nothing the tool draws can move a player's height rating — not a reroll, not the size drift, not the 7'4" anomaly. A height you set by hand still moves it.</p>
+		<p class="hint">On, nothing the tool draws can move a player's height rating — not a reroll, not the size drift, not the physical-outlier anomaly (which is half a foot from his own height when it runs). Weight can still drift if the box above it is ticked. A height you set by hand still moves it.</p>
 		<p class="hint">Every rebuilt player is re-solved against BBGM's own ovr formula, so specializing a build never changes his overall.</p>
 	</details>
 
@@ -329,7 +343,16 @@
 	<details class="grp" id="grp-notes">
 		<summary>Note template</summary>
 		<div id="noteLines" class="checks"></div>
-		<p class="hint">Exactly these lines are written into each player's note.</p>
+		<div class="ctl">
+			<label for="noteHeader">Note header</label>
+			<input type="text" id="noteHeader" maxlength="300" placeholder="e.g. {class} class, seed {seed}">
+		</div>
+		<div class="ctl">
+			<label for="noteFooter">Note footer</label>
+			<input type="text" id="noteFooter" maxlength="300" placeholder="e.g. Board No. {rank}, {school}">
+		</div>
+		<p class="hint">Header and footer go above and below every note. Tokens: {class} {seed} {rank} {school}. Leave empty for none.</p>
+		<p class="hint">These lines are built into each player's note. The file can differ: the awards scope, “My notes” and “Include scouting notes” are set in the export dialog.</p>
 	</details>
 
 	<details class="grp" id="grp-batch">
@@ -352,6 +375,9 @@
 </aside>
 
 <main>
+	<!-- Shown only when printing (see @media print): which class this page is
+	     about, since the header with the seed and the file is hidden then. -->
+	<div id="printHeader" class="printonly" aria-hidden="true"></div>
 	<!-- Above the drop box: on first run a load error used to appear below it,
 	     off-screen on a short viewport. -->
 	<div id="errBanner" class="banner" role="alert" hidden>
@@ -376,10 +402,24 @@
 		<p class="hint">Everything runs locally in your browser. Nothing is uploaded.</p>
 		<p class="emptyacts">No export to hand? <button type="button" id="btnSample" class="primary"
 			title="Load a synthetic 70-man class so you can try every tab before exporting one from the game">Try a sample class</button>
+			<button type="button" id="btnNewClassEmpty"
+			title="Make a synthetic class of a size, year and seed you choose">Custom sample class…</button>
 			<button type="button" id="btnPasteClass"
 			title="Read a class or league JSON from the clipboard (or just paste with Ctrl+V)">Paste JSON</button>
 			<button type="button" id="btnSynthUniverse"
 			title="Run several synthetic seasons as one continuous world, rebuilt from the seed">New synthetic universe (N seasons)…</button></p>
+	</div>
+
+	<!-- The last session, offered (never applied by itself) wherever the drop box
+	     shows. Filled by js/app.js from what it saved in IndexedDB. -->
+	<div id="sessionCard" class="card sessioncard" role="region" aria-label="Last session" hidden>
+		<p id="sessionCardText"></p>
+		<div class="sessionacts">
+			<button type="button" id="btnSessionRestore" class="primary"
+				title="Load the class files you had open and put the settings and locks back">Restore</button>
+			<button type="button" id="btnSessionDiscard"
+				title="Forget the saved session">Discard</button>
+		</div>
 	</div>
 
 	<p id="status" class="status" role="status" hidden></p>
@@ -435,6 +475,7 @@
 <script defer src="js/replay.js"></script>
 <script defer src="js/site.js"></script>
 <script defer src="js/replaymeta.js"></script>
+<script defer src="js/share.js"></script>
 <script defer src="js/views.js"></script>
 <script defer src="js/play.js"></script>
 <script defer src="js/app.js"></script>

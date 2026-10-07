@@ -10,8 +10,8 @@
 		classQuality: 0,       // -3 (historically bad) .. +3 (loaded)
 		classDepth: 0,         // -3 (top heavy) .. +3 (deep)
 		eliteCount: 2,         // prospects given a genuine star ceiling
-		potBias: 0,            // -3 .. +3 shift on potential
-		potSpread: 6,          // sd of the ovr -> pot gap
+		potBias: 0,            // -3 .. +3, 2.2 gap points a step (the floor at ovr+1 makes -3 move the mean by about -4.7, +3 by +7)
+		potSpread: 6,          // extra noise on the ovr -> pot gap, sd = 0.35 x this (6 -> 2.1 pts); the gap's own sd is ~5.9 before it
 
 		// --- builds ------------------------------------------------------
 		specialization: 1.0,   // 0 = keep BBGM's samey builds, 2 = extreme specialists
@@ -387,6 +387,11 @@
 		   scouting note can say what a scout would say, and a line nobody
 		   turns on says nothing. See js/traits.js. */
 		noteLines: ["summary", "team", "traits", "stats", "shooting", "signature", "awards"],
+		/* A first and a last line for every note, in the commissioner's own
+		   words. {class} {seed} {rank} {school} are filled in per player.
+		   Empty (the default) writes nothing; see buildNote. */
+		noteHeader: "",
+		noteFooter: "",
 		/* How many scouting traits a prospect carries, roughly. 0 turns the
 		   layer off, which is what a user who wants a plain statline note
 		   wants; the effects (night-to-night volatility, the offensive glass,
@@ -469,33 +474,24 @@
 		"Top heavy": { classDepth: -2, eliteCount: 3, ovrMode: "curve" },
 		"Deep, no stars": { classDepth: 2, eliteCount: 0, ovrMode: "curve" },
 		"Specialist league": { specialization: 1.8, archetypeDiversity: 95, buildNoise: 7, classFlavor: 1.6 },
-		"Guard-heavy class": { classFlavor: 2, archetypeDiversity: 92 },
+		/* flavorHint names the flavor. classFlavor: 2 alone only STRENGTHENED
+		   whichever flavor the seed happened to draw: twelve seeds drew twelve
+		   different flavors and "guard-heavy" once (audit C11). */
+		"Guard-heavy class": { flavorHint: "guard-heavy", classFlavor: 2, archetypeDiversity: 92 },
 		"Transfer-portal era": { transferShare: 62, freshmanShare: 26 },
+		/* A class sent abroad. Two things were wrong with this preset (audit
+		   C11): leagueWeights alone only reorder the draw for prospects whose
+		   college is BLANK, so the share abroad stayed at the file's own 16.7%
+		   whatever the weights said, and the weights were a typed-in snapshot
+		   of the league table that went stale every time a league was added.
+		   "rewrite" redraws every prospect's destination, where the weights
+		   now set the abroad share as well as its mix (see destinationPool in
+		   js/engine.js), and the weights are computed from the live table when
+		   the preset is applied. A getter, so it is read at that moment and
+		   not at load. */
 		"International class": {
-			/* EVERY league, not twelve of them. This named the twelve
-			   destinations the table held when the preset was written, and
-			   assignCollege falls back to a league's DEFAULT weight for any
-			   name the object omits — so the twenty-four leagues added since
-			   (Italy, Lithuania, Turkey, Greece, Israel, the BAL, Japan,
-			   Brazil, Korea, the PBA, Argentina and the rest) sat at their
-			   ordinary weight while the twelve were boosted around them. The
-			   preset that exists to send a class abroad was quietly holding
-			   back the leagues most of the world plays in. Every entry is
-			   the table's own weight, scaled: 2.2x abroad, 0.35x for the
-			   American paths. */
-			leagueWeights: {
-				"EuroLeague": 57, "NBA G League": 11, "Liga ACB": 22, "NBL": 26,
-				"Chinese CBA": 13, "LNB Pro A": 20, "EuroCup": 20,
-				"Basketball Bundesliga": 18, "Adriatic League": 18, "NBL1": 9,
-				"Overtime Elite": 2, "NBA Academy": 9, "Basketball Champions League": 15,
-				"Turkish BSL": 13, "Greek Basket League": 11, "Israeli Premier League": 11,
-				"Japan B.League": 9, "Brazil NBB": 9, "Basketball Africa League": 9,
-				"CEBL": 7, "Prep / Postgrad": 1, "NAIA": 1, "Did not play": 1,
-				"Italian LBA": 13, "Lithuanian LKL": 9, "VTB United League": 9,
-				"Polish PLK": 7, "BNXT League": 7, "Korean KBL": 7, "Philippine PBA": 4,
-				"Argentine Liga Nacional": 7, "Mexican LNBP": 4, "Puerto Rico BSN": 4,
-				"New Zealand NBL": 4, "JUCO": 1, "DIII NCAA": 1,
-			},
+			collegeSource: "rewrite",
+			get leagueWeights() { return internationalWeights(); },
 		},
 		"Vanilla builds": { specialization: 0.2, archetypeDiversity: 20 },
 		"One-and-done era": { freshmanShare: 78 },
@@ -510,6 +506,27 @@
 		"Chalk March": { upsetFactor: 0.35 },
 		"Total madness": { upsetFactor: 1.9 },
 	};
+
+	/* The American paths (the ones the "International class" preset turns
+	   down); every other destination is abroad and turned up. */
+	const AMERICAN_PATHS = ["NBA G League", "Overtime Elite", "Prep / Postgrad",
+		"NAIA", "Did not play", "JUCO", "DIII NCAA"];
+	/* Every league in the live table at 4x its own weight (the weight editor
+	   stops at 100), the American paths at 0.35x (never below 1, so none is
+	   closed off). Computed, so a league added to the table is in the preset
+	   the day it is added. Measured over 12 classes of 70 under "rewrite": the
+	   share outside Division I goes from 16.1% to 29.4%, and the share in a
+	   league abroad from 8.1% to 26.8% (the old 2.2x snapshot with blanks-only
+	   gave 16.0%, the same as no preset). */
+	function internationalWeights() {
+		const out = {};
+		const base = defaultLeagueWeights();
+		for (const name of Object.keys(base)) {
+			const w = AMERICAN_PATHS.indexOf(name) !== -1 ? base[name] * 0.35 : base[name] * 4;
+			out[name] = Math.min(LEAGUE_WEIGHT_MAX, Math.max(1, Math.round(w)));
+		}
+		return out;
+	}
 
 	/* Built-in destination weights, read from the league table so there is one
 	   place to change them. */
@@ -556,6 +573,7 @@
 	   one; a list that is not loaded yet (null) is not checked. `era` is
 	   checked against every era the table knows, fitted or not — the harness
 	   runs an unfitted era by name on purpose; the panel narrows it further. */
+	const NOTE_FRAME_MAX = 300;
 	const CHOICES = {
 		ovrMode: () => ["preserve", "curve"],
 		priorSeasons: () => ["simulate", "reconstruct"],
@@ -614,6 +632,13 @@
 		cfg.noteLines = (Array.isArray(cfg.noteLines) ? cfg.noteLines : DEFAULTS.noteLines)
 			.filter((k) => typeof k === "string" && (!known || known.has(k)))
 			.filter((k, i, a) => a.indexOf(k) === i);
+		/* The note header and footer are text, at most NOTE_FRAME_MAX characters
+		   each (a link or a settings file can carry anything); whitespace alone
+		   is no text. */
+		for (const key of ["noteHeader", "noteFooter"]) {
+			const t = typeof cfg[key] === "string" ? cfg[key].replace(/\r/g, "") : "";
+			cfg[key] = t.trim() ? t.slice(0, NOTE_FRAME_MAX) : "";
+		}
 		/* An empty list is a real choice — "write no scouting notes" — and
 		   stays empty. It used to fall back to the default template here, so
 		   unticking every box left the boxes empty and the notes written
@@ -701,7 +726,55 @@
 			const w = isCount(key) ? Math.round(v) : v;
 			cfg[key] = w < band.min ? band.min : w > band.max ? band.max : w;
 		}
+		cfg.pinned = pinnedKeys(src, cfg);
 		return cfg;
+	}
+
+	/* WHICH SETTINGS THE CALLER HAS PINNED AT THEIR DEFAULT (audit C4).
+
+	   A class flavor, a season storyline and the weirdness dial all move "what
+	   nobody has decided", and "decided" used to be `value !== default`. So a
+	   setting sitting AT its default could never be decided: pace 68 was
+	   open to every storyline, while 67 and 69 were not, and sweeping 66/68/70
+	   with a storyline drawn gave 69.9/75.9/73.9 possessions.
+
+	   `cfg.pinned` is the explicit list: the keys the caller set to a value
+	   equal to the default and meant it. A key that differs from its default
+	   needs no entry, because the old rule already treats it as the user's;
+	   the engine reads both (see userTouched in js/engine.js).
+
+	   THE RULE, because every door builds configs differently:
+	   - a caller that passes `pinned` is explicit: that list is the pins
+	     (a round-tripped config, a saved session, a #c= link and the UI all
+	     carry it; make() writes it back, so make(make(x)) is stable);
+	   - otherwise a PARTIAL object is a statement of what the caller set:
+	     every key it names (non-null) is pinned, even at the default. The
+	     CLI's --set, a preset and make({pace: 68}) are partial;
+	   - otherwise a FULL object (it names at least 90% of the settings) is a
+	     snapshot, not a statement: make(Config.DEFAULTS) or a spread of it
+	     must not pin everything, so only value-differs counts, as before. 90%
+	     and not "every key" so an old saved config that predates a few newer
+	     settings is still recognised as a snapshot.
+	   Only scalar settings can be pinned; the seed is never one. */
+	function pinnedKeys(src, cfg) {
+		const keys = Object.keys(DEFAULTS);
+		const named = new Set();
+		if (Array.isArray(src.pinned)) {
+			for (const k of src.pinned) if (typeof k === "string") named.add(k);
+		} else {
+			const has = (k) => Object.prototype.hasOwnProperty.call(src, k);
+			// Counted over every key (a snapshot carries its nulls too), named
+			// over the ones with a value.
+			if (keys.filter(has).length < 0.9 * keys.length) {
+				for (const k of keys) if (has(k) && src[k] !== undefined && src[k] !== null) named.add(k);
+			}
+		}
+		return keys.filter((k) => {
+			if (k === "seed" || !named.has(k)) return false;
+			const d = DEFAULTS[k];
+			return (typeof d === "number" || typeof d === "boolean" || typeof d === "string") &&
+				cfg[k] === d;
+		});
 	}
 
 	/* WHICH SETTINGS ARE COUNTS.
@@ -859,5 +932,5 @@
 	}
 
 	global.Config = { DEFAULTS, PRESETS, make, defaultLeagueWeights, COUNTS, isCount,
-		CLAMP, sliderRange, LEAGUE_WEIGHT_MAX, ARCH_WEIGHT_MAX };
+		CLAMP, CHOICES, NOTE_FRAME_MAX, sliderRange, LEAGUE_WEIGHT_MAX, ARCH_WEIGHT_MAX };
 })(typeof window !== "undefined" ? window : self);

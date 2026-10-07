@@ -782,9 +782,13 @@ module.exports = function (ok, V) {
 			{
 				const pf = global.Engine.exportPlayersFile(res,
 					{ stats: true, prior: true, highs: true, awards: true });
-				ok("the players file is version, startingSeason and players, nothing else",
+				/* ...plus the tool's own `bbgmdraft` mark at the root (audit B6):
+				   Import players reads the file through the same keyed parser
+				   as Create League, which looks only for the stores it knows
+				   and skips every other root key. */
+				ok("the players file is version, startingSeason, the tool's mark and players, nothing else",
 					JSON.stringify(Object.keys(pf)) ===
-					JSON.stringify(["version", "startingSeason", "players"]) &&
+					JSON.stringify(["version", "startingSeason", "bbgmdraft", "players"]) &&
 					pf.players.length === res.leagueFile.players.length);
 				ok("every player in it is an undrafted prospect with no exportedSeason",
 					pf.players.every((x) => x.tid === -2 && x.exportedSeason === undefined));

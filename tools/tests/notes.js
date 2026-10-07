@@ -34,9 +34,16 @@ module.exports = function (ok, V) {
 		ok("notes/an empty template exports no note and no noteBool on a note-less player",
 			file.players.every((p, i) => i === 2 || (p.note === undefined && p.noteBool === undefined)),
 			JSON.stringify(file.players.filter((p, i) => i !== 2 && (p.note !== undefined || p.noteBool !== undefined)).length));
-		ok("notes/an empty template leaves the file's own note alone",
-			file.players[2].note === "my own scouting scribble" && file.players[2].noteBool === 1,
+		/* One rule (audit N3): the note is the template's output, so a
+		   player it wrote nothing for has no note, unless "keep any note
+		   already in the file" is on. */
+		ok("notes/an empty template clears the file's own note, as the Notes tab says",
+			file.players[2].note === undefined && file.players[2].noteBool === undefined,
 			JSON.stringify(file.players[2].note));
+		const kept = E.exportFile(res, { noteAppend: true }).players[2];
+		ok("notes/...unless Keep any note already in the file is on",
+			kept.note === "my own scouting scribble" && kept.noteBool === 1,
+			JSON.stringify(kept.note));
 	}
 
 	/* ---- the summary says only what is ticked --------------------------- */
