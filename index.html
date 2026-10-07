@@ -136,6 +136,14 @@
 		<p class="unit" id="settingSearchNote"></p>
 	</div>
 
+	<!-- Settings starred with the star on their label are MOVED here (the real
+	     controls, so every id stays unique and everything bound to them keeps
+	     working) and moved back when unstarred. See applyStarredSettings. -->
+	<details class="grp" id="grp-pinned" open>
+		<summary>Pinned</summary>
+		<p class="hint" id="pinnedHint">Star a setting to keep it here.</p>
+	</details>
+
 	<details class="grp" id="grp-quality" open>
 		<summary>Class quality &amp; depth</summary>
 		<div class="ctl">
@@ -400,6 +408,18 @@
 			title="Read a class or league JSON from the clipboard (or just paste with Ctrl+V)">Paste JSON</button>
 			<button type="button" id="btnSynthUniverse"
 			title="Run several synthetic seasons as one continuous world, rebuilt from the seed">New synthetic universe (N seasons)…</button></p>
+	</div>
+
+	<!-- The last session, offered (never applied by itself) wherever the drop box
+	     shows. Filled by js/app.js from what it saved in IndexedDB. -->
+	<div id="sessionCard" class="card sessioncard" role="region" aria-label="Last session" hidden>
+		<p id="sessionCardText"></p>
+		<div class="sessionacts">
+			<button type="button" id="btnSessionRestore" class="primary"
+				title="Load the class files you had open and put the settings and locks back">Restore</button>
+			<button type="button" id="btnSessionDiscard"
+				title="Forget the saved session">Discard</button>
+		</div>
 	</div>
 
 	<p id="status" class="status" role="status" hidden></p>

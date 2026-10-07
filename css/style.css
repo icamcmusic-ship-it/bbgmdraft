@@ -1756,3 +1756,16 @@ input.badquery { outline: 2px dashed var(--bad); outline-offset: 1px; }
 	.printonly b { font-size: 12pt; }
 	.tablecopy, .tagrow, .skillchips, .tagmark { display: none !important; }
 }
+
+/* ---- remembered session card and pinned settings (audit Q1, Q5) ---------- */
+.sessioncard { max-width: 620px; margin: 0 auto 16px; text-align: center; }
+.sessioncard p { margin: 0 0 8px; overflow-wrap: anywhere; }
+.sessioncard .sessionacts { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.ctl .star-btn {
+	background: none; border: none; padding: 0 2px; cursor: pointer;
+	font-size: 12px; line-height: 1; margin-left: 4px; color: var(--dim);
+	flex-shrink: 0; opacity: .35;
+}
+.ctl:hover .star-btn, .ctl:focus-within .star-btn, .ctl .star-btn:hover { opacity: .9; }
+.ctl .star-btn[aria-pressed="true"] { opacity: 1; color: var(--accent); }
+#grp-pinned > .hint[hidden] { display: none; }

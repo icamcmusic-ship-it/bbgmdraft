@@ -1090,6 +1090,179 @@
 		return out;
 	}
 
+	/* PINNED SETTINGS (audit Q5). The list is stored in the persisted payload
+	   and read back from it, so it is checked on the way in: only strings that
+	   name a real setting (isKnown), each once, in order, at most `max`. */
+	const PIN_MAX = 8;
+	function cleanStarredSettings(v, isKnown, max) {
+		const cap = Number.isFinite(max) && max > 0 ? Math.floor(max) : PIN_MAX;
+		if (!Array.isArray(v)) return [];
+		const out = [];
+		for (const k of v) {
+			if (typeof k !== "string" || out.indexOf(k) !== -1) continue;
+			const known = typeof isKnown === "function"
+				? !!isKnown(k) : /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(k);
+			if (!known) continue;
+			out.push(k);
+			if (out.length >= cap) break;
+		}
+		return out;
+	}
+
+	/* "5 minutes ago" for the Restore card. `then` and `now` are epoch
+	   milliseconds (or anything Date.parse reads); a clock that ran backwards
+	   reads as "just now" rather than as a negative span. */
+	function timeAgo(then, now) {
+		const t = typeof then === "number" ? then : Date.parse(then);
+		const n = typeof now === "number" ? now : Date.now();
+		if (!Number.isFinite(t)) return "a while ago";
+		const s = Math.max(0, (n - t) / 1000);
+		const plural = (x, w) => x + " " + w + (x === 1 ? "" : "s") + " ago";
+		if (s < 45) return "just now";
+		if (s < 90) return "a minute ago";
+		if (s < 45 * 60) return plural(Math.round(s / 60), "minute");
+		if (s < 90 * 60) return "an hour ago";
+		if (s < 22 * 3600) return plural(Math.round(s / 3600), "hour");
+		if (s < 36 * 3600) return "yesterday";
+		if (s < 45 * 86400) return plural(Math.round(s / 86400), "day");
+		return plural(Math.round(s / (30 * 86400)), "month");
+	}
+
+	/* REMEMBERING THE SESSION (audit Q1). What goes to IndexedDB: the files as
+	   the JSON they were loaded from (a string each, so the size is a plain sum
+	   and nothing has to be structure-cloned), the active index and a snapshot
+	   of the persisted payload. Pure: the page decides when to write.
+
+	   Two records, so a settings change rewrites kilobytes rather than the
+	   files: "state" (small, read to draw the card) and "files" (large, read
+	   only on Restore). They carry the same `sig`, and a restore refuses a pair
+	   whose sigs differ. Over the cap (counted in characters of JSON, which is
+	   bytes for everything but the odd accented name) the session is skipped;
+	   a league file that alone breaks the cap is dropped first, since the
+	   classes were cut out of it and still load without it. A synthetic
+	   universe world is not stored: it is regenerated from its seeds. */
+	const SESSION_MAX_BYTES = 60 * 1024 * 1024;
+	function sessionShape(files, opts) {
+		const o = opts || {};
+		const max = Number.isFinite(o.maxBytes) ? o.maxBytes : SESSION_MAX_BYTES;
+		const cache = o.cache || null;
+		const list = Array.isArray(files) ? files : [];
+		if (!list.length || list.some((f) => !f || !f.data || typeof f.data !== "object")) {
+			return { skip: "empty" };
+		}
+		if (list.some((f) => f.synthetic)) return { skip: "synthetic" };
+		try {
+			const str = (obj) => {
+				if (cache && cache.has(obj)) return cache.get(obj);
+				const s = JSON.stringify(obj);
+				if (cache) cache.set(obj, s);
+				return s;
+			};
+			let bytes = 0;
+			const recFiles = [];
+			for (const f of list) {
+				const json = str(f.data);
+				bytes += json.length;
+				if (bytes > max) return { skip: "toobig", bytes };
+				recFiles.push({
+					name: String(f.name || ""), json,
+					fingerprint: typeof f.fingerprint === "string" ? f.fingerprint : null,
+					warnings: (f.warnings || []).filter((w) => typeof w === "string").slice(0, 20),
+					league: -1,
+				});
+			}
+			const leagues = [];
+			const at = new Map();
+			let leagueDropped = false;
+			let leagueBytes = 0;
+			list.forEach((f, i) => {
+				const lg = f.league && f.league.data && typeof f.league.data === "object"
+					? f.league : null;
+				if (!lg) return;
+				if (!at.has(lg.data)) {
+					// false in the cache: known to break the cap on its own.
+					let json = cache && cache.has(lg.data) ? cache.get(lg.data) : undefined;
+					if (json === undefined) {
+						json = JSON.stringify(lg.data);
+						if (cache) cache.set(lg.data, json.length > max ? false : json);
+						if (json.length > max) json = false;
+					}
+					if (json === false) at.set(lg.data, -1);
+					else {
+						at.set(lg.data, leagues.length);
+						leagues.push({ name: String(lg.name || ""), json });
+						leagueBytes += json.length;
+					}
+				}
+				recFiles[i].league = at.get(lg.data);
+			});
+			if (bytes + leagueBytes > max) {
+				leagues.length = 0;
+				for (const rf of recFiles) rf.league = -1;
+				leagueBytes = 0;
+			}
+			leagueDropped = list.some((f) => f.league && f.league.data) &&
+				recFiles.every((rf) => rf.league === -1);
+			const total = bytes + leagueBytes;
+			const sig = list.map((f, i) => (f.name || "") + "|" + (f.fingerprint || "") + "|" +
+				recFiles[i].json.length).join("␞") + "␞" + leagues.length;
+			const names = list.map((f) => String(f.name || ""));
+			const players = list.reduce((a, f) => a +
+				(Array.isArray(f.data.players) ? f.data.players.length : 0), 0);
+			return {
+				skip: null, bytes: total, sig, leagueDropped,
+				state: {
+					id: "state", v: 1, sig, savedAt: Number.isFinite(o.now) ? o.now : Date.now(),
+					active: Number.isInteger(o.active) ? o.active : 0,
+					names, players, count: list.length, leagueDropped,
+					payload: typeof o.payloadJson === "string" ? o.payloadJson : null,
+				},
+				files: { id: "files", v: 1, sig, files: recFiles, leagues },
+			};
+		} catch (e) {
+			return { skip: "error", error: String(e && e.message || e) };
+		}
+	}
+
+	/* The files back out of a "files" record, shaped like the ones a drop
+	   builds (installFiles recomputes the fingerprints). Null for anything
+	   that does not parse, so a damaged record is "no session". */
+	function sessionFiles(rec) {
+		if (!rec || !Array.isArray(rec.files) || !rec.files.length) return null;
+		try {
+			const leagues = (Array.isArray(rec.leagues) ? rec.leagues : []).map((l) =>
+				(l && typeof l.json === "string"
+					? { name: String(l.name || ""), data: JSON.parse(l.json) } : null));
+			const out = [];
+			for (const f of rec.files) {
+				if (!f || typeof f.json !== "string") return null;
+				const data = JSON.parse(f.json);
+				if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+				const file = {
+					name: String(f.name || "class.json"), data,
+					warnings: (Array.isArray(f.warnings) ? f.warnings : [])
+						.filter((w) => typeof w === "string"),
+				};
+				if (Number.isInteger(f.league) && f.league >= 0 && leagues[f.league]) {
+					file.league = leagues[f.league];
+				}
+				out.push(file);
+			}
+			return out;
+		} catch (e) { return null; }
+	}
+
+	/* The card's sentence, from the small "state" record. */
+	function sessionLabel(meta, now) {
+		if (!meta || !Array.isArray(meta.names) || !meta.names.length) return "";
+		const names = meta.names.map(String);
+		const shown = names.slice(0, 3).join(", ") +
+			(names.length > 3 ? " and " + (names.length - 3) + " more" : "");
+		const n = Number(meta.players) || 0;
+		return "Restore last session: " + shown + ", " + n + " player" + (n === 1 ? "" : "s") +
+			", saved " + timeAgo(meta.savedAt, now);
+	}
+
 	/* Q21. The filter state, canonical, for saving under a name and for
 	   restoring a save from an older build (missing keys fill in empty). */
 	function emptyFilter() {
@@ -8997,6 +9170,7 @@
 		tableText, tableParts, domTableText, decorateTables, crc32, zipStore, exportFilename,
 		EXPORT_NAME_DEFAULT, cleanFilenameTemplate, parseQuery, queryMatch, queryCtx,
 		EXTRA_VALUE, EXTRA_COLUMNS, CSV_EXTRA, csvExtras, pathFlags, PATH_FILTERS, PLAYER_TAGS,
+		PIN_MAX, cleanStarredSettings, timeAgo, SESSION_MAX_BYTES, sessionShape, sessionFiles, sessionLabel,
 		cleanTags, tagsOf, emptyFilter, cleanFilter, cleanFilterViews, metricUnits, weightText,
 		SEARCH_HELP, SKILL_TAGS, neighborKeys, planRenames, planLockRows, lockPatchText,
 		RATING_COLUMN_KEYS,

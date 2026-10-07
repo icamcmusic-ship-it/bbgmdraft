@@ -2161,7 +2161,7 @@ async function gotoProspects(page) {
 			await new Promise((r) => setTimeout(r, 1200));
 			out.autosave = await new Promise((resolve) => {
 				try {
-					const req = indexedDB.open("bbgm-draft-workshop", 1);
+					const req = indexedDB.open("bbgm-draft-workshop");
 					req.onsuccess = () => {
 						const g = req.result.transaction("universes").objectStore("universes").get("autosave");
 						g.onsuccess = () => resolve(g.result ? g.result.seasons : 0);
@@ -4788,6 +4788,430 @@ async function gotoProspects(page) {
 		await page.waitForTimeout(1200);
 		ok("the bulk bar sets a class year for the selection",
 			(await page.evaluate((k) => window.App.state.overrides[k].classYear, pkey)) === "Senior");
+	}
+
+	/* --- Remembered session and pinned settings (audit Q1, Q5) ------------- */
+	{
+		console.log("\nRemembered session and pinned settings");
+		const settle = (ms) => page.waitForTimeout(ms || 500);
+		// One record out of the app's IndexedDB, opened without a version so
+		// reading can never start an upgrade; large strings are summarised.
+		const idbRead = (store, key, full) => page.evaluate(({ store, key, full }) => new Promise((resolve) => {
+			const req = indexedDB.open("bbgm-draft-workshop");
+			req.onerror = () => resolve({ error: "open" });
+			req.onsuccess = () => {
+				const db = req.result;
+				const out = { version: db.version, stores: Array.from(db.objectStoreNames).sort() };
+				if (!key || !db.objectStoreNames.contains(store)) { db.close(); resolve(out); return; }
+				const g = db.transaction(store).objectStore(store).get(key);
+				g.onsuccess = () => {
+					const r = g.result;
+					db.close();
+					if (!r) { out.rec = null; resolve(out); return; }
+					out.rec = full ? r : Object.assign({}, r, {
+						payload: r.payload ? JSON.parse(r.payload) : null,
+						files: r.files ? r.files.map((f) => ({ name: f.name, jsonLength: f.json.length })) : undefined,
+					});
+					resolve(out);
+				};
+				g.onerror = () => { db.close(); resolve(out); };
+			};
+		}), { store, key, full: !!full });
+		const until = async (fn, ms) => {
+			const end = Date.now() + (ms || 9000);
+			let last;
+			while (Date.now() < end) {
+				last = await fn();
+				if (last) return last;
+				await page.waitForTimeout(250);
+			}
+			return last;
+		};
+		const star = (key) => page.locator(".ctl:has(#" + key + ") .star-btn").first();
+
+		/* ---- Q5: pinned settings ------------------------------------------ */
+		await page.goto(base);
+		await clearStorage(page);
+		await page.goto(base);
+		ok("with nothing saved the Restore card is not shown",
+			(await page.locator("#sessionCard").isHidden()));
+		await page.setInputFiles("#file", fixture);
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		await page.evaluate(() => document.querySelectorAll("#settings details.grp").forEach((d) => { d.open = true; }));
+		await settle(300);
+		const pin0 = await page.evaluate(() => {
+			const g = document.querySelector("#settings details.grp");
+			const h = document.getElementById("pinnedHint");
+			return {
+				first: g && g.id, hint: h && h.textContent, hintShown: !!h && !h.hidden,
+				stars: document.querySelectorAll("#settings .star-btn").length,
+				label: document.querySelector(".ctl:has(#pace) .star-btn").getAttribute("aria-label"),
+				pressed: document.querySelector(".ctl:has(#pace) .star-btn").getAttribute("aria-pressed"),
+				ids: Array.from(document.querySelectorAll("#settings [id]")).length ===
+					new Set(Array.from(document.querySelectorAll("#settings [id]")).map((n) => n.id)).size,
+			};
+		});
+		ok("a Pinned group sits above the first group, with a hint while empty",
+			pin0.first === "grp-pinned" && /Star a setting to keep it here/.test(pin0.hint) && pin0.hintShown, JSON.stringify(pin0));
+		ok("every setting has a star toggle labelled \"Pin <label> to the top\", not pressed",
+			pin0.stars >= 40 && pin0.label === "Pin Pace (poss / 40) to the top" && pin0.pressed === "false", JSON.stringify(pin0));
+		ok("...and ids stay unique", pin0.ids);
+		const idxBefore = await page.evaluate(() => {
+			const c = document.getElementById("pace").closest(".ctl");
+			return Array.from(c.parentNode.children).indexOf(c);
+		});
+		await star("pace").focus();
+		await page.keyboard.press("Enter");
+		await settle(200);
+		for (const k of ["ovrMode", "classQuality", "signatureSkills"]) await star(k).click();
+		await settle(300);
+		const pin1 = await page.evaluate(() => ({
+			homes: ["pace", "ovrMode", "classQuality", "signatureSkills"].map((k) => document.getElementById(k).closest("details").id),
+			one: ["pace", "ovrMode"].every((k) => document.querySelectorAll("#" + k).length === 1),
+			hintShown: !document.getElementById("pinnedHint").hidden,
+			pressed: document.querySelector(".ctl:has(#pace) .star-btn").getAttribute("aria-pressed"),
+			list: window.App.state.starredSettings,
+			focus: document.activeElement && document.activeElement.className,
+			dim: (() => {
+				const c = document.getElementById("classQuality").closest(".ctl");
+				return { opacity: c.style.opacity, disabled: document.getElementById("classQuality").disabled };
+			})(),
+		}));
+		ok("starring MOVES the real controls into the group (one element each, keyboard works)",
+			pin1.homes.every((h) => h === "grp-pinned") && pin1.one && !pin1.hintShown && pin1.pressed === "true" &&
+			pin1.list.join() === "pace,ovrMode,classQuality,signatureSkills", JSON.stringify(pin1));
+		ok("...the curve-only dimming still applies to a pinned control", pin1.dim.opacity === "0.38" && pin1.dim.disabled, JSON.stringify(pin1.dim));
+		// Editing the pinned control edits the same cfg; markers, locks, reverts, group counts follow it.
+		await page.evaluate(() => {
+			const i = document.getElementById("pace");
+			i.value = "70";
+			i.dispatchEvent(new Event("input", { bubbles: true }));
+		});
+		await settle(400);
+		const pin2 = await page.evaluate(() => {
+			const c = document.getElementById("pace").closest(".ctl");
+			const badge = (id) => { const b = document.querySelector("#" + id + " > summary .grp-changed"); return b && !b.hidden ? b.textContent : ""; };
+			return {
+				cfg: window.App.state.cfg.pace, dot: !!c.querySelector(".modified-dot"), revert: !!c.querySelector(".revert-btn"),
+				lock: !!c.querySelector(".lock-btn"), pinnedBadge: badge("grp-pinned"), homeBadge: badge("grp-season"),
+			};
+		});
+		ok("editing a pinned slider changes the same cfg and shows its changed dot, revert and lock",
+			pin2.cfg === 70 && pin2.dot && pin2.revert && pin2.lock, JSON.stringify(pin2));
+		ok("...the Pinned group and the setting's own group both count it as changed",
+			pin2.pinnedBadge === "changed: 1" && pin2.homeBadge === "changed: 1", JSON.stringify(pin2));
+		await page.locator(".ctl:has(#pace) .lock-btn").click();
+		ok("the randomizer lock works from the pinned group", await page.evaluate(() => window.App.state.settingLocks.pace === true));
+		await page.locator(".ctl:has(#pace) .lock-btn").click();
+		// Search and "only what I changed" see pinned controls.
+		await page.fill("#settingSearch", "pace");
+		await settle(200);
+		const sr = await page.evaluate(() => ({
+			pace: !document.getElementById("pace").closest(".ctl").classList.contains("settings-hidden"),
+			ovr: document.getElementById("ovrMode").closest(".ctl").classList.contains("settings-hidden"),
+			group: !document.getElementById("grp-pinned").classList.contains("settings-hidden"),
+		}));
+		ok("the settings search finds a pinned control and hides the other pinned ones", sr.pace && sr.ovr && sr.group, JSON.stringify(sr));
+		await page.fill("#settingSearch", "potential bias");
+		await settle(200);
+		ok("...and hides the whole Pinned group when none of its settings match",
+			await page.evaluate(() => document.getElementById("grp-pinned").classList.contains("settings-hidden")));
+		await page.fill("#settingSearch", "");
+		await page.check("#onlyChanged");
+		await settle(200);
+		const oc = await page.evaluate(() => ({
+			pace: !document.getElementById("pace").closest(".ctl").classList.contains("settings-hidden"),
+			ovr: document.getElementById("ovrMode").closest(".ctl").classList.contains("settings-hidden"),
+		}));
+		ok("\"Show only what I have changed\" keeps a changed pinned control and hides an unchanged one", oc.pace && oc.ovr, JSON.stringify(oc));
+		await page.uncheck("#onlyChanged");
+		await settle(200);
+		// The cap, the unpin position and the status.
+		for (const k of ["classDepth", "eliteCount", "potBias", "potSpread"]) await star(k).click();
+		await star("specialization").click();
+		await settle(300);
+		const cap = await page.evaluate(() => ({
+			n: window.App.state.starredSettings.length,
+			home: document.getElementById("specialization").closest("details").id,
+			status: document.getElementById("status").textContent,
+		}));
+		ok("at most 8 settings can be pinned; the ninth is refused with a message",
+			cap.n === 8 && cap.home === "grp-builds" && /Up to 8/.test(cap.status), JSON.stringify(cap));
+		await star("pace").click();
+		await settle(300);
+		const un = await page.evaluate(() => {
+			const c = document.getElementById("pace").closest(".ctl");
+			return { home: c.closest("details").id, idx: Array.from(c.parentNode.children).indexOf(c),
+				n: window.App.state.starredSettings.length, marks: document.getElementById("grp-pinned").querySelectorAll("#pace").length };
+		});
+		ok("unstarring puts the control back at its original place in its own group",
+			un.home === "grp-season" && un.idx === idxBefore && un.n === 7 && un.marks === 0, JSON.stringify(un) + " vs " + idxBefore);
+		// A saved list is validated against the known settings and the cap.
+		await page.evaluate(() => {
+			const k = "bbgm-draft-workshop/v1";
+			const p = JSON.parse(localStorage.getItem(k));
+			p.starredSettings = ["__proto__", "nope", "pace", "pace", "seed", 5, "constructor", "potBias"];
+			localStorage.setItem(k, JSON.stringify(p));
+		});
+		await page.reload();
+		await settle(800);
+		ok("a hand-edited pin list keeps only known settings, once each",
+			(await page.evaluate(() => window.App.state.starredSettings.join())) === "pace,potBias");
+
+		/* ---- Q1: remember and restore the session ------------------------- */
+		await page.goto(base);
+		await clearStorage(page);
+		await page.goto(base);
+		await page.setInputFiles("#file", fixture);
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		await page.evaluate(() => document.querySelectorAll("#settings details.grp").forEach((d) => { d.open = true; }));
+		await star("pace").click();
+		await page.evaluate(() => {
+			const i = document.getElementById("pace");
+			i.value = "70";
+			i.dispatchEvent(new Event("input", { bubbles: true }));
+		});
+		await gotoProspects(page);
+		await page.locator("table tbody tr").first().click();
+		await page.waitForSelector(".editor", { timeout: 8000 });
+		await page.selectOption(".editor select >> nth=0", { index: 2 });
+		await page.locator('.editor button:has-text("Apply lock")').click();
+		await page.waitForTimeout(600);
+		const saved = await until(async () => {
+			const st = (await idbRead("session", "state")).rec;
+			return st && st.payload && st.payload.cfg && st.payload.cfg.pace === 70 &&
+				Object.keys(st.payload.overrides || {}).length === 1 ? st : null;
+		}, 12000);
+		ok("the class is saved to the session store after the debounce (names, count, settings and the lock)",
+			!!saved && saved.names.join() === "bbgm-uismoke-class.json" && saved.players === 70 && saved.active === 0 &&
+			saved.payload.universe === null, JSON.stringify(saved && { n: saved.names, p: saved.players }));
+		const filesRec = (await idbRead("session", "files")).rec;
+		ok("...with the files record under the same signature", !!filesRec && filesRec.sig === saved.sig &&
+			filesRec.files.length === 1 && filesRec.files[0].jsonLength > 1000);
+		const meta0 = await idbRead("session", null);
+		ok("the database is at version 2 and still has the universe store",
+			meta0.version === 2 && meta0.stores.join() === "session,universes", JSON.stringify(meta0));
+		await page.reload();
+		await settle(1000);
+		const card = await page.evaluate(() => ({
+			shown: !document.getElementById("sessionCard").hidden,
+			text: document.getElementById("sessionCardText").textContent,
+			files: window.App.state.files.length,
+			empty: !document.getElementById("empty").hidden,
+			buttons: Array.from(document.querySelectorAll("#sessionCard button")).map((b) => b.textContent),
+			pinnedHome: document.getElementById("pace").closest("details").id,
+			pins: window.App.state.starredSettings.join(),
+		}));
+		ok("after a reload the empty screen offers the session and does not restore it by itself",
+			card.shown && card.empty && card.files === 0 &&
+			/^Restore last session: bbgm-uismoke-class\.json, 70 players, saved (just now|a minute ago|\d+ minutes? ago)$/.test(card.text) &&
+			card.buttons.join() === "Restore,Discard", JSON.stringify(card));
+		ok("a pinned setting is still pinned after the reload", card.pinnedHome === "grp-pinned" && /^pace\b/.test(card.pins), JSON.stringify(card));
+		await page.locator("#btnSessionRestore").click();
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		await settle(800);
+		const back = await page.evaluate(() => {
+			const s = window.App.state;
+			return {
+				files: s.files.length, name: s.files[0].name, pace: s.cfg.pace, locks: Object.keys(s.overrides).length,
+				fp: s.overrideFingerprint === s.files[0].fingerprint, card: document.getElementById("sessionCard").hidden,
+				slider: document.getElementById("pace").value, rows: document.querySelectorAll("table tbody tr").length,
+			};
+		});
+		ok("Restore loads the class through the normal path with its settings and lock",
+			back.files === 1 && back.name === "bbgm-uismoke-class.json" && back.pace === 70 && back.locks === 1 && back.fp &&
+			back.card && back.slider === "70" && back.rows > 20, JSON.stringify(back));
+		await page.evaluate(() => {
+			const i = document.getElementById("pace");
+			i.value = "66";
+			i.dispatchEvent(new Event("input", { bubbles: true }));
+		});
+		ok("...and the pinned control still edits the same cfg",
+			(await page.evaluate(() => window.App.state.cfg.pace)) === 66);
+		// Locks honour the file fingerprint on a restore as they do on a drop.
+		await settle(1800);
+		await page.evaluate(() => new Promise((resolve) => {
+			const req = indexedDB.open("bbgm-draft-workshop");
+			req.onsuccess = () => {
+				const db = req.result;
+				const tx = db.transaction("session", "readwrite");
+				const store = tx.objectStore("session");
+				const g = store.get("state");
+				g.onsuccess = () => {
+					const r = g.result;
+					const p = JSON.parse(r.payload);
+					p.overrideFingerprint = "someone-elses-class";
+					r.payload = JSON.stringify(p);
+					store.put(r);
+				};
+				tx.oncomplete = () => { db.close(); resolve(); };
+			};
+		}));
+		await page.reload();
+		await settle(1000);
+		await page.locator("#btnSessionRestore").click();
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		await settle(600);
+		const dropped = await page.evaluate(() => ({
+			locks: Object.keys(window.App.state.overrides).length,
+			warn: !document.getElementById("warnBanner").hidden && /came from a different draft class/.test(document.getElementById("warnBanner").textContent),
+		}));
+		ok("a session whose locks belong to another class drops them with a warning, as a drop does", dropped.locks === 0 && dropped.warn, JSON.stringify(dropped));
+		// Discard removes it, and a reload no longer offers it.
+		await settle(1800);
+		await page.reload();
+		await settle(1000);
+		ok("the card is back after another reload", await page.locator("#sessionCard").isVisible());
+		await page.locator("#btnSessionDiscard").click();
+		await settle(500);
+		const gone = { hidden: await page.locator("#sessionCard").isHidden(), st: (await idbRead("session", "state")).rec,
+			fl: (await idbRead("session", "files")).rec };
+		ok("Discard hides the card and deletes both records", gone.hidden && gone.st === null && gone.fl === null, JSON.stringify(gone));
+		await page.reload();
+		await settle(1000);
+		ok("...and a reload no longer offers it", await page.locator("#sessionCard").isHidden());
+
+		// Several files: the active one comes back; a stranded universe still offers the card.
+		const dirS = fs.mkdtempSync(path.join(os.tmpdir(), "bbgm-uismoke-sess-"));
+		const sFiles = [1, 2].map((y) => {
+			const c = V.realisticClass("sess" + y, 40);
+			c.startingSeason = 2024 + y;
+			c.players.forEach((p) => { p.draft.year = 2024 + y; p.born.year = 2024 + y - 20; p.pid += y * 100; });
+			const f = path.join(dirS, "s" + y + ".json");
+			fs.writeFileSync(f, JSON.stringify(c));
+			return f;
+		});
+		await page.setInputFiles("#file", sFiles);
+		await page.waitForFunction(() => window.App.state.files.length === 2, null, { timeout: 30000 });
+		await page.selectOption("#fileSelect", "1");
+		await page.evaluate(() => {
+			const u = document.getElementById("universe");
+			u.checked = true;
+			u.dispatchEvent(new Event("change", { bubbles: true }));
+		});
+		await page.waitForFunction(() => {
+			const u = window.App.state.universe;
+			return u && !u.running && u.rows && u.rows.length >= 2;
+		}, null, { timeout: 120000 });
+		await until(async () => {
+			const st = (await idbRead("session", "state")).rec;
+			return st && st.count === 2 && st.active === 1 && st.payload && st.payload.cfg.universe === true;
+		}, 12000);
+		const autoRec = await until(async () => {
+			const r = (await idbRead("universes", "autosave", true)).rec;
+			return r && r.universe && r.universe.rows.length >= 2 ? r : null;
+		}, 12000);
+		await settle(800);
+		await page.reload();
+		await settle(2500);
+		const stranded = await page.evaluate(() => ({
+			files: window.App.state.files.length, stranded: !!document.getElementById("btnStrandedLoad"),
+			card: !document.getElementById("sessionCard").hidden, text: document.getElementById("sessionCardText").textContent,
+		}));
+		ok("a stranded universe (saved, no files) still offers the Restore card",
+			stranded.files === 0 && stranded.stranded && stranded.card && /s1\.json, s2\.json, 80 players/.test(stranded.text), JSON.stringify(stranded));
+		await page.locator("#btnSessionRestore").click();
+		await page.waitForFunction(() => window.App.state.files.length === 2 && !window.App.state.universe.running &&
+			window.App.state.universe.rows.length >= 2 && !document.getElementById("errBanner").offsetParent,
+		null, { timeout: 120000 });
+		await settle(1500);
+		const multi = await page.evaluate(() => ({
+			active: window.App.state.active, sel: document.getElementById("fileSelect").value,
+			universe: window.App.state.cfg.universe, rows: window.App.state.universe.rows.length,
+		}));
+		ok("Restore brings back every file, the active one and universe mode",
+			multi.active === 1 && multi.sel === "1" && multi.universe === true && multi.rows >= 2, JSON.stringify(multi));
+		fs.rmSync(dirS, { recursive: true, force: true });
+
+		// The database upgrade: a version 1 database holding a universe autosave.
+		ok("(setup) the universe autosave was captured to downgrade", !!autoRec);
+		const off = "http://127.0.0.1:" + PORT + "/css/style.css";
+		await page.goto(off);
+		const old = await page.evaluate((rec) => new Promise((resolve) => {
+			const del = indexedDB.deleteDatabase("bbgm-draft-workshop");
+			const go = () => {
+				const req = indexedDB.open("bbgm-draft-workshop", 1);
+				req.onupgradeneeded = () => req.result.createObjectStore("universes", { keyPath: "slot" });
+				req.onsuccess = () => {
+					const db = req.result;
+					const tx = db.transaction("universes", "readwrite");
+					tx.objectStore("universes").put(rec);
+					tx.objectStore("universes").put(Object.assign({}, rec, { slot: "slot1", name: "an old slot" }));
+					tx.oncomplete = () => {
+						const out = { version: db.version, stores: Array.from(db.objectStoreNames) };
+						db.close();
+						resolve(out);
+					};
+				};
+				req.onerror = () => resolve({ error: "open" });
+			};
+			del.onsuccess = go;
+			del.onerror = go;
+			del.onblocked = go;
+		}), autoRec);
+		ok("(setup) a version 1 database with only the universes store", old.version === 1 && old.stores.join() === "universes", JSON.stringify(old));
+		await page.goto(base);
+		await settle(2500);
+		const up = await idbRead("universes", "autosave", true);
+		const slot1 = await idbRead("universes", "slot1", true);
+		const appRows = await page.evaluate(() => window.App.state.universe.rows.length);
+		ok("an older database upgrades to version 2 and gains the session store",
+			up.version === 2 && up.stores.join() === "session,universes", JSON.stringify(up.stores) + " v" + up.version);
+		ok("...the universe autosave survives the upgrade and is read back by the app",
+			!!up.rec && up.rec.universe.rows.length === autoRec.universe.rows.length && appRows === autoRec.universe.rows.length,
+			(up.rec && up.rec.universe.rows.length) + " rows, app " + appRows);
+		ok("...and so does a named slot, untouched", !!slot1.rec && slot1.rec.name === "an old slot" && slot1.rec.seasons === autoRec.seasons);
+		await page.setInputFiles("#file", fixture);
+		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		const after = await until(async () => {
+			const st = (await idbRead("session", "state")).rec;
+			return st && st.names.join() === "bbgm-uismoke-class.json" ? st : null;
+		}, 12000);
+		ok("...and the new store takes a session right away", !!after);
+
+		// Failure modes: no IndexedDB at all, and a store that is full. Said once, nothing thrown.
+		for (const mode of ["missing", "full"]) {
+			const pg = await browser.newPage({ viewport: { width: 1500, height: 980 } });
+			const errs = [];
+			pg.on("pageerror", (e) => errs.push(String(e.message)));
+			pg.on("console", (m) => { if (m.type() === "error") errs.push(m.text()); });
+			pg.on("dialog", (d) => d.accept());
+			await pg.addInitScript((mode) => {
+				window.__said = [];
+				document.addEventListener("DOMContentLoaded", () => {
+					new MutationObserver(() => {
+						const t = document.getElementById("status").textContent;
+						if (t) window.__said.push(t);
+					}).observe(document.getElementById("status"), { childList: true, characterData: true, subtree: true });
+				});
+				if (mode === "missing") Object.defineProperty(window, "indexedDB", { value: undefined, configurable: true });
+				else {
+					const put = window.IDBObjectStore.prototype.put;
+					window.IDBObjectStore.prototype.put = function () {
+						if (this.name === "session") throw new window.DOMException("full", "QuotaExceededError");
+						return put.apply(this, arguments);
+					};
+				}
+			}, mode);
+			await pg.goto(base);
+			await pg.evaluate(() => localStorage.clear());
+			await pg.setInputFiles("#file", fixture);
+			await pg.waitForSelector("table tbody tr", { timeout: 30000 });
+			for (let i = 0; i < 2; i++) {
+				await pg.evaluate((i) => {
+					const el = document.getElementById("pace");
+					el.value = String(60 + i);
+					el.dispatchEvent(new Event("input", { bubbles: true }));
+					el.dispatchEvent(new Event("change", { bubbles: true }));
+				}, i);
+				await pg.waitForTimeout(3200);
+			}
+			const said = (await pg.evaluate(() => window.__said)).filter((t) => /IndexedDB|storage is full/.test(t));
+			ok("with IndexedDB " + mode + ", the page keeps working and says so once, without an error",
+				said.length === 1 && errs.length === 0 && (await pg.locator("table tbody tr").count()) > 20,
+				JSON.stringify(said) + " " + errs.join(" | "));
+			await pg.close();
+		}
 	}
 
 	console.log("\nNo errors");

@@ -156,6 +156,11 @@
 		   awards, "model" is everything. Persisted like every other view
 		   choice. The search box and "only what I changed" cut across it. */
 		settingTier: "model",
+		/* The settings starred into the "Pinned" group at the top of the
+		   panel (audit Q5), in the order they were pinned. Not to be confused
+		   with cfg.pinned (settings the user has decided; see pinSetting) or
+		   state.pinned (the class kept for comparison). */
+		starredSettings: [],
 		/* RUN HISTORY. The seed list remembers twelve seeds, and a seed is not
 		   a run: the run is seed + settings + locks + the pool and anomaly
 		   memories it was drawn against. One entry per reroll, labelled by
@@ -339,6 +344,7 @@
 
 	function persist() {
 		scheduleAutosave();
+		scheduleSessionSave();
 		try {
 			localStorage.setItem(STORE_KEY, JSON.stringify(payload()));
 		} catch (e) {
@@ -407,6 +413,7 @@
 			randomizePerFile: state.randomizePerFile,
 			settingLocks: state.settingLocks,
 			settingTier: state.settingTier,
+			starredSettings: state.starredSettings,
 			challenge: state.challenge,
 			challengeProgress: state.challengeProgress,
 			replayRun: state.replayRun,
@@ -552,9 +559,13 @@
 		};
 	}
 
-	function restore() {
-		let saved = null;
-		try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) { saved = null; }
+	/* `given` is a payload to apply instead of the one in localStorage: what
+	   "Restore last session" reads out of IndexedDB. */
+	function restore(given) {
+		let saved = given || null;
+		if (!given) {
+			try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) { saved = null; }
+		}
 		if (!saved || typeof saved !== "object" || Array.isArray(saved)) return null;
 		/* A payload from an older schema is MIGRATED. One that cannot be
 		   migrated is discarded rather than half-applied, and only `theme` is
@@ -679,6 +690,9 @@
 		state.settingLocks = validFlagMap(saved.settingLocks) || state.settingLocks;
 		if (validString(saved.settingTier, SETTING_TIERS.map((t) => t[0]))) {
 			state.settingTier = saved.settingTier;
+		}
+		if (Array.isArray(saved.starredSettings)) {
+			state.starredSettings = V.cleanStarredSettings(saved.starredSettings, starrable, V.PIN_MAX);
 		}
 		if (Array.isArray(saved.sessions)) {
 			state.sessions = saved.sessions.filter((x) => x && typeof x === "object" &&
@@ -1738,6 +1752,7 @@
 		}
 		document.body.classList.add("density-" + state.density);
 		paintLockButtons();
+		paintStarButtons();
 		paintGroupResets();
 	}
 
@@ -2077,6 +2092,15 @@
 			const key = node.id;
 			if (key && Object.prototype.hasOwnProperty.call(CFG.DEFAULTS, key)) keys.push(key);
 		}
+		/* A pinned setting is moved out of its group (see applyStarredSettings)
+		   but still belongs to it: its changed count and Reset include it. */
+		if (details.id && details.id !== "grp-pinned") {
+			for (const ctl of document.querySelectorAll("#grp-pinned > .ctl")) {
+				const input = ctl.querySelector("input[id], select[id]");
+				if (input && ctl.dataset.home === details.id &&
+					Object.prototype.hasOwnProperty.call(CFG.DEFAULTS, input.id)) keys.push(input.id);
+			}
+		}
 		return keys;
 	}
 
@@ -2196,7 +2220,7 @@
 			if (label) {
 				const dot = el("span", "modified-dot");
 				dot.title = "Modified from default (" + defaultValue + ")";
-				label.appendChild(dot);
+				label.insertBefore(dot, label.querySelector(".star-btn"));
 				const revertBtn = el("button", "revert-btn", "↺");
 				revertBtn.type = "button";
 				revertBtn.title = "Revert to default (" + defaultValue + ")";
@@ -2216,7 +2240,7 @@
 					paintConfig();
 					scheduleRun();
 				});
-				label.appendChild(revertBtn);
+				label.insertBefore(revertBtn, label.querySelector(".star-btn"));
 			}
 		}
 	}
@@ -3136,7 +3160,8 @@
 				let show = true;
 				if (q && settingText(ctl).indexOf(q) === -1) show = false;
 				// A setting you changed is never hidden behind a tier.
-				if (show && !q && !changedOnly && !changed &&
+				// A pinned setting is one the user asked to see: no tier hides it.
+				if (show && !q && !changedOnly && !changed && grp.id !== "grp-pinned" &&
 					TIER_RANK[tierOf(key)] > tierRank) {
 					show = false;
 					if (isSetting) tiered++;
@@ -3158,7 +3183,8 @@
 			   — and hiding it because "none of its controls matched" hid a
 			   panel that has no controls to match. Only a group that HAS
 			   controls and matched none of them is hidden. */
-			grp.classList.toggle("settings-hidden", ctls.length > 0 && any === 0);
+			grp.classList.toggle("settings-hidden", any === 0 &&
+				(ctls.length > 0 || (grp.id === "grp-pinned" && !!(q || changedOnly))));
 			if ((q || changedOnly) && any > 0) grp.open = true;
 		}
 		const hid = $("settingTierHidden");
@@ -3225,6 +3251,105 @@
 			b.setAttribute("aria-label", (locked ? "Unlock " : "Lock ") + settingLabel(key) +
 				" against the randomizer");
 			b.setAttribute("aria-pressed", locked ? "true" : "false");
+		}
+	}
+
+	/* PINNED SETTINGS (audit Q5).
+
+	   A star on each setting's label keeps up to Views.PIN_MAX of them in a
+	   "Pinned" group above the first group. The REAL control is moved there
+	   (its .ctl, label and all) and moved back to a marker left in its own
+	   group when unstarred, so there is one element per setting, ids stay
+	   unique, and everything keyed on the element keeps working wherever it
+	   sits: the changed dot and revert button, the randomizer lock, the
+	   curve-only dimming, the search and the "only what I changed" filter.
+	   The list lives in state.starredSettings and in the persisted payload. */
+	const starHomes = new Map();
+
+	// A key with a config default whose control is a plain labelled .ctl of a group.
+	function starrable(k) {
+		if (typeof k !== "string" || !Object.prototype.hasOwnProperty.call(CFG.DEFAULTS, k)) return false;
+		const input = $(k);
+		const ctl = input && input.closest ? input.closest(".ctl") : null;
+		const host = ctl && ctl.parentNode;
+		return !!(host && host.matches && host.matches("details.grp") &&
+			ctl.querySelector("input, select") === input && ctl.querySelector("label"));
+	}
+
+	function applyStarredSettings() {
+		const box = $("grp-pinned");
+		if (!box) return;
+		const want = new Set(state.starredSettings);
+		for (const [key, mark] of Array.from(starHomes)) {
+			if (want.has(key)) continue;
+			const input = $(key);
+			const ctl = input && input.closest(".ctl");
+			if (ctl && mark.parentNode) mark.parentNode.insertBefore(ctl, mark);
+			if (ctl) delete ctl.dataset.home;
+			mark.remove();
+			starHomes.delete(key);
+		}
+		for (const key of state.starredSettings) {
+			if (starHomes.has(key) || !starrable(key)) continue;
+			const ctl = $(key).closest(".ctl");
+			const mark = document.createComment("home of " + key);
+			ctl.dataset.home = ctl.parentNode.id || "";
+			ctl.parentNode.insertBefore(mark, ctl);
+			starHomes.set(key, mark);
+			box.appendChild(ctl);
+		}
+		const hint = $("pinnedHint");
+		if (hint) hint.hidden = state.starredSettings.length > 0;
+	}
+
+	function toggleStar(key) {
+		const list = state.starredSettings.slice();
+		const i = list.indexOf(key);
+		if (i !== -1) list.splice(i, 1);
+		else if (list.length >= V.PIN_MAX) {
+			setStatus("Up to " + V.PIN_MAX + " settings can be pinned. Unpin one first.");
+			return;
+		} else list.push(key);
+		state.starredSettings = list;
+		applyStarredSettings();
+		paintStarButtons();
+		applySettingFilter();
+		paintGroupResets();
+		persist();
+		// The control moved; keep the keyboard where it was.
+		const star = $(key) && $(key).closest(".ctl").querySelector(".star-btn");
+		if (star) star.focus();
+		announce((i === -1 ? "Pinned " : "Unpinned ") + settingLabel(key));
+	}
+
+	function paintStarButtons() {
+		for (const ctl of document.querySelectorAll("#settings details.grp > .ctl")) {
+			const input = ctl.querySelector("input, select");
+			const key = input && input.id;
+			if (!key || !starrable(key)) continue;
+			const label = ctl.querySelector("label");
+			let b = label.querySelector(".star-btn");
+			if (!b) {
+				b = el("button", "star-btn");
+				b.type = "button";
+				b.addEventListener("click", (e) => {
+					e.preventDefault();
+					e.stopPropagation();
+					toggleStar(key);
+				});
+				label.appendChild(b);
+			}
+			const on = state.starredSettings.indexOf(key) !== -1;
+			const name = settingLabel(key);
+			/* The star lives inside the label, which would become part of the
+			   control's accessible name; a select or checkbox keeps its own. */
+			if (input.type !== "range" && !input.hasAttribute("aria-label")) {
+				input.setAttribute("aria-label", name);
+			}
+			b.textContent = on ? "\u2605" : "\u2606";
+			b.title = (on ? "Pinned: click to unpin " : "Pin ") + name + (on ? "" : " to the top");
+			b.setAttribute("aria-label", "Pin " + name + " to the top");
+			b.setAttribute("aria-pressed", on ? "true" : "false");
 		}
 	}
 
@@ -4551,7 +4676,9 @@
 			for (const f of state.files) if (!f.synthetic) f.fingerprint = fingerprint(f);
 			state.runners = state.files.map((f) => global.Engine.createRunner(f.data));
 			state.results = [];
-			state.active = 0;
+			/* A restored session names the file it was on; a drop starts at 0. */
+			state.active = opts && Number.isInteger(opts.active) &&
+				opts.active >= 0 && opts.active < state.files.length ? opts.active : 0;
 			/* Patches keyed by file index, and this is a new set of files —
 			   keeping the old map would silently hand a randomized-settings
 			   patch drawn for somebody else's third file to whatever loads
@@ -4582,6 +4709,7 @@
 				sel.appendChild(new Option(
 					(f.data.startingSeason || "?") + " — " + f.name, String(i)));
 			});
+			sel.value = String(state.active);
 			sel.hidden = state.files.length < 2;
 			if ($("btnAddFiles")) $("btnAddFiles").hidden = false;
 			$("btnExportAll").hidden = state.files.length < 2;
@@ -7881,6 +8009,11 @@
 	   access is wrapped; a failure resolves to null rather than throwing. */
 	const IDB_NAME = "bbgm-draft-workshop";
 	const IDB_STORE = "universes";
+	/* Version 2 added SESSION_STORE (the remembered session, see below).
+	   onupgradeneeded creates a store only when it is missing and never
+	   deletes one, so a version 1 database keeps its universe autosave. */
+	const IDB_VERSION = 2;
+	const SESSION_STORE = "session";
 	const UNIVERSE_SLOTS = 5;
 	const AUTO_SLOT = "autosave";
 	let idbPromise = null;
@@ -7894,11 +8027,16 @@
 		idbPromise = new Promise((resolve) => {
 			try {
 				if (typeof indexedDB === "undefined" || !indexedDB) { resolve(null); return; }
-				const req = indexedDB.open(IDB_NAME, 1);
+				const req = indexedDB.open(IDB_NAME, IDB_VERSION);
 				req.onupgradeneeded = () => {
-					try { req.result.createObjectStore(IDB_STORE, { keyPath: "slot" }); } catch (e) { /* exists */ }
+					for (const [n, k] of [[IDB_STORE, "slot"], [SESSION_STORE, "id"]]) {
+						try { if (!req.result.objectStoreNames.contains(n)) req.result.createObjectStore(n, { keyPath: k }); } catch (e) { /* exists */ }
+					}
 				};
-				req.onsuccess = () => resolve(req.result);
+				req.onsuccess = () => {
+					req.result.onversionchange = () => { try { req.result.close(); } catch (e) { /* gone */ } idbPromise = null; };
+					resolve(req.result);
+				};
 				req.onerror = () => resolve(null);
 				req.onblocked = () => resolve(null);
 			} catch (e) { resolve(null); }
@@ -8060,6 +8198,225 @@
 			setStatus("Cleared " + slot + ".");
 			return true;
 		});
+	}
+
+	/* REMEMBER AND RESTORE THE SESSION (audit Q1).
+
+	   A reload used to land on the empty drop screen: the settings, locks and
+	   presets survived (localStorage) but the class files, which are too big
+	   for it, did not. They go to the SESSION_STORE of the same database as
+	   the universe autosave, written 1.5 s after the last change and when the
+	   page is hidden, as two records so that a settings change rewrites
+	   kilobytes ("state": names, counts, the active file and a snapshot of the
+	   persisted payload) and only a change of FILES rewrites the megabytes
+	   ("files"). The empty screen then OFFERS to restore it; nothing is ever
+	   restored by itself. Every access is wrapped, resolves to a result object
+	   rather than throwing, and a problem is said once through setStatus. See
+	   Views.sessionShape for the record shapes and the size cap. */
+	const SESSION_DEBOUNCE = 1500;
+	let sessionTimer = null;
+	let sessionDirty = false;
+	let sessionBusy = false;
+	let sessionWritten = null;
+	let sessionSaid = "";
+	let sessionMeta = null;
+	const sessionJson = new WeakMap();
+
+	function sessionTx(mode, make) {
+		return idbOpen().then((db) => new Promise((resolve) => {
+			if (!db) { resolve({ ok: false, why: "unavailable" }); return; }
+			try {
+				const tx = db.transaction(SESSION_STORE, mode);
+				const req = make(tx.objectStore(SESSION_STORE));
+				tx.oncomplete = () => resolve({ ok: true, value: req ? req.result : undefined });
+				tx.onerror = tx.onabort = () => resolve({
+					ok: false, why: (tx.error && tx.error.name) || "error",
+				});
+			} catch (e) { resolve({ ok: false, why: (e && e.name) || "error" }); }
+		})).catch(() => ({ ok: false, why: "error" }));
+	}
+
+	// Each distinct problem is said once, not on every autosave after it.
+	function sessionSay(key, text) {
+		if (sessionSaid === key) return;
+		sessionSaid = key;
+		try { setStatus(text, true); } catch (e) { /* nothing to report to */ }
+	}
+
+	function sessionProblem(why) {
+		if (why === "unavailable") {
+			return ["unavailable", "This browser is not giving the page IndexedDB, so the " +
+				"class files cannot be restored after a reload. Settings are still saved."];
+		}
+		if (/Quota/i.test(why)) {
+			return ["quota", "Browser storage is full, so this session will not be offered " +
+				"for restore after a reload. Delete a universe slot or free some space."];
+		}
+		return ["error:" + why, "Could not remember this session (" + why + ")."];
+	}
+
+	function scheduleSessionSave() {
+		if (!state.files.length) return;
+		if (idbOk === false) {
+			const [key, text] = sessionProblem("unavailable");
+			sessionSay(key, text);
+			return;
+		}
+		sessionDirty = true;
+		clearTimeout(sessionTimer);
+		sessionTimer = setTimeout(saveSessionNow, SESSION_DEBOUNCE);
+	}
+
+	function saveSessionNow() {
+		clearTimeout(sessionTimer);
+		sessionTimer = null;
+		try {
+			if (sessionBusy) { sessionTimer = setTimeout(saveSessionNow, SESSION_DEBOUNCE); return; }
+			if (!sessionDirty) return;
+			sessionDirty = false;
+			if (!state.files.length || state.universe.running) return;
+			/* The persisted payload, minus what is not the session's: the
+			   universe has its own autosave, the run history and the look of
+			   the page are not rolled back by restoring a class. */
+			const snap = Object.assign(payload(), {
+				universe: null, sessions: undefined, theme: undefined,
+				density: undefined, starredSettings: undefined,
+			});
+			const shaped = V.sessionShape(state.files, {
+				active: state.active, payloadJson: JSON.stringify(snap),
+				cache: sessionJson, now: Date.now(),
+			});
+			if (shaped.skip === "empty" || shaped.skip === "synthetic") return;
+			if (shaped.skip) {
+				// A stale record would offer a different class than the one open.
+				sessionMeta = null;
+				sessionWritten = null;
+				sessionTx("readwrite", (s) => { s.delete("state"); return s.delete("files"); });
+				sessionSay("skip:" + shaped.skip, shaped.skip === "toobig"
+					? "These class files are over " + Math.round(V.SESSION_MAX_BYTES / 1048576) +
+						" MB, so the session will not be offered for restore after a reload. " +
+						"Settings are still saved."
+					: "Could not remember this session (" + (shaped.error || "error") + ").");
+				return;
+			}
+			const withFiles = shaped.sig !== sessionWritten;
+			sessionBusy = true;
+			sessionTx("readwrite", (s) => {
+				if (withFiles) s.put(shaped.files);
+				return s.put(shaped.state);
+			}).then((r) => {
+				sessionBusy = false;
+				if (!r.ok) {
+					const [key, text] = sessionProblem(r.why);
+					sessionSay(key, text);
+					return;
+				}
+				sessionWritten = shaped.sig;
+				sessionMeta = shaped.state;
+				sessionSaid = "";
+				if (shaped.leagueDropped) {
+					sessionSay("league", "The league file itself is too big to remember; the classes " +
+						"cut from it are, but “Merge into a league file” will need it dropped again.");
+				}
+			}, () => { sessionBusy = false; });
+		} catch (e) {
+			sessionBusy = false;
+			sessionSay("throw", "Could not remember this session (" + (e && e.message || e) + ").");
+		}
+	}
+
+	function loadSessionMeta() {
+		return sessionTx("readonly", (s) => s.get("state")).then((r) => {
+			const rec = r.ok ? r.value : null;
+			sessionMeta = rec && typeof rec.sig === "string" && Array.isArray(rec.names) &&
+				rec.names.length ? rec : null;
+			paintSessionCard();
+		});
+	}
+
+	// Offered wherever the drop screen is: empty, or the stranded universe view.
+	function paintSessionCard() {
+		const card = $("sessionCard");
+		if (!card) return;
+		const show = !!sessionMeta && !state.files.length && !!$("empty") && !$("empty").hidden;
+		card.hidden = !show;
+		if (show) $("sessionCardText").textContent = V.sessionLabel(sessionMeta, Date.now());
+	}
+
+	function restoreLastSession() {
+		if (state.universe.running) {
+			setStatus("A universe is running — cancel it on the Universe tab before restoring.", true);
+			return Promise.resolve(false);
+		}
+		const btn = $("btnSessionRestore");
+		const fail = (text) => {
+			if (btn) btn.disabled = false;
+			$("empty").classList.remove("busy");
+			setStatus(text, true);
+			return false;
+		};
+		if (btn) btn.disabled = true;
+		$("empty").classList.add("busy");
+		setStatus("Restoring the last session…", true);
+		return Promise.all([
+			sessionTx("readonly", (s) => s.get("state")),
+			sessionTx("readonly", (s) => s.get("files")),
+		]).then(([st, fl]) => {
+			const meta = st.ok ? st.value : null;
+			const rec = fl.ok ? fl.value : null;
+			if (!meta || !rec || meta.sig !== rec.sig) {
+				return fail("The saved session is missing or incomplete, so it was not restored.");
+			}
+			const files = V.sessionFiles(rec);
+			if (!files) return fail("The saved session could not be read, so it was not restored.");
+			let snap = null;
+			try { snap = meta.payload ? JSON.parse(meta.payload) : null; } catch (e) { snap = null; }
+			try {
+				/* The settings, locks and the rest, exactly as a reload would
+				   have them from localStorage; the files then go through the
+				   same installFiles a drop takes, whose lock-fingerprint check
+				   decides whether the locks belong to the class. */
+				if (snap && typeof snap === "object" && !Array.isArray(snap)) {
+					snap.universe = null;
+					restore(snap);
+					paintConfig();
+				}
+				sessionWritten = meta.sig;
+				installFiles(files, [], { active: Number(meta.active) || 0, noRun: true });
+				if (!state.files.length) return fail("The saved session held no class that could be loaded.");
+				persist();
+				run(() => setStatus("Restored the last session (" + state.files.length + " file" +
+					(state.files.length === 1 ? "" : "s") + ")."));
+				return true;
+			} catch (e) {
+				showError(e);
+				return fail("The saved session could not be restored.");
+			}
+		});
+	}
+
+	function discardLastSession() {
+		sessionMeta = null;
+		sessionWritten = null;
+		paintSessionCard();
+		return sessionTx("readwrite", (s) => { s.delete("state"); return s.delete("files"); })
+			.then((r) => {
+				setStatus(r.ok ? "Discarded the saved session." : "Could not discard the saved session.", !r.ok);
+				return r.ok;
+			});
+	}
+
+	function bindSessionCard() {
+		const go = $("btnSessionRestore");
+		const del = $("btnSessionDiscard");
+		if (go) go.addEventListener("click", restoreLastSession);
+		if (del) del.addEventListener("click", discardLastSession);
+		// Nothing a hidden page can still finish is worth waiting a debounce for.
+		window.addEventListener("pagehide", () => { if (sessionTimer) saveSessionNow(); });
+		if ($("empty") && typeof MutationObserver !== "undefined") {
+			new MutationObserver(paintSessionCard)
+				.observe($("empty"), { attributes: true, attributeFilter: ["hidden"] });
+		}
 	}
 
 	function universeStorageInfo() {
@@ -12159,6 +12516,7 @@
 	bindSettingFilter();
 	bindFiles();
 	applyTheme();
+	applyStarredSettings();
 	paintConfig();
 	paintHistory();
 	paintUndo();
@@ -12175,6 +12533,8 @@
 		}
 	};
 	Promise.resolve().then(loadAutosave).then(afterAutosave, afterAutosave);
+	bindSessionCard();
+	loadSessionMeta();
 
 	$("errClose").addEventListener("click", clearError);
 	$("errReport").addEventListener("click", () => {
