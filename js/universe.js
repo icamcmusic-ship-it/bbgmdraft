@@ -55,7 +55,11 @@
 	   bounded, not a fresh draw), and realignment is geographic with a
 	   cooldown. A universe's champions, levels and conferences move; a
 	   standalone class does not. */
-	const ENGINE_REV = 4;
+	/* 5: the 2026-10-10 audit — the top-end strength stretch was cut
+	   (TOP_STRETCH 0.7 -> 0.2, ELITE_STRETCH 1.0 -> 0.6) so a season no
+	   longer carries several near-unbeaten teams; 62 new archetypes; and the
+	   fixes that audit listed. Records, boards and builds all move. */
+	const ENGINE_REV = 5;
 
 	/* THE ONE DEFINITION OF PLAYER OF THE YEAR.
 

@@ -1588,7 +1588,7 @@
 	   direction, since a curve steep enough for Kentucky to win every year
 	   is the opposite failure. */
 	const TOP_KNEE = 50;
-	const TOP_STRETCH = 0.7;
+	const TOP_STRETCH = 0.2;
 	/* A second knee for the true elite, in the POSTSEASON and only against
 	   another team above TOP_KNEE — where titles are decided. The real
 	   curve keeps bending above the 1-seed line; applied to every game the
@@ -1599,7 +1599,7 @@
 	   1 seeds win 60% of titles over 300 seasons (44% before) and 5 seeds
 	   or worse 8% (16%); 1v16, 5v12 and 8v9 are unchanged. */
 	const ELITE_KNEE = 56;
-	const ELITE_STRETCH = 1.0;
+	const ELITE_STRETCH = 0.6;
 	function gameStrength(r, postseason, vsRating) {
 		const base = r + TOP_STRETCH * Math.max(0, r - TOP_KNEE);
 		if (!postseason || !(vsRating > TOP_KNEE)) return base;
