@@ -110,7 +110,11 @@
 	const EFF_TOL = 1e-4;
 	const EFF_DAMP = 0.5;
 	const MARGIN_CAP = 10;
-	const HOME_EDGE = 1.4;
+	/* The mean of the game model's homeEdge() (js/teams.js: 3.2 + (prestige
+	   - 60)/34, clamped 2.1-4.5). It was 1.4, so a team that bought home
+	   games was under-adjusted by about 1.8 points a home game against the
+	   same sim that produced the margins (audit C7). */
+	const HOME_EDGE = 3.2;
 
 	function computeAdjEff(list, byName) {
 		const idx = new Map();

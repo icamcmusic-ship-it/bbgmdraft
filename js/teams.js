@@ -1466,9 +1466,28 @@
 		return teams;
 	}
 
-	function winProb(a, b, homeEdge) {
-		const diff = a - b + (homeEdge || 0);
-		return 1 / (1 + Math.exp(-diff / 7.5));
+	/* The chance that a team rated `a` beats one rated `b`, quoted from the
+	   same model playGameScore plays: the stretched strengths, ~0.72 points
+	   of margin per point, and a normal margin with sd MARGIN_SD x the
+	   regular-season (or postseason) noise. It used to be a logistic on
+	   7.5 rating points with no stretch, which nothing called and which
+	   disagreed with the sim (audit C8). `homePts` is a home edge in
+	   points, as homeEdge() returns it. */
+	function winProb(a, b, homePts, opts) {
+		const post = !!(opts && opts.postseason);
+		const noise = post
+			? 1 + 0.2 * clamp(opts && Number.isFinite(opts.upsetFactor) ? opts.upsetFactor : 1, 0, 3)
+			: REGULAR_NOISE;
+		const edge = gameStrength(a, post, b) - gameStrength(b, post, a) + (homePts || 0);
+		return normCdf((edge * 0.72) / (MARGIN_SD * noise));
+	}
+	function normCdf(z) {
+		// Abramowitz-Stegun 7.1.26 on erf; |error| < 1.5e-7.
+		const x = Math.abs(z) / Math.SQRT2;
+		const t = 1 / (1 + 0.3275911 * x);
+		const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t -
+			0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+		return z >= 0 ? 0.5 * (1 + y) : 0.5 * (1 - y);
 	}
 
 	/* A team's rating on a given day. Programs are not frozen at build time:
