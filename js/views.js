@@ -467,6 +467,8 @@
 			if (ev.detail) line += " — " + ev.detail;
 			out.push(line);
 		}
+		const posLine = posStandingLine(p, res);
+		if (posLine) out.push(posLine);
 		if (p.surprise) out.push("Anomaly: " + (p.surprise.label || p.surprise.name));
 		if (p.stats) {
 			out.push("Season: " + n1(p.stats.ppg) + " ppg, " + n1(p.stats.rpg) + " rpg, " +
@@ -488,6 +490,33 @@
 		}
 		if ((p.awards || []).length) out.push("Honors: " + p.awards.slice(0, 4).join("; "));
 		return out;
+	}
+	/* U4: "1st of 11 guards in this class · 3-star recruit" — the line the
+	   "?" popover and the player page share. */
+	const POS_GROUP_OF = { PG: "guard", SG: "guard", G: "guard", GF: "wing", SF: "wing",
+		F: "forward", PF: "forward", FC: "big", C: "big" };
+	function posGroupSize(p, res) {
+		const g = p.posGroup;
+		if (!g || !res || !res.board) return 0;
+		let n = 0;
+		for (const q of res.board) if (q.posGroup === g) n++;
+		return n;
+	}
+	function ordinalWord(n) {
+		const s = ["th", "st", "nd", "rd"], v = n % 100;
+		return n + (s[(v - 20) % 10] || s[v] || s[0]);
+	}
+	function posStandingLine(p, res) {
+		if (!p.posBoardRank || !p.posGroup) return "";
+		const n = posGroupSize(p, res);
+		const stars = p.recruiting && p.recruiting.stars;
+		return ordinalWord(p.posBoardRank) + (n ? " of " + n + " " + p.posGroup + (n === 1 ? "" : "s") : " " + p.posGroup) +
+			" in this class" + (stars ? " · " + stars + "-star recruit" : "");
+	}
+	/* U4: the high-school positional rank, labelled as history so it does
+	   not read as where he stands now. */
+	function hsPosRankText(rec) {
+		return rec && rec.posRank ? " · No. " + rec.posRank + " " + rec.posLabel + " in his HS class" : "";
 	}
 	function posRankTitle(p) {
 		const stars = p.recruiting && p.recruiting.stars;
@@ -1937,6 +1966,12 @@
 	}
 
 	const SKILL_TAGS = ["3", "A", "B", "Di", "Dp", "Po", "Ps", "R", "V"];
+	// U25: BBGM's skill codes in words, for the chips' tooltips.
+	const SKILL_NAMES = {
+		"3": "Three-point shooter", A: "Athlete", B: "Ball handler",
+		Di: "Interior defender", Dp: "Perimeter defender", Po: "Post scorer",
+		Ps: "Passer", R: "Rebounder", V: "Volume scorer",
+	};
 	const SEARCH_HELP = "Plain words match the name, school, build, class year and honors. " +
 		"Or: pos:C school:Duke arch:\"Rim Protector\" year:sr skill:3 tag:sleeper " +
 		"ovr>=55 age<=20 ppg>15 ovr:50-60 is:locked is:starred is:transfer — " +
@@ -2086,7 +2121,7 @@
 			const b = el("button", "chip" + (on ? " on" : ""), sk);
 			b.type = "button";
 			b.setAttribute("aria-pressed", on ? "true" : "false");
-			b.title = "Only players with the " + sk + " skill" + (on ? " (on)" : "");
+			b.title = sk + " \u2014 " + (SKILL_NAMES[sk] || sk) + ": only players with this skill" + (on ? " (on)" : "");
 			b.addEventListener("click", () => {
 				const cur = st.filter.skills || (st.filter.skills = []);
 				const i = cur.indexOf(sk);
@@ -3581,6 +3616,7 @@
 			// and records — the data was always there, only the final week
 			// was ever shown.
 			const wkSel = el("select");
+			wkSel.setAttribute("aria-label", "Poll week");
 			hist.forEach((wk, i) => {
 				const o = el("option", null,
 					wk.label || (wk.week === 0 ? "Preseason" : "Week " + wk.week));
@@ -3823,6 +3859,7 @@
 		const f = st.newsFilter;
 		const bar = el("div", "filters");
 		const kindSel = el("select");
+		kindSel.setAttribute("aria-label", "Article kind");
 		kindSel.appendChild(new Option("every kind", ""));
 		const groups = {};
 		for (const a of articles) {
@@ -3841,6 +3878,7 @@
 		const box = el("input");
 		box.type = "search";
 		box.placeholder = "team or player…";
+		box.setAttribute("aria-label", "Filter articles by team or player");
 		box.value = f.text;
 		box.addEventListener("input", () => { f.text = box.value; A().render(); });
 		bar.appendChild(box);
@@ -5137,6 +5175,14 @@
 			b.addEventListener("click", () => { A().exportUniverseCsv(what); });
 			bar.appendChild(b);
 		}
+		/* U22: a greyed button says why. */
+		const whyOff = u.running ? "Wait for the universe run to finish"
+			: !u.rows.length ? "Run a universe first (load two or more classes, or start a synthetic one)"
+			: u.viewOnly ? "This universe was imported view-only, without its class files"
+			: stranded ? "The class files this universe was built from are not loaded" : "";
+		for (const b of bar.querySelectorAll("button")) {
+			if (b.disabled && whyOff) b.title = whyOff + ". " + (b.title || "");
+		}
 		const impBtn = el("button", null, "Import universe…");
 		impBtn.disabled = !!u.running;
 		const impInput = el("input");
@@ -6103,8 +6149,16 @@
 		cards.appendChild(mk("Fallers", res.fallers || []));
 		view.appendChild(cards);
 
-		const BOARD_HEADS = ["Board", "Rd", "Pick", "Player", "Pos", "Year", "Ovr", "Pot",
-			"School / club", "Preseason", "±", "PPG", "Honors"];
+		/* Ovr and Pot sit right after Pos so a phone sees them without a
+		   sideways scroll (U7); Pos# and the recruiting stars make "the best
+		   man at his position" a column, not a guess (U4). */
+		const BOARD_HEADS = ["Board", "Rd", "Pick", "Player", "Pos", "Ovr", "Pot", "Pos#", "Stars",
+			"Year", "School / club", "Preseason", "±", "PPG", "Honors"];
+		const BOARD_NUM = ["Board", "Rd", "Pick", "Ovr", "Pot", "Pos#", "Stars", "Preseason", "±", "PPG"];
+		const BOARD_TITLES = {
+			"Pos#": "Rank on the board within his position group (guards, wings, forwards, bigs)",
+			Stars: "Recruiting stars out of high school",
+		};
 		if (!(res.board || []).length) {
 			const box = el("div", "card empty-state");
 			box.appendChild(el("h4", null, "No board to show"));
@@ -6129,9 +6183,20 @@
 		const posSel = el("select");
 		posSel.setAttribute("aria-label", "Board position filter");
 		posSel.appendChild(new Option("all positions", ""));
-		for (const pos of ["PG", "G", "SG", "GF", "SF", "F", "PF", "FC", "C"]) {
-			posSel.appendChild(new Option(pos, pos));
+		/* U20: groups first, so "guards" means PG, SG and G together. */
+		const grpOpt = el("optgroup");
+		grpOpt.label = "Position groups";
+		for (const [v, t] of [["grp:guard", "Guards (PG/SG/G)"], ["grp:wing", "Wings (GF/SF)"],
+			["grp:forward", "Forwards (F/PF)"], ["grp:big", "Bigs (FC/C)"]]) {
+			grpOpt.appendChild(new Option(t, v));
 		}
+		posSel.appendChild(grpOpt);
+		const exOpt = el("optgroup");
+		exOpt.label = "Exact position";
+		for (const pos of ["PG", "G", "SG", "GF", "SF", "F", "PF", "FC", "C"]) {
+			exOpt.appendChild(new Option(pos, pos));
+		}
+		posSel.appendChild(exOpt);
 		posSel.value = bf.pos;
 		posSel.addEventListener("change", () => { bf.pos = posSel.value; A().render(); });
 		fbar.appendChild(posSel);
@@ -6151,6 +6216,16 @@
 		starChip.title = "Show only the prospects on your watchlist (click ☆ beside a name to add one)";
 		starChip.addEventListener("click", () => { bf.starred = !bf.starred; A().render(); });
 		fbar.appendChild(starChip);
+		/* U37: the men the recruiting services missed — three stars or fewer
+		   and now top-30 on the board or first at their position. */
+		const nSleep = (res.board || []).filter(isSleeper).length;
+		const sleepChip = el("button", "chip" + (bf.sleepers ? " on" : ""),
+			"Sleepers" + (nSleep ? " (" + nSleep + ")" : ""));
+		sleepChip.type = "button";
+		sleepChip.setAttribute("aria-pressed", bf.sleepers ? "true" : "false");
+		sleepChip.title = "Prospects who were 3-star recruits or less and are now top 30 on the board or the best at their position";
+		sleepChip.addEventListener("click", () => { bf.sleepers = !bf.sleepers; A().render(); });
+		fbar.appendChild(sleepChip);
 		/* Q16: one chip per tag in use in this class; click to show only those. */
 		for (const t of PLAYER_TAGS) {
 			const n = (res.board || []).filter((p) => tagsOf(p).indexOf(t) !== -1).length;
@@ -6182,7 +6257,8 @@
 		md.addEventListener("click", () => {
 			const rows = (res.board || []).map((p) => [
 				p.boardRank, p.mockRound || "", p.mockPick || "", p.name, p.newPos,
-				p.classYear, p.newOvr, p.newPot, p.proClub || p.newCollege,
+				p.newOvr, p.newPot, p.posBoardRank || "", (p.recruiting && p.recruiting.stars) || "",
+				p.classYear, p.proClub || p.newCollege,
 				p.preseasonRank, p.stockMove === 0 ? "" : (p.stockMove > 0 ? "+" : "") + p.stockMove,
 				p.stats ? n1(p.stats.ppg) : "", (p.awards || []).slice(0, 3).join("; "),
 			]);
@@ -6190,7 +6266,16 @@
 				(res.flavor && res.flavor.label ? ", " + res.flavor.label : "") + "**\n\n" +
 				markdownTable(BOARD_HEADS, rows), md, "Copy as markdown", "the draft board as markdown");
 		});
-		fbar.appendChild(md);
+		/* U47: the four copy/paste actions live in one small "Copy ▾" menu
+		   instead of four full-size buttons wrapping the filter bar. */
+		const copyMenu = el("details", "copymenu");
+		const copySum = el("summary", "chip", "Copy \u25be");
+		copySum.title = "Copy the board as markdown, a top-30 list or for a spreadsheet; paste names";
+		copyMenu.appendChild(copySum);
+		const copyList = el("div", "copymenu-list");
+		copyMenu.appendChild(copyList);
+		copyList.addEventListener("click", (e) => { if (e.target.closest("button")) copyMenu.open = false; });
+		copyList.appendChild(md);
 		/* A forum-ready top 30: a numbered list, one line a player, with his
 		   note when the user has written one. The table above is for a
 		   spreadsheet; this is what gets pasted into a thread. */
@@ -6210,7 +6295,7 @@
 				(res.flavor && res.flavor.label ? ", " + res.flavor.label : "") + "**\n\n" +
 				lines.join("\n"), top, "Copy top 30", "the top 30 as a markdown list");
 		});
-		fbar.appendChild(top);
+		copyList.appendChild(top);
 		/* Q22: the board as it is on screen — the rows after the search, the
 		   position and tag chips and the sort — as tab-separated text. */
 		const sheet = el("button", null, "Copy for spreadsheet");
@@ -6221,12 +6306,13 @@
 			if (!t) return;
 			A().copyText(domTableText(t, "tsv"), sheet, "Copy for spreadsheet", "the board for a spreadsheet");
 		});
-		fbar.appendChild(sheet);
+		copyList.appendChild(sheet);
 		const rename = el("button", null, "Paste names…");
 		rename.type = "button";
 		rename.title = "Paste a list of names, one per line, and rename the prospects in board order";
 		rename.addEventListener("click", () => A().renameDialog());
-		fbar.appendChild(rename);
+		copyList.appendChild(rename);
+		fbar.appendChild(copyMenu);
 		view.appendChild(fbar);
 
 		/* One sort value per heading. Pick is the overall mock slot
@@ -6236,18 +6322,20 @@
 			Pick: (p) => (p.mockRound ? p.mockRound * 100 + p.mockPick : undefined),
 			Player: (p) => p.name, Pos: (p) => p.newPos, Year: (p) => classYearRank(p.classYear),
 			Ovr: (p) => p.newOvr, Pot: (p) => p.newPot,
+			"Pos#": (p) => p.posBoardRank, Stars: (p) => (p.recruiting ? p.recruiting.stars : undefined),
 			"School / club": (p) => p.proClub || p.newCollege,
 			Preseason: (p) => p.preseasonRank, "±": (p) => p.stockMove,
 			PPG: (p) => (p.stats ? p.stats.ppg : undefined),
 			Honors: (p) => (p.awards || []).length,
 		};
-		const ASC_FIRST = { Board: 1, Rd: 1, Pick: 1, Player: 1, Pos: 1, Year: 1,
+		const ASC_FIRST = { Board: 1, Rd: 1, Pick: 1, Player: 1, Pos: 1, Year: 1, "Pos#": 1,
 			"School / club": 1, Preseason: 1 };
 		const needle = bf.q.trim().toLowerCase();
 		const parsedQ = parseQuery(bf.q);
 		const qctx = queryCtx();
 		let list = (res.board || []).filter((p) => {
-			if (bf.pos && p.newPos !== bf.pos) return false;
+			if (bf.pos && !boardPosMatch(bf.pos, p)) return false;
+			if (bf.sleepers && !isSleeper(p)) return false;
 			if (bf.starred && !A().state.watch[A().userKey(p)]) return false;
 			if (bf.tag && tagsOf(p).indexOf(bf.tag) === -1) return false;
 			if (!needle) return true;
@@ -6267,16 +6355,19 @@
 			}
 		}
 
-		const wrap = el("div", "scroll");
+		const wrap = el("div", "scroll boardwrap");
 		const table = el("table", "boardtable");
 		const thead = el("thead");
 		const hr = el("tr");
+		let firstHead = true;
 		for (const h of BOARD_HEADS) {
-			const th = el("th", (["Board", "Rd", "Pick", "Ovr", "Pot", "Preseason", "±", "PPG"].indexOf(h) >= 0 ? "num " : "") +
-				(h === "Player" ? "sticky " : "") + "sortable", h);
+			const th = el("th", (BOARD_NUM.indexOf(h) >= 0 ? "num " : "") +
+				(h === "Player" ? "sticky " : "") + (h === "Rd" || h === "Pick" ? "rdpick " : "") + "sortable", h);
 			th.scope = "col";
-			th.tabIndex = 0;
-			th.title = h + " — click to sort";
+			/* U30: one header in the tab order; ←/→ walk the rest. */
+			th.tabIndex = (bf.sort ? bf.sort.key === h : firstHead) ? 0 : -1;
+			firstHead = false;
+			th.title = (BOARD_TITLES[h] ? BOARD_TITLES[h] + " — " : h + " — ") + "click to sort";
 			const on = bf.sort && bf.sort.key === h;
 			if (on) {
 				th.textContent = h + (bf.sort.dir < 0 ? " ▾" : " ▴");
@@ -6292,7 +6383,15 @@
 			};
 			th.addEventListener("click", go);
 			th.addEventListener("keydown", (e) => {
-				if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); }
+				if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); return; }
+				const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+				if (!d) return;
+				const sib = d > 0 ? th.nextElementSibling : th.previousElementSibling;
+				if (!sib) return;
+				e.preventDefault();
+				th.tabIndex = -1;
+				sib.tabIndex = 0;
+				sib.focus();
 			});
 			hr.appendChild(th);
 		}
@@ -6341,8 +6440,11 @@
 		   step down of TIER_DROP overall or more from the man above him. The
 		   board's round dividers say where the picks fall; this says where
 		   the class actually thins out, which is not the same place. */
-		const TIER_DROP = 3;
-		let prevOvr = null;
+		/* U19: tiers come from the board's own order, and only the biggest
+		   steps count — the five largest drops of at least TIER_DROP overall
+		   (scaled to the class spread), so a 70-man board shows a handful of
+		   labelled tiers instead of a rule on every third row. */
+		const tierAt = boardTiers(res.board || []);
 		let firstRow = true;
 		for (const p of list) {
 			const band = bandOf(p);
@@ -6355,11 +6457,12 @@
 				tb.appendChild(sep);
 			}
 			const tr = el("tr");
-			if (banded && prevOvr !== null && prevOvr - p.newOvr >= TIER_DROP) {
+			if (banded && tierAt[p.key]) {
 				tr.classList.add("tierbreak");
-				tr.title = "Tier break: " + (prevOvr - p.newOvr) + " overall below the man above";
+				tr.dataset.tier = "Tier " + tierAt[p.key].tier;
+				tr.title = "Tier " + tierAt[p.key].tier + " starts here: " + tierAt[p.key].drop +
+					" overall below the man above him on the board";
 			}
-			prevOvr = p.newOvr;
 			/* Roving tabindex, as in Player Edit: one row in the tab order
 			   and the arrow keys (or j/k) walk the rest, instead of sixty tab
 			   stops between the header and whatever is under the board. */
@@ -6403,12 +6506,21 @@
 				e.preventDefault();
 				A().showPlayer(p.key);
 			});
-			tr.appendChild(el("td", "num", String(p.boardRank)));
-			tr.appendChild(el("td", "num", p.mockRound ? String(p.mockRound) : "—"));
-			tr.appendChild(el("td", "num", p.mockPick ? String(p.mockPick) : "—"));
+			const rankTd = el("td", "num", String(p.boardRank));
+			if (tr.dataset.tier) rankTd.dataset.tier = tr.dataset.tier;
+			tr.appendChild(rankTd);
+			tr.appendChild(el("td", "num rdpick", p.mockRound ? String(p.mockRound) : "—"));
+			tr.appendChild(el("td", "num rdpick", p.mockPick ? String(p.mockPick) : "—"));
 			const nameTd = el("td", "sticky");
 			nameTd.appendChild(watchStar(p));
 			nameTd.appendChild(playerLink(p));
+			if (p.posLeader) {
+				const b = el("span", "tag posbest" + (p.posGem ? " gem" : ""), "Best " + p.posGroup);
+				b.title = posRankTitle(p);
+				b.dataset.nocopy = "";
+				nameTd.appendChild(document.createTextNode(" "));
+				nameTd.appendChild(b);
+			}
 			for (const t of tagsOf(p)) {
 				const tg = el("span", "tag tagmark", t);
 				tg.title = "Your tag: " + t;
@@ -6428,10 +6540,18 @@
 			nameTd.appendChild(ed);
 			tr.appendChild(nameTd);
 			tr.appendChild(el("td", null, p.newPos));
-			tr.appendChild(el("td", null, p.classYear));
 			tr.appendChild(heatCell(el("td", "num", String(p.newOvr)), heat.ovr, p.newOvr));
 			tr.appendChild(heatCell(el("td", "num", String(p.newPot)), heat.pot, p.newPot));
-			const schoolTd = el("td");
+			const prTd = el("td", "num", p.posBoardRank ? String(p.posBoardRank) : "—");
+			if (p.posBoardRank) prTd.title = posRankTitle(p);
+			if (p.posGem) prTd.appendChild(el("span", "gem", " \u25c6"));
+			tr.appendChild(prTd);
+			const stars = p.recruiting && p.recruiting.stars;
+			const stTd = el("td", "num", stars ? String(stars) : "—");
+			stTd.title = stars ? stars + "-star recruit" : "Not a ranked recruit";
+			tr.appendChild(stTd);
+			tr.appendChild(el("td", "wrapok", p.classYear));
+			const schoolTd = el("td", "wrapok");
 			if (!p.nonNcaa && res.teams[p.newCollege]) schoolTd.appendChild(teamLink(p.newCollege));
 			else schoolTd.appendChild(document.createTextNode(p.proClub || p.newCollege));
 			tr.appendChild(schoolTd);
@@ -6440,8 +6560,14 @@
 			mv.appendChild(el("span", p.stockMove > 0 ? "up" : p.stockMove < 0 ? "down" : "",
 				p.stockMove === 0 ? "—" : (p.stockMove > 0 ? "+" : "") + p.stockMove));
 			tr.appendChild(mv);
-			tr.appendChild(heatCell(el("td", "num", p.stats ? n1(p.stats.ppg) : "—"),
-				heat.ppg, p.stats ? p.stats.ppg : NaN));
+			/* U46: say why the PPG cell is blank, where a touch screen can see it. */
+			const ppgTd = p.stats ? el("td", "num", n1(p.stats.ppg)) : el("td", "num");
+			if (!p.stats) {
+				const dnp = el("span", "tag dnptag", "DNP");
+				dnp.title = tr.title;
+				ppgTd.appendChild(dnp);
+			}
+			tr.appendChild(heatCell(ppgTd, heat.ppg, p.stats ? p.stats.ppg : NaN));
 			tr.appendChild(honorsCell(p));
 			tb.appendChild(tr);
 		}
@@ -6452,7 +6578,10 @@
 			const none = el("p", "hint boardnone", "No prospect on the board matches that search. ");
 			const clr = el("button", "chip", "Clear filters");
 			clr.type = "button";
-			clr.addEventListener("click", () => { bf.q = ""; bf.pos = ""; A().render(); });
+			clr.addEventListener("click", () => {
+				bf.q = ""; bf.pos = ""; bf.starred = false; bf.sleepers = false; bf.tag = "";
+				A().render();
+			});
 			none.appendChild(clr);
 			view.appendChild(none);
 		}
@@ -6485,7 +6614,38 @@
 	// Disclosure states that should survive a re-render but are not settings.
 	const uiMemo = { classInfoOpen: false, filtersOpen: false };
 	// The board's own search, position filter and sort (see viewBoard).
-	const boardFilter = { q: "", pos: "", sort: null, starred: false, tag: "" };
+	const boardFilter = { q: "", pos: "", sort: null, starred: false, tag: "", sleepers: false };
+	/* U20: "grp:guard" matches every guard position; a bare position is exact. */
+	function boardPosMatch(want, p) {
+		if (!want) return true;
+		if (want.indexOf("grp:") === 0) {
+			return (p.posGroup || POS_GROUP_OF[p.newPos] || "wing") === want.slice(4);
+		}
+		return p.newPos === want;
+	}
+	function isSleeper(p) {
+		const stars = p.recruiting && p.recruiting.stars;
+		if (stars > 3) return false;
+		return p.boardRank <= 30 || !!p.posLeader;
+	}
+	/* U19: the board's tier breaks. Map key -> {tier, drop}. */
+	function boardTiers(board) {
+		const TIER_DROP = 3;
+		const ovrs = board.map((p) => p.newOvr).filter(Number.isFinite);
+		if (ovrs.length < 4) return {};
+		const spread = Math.max.apply(null, ovrs) - Math.min.apply(null, ovrs);
+		const min = Math.max(TIER_DROP, Math.round(spread / 8));
+		const drops = [];
+		for (let i = 1; i < board.length; i++) {
+			const d = board[i - 1].newOvr - board[i].newOvr;
+			if (d >= min) drops.push({ i, d });
+		}
+		drops.sort((a, b) => b.d - a.d || a.i - b.i);
+		const keep = drops.slice(0, 5).sort((a, b) => a.i - b.i);
+		const out = {};
+		keep.forEach((x, k) => { out[board[x.i].key] = { tier: k + 2, drop: x.d }; });
+		return out;
+	}
 
 	/* --------------------------------------------------------- distributions */
 
@@ -7782,7 +7942,7 @@
 		head.appendChild(idbox);
 		box.appendChild(head);
 
-		const dl = el("dl", "shortcuts");
+		const dl = el("dl", "shortcuts playerdl");
 		const row = (k, v) => {
 			if (!v) return;
 			dl.appendChild(el("dt", null, k));
@@ -7851,7 +8011,7 @@
 			if (p.hand === "left") row("Hand", "Left-handed");
 		}
 		if (p.posBoardRank) {
-			row("Position", posRankTitle(p).replace(/^No\./, "No."));
+			row("Position", posRankTitle(p) + " · " + posStandingLine(p, res));
 		}
 		if (p.recruiting) {
 			/* The whole recruitment, not the box score of one. Rank and stars
@@ -7860,7 +8020,7 @@
 			   things a scout's file actually opens with. */
 			const rec = p.recruiting;
 			row("Recruiting", rec.stars + "-star, No. " + rec.rank + " nationally" +
-				(rec.posRank ? " · No. " + rec.posRank + " " + rec.posLabel : "") +
+				hsPosRankText(rec) +
 				(Number.isFinite(rec.composite) ? " · " + rec.composite.toFixed(4) : "") +
 				(rec.headliner ? " — headline signing" : "") +
 				(rec.diOnly === false ? " · not a Division I signing" : "") +
@@ -8176,7 +8336,7 @@
 		idbox.appendChild(pills);
 		head.appendChild(idbox);
 		box.appendChild(head);
-		const dl = el("dl", "shortcuts");
+		const dl = el("dl", "shortcuts playerdl");
 		const row = (k, v) => {
 			if (!v) return;
 			dl.appendChild(el("dt", null, k));
@@ -8240,7 +8400,7 @@
 		head.appendChild(idbox);
 		box.appendChild(head);
 
-		const dl = el("dl", "shortcuts");
+		const dl = el("dl", "shortcuts playerdl");
 		const row = (k, v) => {
 			if (!v) return;
 			dl.appendChild(el("dt", null, k));
@@ -8450,7 +8610,7 @@
 		}
 		box.appendChild(el("h3", null, t.name + " — " + t.w + "-" + t.l +
 			(t.apRank ? "  (AP #" + t.apRank + ")" : "")));
-		const dl = el("dl", "shortcuts");
+		const dl = el("dl", "shortcuts playerdl");
 		const row = (k, v) => {
 			dl.appendChild(el("dt", null, k));
 			const dd = el("dd");
@@ -8893,7 +9053,7 @@
 			const t = mk("text", {
 				x: q[0].toFixed(1), y: q[1].toFixed(1),
 				"text-anchor": "middle", "dominant-baseline": "middle",
-				"font-size": "8", fill: "currentColor", opacity: "0.7",
+				"font-size": "11", fill: "currentColor", opacity: "0.85",
 			});
 			t.textContent = a[1];
 			svg.appendChild(t);
@@ -9203,5 +9363,6 @@
 		currentColumnPreset, COLUMN_PRESETS,
 		compareWith, sortableTable,
 		el, n1, pc, wrapCell, COMPARE_MAX, ratingRadar, RADAR_AXES,
+		boardPosMatch, isSleeper, boardTiers, posStandingLine, whyLines, hsPosRankText,
 	};
 })(window);

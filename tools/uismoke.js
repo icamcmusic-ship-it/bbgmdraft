@@ -3310,7 +3310,7 @@ async function gotoProspects(page) {
 		});
 
 		// Settings panel.
-		await page.locator("#settingTier button", { hasText: "Shape" }).click();
+		await page.locator("#settingTier button", { hasText: "Basic" }).click();
 		await page.waitForTimeout(150);
 		const tier = await page.evaluate(() => {
 			const r = document.querySelector("#settings .ctl .rerun");
@@ -3321,9 +3321,9 @@ async function gotoProspects(page) {
 			};
 		});
 		ok("the tier chips are labelled and say how many settings they hide",
-			tier.label === "Show settings about:" && /^\d+ hidden$/.test(tier.hidden), JSON.stringify(tier));
+			tier.label === "Show settings:" && /^\d+ hidden$/.test(tier.hidden), JSON.stringify(tier));
 		ok("outside the Model view the re-run cost is hidden", tier.rerun === "none", tier.rerun);
-		await page.locator("#settingTier button", { hasText: "Model" }).click();
+		await page.locator("#settingTier button", { hasText: "Everything" }).click();
 		await page.waitForTimeout(150);
 		ok("the Model view shows the re-run cost", await page.evaluate(() => {
 			const r = document.querySelector("#settings .ctl .rerun");
@@ -3519,6 +3519,7 @@ async function gotoProspects(page) {
 			window.__copied = null;
 			navigator.clipboard.writeText = (t) => { window.__copied = t; return Promise.resolve(); };
 		});
+		await page.locator(".boardfilters .copymenu > summary").click();
 		await page.locator(".boardfilters button", { hasText: "Copy top 30" }).click();
 		await page.waitForTimeout(300);
 		const copied = await page.evaluate(() => window.__copied || "");
@@ -3799,6 +3800,7 @@ async function gotoProspects(page) {
 		// Q22: the board copies as text, the rows and columns on screen.
 		await page.locator("#tabs button", { hasText: "Draft board" }).first().click();
 		await settleQ();
+		await page.click("#view .copymenu > summary");
 		await page.click('#view button:has-text("Copy for spreadsheet")');
 		await page.waitForTimeout(250);
 		const sheet = await page.evaluate(() => window.__copied || "");
@@ -4160,6 +4162,7 @@ async function gotoProspects(page) {
 		await page.locator("#tabs button", { hasText: "Draft board" }).first().click();
 		await page.evaluate(() => { window.App.state.boardMode = "board"; window.App.render(); });
 		await settleQ();
+		await page.click("#view .copymenu > summary");
 		await page.click('#view button:has-text("Paste names")');
 		await page.fill("#renameList", "1. Zed Alpha\n\n- \nQuin Beta");
 		await page.waitForTimeout(200);
