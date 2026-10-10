@@ -1143,6 +1143,14 @@
 		for (const pa of POSITION_AWARDS) {
 			const pool = nation.filter((x) => pa.pos.indexOf(x.pos) !== -1);
 			finalist(pool, 0, slots(4), pa.name + " finalist");
+			/* The best man in THIS CLASS at the position is always on the
+			   list, even when returning players crowd the top four: a
+			   3-star who became the class's best centre is exactly the
+			   prospect a position trophy's watch list exists to name, and
+			   a draft room reads it that way (audit C9). Production only —
+			   no stars, no board — so the ballot is still the season. */
+			const own = pool.find((x) => !x.filler && x.awards);
+			if (own) finalist([own], 0, 1, pa.name + " finalist");
 		}
 
 		/* Academic All-America. BBGM has no academics, so this is rolled from

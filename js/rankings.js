@@ -110,7 +110,15 @@
 	const EFF_TOL = 1e-4;
 	const EFF_DAMP = 0.5;
 	const MARGIN_CAP = 10;
-	const HOME_EDGE = 1.4;
+	/* The game model's mean home edge is 3.2 points (homeEdge() in
+	   js/teams.js), but what is subtracted here is from a margin CAPPED at
+	   +/-10, and a 3.2-point shift moves a capped margin only while the game
+	   sits inside the cap: over the sim's own spread of matchups (game sd
+	   11.3, matchup sd ~10) the capped-margin equivalent is 1.6. The audit
+	   (2026-10-10 C7) compared 1.4 with the raw 3.2; at 3.2 the committee's
+	   NET over-penalised home games and 1 seeds won 35% of titles over 20
+	   seasons (55% before). */
+	const HOME_EDGE = 1.6;
 
 	function computeAdjEff(list, byName) {
 		const idx = new Map();

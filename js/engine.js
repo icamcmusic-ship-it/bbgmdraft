@@ -3187,10 +3187,15 @@
 			const g = ({ PG: "point guard", SG: "shooting guard", G: "guard",
 				GF: "wing", SF: "small forward", F: "forward", PF: "power forward",
 				FC: "big", C: "center" })[p.newPos] || "player";
-			(posGroups[g] = posGroups[g] || []).push(p);
+			/* Per high-school class AND position: recruiting.rank is
+			   cohort-local (rankCohort), so a 2026 senior's No. 3 and a 2029
+			   freshman's No. 3 are not on one list (audit C9). */
+			const k = p.recruiting.hsClass + "|" + g;
+			(posGroups[k] = posGroups[k] || []).push(p);
 		}
-		for (const g of Object.keys(posGroups)) {
-			posGroups[g].sort((a, b) => a.recruiting.rank - b.recruiting.rank)
+		for (const k of Object.keys(posGroups)) {
+			const g = k.slice(k.indexOf("|") + 1);
+			posGroups[k].sort((a, b) => a.recruiting.rank - b.recruiting.rank)
 				.forEach((p, i) => { p.recruiting.posRank = i + 1; p.recruiting.posLabel = g; });
 		}
 		for (const p of ncaa) {
@@ -3389,8 +3394,16 @@
 				(Number.isFinite(p.traitInjuryMult) ? p.traitInjuryMult : 1);
 			// The draft-year games-played mean is 33.5 against a ~35-game
 			// schedule, so a bit over half a class misses something.
-			if (r.random() >= 0.54 * rate * (0.6 + 0.4 * build)) continue;
-			const hurt = r.random() < Math.min(0.95, 0.55 * rate * build);
+			/* `rate` is a HAZARD multiplier, not a probability one: the old
+			   0.54·rate·(...) passed 1 at about rate 1.8, so everything above
+			   that on the slider did nothing and 2.0 already sidelined 95% of
+			   a class (audit C1-C2 of 2026-10-10). 1-(1-p)^rate is the same p
+			   at rate 1, 0 at rate 0, and keeps rising across the whole 0-3
+			   range without ever reaching certainty. */
+			const hazard = (p1) => Math.min(0.95,
+				1 - Math.pow(1 - clamp(p1, 0, 0.95), rate));
+			if (r.random() >= hazard(0.54 * (0.6 + 0.4 * build))) continue;
+			const hurt = r.random() < hazard(0.55 * build);
 			const table = hurt ? INJURIES : ABSENCES;
 			const pickKind = r.weighted(table);
 			// int(), not round(uniform(lo, hi + 0.999)): the rounding put a
@@ -6599,9 +6612,17 @@
 				const rec = p.recruiting;
 				bits.push(rec.stars + "-star recruit (No. " + rec.rank +
 					" nationally" +
-					(rec.posRank ? ", No. " + rec.posRank + " " + rec.posLabel : "") +
+					(rec.posRank ? ", No. " + rec.posRank + " " + rec.posLabel +
+						(rec.hsClass ? " in the " + rec.hsClass + " class" : "") : "") +
 					(Number.isFinite(rec.composite)
 						? ", " + rec.composite.toFixed(4) + " composite" : "") + ")");
+				/* Where he stands NOW among his position — the board, not the
+				   recruiting services. A 3-star who is the best big in the
+				   class says so here. */
+				if (p.posBoardRank) {
+					bits.push("No. " + p.posBoardRank + " " + p.posGroup + " on the board" +
+						(p.posLeader && rec.stars > 0 && rec.stars < 5 ? " (a " + rec.stars + "-star)" : ""));
+				}
 				if (rec.offerCount) {
 					bits.push(rec.offerCount + " offers" +
 						(rec.finalists && rec.finalists.length > 1
