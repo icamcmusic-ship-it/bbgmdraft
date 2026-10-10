@@ -6160,12 +6160,12 @@
 		/* Ovr and Pot sit right after Pos so a phone sees them without a
 		   sideways scroll (U7); Pos# and the recruiting stars make "the best
 		   man at his position" a column, not a guess (U4). */
-		const BOARD_HEADS = ["Board", "Rd", "Pick", "Player", "Pos", "Ovr", "Pot", "Pos#", "★",
+		const BOARD_HEADS = ["Board", "Rd", "Pick", "Player", "Pos", "Ovr", "Pot", "Pos#", "Stars",
 			"Year", "School / club", "Preseason", "±", "PPG", "Honors"];
-		const BOARD_NUM = ["Board", "Rd", "Pick", "Ovr", "Pot", "Pos#", "★", "Preseason", "±", "PPG"];
+		const BOARD_NUM = ["Board", "Rd", "Pick", "Ovr", "Pot", "Pos#", "Stars", "Preseason", "±", "PPG"];
 		const BOARD_TITLES = {
 			"Pos#": "Rank on the board within his position group (guards, wings, forwards, bigs)",
-			"★": "Recruiting stars out of high school",
+			Stars: "Recruiting stars out of high school",
 		};
 		if (!(res.board || []).length) {
 			const box = el("div", "card empty-state");
@@ -6330,7 +6330,7 @@
 			Pick: (p) => (p.mockRound ? p.mockRound * 100 + p.mockPick : undefined),
 			Player: (p) => p.name, Pos: (p) => p.newPos, Year: (p) => classYearRank(p.classYear),
 			Ovr: (p) => p.newOvr, Pot: (p) => p.newPot,
-			"Pos#": (p) => p.posBoardRank, "★": (p) => (p.recruiting ? p.recruiting.stars : undefined),
+			"Pos#": (p) => p.posBoardRank, Stars: (p) => (p.recruiting ? p.recruiting.stars : undefined),
 			"School / club": (p) => p.proClub || p.newCollege,
 			Preseason: (p) => p.preseasonRank, "±": (p) => p.stockMove,
 			PPG: (p) => (p.stats ? p.stats.ppg : undefined),

@@ -42,7 +42,7 @@ module.exports = function (ok, V) {
 	ok("U4/the popover carries the standing line",
 		Vw.whyLines(board[1], { board }).some((l) => /^1st of 1 big in this class|^1st of 1 bigs/.test(l)),
 		JSON.stringify(Vw.whyLines(board[1], { board })));
-	ok("U4/the board has Pos# and stars columns", /"Pos#", "★"/.test(VIEWS));
+	ok("U4/the board has Pos# and stars columns", /"Pos#", "Stars"/.test(VIEWS));
 	ok("U4/the HS positional rank is labelled as history",
 		Vw.hsPosRankText({ posRank: 5, posLabel: "big" }) === " · No. 5 big in his HS class" &&
 		Vw.hsPosRankText({}) === "");
@@ -90,7 +90,7 @@ module.exports = function (ok, V) {
 	ok("U32/settings levels are Basic / More / Everything", /"shape", "Basic"/.test(APP) && /"model", "Everything"/.test(APP));
 	ok("U40/the theme picker has no clipped glyph", !/◐/.test(HTML));
 	ok("U41/the phone settings sheet has a Done bar", /sheetdone/.test(APP));
-	ok("U44/'Reroll until…' and 'Re-run same seed'", />Reroll until…</.test(HTML) && />Re-run same seed</.test(HTML));
+	ok("U44/'Reroll until…' and 'Re-run same seed'", />Reroll <\/span>until…</.test(HTML) && / same seed<\/span>/.test(HTML));
 	ok("U46/a DNP tag in the PPG cell", /dnptag/.test(VIEWS));
 	ok("U47/the board's copy actions are one menu", /copymenu/.test(VIEWS));
 	ok("U2/U39/the written file's size is shown", /function fmtBytes/.test(APP));

@@ -6594,7 +6594,7 @@
 		   through setStatus, so sixty "try n of 60" lines do not bury the
 		   message history. */
 		const untilBtn = $("btnRerollUntil");
-		const restLabel = untilBtn ? untilBtn.textContent : "";
+		const restLabel = untilBtn ? untilBtn.innerHTML : "";
 		const restTitle = untilBtn ? untilBtn.title : "";
 		function progress(done, total) {
 			const s = $("status");
@@ -6608,7 +6608,7 @@
 			if (searchWorker) { searchWorker.terminate(); searchWorker = null; }
 			document.body.classList.remove("searching");
 			if (untilBtn) {
-				untilBtn.textContent = restLabel;
+				untilBtn.innerHTML = restLabel;
 				untilBtn.title = restTitle;
 				untilBtn.removeAttribute("aria-pressed");
 			}
@@ -9346,7 +9346,7 @@
 	/* U14: one h2 per tab. Most views open at h3 or h4; the tab's own name
 	   goes in as a visually hidden h2 so heading navigation has a top. */
 	function tabHeading(view) {
-		if (view.querySelector("h2")) return;
+		if (view.querySelector("h2") || state.game || state.player) return;
 		const t = TABS.find((x) => x[0] === state.tab);
 		const h = el("h2", "visually-hidden tabh2", t ? t[1] : "Draft board");
 		view.insertBefore(h, view.firstChild);
