@@ -6471,7 +6471,10 @@
 				(h === "Player" ? "sticky " : "") + "sortable", h);
 			th.scope = "col";
 			th.tabIndex = 0;
-			th.title = h + " — click to sort";
+			th.title = ({ Board: "Board: the consensus ranking", Rd: "Rd: draft night's round (the board after draft-night events)",
+				Pick: "Pick: draft night's pick in the round — not the team mock on the Mock draft tab" })[h] ||
+				h;
+			th.title += " — click to sort";
 			const on = bf.sort && bf.sort.key === h;
 			if (on) {
 				th.textContent = h + (bf.sort.dir < 0 ? " ▾" : " ▴");
@@ -7396,6 +7399,15 @@
 	}
 
 	/* The projection block on a player page. */
+	function draftOrderLegend(p, pick) {
+		const bits = [];
+		if (p.boardRank) bits.push("board No. " + p.boardRank + " (the consensus ranking)");
+		if (p.draftSlot) bits.push("draft night No. " + p.draftSlot + " (the board after draft-night events)");
+		if (p.mockRound) bits.push("note mock round " + p.mockRound + ", pick " + p.mockPick + " (draft night, in rounds)");
+		if (pick) bits.push("team mock No. " + pick.pick + " (each team's own value, above)");
+		return "Draft orders: " + (bits.length ? bits.join(" · ") : "none") + ".";
+	}
+
 	function proBlock(res, p) {
 		const { projections, mock } = proFor(res);
 		const x = projections[p.key];
@@ -7409,8 +7421,13 @@
 			x.peakAge + ", and " + x.years + " seasons in the league (" + x.yearsLow + "-" +
 			x.yearsHigh + "). " + Math.round(x.starChance * 100) + "% chance of a star's peak, " +
 			Math.round(x.bustChance * 100) + "% of a bust." +
-			(pick ? " Mock draft: No. " + pick.pick + " to the " + pick.team + " — " + pick.why + "."
-				: " Undrafted in the mock draft.")));
+			(pick ? " Team mock: No. " + pick.pick + " to the " + pick.team + " — " + pick.why + "."
+				: " Undrafted in the team mock.")));
+		/* Which order is which (audit Q32): a prospect carries the board's
+		   rank, draft night's slot, the note's slot-shaped mock and this
+		   team-by-team mock, and two of them side by side read as a
+		   contradiction unless they are named. */
+		box.appendChild(el("p", "hint draftorders", draftOrderLegend(p, pick)));
 		if (x.curve.length) {
 			box.appendChild(el("p", "hint", "A median career: " + x.curve.slice(0, 16)
 				.map((s) => s.age + ": " + s.ovr).join(" · ")));
@@ -9727,7 +9744,7 @@
 		gamePage, gameKeyFor, quadBar, pollSpark, ballotCards,
 		COLUMNS, STAT_MODES, PCT_KEYS, DERIVED, derived, cellValue, statValue,
 		CARD_COLUMNS, CARD_BREAKPOINT, cardMode, orderedColumns, moveColumn,
-		dropColumn, setColumnOrder,
+		dropColumn, setColumnOrder, draftOrderLegend,
 		matchesFilter, numericColumns, histogram, feet, closeRowMenu,
 		// Quick wins: table text, zip, file names, search syntax, tags, filter views, units.
 		tableText, tableParts, domTableText, decorateTables, crc32, zipStore, exportFilename,
