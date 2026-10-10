@@ -1033,6 +1033,218 @@
 		return out;
 	}
 
+	/* PRO HISTORY: THE CLASSES A LEAGUE HAS ALREADY DRAFTED (audit UV12).
+
+	   draftClassesIn reads only the classes still to come. A league export
+	   also holds the men it drafted in the last few seasons, on teams, in
+	   free agency, retired or undrafted-and-signed, with their real pro
+	   careers. pastClassesIn says which of those years are there;
+	   extractPastClass rewinds one of them to draft night (ratings as of his
+	   draft year, tid -2, no pro stats) so the universe can play the college
+	   season he was drafted out of, and carries his real draft slot, his
+	   school and his pro career beside the class in bbgmdraft.pastPro. That
+	   mark is also what tells every exporter to leave these men alone: they
+	   already exist in the league. */
+	function leaguePhase(lf) {
+		const ga = lf && lf.gameAttributes;
+		if (!ga) return null;
+		const rows = Array.isArray(ga) ? ga : Object.keys(ga).map((k) => ({ key: k, value: ga[k] }));
+		for (const row of rows) {
+			if (!row || row.key !== "phase") continue;
+			let v = row.value && typeof row.value === "object" && "value" in row.value
+				? row.value.value : row.value;
+			if (Array.isArray(v) && v.length) v = v[v.length - 1] && v[v.length - 1].value;
+			return Number.isFinite(Number(v)) ? Number(v) : null;
+		}
+		return null;
+	}
+	const PAST_MIN_CLASS = 10;
+	function pastYearsOf(leagueFile, back) {
+		let season = null;
+		try { season = findSeason(leagueFile); } catch (e) { season = null; }
+		if (season === null) return { season: null, years: [] };
+		const n = Math.max(1, Math.min(10, Math.round(back || 4)));
+		const phase = leaguePhase(leagueFile);
+		// Phase 5 (DRAFT) and later: this season's draft has been held.
+		const last = phase !== null && phase >= 5 ? season : season - 1;
+		const years = [];
+		for (let y = last - n + 1; y <= last; y++) years.push(y);
+		return { season, years };
+	}
+	function isPastDrafted(p, year) {
+		if (!p || !p.draft || Number(p.draft.year) !== year) return false;
+		// Still a prospect (an unsigned undrafted man keeps tid -2): not history.
+		return !PROSPECT_TIDS.includes(Number(p.tid)) && Number(p.tid) !== -7;
+	}
+	function pastClassesIn(leagueFile, opts) {
+		if (!leagueFile || !Array.isArray(leagueFile.players) || !isLeagueFile(leagueFile)) return [];
+		const { years } = pastYearsOf(leagueFile, opts && opts.back);
+		const out = [];
+		for (const year of years) {
+			const men = leagueFile.players.filter((p) => isPastDrafted(p, year));
+			const drafted = men.filter((p) => Number(p.draft.round) > 0).length;
+			if (drafted < PAST_MIN_CLASS) continue;
+			const ours = men.some((p) => (p.stats || []).some((s) => s && Number(s.tid) === -7)) ||
+				!!potStampFor(leagueFile, year);
+			out.push({ year, count: men.length, drafted, undrafted: men.length - drafted, ours });
+		}
+		return out;
+	}
+	function pastClassYear(p, year) {
+		const age = year - Number(p.born && p.born.year);
+		if (!Number.isFinite(age)) return null;
+		return age <= 19 ? "Freshman" : age === 20 ? "Sophomore" : age === 21 ? "Junior" : "Senior";
+	}
+	function numPerRound(lf) {
+		const ga = lf && lf.gameAttributes;
+		let v = ga && !Array.isArray(ga) ? ga.numDraftPicksPerRound : null;
+		if (Array.isArray(ga)) {
+			const row = ga.filter((r) => r && r.key === "numDraftPicksPerRound")[0];
+			v = row ? row.value : null;
+		}
+		if (v && typeof v === "object" && "value" in v) v = v.value;
+		return Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v)
+			: Math.max(30, (lf && Array.isArray(lf.teams) ? lf.teams.length : 30));
+	}
+	// His real pro career, summed from regular-season stats after his draft.
+	function proCareerOf(p, lf, year) {
+		const teams = (lf && lf.teams) || [];
+		const abbrevOf = (tid) => {
+			const t = teams.filter((x) => x && Number(x.tid) === Number(tid))[0];
+			return t ? t.abbrev || t.region || null : null;
+		};
+		const rows = (p.stats || []).filter((s) => s && Number(s.tid) >= 0 && !s.playoffs &&
+			Number(s.season) >= year);
+		const seasons = new Set(rows.map((s) => s.season)).size;
+		const gp = rows.reduce((a, s) => a + (Number(s.gp) || 0), 0);
+		const pts = rows.reduce((a, s) => a + (Number(s.pts) || 0), 0);
+		const tid = Number(p.tid);
+		const status = tid >= 0 ? "active" : tid === -1 ? "free agent" : tid === -3 ? "retired" : "unsigned";
+		return {
+			real: true, seasons, gp, ppg: gp ? Math.round((pts / gp) * 10) / 10 : 0,
+			team: tid >= 0 ? abbrevOf(tid) : null, status,
+			awards: (p.awards || []).filter((a) => a && Number(a.season) > year)
+				.map((a) => ({ season: Number(a.season), award: String(a.type || a.name || "") })),
+		};
+	}
+	function extractPastClass(leagueFile, year) {
+		const want = Number(year);
+		const C = global.Colleges;
+		const teams = (leagueFile && leagueFile.teams) || [];
+		const perRound = numPerRound(leagueFile);
+		const truth = {};
+		const bio = {};
+		const careers = {};
+		const players = (leagueFile.players || []).filter((p) => isPastDrafted(p, want))
+			.map((p) => {
+				const rows = (p.ratings || []).filter((r) => r && Number(r.season) <= want)
+					.sort((a, b) => Number(a.season) - Number(b.season));
+				const r = rows.length ? rows[rows.length - 1]
+					: (p.ratings || [])[0] || null;
+				if (!r) return null;
+				const key = String(p.pid);
+				const round = Number(p.draft.round) || 0;
+				const pick = Number(p.draft.pick) || 0;
+				const team = teams.filter((t) => t && Number(t.tid) === Number(p.draft.tid))[0];
+				truth[key] = round > 0
+					? { round, pick, slot: (round - 1) * perRound + pick,
+						team: team ? team.abbrev || team.region || null : null }
+					: { round: 0, pick: 0, slot: null, team: null };
+				const school = p.college && C && C.isKnown(C.canonical(p.college))
+					? C.canonical(p.college) : null;
+				bio[key] = { classYear: pastClassYear(p, want) };
+				if (school) bio[key].college = school;
+				careers[key] = Object.assign(proCareerOf(p, leagueFile, want),
+					{ college: p.college || null, collegeKnown: !!school });
+				const out = Object.assign({}, p, {
+					tid: -2,
+					ratings: [Object.assign({}, r, { season: want })],
+					draft: Object.assign({}, p.draft, { round: 0, pick: 0, tid: -1, originalTid: -1 }),
+					// Pro stats stripped; college rows this tool wrote (tid -7) stay.
+					stats: (p.stats || []).filter((s) => s && Number(s.tid) === -7 &&
+						Number(s.season) <= want),
+					awards: (p.awards || []).filter((a) => a && Number(a.season) <= want),
+					transactions: [], contract: undefined, salaries: [],
+				});
+				delete out.contract;
+				return out;
+			}).filter(Boolean);
+		if (!players.length) throw new Error("No " + want + " drafted class in that league file.");
+		const out = { startingSeason: want, players };
+		if (leagueFile.version !== undefined) out.version = leagueFile.version;
+		const mark = potStampFor(leagueFile, want);
+		out.bbgmdraft = mark
+			? withPotStamp(null, want, { potBias: mark.bias, potSpread: mark.spread, potModel: mark.model })
+			: {};
+		const recipes = leagueFile.bbgmdraft && leagueFile.bbgmdraft.recipes;
+		out.bbgmdraft.pastPro = {
+			year: want, truth, bio, careers,
+			league: leagueFp(leagueFile),
+			recipe: recipes && recipes[want] ? recipes[want] : null,
+		};
+		return out;
+	}
+	function leagueFp(lf) {
+		const meta = (lf && lf.meta) || {};
+		let start = lf && lf.startingSeason;
+		const ga = lf && lf.gameAttributes;
+		const lid = ga && !Array.isArray(ga) ? ga.lid : null;
+		return "lg" + hashText(String(meta.name || lid || "") + "|" + String(start || ""));
+	}
+	function hashText(str) {
+		let h = 0x811c9dc5;
+		for (let i = 0; i < str.length; i++) {
+			h ^= str.charCodeAt(i);
+			h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+		}
+		return ("00000000" + h.toString(16)).slice(-8);
+	}
+	function pastProOf(lf) {
+		return lf && lf.bbgmdraft && lf.bbgmdraft.pastPro ? lf.bbgmdraft.pastPro : null;
+	}
+	/* A past class runs with its men's real schools and class years pinned
+	   and its real draft order forced, from the mark extractPastClass left on
+	   the file. Explicit cfg values win. */
+	function withPastPro(cfg, lf) {
+		const pp = pastProOf(lf);
+		if (!pp) return cfg;
+		const out = Object.assign({}, cfg);
+		const bio = Object.assign({}, pp.bio || {});
+		if (cfg.biography) {
+			for (const k of Object.keys(cfg.biography)) {
+				bio[k] = Object.assign({}, bio[k] || {}, cfg.biography[k]);
+			}
+		}
+		out.biography = bio;
+		if (!out.draftTruth) out.draftTruth = pp.truth || null;
+		return out;
+	}
+	/* cfg.draftTruth: {key: {round, pick, slot}}. Drafted men in real pick
+	   order, everyone else after them in the board's order; the draft-night
+	   events of anyone it moved are dropped (they described a move that did
+	   not happen). boardRank stays the mock. */
+	function applyDraftTruth(order, truth, events) {
+		if (!truth) return { order, events };
+		const slotOf = (p) => {
+			const t = truth[p.key];
+			return t && Number.isFinite(t.slot) && t.slot > 0 ? t.slot : null;
+		};
+		const drafted = order.filter((p) => slotOf(p) !== null)
+			.sort((a, b) => slotOf(a) - slotOf(b));
+		const rest = order.filter((p) => slotOf(p) === null);
+		const next = drafted.concat(rest);
+		const at = {};
+		order.forEach((p, i) => { at[p.key] = i; });
+		const kept = (events || []).filter((e) => {
+			const i = next.findIndex((p) => p.key === e.key);
+			if (i === at[e.key]) return true;
+			const p = next[i];
+			if (p) p.draftEvent = null;
+			return false;
+		});
+		return { order: next, events: kept };
+	}
+
 	/* A per-player salt for the RNG streams. `reroll` re-draws ONE prospect:
 	   every stream in the generator is keyed off the player's key, so salting
 	   his key changes his draw and leaves every other player's stream
@@ -4800,8 +5012,21 @@
 		const order = board.slice();
 		state.draftEvents = applyDraftEvents(order, rng.child("draftday"),
 			state.effectiveCfg || state.cfg, state);
-		order.forEach((p, i) => { p.draftSlot = i + 1; });
-		state.draftOrder = order;
+		let finalOrder = order;
+		const truth = (state.cfg && state.cfg.draftTruth) || null;
+		if (truth) {
+			const t = applyDraftTruth(order, truth, state.draftEvents);
+			finalOrder = t.order;
+			state.draftEvents = t.events;
+		}
+		finalOrder.forEach((p, i) => {
+			p.draftSlot = i + 1;
+			if (truth) {
+				const tr = truth[p.key];
+				p.realDraft = tr && tr.slot ? { round: tr.round, pick: tr.pick, team: tr.team } : null;
+			}
+		});
+		state.draftOrder = finalOrder;
 		state.board = board;
 		state.risers = board.slice().sort((a, b) => b.stockMove - a.stockMove)
 			.filter((p) => p.stockMove > 0).slice(0, 8);
@@ -5151,7 +5376,7 @@
 				"awardNoise"],
 			run: phaseAwards,
 		},
-		{ name: "stock", deps: ["draftEvents"], run: phaseStock },
+		{ name: "stock", deps: ["draftEvents", "draftTruth"], run: phaseStock },
 		{ name: "notes", deps: ["noteLines", "noteHeader", "noteFooter"], run: phaseNotes },
 	];
 
@@ -5295,7 +5520,7 @@
 		const lf = Object.assign({}, leagueFile, { startingSeason: validation.season });
 		const seed = cfg.seed && String(cfg.seed).trim() !== ""
 			? String(cfg.seed).trim() : String(Math.floor(Math.random() * 1e9));
-		const effective = Object.assign({}, cfg, { seed });
+		const effective = withPastPro(Object.assign({}, cfg, { seed }), leagueFile);
 		const key = phaseKey(PHASES[0], effective);
 		let byKey = previewCache.get(leagueFile);
 		if (byKey && byKey.key === key) {
@@ -5455,11 +5680,15 @@
 		let state = null;
 		let keys = null;
 
-		function run(cfg) {
+		/* opts.stopAfter (UV1): run only up to and including the named phase,
+		   so a caller can hand control back between phases. The next call with
+		   the same cfg carries on from the first phase not yet run; the season
+		   that comes out is exactly the one a single call would make. */
+		function run(cfg, opts) {
 			const seed = cfg.seed && String(cfg.seed).trim() !== ""
 				? String(cfg.seed).trim()
 				: String(Math.floor(Math.random() * 1e9));
-			const effective = Object.assign({}, cfg, { seed });
+			const effective = withPastPro(Object.assign({}, cfg, { seed }), leagueFile);
 			const nextKeys = PHASES.map((p) => phaseKey(p, effective));
 			let from = 0;
 			if (state && keys) {
@@ -5512,8 +5741,11 @@
 				state.seed = seed;
 			}
 			const ran = [];
+			const stopAt = opts && opts.stopAfter
+				? PHASES.findIndex((ph) => ph.name === opts.stopAfter) : -1;
+			const last = stopAt >= 0 ? stopAt : PHASES.length - 1;
 			try {
-				for (let i = from; i < PHASES.length; i++) {
+				for (let i = from; i <= last; i++) {
 					PHASES[i].run(state);
 					ran.push(PHASES[i].name);
 				}
@@ -5528,7 +5760,8 @@
 				keys = null;
 				throw err;
 			}
-			keys = nextKeys;
+			keys = last >= PHASES.length - 1 ? nextKeys
+				: nextKeys.map((k, i) => (i < from || i <= last ? k : null));
 			return {
 				seed: state.seed,
 				season: state.season,
@@ -7631,8 +7864,19 @@
 	}
 	/* The recipe a file carries, or null. A copy, so the caller can edit it.
 	   `settings` is a plain payload for Config.make; nothing here applies it. */
-	function readRecipe(file) {
-		const r = file && typeof file === "object" ? file.bbgmdraft && file.bbgmdraft.recipe : null;
+	function withRecipe(bd, result, recipe, year) {
+		const y = Number.isFinite(year) ? year
+			: classDraftYear((result.leagueFile && result.leagueFile.players) || [], result.season);
+		const recipes = Object.assign({}, bd && bd.recipes);
+		if (Number.isFinite(y)) recipes[y] = recipe;
+		return Object.assign({}, bd, { recipe, recipes });
+	}
+	/* readRecipe(file) reads the newest; readRecipe(file, year) prefers that
+	   year's entry in `recipes` and falls back to `recipe`. */
+	function readRecipe(file, year) {
+		const bd = file && typeof file === "object" ? file.bbgmdraft : null;
+		const r = bd && year !== undefined && bd.recipes && bd.recipes[year]
+			? bd.recipes[year] : bd && bd.recipe;
 		if (!r || typeof r !== "object" || r.v !== RECIPE_VERSION) return null;
 		if (typeof r.seed !== "string" || !r.seed) return null;
 		if (!r.settings || typeof r.settings !== "object" || Array.isArray(r.settings)) return null;
@@ -8329,7 +8573,7 @@
 		/* opts.recipe: what made this file (seed, engine revision, settings,
 		   source fingerprint), in the same root key; see recipeFor. */
 		if (opts.recipe) {
-			file.bbgmdraft = Object.assign({}, file.bbgmdraft, { recipe: recipeFor(result, opts.recipe) });
+			file.bbgmdraft = withRecipe(file.bbgmdraft, result, recipeFor(result, opts.recipe));
 		}
 		/* opts.only: a list of player keys; the export carries just those.
 		   Everything is still computed for the WHOLE class first, so a kept
@@ -8781,6 +9025,11 @@
 	];
 
 	function exportPlayersFile(result, opts) {
+		if (result && pastProOf(result.leagueFile)) {
+			throw new Error("The " + pastProOf(result.leagueFile).year + " class is pro " +
+				"history from a league file: those men are already in the league, so " +
+				"they are never exported or merged back.");
+		}
 		/* `awards` does not survive Tools -> Import players, so the honors go
 		   into the note here whatever the note template says. */
 		const full = exportFile(result, Object.assign({}, opts,
@@ -8840,7 +9089,7 @@
 
 	function universePlayersFile(results, opts) {
 		opts = opts || {};
-		const ordered = (results || []).filter(Boolean).slice()
+		const ordered = (results || []).filter((r) => r && !pastProOf(r.leagueFile)).slice()
 			.sort((a, b) => (exportSeasonOf(a) - exportSeasonOf(b)));
 		const players = [];
 		const perFile = [];
@@ -9141,6 +9390,11 @@
 	}
 
 	function mergeIntoLeague(result, league, opts) {
+		if (result && pastProOf(result.leagueFile)) {
+			throw new Error("The " + pastProOf(result.leagueFile).year + " class is pro " +
+				"history from a league file: those men are already in the league, so " +
+				"they are never exported or merged back.");
+		}
 		if (!league || typeof league !== "object" || !Array.isArray(league.players)) {
 			throw new Error("That file has no players array — it is not a BBGM league file.");
 		}
@@ -9373,9 +9627,11 @@
 		const file = Object.assign({}, league, { players });
 		// The class's potential is adjusted once; see potStampFor.
 		file.bbgmdraft = withPotStamp(league.bbgmdraft, season, result.effectiveCfg || result.cfg);
-		// opts.recipe, as exportFile writes it (a multi-class merge keeps the last).
+		/* opts.recipe, as exportFile writes it. `recipe` is the last class
+		   merged (what older readers read); `recipes[year]` keeps every
+		   class's, so a second merge no longer erases the first (UV13). */
 		if (opts && opts.recipe) {
-			file.bbgmdraft = Object.assign({}, file.bbgmdraft, { recipe: recipeFor(result, opts.recipe) });
+			file.bbgmdraft = withRecipe(file.bbgmdraft, result, recipeFor(result, opts.recipe), season);
 		}
 		const mergedPids = [];
 		for (const p of replacements.values()) mergedPids.push(Number(p.pid));
@@ -9414,7 +9670,8 @@
 	   either answer (both classes in one draft, or the second silently winning)
 	   is a guess about what the user meant. */
 	function mergeManyIntoLeague(results, league, opts) {
-		const list = Array.isArray(results) ? results : [results];
+		const list = (Array.isArray(results) ? results : [results])
+			.filter((r) => !(r && pastProOf(r.leagueFile)));
 		if (!list.length) throw new Error("No draft class was selected to merge.");
 		const protect = new Set();
 		const seasons = [];
@@ -9450,6 +9707,7 @@
 		SIZE_OVERRIDE_KEYS, SURPRISES, DRAFT_EVENTS, PACE_MIN, PACE_MAX,
 		heightsLocked,
 		draftClassesIn, extractDraftClass, MIN_CLASS, PROSPECT_TIDS,
+		pastClassesIn, extractPastClass, pastProOf, withPastPro, applyDraftTruth, leagueFp,
 		MAX_CLASS, ANOMALY_MEMORY_DEPTH, NARRATIVES, isLeagueFile,
 		rerollSalt,
 		signatureGame, simulateProLeagues, assignRecruiting,

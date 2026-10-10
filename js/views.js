@@ -4711,6 +4711,7 @@
 		}
 		sec.appendChild(bar);
 		programHistoryBlock(sec, chosen, all[chosen], { heading: "h5", link: true });
+		programAlumniBlock(sec, chosen);
 		view.appendChild(sec);
 	}
 
@@ -4761,6 +4762,64 @@
 		table.appendChild(tb);
 		wrap.appendChild(table);
 		view.appendChild(wrap);
+	}
+
+	/* ALUMNI / DRAFTED FROM (UV11): who the program sent to the draft and
+	   who played there, from the registry (Universe.programAlumni), with a
+	   draft-year filter. A real pro career (UV12, a league's pro history) is
+	   marked as such; the seeded one is "projected". */
+	function programAlumniBlock(box, name) {
+		const st = A().state;
+		const u = st.universe;
+		if (!u || !u.registry || !global.Universe || !global.Universe.programAlumni) return;
+		const all = global.Universe.programAlumni(u, name);
+		if (!all.length) return;
+		const head = el("h5", null, "Alumni / drafted from " + name);
+		box.appendChild(head);
+		const years = Array.from(new Set(all.map((x) => x.draftSeason).filter(Number.isFinite)))
+			.sort((a, b) => b - a);
+		const pick = st.universeAlumniYear || {};
+		const want = Number.isFinite(pick[name]) ? pick[name] : null;
+		if (years.length > 1) {
+			const sel = el("select");
+			sel.setAttribute("aria-label", "Draft year");
+			sel.appendChild(new Option("every draft", ""));
+			for (const y of years) sel.appendChild(new Option(y + " draft", String(y)));
+			sel.value = want === null ? "" : String(want);
+			sel.addEventListener("change", () => {
+				st.universeAlumniYear = Object.assign({}, st.universeAlumniYear,
+					{ [name]: sel.value === "" ? null : Number(sel.value) });
+				A().render();
+			});
+			box.appendChild(sel);
+		}
+		const list = want === null ? all : all.filter((x) => x.draftSeason === want);
+		const wrap = el("div", "scroll");
+		const t = el("table", "proghist alumni");
+		const hr = el("tr");
+		for (const h of ["Name", "Years", "Class", "Draft", "Honors", "Pro"]) hr.appendChild(el("th", null, h));
+		const thead = el("thead");
+		thead.appendChild(hr);
+		t.appendChild(thead);
+		const tb = el("tbody");
+		for (const x of list.slice(0, 60)) {
+			const tr = el("tr");
+			const td = el("td");
+			td.appendChild(personLink(x, u.registry));
+			if (x.imported) td.appendChild(el("span", "tag", "league"));
+			tr.appendChild(td);
+			tr.appendChild(el("td", null, x.from === x.to ? String(x.from) : x.from + "\u2013" + x.to));
+			tr.appendChild(el("td", null, x.classYear || "\u2014"));
+			tr.appendChild(el("td", null, !x.drafted ? "(played here)"
+				: x.draftSeason + (x.slot ? " · No. " + x.slot + (x.team ? " " + x.team : "") : " · undrafted")));
+			tr.appendChild(el("td", "num", String(x.honors)));
+			tr.appendChild(el("td", null, x.pro || "\u2014"));
+			tb.appendChild(tr);
+		}
+		t.appendChild(tb);
+		wrap.appendChild(t);
+		box.appendChild(wrap);
+		if (list.length > 60) box.appendChild(el("p", "hint", (list.length - 60) + " more not shown."));
 	}
 
 	/* THE RECORD BOOK FOR PEOPLE (Universe.peopleRecords): the registry's
@@ -5003,6 +5062,21 @@
 				"rest under the current settings.";
 			part.addEventListener("click", () => { A().resumeUniverseDialog(); });
 			bar.appendChild(part);
+		}
+		/* UV12: a loaded league's last drafted classes, as history. */
+		const offer = A().state.pastProOffer;
+		if (!u.running && offer && offer.classes && offer.classes.length) {
+			const pro = el("button", null, "Add the last " + offer.classes.length +
+				" drafted classes to the universe's history");
+			pro.id = "btnPastPro";
+			pro.title = offer.classes.map((c) => c.year + ": " + c.drafted + " drafted, " +
+				c.undrafted + " undrafted signed").join("; ") +
+				(u.rows.length ? ". The world is already built, so they are added as a ledger " +
+					"(registry, alumni, real pro careers) without replaying their seasons."
+					: ". Their college seasons are played as the world's first seasons, with " +
+					"their real schools and draft order.");
+			pro.addEventListener("click", () => { A().addPastProClasses(); });
+			bar.appendChild(pro);
 		}
 		/* Past the last season: real games on synthetic classes. */
 		if (!u.running && u.rows.length && u.tail && !u.broken) {
@@ -8464,6 +8538,7 @@
 			if (hist.length) {
 				const sec = el("section", "programs");
 				programHistoryBlock(sec, t.name, hist, { season: res.season });
+				programAlumniBlock(sec, t.name);
 				box.appendChild(sec);
 			}
 		}
