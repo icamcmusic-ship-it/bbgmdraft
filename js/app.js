@@ -7080,7 +7080,7 @@
 		const score = attemptScore(ch, sc);
 		if (score !== null) {
 			writeBest(ch.key, score);
-			if (ch.daily) recordDaily(ch.key.slice(6), score);
+			if (ch.daily) recordDaily(ch.date || ch.key.slice(6, 16), score);
 			if (Number.isFinite(ch.tier) &&
 				!state.challengeProgress.cleared[ch.baseKey]) {
 				state.challengeProgress.cleared[ch.baseKey] = sc.moved.slice();
@@ -7189,9 +7189,29 @@
 		return true;
 	}
 
+	/* A day the shared class already solves at the defaults is no puzzle:
+	   the goals are redrawn (same class, same seed) until it is not, up to
+	   four times. Deterministic, so everybody lands on the same draw. */
 	function startDaily(date) {
-		const ch = RP.dailyChallenge(date || RP.dateKey(new Date()));
-		if (ch) startChallenge(ch);
+		const day = date || RP.dateKey(new Date());
+		let ch = RP.dailyChallenge(day);
+		if (!ch) return;
+		if (!state.challengeOwnFile && ensureChallengeClass(ch) && state.runners[state.active]) {
+			try {
+				const cfg = CFG.make({ seed: ch.seed });
+				cfg.overrides = {};
+				const res = state.runners[state.active].run(cfg);
+				for (let k = 1; k <= 4; k++) {
+					const solved = ch.goals.every((g) => {
+						const cl = parseClause(g);
+						try { return !!(cl && cl.test(res)); } catch (e) { return false; }
+					});
+					if (!solved) break;
+					ch = RP.dailyChallenge(day + "#" + k);
+				}
+			} catch (e) { /* the first draw stands */ }
+		}
+		startChallenge(ch);
 	}
 
 	// A campaign tier runs on its own canonical class (R5).

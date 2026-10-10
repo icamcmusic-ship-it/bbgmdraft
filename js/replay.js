@@ -81,9 +81,15 @@
 		return d.toISOString().slice(0, 10);
 	}
 
-	function dailyChallenge(date) {
-		if (!DATE_RE.test(String(date))) return null;
-		const h = hash("daily|" + date);
+	/* "YYYY-MM-DD" or "YYYY-MM-DD#k": the k-th redraw of the day's goals,
+	   same class and seed. The app redraws when the canonical class already
+	   meets every goal at the defaults (a day solved by doing nothing). */
+	function dailyChallenge(dateArg) {
+		const m = /^(\d{4}-\d{2}-\d{2})(?:#(\d))?$/.exec(String(dateArg));
+		if (!m) return null;
+		const date = m[1];
+		const k = m[2] ? Number(m[2]) : 0;
+		const h = hash("daily|" + date + (k ? "|" + k : ""));
 		const theme = weeklyTheme(date);
 		const themed = DAILY_STRETCH.filter((g) => g.theme === theme.key);
 		// Two days in three from the week's theme, the rest from anywhere.
@@ -99,7 +105,9 @@
 			if (more.length) { goals.splice(1, 0, more[h() % more.length]); budget++; }
 		}
 		return {
-			key: "daily-" + date,
+			key: "daily-" + date + (k ? "#" + k : ""),
+			date,
+			attempt: k,
 			name: "Daily challenge " + date,
 			blurb: "Today's class, fixed for everybody: hit every goal, moving as " +
 				"few settings as you can. " + theme.name + ".",

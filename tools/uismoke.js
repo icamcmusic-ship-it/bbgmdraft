@@ -2920,6 +2920,9 @@ async function gotoProspects(page) {
 			clamped[0] === 82 && clamped[1] === "82", clamped.join(" / "));
 
 		// Replayability (js/replay.js): daily, par, codes, rival, campaign, puzzle.
+		/* On this file: the canonical shared class (audit R5) is checked on
+		   its own page at the end, so this section's file set stays one. */
+		await page.evaluate(() => { window.App.state.challengeOwnFile = true; });
 		await page.evaluate(() => window.App.startDaily("2026-09-25"));
 		await page.waitForFunction(() => document.getElementById("challengeScore") &&
 			window.App.state.challenge === "daily-2026-09-25", null, { timeout: 30000 });
@@ -3021,9 +3024,11 @@ async function gotoProspects(page) {
 			A.state.cfg.weirdness = 2;
 			return A.challengeResultText(c, A.scoreChallenge(c, A.state.results[A.state.active]));
 		});
-		ok("the challenge result line names the challenge, the dials moved and the seed",
-			/^The perfect season: (not )?solved · \d\/2 goals · 1\/3 settings \(weirdness 0 → 2\) · seed undefeated$/
-				.test(line), line);
+		/* Spoiler-free since the 2026-10-10 audit (R6): goals as marks and
+		   the dial and run counts, never the dial names. */
+		ok("the challenge result line names the challenge and counts without naming the dials",
+			/^The perfect season [\u2713\u00b7]{2} · (not )?solved · 1\/3 dials · \d+ runs?$/.test(line) &&
+				line.indexOf("weirdness") === -1, line);
 		const forbidden = await page.evaluate(() => {
 			const A = window.App;
 			const c = A.CHALLENGES.filter((x) => x.key === "perfect")[0];
@@ -3157,8 +3162,9 @@ async function gotoProspects(page) {
 			return { champ: res.tourney.champion.team.name, no1: res.board[0].name };
 		});
 		await playTab();
-		ok("the Play tab offers three games",
-			(await page.locator("[data-play]").count()) === 3);
+		ok("the Play tab offers five games and the blind rerolls",
+			(await page.locator("[data-play]").count()) === 5 &&
+			(await page.locator("[data-blind]").count()) === 4);
 
 		// Prediction.
 		await page.locator('[data-play="predict"]').click();
@@ -3712,7 +3718,7 @@ async function gotoProspects(page) {
 		await page.waitForTimeout(300);
 		const text = (await page.locator(".problock").first().textContent()) || "";
 		ok("the player page carries a pro projection and his mock-draft slot",
-			/median peak of \d+/.test(text) && /Mock draft: No\. 1 /.test(text), text.slice(0, 160));
+			/median peak of \d+/.test(text) && /Team mock: No\. 1 /.test(text), text.slice(0, 160));
 
 		// A class from a league export is drafted by that league's teams.
 		const lg = { version: 73, startingSeason: 2027, gameAttributes: { season: 2027 },
@@ -5212,6 +5218,75 @@ async function gotoProspects(page) {
 				JSON.stringify(said) + " " + errs.join(" | "));
 			await pg.close();
 		}
+	}
+
+	console.log("\nReplayability and quick wins (audit 2026-10-10)");
+	{
+		const pg = await browser.newPage();
+		const errs = [];
+		pg.on("pageerror", (e) => errs.push(String(e)));
+		await pg.goto(base);
+		await pg.evaluate(() => localStorage.clear());
+		await pg.setInputFiles("#file", fixture);
+		await pg.waitForSelector("table tbody tr", { timeout: 60000 });
+		await pg.waitForTimeout(800);
+		const A = (fn, arg) => pg.evaluate(fn, arg);
+		await A(() => window.App.showTab("bracket"));
+		await pg.waitForTimeout(800);
+		ok("the March tab has title odds, conference tournaments and a PNG button",
+			(await pg.locator(".bracketodds").count()) === 1 && (await pg.locator(".conftourneys").count()) === 1 &&
+			(await pg.locator("#btnBracketPng").count()) === 1);
+		await A(() => window.App.showTab("mock"));
+		await pg.waitForTimeout(2500);
+		const heads = (await pg.locator(".mocktable thead th").allTextContents()).join("|");
+		ok("the mock has a Range column", /\|Range\|/.test(heads), heads);
+		await pg.selectOption("#mockTeam", { index: 1 });
+		await pg.waitForTimeout(800);
+		ok("My team's picks can be changed (on the clock)", (await pg.locator("[data-mock-pick]").count()) >= 1);
+		ok("the Teams table grades every team", (await pg.locator(".mockteams th", { hasText: "Grade" }).count()) === 1);
+		const key = await A(() => window.App.state.results[window.App.state.active].board[0].key);
+		await A((k) => window.App.showPlayer(k), key);
+		await pg.waitForTimeout(800);
+		ok("a player page has combine numbers, closest builds and the draft-order legend",
+			(await pg.locator("dt", { hasText: "Combine" }).count()) === 1 &&
+			(await pg.locator("dt", { hasText: "Closest builds" }).count()) === 1 &&
+			(await pg.locator(".draftorders").count()) === 1);
+		const team = await A(() => Object.keys(window.App.state.results[window.App.state.active].teams)
+			.filter((n) => !/^__/.test(n))[0]);
+		const coach = await A((t) => window.App.state.results[window.App.state.active].teams[t].coach.name, team);
+		await A((x) => window.App.showTeam(x), "coach:" + coach);
+		await pg.waitForTimeout(500);
+		ok("a coach page", (await pg.locator("#view h3").first().textContent()) === coach);
+		const conf = await A((t) => window.App.state.results[window.App.state.active].teams[t].conf, team);
+		await A((x) => window.App.showTeam(x), "conf:" + conf);
+		await pg.waitForTimeout(500);
+		ok("a conference page", (await pg.locator("#view h3").first().textContent()) === conf);
+		await A(() => window.App.showTab("play"));
+		await pg.waitForTimeout(500);
+		await pg.locator('[data-blind="predict"]').click();
+		await pg.waitForFunction(() => window.App.state.play && window.App.state.play.kind === "predict",
+			null, { timeout: 60000 });
+		ok("a blind reroll opens its game before anything is shown, and masks the tab title",
+			(await A(() => window.App.state.tab)) === "play" && /^A class in play/.test(await pg.title()),
+			await pg.title());
+		await A(() => { window.App.state.play = null; window.App.render(); });
+		await A(() => window.App.replayDialog());
+		await pg.waitForTimeout(300);
+		ok("the replay dialog has the reroll scope and the build collection",
+			(await pg.locator("#rerollScope").count()) === 1 &&
+			(await pg.locator("text=Build collection").count()) === 1);
+		await A(() => window.App.closeModal());
+		await A(() => window.App.startDaily("2026-10-10"));
+		await pg.waitForFunction(() => /^daily-2026-10-10/.test(window.App.state.challenge || "") &&
+			document.getElementById("challengeScore"), null, { timeout: 60000 });
+		const daily = await A(() => [window.App.state.files.length,
+			window.App.state.files[window.App.state.active].name]);
+		ok("a daily runs on its own shared class, added beside the file",
+			daily[0] === 2 && daily[1] === "challenge-daily-2026-10-10.json", daily.join(" / "));
+		ok("...and its result code carries the class fingerprint",
+			!!(await A(() => window.Replay.readResult(window.App.resultCode()).fp)));
+		ok("no page errors in the audit section", errs.length === 0, errs.join(" | "));
+		await pg.close();
 	}
 
 	console.log("\nNo errors");
