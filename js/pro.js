@@ -500,7 +500,7 @@
 		}
 		const rows = Object.values(by).map((r) => ({
 			key: r.key, name: r.name,
-			mean: Math.round(10 * r.picks.reduce((a, b) => a + b, 0) / K) / 10,
+			mean: Math.round(10 * r.picks.reduce((a, b) => a + b, 0) / r.picks.length) / 10,
 			min: Math.min.apply(null, r.picks), max: Math.max.apply(null, r.picks),
 			// Undrafted in some salts: counted out of K, not out of his own picks.
 			pFirst: r.first / K, drafted: r.picks.length / K,

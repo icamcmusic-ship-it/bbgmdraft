@@ -179,6 +179,7 @@
 			foy: (res.players || []).filter((p) => (p.awards || []).indexOf("Wayman Tisdale Award") !== -1)
 				.map((p) => p.key),
 			onesInFF: (t.finalFour || []).filter((x) => x && x.seed === 1).length,
+			stories: (res.narrative || []).map((x) => ({ name: x.name, held: x.held === undefined ? null : x.held })),
 		};
 	}
 
@@ -193,7 +194,16 @@
 		const foy = ans.foy.length ? (ans.foy.indexOf(picks.foy) !== -1 ? 2 : 0)
 			: (picks.foy === "none" ? 2 : 0);
 		const ones = Number(picks.ones) === ans.onesInFF ? 2 : 0;
-		return { ff: ffPts, foy, ones, points: ffPts + foy + ones, max: 8 };
+		/* The storyline market (R8, R12.4): a point for each checkable
+		   preseason storyline called right ("yes" it came true / "no"). */
+		let story = 0, storyMax = 0;
+		(ans.stories || []).forEach((st, i) => {
+			if (st.held === null || st.held === undefined) return;
+			storyMax++;
+			const call = picks.story && picks.story[i];
+			if ((call === "yes" && st.held) || (call === "no" && !st.held)) story++;
+		});
+		return { ff: ffPts, foy, ones, story, points: ffPts + foy + ones + story, max: 8 + storyMax };
 	}
 
 	/* Champion 5 (2 for a Final Four team), POY 3, No. 1 pick 3 (1 for a
@@ -471,7 +481,7 @@
 		// The advanced card (Q23), optional, graded apart.
 		const adv = el("details", "card playadvanced");
 		adv.open = !!g.picks.advanced;
-		adv.appendChild(el("summary", null, "Advanced (optional, out of 8): Final Four, " +
+		adv.appendChild(el("summary", null, "Advanced (optional, out of 8 plus the storylines): Final Four, " +
 			"Freshman of the Year, 1 seeds in the Final Four"));
 		adv.addEventListener("toggle", () => { g.picks.advanced = adv.open; });
 		const sub = (label, key, options, i) => {
@@ -495,6 +505,12 @@
 		sub("Freshman of the Year", "foy", [["none", "Nobody in this class"]]
 			.concat(players.filter((p) => !p.nonNcaa && p.classYear === "Freshman").map((p) => [p.key, playerLabel(p)])));
 		sub("1 seeds in the Final Four", "ones", [0, 1, 2, 3, 4].map((n) => [String(n), String(n)]));
+		// The storyline market: the preseason talk, called before the season.
+		(res.narrative || []).forEach((st, i) => {
+			if (st.held === null) return;
+			sub("Storyline: \u201c" + st.name + "\u201d comes true?", "story",
+				[["yes", "yes"], ["no", "no"]], i);
+		});
 		wrap.appendChild(adv);
 		if (!g.revealed) {
 			wrap.appendChild(revealButton("Lock in and reveal",
@@ -503,7 +519,8 @@
 					g.answers = predictionAnswers(res);
 					g.grade = gradePrediction(g.picks, g.answers);
 					g.base = gradePrediction(baselinePrediction(res), g.answers);
-					const advPicked = (g.picks.ff || []).some(Boolean) || g.picks.foy || g.picks.ones;
+					const advPicked = (g.picks.ff || []).some(Boolean) || g.picks.foy || g.picks.ones ||
+						(g.picks.story || []).some(Boolean);
 					if (advPicked) g.adv = gradeAdvanced(g.picks, g.answers);
 					g.record = saveRecord("predict", g.grade.points, g.grade.max, res.seed,
 						{ fp: classId(res), base: g.base.points });
@@ -525,9 +542,11 @@
 				"preseason No. 1) scored " + g.base.points + ": you are " + (d >= 0 ? "+" : "") + d + " above it."));
 		}
 		if (g.adv) {
-			out.appendChild(el("p", null, "Advanced: " + g.adv.points + " / 8 (Final Four " + g.adv.ff +
-				", Freshman of the Year " + g.adv.foy + ", 1 seeds " + g.adv.ones + "). Final Four: " +
-				a.finalFour.join(", ") + "."));
+			out.appendChild(el("p", null, "Advanced: " + g.adv.points + " / " + g.adv.max + " (Final Four " + g.adv.ff +
+				", Freshman of the Year " + g.adv.foy + ", 1 seeds " + g.adv.ones + ", storylines " + g.adv.story +
+				"). Final Four: " + a.finalFour.join(", ") + "." +
+				(a.stories.length ? " Storylines: " + a.stories.map((x) => x.name + " — " +
+					(x.held === null ? "uncheckable" : x.held ? "came true" : "did not")).join("; ") + "." : "")));
 		}
 		if (g.record && g.record.repeat) out.appendChild(el("p", "hint", "Already played on this class: not counted again."));
 		wrap.appendChild(out);
