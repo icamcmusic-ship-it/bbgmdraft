@@ -48,8 +48,8 @@
 	     matter disappear into it. -->
 	<div class="btngroup" role="group" aria-label="Generate">
 		<button id="btnReroll" class="warn" disabled title="New seed, same settings">Reroll</button>
-		<button id="btnRerollUntil" disabled title="Reroll until the class satisfies a condition — a 7'2&quot; top-five pick, a mid-major champion…">Until…</button>
-		<button id="btnRerun" disabled title="Re-apply the current settings with the same seed">Re-apply</button>
+		<button id="btnRerollUntil" disabled title="Reroll until the class satisfies a condition — a 7'2&quot; top-five pick, a mid-major champion…">Reroll until…</button>
+		<button id="btnRerun" disabled title="Re-run the current settings with the same seed (Re-apply)">Re-run same seed</button>
 	</div>
 	<div class="btngroup tools" id="headerTools" role="group" aria-label="Tools">
 		<button id="btnUndo" class="iconbtn" disabled title="Undo the last settings or lock change (Ctrl+Z)">Undo</button>
@@ -64,7 +64,7 @@
 		<button id="btnPrint" class="iconbtn" title="Print this page, or save it as a PDF, under a header with the class name, seed, fingerprint and date" aria-label="Print or save as PDF">🖨</button>
 	</div>
 	<div class="btngroup" role="group" aria-label="Export">
-		<button id="btnExport" class="primary" disabled>Export JSON</button>
+		<button id="btnExport" class="primary" disabled title="Load a class first — then this writes it back out as a BBGM draft class file">Export JSON</button>
 		<!-- The label was a bare ▾. Screen readers got "Other exports" from the
 		     title; a sighted user got a chevron with nothing to say it was a
 		     menu, what was in it, or that it belonged to the button beside it.
@@ -86,9 +86,9 @@
 	<div class="ctl themerow">
 		<label for="themeSelect">Theme</label>
 		<select id="themeSelect">
-			<option value="system">◐ Auto</option>
-			<option value="light">☀ Light</option>
-			<option value="dark">☾ Dark</option>
+			<option value="system">Auto (system)</option>
+			<option value="light">Light</option>
+			<option value="dark">Dark</option>
 			<optgroup label="Light themes">
 				<option value="ledger-light">Ledger Light</option>
 				<option value="draft-board">Draft Board</option>

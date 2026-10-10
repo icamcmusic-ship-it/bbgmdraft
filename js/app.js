@@ -1554,7 +1554,9 @@
 			champ.regSnapshot.w >= 20;
 		const bits = [];
 		if (perfect) bits.push(champ.name + " went unbeaten and won it all");
-		if (sc && sc.score >= 50) bits.push("strangeness " + sc.score + "/100");
+		/* U28: the strangeness score is replay-goal jargon; it lives in the
+		   seed pill's tooltip, not in the status line after a first run. */
+		void sc;
 		if (bits.length) setStatus("\u2605 Achievement: " + bits.join(" · ") + ".");
 	}
 
@@ -1715,6 +1717,14 @@
 			n.style.opacity = curve ? "1" : ".38";
 			n.querySelectorAll("input").forEach((i) => (i.disabled = !curve));
 			n.title = curve ? "" : "Unused while overalls are preserved; pick Rebuild class curve";
+			// U22: the reason on the control itself, not only on hover.
+			let note = n.querySelector(".curvenote");
+			if (!note) {
+				note = el("span", "unit curvenote", "(only with Rebuild class curve)");
+				const lab = n.querySelector("label") || n;
+				lab.appendChild(note);
+			}
+			note.hidden = curve;
 		}
 		$("ovrModeHint").textContent = curve
 			? "Rebuild: overalls are re-dealt along a configurable curve, so the class can get better or worse."
@@ -1938,9 +1948,13 @@
 			const y = b[k];
 			if (sameSetting(k, x, y)) continue;
 			if (x && typeof x === "object") { out.push(k + " (edited)"); continue; }
-			out.push(k + " " + x + " → " + y);
+			out.push(k + " " + settingWord(x) + " → " + settingWord(y));
 		}
 		return out;
+	}
+	// U28: a boolean reads as off/on, not as JavaScript.
+	function settingWord(v) {
+		return v === true ? "on" : v === false ? "off" : v;
 	}
 
 	/* Any two presets against each other. The dropdown told you what the
@@ -2651,6 +2665,7 @@
 			ledger,
 			// Gated by default; one tick shows every era and flavor.
 			showAll: !!s.showAll,
+			quiet: !!s.quiet,
 		};
 		return replayState;
 	}
@@ -2693,10 +2708,24 @@
 			box.setAttribute("aria-live", "polite");
 			document.body.appendChild(box);
 		}
-		const t = el("div", "replaytoast", text);
+		const t = el("div", "replaytoast toast", text);
+		// U9: every toast can be closed.
+		const x = el("button", "toastx", "\u00d7");
+		x.type = "button";
+		x.setAttribute("aria-label", "Dismiss");
+		x.addEventListener("click", () => t.remove());
+		t.appendChild(x);
 		box.appendChild(t);
 		setTimeout(() => t.remove(), 5000);
 		return t;
+	}
+	/* U9: achievement and bingo toasts stay quiet on the first run of a
+	   session (a first-time visitor came for a draft class, not a bingo
+	   card) and when the user ticked "Quiet achievements". They are still
+	   recorded in the ledger. */
+	let replayRunsSeen = 0;
+	function achievementsQuiet() {
+		return replayRunsSeen <= 1 || !!replayStore().quiet;
 	}
 	const replayToast = toast;
 
@@ -2733,9 +2762,16 @@
 		for (const id of RM.detect(res, sc)) earn(r, id, res, fresh);
 		if (RM.cardLines(r.card) > 0) earn(r, "bingo-line", res, fresh);
 		if (RM.cardFull(r.card)) earn(r, "bingo-full", res, fresh);
+		replayRunsSeen++;
 		if (!marked.length && !fresh.length) return;
-		if (RM.cardLines(r.card) > linesBefore) replayToast("Bingo! A line on card " + r.card.seed + ".");
-		for (const id of fresh) {
+		const quiet = achievementsQuiet();
+		if (!quiet && RM.cardLines(r.card) > linesBefore) replayToast("Bingo! A line on card " + r.card.seed + ".");
+		if (!quiet && fresh.length > 2) {
+			// U9: several at once are one toast, not a stack over the board.
+			replayToast(fresh.length + " achievements: " +
+				fresh.map((id) => RM.ACH_BY_ID[id].label).join(", ") + " — see Challenges (\u2691).");
+		}
+		for (const id of (quiet || fresh.length > 2) ? [] : fresh) {
 			const a = RM.ACH_BY_ID[id];
 			const opens = RM.UNLOCKS.filter((u) => u.requires === id)
 				.map((u) => (u.kind === "era"
@@ -2885,6 +2921,17 @@
 		lab.appendChild(document.createTextNode(" Show everything (no unlocks needed)"));
 		lab.title = "Eras and flavors that achievements unlock are listed from the start";
 		sel.parentNode.insertBefore(lab, $("eraNote"));
+		// U9: achievements and bingo can be told to stay out of the way.
+		const qlab = el("label", "check");
+		const qcb = el("input");
+		qcb.type = "checkbox";
+		qcb.id = "replayQuiet";
+		qcb.checked = replayStore().quiet;
+		qcb.addEventListener("change", () => { replayStore().quiet = qcb.checked; saveReplay(); });
+		qlab.appendChild(qcb);
+		qlab.appendChild(document.createTextNode(" Quiet achievements (no pop-ups)"));
+		qlab.title = "Achievements and bingo lines are still recorded; they just do not pop up";
+		sel.parentNode.insertBefore(qlab, $("eraNote"));
 	}
 
 	/* Replay a randomizer draw by its seed. */
@@ -2957,6 +3004,7 @@
 			});
 			box.appendChild(b);
 		}
+		rovingRadios(box);
 	}
 
 	/* The one-press version of the whole loop. Placed beside Randomize
@@ -3065,9 +3113,10 @@
 	   "only what I changed" does too, since a changed model dial is exactly
 	   what you would want to see. */
 	const SETTING_TIERS = [
-		["shape", "Shape", "The class: quality, depth, builds, flavor, paths"],
-		["season", "Season", "Plus the college season and its awards"],
-		["model", "Model", "Everything, memories and noise dials included"],
+		// U32: cumulative depth levels, named as levels rather than topics.
+		["shape", "Basic", "The class: quality, depth, builds, flavor, paths"],
+		["season", "More", "Plus the college season and its awards"],
+		["model", "Everything", "Everything, memories and noise dials included"],
 	];
 	const TIER_SHAPE = new Set([
 		"preset", "seed", "ovrMode", "classQuality", "classDepth", "eliteCount",
@@ -3109,13 +3158,39 @@
 			});
 			row.appendChild(b);
 		}
+		rovingRadios(row);
+	}
+	/* U15: a role="radio" group behaves like one — a single tab stop, and
+	   the arrow keys move the choice. */
+	function rovingRadios(box) {
+		const items = Array.from(box.querySelectorAll('[role="radio"]'));
+		if (!items.length) return;
+		let any = false;
+		for (const b of items) {
+			const on = b.getAttribute("aria-checked") === "true";
+			b.tabIndex = on ? 0 : -1;
+			any = any || on;
+		}
+		if (!any) items[0].tabIndex = 0;
+		box.onkeydown = (e) => {
+			const d = (e.key === "ArrowRight" || e.key === "ArrowDown") ? 1
+				: (e.key === "ArrowLeft" || e.key === "ArrowUp") ? -1 : 0;
+			if (!d) return;
+			const list = Array.from(box.querySelectorAll('[role="radio"]'));
+			const i = list.indexOf(document.activeElement);
+			if (i === -1) return;
+			e.preventDefault();
+			list[(i + d + list.length) % list.length].click();
+			const now = box.querySelector('[role="radio"][aria-checked="true"]');
+			if (now) now.focus();
+		};
 	}
 
 	function bindSettingTier() {
 		const anchor = $("settingSearchBox");
 		if (!anchor || $("settingTier")) return;
 		const ctl = el("div", "ctl");
-		const lbl = el("span", "lbl", "Show settings about:");
+		const lbl = el("span", "lbl", "Show settings:");
 		lbl.id = "settingTierLabel";
 		ctl.appendChild(lbl);
 		const chips = el("div", "chips");
@@ -4395,7 +4470,7 @@
 			}
 			let seen = 0;
 			let last = 0;
-			const counter = new TransformStream({
+			const counter = new global.TransformStream({
 				transform(chunk, ctl) {
 					seen += chunk.byteLength;
 					// A repaint per 64 KB chunk is thousands of them; one per
@@ -4435,6 +4510,7 @@
 		box.querySelector(".lp-label").textContent = label;
 		box.querySelector(".lp-detail").textContent = detail || "";
 		const bar = box.querySelector("progress");
+		box.classList.toggle("indet", frac === null || frac === undefined || !Number.isFinite(frac));
 		if (frac === null || frac === undefined || !Number.isFinite(frac)) {
 			bar.removeAttribute("value");
 			box.removeAttribute("aria-valuenow");
@@ -4594,7 +4670,7 @@
 						side.csv.push(text);
 						return null;
 					}
-					const data = JSON.parse(text);
+					const data = parseJsonFriendly(text);
 					if (data && data.format === "bbgm-draft-workshop/universe") {
 						side.universe.push(data);
 						return null;
@@ -4637,6 +4713,25 @@
 				else run(() => importLocksCsv(text));
 			}
 		});
+	}
+
+	/* U16: JSON.parse's own messages ("Unexpected end of JSON input",
+	   "Unexpected token 'h'…") say nothing a person can act on. The raw
+	   detail stays on the error (`.detail`) for the bug report. */
+	function friendlyJsonError(e) {
+		const raw = e && e.message ? e.message : String(e);
+		const cut = /end of (JSON )?input|Unterminated|Unexpected end/i.test(raw);
+		const err = new Error(cut
+			? "isn't a complete JSON file — the export may have been cut off. Export it again from BBGM (Tools → Export) and load the new file."
+			: "isn't a JSON file this tool can read. Load a BBGM draft class or league export (.json or .json.gz).");
+		err.detail = raw;
+		return err;
+	}
+	function parseJsonFriendly(text) {
+		try { return JSON.parse(text); } catch (e) {
+			if (e instanceof SyntaxError) throw friendlyJsonError(e);
+			throw e;
+		}
 	}
 
 	/* THE SETTINGS, AS A FILE. What "More ▾ → Export settings JSON" writes
@@ -5407,7 +5502,25 @@
 		const b = $("warnBanner");
 		b.hidden = false;
 		b.querySelector(".bannertext").textContent = text;
-		remember("Warning: " + text);
+		/* U18: the league-split note on its own is information, not a
+		   problem: neutral styling, and the universe checkbox it points at
+		   is a button right here instead of a hunt through the settings. */
+		const lines = String(text).split("\n");
+		const info = lines.every((l) => /full league export/.test(l));
+		b.classList.toggle("info", info);
+		const old = b.querySelector(".bannerbtn.unibtn");
+		if (old) old.remove();
+		if (info && /draft classes were found/.test(text) && $("universe") && !$("universe").checked) {
+			const go = el("button", "bannerbtn unibtn", "Run as one universe");
+			go.type = "button";
+			go.addEventListener("click", () => {
+				$("universe").checked = true;
+				$("universe").dispatchEvent(new Event("change", { bubbles: true }));
+				go.remove();
+			});
+			b.insertBefore(go, b.querySelector(".bannerclose"));
+		}
+		remember((info ? "Note: " : "Warning: ") + text);
 	}
 
 	/* The settings actually handed to the engine.
@@ -5873,8 +5986,16 @@
 	function withBusy(what, fn) {
 		if (typeof requestAnimationFrame !== "function") { fn(); return; }
 		beginBusy(what);
+		/* U3: the very first class blocks the page for seconds. The meter
+		   goes up with a spinner that turns on the compositor (a CSS
+		   transform), so it keeps moving while the engine has the thread. */
+		const first = what === "Generating the class…" && !state.results[state.active];
+		if (first) progressShow("Generating the class…", null, "the first class takes a few seconds");
 		requestAnimationFrame(() => requestAnimationFrame(() => {
-			try { fn(); } finally { endBusy(); }
+			try { fn(); } finally {
+				endBusy();
+				if (first) progressHide();
+			}
 		}));
 	}
 
@@ -5893,6 +6014,12 @@
 	   is on screen. Split out of runNow because the universe chain has to
 	   stamp it too — it produces the result the tabs are showing, and the pill
 	   used to keep saying whatever the last standalone run had said. */
+	/* U28: a universe class's internal seed ("synth-913#0:2027:syn57f3")
+	   reads as "world seed synth-913 · 2027"; a plain seed is unchanged. */
+	function seedPillLabel(seed) {
+		const m = /^([^#:]+)#\d+:(\d{4})(?::|$)/.exec(String(seed));
+		return m ? "world seed " + m[1] + " · " + m[2] : "seed " + seed;
+	}
 	function stampSeedPill(res, ms) {
 		$("seedPill").hidden = false;
 		/* A short hash OF THE CLASS, not of the seed. Two people can share a
@@ -5915,7 +6042,7 @@
 			delete pill.dataset.flashTimer;
 		}
 		paintExportLabel();
-		pill.dataset.label = "seed " + res.seed + " · " + classFingerprint(res);
+		pill.dataset.label = seedPillLabel(res.seed) + " · " + classFingerprint(res);
 		pill.textContent = pill.dataset.label;
 		pill.dataset.seed = res.seed;
 		/* The fingerprint and flavor in the tab title, so two browser tabs
@@ -7564,6 +7691,7 @@
 		const started = Date.now();
 		let lastRender = 0;
 		const finish = (cancelled) => {
+			progressHide();
 			let out;
 			try {
 				out = chain.finish({
@@ -7660,6 +7788,11 @@
 			evictUniverseResults(chain.runnable.slice(Math.max(0, k - UNIVERSE_LIVE_RESULTS + 1), k + 1)
 				.map((x) => x.index));
 			setStatus("Universe: season " + (k + 1) + " of " + total + "…", true);
+			/* U23: a bar and an estimate, from the pace so far. */
+			const per = (Date.now() - started) / (k + 1);
+			const left = Math.round(per * (total - k - 1) / 1000);
+			progressShow("Universe: season " + (k + 1) + " of " + total, (k + 1) / total,
+				left > 1 ? "about " + (left >= 90 ? Math.round(left / 60) + " min" : left + " s") + " left" : "");
 			// finish() always renders, so the last season is never skipped.
 			if (Date.now() - lastRender >= UNIVERSE_RENDER_MS) {
 				render();
@@ -9203,9 +9336,67 @@
 		(V[state.tab] || V.players)(view, res);
 		// A "copy this table" strip above every real table in the view.
 		V.decorateTables(view);
+		tabHeading(view);
+		jumpRow(view);
+		fitBoard();
 		restoreScroll(view, scrolls);
 		restoreFocus(view, focus);
 	}
+
+	/* U14: one h2 per tab. Most views open at h3 or h4; the tab's own name
+	   goes in as a visually hidden h2 so heading navigation has a top. */
+	function tabHeading(view) {
+		if (view.querySelector("h2")) return;
+		const t = TABS.find((x) => x[0] === state.tab);
+		const h = el("h2", "visually-hidden tabh2", t ? t[1] : "Draft board");
+		view.insertBefore(h, view.firstChild);
+	}
+	/* U29: the long tabs get an "On this page" row built from their own
+	   section headings. */
+	const JUMP_TABS = { teams: 1, awards: 1, news: 1, notes: 1, gamelog: 1 };
+	function jumpRow(view) {
+		if (!JUMP_TABS[state.tab] || state.player) return;
+		const heads = Array.from(view.querySelectorAll("h3")).filter((h) => h.textContent.trim());
+		if (heads.length < 3) return;
+		const nav = el("nav", "jumprow chips");
+		nav.setAttribute("aria-label", "On this page");
+		nav.appendChild(el("span", "unit", "On this page:"));
+		heads.slice(0, 14).forEach((h, i) => {
+			if (!h.id) h.id = "sec-" + state.tab + "-" + i;
+			const b = el("button", "chip", h.textContent.trim().slice(0, 40));
+			b.type = "button";
+			b.addEventListener("click", () => {
+				h.scrollIntoView({ block: "start" });
+				h.tabIndex = -1;
+				h.focus({ preventScroll: true });
+			});
+			nav.appendChild(b);
+		});
+		const first = view.querySelector(".tabh2");
+		view.insertBefore(nav, first ? first.nextSibling : view.firstChild);
+	}
+	/* U5/U6: a board narrow enough to fit its column needs no scroller of
+	   its own — the page scrolls, and the headers stick under the filter
+	   bar (whose height they are offset by). */
+	function fitBoard() {
+		const wrap = document.querySelector("#view .scroll.boardwrap");
+		if (!wrap) return;
+		const bar = document.querySelector("#view .boardfilters");
+		wrap.classList.remove("fits");
+		const table = wrap.querySelector("table");
+		const fits = !!table && table.scrollWidth <= wrap.clientWidth + 1;
+		/* A board that needs its own scroller keeps its headers inside it;
+		   the filter bar then stops sticking, so it can never cover them. */
+		if (bar) bar.classList.toggle("nosticky", !fits);
+		if (!fits) return;
+		wrap.classList.add("fits");
+		if (bar) wrap.style.setProperty("--bfH", bar.offsetHeight + "px");
+	}
+	let fitTimer = 0;
+	global.addEventListener("resize", () => {
+		clearTimeout(fitTimer);
+		fitTimer = setTimeout(fitBoard, 120);
+	});
 
 	const SCROLLERS = ".scroll, .tablewrap, .drawer";
 
@@ -10344,16 +10535,25 @@
 		   ever naming the file — so "which of these four JSONs is the one I
 		   just made" was unanswerable from inside the tool. */
 		lastDownload = name;
+		lastDownloadBytes = blob.size;
 		markExported();
-		setStatus("Wrote " + name + ".");
+		setStatus("Wrote " + name + " (" + fmtBytes(blob.size) + ").", blob.size > 1e6);
 		return name;
 	}
 
 	/* The status a caller writes after download(): its own sentence, with the
 	   file name download() recorded in front of it. */
 	let lastDownload = "";
+	/* U2/U39: what was written, with its size, and a large file's line
+	   stays up (a merge takes long enough that a 3.5-second line is gone
+	   before anyone looks back at the page). */
+	let lastDownloadBytes = 0;
+	function fmtBytes(n) {
+		return n >= 1e6 ? (n / 1e6).toFixed(1) + " MB" : n >= 1e3 ? Math.round(n / 1e3) + " KB" : n + " bytes";
+	}
 	function exported(extra) {
-		setStatus("Wrote " + lastDownload + (extra ? " — " + extra : "") + ".");
+		setStatus("Wrote " + lastDownload + (lastDownloadBytes ? " (" + fmtBytes(lastDownloadBytes) + ")" : "") +
+			(extra ? " — " + extra : "") + ".", lastDownloadBytes > 1e6 || /merged/.test(extra || ""));
 	}
 
 	/* The user's notes and stars for ONE class, by player key, stamped on the
@@ -11876,7 +12076,7 @@
 							state.mergeOpts || {});
 					} catch (err) {
 						progressHide();
-						setStatus("Could not merge: " + (err && err.message ? err.message : err));
+						showError(new Error("Could not merge: " + (err && err.message ? err.message : err)), err);
 						return null;
 					}
 				});
@@ -11895,7 +12095,7 @@
 			mergeDone(out, leagueName, pair[1]);
 		}, (err) => {
 			progressHide();
-			setStatus("Could not merge: " + (err && err.message ? err.message : err));
+			showError(new Error("Could not merge: " + (err && err.message ? err.message : err)), err);
 		});
 	}
 
@@ -12746,6 +12946,29 @@
 			if (modalEl && !modalEl.hidden) return;
 			toggle();
 		});
+		/* U41: on a phone the open settings sheet gets a sticky "Done" bar,
+		   and Escape closes it, instead of a 4,700px scroll back to the page. */
+		const aside = $("settings");
+		if (aside && !aside.querySelector(".sheetdone")) {
+			const bar = el("div", "sheetdone");
+			bar.appendChild(el("strong", null, "Settings"));
+			const done = el("button", "primary", "Done");
+			done.type = "button";
+			done.addEventListener("click", () => {
+				if (isOpen()) toggle();
+				const v = $("view");
+				if (v) v.scrollIntoView({ block: "start" });
+			});
+			bar.appendChild(done);
+			aside.insertBefore(bar, aside.firstChild);
+		}
+		document.addEventListener("keydown", (e) => {
+			if (e.key !== "Escape" || !narrow() || !isOpen()) return;
+			const modalEl = $("modal");
+			if (modalEl && !modalEl.hidden) return;
+			if (document.querySelector(".whypop")) return;
+			toggle();
+		});
 		window.addEventListener("resize", apply);
 		apply();
 	})();
@@ -12794,14 +13017,14 @@
 					league = JSON.parse(text);
 				} catch (err) {
 					progressHide();
-					setStatus("Could not merge: " + (err && err.message ? err.message : err));
+					showError(new Error("Could not merge: " + (err && err.message ? err.message : err)), err);
 					return;
 				}
 				return mergeInto(league, f.name, picked, 0.6);
 			}).catch((err) => {
 				progressHide();
-				setStatus(f.name + " could not be read: " +
-					(err && err.message ? err.message : err));
+				showError(new Error(f.name + " could not be read: " +
+					(err && err.message ? err.message : err)), err);
 			});
 	});
 	$("csvFile").addEventListener("change", (e) => {
@@ -12961,12 +13184,20 @@
 	$("btnCopyLink").addEventListener("click", (e) => {
 		// Shift-click copies the settings as prose instead of as a URL, for
 		// the forums and chat clients that eat links. Advertised in the title.
+		if (needClassFirst()) return;
 		if (e.shiftKey) {
 			writeHash(true);
 			copyText(configAsText(), $("btnCopyLink"), null, "settings as text");
 		} else copyLink($("btnCopyLink"), "link to these settings");
 	});
+	/* U21: with nothing loaded these used to do nothing at all. */
+	function needClassFirst() {
+		if (state.files.length) return false;
+		setStatus("Load a class first — try a sample class or load a BBGM file.");
+		return true;
+	}
 	$("btnCopyText").addEventListener("click", () => {
+		if (needClassFirst()) return;
 		writeHash(true);
 		copyText(configAsText(), $("btnCopyText"), null, "settings as text");
 	});
@@ -13061,8 +13292,23 @@
 			}
 			return;
 		}
+		/* U30: [ and ] step through the tabs, so the two without a number
+		   key (and every other) are one key away. */
+		if ((k === "[" || k === "]") && !$("archFilter")) {
+			const usable = TABS.filter((t) => t[0] !== "compare" || state.pinned);
+			const i = usable.findIndex((t) => t[0] === state.tab);
+			const next = usable[(i + (k === "]" ? 1 : -1) + usable.length) % usable.length];
+			if (next) { e.preventDefault(); showTab(next[0]); }
+			return;
+		}
 		if (k === "/") {
 			e.preventDefault();
+			/* U30: the search box on the page in front of you first (the board
+			   has its own, as do News and the tables); Player Edit's only when
+			   the page has none. */
+			const here = Array.from(document.querySelectorAll('#view input[type="search"]'))
+				.find((x) => x.offsetParent !== null);
+			if (here) { here.focus(); here.select(); return; }
 			/* The search box lives on the prospect table, which is now a mode
 			   of the Draft board rather than a tab of its own — so "/" takes
 			   you there rather than doing nothing on every other page. */
@@ -13240,9 +13486,9 @@
 		["b", "Draft board \u2194 Player Edit"],
 		["r", "Reroll the class"],
 		["g", "Randomize the settings in the chosen scope"],
-		["/", "Focus the prospect search (opens Player Edit)"],
+		["/", "Focus this page's search (Player Edit's when the page has none)"],
 		["l", "Lock or unlock the focused row"],
-		["[ / ]", "Previous / next archetype filter"],
+		["[ / ]", "Previous / next tab (in Player Edit: previous / next archetype filter)"],
 		["p", "Pin this class as the comparison baseline"],
 		["e", "Export the active file"],
 		["x", "Open the export menu"],

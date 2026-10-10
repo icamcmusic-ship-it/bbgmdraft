@@ -19,6 +19,8 @@
 	   written inline by the app from the header's measured height, so it
 	   cannot be overridden by a media query; this can. */
 	--stickyTop: var(--headerH);
+	/* The board filter bar's height, written on the board wrapper by fitBoard. */
+	--bfH: 48px;
 	/* One spacing and radius scale, so a new panel does not have to invent
 	   its own padding. */
 	--r-md: 8px;
@@ -62,7 +64,7 @@
    nothing downstream needs to know a given theme exists. */
 :root[data-theme="ledger-light"] {
 	--bg: #f2efe4; --panel: #fffdf8; --panel-2: #ded9e2; --line: #c0b9dd;
-	--text: #211f2b; --dim: #6b6878; --accent: #3a5d8f; --accent-2: #2f7877;
+	--text: #211f2b; --dim: #55525f; --accent: #3a5d8f; --accent-2: #2f7877;
 	--good: #1a7f4b; --bad: #c0323a;
 }
 :root[data-theme="twilight-court"] {
@@ -79,13 +81,13 @@
 }
 :root[data-theme="draft-board"] {
 	--bg: #efeadb; --panel: #fffefb; --panel-2: #ded9e2; --line: #c0b9dd;
-	--text: #211f2b; --dim: #5a5768; --accent: #4a6da3; --accent-2: #2f7877;
-	--good: #1a7f4b; --bad: #c0323a;
+	--text: #211f2b; --dim: #5a5768; --accent: #3a5a8c; --accent-2: #2f7877;
+	--good: #146b3e; --bad: #c0323a;
 }
 :root[data-theme="fieldhouse"] {
 	--bg: #efe8d5; --panel: #faf5ea; --panel-2: #d7be82; --line: #755c1b;
-	--text: #400406; --dim: #5c4b2a; --accent: #7a4419; --accent-2: #755c1b;
-	--good: #515a47; --bad: #a3341f;
+	--text: #400406; --dim: #5c4b2a; --accent: #66380f; --accent-2: #755c1b;
+	--good: #3f4737; --bad: #a3341f;
 }
 :root[data-theme="scout-report"] {
 	--bg: #eef3f8; --panel: #ffffff; --panel-2: #dbe4ee; --line: #81a4cd;
@@ -93,7 +95,7 @@
 	   for a falling poll team. A burnt orange of the same hue clears 4.5:1 on
 	   every surface this theme has. */
 	--text: #0a2d52; --dim: #4c6784; --accent: #054a91; --accent-2: #9a4700;
-	--good: #1a7f4b; --bad: #c0323a;
+	--good: #146b3e; --bad: #c0323a;
 }
 :root[data-theme="night-game"] {
 	--tag-arch-border: #3b5b7d; --tag-arch-text: #8fc0f0;
@@ -104,7 +106,7 @@
 	--on-accent: #10161d;
 	--upset-bg2: rgba(255,180,84,.24); --upset-bg3: rgba(255,180,84,.34);
 	--bg: #171123; --panel: #221631; --panel-2: #2c1c3d; --line: #414770;
-	--text: #f4efe8; --dim: #9a93b0; --accent: #5b85aa; --accent-2: #f46036;
+	--text: #f4efe8; --dim: #9a93b0; --accent: #7fa3c4; --accent-2: #f46036;
 	--good: #57c78a; --bad: #e0574a;
 }
 * { box-sizing: border-box; }
@@ -1785,3 +1787,86 @@ input.badquery { outline: 2px dashed var(--bad); outline-offset: 1px; }
 .ctl:hover .star-btn, .ctl:focus-within .star-btn, .ctl .star-btn:hover { opacity: .9; }
 .ctl .star-btn[aria-pressed="true"] { opacity: 1; color: var(--accent); }
 #grp-pinned > .hint[hidden] { display: none; }
+
+/* ---- 2026-10-10 UI audit (§2) --------------------------------------------- */
+/* U5/U6: when the board fits its column it has no scroller of its own — the
+   page scrolls, and the headers stick under the sticky filter bar instead of
+   sliding beneath it. `fits` is set from JS after layout. */
+.scroll.boardwrap.fits { max-height: none; overflow: visible; }
+.scroll.boardwrap.fits th { top: calc(var(--stickyTop) + var(--bfH, 48px)); }
+/* U19: a labelled tier divider. */
+tr.tierbreak td:first-child { position: relative; }
+tr.tierbreak td:first-child::before {
+	content: attr(data-tier); position: absolute; top: 2px; left: 3px;
+	font-size: 9.5px; line-height: 1; padding: 1px 4px; border-radius: 4px;
+	background: var(--panel); color: var(--accent); font-weight: 600;
+}
+.tag.dnptag { font-size: 10px; padding: 0 5px; }
+/* U7: on a phone, the mock round and pick give way to Ovr and Pot. */
+@media (max-width: 520px) {
+	table.boardtable .rdpick { display: none; }
+	table.boardtable td.honors { min-width: 140px; }
+}
+/* U27: touch targets. */
+@media (pointer: coarse) {
+	button.tiny, .pill, button.chip { min-height: 36px; }
+}
+/* U26: the player page's labels are prose, not keyboard shortcuts. */
+.playerdl dt, .shortcuts.playerdl dt { font-family: inherit; font-weight: 600; font-size: 12px; }
+/* U9: a toast can be dismissed, and sits clear of the phone settings button. */
+.replaytoast { pointer-events: auto; display: flex; align-items: flex-start; gap: 6px; justify-content: space-between; }
+.replaytoast .toastx { background: none; border: 0; color: inherit; cursor: pointer; padding: 0 2px; font-size: 16px; line-height: 1; }
+@media (max-width: 860px) { .replaytoasts { bottom: 76px; } }
+/* U18: routine information, not a warning. */
+#warnBanner.info { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); position: static; }
+#warnBanner.info .bannerclose, #warnBanner.info .bannerbtn { color: var(--text); background: var(--chip); }
+/* U41: the phone settings sheet's Done bar. */
+.sheetdone { display: none; }
+@media (max-width: 860px) {
+	body.settings-open .sheetdone {
+		display: flex; position: sticky; top: 0; z-index: 20; justify-content: space-between;
+		align-items: center; padding: 8px 0; background: var(--bg); border-bottom: 1px solid var(--line);
+	}
+}
+/* U12: radar axis labels a person can read. */
+svg.radar text { font-size: 11px; }
+/* U3/U38: an indeterminate stretch gets a compositor-driven spinner. */
+.loadprog.indet .lp-label::before {
+	content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 6px;
+	border: 2px solid var(--accent); border-right-color: transparent; border-radius: 50%;
+	vertical-align: -1px; animation: spin .7s linear infinite; will-change: transform;
+}
+/* U8: the mock table scrolls inside its own box, not the page. */
+.tablewrap { max-width: 100%; overflow-x: auto; }
+/* U29: the "On this page" jump row on the long tabs. */
+.jumprow { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 0 0 10px; }
+.jumprow .unit { margin: 0 4px 0 0; }
+/* U14: tab headings render at one size everywhere. */
+#view h2 { font-size: 18px; }
+.boardfilters.nosticky { position: static; }
+@media (min-width: 861px) {
+	.scroll.boardwrap:not(.fits) { max-height: calc(100vh - var(--stickyTop) - 12px); }
+}
+/* Year and school may wrap so the whole board fits its column (and the
+   page, not a nested box, does the scrolling). */
+table.boardtable td.wrapok { white-space: normal; min-width: 72px; }
+@media (min-width: 861px) {
+	table.boardtable td.honors { min-width: 110px; }
+	table.boardtable th, table.boardtable td { padding-left: 6px; padding-right: 6px; }
+}
+/* U47: the board's copy menu. */
+.copymenu { position: relative; }
+.copymenu > summary { list-style: none; cursor: pointer; }
+.copymenu > summary::-webkit-details-marker { display: none; }
+.copymenu-list {
+	position: absolute; right: 0; top: calc(100% + 4px); z-index: 12; display: grid; gap: 4px;
+	background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-md);
+	padding: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.15); min-width: 200px;
+}
+.copymenu-list button { text-align: left; }
+tr.tierbreak td:first-child::before { z-index: 1; }
+@media (min-width: 861px) {
+	table.boardtable td.sticky { white-space: normal; min-width: 170px; }
+	table.boardtable td.honors { max-width: 220px; }
+}
+.copymenu > summary.chip { border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; background: var(--panel); font-size: 12px; }
