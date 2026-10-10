@@ -2291,7 +2291,7 @@
 		   looks short has a number on screen explaining why. */
 		const active = describeFilters();
 		if (active.length) {
-			const clear = el("button", "chip", "Clear " +
+			const clear = el("button", "chip clearfilters", "Clear " +
 				(active.length === 1 ? "1 filter" : active.length + " filters"));
 			clear.type = "button";
 			clear.title = "Active: " + active.join(" · ");
@@ -2613,21 +2613,33 @@
 		/* Realignment, the season's events and draft day used to be three more
 		   ·-joined walls here. They are proper dated articles on the News tab
 		   now, with every player and team mention a link. */
-		/* On a phone the filters, presets, range rows and bulk bar were three
-		   screens of controls above the first prospect. They fold into one
-		   "Filters (n)" disclosure there; on a wider screen the fold is
-		   always open and its summary is hidden (see .filterfold). */
-		const phone = typeof window !== "undefined" && window.innerWidth <= CARD_BREAKPOINT;
-		const fold = el("details", "filterfold");
-		fold.open = !phone || !!uiMemo.filtersOpen;
-		fold.addEventListener("toggle", () => { if (phone) uiMemo.filtersOpen = fold.open; });
+		/* U24: search, position, the column presets and "Clear n filters"
+		   stay in view; everything else folds behind "Filters (n active)" at
+		   every width, so the table starts near the top of the screen. The
+		   bulk bar sits above the table only while rows are selected. */
 		const nActive = describeFilters().length;
-		fold.appendChild(el("summary", null, "Filters" + (nActive ? " (" + nActive + ")" : "") +
-			" · columns · bulk edit"));
-		fold.appendChild(filterBar(res));
+		const bar = filterBar(res);
+		const quick = el("div", "filters quickfilters");
+		for (const sel of ["#prospectSearch", 'select[aria-label="Filter by position"]',
+			".presetchips", ".clearfilters"]) {
+			const n = bar.querySelector(sel);
+			if (n) quick.appendChild(n);
+		}
+		const fold = el("details", "filterfold");
+		fold.open = !!uiMemo.filtersOpen;
+		fold.addEventListener("toggle", () => { uiMemo.filtersOpen = fold.open; });
+		fold.appendChild(el("summary", null, "Filters" + (nActive ? " (" + nActive + " active)" : "") +
+			" · columns · units"));
+		fold.appendChild(bar);
 		fold.appendChild(rangeBar(res));
-		fold.appendChild(bulkBar(res));
-		view.appendChild(fold);
+		const bulk = bulkBar(res);
+		const picked = Object.keys(st.selected).length > 0;
+		if (!picked) fold.appendChild(bulk);
+		const head = el("div", "filterhead");
+		head.appendChild(quick);
+		head.appendChild(fold);
+		view.appendChild(head);
+		if (picked) view.appendChild(bulk);
 
 		/* On a phone the card layout picks its own columns (see CARD_COLUMNS):
 		   the desktop selection is a choice about a wide table and applying it
@@ -5822,11 +5834,19 @@
 			: winners.size + " different winners across the six trophies. Each " +
 				"electorate weighs what a player's team did differently — that " +
 				"weight is the “résumé lean” under each name."));
+		/* U43: the key to the numbers on the cards. */
+		const key = el("p", "unit ballotkey");
+		key.textContent = "Key: −5.91 = ballot points behind the winner · résumé lean = how much " +
+			"that electorate weighs team success (0 none; higher counts it more, below 0 against) · " +
+			"“not in the class” = a returning player, not a draft prospect.";
+		wrap.appendChild(key);
 		const cards = el("div", "cards");
 		for (const b of rows) {
 			const card = el("div", "card");
 			card.appendChild(el("h4", null, b.award));
-			card.appendChild(el("p", "unit", "résumé lean " + b.resumeLean.toFixed(2)));
+			const lean = el("p", "unit", "résumé lean " + b.resumeLean.toFixed(2));
+			lean.title = "How much this electorate weighs team success: 0 is none, higher counts it more";
+			card.appendChild(lean);
 			const list = el("ol", "ballot");
 			for (const r of b.top) {
 				const li = el("li");
@@ -5845,9 +5865,16 @@
 				li.appendChild(document.createTextNode(" — "));
 				if (team) li.appendChild(teamLink(r.school));
 				else li.appendChild(document.createTextNode(r.school || ""));
-				li.appendChild(el("span", "unit",
-					r.rank === 1 ? "  winner" : "  −" + r.behind.toFixed(2)));
-				if (!r.inClass) li.appendChild(el("span", "unit", "  not in the class"));
+				const gap = el("span", "unit",
+					r.rank === 1 ? "  winner" : "  −" + r.behind.toFixed(2));
+				gap.title = r.rank === 1 ? "Won this ballot"
+					: r.behind.toFixed(2) + " ballot points behind the winner";
+				li.appendChild(gap);
+				if (!r.inClass) {
+					const nic = el("span", "unit", "  not in the class");
+					nic.title = "A returning player, not a prospect in this draft class";
+					li.appendChild(nic);
+				}
 				list.appendChild(li);
 			}
 			card.appendChild(list);
@@ -6147,18 +6174,38 @@
 		};
 		cards.appendChild(mk("Risers", res.risers || []));
 		cards.appendChild(mk("Fallers", res.fallers || []));
-		view.appendChild(cards);
+		/* U35: Risers and Fallers fold away (and start folded in compact
+		   mode), so the board itself is the first thing on screen. */
+		const stB = A().state;
+		const moverFold = el("details", "moverfold");
+		moverFold.open = uiMemo.moversOpen === undefined ? !stB.boardCompact : uiMemo.moversOpen;
+		moverFold.addEventListener("toggle", () => { uiMemo.moversOpen = moverFold.open; });
+		moverFold.appendChild(el("summary", null, "Risers and fallers"));
+		moverFold.appendChild(cards);
+		view.appendChild(moverFold);
 
 		/* Ovr and Pot sit right after Pos so a phone sees them without a
 		   sideways scroll (U7); Pos# and the recruiting stars make "the best
 		   man at his position" a column, not a guess (U4). */
-		const BOARD_HEADS = ["Board", "Rd", "Pick", "Player", "Pos", "Ovr", "Pot", "Pos#", "Stars",
-			"Year", "School / club", "Preseason", "±", "PPG", "Honors"];
+		const BOARD_HEADS = BOARD_HEADS_ALL;
 		const BOARD_NUM = ["Board", "Rd", "Pick", "Ovr", "Pot", "Pos#", "Stars", "Preseason", "±", "PPG"];
 		const BOARD_TITLES = {
 			"Pos#": "Rank on the board within his position group (guards, wings, forwards, bigs)",
 			Stars: "Recruiting stars out of high school",
 		};
+		/* U36: the board's own columns — any of its fifteen but Board and
+		   Player can go, and a short whitelist from the Player Edit registry
+		   can join, just before Honors. */
+		const extraCols = boardExtraColumns(stB);
+		const heads = BOARD_HEADS.filter((h) => !(stB.boardHidden || {})[h] || BOARD_FIXED.indexOf(h) !== -1);
+		const at = heads.indexOf("Honors") === -1 ? heads.length : heads.indexOf("Honors");
+		heads.splice.apply(heads, [at, 0].concat(extraCols.map((c) => c.label)));
+		const extraByLabel = {};
+		for (const c of extraCols) {
+			extraByLabel[c.label] = c;
+			BOARD_TITLES[c.label] = c.title || c.label;
+			BOARD_NUM.push(c.num ? c.label : "");
+		}
 		if (!(res.board || []).length) {
 			const box = el("div", "card empty-state");
 			box.appendChild(el("h4", null, "No board to show"));
@@ -6247,6 +6294,20 @@
 			A().render();
 		});
 		fbar.appendChild(heatChip);
+		/* U35: compact rows — one line each, honors as a count. */
+		const compChip = el("button", "chip" + (st0.boardCompact ? " on" : ""), "Compact");
+		compChip.type = "button";
+		compChip.id = "boardCompact";
+		compChip.setAttribute("aria-pressed", st0.boardCompact ? "true" : "false");
+		compChip.title = "One line per prospect: honors as a count, Risers and Fallers folded";
+		compChip.addEventListener("click", () => {
+			st0.boardCompact = !st0.boardCompact;
+			uiMemo.moversOpen = undefined;
+			A().persist();
+			A().render();
+		});
+		fbar.appendChild(compChip);
+		fbar.appendChild(boardColumnMenu());
 		// "12 of 70" — filled in once the list is filtered, below.
 		const count = el("span", "unit boardcount");
 		fbar.appendChild(count);
@@ -6330,6 +6391,10 @@
 		};
 		const ASC_FIRST = { Board: 1, Rd: 1, Pick: 1, Player: 1, Pos: 1, Year: 1, "Pos#": 1,
 			"School / club": 1, Preseason: 1 };
+		for (const c of extraCols) {
+			BOARD_SORT[c.label] = (p) => boardExtraValue(p, c.key, res);
+			if (!c.num || c.key === "recRank") ASC_FIRST[c.label] = 1;
+		}
 		const needle = bf.q.trim().toLowerCase();
 		const parsedQ = parseQuery(bf.q);
 		const qctx = queryCtx();
@@ -6356,11 +6421,11 @@
 		}
 
 		const wrap = el("div", "scroll boardwrap");
-		const table = el("table", "boardtable");
+		const table = el("table", "boardtable" + (stB.boardCompact ? " boardcompact" : ""));
 		const thead = el("thead");
 		const hr = el("tr");
 		let firstHead = true;
-		for (const h of BOARD_HEADS) {
+		for (const h of heads) {
 			const th = el("th", (BOARD_NUM.indexOf(h) >= 0 ? "num " : "") +
 				(h === "Player" ? "sticky " : "") + (h === "Rd" || h === "Pick" ? "rdpick " : "") + "sortable", h);
 			th.scope = "col";
@@ -6452,7 +6517,7 @@
 				lastBand = band;
 				const sep = el("tr", "bandrow");
 				const cell = el("td", null, band);
-				cell.colSpan = BOARD_HEADS.length;
+				cell.colSpan = heads.length;
 				sep.appendChild(cell);
 				tb.appendChild(sep);
 			}
@@ -6568,7 +6633,17 @@
 				ppgTd.appendChild(dnp);
 			}
 			tr.appendChild(heatCell(ppgTd, heat.ppg, p.stats ? p.stats.ppg : NaN));
-			tr.appendChild(honorsCell(p));
+			tr.appendChild(honorsCell(p, stB.boardCompact));
+			if (heads.length !== BOARD_HEADS.length || extraCols.length) {
+				const base = Array.from(tr.children);
+				tr.replaceChildren.apply(tr, heads.map((h) => {
+					const i = BOARD_HEADS.indexOf(h);
+					if (i !== -1) return base[i];
+					const c = extraByLabel[h];
+					const v = boardExtraValue(p, c.key, res);
+					return el("td", c.num ? "num" : "wrapok", boardExtraText(c.key, v));
+				}));
+			}
 			tb.appendChild(tr);
 		}
 		table.appendChild(tb);
@@ -6589,11 +6664,19 @@
 
 	/* The Honors cell: a count badge and the list clamped to two lines;
 	   the badge expands the cell when there is more than fits. */
-	function honorsCell(p) {
+	function honorsCell(p, compact) {
 		if (!p.stats) return wrapCell("did not play");
 		const aw = p.awards || [];
 		const td = el("td", "wrap honors");
 		if (!aw.length) return td;
+		// U35: compact rows carry the count alone, with the list on hover.
+		if (compact) {
+			const n = el("span", "honorcount", String(aw.length));
+			n.title = aw.join("\n");
+			n.setAttribute("aria-label", aw.length + " honors: " + aw.join("; "));
+			td.appendChild(n);
+			return td;
+		}
 		const inner = el("div", "clamp", aw.join("; "));
 		inner.title = aw.join("\n");
 		if (aw.length > 2) {
@@ -6610,6 +6693,92 @@
 		}
 		td.appendChild(inner);
 		return td;
+	}
+	/* U36: what the board's Columns menu offers. Board and Player stay. */
+	const BOARD_HEADS_ALL = ["Board", "Rd", "Pick", "Player", "Pos", "Ovr", "Pot", "Pos#", "Stars",
+		"Year", "School / club", "Preseason", "±", "PPG", "Honors"];
+	const BOARD_FIXED = ["Board", "Player"];
+	const BOARD_EXTRA_KEYS = ["hgtInches", "weight", "age", "recRank", "composite", "hand",
+		"archetype", "conf", "rpg", "apg", "usg"];
+	const BOARD_EXTRA_NAMES = { hgtInches: "Height", weight: "Weight", age: "Age",
+		recRank: "Recruiting rank", composite: "Recruiting composite", hand: "Shooting hand",
+		archetype: "Build", conf: "Conference", rpg: "RPG", apg: "APG", usg: "USG%" };
+	function boardExtraColumns(st) {
+		const want = (st && st.boardExtra) || [];
+		return BOARD_EXTRA_KEYS.filter((k) => want.indexOf(k) !== -1)
+			.map((k) => COLUMNS.filter((c) => c.key === k)[0]).filter(Boolean)
+			.map((c) => ({ key: c.key, label: c.key === "archetype" ? "Build" : c.label, num: c.num, title: c.title }));
+	}
+	function boardExtraValue(p, key, res) {
+		if (key === "archetype") return p.archetype || "";
+		if (key === "hand") return p.hand || "right";
+		if (key === "conf") {
+			const t = res && res.teams ? res.teams[p.newCollege] : null;
+			return t ? t.conf : "";
+		}
+		return cellValue(p, key, res, "pg");
+	}
+	function boardExtraText(key, v) {
+		if (v === undefined || v === null || v === "" || (typeof v === "number" && !Number.isFinite(v))) return "—";
+		if (key === "hgtInches") return feet(v);
+		if (key === "weight") return metricUnits() ? Math.round(v * 0.4536) + " kg" : String(Math.round(v));
+		if (key === "usg") return v <= 1 ? (v * 100).toFixed(1) : n1(v);
+		if (typeof v === "number") return Number.isInteger(v) ? String(v) : n1(v);
+		return String(v);
+	}
+	/* The board's Columns menu: tick the fifteen it has and the extras. */
+	function boardColumnMenu() {
+		const st = A().state;
+		const menu = el("details", "boardcols");
+		const sum = el("summary", "chip", "Columns \u25be");
+		sum.title = "Choose the board's columns — hide some, add height, age, recruiting rank and more";
+		menu.appendChild(sum);
+		const list = el("div", "colsmenu");
+		list.setAttribute("role", "group");
+		list.setAttribute("aria-label", "Board columns");
+		const box = (label, on, disabled, onChange, title) => {
+			const lab = el("label", "check");
+			const cb = el("input");
+			cb.type = "checkbox";
+			cb.checked = on;
+			cb.disabled = !!disabled;
+			cb.addEventListener("change", () => { onChange(cb.checked); A().persist(); A().render(); });
+			lab.appendChild(cb);
+			lab.appendChild(document.createTextNode(" " + label));
+			if (title) lab.title = title;
+			list.appendChild(lab);
+		};
+		for (const h of BOARD_HEADS_ALL) {
+			box(h, !(st.boardHidden || {})[h], BOARD_FIXED.indexOf(h) !== -1, (on) => {
+				st.boardHidden = Object.assign({}, st.boardHidden);
+				if (on) delete st.boardHidden[h]; else st.boardHidden[h] = true;
+			});
+		}
+		list.appendChild(el("p", "unit", "Add from Player Edit"));
+		for (const k of BOARD_EXTRA_KEYS) {
+			const c = COLUMNS.filter((x) => x.key === k)[0];
+			if (!c) continue;
+			const on = (st.boardExtra || []).indexOf(k) !== -1;
+			box(BOARD_EXTRA_NAMES[k] || c.label, on, false, (v) => {
+				const cur = (st.boardExtra || []).filter((x) => x !== k);
+				if (v) cur.push(k);
+				st.boardExtra = cur;
+			});
+		}
+		const reset = el("button", "tiny", "Default columns");
+		reset.type = "button";
+		reset.addEventListener("click", () => {
+			st.boardHidden = {};
+			st.boardExtra = [];
+			menu.open = false;
+			A().persist();
+			A().render();
+		});
+		list.appendChild(reset);
+		menu.appendChild(list);
+		if (uiMemo.boardColsOpen) menu.open = true;
+		menu.addEventListener("toggle", () => { uiMemo.boardColsOpen = menu.open; });
+		return menu;
 	}
 	// Disclosure states that should survive a re-render but are not settings.
 	const uiMemo = { classInfoOpen: false, filtersOpen: false };
@@ -9363,6 +9532,6 @@
 		currentColumnPreset, COLUMN_PRESETS,
 		compareWith, sortableTable,
 		el, n1, pc, wrapCell, COMPARE_MAX, ratingRadar, RADAR_AXES,
-		boardPosMatch, isSleeper, boardTiers, posStandingLine, whyLines, hsPosRankText,
+		boardPosMatch, isSleeper, boardExtraColumns, boardExtraText, BOARD_EXTRA_KEYS, boardTiers, posStandingLine, whyLines, hsPosRankText,
 	};
 })(window);

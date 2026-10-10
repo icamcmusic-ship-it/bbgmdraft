@@ -138,7 +138,7 @@ header h1 span { color: var(--accent); font-weight: 600; }
 /* The panel toggle carries a word, so it has to read as a button rather than
    as a caption sitting next to the title. */
 #btnSettings { border-color: var(--line); color: var(--text); background: var(--panel-2); }
-.btngroup.tools > .iconbtn { border-color: var(--line); }
+.btngroup.tools > .iconbtn, .undogrp > .iconbtn { border-color: var(--line); }
 .btngroup.tools > .iconbtn:hover:not(:disabled) { border-color: var(--accent); }
 /* paintUndo writes what the button will undo into the label, so its width
    changes with every action. Uncapped, one long label rewrapped the whole
@@ -886,12 +886,13 @@ body.busy button, body.busy input[type=range] { cursor: progress; }
    shows it, and wide enough to read the byte count on a phone. */
 .loadprog {
 	position: sticky; top: var(--stickyTop, 0); z-index: 9;
-	display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center;
+	display: grid; grid-template-columns: 1fr auto auto; gap: 4px 10px; align-items: center;
 	font-size: 12px; color: var(--text); background: var(--bg, inherit);
 	border: 1px solid var(--line); border-left: 3px solid var(--accent);
 	border-radius: 6px; padding: 7px 10px; margin: 0 0 10px;
 }
-.loadprog[hidden] { display: none; }
+.loadprog[hidden], .loadprog .lp-cancel[hidden] { display: none; }
+.loadprog .lp-cancel { padding: 1px 8px; font-size: 12px; }
 .loadprog .lp-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .loadprog .lp-detail { color: var(--dim); font-variant-numeric: tabular-nums; text-align: right; }
 .loadprog progress { grid-column: 1 / -1; width: 100%; height: 8px; accent-color: var(--accent); }
@@ -1451,14 +1452,17 @@ details.classinfo > summary::after {
 details.classinfo[open] > summary::after { content: "storylines ▾"; }
 details.classinfo > summary > .rowflex { flex: 1; min-width: 0; }
 details.classinfo > p { margin-top: 6px; }
-details.filterfold > summary { display: none; }
+/* U24: the Player Edit filters fold behind one disclosure at every width. */
+.filterhead { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 10px; margin: 0 0 8px; }
+.filterhead > .quickfilters { margin: 0; flex: 1 1 520px; }
+.filterhead > details.filterfold { flex: 1 1 100%; }
+details.filterfold { border: 1px solid var(--line); border-radius: 8px; margin: 0; background: var(--panel); }
+details.filterfold > summary {
+	display: block; cursor: pointer; padding: 6px 12px; font-weight: 600; color: var(--accent); font-size: 13px;
+}
+details.filterfold[open] > summary { border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+details.filterfold > *:not(summary) { margin-left: 10px; margin-right: 10px; }
 @media (max-width: 700px) {
-	details.filterfold { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 10px; background: var(--panel); }
-	details.filterfold > summary {
-		display: block; cursor: pointer; padding: 8px 12px; font-weight: 600; color: var(--accent);
-	}
-	details.filterfold[open] > summary { border-bottom: 1px solid var(--line); margin-bottom: 8px; }
-	details.filterfold > *:not(summary) { margin-left: 10px; margin-right: 10px; }
 	details.classinfo > summary > .rowflex { flex-wrap: nowrap; overflow: hidden; }
 	details.classinfo > summary .pill { white-space: nowrap; }
 }
@@ -1623,10 +1627,18 @@ details.grp > summary .grp-changed {
 }
 details.grp > summary .grp-changed[hidden] { display: none; }
 details.grp > summary .grp-changed:not([hidden]) + .grp-reset { margin-left: 6px; }
-/* "re-runs: …" is for the Model view; elsewhere it appears on hover or focus. */
-#settings:not(.tier-model) .ctl .rerun { display: none; }
-#settings:not(.tier-model) .ctl:hover .rerun,
-#settings:not(.tier-model) .ctl:focus-within .rerun { display: block; }
+/* U33: "re-runs: …" appears on hover or focus, at every level. */
+#settings .ctl .rerun { display: none; }
+#settings .ctl:hover .rerun,
+#settings .ctl:focus-within .rerun { display: block; }
+/* U33: a long explanation shows two lines; ⓘ more opens the rest. */
+#settings p.hintclamp {
+	display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+#settings .hintmore {
+	display: inline-block; padding: 0 4px; margin: 0; border: none; background: none;
+	font-size: 10.5px; color: var(--accent); cursor: pointer; min-height: 0;
+}
 
 /* ---- busy: a thin bar over the view while a re-run is in flight ---------- */
 #view { position: relative; }
@@ -1641,23 +1653,36 @@ details.grp > summary .grp-changed:not([hidden]) + .grp-reset { margin-left: 6px
 }
 
 /* ---- header, tabs and the empty state (audit 2026-09-24, UI 1-8, 19) ------ */
-/* The "⋯" toggle only exists on a phone; see bindHeaderMore. */
-.headmore { display: none; }
+/* U10/U45: the small tools are one "Tools ▾" menu at every width (see
+   bindHeaderMore), and inside it every tool says what it is beside its icon. */
+.toolsmenu { position: relative; display: inline-flex; }
+.headmore { display: inline-flex; border-color: var(--line); white-space: nowrap; }
+header:not(.toolsopen) #headerTools { display: none; }
+header #headerTools {
+	position: absolute; right: 0; top: calc(100% + 4px); z-index: 80;
+	display: flex; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 2px;
+	min-width: 230px; padding: 4px; border: 1px solid var(--line); border-radius: 8px;
+	background: var(--panel); box-shadow: var(--shadow-1);
+}
+header #headerTools > button { justify-content: flex-start; width: 100%; border-color: transparent; color: var(--text); text-align: left; }
+header #headerTools > button[hidden] { display: none; }
+header #headerTools > .iconbtn[data-tip]::after,
+header #headerTools > .iconbtn[data-tip]:hover::after,
+header #headerTools > .iconbtn[data-tip]:focus-visible::after {
+	content: attr(data-tip); position: static; transform: none; padding: 0;
+	background: none; color: inherit; box-shadow: none; font-size: 13px; white-space: nowrap;
+}
 @media (max-width: 560px) {
 	/* Brand, Settings and Load share the first row instead of the title
 	   taking a row of its own. */
 	header h1 { width: auto; }
 	header .brand { margin-right: auto; }
-	.headmore { display: inline-flex; border-color: var(--line); font-size: 18px; line-height: 1; }
-	header:not(.toolsopen) #headerTools,
-	header:not(.toolsopen) .btngroup[aria-label="Seed"] select { display: none; }
+	header .btngroup[aria-label="Seed"] select { display: none; }
 	header .btngroup { flex: 0 1 auto; }
 	header { gap: 6px; padding: 8px 12px; }
 	header button, header select { padding: 5px 8px; font-size: 13px; }
-	/* "⋯" rides on the seed row; Reroll and Export share the next one. */
-	header > .btngroup[aria-label="Generate"], header > .btngroup[aria-label="Export"],
-	header > #headerTools { order: 2; }
-	header > #headerTools { flex-basis: 100%; }
+	header > .btngroup[aria-label="Generate"], header > .btngroup[aria-label="Export"] { order: 2; }
+	header > .undogrp { order: 3; }
 }
 /* Icon-only tools carry their name in data-tip (from aria-label); it shows on
    keyboard focus and hover, since a title never appears on touch or focus. */
@@ -1668,15 +1693,12 @@ details.grp > summary .grp-changed:not([hidden]) + .grp-reset { margin-left: 6px
 	padding: 3px 8px; border-radius: 6px; font-size: 12px; font-weight: 400;
 	background: var(--text); color: var(--bg); box-shadow: var(--shadow-1);
 }
-/* Wide enough for words: the tools say what they are, inline. */
-@media (min-width: 1700px) {
-	.btngroup.tools .iconbtn[data-tip]::after,
-	.btngroup.tools .iconbtn[data-tip]:hover::after,
-	.btngroup.tools .iconbtn[data-tip]:focus-visible::after {
-		content: attr(data-tip); position: static; transform: none; padding: 0;
-		background: none; color: inherit; box-shadow: none; font-size: 12px;
-	}
-}
+/* U31: before a class is loaded the header holds only what works then. */
+body.noclass header > .btngroup[aria-label="Generate"],
+body.noclass header > .btngroup[aria-label="Seed"],
+body.noclass header > .undogrp,
+body.noclass header > .btngroup[aria-label="Export"],
+body.noclass header > #btnSettings { display: none; }
 /* Undo and Redo name the action in the same form; both are capped. */
 #btnRedo {
 	max-width: 17ch; overflow: hidden; text-overflow: ellipsis;
@@ -1690,9 +1712,31 @@ details.grp > summary .grp-changed:not([hidden]) + .grp-reset { margin-left: 6px
 	border-left: none; padding: 0 2px 0 4px; font-size: 9px; letter-spacing: .12em;
 	opacity: .8; cursor: default; user-select: none;
 }
+/* U42: one row at every width. Below 1600px the long tab names shorten;
+   a strip that still does not fit scrolls sideways (faded at the edge with
+   more) instead of wrapping to two or three rows. */
+.tabs .tl-short { display: none; }
+@media (max-width: 1599px) {
+	.tabs .tl-long { display: none; }
+	.tabs .tl-short { display: inline; }
+	.tabs button { padding: 6px 10px; }
+	/* The divider between groups stays; the caption word goes. */
+	.tabs .tabgroup { font-size: 0 !important; padding: 0; }
+}
+@media (min-width: 701px) {
+	.tabs {
+		flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none;
+	}
+	.tabs::-webkit-scrollbar { display: none; }
+	.tabs button, .tabs .tabgroup { flex: none; white-space: nowrap; }
+	.tabs .tabgroup { font-size: 10px; }
+}
+.tabset { flex: none; }
+.tabs.more-r { -webkit-mask-image: linear-gradient(to right, #000 85%, transparent); mask-image: linear-gradient(to right, #000 85%, transparent); }
+.tabs.more-l { -webkit-mask-image: linear-gradient(to left, #000 85%, transparent); mask-image: linear-gradient(to left, #000 85%, transparent); }
+.tabs.more-l.more-r { -webkit-mask-image: linear-gradient(to right, transparent, #000 12%, #000 88%, transparent); mask-image: linear-gradient(to right, transparent, #000 12%, #000 88%, transparent); }
 /* Narrow screens: one sideways row, faded at whichever edge has more. */
 @media (max-width: 700px) {
-	.tabset { flex: none; }
 	.tabs.more-r { -webkit-mask-image: linear-gradient(to right, #000 85%, transparent); mask-image: linear-gradient(to right, #000 85%, transparent); }
 	.tabs.more-l { -webkit-mask-image: linear-gradient(to left, #000 85%, transparent); mask-image: linear-gradient(to left, #000 85%, transparent); }
 	.tabs.more-l.more-r { -webkit-mask-image: linear-gradient(to right, transparent, #000 12%, #000 88%, transparent); mask-image: linear-gradient(to right, transparent, #000 12%, #000 88%, transparent); }
@@ -1703,6 +1747,18 @@ details.grp > summary .grp-changed:not([hidden]) + .grp-reset { margin-left: 6px
 #empty:hover { border-color: var(--accent); }
 #empty h2 { margin: 0 0 8px; font-size: 18px; color: var(--text); }
 #empty > p { margin: 0; }
+#empty .steps {
+	list-style: none; counter-reset: step; display: flex; flex-wrap: wrap; justify-content: center;
+	gap: 6px 18px; margin: 4px 0 14px; padding: 0; font-size: 13px; color: var(--dim);
+}
+#empty .steps li { counter-increment: step; display: flex; align-items: center; gap: 6px; }
+#empty .steps li::before {
+	content: counter(step); display: inline-flex; align-items: center; justify-content: center;
+	width: 20px; height: 20px; border-radius: 50%; font-size: 11px; font-weight: 700;
+	background: var(--accent); color: var(--on-accent, #fff);
+}
+#empty .steps b { color: var(--text); }
+#empty.slim .steps { display: none; }
 #empty > p.hint { margin-top: 4px; }
 #empty .emptyacts { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; }
 @media (max-width: 560px) { .drop { padding: 24px 16px; margin: 16px auto; } }
@@ -1713,8 +1769,14 @@ details.grp > summary .grp-changed:not([hidden]) + .grp-reset { margin-left: 6px
 #empty.slim > p, #empty.slim .emptyacts { display: none; }
 .noclassnote { display: none; }
 body.noclass #settings > :not(.themerow):not(.noclassnote) { display: none; }
-body.noclass #settings .noclassnote { display: block; }
-body.noclass #settings { height: auto; }
+/* U31: no stub panel before a class: the theme picker sits in a corner. */
+body.noclass #settings {
+	display: block !important; position: fixed; right: 12px; bottom: 12px; top: auto; left: auto; z-index: 40;
+	width: auto; height: auto; padding: 4px 8px; overflow: visible;
+	border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow-1);
+}
+body.noclass #settings .themerow { display: flex; align-items: center; gap: 6px; margin: 0; }
+body.noclass #settings .themerow label { margin: 0; font-size: 12px; }
 /* A Settings button that stays in reach on a phone once a class is loaded.
    Bottom-left and above .replaytoasts, which stack bottom-right. */
 .fab {
@@ -1871,4 +1933,33 @@ tr.tierbreak td:first-child::before { z-index: 1; }
 }
 .copymenu > summary.chip { border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; background: var(--panel); font-size: 12px; }
 /* U44 labels, shortened again where the phone header has no room. */
-@media (max-width: 560px) { .wideonly { display: none; } }
+@media (max-width: 1599px) { .wideonly { display: none; } }
+
+/* ---- U35/U36: board compact rows, its Columns menu, folding movers ----- */
+details.moverfold { margin: 0 0 10px; }
+details.moverfold > summary { cursor: pointer; color: var(--accent); font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.boardcols { position: relative; }
+.boardcols > summary { list-style: none; cursor: pointer; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; background: var(--panel); font-size: 12px; }
+.boardcols > summary::-webkit-details-marker { display: none; }
+.colsmenu {
+	position: absolute; right: 0; top: calc(100% + 4px); z-index: 12; display: grid; gap: 2px;
+	background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-md);
+	padding: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.15); min-width: 210px; max-height: 60vh; overflow-y: auto;
+}
+.colsmenu label.check { font-size: 13px; white-space: nowrap; }
+.colsmenu .unit { margin: 6px 0 2px; }
+table.boardcompact td { padding-top: 3px; padding-bottom: 3px; }
+table.boardcompact td.wrapok, table.boardcompact td.sticky { white-space: nowrap; }
+table.boardcompact td.honors { min-width: 0; }
+table.boardcompact td.honors .honorcount { float: none; margin: 0; cursor: default; }
+table.boardcompact .whybtn { min-height: 20px; min-width: 20px; }
+
+/* ---- U34: the export menu in headed sections --------------------------- */
+.exportmenu .exportgroup { margin: 0 0 12px; }
+.exportmenu .exportgroup > h4 {
+	margin: 0 0 6px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent);
+}
+.exportmenu details.exportopts { margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+.exportmenu details.exportopts > summary { cursor: pointer; font-size: 12px; color: var(--dim); }
+.exportmenu details.exportopts[open] > summary { margin-bottom: 8px; }
+#settings p[hidden] + .hintmore { display: none; }

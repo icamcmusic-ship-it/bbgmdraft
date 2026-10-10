@@ -32,9 +32,6 @@
 		     universe whose new classes are all later than its last season is
 		     extended rather than redrawn. See appendFiles. -->
 		<button id="btnAddFiles" hidden title="Add more draft classes, keeping the ones already loaded">Add classes…</button>
-		<!-- A synthetic class of a size, year and seed you choose, added beside
-		     whatever is loaded (or on its own when nothing is). -->
-		<button id="btnNewClass" title="Make a new synthetic class — size, year and seed — and add it to the classes already loaded">New class…</button>
 		<select id="fileSelect" hidden aria-label="Loaded file"></select>
 	</div>
 	<span class="spacer"></span>
@@ -42,26 +39,16 @@
 		<button class="pill seedpill" id="seedPill" hidden title="Click to copy this seed"></button>
 		<select id="seedHistory" hidden aria-label="Recent seeds"></select>
 	</div>
-	<!-- The two verbs that make a new class, then the four small tools that
-	     support them. Icon-only, because a row of eight equally weighted
-	     labelled buttons reads as one undifferentiated bar and the two that
-	     matter disappear into it. -->
+	<!-- The verbs that make a new class. The small tools that support them
+	     are in the Tools menu at the end of the header (U10). -->
 	<div class="btngroup" role="group" aria-label="Generate">
 		<button id="btnReroll" class="warn" disabled title="New seed, same settings">Reroll</button>
 		<button id="btnRerollUntil" disabled title="Reroll until the class satisfies a condition — a 7'2&quot; top-five pick, a mid-major champion…"><span class="wideonly">Reroll </span>until…</button>
 		<button id="btnRerun" disabled title="Re-run the current settings with the same seed (Re-apply)">Re-run<span class="wideonly"> same seed</span></button>
 	</div>
-	<div class="btngroup tools" id="headerTools" role="group" aria-label="Tools">
+	<div class="btngroup undogrp" role="group" aria-label="Undo">
 		<button id="btnUndo" class="iconbtn" disabled title="Undo the last settings or lock change (Ctrl+Z)">Undo</button>
 		<button id="btnRedo" class="iconbtn" disabled title="Redo (Ctrl+Shift+Z)">Redo</button>
-		<button id="btnPin" class="iconbtn" disabled title="Pin this class as a comparison baseline" aria-label="Pin as baseline">◎</button>
-		<button id="btnCopyLink" class="iconbtn" title="Copy a link that reproduces this exact class, settings and locks — shift-click to copy it as plain text instead" aria-label="Copy link">🔗</button>
-		<button id="btnCopyText" class="iconbtn" title="Copy the seed, the class fingerprint and every setting you changed as plain text, for a forum post or a chat message" aria-label="Copy seed and settings as text">📋</button>
-		<!-- The guide is a book and the shortcut sheet is a keyboard: the guide
-		     used to wear a "?" while the ? KEY opened the shortcuts. -->
-		<button id="btnHowTo" class="iconbtn" title="How to play — what everything does and a sensible order to do it in" aria-label="Guide">📖</button>
-		<button id="btnKeys" class="iconbtn" title="Keyboard shortcuts (press ?)" aria-label="Keyboard shortcuts">⌨</button>
-		<button id="btnPrint" class="iconbtn" title="Print this page, or save it as a PDF, under a header with the class name, seed, fingerprint and date" aria-label="Print or save as PDF">🖨</button>
 	</div>
 	<div class="btngroup" role="group" aria-label="Export">
 		<button id="btnExport" class="primary" disabled title="Load a class first — then this writes it back out as a BBGM draft class file">Export JSON</button>
@@ -74,9 +61,25 @@
 		<button id="btnExportAll" disabled hidden>Export all</button>
 	</div>
 	<span id="exportSummary" class="exportsum" hidden></span>
-	<!-- Below 560px the tool buttons fold behind this; see bindHeaderMore. -->
-	<button id="btnHeaderMore" class="iconbtn headmore" type="button" aria-expanded="false"
-		aria-controls="headerTools" aria-label="More tools" title="More tools">⋯</button>
+	<!-- U10/U45: the small tools live in one "Tools" menu at every width,
+	     each with its name beside its icon. See bindHeaderMore. -->
+	<div class="toolsmenu">
+		<button id="btnHeaderMore" class="headmore" type="button" aria-expanded="false"
+			aria-haspopup="menu" aria-controls="headerTools" title="Pin, copy link or text, guide, shortcuts, print and more">Tools ▾</button>
+		<div class="btngroup tools" id="headerTools" role="menu" aria-label="Tools">
+			<!-- A synthetic class of a size, year and seed you choose, added
+			     beside whatever is loaded (or on its own when nothing is). -->
+			<button id="btnNewClass" class="iconbtn" aria-label="New synthetic class…" title="Make a new synthetic class — size, year and seed — and add it to the classes already loaded">✚</button>
+			<button id="btnPin" class="iconbtn" disabled title="Pin this class as a comparison baseline" aria-label="Pin as baseline">◎</button>
+			<button id="btnCopyLink" class="iconbtn" title="Copy a link that reproduces this exact class, settings and locks — shift-click to copy it as plain text instead" aria-label="Copy link">🔗</button>
+			<button id="btnCopyText" class="iconbtn" title="Copy the seed, the class fingerprint and every setting you changed as plain text, for a forum post or a chat message" aria-label="Copy seed and settings as text">📋</button>
+			<!-- The guide is a book and the shortcut sheet is a keyboard: the guide
+			     used to wear a "?" while the ? KEY opened the shortcuts. -->
+			<button id="btnHowTo" class="iconbtn" title="How to play — what everything does and a sensible order to do it in" aria-label="Guide">📖</button>
+			<button id="btnKeys" class="iconbtn" title="Keyboard shortcuts (press ?)" aria-label="Keyboard shortcuts">⌨</button>
+			<button id="btnPrint" class="iconbtn" title="Print this page, or save it as a PDF, under a header with the class name, seed, fingerprint and date" aria-label="Print or save as PDF">🖨</button>
+		</div>
+	</div>
 </header>
 
 <div class="layout">
@@ -394,6 +397,12 @@
 	     paste, or the paste button reads a class too. See bindFiles. -->
 	<div id="empty" class="drop" role="button" tabindex="0" aria-describedby="emptyLead">
 		<h2>Choose a file (or drop it here)</h2>
+		<!-- U31: the whole job in three steps. -->
+		<ol class="steps" aria-label="How it works">
+			<li><b>Load</b> a BBGM class or league</li>
+			<li><b>Read the board</b> and tune the class</li>
+			<li><b>Export</b> it back to BBGM</li>
+		</ol>
 		<p id="emptyLead">A BBGM draft class or league file. Export a class from Basketball GM via
 		<b>Tools → Export → Draft class</b>, or export the whole league
 		(<b>Tools → Export league</b>) and choose the <code>.json</code> or
@@ -423,12 +432,14 @@
 	</div>
 
 	<p id="status" class="status" role="status" hidden></p>
-	<!-- The load / merge meter: see progressShow in js/app.js. -->
+	<!-- U38: the one progress meter for every long job (file reads, merges,
+	     reroll-until, batch, universe, the export zip); see progressShow. -->
 	<div id="loadProgress" class="loadprog" role="progressbar" aria-valuemin="0"
-		aria-valuemax="100" aria-label="File progress" hidden>
+		aria-valuemax="100" aria-label="Progress" hidden>
 		<span class="lp-label"></span>
 		<progress max="100"></progress>
 		<span class="lp-detail"></span>
+		<button type="button" class="lp-cancel tiny" hidden>Cancel</button>
 	</div>
 	<!-- Collapsed by default: one line per loaded class buried the page
 	     under a wall of text on a 70-file universe. -->

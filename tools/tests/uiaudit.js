@@ -94,4 +94,60 @@ module.exports = function (ok, V) {
 	ok("U46/a DNP tag in the PPG cell", /dnptag/.test(VIEWS));
 	ok("U47/the board's copy actions are one menu", /copymenu/.test(VIEWS));
 	ok("U2/U39/the written file's size is shown", /function fmtBytes/.test(APP));
+
+	/* ---- the second pass: U10, U24, U31-U36, U38, U42, U43, U45 ---------- */
+	ok("U10/the small tools are one Tools menu at every width",
+		/id="btnHeaderMore"[^>]*aria-haspopup="menu"[^>]*>Tools ▾</.test(HTML.replace(/\n\s*/g, " ")) &&
+		/<div class="toolsmenu">/.test(HTML) && /header:not\(\.toolsopen\) #headerTools \{ display: none; \}/.test(CSS));
+	ok("U10/Reroll, Undo and Export stay outside the menu", (() => {
+		const menu = HTML.slice(HTML.indexOf('id="headerTools"'), HTML.indexOf("</header>"));
+		return !/btnReroll|btnUndo|btnExport"/.test(menu) && /btnPin/.test(menu) && /btnPrint/.test(menu);
+	})());
+	ok("U10/the menu closes on Escape and outside clicks, and arrows walk it",
+		/e\.key === "Escape"/.test(APP.slice(APP.indexOf("function bindHeaderMore"))) &&
+		/closest\("\.toolsmenu"\)/.test(APP));
+	ok("U45/every tool in the menu shows its name beside its icon",
+		/header #headerTools > \.iconbtn\[data-tip\]::after/.test(CSS) && /role", "menuitem"/.test(APP));
+	ok("U45/added tools get a short name, not their whole tooltip",
+		/add\("btnKept", "★", "Kept classes", /.test(APP));
+	ok("U24/Player Edit keeps search, position and presets out; the rest folds",
+		/quickfilters/.test(VIEWS) && /"Filters" \+ \(nActive \? " \(" \+ nActive \+ " active\)"/.test(VIEWS) &&
+		/fold\.open = !!uiMemo\.filtersOpen;/.test(VIEWS));
+	ok("U24/the bulk bar sits above the table only while rows are selected",
+		/if \(!picked\) fold\.appendChild\(bulk\)/.test(VIEWS) && /if \(picked\) view\.appendChild\(bulk\)/.test(VIEWS));
+	ok("U31/no stub settings panel and no disabled tool groups before a class",
+		/body\.noclass header > \.btngroup\[aria-label="Generate"\]/.test(CSS) &&
+		/body\.noclass #settings \{[^}]*position: fixed/.test(CSS));
+	ok("U31/the drop box shows three steps", /<ol class="steps"/.test(HTML) &&
+		(HTML.match(/<li><b>(Load|Read the board|Export)<\/b>/g) || []).length === 3);
+	ok("U32/a first visit starts at Basic", /settingTier: "shape",/.test(APP));
+	ok("U33/the re-run cost is hover/focus only, long hints fold behind (i)",
+		/#settings \.ctl \.rerun \{ display: none; \}/.test(CSS) && /function foldLongHints/.test(APP) &&
+		/hintclamp/.test(CSS));
+	ok("U34/the export menu is in headed sections with folded options",
+		/\["bbgm", "Back to BBGM"\]/.test(APP) && /\["pics", "Pictures and pages"\]/.test(APP) &&
+		/"Options for BBGM files: "/.test(APP) && /optFold\.id = "exportOptions"/.test(APP));
+	ok("U35/the board has a Compact chip, honors as a count, movers fold",
+		/"Compact"/.test(VIEWS) && /function honorsCell\(p, compact\)/.test(VIEWS) && /moverfold/.test(VIEWS) &&
+		/table\.boardcompact/.test(CSS) && /boardCompact: state\.boardCompact/.test(APP));
+	const extras = Vw.boardExtraColumns({ boardExtra: ["recRank", "hgtInches", "bogus"] });
+	ok("U36/the board's extra columns come from the registry whitelist, in its order",
+		extras.map((c) => c.key).join() === "hgtInches,recRank" && extras[0].label === "Ht",
+		JSON.stringify(extras));
+	ok("U36/extra cells format height, blanks and decimals",
+		Vw.boardExtraText("hgtInches", 83) === "6'11\"" && Vw.boardExtraText("age", undefined) === "—" &&
+		Vw.boardExtraText("rpg", 7.25) === "7.3", Vw.boardExtraText("rpg", 7.25));
+	ok("U36/the column choice is remembered", /boardHidden: state\.boardHidden/.test(APP) &&
+		/boardExtra: state\.boardExtra/.test(APP) && /function boardColumnMenu/.test(VIEWS));
+	ok("U38/one progress component with a cancel, used by every long job",
+		/function progressShow\(label, frac, detail, onCancel\)/.test(APP) && /lp-cancel/.test(HTML) &&
+		/progressShow\("Reroll until: try "/.test(APP) && /progressShow\("Batch: "/.test(APP) &&
+		/progressShow\("Exporting "/.test(APP) && /progressShow\("Merging "|step\("Merging "/.test(APP) &&
+		/cancelUniverse\);/.test(APP));
+	ok("U42/one tab row: short names below 1600px, sideways scroll instead of wrapping",
+		/const TAB_SHORT = /.test(APP) && /\.tabs \.tl-long \{ display: none; \}/.test(CSS) &&
+		/@media \(min-width: 701px\) \{\s*\.tabs \{\s*flex-wrap: nowrap/.test(CSS));
+	ok("U43/the ballot cards carry a key and number tooltips",
+		/ballot points behind the winner/.test(VIEWS) && /ballotkey/.test(VIEWS) &&
+		/How much this electorate weighs team success/.test(VIEWS));
 };

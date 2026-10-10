@@ -93,6 +93,10 @@
 		units: "imperial",
 		// Board heatmap: shade Ovr / Pot / PPG by percentile within the class.
 		boardHeat: false,
+		// U35/U36: the board's compact rows and its own column choice.
+		boardCompact: false,
+		boardHidden: {},
+		boardExtra: [],
 		// "auto" | "on" | "off" — see cardMode() in js/views.js.
 		cardView: "auto",
 		cardAll: false,
@@ -162,7 +166,8 @@
 		   of sliders a new user needs, "season" adds the college season and
 		   awards, "model" is everything. Persisted like every other view
 		   choice. The search box and "only what I changed" cut across it. */
-		settingTier: "model",
+		// U32: a first visit shows the Basic settings; the level is remembered.
+		settingTier: "shape",
 		/* The settings starred into the "Pinned" group at the top of the
 		   panel (audit Q5), in the order they were pinned. Not to be confused
 		   with cfg.pinned (settings the user has decided; see pinSetting) or
@@ -429,6 +434,9 @@
 			// So a column added later can be told from one the user hid.
 			knownColumns: V.COLUMNS.map((c) => c.key),
 			boardHeat: state.boardHeat,
+			boardCompact: state.boardCompact,
+			boardHidden: state.boardHidden,
+			boardExtra: state.boardExtra,
 			cardView: state.cardView,
 			cardAll: state.cardAll,
 			compactBracket: state.compactBracket,
@@ -711,6 +719,10 @@
 			}
 		}
 		state.boardHeat = !!saved.boardHeat;
+		state.boardCompact = !!saved.boardCompact;
+		state.boardHidden = validFlagMap(saved.boardHidden) || {};
+		state.boardExtra = Array.isArray(saved.boardExtra)
+			? saved.boardExtra.filter((k) => typeof k === "string").slice(0, 20) : [];
 		if (validString(saved.cardView, ["auto", "on", "off"])) state.cardView = saved.cardView;
 		state.cardAll = !!saved.cardAll;
 		state.compactBracket = !!saved.compactBracket;
@@ -3332,15 +3344,35 @@
 		// The re-run fine print is for the Model view (or a focused control).
 		const aside = $("settings");
 		if (aside) aside.classList.toggle("tier-model", state.settingTier === "model");
+		foldLongHints();
 		if (note) {
 			note.textContent = (q || changedOnly)
 				? shown + " of " + total + " settings" +
 					(shown === 0 ? " — nothing matches" : "")
 				: tiered
 					? tiered + " of " + total + " settings are behind the " +
-						(state.settingTier === "shape" ? "Season and Model" : "Model") +
-						" tier"
+						(state.settingTier === "shape" ? "More and Everything levels" : "Everything level")
 					: "";
+		}
+	}
+	/* U33: a setting's long explanation shows its first two lines, with an
+	   (i) that opens the rest. Idempotent: a hint is folded once. */
+	const LONG_HINT = 150;
+	function foldLongHints() {
+		for (const p of document.querySelectorAll("#settings .ctl p.unit:not([data-fold]), #settings .ctl p.hint:not([data-fold])")) {
+			if ((p.textContent || "").length < LONG_HINT) continue;
+			p.dataset.fold = "1";
+			p.classList.add("hintclamp");
+			const b = el("button", "hintmore", "\u24d8 more");
+			b.type = "button";
+			b.setAttribute("aria-expanded", "false");
+			b.title = "Show the whole explanation";
+			b.addEventListener("click", () => {
+				const open = p.classList.toggle("hintclamp");
+				b.setAttribute("aria-expanded", open ? "false" : "true");
+				b.textContent = open ? "\u24d8 more" : "less";
+			});
+			p.after(b);
 		}
 	}
 	function bindSettingFilter() {
@@ -4572,7 +4604,10 @@
 	   meter is a flash, not information). `frac` null is an indeterminate
 	   stage — JSON.parse cannot report how far it has got. */
 	const PROGRESS_MIN_BYTES = 1 << 20;
-	function progressShow(label, frac, detail) {
+	/* U38: the ONE progress component. Every long job — file reads, merges,
+	   reroll-until, batch runs, universe runs, the export zip — reports
+	   through it; `onCancel`, when given, shows a Cancel button on it. */
+	function progressShow(label, frac, detail, onCancel) {
 		const box = $("loadProgress");
 		if (!box) return;
 		box.hidden = false;
@@ -4589,10 +4624,18 @@
 			box.setAttribute("aria-valuenow", String(pct));
 		}
 		box.setAttribute("aria-valuetext", label + (detail ? " " + detail : ""));
+		const stop = box.querySelector(".lp-cancel");
+		if (stop) {
+			stop.hidden = typeof onCancel !== "function";
+			stop.onclick = typeof onCancel === "function" ? () => onCancel() : null;
+		}
 	}
 	function progressHide() {
 		const box = $("loadProgress");
-		if (box) box.hidden = true;
+		if (!box) return;
+		box.hidden = true;
+		const stop = box.querySelector(".lp-cancel");
+		if (stop) { stop.hidden = true; stop.onclick = null; }
 	}
 	/* Two frames, so a label set just before a long synchronous step (a parse,
 	   a merge, a stringify) is actually on screen while the step runs. */
@@ -5216,9 +5259,10 @@
 			const name = b.getAttribute("aria-label");
 			b.setAttribute("data-tip", name);
 		});
+		// U45: inside the Tools menu every tool shows its name beside its icon.
+		document.querySelectorAll("#headerTools > button").forEach((b) => b.setAttribute("role", "menuitem"));
 	}
 
-	/* Below 560px the tools fold behind "⋯". */
 	/* ---- kept classes, the command line, install and file handling ----------
 
 	   The sharing tools that are not a link: a class kept under a name outside
@@ -5413,23 +5457,23 @@
 	function bindShareTools() {
 		loadKept();
 		const tools = $("headerTools");
-		const add = (id, text, title, onClick, hidden) => {
+		const add = (id, text, name, title, onClick, hidden) => {
 			if (!tools || $(id)) return null;
 			const b = el("button", "iconbtn", text);
 			b.id = id;
 			b.type = "button";
 			b.title = title;
-			b.setAttribute("aria-label", title);
+			b.setAttribute("aria-label", name);
 			b.hidden = !!hidden;
 			b.addEventListener("click", onClick);
 			tools.appendChild(b);
 			return b;
 		};
-		add("btnKept", "★", "Kept classes — keep this class under a name and a note, outside the run history's cap",
+		add("btnKept", "★", "Kept classes", "Kept classes — keep this class under a name and a note, outside the run history's cap",
 			keptDialog);
-		add("btnCopyCmd", ">_", "Copy these settings as a bbgmdraft command line",
+		add("btnCopyCmd", ">_", "Copy command line", "Copy these settings as a bbgmdraft command line",
 			() => copyCommandLine($("btnCopyCmd")));
-		add("btnInstall", "Install", "Install this tool as an app", () => {
+		add("btnInstall", "\u2913", "Install as an app", "Install this tool as an app", () => {
 			const ev = installPrompt;
 			if (!ev) return;
 			installPrompt = null;
@@ -5459,12 +5503,37 @@
 		}
 	}
 
+	/* U10: the small tools are one "Tools ▾" menu at every width. It closes
+	   on Escape, on a click outside it and once one of its tools is used. */
 	function bindHeaderMore() {
 		const btn = $("btnHeaderMore");
-		if (!btn) return;
-		btn.addEventListener("click", () => {
-			const open = document.querySelector("header").classList.toggle("toolsopen");
+		const menu = $("headerTools");
+		if (!btn || !menu) return;
+		const header = document.querySelector("header");
+		const setOpen = (open, focusBtn) => {
+			header.classList.toggle("toolsopen", open);
 			btn.setAttribute("aria-expanded", open ? "true" : "false");
+			if (open) {
+				const first = menu.querySelector("button:not([hidden]):not(:disabled)");
+				if (first) first.focus();
+			} else if (focusBtn) btn.focus();
+		};
+		btn.addEventListener("click", () => setOpen(!header.classList.contains("toolsopen")));
+		menu.addEventListener("click", (e) => {
+			if (e.target.closest("button")) setOpen(false);
+		});
+		menu.addEventListener("keydown", (e) => {
+			if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setOpen(false, true); return; }
+			const d = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+			if (!d) return;
+			const items = Array.from(menu.querySelectorAll("button:not([hidden]):not(:disabled)"));
+			const at = items.indexOf(document.activeElement);
+			if (!items.length) return;
+			e.preventDefault();
+			items[(at + d + items.length) % items.length].focus();
+		});
+		document.addEventListener("click", (e) => {
+			if (header.classList.contains("toolsopen") && !e.target.closest(".toolsmenu")) setOpen(false);
 		});
 	}
 
@@ -6738,9 +6807,12 @@
 			s.textContent = "Reroll until: try " + done + " of " + total + "… (Esc cancels)";
 			s.hidden = false;
 			if (untilBtn) untilBtn.textContent = "Cancel " + done + "/" + total;
+			progressShow("Reroll until: try " + done + " of " + total, total ? done / total : null,
+				"Esc cancels", () => { if (untilSearch) untilSearch.cancel(); });
 		}
 		function end() {
 			untilSearch = null;
+			progressHide();
 			clearTimeout(timer);
 			if (searchWorker) { searchWorker.terminate(); searchWorker = null; }
 			document.body.classList.remove("searching");
@@ -7487,6 +7559,9 @@
 		// Prediction, bracket pool and blind scout; see js/play.js.
 		["play", "Play", "Play"],
 	];
+	/* U42: the short form a tab wears below 1600px, so the twelve tabs sit
+	   on one row on a laptop. The full name stays the accessible name. */
+	const TAB_SHORT = { teams: "Teams", awards: "Awards", notes: "Notes", distribution: "Charts", gamelog: "Games" };
 
 	/* ----------------------------------------------------------- universe */
 
@@ -7954,7 +8029,8 @@
 			const per = (Date.now() - started) / (k + 1);
 			const left = Math.round(per * (total - k - 1) / 1000);
 			progressShow("Universe: season " + (k + 1) + " of " + total, (k + 1) / total,
-				left > 1 ? "about " + (left >= 90 ? Math.round(left / 60) + " min" : left + " s") + " left" : "");
+				left > 1 ? "about " + (left >= 90 ? Math.round(left / 60) + " min" : left + " s") + " left" : "",
+				cancelUniverse);
 			// finish() always renders, so the last season is never skipped.
 			if (Date.now() - lastRender >= UNIVERSE_RENDER_MS) {
 				render();
@@ -9454,7 +9530,15 @@
 				tabs.appendChild(set);
 				lastGroup = group;
 			}
-			const b = el("button", key === state.tab ? "active" : "", label);
+			const b = el("button", key === state.tab ? "active" : "");
+			if (TAB_SHORT[key]) {
+				b.appendChild(el("span", "tl-long", label));
+				const sh = el("span", "tl-short", TAB_SHORT[key]);
+				sh.setAttribute("aria-hidden", "true");
+				b.appendChild(sh);
+				b.setAttribute("aria-label", label);
+				b.title = label;
+			} else b.textContent = label;
 			b.setAttribute("role", "tab");
 			b.setAttribute("aria-selected", key === state.tab ? "true" : "false");
 			b.tabIndex = key === state.tab ? 0 : -1;
@@ -11747,38 +11831,61 @@
 	/* Q6. Every loaded class in ONE .zip, so a set of classes is one click
 	   rather than "Export next" once per file (a browser blocks several
 	   downloads from one click). Same options as a single export. */
+	/* U38: one class at a time behind the shared meter, a paint between
+	   each, so a forty-class zip says how far it has got. */
 	function exportAllZip(opts) {
 		const o = Object.assign({}, opts || currentExportOpts());
 		delete o.only;
 		const files = [];
 		let warn = 0;
+		const todo = [];
 		for (let i = 0; i < state.files.length; i++) {
 			// UV12: pro history is never written back out.
-			if (global.Engine.pastProOf(state.files[i].data)) continue;
-			const res = ensureResult(i);
-			if (!res) {
-				showError(new Error("Could not export " + state.files[i].name +
-					": it has not been run yet."));
-				return false;
-			}
-			if (o.myMarks) stampUserMarks(res);
-			try {
-				const out = global.Engine.exportFile(res, o);
-				warn += global.Engine.exportFile.passthroughs || 0;
-				files.push({
-					name: exportName(i, o),
-					data: "\ufeff" + JSON.stringify(out, null, 2),
-				});
-			} catch (err) {
-				showError(new Error("Could not export " + state.files[i].name + ": " + err.message));
-				return false;
-			}
+			if (!global.Engine.pastProOf(state.files[i].data)) todo.push(i);
 		}
-		const bytes = V.zipStore(files, new Date());
-		download("bbgm_draft_classes_" + files.length + ".zip", bytes, "application/zip");
-		exported(files.length + " classes in one zip" +
-			(warn ? ". Warning: " + warn + " player(s) could not be matched and were exported unmodified." : ""));
-		return true;
+		let cancelled = false;
+		const cancel = () => { cancelled = true; };
+		const one = (n) => {
+			if (cancelled) { progressHide(); setStatus("Zip export cancelled."); return false; }
+			if (n >= todo.length) {
+				progressShow("Writing the zip", 1, files.length + " classes");
+				return nextPaint().then(() => {
+					const bytes = V.zipStore(files, new Date());
+					progressHide();
+					download("bbgm_draft_classes_" + files.length + ".zip", bytes, "application/zip");
+					exported(files.length + " classes in one zip" +
+						(warn ? ". Warning: " + warn + " player(s) could not be matched and were exported unmodified." : ""));
+					return true;
+				});
+			}
+			const i = todo[n];
+			progressShow("Exporting " + state.files[i].name, n / todo.length,
+				(n + 1) + " of " + todo.length + " classes", cancel);
+			return nextPaint().then(() => {
+				const res = ensureResult(i);
+				if (!res) {
+					progressHide();
+					showError(new Error("Could not export " + state.files[i].name +
+						": it has not been run yet."));
+					return false;
+				}
+				if (o.myMarks) stampUserMarks(res);
+				try {
+					const out = global.Engine.exportFile(res, o);
+					warn += global.Engine.exportFile.passthroughs || 0;
+					files.push({
+						name: exportName(i, o),
+						data: "\ufeff" + JSON.stringify(out, null, 2),
+					});
+				} catch (err) {
+					progressHide();
+					showError(new Error("Could not export " + state.files[i].name + ": " + err.message));
+					return false;
+				}
+				return one(n + 1);
+			});
+		};
+		return one(0);
 	}
 
 	/* Q2. What the tool did to the file: the engine's change report as a
@@ -11949,17 +12056,27 @@
 	}
 	window.addEventListener("beforeprint", paintPrintHeader);
 
+	let exportOptionsOpen = false;
 	function exportMenu() {
 		const res = state.results[state.active];
 		if (!res) return;
-		const box = el("div");
-		box.appendChild(el("p", "hint",
-			"The simulated season used to be thrown away except for the note strings."));
+		const box = el("div", "exportmenu");
+		/* U34: headed sections instead of one flat list of 26, and the
+		   options for BBGM files folded behind a one-line summary. */
 		const list = el("div", "checks");
-		const item = (label, fn) => {
+		const SECTIONS = [
+			["bbgm", "Back to BBGM"],
+			["sheets", "Spreadsheets and data"],
+			["pics", "Pictures and pages"],
+			["import", "Import"],
+			["tools", "Tools"],
+		];
+		const sections = {};
+		for (const [k] of SECTIONS) sections[k] = el("div", "checks exportsec");
+		const item = (label, fn, sec) => {
 			const b = el("button", null, label);
 			b.addEventListener("click", () => { closeModal(); fn(); });
-			list.appendChild(b);
+			sections[sec || "tools"].appendChild(b);
 		};
 		/* §8.13: the simulated season, honors and career were computed and
 		   then thrown away at export time. Opt-in, so the default file is
@@ -12210,7 +12327,7 @@
 			"Tools → Import players also stamps every imported season's team " +
 			"“DNE” itself, whatever team the file named — that is BBGM, not " +
 			"this export."));
-		item("BBGM class file, with the options above", () => {
+		item("BBGM class file, with the options below", () => {
 			const popts = exportOpts();
 			const keys = partialKeys(res, onlySel.value, onlyN.value);
 			if (keys) {
@@ -12222,12 +12339,12 @@
 				popts.only = keys;
 			}
 			exportActive(popts);
-		});
+		}, "bbgm");
 		if (state.files.length > 1) {
-			item("Every loaded class as ONE .zip (with the options above)", () => exportAllZip(exportOpts()));
+			item("Every loaded class as ONE .zip (with the options below)", () => exportAllZip(exportOpts()), "bbgm");
 		}
-		item("What the tool changed in my file — report as Markdown", () => exportChangeReport(res, "md", exportOpts()));
-		item("What the tool changed in my file — report as CSV", () => exportChangeReport(res, "csv", exportOpts()));
+		item("What the tool changed in my file — report as Markdown", () => exportChangeReport(res, "md", exportOpts()), "pics");
+		item("What the tool changed in my file — report as CSV", () => exportChangeReport(res, "csv", exportOpts()), "sheets");
 		item("Players file, for Tools → Import players (keeps the statline)", () => {
 			const res2 = ensureResult(state.active);
 			if (!res2) return;
@@ -12243,37 +12360,67 @@
 			} catch (err) {
 				setStatus("Could not export: " + (err && err.message ? err.message : err));
 			}
-		});
+		}, "bbgm");
 		item("Merge into a league file… (keeps the statline AND the awards)", () => {
 			state.mergeOpts = exportOpts();
 			chooseMergeClasses();
-		});
+		}, "bbgm");
 		/* The one export that needs nothing but a browser to read. */
-		item("Mock first round as a picture (PNG) — for a forum post", () => exportMockImage(res));
-		item("Class card as a picture (PNG) — the top five and the class in numbers", () => exportClassCard(res));
-		item("Prospect table as CSV (the current filter)", () => exportCsv(res));
-		item("Prospect table as CSV (whole class)", () => exportCsv(res, true));
-		item("Season as JSON — records, bracket, awards, board", () => exportSeasonJson(res));
-		item("Season as CSV", () => exportSeasonCsv(res));
+		item("Mock first round as a picture (PNG) — for a forum post", () => exportMockImage(res), "pics");
+		item("Class card as a picture (PNG) — the top five and the class in numbers", () => exportClassCard(res), "pics");
+		item("Prospect table as CSV (the current filter)", () => exportCsv(res), "sheets");
+		item("Prospect table as CSV (whole class)", () => exportCsv(res, true), "sheets");
+		item("Season as JSON — records, bracket, awards, board", () => exportSeasonJson(res), "sheets");
+		item("Season as CSV", () => exportSeasonCsv(res), "sheets");
 		item("Season almanac — the whole season as Markdown or a PDF\u2026",
-			() => almanacDialog());
+			() => almanacDialog(), "pics");
 		item("Season as an interactive website — one HTML file with the JSON in it\u2026",
-			() => almanacDialog());
-		item("Season as a BBGM league fragment — teams, records, coaches", () => exportLeagueFragment(res));
-		item("Note text only, for a spreadsheet", () => exportNotes(res));
-		item("Notes as Markdown, for a forum post", () => exportNotesMarkdown(res));
-		item("Locked prospects as CSV — the file Import locks reads back", exportLocksCsv);
-		item("Import locks from a CSV…", () => $("csvFile").click());
-		item("Rename prospects from a pasted list of names…", renameDialog);
-		item("New synthetic class… (size, year, seed)", newClassDialog);
-		item("Print this page, or save it as a PDF…", printPage);
-		item("Settings as JSON — drop it on the page to load them again", exportSettingsJson);
-		item("Message history", messageHistory);
+			() => almanacDialog(), "pics");
+		item("Season as a BBGM league fragment — teams, records, coaches", () => exportLeagueFragment(res), "bbgm");
+		item("Note text only, for a spreadsheet", () => exportNotes(res), "sheets");
+		item("Notes as Markdown, for a forum post", () => exportNotesMarkdown(res), "pics");
+		item("Locked prospects as CSV — the file Import locks reads back", exportLocksCsv, "sheets");
+		item("Import locks from a CSV…", () => $("csvFile").click(), "import");
+		item("Rename prospects from a pasted list of names…", renameDialog, "import");
+		item("New synthetic class… (size, year, seed)", newClassDialog, "tools");
+		item("Print this page, or save it as a PDF…", printPage, "pics");
+		item("Settings as JSON — drop it on the page to load them again", exportSettingsJson, "sheets");
+		item("Message history", messageHistory, "tools");
 		item("Copy a bug report (seed, settings, engine revision, last error — no player data)", () => {
 			copyText(bugReport(), null, "", "the bug report");
-		});
-		item("Compare two presets…", comparePresets);
-		box.appendChild(list);
+		}, "tools");
+		item("Compare two presets…", comparePresets, "tools");
+		const optFold = el("details", "exportopts");
+		optFold.id = "exportOptions";
+		optFold.open = !!exportOptionsOpen;
+		optFold.addEventListener("toggle", () => { exportOptionsOpen = optFold.open; });
+		const optSum = el("summary");
+		const paintOptSum = () => {
+			const o = exportOpts();
+			const on = [];
+			if (o.stats) on.push("statline" + (o.prior ? " + prior" : "") + (o.highs ? " + highs" : ""));
+			if (o.awards) on.push(o.awardsScope === "major" ? "major awards" : "awards");
+			if (o.ages) on.push("ages");
+			if (o.injuries) on.push("injuries");
+			if (o.jerseys) on.push("jerseys");
+			if (o.includeNotes) on.push(o.noteAppend ? "notes (kept)" : "notes");
+			if (o.myMarks) on.push("my notes");
+			if (onlySel.value !== "all") on.push(onlySel.options[onlySel.selectedIndex].text);
+			optSum.textContent = "Options for BBGM files: " + (on.length ? on.join(" · ") : "none");
+		};
+		paintOptSum();
+		optFold.addEventListener("change", paintOptSum);
+		optFold.addEventListener("input", paintOptSum);
+		optFold.appendChild(optSum);
+		optFold.appendChild(list);
+		for (const [k, title] of SECTIONS) {
+			if (!sections[k].children.length) continue;
+			const sec = el("section", "exportgroup");
+			sec.appendChild(el("h4", null, title));
+			sec.appendChild(sections[k]);
+			if (k === "bbgm") sec.appendChild(optFold);
+			box.appendChild(sec);
+		}
 		modal("Export and import", box, null, "Close");
 	}
 
@@ -12499,6 +12646,7 @@
 		$("batchBar").style.width = p + "%";
 		$("batchGauge").setAttribute("aria-valuenow", String(p));
 		$("batchNote").textContent = done + " of " + total + " classes";
+		progressShow("Batch: " + done + " of " + total + " classes", total ? done / total : null, "", cancelBatch);
 	}
 
 	/* The classes a running batch has already finished. A cancelled sweep used
@@ -12509,6 +12657,7 @@
 
 	function batchDone(rows, failed) {
 		$("batchProgress").hidden = true;
+		progressHide();
 		$("btnBatch").disabled = false;
 		$("btnBatchCancel").hidden = true;
 		// An idle worker still holds the league file it was sent.
