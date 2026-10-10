@@ -11030,6 +11030,82 @@
 		return text + "…";
 	}
 
+	/* THE BRACKET AS A PICTURE (audit Q14): the 64 in four regions, the left
+	   two read left to right and the right two mirrored, the Final Four and
+	   the champion in the middle. Winners in ink, losers dimmed. */
+	function exportBracketImage(res) {
+		res = res || state.results[state.active];
+		const t = res && res.tourney;
+		if (!t || !t.regions) { setStatus("No bracket to draw."); return; }
+		const order = t.semiRegions || Object.keys(t.regions);
+		if (order.length !== 4) { setStatus("This field is too small for a full bracket."); return; }
+		const W = 1600, H = 1000, top = 90, regionH = 420, colW = 150;
+		const c = newCardCanvas(W, H);
+		if (!c) return;
+		const g = c.g;
+		g.fillStyle = CARD_INK;
+		g.font = "600 26px " + CARD_FONT;
+		g.fillText(fitText(g, (res.season ? res.season + " " : "") + "NCAA tournament — " +
+			className(res), W - 56), 28, 44);
+		g.fillStyle = CARD_DIM;
+		g.font = "13px " + CARD_MONO;
+		g.fillText("seed " + res.seed + " · " + classFingerprint(res), 28, 68);
+		const label = (x) => (x && x.team ? x.seed + " " + x.team.name : "");
+		const drawName = (txt, x, y, won, align) => {
+			g.fillStyle = won ? CARD_INK : CARD_DIM;
+			g.font = (won ? "600 " : "") + "11px " + CARD_FONT;
+			g.textAlign = align;
+			g.fillText(fitText(g, txt, colW - 10), x, y);
+		};
+		order.forEach((rn, ri) => {
+			const reg = t.regions[rn];
+			if (!reg || !reg.rounds) return;
+			const left = ri < 2;
+			const y0 = top + (ri % 2) * (regionH + 40);
+			g.fillStyle = CARD_DIM;
+			g.font = "600 12px " + CARD_FONT;
+			g.textAlign = left ? "left" : "right";
+			g.fillText(String(rn).toUpperCase(), left ? 28 : W - 28, y0 - 8);
+			for (let k = 0; k < 4; k++) {
+				const games = reg.rounds[k] || [];
+				const n = games.length * 2;
+				const x = left ? 28 + k * colW : W - 28 - k * colW;
+				games.forEach((gm, i) => {
+					for (const [side, j] of [[gm.a, 2 * i], [gm.b, 2 * i + 1]]) {
+						const y = y0 + (j + 0.5) * (regionH / n) + 4;
+						drawName(label(side), x, y, gm.winner === side, left ? "left" : "right");
+					}
+				});
+			}
+			const last = reg.rounds[3] && reg.rounds[3][0];
+			if (last && last.winner) {
+				const x = left ? 28 + 4 * colW : W - 28 - 4 * colW;
+				drawName(label(last.winner), x, y0 + regionH / 2 + 4, true, left ? "left" : "right");
+			}
+		});
+		// The Final Four and the title game, in the middle.
+		const cx = W / 2;
+		g.textAlign = "center";
+		(t.semis || []).forEach((gm, i) => {
+			const y = top + 300 + i * 200;
+			drawName(label(gm.a), cx, y, gm.winner === gm.a, "center");
+			drawName(label(gm.b), cx, y + 18, gm.winner === gm.b, "center");
+		});
+		if (t.champion && t.champion.team) {
+			g.fillStyle = CARD_INK;
+			g.font = "600 18px " + CARD_FONT;
+			g.textAlign = "center";
+			g.fillText("Champion: " + t.champion.team.name, cx, top + 420);
+			if (t.final && t.final.score) {
+				g.font = "12px " + CARD_MONO;
+				g.fillStyle = CARD_DIM;
+				g.fillText(String(t.final.score), cx, top + 440);
+			}
+		}
+		g.textAlign = "left";
+		saveCanvasPng(c.cv, "bracket_" + res.seed + ".png", "the bracket");
+	}
+
 	function exportClassCard(res) {
 		res = res || state.results[state.active];
 		if (!res || !res.board || !res.board.length) { setStatus("No class to draw."); return; }
@@ -12171,6 +12247,7 @@
 		/* The one export that needs nothing but a browser to read. */
 		item("Mock first round as a picture (PNG) — for a forum post", () => exportMockImage(res));
 		item("Class card as a picture (PNG) — the top five and the class in numbers", () => exportClassCard(res));
+		item("Bracket as a picture (PNG) — the 64, the Final Four and the champion", () => exportBracketImage(res));
 		item("Prospect table as CSV (the current filter)", () => exportCsv(res));
 		item("Prospect table as CSV (whole class)", () => exportCsv(res, true));
 		item("Season as JSON — records, bracket, awards, board", () => exportSeasonJson(res));
@@ -12837,7 +12914,7 @@
 		REROLL_PREDICATES,
 		exportCsv, setStatus, showError, indexSnapshot, readTextFile,
 		// The analytics, mock and sharing UI (js/share.js, js/views.js).
-		exportMockImage, exportClassCard, exportPlayerCard, downloadText: download, copyLink,
+		exportMockImage, exportClassCard, exportBracketImage, exportPlayerCard, downloadText: download, copyLink,
 		keepCurrentClass, keptDialog, commandLineText, copyCommandLine,
 		// The replay layer, for tools/uismoke.js.
 		replayStore, replayDialog, replayAfterRun, chaosDraft, className,

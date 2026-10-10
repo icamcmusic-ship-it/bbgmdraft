@@ -13,6 +13,14 @@
 (function (global) {
 	"use strict";
 
+	// The combine numbers Traits.measurables derives (audit Q15), as text.
+	function combineOf(p, k) {
+		const TR = global.Traits;
+		const m = TR && TR.measurables ? TR.measurables(p) : null;
+		if (!m) return "";
+		return k === "vertical" ? m.vertical + "-inch" : TR.inchesText(m[k]);
+	}
+
 	/* Code-unit comparison for tie-breaks that feed the simulation. localeCompare
 	   follows the browser's ICU collation, which differs between engines and
 	   versions, so the same seed could order two tied teams differently on two
@@ -2962,6 +2970,8 @@
 				player: PL(p.name, p.key), team: TM(p.newCollege),
 				hgt: T(ft + "'" + inch + "\""), wt: T(String(p.newWeight) + " pounds"),
 				rank: T("No. " + p.boardRank), pos: T(p.newPos),
+				// Audit Q15: the measurables the traits imply.
+				wingspan: T(combineOf(p, "wingspan")), vertical: T(combineOf(p, "vertical")),
 			};
 		},
 		headlines: [
@@ -2973,6 +2983,7 @@
 		bodies: [
 			"{player} measured {hgt} and {wt} at the combine. He played {pos} for {team} and every team in the gym has an opinion about whether he still will.",
 			"The measurements came in at {hgt} and {wt} for {player}, which is what he was listed at and is not always what happens.",
+			"{player} measured {hgt} in shoes with a {wingspan} wingspan and a {vertical} no-step vertical. The {team} {pos} left the combine with more teams interested than he arrived with.",
 			"{rank} on the board and {hgt} in socks. {player} did not scrimmage; nobody at his slot does any more.",
 			"There is a version of the combine that matters and it is the part with the tape measure. {player}: {hgt}, {wt}, and no change to his projection.",
 		],

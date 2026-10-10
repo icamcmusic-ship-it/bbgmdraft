@@ -23,23 +23,26 @@
 	   Every daily runs on a CANONICAL synthetic class (`classSeed`, built by
 	   Sample.makeClass in the app) so "fixed for everybody" is true whatever
 	   file a player has loaded (R5); "my own file" is the explicit opt-out. */
-	const DAILY_COMMON = ["freshmanNo1", "poyIsNo1", "unrankedTop10",
-		"!cinderella", "!unbeaten", "!seniorTop3"];
+	/* Bands measured on the canonical class itself (ten daily classes at
+	   the defaults, tools/tests/replaychallenge.js keeps the shape honest):
+	   the common goals held on 30-70% of them, the stretch goals on 10-30%.
+	   Goals that held on 90%+ (freshmanNo1, the negations of rare events)
+	   or never (seniorTop3, abroadNo1) are out. */
+	const DAILY_COMMON = ["tallTop5", "freshmen:5", "pos1:C", "!pos1:C", "topOvr:55",
+		"!unrankedTop10"];
 	const DAILY_STRETCH = [
-		// `lever`: dials that make the goal likely (the test solves with them).
+		// `lever`: dials that make the goal likelier (the test tries them).
 		{ key: "unbeaten", budget: 3, lever: { teamMomentum: 2.5 }, theme: "season" },
-		/* Heights are locked by default, so a lever that only reshuffles the
-		   board could not reach a 7'2" (R6): the lever unlocks them. */
-		{ key: "tallTop5", budget: 4, lever: { lockHeights: false, varySize: true, specialization: 2.5 },
-			theme: "draft" },
+		{ key: "poyIsNo1", budget: 4, lever: { teamMomentum: 2.5, specialization: 2.5 }, theme: "season" },
+		{ key: "poyOutsideClass", budget: 3, lever: { starReturners: 300 }, theme: "season" },
 		{ key: "cinderella", budget: 4, lever: { upsetFactor: 2 }, theme: "march" },
-		{ key: "seniorTop3", budget: 4, lever: { freshmanShare: 5 }, theme: "draft" },
 		{ key: "midMajorChamp", budget: 4, lever: { midMajorLift: 12, upsetFactor: 2 }, theme: "march" },
-		{ key: "freshmen:6", budget: 4, lever: { freshmanShare: 80 }, theme: "draft" },
-		{ key: "abroadLottery", budget: 4, lever: { pDII: 0, wEuroLeague: 200 }, theme: "draft" },
-		{ key: "strangeness:50", budget: 4, lever: { weirdness: 3 }, theme: "chaos" },
-		{ key: "!poyIsNo1", budget: 3, lever: { freshmanShare: 80 }, theme: "season" },
-		{ key: "count50:14", budget: 4, lever: { ovrMode: "curve", classDepth: 3 }, theme: "chaos" },
+		{ key: "strangeness:30", budget: 4, lever: { weirdness: 3, upsetFactor: 2 }, theme: "chaos" },
+		{ key: "topOvr:58", budget: 4, lever: { ovrMode: "curve", classQuality: 3 }, theme: "draft" },
+		{ key: "count50:8", budget: 4, lever: { ovrMode: "curve", classDepth: 3 }, theme: "draft" },
+		{ key: "abroadLottery", budget: 4, lever: { collegeSource: "rewrite", wEuroLeague: 200 }, theme: "draft" },
+		{ key: "pos1:PG", budget: 4, lever: { lockHeights: false, varySize: true, specialization: 2.5 },
+			theme: "chaos" },
 	];
 	const WEEKLY_THEMES = [
 		{ key: "march", name: "March week" },
@@ -49,9 +52,7 @@
 	];
 	// Pairs that cannot both hold (one No. 1 pick, one player of the year).
 	const CONFLICTS = [["freshmanNo1", "abroadNo1"], ["poyIsNo1", "poyOutsideClass"],
-		["poyIsNo1", "!poyIsNo1"], ["unbeaten", "!unbeaten"], ["cinderella", "!cinderella"],
-		["seniorTop3", "!seniorTop3"], ["freshmanNo1", "seniorTop3"],
-		["midMajorChamp", "!cinderella"]];
+		["pos1:C", "!pos1:C"], ["pos1:C", "pos1:PG"], ["topOvr:55", "topOvr:58"]];
 	const conflicts = (a, b) => a === b || CONFLICTS.some((c) =>
 		(c[0] === a && c[1] === b) || (c[0] === b && c[1] === a));
 

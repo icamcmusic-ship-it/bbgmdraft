@@ -1075,6 +1075,28 @@
 
 	/* Q4. The prospects either side of this one, in board order (the board
 	   if the class has one, else the file's order). Wraps at the ends. */
+	/* Q16: the nearest prospects by cosine similarity over the ratings,
+	   centred on the class mean (the normalisation the archetype table is
+	   de-duplicated with), weighted by height overlap: two inches apart
+	   costs nothing, eight costs half. */
+	function closestProspects(res, p, n) {
+		const keys = (global.BBGM && global.BBGM.RATING_KEYS || []).filter((k) => k !== "hgt");
+		const pl = (res.players || []).filter((x) => x && x.newRatings);
+		if (!p || !p.newRatings || pl.length < 2 || !keys.length) return [];
+		const mean = {};
+		for (const k of keys) mean[k] = pl.reduce((a, x) => a + (x.newRatings[k] || 0), 0) / pl.length;
+		const vec = (x) => keys.map((k) => (x.newRatings[k] || 0) - mean[k]);
+		const norm = (v) => Math.sqrt(v.reduce((a, b) => a + b * b, 0)) || 1;
+		const pv = vec(p), pn = norm(pv);
+		return pl.filter((x) => x.key !== p.key).map((x) => {
+			const v = vec(x);
+			const cos = v.reduce((a, b, i) => a + b * pv[i], 0) / (norm(v) * pn);
+			const dh = Math.abs((x.newHgtInches || 0) - (p.newHgtInches || 0));
+			const hw = dh <= 2 ? 1 : Math.max(0, 1 - (dh - 2) / 12);
+			return { p: x, sim: cos * hw };
+		}).sort((a, b) => b.sim - a.sim).slice(0, n || 3).filter((x) => x.sim > 0);
+	}
+
 	function neighborKeys(res, key) {
 		const list = (res.board && res.board.length ? res.board : res.players) || [];
 		const i = list.findIndex((x) => x.key === key);
@@ -5712,6 +5734,11 @@
 				.join("\n");
 			view.appendChild(nit);
 		}
+		const png = el("button", null, "Bracket as PNG");
+		png.id = "btnBracketPng";
+		png.title = "The 64-team bracket as a picture, for a forum post";
+		png.addEventListener("click", () => A().exportBracketImage && A().exportBracketImage(res));
+		view.appendChild(png);
 		bracketOdds(view, res);
 		confTourneySection(view, res);
 	}
@@ -8094,6 +8121,34 @@
 				.sort((a, b) => b.season - a.season)
 				.map((a) => a.season + " " + a.award).join("; "));
 		}
+		// Combine measurables (audit Q15), derived from the traits and ratings.
+		{
+			const TR = global.Traits;
+			const m = TR && TR.measurables ? TR.measurables(p) : null;
+			if (m) {
+				row("Combine", "wingspan " + TR.inchesText(m.wingspan) + " · standing reach " +
+					TR.inchesText(m.reach) + " · no-step vertical " + m.vertical + "\" · lane agility " +
+					m.lane.toFixed(2) + "s");
+			}
+		}
+		// Closest builds in this class (audit Q16).
+		{
+			const near = closestProspects(res, p, 3);
+			if (near.length) {
+				const wrap = el("span");
+				near.forEach((x, i) => {
+					if (i) wrap.appendChild(document.createTextNode(" · "));
+					wrap.appendChild(playerLink(x.p.name, x.p.key));
+					wrap.appendChild(document.createTextNode(" (" + x.p.newOvr + ", " + (x.p.archetype || "?") +
+						", " + Math.round(100 * x.sim) + "% alike) "));
+					const cb = el("button", "linky", "compare");
+					cb.type = "button";
+					cb.addEventListener("click", () => compareWith(x.p, res));
+					wrap.appendChild(cb);
+				});
+				row("Closest builds", wrap);
+			}
+		}
 		box.appendChild(dl);
 		{
 			const pb = proBlock(res, p);
@@ -9602,7 +9657,7 @@
 		EXTRA_VALUE, EXTRA_COLUMNS, CSV_EXTRA, csvExtras, pathFlags, PATH_FILTERS, PLAYER_TAGS,
 		PIN_MAX, cleanStarredSettings, timeAgo, SESSION_MAX_BYTES, sessionShape, sessionFiles, sessionLabel,
 		cleanTags, tagsOf, emptyFilter, cleanFilter, cleanFilterViews, metricUnits, weightText,
-		SEARCH_HELP, SKILL_TAGS, neighborKeys, planRenames, planLockRows, lockPatchText,
+		SEARCH_HELP, SKILL_TAGS, neighborKeys, closestProspects, planRenames, planLockRows, lockPatchText,
 		RATING_COLUMN_KEYS,
 		sortRows, classYearRank, CLASS_YEAR_ORDER, defaultHiddenColumns, closeWhy,
 		currentColumnPreset, COLUMN_PRESETS, applyColumnPreset,
