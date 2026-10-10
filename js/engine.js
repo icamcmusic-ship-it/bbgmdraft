@@ -5171,12 +5171,61 @@
 				const no1 = res && res.board && res.board[0];
 				return !!no1 && (no1.awards || []).some((a) => set.has(a));
 			} },
+		/* Seven more (audit 2026-10-10, Q21): what the achievements test and
+		   the search could not target. The bracket ones read the games the
+		   same way ReplayMeta.seedBeat does, here so the worker has them. */
+		{ key: "sixteenOverOne", label: "a 16 seed beat a 1 seed",
+			test: (res) => bracketSeedBeat(res, 16, 1) },
+		{ key: "fifteenOverTwo", label: "a 15 seed beat a 2 seed",
+			test: (res) => bracketSeedBeat(res, 15, 2) },
+		{ key: "freshmanPoy", label: "the player of the year is a freshman",
+			test: (res) => poyPlayers(res).some((p) => p.classYear === "Freshman") },
+		{ key: "midMajorPoy", label: "the player of the year plays at a mid-major",
+			test: (res) => poyPlayers(res).some((p) => {
+				if (p.nonNcaa) return false;
+				const t = res.teams && res.teams[p.newCollege];
+				const conf = t && t.conf && C.CONFERENCES[t.conf];
+				return !!t && (!conf || conf.tier !== "high");
+			}) },
+		{ key: "leftyNo1", label: "the No. 1 pick is left-handed",
+			test: (res) => !!(res && res.board && res.board[0] && res.board[0].hand === "left") },
+		{ key: "unbeatenChamp", label: "an unbeaten national champion",
+			test: (res) => {
+				const c = res && res.tourney && res.tourney.champion;
+				return !!(c && c.team && c.team.l === 0 && c.team.w >= 20);
+			} },
+		{ key: "allOneSeedsFF", label: "all four 1 seeds in the Final Four",
+			test: (res) => {
+				const ff = (res && res.tourney && res.tourney.finalFour) || [];
+				return ff.length === 4 && ff.every((x) => x && x.seed === 1);
+			} },
 		/* Strangeness as a clause: "reroll until the world comes out weird".
 		   Any "strangeness:N" key parses (see parseRerollClause); these two
 		   are the thresholds the dialog lists. */
 		strangenessPredicate(30),
 		strangenessPredicate(50),
 	];
+
+	function bracketSeedBeat(res, lo, hi) {
+		const t = res && res.tourney;
+		if (!t) return false;
+		const games = [];
+		for (const r of Object.values(t.regions || {})) {
+			for (const round of (r && r.rounds) || []) for (const g of round || []) games.push(g);
+		}
+		for (const g of t.semis || []) games.push(g);
+		if (t.final) games.push(t.final);
+		return games.some((g) => {
+			if (!g || !g.a || !g.b || !g.winner) return false;
+			const loser = g.winner === g.a ? g.b : g.a;
+			return g.winner.seed === lo && loser.seed === hi;
+		});
+	}
+	function poyPlayers(res) {
+		const set = global.Universe && global.Universe.nationalPOYSet
+			? global.Universe.nationalPOYSet() : new Set();
+		return ((res && res.players) || []).filter((p) => (p.awards || []).some((a) => set.has(a)));
+	}
 
 	function strangenessPredicate(n) {
 		const t = Math.max(0, Math.min(100, Math.round(Number(n) || 0)));

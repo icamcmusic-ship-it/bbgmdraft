@@ -8130,6 +8130,12 @@
 		const U = global.Universe;
 		const u = state.universe;
 		if (!u.rows.length) { setStatus("Build a timeline first."); return; }
+		if (what === "careers") {
+			// Everyone in the world, not only the multi-season men (audit Q25).
+			download(U.exportBaseName(u) + "-careers.csv",
+				csvJoin(U.careersTable(u.registry || {}).map((r) => r.map(esc).join(","))), "text/csv");
+			return;
+		}
 		const records = what === "records";
 		const table = records ? U.recordsTable(u.records) : U.timelineTable(u.rows);
 		download(U.exportBaseName(u) + (records ? "-records.csv" : "-timeline.csv"),
@@ -12531,6 +12537,33 @@
 			.map((k) => String(flavors[k]).padStart(3) + "  " + k).join("\n")));
 		cards.appendChild(fBox);
 		view.appendChild(cards);
+		// Range of outcomes per prospect (audit Q20).
+		const ranges = B.prospectRanges ? B.prospectRanges(rows) : [];
+		if (ranges.length) {
+			const d = el("details", "card batchranges");
+			d.appendChild(el("summary", null, "Range of outcomes per prospect (" + ranges.length + ")"));
+			const t = el("table", "mini");
+			const hr = el("tr");
+			for (const h of ["Prospect", "Board p10-p90", "Top 3", "Usual schools", "Builds", "PPG"]) hr.appendChild(el("th", null, h));
+			t.appendChild(hr);
+			const pc0 = (x) => Math.round(100 * x) + "%";
+			for (const r of ranges.slice(0, 40)) {
+				const tr = el("tr");
+				tr.appendChild(el("td", null, r.name));
+				tr.appendChild(el("td", "num", r.boardP10 === null ? "—"
+					: Math.round(r.boardP10) + "-" + Math.round(r.boardP90) + " (" + Math.round(r.boardMedian) + ")"));
+				tr.appendChild(el("td", "num", pc0(r.top3)));
+				tr.appendChild(el("td", null, r.colleges.map((c) => c.name + " " + pc0(c.share)).join(", ")));
+				tr.appendChild(el("td", null, r.archetypes.map((c) => c.name + " " + pc0(c.share)).join(", ")));
+				tr.appendChild(el("td", "num", r.ppgP10 === null ? "—" : r.ppgP10.toFixed(1) + "-" + r.ppgP90.toFixed(1)));
+				t.appendChild(tr);
+			}
+			const w = el("div", "tablewrap");
+			w.appendChild(t);
+			d.appendChild(w);
+			d.appendChild(el("p", "hint", "Player keys survive seeds, so each row is one man across the batch. The top 40 by median board rank."));
+			view.appendChild(d);
+		}
 	}
 
 	/* THE BATCH AS A CONTACT SHEET.

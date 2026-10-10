@@ -723,5 +723,45 @@
 			"\n</style>\n</head>\n<body>\n" + renderBody(md) + "\n</body>\n</html>\n";
 	}
 
-	global.Almanac = { markdown, html, SECTIONS, renderBody, slug };
+	/* THE UNIVERSE ALMANAC (audit Q26): the whole world as one document —
+	   the timeline, the records book, the threads, the pro-weighted Hall,
+	   the all-decade teams and the hindsight redraft. Markdown; the season
+	   almanac's own print CSS applies to its HTML (universeHtml). */
+	function universeMarkdown(u) {
+		const U = global.Universe;
+		if (!u || !U) return "";
+		const out = ["# " + (u.name || "A universe"), "",
+			"_base seed `" + (u.baseSeed || "?") + "` · " + (u.rows || []).length + " seasons · engine rev " +
+			U.ENGINE_REV + "._", ""];
+		const tl = U.timelineTable(u.rows || []);
+		if (tl.length > 1) { out.push("## Timeline", "", table(tl[0], tl.slice(1)), ""); }
+		const rt = U.recordsTable(u.records);
+		if (rt.length > 1) { out.push("## Records book", "", table(rt[0], rt.slice(1)), ""); }
+		if ((u.threads || []).length) {
+			out.push("## Threads", "");
+			for (const t of u.threads) out.push("- " + (t.season ? t.season + ": " : "") + (t.text || t.title || ""));
+			out.push("");
+		}
+		if (u.registry) {
+			const hall = U.proHall(u.registry, 10) || [];
+			if (hall.length) {
+				out.push("## Pro-weighted Hall of Fame", "", table(["#", "Name", "School", "Pro career"],
+					hall.map((m, i) => [i + 1, m.name, m.school, U.proText(m.pro)])), "");
+			}
+			const dec = U.allDecadeTeams ? U.allDecadeTeams(u.registry) : [];
+			if (dec.length) {
+				out.push("## All-decade teams", "", table(["Decade", "First team"],
+					dec.map((d) => [d.decade + "s", d.team.map((m) => m.name + " (" + m.school + ")").join(", ")])), "");
+			}
+			const h = U.hindsight ? U.hindsight(u.registry) : null;
+			if (h && h.classes.length) {
+				out.push("## Hindsight redraft", "", table(["Class", "Top five in hindsight"],
+					h.classes.map((k) => [k.season, k.top5.map((m) => m.redraft + ". " + m.name +
+						" (" + (m.slot ? "No. " + m.slot : "undrafted") + ")").join("; ")])), "");
+			}
+		}
+		return out.join("\n");
+	}
+
+	global.Almanac = { markdown, html, SECTIONS, renderBody, slug, universeMarkdown };
 })(typeof window !== "undefined" ? window : self);

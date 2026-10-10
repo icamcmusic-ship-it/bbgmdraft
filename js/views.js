@@ -4211,6 +4211,7 @@
 	   Read off Universe.registryOf, which is derived from results the chain
 	   already has; nothing here re-simulates. */
 	const REGISTRY_ROWS = 40;
+	const regSearch = { q: "" };
 	function registrySection(view, u) {
 		const reg = u.registry;
 		/* SAY WHY IT IS EMPTY, RATHER THAN RENDERING NOTHING.
@@ -4231,6 +4232,44 @@
 					"chain finishes; run the universe to fill it in.");
 			}
 			return;
+		}
+		/* Search everyone (audit Q25), not only the multi-season men below:
+		   "what happened to that kid from 2031?" */
+		{
+			const box = el("div", "filters registrysearch");
+			const inp = el("input");
+			inp.type = "search";
+			inp.id = "registrySearch";
+			inp.placeholder = "Search everyone in this world by name or school";
+			inp.setAttribute("aria-label", "Search the universe's players");
+			inp.value = regSearch.q;
+			const out = el("div", "registryhits");
+			const paint = () => {
+				regSearch.q = inp.value;
+				out.innerHTML = "";
+				for (const x of global.Universe.searchRegistry(reg, inp.value, 30)) {
+					const d = x.draft || {};
+					const line = el("div");
+					const b = el("button", "linky", x.name || "?");
+					b.type = "button";
+					b.addEventListener("click", () => {
+						if (Number.isFinite(x.fileIndex) && A().showPlayerInFile) {
+							const key = String(x.id).split("/").slice(1).join("/") || x.id;
+							A().showPlayerInFile(x.fileIndex, key);
+						}
+					});
+					line.appendChild(b);
+					line.appendChild(document.createTextNode(" — " + (d.season || "?") + " class, " +
+						(d.school || d.club || "?") + (d.slot ? ", went No. " + d.slot : "") +
+						" · " + global.Universe.proText(global.Universe.proOutcome(x))));
+					out.appendChild(line);
+				}
+			};
+			inp.addEventListener("input", paint);
+			box.appendChild(inp);
+			view.appendChild(box);
+			view.appendChild(out);
+			if (regSearch.q) paint();
 		}
 		const people = Object.keys(reg).map((id) => reg[id])
 			.filter((x) => x.span >= 2)
@@ -4399,7 +4438,36 @@
 		view.appendChild(cm);
 	}
 
+	/* All-decade teams and the hindsight redraft (audit Q27, Q28), from the
+	   registry. */
+	function registryRecords(view, u) {
+		const U = global.Universe;
+		if (!u || !u.registry || !U || !U.allDecadeTeams) return;
+		const dec = U.allDecadeTeams(u.registry).filter((d) => d.team.length);
+		if (dec.length) {
+			const c = el("div", "card alldecade");
+			c.appendChild(el("h4", null, "All-decade teams"));
+			c.appendChild(el("div", "note", dec.map((d) => d.decade + "s: " +
+				d.team.map((m) => m.name + " (" + m.school + ")").join(", ")).join("\n")));
+			view.appendChild(c);
+		}
+		const h = U.hindsight(u.registry);
+		if (h.classes.length) {
+			const c = el("details", "card hindsight");
+			c.appendChild(el("summary", null, "Hindsight redraft"));
+			c.appendChild(el("div", "note", h.classes.map((k) => k.season + ": " + k.top5.map((m) =>
+				m.redraft + ". " + m.name + " (went " + (m.slot ? "No. " + m.slot : "undrafted") + ", " + m.pro.tier + ")")
+				.join("; ")).join("\n") +
+				(h.steals.length ? "\n\nBiggest steals: " + h.steals.map((m) => m.season + " " + m.name +
+					" (" + (m.slot ? "No. " + m.slot : "undrafted") + ", " + m.pro.tier + ")").join("; ") : "") +
+				(h.busts.length ? "\nBiggest busts: " + h.busts.map((m) => m.season + " " + m.name +
+					" (No. " + m.slot + ")").join("; ") : "")));
+			view.appendChild(c);
+		}
+	}
+
 	function recordsSection(view, rec, u) {
+		registryRecords(view, u);
 		view.appendChild(el("h4", null, "Records book"));
 		view.appendChild(el("p", "legendline",
 			"All-time across this universe — every line is derived from the " +
@@ -5168,12 +5236,22 @@
 			"Tools → Import players and tick “include stats”.";
 		expPlayers.addEventListener("click", () => { A().exportUniversePlayers(); });
 		bar.appendChild(expPlayers);
-		for (const [what, label] of [["timeline", "Timeline CSV"], ["records", "Records CSV"]]) {
+		for (const [what, label] of [["timeline", "Timeline CSV"], ["records", "Records CSV"], ["careers", "Careers CSV"]]) {
 			const b = el("button", null, label);
-			b.disabled = !u.rows.length || !!u.running || (what === "records" && !u.records);
+			b.disabled = !u.rows.length || !!u.running || (what === "records" && !u.records) ||
+				(what === "careers" && !u.registry);
 			b.addEventListener("click", () => { A().exportUniverseCsv(what); });
 			bar.appendChild(b);
 		}
+		const alm = el("button", null, "Universe almanac (Markdown)");
+		alm.disabled = !u.rows.length || !!u.running;
+		alm.title = "The whole world as one document: timeline, records, threads, the Hall, " +
+			"all-decade teams and the hindsight redraft";
+		alm.addEventListener("click", () => {
+			const md = global.Almanac && global.Almanac.universeMarkdown ? global.Almanac.universeMarkdown(u) : "";
+			if (md) A().downloadText(global.Universe.exportBaseName(u) + "-almanac.md", md, "text/markdown");
+		});
+		bar.appendChild(alm);
 		const impBtn = el("button", null, "Import universe…");
 		impBtn.disabled = !!u.running;
 		const impInput = el("input");

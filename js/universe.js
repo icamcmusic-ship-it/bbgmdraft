@@ -4526,6 +4526,100 @@
 	}
 
 
+	/* --- the registry as a corpus (audit Q25, Q27, Q28) ---------------- */
+
+	// Everyone in the registry, not only the multi-season men, as CSV rows.
+	function careersTable(registry) {
+		const out = [["id", "name", "draft season", "school", "class year", "ovr", "pot", "board",
+			"slot", "seasons", "honors", "pro"]];
+		for (const id of Object.keys(registry || {}).sort()) {
+			const x = registry[id];
+			if (!x) continue;
+			const d = x.draft || {};
+			out.push([id, x.name || "", d.season || "", d.school || d.club || "", d.classYear || "",
+				Number.isFinite(d.ovr) ? d.ovr : "", Number.isFinite(d.pot) ? d.pot : "",
+				d.boardRank || "", d.slot || "",
+				(x.seasons || []).map((sn) => sn.season + " " + (sn.school || sn.as || "")).join("; "),
+				personalHonors(x).map((h) => h.season + " " + h.award).join("; "),
+				proText(proOutcome(x))]);
+		}
+		return out;
+	}
+	// Name or school, case-blind, over the whole registry; newest draft first.
+	function searchRegistry(registry, query, limit) {
+		const q = String(query || "").trim().toLowerCase();
+		if (!q) return [];
+		const out = [];
+		for (const id of Object.keys(registry || {})) {
+			const x = registry[id];
+			if (!x) continue;
+			const schools = (x.seasons || []).map((sn) => sn.school).concat([x.draft && x.draft.school])
+				.filter(Boolean).map((t) => String(t).toLowerCase());
+			if (String(x.name || "").toLowerCase().indexOf(q) !== -1 || schools.some((t) => t.indexOf(q) !== -1)) out.push(x);
+		}
+		return out.sort((a, b) => ((b.draft && b.draft.season) || 0) - ((a.draft && a.draft.season) || 0))
+			.slice(0, limit || 50);
+	}
+
+	/* ALL-DECADE TEAMS (Q27): five men a calendar decade by honors weighted
+	   POY 10, All-American 5 (first team 6), all-conference 2, counted once
+	   per man per season at its best tier. */
+	function honorWeight(award) {
+		const set = nationalPOYSet();
+		if (set.has(award)) return 10;
+		if (/First Team All-American/.test(award)) return 6;
+		if (/All-American/.test(award)) return 5;
+		if (/^All-.* First Team$/.test(award)) return 2;
+		return 0;
+	}
+	function allDecadeTeams(registry) {
+		const by = {};
+		for (const id of Object.keys(registry || {})) {
+			const x = registry[id];
+			if (!x) continue;
+			const best = {};
+			for (const h of x.honors || []) {
+				const w = honorWeight(h.award);
+				if (w && Number.isFinite(h.season)) best[h.season] = Math.max(best[h.season] || 0, w);
+			}
+			for (const sn of Object.keys(best)) {
+				const dec = Math.floor(Number(sn) / 10) * 10;
+				const d = by[dec] || (by[dec] = {});
+				const e = d[id] || (d[id] = { id, name: x.name, school: (x.draft && (x.draft.school || x.draft.club)) || "", score: 0 });
+				e.score += best[sn];
+			}
+		}
+		return Object.keys(by).map(Number).sort((a, b) => a - b).map((dec) => ({
+			decade: dec,
+			team: Object.values(by[dec]).sort((a, b) => b.score - a.score || String(a.name).localeCompare(String(b.name))).slice(0, 5),
+		}));
+	}
+
+	/* HINDSIGHT REDRAFT (Q28): each played class re-ranked by the pro tail,
+	   against where each man actually went. */
+	function hindsight(registry) {
+		const by = {};
+		for (const id of Object.keys(registry || {})) {
+			const x = registry[id];
+			const d = x && x.draft;
+			if (!d || !Number.isFinite(d.season)) continue;
+			const pro = proOutcome(x);
+			if (!pro) continue;
+			(by[d.season] = by[d.season] || []).push({ id, name: x.name, slot: d.slot || null, pro });
+		}
+		const classes = Object.keys(by).map(Number).sort((a, b) => a - b).map((season) => {
+			const men = by[season].sort((a, b) => b.pro.score - a.pro.score);
+			return { season, top5: men.slice(0, 5).map((m, i) => Object.assign({ redraft: i + 1 }, m)) };
+		});
+		const all = [];
+		for (const c of classes) for (const m of by[c.season].map((mm, i) => Object.assign({ redraft: i + 1, season: c.season }, mm))) all.push(m);
+		const steals = all.filter((m) => m.redraft <= 5 && (!m.slot || m.slot >= 20))
+			.sort((a, b) => (b.slot || 99) - (a.slot || 99)).slice(0, 5);
+		const busts = all.filter((m) => m.slot && m.slot <= 5 && m.pro.bust)
+			.sort((a, b) => a.slot - b.slot).slice(0, 5);
+		return { classes, steals, busts };
+	}
+
 	/* THE PRO CAREER TAIL. Seeded from the player id, so the same man has
 	   the same pro career on every machine; pot sets the odds and the draft
 	   slot nudges them. Not a simulation: a plausible epilogue. */
@@ -4672,5 +4766,6 @@
 		SYNTH_SIZE,
 		rowMentions, followedCard, followedLead, dynastyProgress, lowPrestige,
 		proOutcome, proText, proHall, seasonDetail, linkCareers,
+		careersTable, searchRegistry, allDecadeTeams, hindsight, honorWeight,
 	};
 })(typeof window !== "undefined" ? window : self);

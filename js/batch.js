@@ -83,7 +83,42 @@
 			ffOneSeeds: res.tourney && res.tourney.finalFour
 				? res.tourney.finalFour.filter((x) => x.seed === 1).length : null,
 			r64Upsets: r64Upsets(res.tourney),
+			// Per prospect (audit Q20): keys survive seeds, so a batch can say
+			// where one man usually lands. Plain data for the structured clone.
+			prospects: res.players.map((p) => ({ key: p.key, name: p.name,
+				board: p.boardRank || null, college: p.nonNcaa ? (p.proClub || p.newCollege) : p.newCollege,
+				archetype: p.archetype, ppg: p.stats ? Math.round(p.stats.ppg * 10) / 10 : null })),
 		}, contactFields(res));
+	}
+
+	/* "Range of outcomes" per prospect over a batch's rows (Q20): board rank
+	   p10-p90, how often a top-3 pick, his commonest schools and builds, his
+	   PPG band. Sorted by median board rank. */
+	function prospectRanges(rows) {
+		const by = {};
+		for (const r of rows || []) {
+			for (const x of r.prospects || []) {
+				const e = by[x.key] || (by[x.key] = { key: x.key, name: x.name, board: [], ppg: [],
+					college: {}, archetype: {}, n: 0 });
+				e.n++;
+				if (Number.isFinite(x.board)) e.board.push(x.board);
+				if (Number.isFinite(x.ppg)) e.ppg.push(x.ppg);
+				if (x.college) e.college[x.college] = (e.college[x.college] || 0) + 1;
+				if (x.archetype) e.archetype[x.archetype] = (e.archetype[x.archetype] || 0) + 1;
+			}
+		}
+		const top = (m, k) => Object.keys(m).sort((a, b) => m[b] - m[a]).slice(0, k)
+			.map((n) => ({ name: n, share: m[n] }));
+		return Object.values(by).map((e) => ({
+			key: e.key, name: e.name, classes: e.n,
+			boardMedian: e.board.length ? pct(e.board, 0.5) : null,
+			boardP10: e.board.length ? pct(e.board, 0.1) : null,
+			boardP90: e.board.length ? pct(e.board, 0.9) : null,
+			top3: e.board.filter((b) => b <= 3).length / Math.max(1, e.n),
+			colleges: top(e.college, 3).map((c) => ({ name: c.name, share: c.share / e.n })),
+			archetypes: top(e.archetype, 3).map((c) => ({ name: c.name, share: c.share / e.n })),
+			ppgP10: e.ppg.length ? pct(e.ppg, 0.1) : null, ppgP90: e.ppg.length ? pct(e.ppg, 0.9) : null,
+		})).sort((a, b) => (a.boardMedian || 999) - (b.boardMedian || 999));
 	}
 
 	function r64Upsets(t) {
@@ -117,5 +152,5 @@
 			p.stats ? p.stats.mpg : null, p.stats ? p.stats.ppg : null]);
 	}
 
-	global.BatchStats = { summarize, batchSeed, mean, maxOf, pct, fingerprint };
+	global.BatchStats = { summarize, batchSeed, mean, maxOf, pct, fingerprint, prospectRanges };
 })(typeof window !== "undefined" ? window : self);
