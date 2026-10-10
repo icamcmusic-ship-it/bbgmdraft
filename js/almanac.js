@@ -27,11 +27,23 @@
 	/* Shooting percentages read .446, not 0.446, everywhere in the tool. */
 	const pct3 = (v) => (Number.isFinite(v) ? v.toFixed(3).replace(/^0/, "") : "");
 
+	/* A name is data, not Markdown. A player called `_a_ [c](#d)` came out
+	   italic and as an in-page link in the printed almanac, and a raw `<img>`
+	   in a name was written verbatim into the .md download (audit 2026-10-10
+	   B18). Backslash-escape the characters our own renderer (and any
+	   CommonMark reader) treats as markup; inline() below undoes it. */
+	function md(v) {
+		return String(v === undefined || v === null ? "" : v).replace(/[\\`*_[\]<]/g, "\\$&");
+	}
+
+	// Close a sentence without doubling a period ("N.J.I.T.._").
+	const endSentence = (s) => global.Text.endSentence(s);
+
 	/* A cell can carry a pipe (a note, a team style) or a newline (a note
-	   again), and either one silently breaks the row it is in. */
+	   again), and either one silently breaks the row it is in. Every table
+	   cell is data, so it is Markdown-escaped too (see md). */
 	function cell(v) {
-		return String(v === undefined || v === null ? "" : v)
-			.replace(/\|/g, "\\|").replace(/\n/g, " ");
+		return md(v).replace(/\|/g, "\\|").replace(/\n/g, " ");
 	}
 
 	function table(heads, rows) {
@@ -108,7 +120,7 @@
 		   an empty header band above it, and there is nothing to put in the
 		   header — these are labels and values, not columns. */
 		if (facts.length) {
-			for (const [label, value] of facts) out.push("- **" + label + "** — " + value);
+			for (const [label, value] of facts) out.push("- **" + label + "** — " + md(value));
 			out.push("");
 		}
 		if (res.narrative && res.narrative.length) {
@@ -118,7 +130,7 @@
 		}
 		if (res.surprises && res.surprises.length) {
 			out.push("**Story of the class:** " +
-				res.surprises.map((s) => s.player + ", " + s.label).join("; ") + ".");
+				endSentence(res.surprises.map((s) => md(s.player) + ", " + s.label).join("; ")));
 			out.push("");
 		}
 		return out.join("\n");
@@ -236,8 +248,8 @@
 			out.push("### " + region + " region");
 			out.push("");
 			if (r.seeds && r.seeds.length) {
-				out.push("_Seeds: " + r.seeds.map((s, i) =>
-					(i + 1) + " " + (s && s.team ? s.team.name : "")).join(" · ") + "._");
+				out.push("_" + endSentence("Seeds: " + r.seeds.map((s, i) =>
+					(i + 1) + " " + (s && s.team ? md(s.team.name) : "")).join(" · ")) + "_");
 				out.push("");
 			}
 			r.rounds.forEach((games, i) => {
@@ -255,7 +267,7 @@
 				out.push("");
 			});
 			if (r.champ && r.champ.team) {
-				out.push("_" + region + " champion: " + r.champ.team.name + "._");
+				out.push("_" + endSentence(region + " champion: " + md(r.champ.team.name)) + "_");
 				out.push("");
 			}
 		}
@@ -270,13 +282,13 @@
 		if (t.final && t.final.winner) {
 			const loser = t.final.winner === t.final.a ? t.final.b : t.final.a;
 			out.push("### National championship", "");
-			out.push("**" + t.final.winner.team.name + "** beat " +
-				loser.team.name + ", " + t.final.score + ".");
+			out.push("**" + md(t.final.winner.team.name) + "** beat " +
+				md(loser.team.name) + ", " + t.final.score + ".");
 			out.push("");
 		}
 		if (t.nit && t.nit.champion) {
 			out.push("### NIT", "");
-			out.push("Champion: **" + t.nit.champion.name + "**.");
+			out.push("Champion: **" + md(t.nit.champion.name) + "**.");
 			out.push("");
 		}
 		return out.join("\n");
@@ -370,8 +382,8 @@
 			out.push("### " + name);
 			out.push("");
 			const line = [];
-			if (lg.champion) line.push("Champion: **" + lg.champion.name + "**");
-			if (lg.cup && lg.cup.champion) line.push("Cup: " + lg.cup.champion.name);
+			if (lg.champion) line.push("Champion: **" + md(lg.champion.name) + "**");
+			if (lg.cup && lg.cup.champion) line.push("Cup: " + md(lg.cup.champion.name));
 			if (line.length) { out.push(line.join(" · ") + "."); out.push(""); }
 			out.push(table(["#", "Club", "Record", "Prospects"],
 				(lg.table || []).map((c, i) => [
@@ -410,10 +422,10 @@
 		const out = ["## The prospects", ""];
 		for (const p of board) {
 			const s = p.stats || {};
-			out.push("### " + (p.boardRank ? p.boardRank + ". " : "") + p.name);
+			out.push("### " + (p.boardRank ? p.boardRank + ". " : "") + md(p.name));
 			out.push("");
 			out.push("`" + p.newPos + "` **" + p.newOvr + "/" + p.newPot + "** · " +
-				p.archetype + " · " + p.classYear + " · " + schoolOf(p) +
+				p.archetype + " · " + p.classYear + " · " + md(schoolOf(p)) +
 				(Number.isFinite(p.newHgtInches)
 					? " · " + Math.floor(p.newHgtInches / 12) + "'" +
 						(p.newHgtInches % 12) + '" ' + p.newWeight + " lb"
@@ -459,12 +471,12 @@
 				out.push("");
 				lastDate = a.dateline;
 			}
-			out.push("**" + segText(a.headline) + "**");
+			out.push("**" + md(segText(a.headline)) + "**");
 			out.push("");
-			out.push(segText(a.body));
+			out.push(md(segText(a.body)));
 			out.push("");
 			for (const para of a.paras || []) {
-				const text = segText(para);
+				const text = md(segText(para));
 				if (text.trim()) { out.push(text); out.push(""); }
 			}
 			out.push("_" + a.kind + (a.byline ? " · " + a.byline : "") + "_");
@@ -618,14 +630,18 @@
 	function inline(s) {
 		/* Escaped pipes come back as pipes: the cell escaping above is a
 		   markdown convention, not something a reader should see. */
+		/* A backslash-escaped character (see md) is set aside first, so no
+		   rule below reads it as markup, and put back as itself at the end. */
+		const held = [];
 		return escapeHtml(s)
+			.replace(/\\(&lt;|[\\`*_[\]|])/g, (m, c) => "\uE000" + (held.push(c) - 1) + "\uE001")
 			.replace(/`([^`]+)`/g, "<code>$1</code>")
 			.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
 			.replace(/(^|[\s(])_([^_]+)_/g, "$1<em>$2</em>")
 			// The anchor through slug(), so a crafted name cannot leave the attribute.
 			.replace(/\[([^\]]+)\]\(#([^)]+)\)/g, (m, text, id) =>
 				'<a href="#' + slug(id) + '">' + text + "</a>")
-			.replace(/\\\|/g, "|");
+			.replace(/\uE000(\d+)\uE001/g, (m, k) => held[Number(k)]);
 	}
 
 	function renderBody(md) {

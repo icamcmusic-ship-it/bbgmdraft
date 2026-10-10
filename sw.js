@@ -34,7 +34,13 @@ self.addEventListener("install", (e) => {
 
 self.addEventListener("activate", (e) => {
 	e.waitUntil(caches.keys()
-		.then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+		/* Only our own old versions. Cache Storage is per ORIGIN, and on a
+		   shared origin (user.github.io/<repo>/) every other app's offline
+		   cache lives beside ours; deleting "everything but CACHE" wiped them
+		   (audit 2026-10-10 B14). */
+		.then((keys) => Promise.all(keys
+			.filter((k) => k !== CACHE && k.indexOf("bbgm-draft-workshop-") === 0)
+			.map((k) => caches.delete(k))))
 		.then(() => self.clients.claim()));
 });
 
@@ -44,7 +50,8 @@ self.addEventListener("fetch", (e) => {
 	e.respondWith(fetch(req).then((res) => {
 		if (res && res.ok) {
 			const copy = res.clone();
-			caches.open(CACHE).then((c) => c.put(req, copy));
+			// Inside waitUntil so a worker stopped mid-write cannot drop it.
+			e.waitUntil(caches.open(CACHE).then((c) => c.put(req, copy)));
 		}
 		return res;
 	}).catch(() => caches.match(req).then((hit) => {

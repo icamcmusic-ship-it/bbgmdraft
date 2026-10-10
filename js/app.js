@@ -50,6 +50,10 @@
 		},
 		noteQuery: "",   // the Notes tab has its own search; it used to share one
 		overrides: {},   // player key -> {ovr, pot, archetype, college, ratings, …}
+		/* The locks of the OTHER loaded files, by file fingerprint. `overrides`
+		   is the active file's; switching files parks it here and brings back
+		   the new file's. See checkLockFingerprint. */
+		lockStash: {},
 		overrideFingerprint: null,
 		selected: {},    // player key -> true, for bulk editing
 		history: [],     // recent seeds, newest first
@@ -375,6 +379,12 @@
 			cfg: state.cfg,
 			overrides: state.overrides,
 			overrideFingerprint: state.overrideFingerprint,
+			lockStash: state.lockStash,
+			/* The seed a reroll drew. A reroll blanks cfg.seed and keeps the
+			   drawn one only here, so without it every reload and every
+			   "Restore last session" drew a new random class from the same
+			   files and settings (audit 2026-10-10 B3). */
+			lastSeed: state.lastSeed || null,
 			history: state.history.slice(0, 12),
 			poolHistory: state.poolHistory,
 			anomalyHistory: state.anomalyHistory,
@@ -585,6 +595,14 @@
 		if (validString(saved.overrideFingerprint)) {
 			state.overrideFingerprint = saved.overrideFingerprint;
 		}
+		if (saved.lockStash && typeof saved.lockStash === "object" && !Array.isArray(saved.lockStash)) {
+			state.lockStash = {};
+			for (const fp of Object.keys(saved.lockStash)) {
+				const m = saved.lockStash[fp];
+				if (m && typeof m === "object" && !Array.isArray(m)) state.lockStash[fp] = m;
+			}
+		}
+		if (validString(saved.lastSeed)) state.lastSeed = saved.lastSeed;
 		if (Array.isArray(saved.history)) {
 			state.history = saved.history.filter((h) => typeof h === "string");
 		}
@@ -780,8 +798,16 @@
 	/* Named for what it is, and not `snapshot`: there is already a snapshot()
 	   further down for the class-comparison panel, and a duplicate function
 	   declaration silently hands both call sites the later one. */
-	function undoSnapshot(label) {
-		return {
+	/* `withWorld` (undo and redo only) also holds the universe, by
+	   reference, and its dynasty goal: loading a saved universe, importing
+	   one, building a synthetic one and starting a dynasty goal pushed a
+	   labelled undo entry that restored the settings and left the world
+	   (audit 2026-10-10 B7). A run-history row or a kept class is persisted,
+	   so it never carries the universe. */
+	function undoSnapshot(label, withWorld) {
+		const world = withWorld && state.universe
+			? { universe: state.universe, dynasty: state.universe.dynasty || null } : {};
+		return Object.assign(world, {
 			label,
 			cfg: JSON.parse(JSON.stringify(state.cfg)),
 			overrides: JSON.parse(JSON.stringify(state.overrides)),
@@ -812,11 +838,19 @@
 			fileCfgs: JSON.parse(JSON.stringify(state.fileCfgs || {})),
 			// An input outside cfg too: the biographies decide who is drawn.
 			universeBiography: state.universeBiography || null,
-		};
+			/* The mutators change the class effectiveCfg builds and live
+			   outside cfg, so an undone mutator toggle, a run-history row or a
+			   kept class made with them on came back without them; and the
+			   challenge wipes the memories in effectiveCfg (audit 2026-10-10
+			   B7). */
+			mutators: (state.mutators || []).slice(),
+			challenge: state.challenge || null,
+			replayRun: state.replayRun ? JSON.parse(JSON.stringify(state.replayRun)) : null,
+		});
 	}
 
 	function pushUndo(label) {
-		state.undo.push(undoSnapshot(label));
+		state.undo.push(undoSnapshot(label, true));
 		if (state.undo.length > 40) state.undo.shift();
 		// A new action forks the history: whatever was undone is no longer
 		// reachable, which is what every undo stack does.
@@ -847,6 +881,15 @@
 		state.fileCfgs = snap.fileCfgs && typeof snap.fileCfgs === "object"
 			? snap.fileCfgs : {};
 		if (snap.universeBiography !== undefined) state.universeBiography = snap.universeBiography;
+		// Absent from a snapshot written before they were recorded.
+		if (Array.isArray(snap.mutators)) state.mutators = global.ReplayMeta.cleanMutators(snap.mutators);
+		if (snap.challenge !== undefined) state.challenge = snap.challenge;
+		if (snap.replayRun !== undefined) state.replayRun = snap.replayRun;
+		// Never swapped out from under a running chain.
+		if (snap.universe && !(state.universe && state.universe.running)) {
+			state.universe = snap.universe;
+			state.universe.dynasty = snap.dynasty || null;
+		}
 	}
 
 	function undo() {
@@ -854,7 +897,7 @@
 		if (!prev) return;
 		// Ctrl+Z existed and Ctrl+Shift+Z did not, so an undo was a one-way
 		// trip: the state you were in a moment ago was simply gone.
-		state.redo.push(undoSnapshot(prev.label));
+		state.redo.push(undoSnapshot(prev.label, true));
 		if (state.redo.length > 40) state.redo.shift();
 		applySnapshot(prev, "Undid");
 	}
@@ -867,7 +910,7 @@
 		let prev = null;
 		for (let i = 0; i < n; i++) {
 			prev = state.undo.pop();
-			state.redo.push(undoSnapshot(prev.label));
+			state.redo.push(undoSnapshot(prev.label, true));
 			if (state.redo.length > 40) state.redo.shift();
 			setSnapshot(prev);
 		}
@@ -903,7 +946,7 @@
 	function redo() {
 		const next = state.redo.pop();
 		if (!next) return;
-		state.undo.push(undoSnapshot(next.label));
+		state.undo.push(undoSnapshot(next.label, true));
 		if (state.undo.length > 40) state.undo.shift();
 		applySnapshot(next, "Redid");
 	}
@@ -2556,11 +2599,15 @@
 	}
 
 	/* Today's seed: the same class for everyone on the same settings and
-	   date, which is what makes a class something to compare notes on. */
+	   date, which is what makes a class something to compare notes on.
+	   The UTC date: a local one gave two users in different time zones two
+	   different dailies at the same moment, and the achievement ledger
+	   (which stamps toISOString's UTC date) a different day from the daily
+	   just played (audit 2026-10-10 B21). */
 	function dailySeed(d) {
 		d = d || new Date();
 		const pad = (n) => String(n).padStart(2, "0");
-		return "daily-" + d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+		return "daily-" + d.getUTCFullYear() + "-" + pad(d.getUTCMonth() + 1) + "-" + pad(d.getUTCDate());
 	}
 
 	function dailyReroll() {
@@ -4092,7 +4139,10 @@
 
 	function setHash(hash) {
 		lastWrittenHash = hash;
-		history.replaceState(null, "", hash || "#");
+		/* Keep the entry's state: replacing it with null erased the bbgmNav
+		   record syncNav wrote, and the next Back press after Copy link was
+		   ignored by the popstate handler (audit 2026-10-10 B12). */
+		history.replaceState(history.state, "", hash || "#");
 	}
 
 	function warnLeanLink() {
@@ -4121,7 +4171,8 @@
 			}
 			const lean = Object.assign({}, payload);
 			delete lean.overrides;
-			delete lean.fp;
+			// fp names the file the deep fields belong to; see Share.encodeLink.
+			if (lean.tab === undefined && lean.pk === undefined && lean.cmp === undefined) delete lean.fp;
 			setHash("#c=" + encodeURIComponent(JSON.stringify(lean)));
 			if (!global.Share.canStream()) { if (payload.overrides) warnLeanLink(); return undefined; }
 			return global.Share.encodeLink(payload).then((r) => {
@@ -4621,7 +4672,13 @@
 			progressHide();
 			const classes = loaded.filter(Boolean).reduce((a, b) => a.concat(b), []);
 			const other = side.universe.length + side.settings.length + side.csv.length;
-			if (classes.length || !other) installFiles(classes, problems, opts);
+			/* A universe export in the same drop replays these classes itself;
+			   a run of installFiles' own would cancel that replay (B5 above
+			   importUniverse). */
+			if (classes.length || !other) {
+				installFiles(classes, problems, side.universe.length
+					? Object.assign({}, opts, { noRun: true }) : opts);
+			}
 			else {
 				$("empty").classList.remove("busy");
 				if (problems.length) showError(new Error(problems.join("\n")));
@@ -4629,6 +4686,10 @@
 			}
 			for (const s of side.settings) applySettingsJson(s);
 			for (const u of side.universe) importUniverse(u);
+			// The classes still run when the import did not start a replay
+			// (refused, or installed as a view).
+			if (side.universe.length && classes.length && state.files.length &&
+				!state.universeExpect && !state.universe.running) run();
 			for (const text of side.csv) {
 				if (!state.files.length) {
 					showError(new Error("Load a draft class first — a locks CSV is " +
@@ -4662,7 +4723,14 @@
 			return;
 		}
 		pushUndo("loaded settings from a file");
-		state.cfg = fitEra(CFG.make(cfg));
+		/* The mutators ride in the file as `mu`, as in a link. This path never
+		   read them: loading the file kept the current mutators and stored a
+		   stray state.cfg.mu (audit 2026-10-10 B11). Done as applyLinkPayload
+		   does it. */
+		const rest = Object.assign({}, cfg);
+		state.mutators = global.ReplayMeta.cleanMutators(rest.mu);
+		delete rest.mu;
+		state.cfg = fitEra(CFG.make(rest));
 		state.presetDirty = true;
 		paintConfig();
 		persist();
@@ -4937,6 +5005,26 @@
 	function checkLockFingerprint() {
 		const file = activeFile();
 		if (!file) return;
+		/* A switch between two LOADED files is not "locks from a different
+		   class": it used to wipe every lock, with no undo, on an ordinary
+		   change of the file picker (and on a reload, which comes back on file
+		   0). The outgoing file's locks are parked under its fingerprint and
+		   the incoming file's come back (audit 2026-10-10 B1). */
+		const from = state.overrideFingerprint;
+		if (from && from !== file.fingerprint &&
+			state.files.some((f) => f.fingerprint === from)) {
+			if (!state.lockStash) state.lockStash = {};
+			if (Object.keys(state.overrides).length) state.lockStash[from] = state.overrides;
+			else delete state.lockStash[from];
+			state.overrides = state.lockStash[file.fingerprint] || {};
+			delete state.lockStash[file.fingerprint];
+			state.overrideFingerprint = file.fingerprint;
+			// A file closed and dropped again finds its locks; a dozen is plenty.
+			const parked = Object.keys(state.lockStash);
+			for (const fp of parked.slice(0, Math.max(0, parked.length - 12))) delete state.lockStash[fp];
+			if (Object.keys(state.overrides).length) reportUnmatchedLocks(file);
+			return;
+		}
 		const n = Object.keys(state.overrides).length;
 		if (!n) { state.overrideFingerprint = file.fingerprint; return; }
 		if (!state.overrideFingerprint) {
@@ -4944,6 +5032,8 @@
 			return;
 		}
 		if (state.overrideFingerprint !== file.fingerprint) {
+			// Never without a way back.
+			pushUndo("dropped " + n + " lock" + (n === 1 ? "" : "s") + " from another class");
 			state.overrides = {};
 			state.overrideFingerprint = file.fingerprint;
 			showWarning(n + " lock" + (n === 1 ? "" : "s") +
@@ -5743,6 +5833,20 @@
 	   simulation produces, so an unlinked one is the right input. */
 	let linking = false;
 
+	/* The locks file `i` is run with. effectiveCfg carries the ACTIVE file's
+	   locks, which are keyed by pid; a sibling file with the same pids was
+	   simulated with them (Export all, the zip, a multi-class merge), the
+	   cross-class mis-lock checkLockFingerprint exists to prevent (audit
+	   2026-10-10 B2). Any other file gets its own parked locks, or none. */
+	function withFileLocks(cfg, i) {
+		if (!cfg || i === state.active) return cfg;
+		const f = state.files[i];
+		const fp = f && f.fingerprint;
+		if (fp && fp === state.overrideFingerprint) return cfg;
+		const own = fp && state.lockStash && state.lockStash[fp];
+		return Object.assign({}, cfg, { overrides: own || {} });
+	}
+
 	function ensureResult(i) {
 		if (state.results[i]) return state.results[i];
 		const runner = state.runners[i];
@@ -5762,7 +5866,7 @@
 		// Every file in a batch shares the seed, so they stay one set —
 		// unless it has its own randomized-settings patch (fileCfgFor), or
 		// is a universe-mode season with its own carry-over (universeCfgFor).
-		state.results[i] = runner.run(ucfg || fileCfgFor(i) || effectiveCfg());
+		state.results[i] = runner.run(withFileLocks(ucfg || fileCfgFor(i) || effectiveCfg(), i));
 		/* WHICH FILE THIS RESULT IS. Universe.biographyOf and
 		   Universe.registryOf are handed a LIST of results beside
 		   state.files, and liveResults() skips any file the chain did not
@@ -6417,8 +6521,12 @@
 	/* What a search's answer is only valid for. A seed is found under one set
 	   of settings and locks; applied under another it is just a seed. */
 	function untilKey() {
+		/* The mutators and the challenge as well: both change the class
+		   effectiveCfg builds, and a seed found under one set of mutators was
+		   applied under another and still said it "satisfies" the search
+		   (audit 2026-10-10 B17). */
 		return JSON.stringify([state.cfg, state.overrides, state.active, state.fileCfgs,
-			state.files.map((f) => f.fingerprint)]);
+			state.files.map((f) => f.fingerprint), state.mutators || [], state.challenge || null]);
 	}
 
 	function rerollUntil(keys, maxTries) {
@@ -6437,11 +6545,21 @@
 		   takes its undo entry back and gives the redo history back with it;
 		   left behind, undo did nothing visible and redo was gone. */
 		function unwind() {
+			/* The memories too. rememberPool below pushed the on-screen class
+			   into the pool/anomaly/flavor memories, which the build phase
+			   reads, so the run() that "restores" the class after a failed or
+			   cancelled search rebuilt it against a different memory: same
+			   seed, different class (audit 2026-10-10 B6). */
+			state.poolHistory = memoriesBefore.pool;
+			state.anomalyHistory = memoriesBefore.anomaly;
+			state.flavorHistory = memoriesBefore.flavor;
 			if (state.undo[state.undo.length - 1] !== undoEntry) return;
 			state.undo.pop();
 			state.redo = redoBefore;
 			paintUndo();
 		}
+		const memoriesBefore = { pool: (state.poolHistory || []).slice(),
+			anomaly: (state.anomalyHistory || []).slice(), flavor: (state.flavorHistory || []).slice() };
 		rememberSession();
 		rememberPool();
 		const base = (state.lastSeed || state.cfg.seed || mintRandomSeed()) +
@@ -8741,7 +8859,12 @@
 						(e && e.message ? e.message : String(e)));
 				}
 			}
-			if (loaded.length) installFiles(loaded, problems);
+			/* Without a run of its own: installFiles schedules run() two frames
+			   later, by which time the replay below has started, and runNow
+			   took the replay for a settings change mid-chain — cancelled it,
+			   cleared universeExpect and universeImported, and ran a plain
+			   cold chain (audit 2026-10-10 B5). The replay is the run. */
+			if (loaded.length) installFiles(loaded, problems, { noRun: true });
 		}
 		/* A synthetic season needs no file: it is regenerated from the seed
 		   its order entry records. Installed without a run; the replay
@@ -11861,9 +11984,21 @@
 		};
 		return step("Simulating the classes to merge", 0).then(() => {
 			const results = [];
+			const skipped = [];
 			for (const i of picked) {
 				const r = ensureResult(i);
 				if (r) results.push((state.mergeOpts && state.mergeOpts.myMarks) ? stampUserMarks(r) : r);
+				else skipped.push(state.files[i] ? state.files[i].name : "file " + (i + 1));
+			}
+			/* A class with no result yet (a universe season the chain has not
+			   recorded, during or after a reload) was silently left out, and
+			   the league came out with only some of the chosen classes (audit
+			   2026-10-10 B20). Refuse and name them, as exportAllZip does. */
+			if (skipped.length) {
+				progressHide();
+				setStatus("Not merged: " + skipped.join(", ") + (skipped.length === 1 ? " has" : " have") +
+					" not been simulated yet. Let the universe finish, then merge again.", true);
+				return [];
 			}
 			return results;
 		}).then((results) => {

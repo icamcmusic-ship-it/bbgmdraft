@@ -236,7 +236,7 @@
 		return rows[rows.length - 1] || null;
 	}
 
-	function leagueDraft(league, season, seed) {
+	function leagueDraft(league, season, seed, wantRounds) {
 		if (!league || !Array.isArray(league.teams) || !Array.isArray(league.players)) return null;
 		const BB = global.BBGM;
 		const teams = league.teams.filter((t) => t && !t.disabled && Number.isFinite(Number(t.tid)))
@@ -320,7 +320,7 @@
 		} else {
 			const first = lotteryOrder();
 			const rounds = picks.length
-				? Math.max.apply(null, picks.map((dp) => Number(dp.round) || 1)) : 2;
+				? Math.max.apply(null, picks.map((dp) => Number(dp.round) || 1)) : (wantRounds || 2);
 			slots = [];
 			for (let round = 1; round <= rounds; round++) {
 				const order = round === 1 ? first : ranked;
@@ -366,7 +366,19 @@
 		const rounds = opts.rounds || 2;
 		const seed = (res && res.seed) || "";
 		const projections = opts.projections || projectClass(res);
-		let plan = opts.league ? leagueDraft(opts.league, res && res.season, seed) : null;
+		let plan = opts.league ? leagueDraft(opts.league, res && res.season, seed, opts.rounds) : null;
+		/* A league plan took its rounds from the league's picks and ignored
+		   `rounds`, so `mock --rounds 3` of a league class quietly drafted two
+		   (audit 2026-10-10 B19). An asked-for count now caps the league's
+		   rounds, and a count the league's picks cannot reach says so. */
+		if (plan && opts.rounds) {
+			plan.slots = plan.slots.filter((x) => x.round <= opts.rounds);
+			const have = plan.slots.reduce((m, x) => Math.max(m, x.round), 0);
+			if (have < opts.rounds) {
+				plan.source += "; the league has picks for " + have + " round" +
+					(have === 1 ? "" : "s") + ", not the " + opts.rounds + " asked for";
+			}
+		}
 		if (!plan) {
 			const order = teamsFor(seed);
 			const slots = [];

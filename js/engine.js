@@ -5053,7 +5053,11 @@
 			   ratio now, which is played out in this phase, and a warm re-run
 			   that skipped it left the box score and the results page in two
 			   different eras. */
-			deps: ["era", "pace", "scoringEnv", "injuryRate", "realignmentRate",
+			/* `efficiencyEnv` too: playGameScore's pointsPerPair scales the
+			   score by efficiencyScale(cfg), so the scoreboard reads it. It was
+			   declared on the stats phase only, and a warm re-run after the
+			   slider moved kept last run's points and W-L (audit 2026-10-10 B4). */
+			deps: ["era", "pace", "scoringEnv", "efficiencyEnv", "injuryRate", "realignmentRate",
 				"bluebloodDownYears", "midMajorLift", "teamMomentum", "seasonEvents",
 				// The world dials: all three are read by buildPrograms.
 				"realignmentMemory", "starReturners", "portalRate", "styleDrift",
@@ -5070,8 +5074,9 @@
 				"carryOver", "universeRoster", "pastRoster"],
 			run: phaseRegular,
 		},
-		// weirdness bends upsetFactor, which this phase owns.
-		{ name: "postseason", deps: ["upsetFactor", "coachTurnover", "weirdness"],
+		// weirdness bends upsetFactor, which this phase owns. efficiencyEnv
+		// scales the March scores the same way it does the regular season's.
+		{ name: "postseason", deps: ["upsetFactor", "coachTurnover", "weirdness", "efficiencyEnv"],
 			run: phasePostseason },
 		{
 			name: "stats",
@@ -8376,10 +8381,21 @@
 		if (cell !== "" || row.length) { row.push(cell); rows.push(row); }
 		return rows;
 	}
-	function planLockCsv(text, players) {
-		const rows = parseCsv(String(text).replace(/^\uFEFF/, ""));
-		if (!rows.length) throw new Error("That CSV has no rows.");
-		const head = rows[0].map((h) => h.trim().toLowerCase());
+	/* Q11. The locks CSV, parsed rows in, a plan out. Columns (matched by
+	   header, any order): key and/or name to find the prospect; then
+	   ovr, pot, archetype, college, newname (the new name), hgtinches,
+	   weight and the fifteen ratings hgt, stre, spd, jmp, endu, ins, dnk, ft,
+	   fg, tp, oiq, diq, drb, pss, reb. An empty cell is no lock. Anything out
+	   of range or unknown is refused and listed, never half-applied.
+
+	   One parser for the page and the command line. The CLI's --locks used
+	   to read only key, name, ovr, pot, archetype and college, so a row whose
+	   locks were a new name, a size or a rating built an empty patch and was
+	   skipped without a word: "0 of 2 row(s) applied" (audit 2026-10-10 B10).
+	   A matched row that locks nothing is listed in `empty` now. */
+	function planLockRows(rows, players, lists) {
+		if (!rows || !rows.length) return { error: "That CSV has no rows." };
+		const head = rows[0].map((h) => String(h).trim().toLowerCase());
 		const idx = (name) => head.indexOf(name);
 		const byKey = {};
 		const byName = {};
@@ -8387,48 +8403,87 @@
 			byKey[p.key] = p;
 			byName[String(p.name).toLowerCase()] = p;
 		}
-		const cols = { key: idx("key"), name: idx("name"), ovr: idx("ovr"), pot: idx("pot"),
-			archetype: idx("archetype"), college: idx("college") };
+		const cols = {
+			key: idx("key"), name: idx("name"), ovr: idx("ovr"), pot: idx("pot"),
+			archetype: idx("archetype"), college: idx("college"), newname: idx("newname"),
+			hgtinches: idx("hgtinches"), weight: idx("weight"),
+		};
 		if (cols.key < 0 && cols.name < 0) {
-			throw new Error("The CSV needs a `key` or `name` column to match players.");
+			return { error: "The CSV needs a `key` or `name` column to match players." };
 		}
+		const L = lists || {};
 		const applied = [];
 		const unmatched = [];
 		const rejected = [];
-		const archetypeNames = new Set(RB.ARCHETYPES.map((a) => a.name));
-		const schoolNames = new Set(C.names.concat(Object.keys(C.NON_NCAA)));
+		const empty = [];
 		let total = 0;
 		for (let i = 1; i < rows.length; i++) {
 			const r = rows[i];
-			if (!r.length || r.every((c) => !c.trim())) continue;
+			if (!r.length || r.every((c) => !String(c).trim())) continue;
 			total++;
-			const k = cols.key >= 0 ? String(r[cols.key]).trim() : null;
-			const nm = cols.name >= 0 ? String(r[cols.name]).trim().toLowerCase() : null;
+			const cell = (c) => (c >= 0 && r[c] !== undefined ? String(r[c]).trim() : "");
+			const k = cols.key >= 0 ? cell(cols.key) : null;
+			const nm = cols.name >= 0 ? cell(cols.name).toLowerCase() : null;
 			const p = (k && byKey[k]) || (nm && byName[nm]);
 			if (!p) { unmatched.push(k || nm); continue; }
 			const patch = {};
-			const cell = (c) => {
-				// An empty cell is no lock, not a lock at 0 (Number("") is 0).
-				const t = String(r[c] === undefined ? "" : r[c]).trim();
+			// An empty cell is no lock, not a lock at 0 (Number("") is 0).
+			const num = (c) => {
+				const t = cell(c);
 				const v = Number(t);
 				return t !== "" && Number.isFinite(v) ? v : null;
 			};
-			if (cols.ovr >= 0 && cell(cols.ovr) !== null) patch.ovr = cell(cols.ovr);
-			if (cols.pot >= 0 && cell(cols.pot) !== null) patch.pot = cell(cols.pot);
-			if (cols.archetype >= 0 && String(r[cols.archetype]).trim()) {
-				const a = String(r[cols.archetype]).trim();
-				if (archetypeNames.has(a)) patch.archetype = a;
+			if (num(cols.ovr) !== null) patch.ovr = num(cols.ovr);
+			if (num(cols.pot) !== null) patch.pot = num(cols.pot);
+			/* A name the tool does not know is refused here, not applied:
+			   an unknown archetype fell back to the rolled build while the
+			   lock badge said otherwise, and an unknown school was written
+			   verbatim into the export with no team behind it. */
+			const a = cell(cols.archetype);
+			if (a) {
+				if (!L.archetypes || L.archetypes.has(a)) patch.archetype = a;
 				else rejected.push(p.name + ": unknown archetype \u201c" + a + "\u201d");
 			}
-			if (cols.college >= 0 && String(r[cols.college]).trim()) {
-				const c = String(r[cols.college]).trim();
-				if (schoolNames.has(c)) patch.college = c;
+			const c = cell(cols.college);
+			if (c) {
+				if (!L.schools || L.schools.has(c)) patch.college = c;
 				else rejected.push(p.name + ": unknown school \u201c" + c + "\u201d");
 			}
-			if (!Object.keys(patch).length) continue;
+			const nn = cell(cols.newname).replace(/\s+/g, " ").slice(0, 100).trim();
+			if (nn && nn !== p.name) patch.name = nn;
+			const h = num(cols.hgtinches);
+			if (h !== null) {
+				if (h >= 58 && h <= 96) patch.hgtInches = Math.round(h);
+				else rejected.push(p.name + ": hgtinches " + h + " is outside 58-96");
+			}
+			const w = num(cols.weight);
+			if (w !== null) {
+				if (w >= 120 && w <= 400) patch.weight = Math.round(w);
+				else rejected.push(p.name + ": weight " + w + " is outside 120-400");
+			}
+			const ratings = {};
+			for (const rk of BB.RATING_KEYS) {
+				const v = num(idx(rk));
+				if (v === null) continue;
+				if (v >= 0 && v <= 100) ratings[rk] = Math.round(v);
+				else rejected.push(p.name + ": " + rk + " " + v + " is outside 0-100");
+			}
+			if (Object.keys(ratings).length) patch.ratings = ratings;
+			if (!Object.keys(patch).length) { empty.push(p.name); continue; }
 			applied.push({ player: p, patch });
 		}
-		return { applied, unmatched, rejected, total };
+		return { applied, unmatched, rejected, empty, total };
+	}
+
+	/* The CLI's --locks: the page's parser with the tool's own archetype and
+	   school lists. Throws where planLockRows returns an error. */
+	function planLockCsv(text, players) {
+		const plan = planLockRows(parseCsv(String(text).replace(/^\uFEFF/, "")), players, {
+			archetypes: new Set(RB.ARCHETYPES.map((a) => a.name)),
+			schools: new Set(C.names.concat(Object.keys(C.NON_NCAA))),
+		});
+		if (plan.error) throw new Error(plan.error);
+		return plan;
 	}
 
 	const CHANGE_COLUMNS = ["key", "name", "origOvr", "newOvr", "origPot", "newPot", "origPos",
@@ -9142,6 +9197,9 @@
 
 		const replacements = new Map();
 		const added = [];
+		/* The class's pid -> the pid it has in the merged league, for the
+		   relatives remap below. */
+		const pidMap = new Map();
 		let oi = -1;
 		for (const p of ours) {
 			oi++;
@@ -9156,9 +9214,11 @@
 			   past the guard below, which only counts the league's side. */
 			if (target && sameName(target, p) && !replacements.has(target)) {
 				replacements.set(target, overlay(target, p, sized.has(oi), aged.has(oi), noted.has(oi)));
+				pidMap.set(pid, Number(target.pid));
 			} else {
 				const copy = JSON.parse(JSON.stringify(p));
 				copy.pid = ++maxPid;
+				pidMap.set(pid, copy.pid);
 				/* An appended player still has to be a prospect of this draft
 				   class; the file he came from may not have said so. An
 				   undrafted prospect is round 0, pick 0, tid -1 in BBGM;
@@ -9176,6 +9236,18 @@
 				}
 				added.push(copy);
 			}
+		}
+		/* An appended player gets a new pid, but his `relatives` still named
+		   the CLASS file's pids — which, in the league, belong to strangers
+		   (a brother turned into an active pro on team 1). Remap each one
+		   through the class's own pids and drop any that point outside the
+		   class, as exportFile does for a file-only export (audit 2026-10-10
+		   B8). */
+		for (const copy of added) {
+			if (!Array.isArray(copy.relatives)) continue;
+			copy.relatives = copy.relatives
+				.filter((r) => r && pidMap.has(Number(r.pid)))
+				.map((r) => Object.assign({}, r, { pid: pidMap.get(Number(r.pid)) }));
 		}
 
 		/* The class this file already had, minus the men we just replaced:
@@ -9290,7 +9362,7 @@
 		NOTE_LINES, DEFAULT_NOTE_LINES, PHASES, PRO_GAMES, strangeness, pastRosterFor,
 		REROLL_PREDICATES, parseRerollClause, PARAM_CLAUSES,
 		changeReport, changeReportText, readRecipe, settingsPayload, faceKeyFor, scoutingFuzz,
-		planLockCsv, parseCsv, hometownFor, lockedClassYear, lockedJersey, lockedMoodTraits,
+		planLockCsv, planLockRows, parseCsv, hometownFor, lockedClassYear, lockedJersey, lockedMoodTraits,
 		previewClass, futureRosterFor, priorYears, ovrYearsAgo, CLASS_YEARS,
 	};
 })(typeof window !== "undefined" ? window : self);
