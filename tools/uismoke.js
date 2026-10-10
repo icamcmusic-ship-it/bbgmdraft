@@ -38,9 +38,12 @@ try {
    a section that meant to start from nothing started inside the previous
    section's world. Deletion is blocked while the page holds the database
    open and completes on the navigation that follows. */
+/* U32: a first visit shows the Basic settings. The smoke drives controls
+   from every level, so its clean slate starts at "Everything". */
 function clearStorage(page) {
 	return page.evaluate(() => {
 		localStorage.clear();
+		localStorage.setItem("bbgm-draft-workshop/v1", JSON.stringify({ v: 3, settingTier: "model" }));
 		return new Promise((resolve) => {
 			try {
 				const req = indexedDB.deleteDatabase("bbgm-draft-workshop");
@@ -48,6 +51,22 @@ function clearStorage(page) {
 			} catch (e) { resolve(); }
 		});
 	});
+}
+
+/* U24: Player Edit's filters, column tools and bulk bar fold behind
+   "Filters"; open the fold (it stays open until the page reloads). */
+async function openFilters(page) {
+	await page.evaluate(() => {
+		const d = document.querySelector("#view details.filterfold");
+		if (d && !d.open) d.querySelector("summary").click();
+	});
+	await page.waitForTimeout(100);
+}
+
+/* U10: the small tools live in the header's Tools menu; open it first. */
+async function tool(page, sel) {
+	if (!(await page.locator(sel).isVisible())) await page.locator("#btnHeaderMore").click();
+	await page.locator(sel).click();
 }
 
 function serve() {
@@ -225,7 +244,7 @@ async function gotoProspects(page) {
 	await page.waitForTimeout(700);
 	ok("redo re-applies it",
 		(await page.evaluate(() => Object.keys(window.App.state.overrides).length)) === 0);
-	await page.locator("#btnKeys").click();
+	await tool(page, "#btnKeys");
 	await page.waitForTimeout(200);
 	ok("the keyboard sheet opens",
 		(await page.locator("#modal").innerText()).indexOf("Undo") !== -1);
@@ -237,6 +256,7 @@ async function gotoProspects(page) {
 	// "show me everyone over 18 points a game".
 	const shownRows = () => page.locator("table tbody tr").count();
 	const before = await shownRows();
+	await openFilters(page);
 	await page.locator('button:has-text("+ range filter")').click();
 	await page.waitForTimeout(200);
 	await page.selectOption(".rangefilter select", "ppg");
@@ -454,6 +474,14 @@ async function gotoProspects(page) {
 	/* The export menu, which is also where the new verbs live. */
 	await page.locator("#btnExportMenu").click();
 	await page.waitForTimeout(250);
+	ok("the export menu is in headed sections (U34)",
+		(await page.locator("#modal .exportgroup h4").allTextContents()).join("|")
+			.indexOf("Back to BBGM|Spreadsheets and data|Pictures and pages|Import|Tools") === 0);
+	ok("and its BBGM options fold behind a one-line summary",
+		await page.evaluate(() => !document.getElementById("exportOptions").open &&
+			/^Options for BBGM files: /.test(document.querySelector("#exportOptions > summary").textContent)));
+	await page.evaluate(() => { document.getElementById("exportOptions").open = true; });
+	await page.waitForTimeout(100);
 	const menuText = await page.locator("#modal").innerText();
 	ok("the export menu offers Markdown notes, a message history and a preset diff",
 		/Markdown/.test(menuText) && /Message history/.test(menuText) &&
@@ -722,6 +750,7 @@ async function gotoProspects(page) {
 
 	console.log("\nBulk and layout verbs");
 	{
+		await openFilters(page);
 		await page.locator("#bulkBar select").first().selectOption("10");
 		await page.waitForTimeout(300);
 		ok("selecting the top of the board ticks rows",
@@ -750,6 +779,7 @@ async function gotoProspects(page) {
 		await page.waitForTimeout(300);
 
 		// Saved column layouts.
+		await openFilters(page);
 		await page.locator(".filters button", { hasText: "Columns…" }).click();
 		await page.waitForSelector(".colpicker", { timeout: 5000 });
 		// Named inline in the picker now, not through window.prompt.
@@ -769,7 +799,7 @@ async function gotoProspects(page) {
 
 	console.log("\nCompare and reroll");
 	{
-		await page.locator("#btnPin").click();
+		await tool(page, "#btnPin");
 		await page.waitForTimeout(400);
 		const sels = page.locator("#view .filters select");
 		ok("the compare tab offers four slots", (await sels.count()) >= 4);
@@ -917,7 +947,7 @@ async function gotoProspects(page) {
 		});
 		ok("the last tab and board mode are stored",
 			!!stored && typeof stored.tab === "string" && typeof stored.boardMode === "string");
-		await page.locator("#btnKeys").click();
+		await tool(page, "#btnKeys");
 		await page.waitForTimeout(150);
 		const sheet = await page.locator("#modalBody").innerText();
 		ok("the shortcut sheet lists j/k, Enter and l for Player Edit",
@@ -1178,6 +1208,7 @@ async function gotoProspects(page) {
 		   status and then runs, which is the case that was being wiped. */
 		await page.locator("table tbody tr").first().locator("td input[type=checkbox]").check();
 		await page.waitForTimeout(200);
+		await openFilters(page);
 		const locks = page.locator("#bulkBar select");
 		await locks.nth(await locks.count() - 1).selectOption("ovr");
 		await page.waitForTimeout(1200);
@@ -1295,7 +1326,7 @@ async function gotoProspects(page) {
 		// A copy button restores the label it HAD, not one a call site
 		// remembered: btnCopyLink is an icon and was passed the word "Link".
 		const icon = await page.locator("#btnCopyLink").textContent();
-		await page.locator("#btnCopyLink").click();
+		await tool(page, "#btnCopyLink");
 		await page.waitForTimeout(1800);
 		ok("the copy-link button goes back to its own icon",
 			(await page.locator("#btnCopyLink").textContent()) === icon,
@@ -3325,10 +3356,13 @@ async function gotoProspects(page) {
 		ok("outside the Model view the re-run cost is hidden", tier.rerun === "none", tier.rerun);
 		await page.locator("#settingTier button", { hasText: "Everything" }).click();
 		await page.waitForTimeout(150);
-		ok("the Model view shows the re-run cost", await page.evaluate(() => {
+		// U33: the cost line is hover/focus-only at every level now.
+		ok("the Everything view keeps the re-run cost for hover or focus", await page.evaluate(() => {
 			const r = document.querySelector("#settings .ctl .rerun");
-			return !!r && getComputedStyle(r).display !== "none";
+			return !!r && getComputedStyle(r).display === "none";
 		}));
+		ok("long setting explanations fold behind an (i) toggle", await page.evaluate(() =>
+			document.querySelectorAll("#settings p.hintclamp + .hintmore").length >= 3));
 		ok("#ovrMode options are short enough not to clip", await page.evaluate(() =>
 			[...document.querySelectorAll("#ovrMode option")].every((o) => o.textContent.length <= 20)));
 
@@ -3784,7 +3818,8 @@ async function gotoProspects(page) {
 		};
 		const openMenu = async () => {
 			await page.click("#btnExportMenu");
-			await page.waitForSelector("#modal:not([hidden]) #exportFilename", { timeout: 5000 });
+			await page.waitForSelector("#modal:not([hidden]) #exportOptions", { timeout: 5000 });
+			await page.evaluate(() => { document.getElementById("exportOptions").open = true; });
 		};
 		const menuItem = (label) => page.locator("#modal .checks button", { hasText: label }).first();
 		await clearStorage(page);
@@ -4070,6 +4105,7 @@ async function gotoProspects(page) {
 			const k = Object.keys(c).filter((s) => c[s] > 2 && c[s] < 60)[0];
 			return { skill: k, n: c[k] };
 		});
+		await openFilters(page);
 		await page.click('.skillchips .chip:text-is("' + skillPick.skill + '")');
 		await settleQ();
 		ok("a skill chip keeps only players with that skill", (await shownRows()) === skillPick.n, (await shownRows()) + " vs " + skillPick.n);
@@ -4178,7 +4214,7 @@ async function gotoProspects(page) {
 		ok("names are applied in board order and kept as locks", renamed[0] === "Zed Alpha" && renamed[1] === "Quin Beta" && renamed[2] === true, JSON.stringify(renamed));
 
 		// Q17: New class... with a file loaded
-		await page.click("#btnNewClass");
+		await tool(page, "#btnNewClass");
 		await page.waitForSelector("#newClassSize", { timeout: 4000 });
 		await page.fill("#newClassSize", "30");
 		await page.fill("#newClassYear", "2041");
@@ -4189,7 +4225,7 @@ async function gotoProspects(page) {
 		const made = await page.evaluate(() => window.App.state.files.map((f) => ({ n: f.data.players.length, season: f.data.startingSeason })));
 		ok("New class adds a 30-player 2041 class beside the loaded one",
 			made.some((m) => m.n === 30 && m.season === 2041) && made.some((m) => m.n === 70), JSON.stringify(made));
-		await page.click("#btnNewClass");
+		await tool(page, "#btnNewClass");
 		await page.waitForSelector("#newClassSize", { timeout: 4000 });
 		await page.fill("#newClassSize", "3");
 		await page.click("#modalOk");
@@ -4345,7 +4381,7 @@ async function gotoProspects(page) {
 			(await page.evaluate(() => document.querySelector("#modal .untillabel").getBoundingClientRect().width)) > 200);
 		await page.keyboard.press("Escape");
 		await page.waitForTimeout(200);
-		await page.click("#btnHowTo");
+		await tool(page, "#btnHowTo");
 		await page.waitForTimeout(400);
 		ok("the Guide opens at its top",
 			(await page.evaluate(() => document.querySelector("#modal .modalbox").scrollTop)) === 0);
@@ -4646,7 +4682,7 @@ async function gotoProspects(page) {
 
 		// Q37: kept classes.
 		const keptSeed = await page.evaluate(() => window.App.state.results[window.App.state.active].seed);
-		await page.click("#btnKept");
+		await tool(page, "#btnKept");
 		await page.waitForTimeout(300);
 		await page.fill("#keptName", "My favourite");
 		await page.fill("#keptNote", "tall centre in the top three");
