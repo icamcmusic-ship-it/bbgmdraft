@@ -342,11 +342,44 @@
 		return out;
 	}
 
+	/* A write per idle moment, not per tab switch (audit P6). Navigation and
+	   a <details> toggle used to stringify and write the whole state —
+	   hundreds of KB with a universe — synchronously, every time. They call
+	   persistSoon; anything that must be on disk now still calls persist,
+	   and a hidden or closing page flushes what is pending. */
+	let persistPending = null;
+	function persistSoon() {
+		if (persistPending !== null) return;
+		const go = () => { persistPending = null; persist(); };
+		persistPending = typeof global.requestIdleCallback === "function"
+			? global.requestIdleCallback(go, { timeout: 1000 }) : setTimeout(go, 300);
+	}
+	function persistFlush() {
+		if (persistPending === null) return;
+		if (typeof global.cancelIdleCallback === "function") global.cancelIdleCallback(persistPending);
+		clearTimeout(persistPending);
+		persistPending = null;
+		persist();
+	}
+	window.addEventListener("pagehide", persistFlush);
+	document.addEventListener("visibilitychange", () => {
+		if (document.visibilityState === "hidden") persistFlush();
+	});
+	// What was last written, so an unchanged state is not written again.
+	let persistedJson = null;
 	function persist() {
 		scheduleAutosave();
 		scheduleSessionSave();
+		if (persistPending !== null) {
+			if (typeof global.cancelIdleCallback === "function") global.cancelIdleCallback(persistPending);
+			clearTimeout(persistPending);
+			persistPending = null;
+		}
 		try {
-			localStorage.setItem(STORE_KEY, JSON.stringify(payload()));
+			const json = JSON.stringify(payload());
+			if (json === persistedJson && localStorage.getItem(STORE_KEY) === json) return;
+			localStorage.setItem(STORE_KEY, json);
+			persistedJson = json;
 		} catch (e) {
 			const quota = e && (e.name === "QuotaExceededError" ||
 				e.name === "NS_ERROR_DOM_QUOTA_REACHED" || e.code === 22);
@@ -1989,30 +2022,51 @@
 	   The old code only repainted when cfg.archetypeWeights was truthy, so
 	   "Reset weights" followed by a preset change left stale numbers on screen. */
 	let archFilterHook = null;
-	function paintArchWeights() {
+	/* Repainted only when what it shows changed (audit P1): the last result
+	   and the custom weights. It ran on every render and every slider tick,
+	   and looked each of ~385 inputs up with a filter over the ~385
+	   archetypes — 45% of a tab switch and 70% of a slider event. */
+	let archPainted = null;
+	let archByName = null;
+	function paintArchWeights(force) {
 		const aw = $("archWeights");
 		if (!aw) return;
-		if (archFilterHook) archFilterHook();
-		// Realized frequency from the last run, beside the weight that asked
-		// for it.
-		const res = state.results[state.active];
-		const counts = {};
-		if (res) {
-			for (const p of res.players) counts[p.archetype] = (counts[p.archetype] || 0) + 1;
-		}
-		const n = res ? res.players.length : 0;
-		for (const g of aw.querySelectorAll(".archgot")) {
-			const c = counts[g.dataset.arch] || 0;
-			g.textContent = n ? (c ? (100 * c / n).toFixed(1) + "%" : "—") : "";
-			g.className = "archgot" + (c ? "" : " none");
-		}
+		const res = state.results[state.active] || null;
 		const custom = state.cfg.archetypeWeights;
+		const customKey = custom ? JSON.stringify(custom) : "";
+		if (!force && archPainted && archPainted.res === res && archPainted.custom === customKey &&
+			archPainted.aw === aw) return;
+		const resChanged = !archPainted || archPainted.res !== res || archPainted.aw !== aw;
+		archPainted = { res, custom: customKey, aw };
+		// The pool filter follows the class; a weight change does not move it.
+		if (archFilterHook && (resChanged || force)) archFilterHook();
+		if (resChanged || force) {
+			// Realized frequency from the last run, beside the weight that asked
+			// for it.
+			const counts = {};
+			if (res) {
+				for (const p of res.players) counts[p.archetype] = (counts[p.archetype] || 0) + 1;
+			}
+			const n = res ? res.players.length : 0;
+			for (const g of aw.querySelectorAll(".archgot")) {
+				const c = counts[g.dataset.arch] || 0;
+				const text = n ? (c ? (100 * c / n).toFixed(1) + "%" : "—") : "";
+				const cls = "archgot" + (c ? "" : " none");
+				if (g.textContent !== text) g.textContent = text;
+				if (g.className !== cls) g.className = cls;
+			}
+		}
+		if (!archByName) {
+			archByName = {};
+			for (const x of RB.ARCHETYPES) archByName[x.name] = x;
+		}
 		for (const i of aw.querySelectorAll("input[data-arch]")) {
-			const a = RB.ARCHETYPES.filter((x) => x.name === i.dataset.arch)[0];
+			const a = archByName[i.dataset.arch];
 			const fallback = a && a.w !== undefined ? a.w : 1;
 			const v = custom && Number.isFinite(custom[i.dataset.arch])
 				? custom[i.dataset.arch] : fallback;
-			i.value = v;
+			// Only a value that differs is written: each write dirties layout.
+			if (i.value !== String(v)) i.value = v;
 		}
 	}
 
@@ -3358,16 +3412,43 @@
 			const input = $(key);
 			if (!input) continue;
 			let pushed = false;
-			input.addEventListener("pointerdown", () => { pushed = false; });
+			/* No engine run while the pointer is down (audit P2): a drag used
+			   to start a multi-second run mid-drag, and the input events that
+			   queued behind it replayed as more. The run starts on release;
+			   the repaint during the drag is one per frame. A keyboard step
+			   still runs after the short debounce. */
+			let dragging = false;
+			let dragMoved = false;
+			let paintQueued = false;
+			const release = () => {
+				if (!dragging) return;
+				dragging = false;
+				if (dragMoved) { dragMoved = false; paintConfig(); scheduleRun(); }
+			};
+			input.addEventListener("pointerdown", () => {
+				pushed = false;
+				dragging = true;
+				dragMoved = false;
+				window.addEventListener("pointerup", release, { once: true });
+				window.addEventListener("pointercancel", release, { once: true });
+			});
 			input.addEventListener("input", () => {
 				if (!pushed) { pushUndo("moved " + key); pushed = true; }
 				state.cfg[key] = Number(input.value);
 				pinSetting(key, true);
 				markDirty();
+				if (dragging && typeof requestAnimationFrame === "function") {
+					dragMoved = true;
+					if (!paintQueued) {
+						paintQueued = true;
+						requestAnimationFrame(() => { paintQueued = false; paintConfig(); });
+					}
+					return;
+				}
 				paintConfig();
 				scheduleRun();
 			});
-			input.addEventListener("change", () => { pushed = false; persist(); });
+			input.addEventListener("change", () => { pushed = false; release(); persist(); });
 		}
 		/* The class flavor, as a choice rather than a draw. See
 		   Config.DEFAULTS.flavorHint. */
@@ -3949,7 +4030,7 @@
 		}
 
 		for (const d of document.querySelectorAll("details.grp")) {
-			d.addEventListener("toggle", persist);
+			d.addEventListener("toggle", persistSoon);
 		}
 	}
 
@@ -4350,15 +4431,38 @@
 	   truth — and DecompressionStream does the rest. Everything else is the
 	   old path: decode UTF-8, drop a BOM, parse. */
 	function readTextFile(f, onBytes) {
-		/* The streamed path, which can say how far it has got. A league
-		   export is tens or hundreds of megabytes and reading, unzipping and
-		   decoding it used to happen behind a single "Reading…" line with no
-		   sign of life for many seconds. Counting the bytes as they leave the
-		   disk — BEFORE the gzip stage, so the fraction is of the file's own
-		   size whether or not it is compressed — gives an honest meter. */
-		if (onBytes && f.stream && typeof f.size === "number" &&
-			typeof TransformStream === "function" && typeof Response === "function") {
-			return readTextStreamed(f, onBytes);
+		/* The streamed path, which can say how far it has got, unwraps a
+		   file gzipped twice, reads a UTF-16 file (Windows Notepad's
+		   "Unicode") and names a .zip instead of quoting the parser (audit
+		   L9). The bytes are counted as they leave the disk — BEFORE the
+		   gzip stage — so the fraction is of the file's own size. */
+		const LS = global.LeagueScan;
+		if (LS && f && typeof f.stream === "function" && typeof f.size === "number" &&
+			typeof TransformStream === "function" && typeof Response === "function" &&
+			typeof ReadableStream === "function") {
+			let gz = false;
+			return LS.openBlob(f, onBytes ? (seen, size) => onBytes(seen, size, gz) : null)
+				.then(({ first, stream, layers }) => {
+					gz = layers > 0;
+					const kind = LS.sniff(first);
+					if (kind === "zip" || kind === "gzip") throw new Error(LS.sniffMessage(kind));
+					return new Response(stream).arrayBuffer().catch((e) => {
+						throw gz ? LS.gzFail(e) : (e && e.message ? e : new Error("could not be read from disk"));
+					}).then((out) => {
+						if (onBytes) onBytes(f.size, f.size, false, out.byteLength);
+						if (kind === "utf16le" || kind === "utf16be") {
+							return new TextDecoder(kind === "utf16le" ? "utf-16le" : "utf-16be")
+								.decode(out).replace(/^\ufeff/, "");
+						}
+						let text = "";
+						try { text = new TextDecoder("utf-8").decode(out); } catch (e) { text = ""; }
+						/* Chromium returns "" rather than throwing for a text
+						   past V8's string limit (about 512 MiB): that is not a
+						   corrupt file and must not be reported as one (L1). */
+						if (!text.length && out.byteLength) throw LS.tooLong(out.byteLength);
+						return text.replace(/^\ufeff/, "");
+					});
+				});
 		}
 		const buf = f.arrayBuffer
 			? f.arrayBuffer()
@@ -4386,39 +4490,15 @@
 		}).then((out) => new TextDecoder("utf-8").decode(out).replace(/^\ufeff/, ""));
 	}
 
-	function readTextStreamed(f, onBytes) {
-		return f.slice(0, 2).arrayBuffer().then((h) => {
-			const head = new Uint8Array(h);
-			const gz = head.length === 2 && head[0] === 0x1f && head[1] === 0x8b;
-			if (gz && typeof DecompressionStream === "undefined") {
-				throw new Error("this browser cannot open a .gz file — unzip it first");
-			}
-			let seen = 0;
-			let last = 0;
-			const counter = new TransformStream({
-				transform(chunk, ctl) {
-					seen += chunk.byteLength;
-					// A repaint per 64 KB chunk is thousands of them; one per
-					// percent is plenty.
-					if (seen - last >= f.size / 100 || seen === f.size) {
-						last = seen;
-						onBytes(seen, f.size, gz);
-					}
-					ctl.enqueue(chunk);
-				},
-			});
-			let s = f.stream().pipeThrough(counter);
-			if (gz) s = s.pipeThrough(new DecompressionStream("gzip"));
-			return new Response(s).arrayBuffer().catch((e) => {
-				throw gz
-					? new Error("the .gz file is incomplete or corrupt — download " +
-						"or export it again")
-					: (e && e.message ? e : new Error("could not be read from disk"));
-			});
-		}).then((out) => {
-			onBytes(f.size, f.size, false, out.byteLength);
-			return new TextDecoder("utf-8").decode(out).replace(/^\ufeff/, "");
-		});
+	/* A JSON file read through the scanner (js/leaguescan.js): no whole-file
+	   string, the big stores the tool never reads skipped, players parsed one
+	   at a time between paints. Null when this browser lacks web streams
+	   (the caller then reads the text the old way). */
+	function canScan(f) {
+		return !!(global.LeagueScan && f && typeof f.stream === "function" &&
+			typeof f.size === "number" && typeof TransformStream === "function" &&
+			typeof ReadableStream === "function" && typeof Response === "function" &&
+			typeof TextDecoder === "function");
 	}
 
 	/* THE PROGRESS METER. One bar under the status line, for the paths that
@@ -4448,6 +4528,19 @@
 	function progressHide() {
 		const box = $("loadProgress");
 		if (box) box.hidden = true;
+		progressCancelable(null);
+	}
+	/* A Cancel button on the meter while a cancellable job runs (L4): a
+	   wrong 500 MB file could only be escaped by closing the tab. */
+	let progressCancel = null;
+	function progressCancelable(fn) {
+		progressCancel = fn || null;
+		const btn = $("loadProgress") && $("loadProgress").querySelector(".lp-cancel");
+		if (btn) btn.hidden = !fn;
+	}
+	function bindProgressCancel() {
+		const btn = $("loadProgress") && $("loadProgress").querySelector(".lp-cancel");
+		if (btn) btn.addEventListener("click", () => { if (progressCancel) progressCancel(); });
 	}
 	/* Two frames, so a label set just before a long synchronous step (a parse,
 	   a merge, a stringify) is actually on screen while the step runs. */
@@ -4495,10 +4588,14 @@
 	   question — a league is warned about a birth year a class file is
 	   refused for. Two copies of it would drift. */
 	function looksLikeLeague(data) {
-		return global.Engine.isLeagueFile(data);
+		/* A scanned league has its schedule and box scores left on disk
+		   (js/leaguescan.js); the scanner marks the stores it skipped. */
+		return global.Engine.isLeagueFile(data) ||
+			!!(data && Array.isArray(data.__omitted) && data.__omitted.length);
 	}
 
-	function classesFromFile(name, data, check) {
+	function classesFromFile(name, data, check, src) {
+		const leagueRef = Object.assign({ name, data }, src || {});
 		const base = name.replace(/\.json(\.gz)?$|\.gz$/i, "");
 		const found = global.Engine.draftClassesIn(data);
 		/* Not a league export: an ordinary draft-class file, loaded as
@@ -4517,7 +4614,7 @@
 					keep.has(Number.isFinite(Number(p.pid)) ? Number(p.pid) : -1 - i));
 				return [{
 					name, data: Object.assign({}, data, { players }),
-					warnings: check.warnings, league: { name, data },
+					warnings: check.warnings, league: leagueRef,
 				}];
 			}
 			return [{ name, data, warnings: check.warnings }];
@@ -4545,7 +4642,7 @@
 				// The note is about the FILE, so it is said once rather than
 				// once per class it produced.
 				warnings: (i === 0 ? [note] : []).concat(sub.warnings),
-				league: { name, data },
+				league: leagueRef,
 			};
 		});
 	}
@@ -4575,49 +4672,87 @@
 		const got = files.map(() => 0);
 		let gzAny = false;
 		const label = files.length === 1 ? files[0].name : files.length + " files";
-		if (meter) progressShow("Reading " + label, 0, "0 of " + mb(total));
+		const abort = typeof AbortController === "function" ? new AbortController() : null;
+		let cancelled = false;
+		if (meter) {
+			progressShow("Reading " + label, 0, "0 of " + mb(total));
+			progressCancelable(() => {
+				cancelled = true;
+				if (abort) abort.abort();
+			});
+		}
 		const tick = meter ? (i) => (seen, size, gz) => {
 			got[i] = seen;
 			gzAny = gzAny || gz;
 			const sum = got.reduce((a, b) => a + b, 0);
-			progressShow((gzAny && sum < total ? "Reading and unzipping " : "Reading ") + label,
+			progressShow((gzAny && sum < total ? "Reading and unzipping " : "Reading ") +
+				(files.length > 1 ? files[i].name + " (file " + (i + 1) + " of " + files.length + ")" : label),
 				sum / total, mb(sum) + " of " + mb(total));
 		} : () => null;
-		const jobs = files.map(
-			(f, i) => readTextFile(f, tick(i) || undefined).then((text) => {
-				if (!meter) return text;
-				progressShow("Parsing " + f.name, null, mb(text.length) + " of JSON");
-				return nextPaint().then(() => text);
-			}).then(
-				(text) => {
-					if (/\.csv$/i.test(f.name || "") || f.type === "text/csv") {
-						side.csv.push(text);
-						return null;
-					}
-					const data = JSON.parse(text);
-					if (data && data.format === "bbgm-draft-workshop/universe") {
-						side.universe.push(data);
-						return null;
-					}
-					if (data && data.format === SETTINGS_FORMAT) {
-						side.settings.push(data);
-						return null;
-					}
-					// Full schema check up front, so a bad file is rejected
-					// with a sentence instead of throwing a raw TypeError
-					// out of the middle of the sim.
-					const check = global.Engine.validateLeagueFile(data);
-					/* validateLeagueFile is a check now, not a migration, so
-					   the season it recovered is applied here. */
-					data.startingSeason = check.season;
-					return classesFromFile(f.name, data, check);
-				},
-			).catch((e) => {
+		/* One file at a time (L10): a drop of two 200 MB leagues used to read
+		   and parse both at once, and the peaks added up. */
+		const readOne = (f, i) => {
+			const isCsv = /\.csv$/i.test(f.name || "") || f.type === "text/csv";
+			const LS = global.LeagueScan;
+			const scanned = !isCsv && canScan(f);
+			const got1 = scanned
+				? LS.scanBlob(f, { onBytes: tick(i) || undefined, signal: abort ? abort.signal : null })
+					.then((r) => ({ data: r.data, src: r }))
+				: readTextFile(f, tick(i) || undefined).then((text) => {
+					if (isCsv) return { csv: text };
+					if (meter) progressShow("Parsing " + f.name, null, mb(text.length) + " of JSON");
+					return (meter ? nextPaint() : Promise.resolve()).then(() =>
+						({ data: LS ? LS.parseText(text) : JSON.parse(text) }));
+				});
+			return got1.then((r) => {
+				if (r.csv !== undefined) { side.csv.push(r.csv); return null; }
+				if (!meter) return r;
+				progressShow("Finding the draft classes in " + f.name, null, "");
+				return nextPaint().then(() => r);
+			}).then((r) => {
+				if (!r) return null;
+				const data = r.data;
+				if (data && data.format === "bbgm-draft-workshop/universe") {
+					side.universe.push(data);
+					return null;
+				}
+				if (data && data.format === SETTINGS_FORMAT) {
+					side.settings.push(data);
+					return null;
+				}
+				// Full schema check up front, so a bad file is rejected
+				// with a sentence instead of throwing a raw TypeError
+				// out of the middle of the sim.
+				const check = global.Engine.validateLeagueFile(data);
+				/* validateLeagueFile is a check now, not a migration, so
+				   the season it recovered is applied here. */
+				data.startingSeason = check.season;
+				/* The file the classes came from, by handle: a merge streams
+				   it again and copies the stores this read skipped (L6, L11). */
+				const src = r.src && r.src.scan ? {
+					blob: f, bytes: Number(f.size) || 0, gz: !!r.src.gz, scan: r.src.scan,
+				} : null;
+				return classesFromFile(f.name, data, check, src);
+			}).catch((e) => {
+				if (cancelled || (e && e.name === "AbortError")) return null;
 				problems.push(f.name + ": " + (e && e.message ? e.message : e));
 				return null;
-			}),
-		);
-		Promise.all(jobs).then((loaded) => {
+			});
+		};
+		const jobs = [];
+		const chain = files.reduce((p, f, i) => p.then(() => {
+			if (cancelled) return null;
+			const job = readOne(f, i);
+			jobs.push(job);
+			return job;
+		}), Promise.resolve());
+		chain.then(() => Promise.all(jobs)).then((loaded) => {
+			if (cancelled) {
+				progressHide();
+				$("empty").classList.remove("busy");
+				setStatus("Loading cancelled; nothing was loaded.");
+				return;
+			}
 			progressHide();
 			const classes = loaded.filter(Boolean).reduce((a, b) => a.concat(b), []);
 			const other = side.universe.length + side.settings.length + side.csv.length;
@@ -5843,9 +5978,21 @@
 		if (v) v.setAttribute("aria-busy", "true");
 	}
 
+	/* When the last busy stretch ended (audit P9). Clicks and keys pressed
+	   while the page was frozen are dispatched only AFTER the work, when
+	   busyDepth is already back to 0, so a guard on busyDepth let three
+	   impatient presses of r become two more rerolls. An event stamped
+	   before this moment was queued during the freeze and is dropped. */
+	let busyEndedAt = 0;
+	function queuedWhileBusy(e) {
+		return !!(e && typeof e.timeStamp === "number" && e.timeStamp > 0 &&
+			e.timeStamp < busyEndedAt);
+	}
+
 	function endBusy() {
 		busyDepth = Math.max(0, busyDepth - 1);
 		if (busyDepth) return;
+		busyEndedAt = typeof performance !== "undefined" && performance.now ? performance.now() : 0;
 		document.body.classList.remove("busy");
 		const s = $("status");
 		s.classList.remove("working");
@@ -6460,6 +6607,14 @@
 		let timer = null;
 		let searchWorker = null;
 		let inline = false;
+		/* Candidates the ENGINE threw on (audit P12). They used to be
+		   swallowed, so settings that broke every run read as "no match in
+		   60 tries" after 60 wasted runs. Three in a row stops the search
+		   and the first error is shown. */
+		let failed = 0;
+		let failedRun = 0;
+		let firstError = null;
+		let watchdog = null;
 
 		/* PROGRESS AND A WAY OUT. The Until… button becomes the search's
 		   Cancel for as long as it runs, with the count on it; Esc does the
@@ -6478,6 +6633,7 @@
 		function end() {
 			untilSearch = null;
 			clearTimeout(timer);
+			clearTimeout(watchdog);
 			if (searchWorker) { searchWorker.terminate(); searchWorker = null; }
 			document.body.classList.remove("searching");
 			if (untilBtn) {
@@ -6538,6 +6694,13 @@
 			if (found) { apply(found.seed); return; }
 			end();
 			unwind();
+			if (failedRun >= 3 || (failed && failed === k)) {
+				setStatus("The search stopped: the engine failed on " + failed + " of " + k +
+					" candidate" + (k === 1 ? "" : "s") + " under these settings (" +
+					(firstError || "unknown error") + "). The class on screen is unchanged.", true);
+				run();
+				return;
+			}
 			const breakdown = preds
 				.map((p, i) => ({ label: p.label, n: hits[i] }))
 				.sort((a, b) => a.n - b.n)
@@ -6557,11 +6720,12 @@
 		   initialised on that path — the fallback threw instead of running. */
 		function step() {
 			if (untilSearch === null) return;
-			if (found || k >= maxTries) { finish(); return; }
+			if (found || k >= maxTries || failedRun >= 3) { finish(); return; }
 			const seed = "u" + Math.floor(searchRng.random() * 1e9).toString(36);
 			k++;
 			try {
 				const res = runner.run(Object.assign({}, cfg, { seed }));
+				failedRun = 0;
 				let all = true;
 				preds.forEach((p, i) => {
 					let hit = false;
@@ -6569,17 +6733,32 @@
 					if (hit) hits[i]++; else all = false;
 				});
 				if (all) found = res;
-			} catch (e) { /* a failed candidate is just not the one */ }
+			} catch (e) {
+				// A failed candidate is not the one — but it is counted.
+				failed++;
+				failedRun++;
+				if (!firstError) firstError = e && e.message ? e.message : String(e);
+			}
 			progress(k, maxTries);
 			timer = setTimeout(step, 0);
 		}
-		function startInline() {
+		/* From try `from` on: a worker that died at try 23 hands over at 23
+		   rather than starting again from zero (audit P11). The seeds are a
+		   stream off `base`, so the ones already tried are drawn and skipped. */
+		function startInline(from, why) {
 			inline = true;
+			clearTimeout(watchdog);
+			const at = Math.max(0, Math.min(maxTries, Number(from) || 0));
+			while (k < at) { searchRng.random(); k++; }
+			if (why) setStatus(why, true);
 			timer = setTimeout(step, 0);
 		}
-		function finishFound(seed, tries, got) {
+		function finishFound(seed, tries, got, fails, err, aborted) {
 			k = tries;
 			for (let i = 0; i < got.length && i < hits.length; i++) hits[i] = got[i];
+			if (Number.isFinite(fails)) failed = fails;
+			if (aborted) failedRun = 3;
+			if (err && !firstError) firstError = err;
 			if (seed) apply(seed);
 			else finish();
 		}
@@ -6601,17 +6780,50 @@
 		try {
 			const w = new Worker("js/worker.js");
 			searchWorker = w;
+			/* Hit counts as of the last progress message, for a hand-over. */
+			const started = Date.now();
+			/* No word from the worker for far longer than a try takes is a
+			   worker that died without an error event (an out-of-memory
+			   kill): the same hand-over as onerror (audit P12). */
+			const arm = () => {
+				clearTimeout(watchdog);
+				const per = k > 0 ? (Date.now() - started) / k : 0;
+				watchdog = setTimeout(() => {
+					if (searchWorker !== w) return;
+					w.terminate();
+					searchWorker = null;
+					startInline(k, "The search worker stopped answering at try " + k +
+						"; continuing on this tab.");
+				}, Math.max(30000, 10 * per));
+			};
+			arm();
 			w.onmessage = (e) => {
 				if (searchWorker !== w) return;
 				const m = e.data || {};
+				if (m.type === "hello") {
+					/* A tab opened before a deploy runs the OLD engine and would
+					   spawn a worker with the NEW one: a seed found there need
+					   not satisfy the clause here (audit P13). */
+					if (global.Universe && m.rev !== undefined && m.rev !== global.Universe.ENGINE_REV) {
+						w.terminate();
+						searchWorker = null;
+						startInline(0, "A new version of this tool is available — reload the page. " +
+							"Searching on this tab meanwhile.");
+					}
+					return;
+				}
 				if (m.type === "searchProgress") {
 					// The cancel message reports this count.
 					k = m.done;
+					if (Array.isArray(m.hits)) for (let i = 0; i < m.hits.length && i < hits.length; i++) hits[i] = m.hits[i];
+					if (Number.isFinite(m.failed)) failed = m.failed;
 					progress(m.done, m.total);
+					arm();
 				} else if (m.type === "searchDone") {
 					w.terminate();
 					searchWorker = null;
-					finishFound(m.found, m.tries, m.hits || []);
+					clearTimeout(watchdog);
+					finishFound(m.found, m.tries, m.hits || [], m.failed, m.firstError, m.aborted);
 				} else if (m.type === "error") {
 					end();
 					unwind();
@@ -6623,7 +6835,7 @@
 				if (searchWorker !== w) return;
 				w.terminate();
 				searchWorker = null;
-				startInline();
+				startInline(k, "The search worker stopped at try " + k + "; continuing on this tab.");
 			};
 			w.postMessage({
 				type: "search", leagueFile: activeFile().data, cfg,
@@ -7157,7 +7369,7 @@
 		/* A second reroll inside the busy window of the first one read a
 		   lastSeed the first had blanked, and pushed an undo entry that
 		   restored nothing. One at a time. */
-		if (busyDepth > 0 || untilSearch || state.universe.running) return;
+		if (busyDepth > 0 || untilSearch || state.universe.running || queuedWhileBusy(opts)) return;
 		const previous = state.lastSeed;
 		if (!(opts && opts.noUndo)) pushUndo("rerolled the class");
 		// The class being replaced goes into the run history, with everything
@@ -7242,7 +7454,10 @@
 	   state.universe.cfgs (see universeCfgFor), so past a budget the older
 	   ones are dropped and rehydrated lazily by ensureResult. The active file
 	   and the files linkCareers still needs are never evicted. */
-	const UNIVERSE_LIVE_RESULTS = 15;
+	/* About 8 MB a live result: a low-memory phone keeps five (audit P16),
+	   since rebuilding an evicted one is a single cold run. */
+	const UNIVERSE_LIVE_RESULTS = typeof navigator !== "undefined" &&
+		Number(navigator.deviceMemory) > 0 && Number(navigator.deviceMemory) <= 4 ? 5 : 15;
 
 	/* What a whole draft class is, for the purpose of deciding whether a file
 	   carried one. A BBGM class is sixty to eighty men; a league export's
@@ -8246,6 +8461,31 @@
 		});
 	}
 
+	/* Best-effort storage can be evicted under pressure without a word
+	   (audit L13). The first time something worth keeping is saved — a
+	   universe slot, a remembered session — the browser is asked to keep
+	   this site's storage. It may say no (Chrome decides from engagement;
+	   Firefox asks the user); nothing depends on the answer. */
+	let persistAsked = false;
+	function askPersistentStorage() {
+		if (persistAsked) return;
+		persistAsked = true;
+		try {
+			const st = typeof navigator !== "undefined" && navigator.storage;
+			if (st && typeof st.persist === "function") st.persist().catch(() => null);
+		} catch (e) { /* not offered here */ }
+	}
+	// "using 12 MB of 2,048 MB", or "" where the browser does not say.
+	function storageUsage() {
+		try {
+			const st = typeof navigator !== "undefined" && navigator.storage;
+			if (!st || typeof st.estimate !== "function") return Promise.resolve("");
+			return st.estimate().then((e) => (e && Number.isFinite(e.usage) && Number.isFinite(e.quota)
+				? "This site is using " + mb(e.usage) + " of the " + mb(e.quota) +
+					" the browser allows it." : ""), () => "");
+		} catch (e) { return Promise.resolve(""); }
+	}
+
 	function listUniverseSlots() {
 		return idbRequest("readonly", (s) => s.getAll()).then((all) => {
 			const out = [];
@@ -8268,6 +8508,7 @@
 		}
 		let rec;
 		try { rec = slotRecord(slot, name); } catch (e) { showError(e); return Promise.resolve(false); }
+		askPersistentStorage();
 		return idbRequest("readwrite", (s) => s.put(rec)).then((ok) => {
 			setStatus(ok ? "Saved “" + rec.name + "” (" + rec.seasons + " seasons, in full) to " + slot + "."
 				: idbOk === false ? "Could not save: IndexedDB is not available in this browser."
@@ -8418,6 +8659,7 @@
 				}
 				sessionWritten = shaped.sig;
 				sessionMeta = shaped.state;
+				askPersistentStorage();
 				sessionSaid = "";
 				if (shaped.leagueDropped) {
 					sessionSay("league", "The league file itself is too big to remember; the classes " +
@@ -8474,6 +8716,30 @@
 			}
 			const files = V.sessionFiles(rec);
 			if (!files) return fail("The saved session could not be read, so it was not restored.");
+			/* A league remembered as its file is read again (scanned, not
+			   parsed whole) so the mock draft and the merge have it. A league
+			   that no longer reads is let go: the classes stand without it. */
+			const pending = new Set(files.map((f) => f.league).filter((l) => l && !l.data && l.blob));
+			return Promise.all(Array.from(pending).map((l) => (canScan(l.blob)
+				? global.LeagueScan.scanBlob(l.blob).then((r) => {
+					l.data = r.data;
+					l.scan = r.scan;
+					l.gz = r.gz;
+				}) : Promise.reject(new Error("no streams"))).catch(() => {
+				for (const f of files) if (f.league === l) delete f.league;
+			}))).then(() => restoreInstall(meta, files));
+		});
+	}
+
+	function restoreInstall(meta, files) {
+		const fail = (text) => {
+			const btn = $("btnSessionRestore");
+			if (btn) btn.disabled = false;
+			$("empty").classList.remove("busy");
+			setStatus(text, true);
+			return false;
+		};
+		{
 			let snap = null;
 			try { snap = meta.payload ? JSON.parse(meta.payload) : null; } catch (e) { snap = null; }
 			try {
@@ -8497,7 +8763,7 @@
 				showError(e);
 				return fail("The saved session could not be restored.");
 			}
-		});
+		}
 	}
 
 	function discardLastSession() {
@@ -8544,6 +8810,9 @@
 		bar.appendChild(sel);
 		bar.appendChild(nm);
 		box.appendChild(bar);
+		const usage = el("p", "hint", "");
+		box.appendChild(usage);
+		storageUsage().then((t) => { usage.textContent = t; });
 		const paint = () => listUniverseSlots().then((slots) => {
 			list.innerHTML = "";
 			sel.innerHTML = "";
@@ -9013,7 +9282,7 @@
 			state.tab = key;
 		}
 		pushNav();
-		persist();
+		persistSoon();
 		render();
 	}
 	global.App.showTab = showTab;
@@ -9022,7 +9291,7 @@
 		state.player = key || null;
 		if (key) state.tab = "board";
 		pushNav();
-		persist();
+		persistSoon();
 		render();
 	}
 
@@ -9033,7 +9302,7 @@
 		state.game = null;
 		if (name) state.tab = "teams";
 		pushNav();
-		persist();
+		persistSoon();
 		render();
 	}
 
@@ -9041,7 +9310,7 @@
 		state.game = ref || null;
 		if (ref) state.tab = "teams";
 		pushNav();
-		persist();
+		persistSoon();
 		render();
 	}
 
@@ -9067,11 +9336,13 @@
 			state.player || "", state.team || "", state.game || ""].join("|");
 	}
 
-	function render() {
-		paintExportLabel();
-		const tabs = $("tabs");
+	const tabStrip = { el: null, buttons: new Map(), active: null };
+	function buildTabStrip(tabs) {
 		tabs.innerHTML = "";
 		tabs.setAttribute("role", "tablist");
+		tabStrip.el = tabs;
+		tabStrip.buttons = new Map();
+		tabStrip.active = null;
 		let lastGroup = null;
 		// One span per group, so the strip wraps between groups, not inside one.
 		let set = null;
@@ -9085,10 +9356,10 @@
 				tabs.appendChild(set);
 				lastGroup = group;
 			}
-			const b = el("button", key === state.tab ? "active" : "", label);
+			const b = el("button", "", label);
 			b.setAttribute("role", "tab");
-			b.setAttribute("aria-selected", key === state.tab ? "true" : "false");
-			b.tabIndex = key === state.tab ? 0 : -1;
+			b.setAttribute("aria-selected", "false");
+			b.tabIndex = -1;
 			b.addEventListener("click", () => showTab(key));
 			b.addEventListener("keydown", (e) => {
 				const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
@@ -9105,20 +9376,44 @@
 				if (next) next.focus();
 			});
 			set.appendChild(b);
+			tabStrip.buttons.set(key, b);
 		});
-		/* On a phone the tab strip is one sideways-scrolling row; keep the
-		   active tab in it rather than off the right edge. */
-		{
-			const act = tabs.querySelector("button.active");
-			if (act && tabs.scrollWidth > tabs.clientWidth) {
-				const r = act.getBoundingClientRect();
-				const t = tabs.getBoundingClientRect();
-				if (r.left < t.left || r.right > t.right) {
-					tabs.scrollLeft += (r.left - t.left) - (t.width - r.width) / 2;
-				}
-			}
+	}
+
+	function render() {
+		paintExportLabel();
+		const tabs = $("tabs");
+		/* Built once and then only marked (audit P7): the strip was emptied
+		   and twelve buttons with 24 listeners rebuilt on every render, and
+		   its geometry read straight after, forcing a layout each time. */
+		if (tabStrip.el !== tabs || tabs.childNodes.length === 0) buildTabStrip(tabs);
+		for (const [key, b] of tabStrip.buttons) {
+			const on = key === state.tab;
+			if (b.classList.contains("active") !== on) b.classList.toggle("active", on);
+			const sel = on ? "true" : "false";
+			if (b.getAttribute("aria-selected") !== sel) b.setAttribute("aria-selected", sel);
+			const ti = on ? 0 : -1;
+			if (b.tabIndex !== ti) b.tabIndex = ti;
 		}
-		tabEdgeCue();
+		/* On a phone the tab strip is one sideways-scrolling row; keep the
+		   active tab in it rather than off the right edge. Only when the tab
+		   changed, and in a frame, so a render does not read layout. */
+		if (tabStrip.active !== state.tab) {
+			tabStrip.active = state.tab;
+			const fit = () => {
+				const act = tabs.querySelector("button.active");
+				if (act && tabs.scrollWidth > tabs.clientWidth) {
+					const r = act.getBoundingClientRect();
+					const t = tabs.getBoundingClientRect();
+					if (r.left < t.left || r.right > t.right) {
+						tabs.scrollLeft += (r.left - t.left) - (t.width - r.width) / 2;
+					}
+				}
+				tabEdgeCue();
+			};
+			if (typeof requestAnimationFrame === "function") requestAnimationFrame(fit);
+			else fit();
+		}
 		const view = $("view");
 		/* Every interaction rebuilds this view from scratch — clicking a row to
 		   open the editor, ticking a sort level, typing in a filter. With a
@@ -10229,9 +10524,24 @@
 			ta.value = text;
 			document.body.appendChild(ta);
 			ta.select();
-			try { document.execCommand("copy"); done(); } catch (e) { /* nothing to do */ }
+			/* execCommand returns false rather than throwing when the copy
+			   is refused, and "Copied" was shown either way (audit P15). */
+			let copied = false;
+			try { copied = document.execCommand("copy") === true; } catch (e) { copied = false; }
 			ta.remove();
 			if (had && had !== document.body && had.isConnected && had.focus) had.focus();
+			if (copied) { done(); return; }
+			const box = el("div");
+			box.appendChild(el("p", null, "The browser would not copy to the clipboard. " +
+				"Select the text below and copy it yourself (Ctrl+C or \u2318C)."));
+			const area = document.createElement("textarea");
+			area.readOnly = true;
+			area.rows = 6;
+			area.style.width = "100%";
+			area.value = text;
+			box.appendChild(area);
+			modal("Copy this text", box, null, "Close");
+			try { area.focus(); area.select(); } catch (e) { /* the text is on screen */ }
 		}
 		if (navigator.clipboard && navigator.clipboard.writeText) {
 			navigator.clipboard.writeText(text).then(done, fallback);
@@ -10328,10 +10638,12 @@
 	   needs it — JSON exports add their own at the call site. */
 	function download(name, text, type) {
 		const t = type || "text/plain";
-		const body = t === "text/csv" && text.charAt(0) !== "\ufeff"
+		// A Blob is written as it is (the merge's streamed, possibly gzipped, league).
+		const isBlob = typeof Blob === "function" && text instanceof Blob;
+		const body = !isBlob && t === "text/csv" && text.charAt(0) !== "\ufeff"
 			? "\ufeff" + text
 			: text;
-		const blob = new Blob([body], { type: t });
+		const blob = isBlob ? text : new Blob([body], { type: t });
 		const a = document.createElement("a");
 		a.href = URL.createObjectURL(blob);
 		a.download = name;
@@ -11853,12 +12165,21 @@
 	/* Staged, with the meter: each step is one long synchronous block, so
 	   the label for it is painted first and then the step runs. `from` is
 	   where the bar already stands (the file read before it, if any). */
-	function mergeInto(league, leagueName, picked, from) {
+	/* The write is a SPLICE when the league came through the scanner (L6):
+	   every store the merge did not change is copied from the file's own
+	   bytes, `players` is written one man at a time, and the result is
+	   gzipped on the way out when the league was a .gz — the 213 MB .json
+	   this used to hand back for a 28 MB .gz is now a .json.gz of about the
+	   size that was dropped. No whole-file string is ever built. */
+	function mergeInto(league, leagueName, picked, from, source) {
 		const at = Number.isFinite(from) ? from : 0;
-		const step = (label, frac) => {
-			progressShow(label, at + (1 - at) * frac);
+		const step = (label, frac, detail) => {
+			progressShow(label, at + (1 - at) * frac, detail);
 			return nextPaint();
 		};
+		const LS = global.LeagueScan;
+		const splice = !!(source && source.blob && source.scan && LS && canScan(source.blob));
+		const gzip = !!(source && source.gz) && typeof CompressionStream === "function";
 		return step("Simulating the classes to merge", 0).then(() => {
 			const results = [];
 			for (const i of picked) {
@@ -11881,28 +12202,48 @@
 					}
 				});
 		}).then((out) => {
-			if (!out) return;
-			return step("Writing the new league file", 0.7).then(() => {
+			if (!out) return null;
+			return step("Writing the new league file", 0.4).then(() => {
+				if (splice) {
+					// Every top-level key the merge produced anew.
+					const changed = {};
+					for (const k of Object.keys(out.file)) if (out.file[k] !== league[k]) changed[k] = out.file[k];
+					return LS.spliceBlob(source.blob, source.scan, changed, changed, {
+						gzip,
+						onProgress: (f) => progressShow("Writing the new league file" +
+							(gzip ? " (gzipped)" : ""), at + (1 - at) * (0.4 + 0.58 * f)),
+					}).then((blob) => [out, blob, gzip]);
+				}
 				/* No BOM here, unlike the CSV exports: this file is read back by
-				   BBGM's own league loader, not by a spreadsheet. */
-				const body = JSON.stringify(out.file);
-				return step("Saving " + mb(body.length), 0.95).then(() => [out, body]);
+				   BBGM's own league loader, not by a spreadsheet. Inside the
+				   try, so a league too big for one string is a sentence (L6). */
+				let body;
+				try { body = JSON.stringify(out.file); } catch (err) {
+					throw /string length/i.test(String(err && err.message))
+						? new Error("the merged league is too big to write as one text in this " +
+							"browser — drop the league file itself (not a restored session) so it " +
+							"can be streamed")
+						: err;
+				}
+				if (!gzip) return step("Saving " + mb(body.length), 0.95).then(() => [out, body, false]);
+				return new Response(new Blob([body]).stream().pipeThrough(new CompressionStream("gzip")))
+					.blob().then((b) => [out, b, true]);
 			});
-		}).then((pair) => {
-			if (!pair) return;
-			const out = pair[0];
+		}).then((triple) => {
+			if (!triple) return;
 			progressHide();
-			mergeDone(out, leagueName, pair[1]);
+			mergeDone(triple[0], leagueName, triple[1], triple[2]);
 		}, (err) => {
 			progressHide();
 			setStatus("Could not merge: " + (err && err.message ? err.message : err));
 		});
 	}
 
-	function mergeDone(out, leagueName, body) {
+	function mergeDone(out, leagueName, body, gz) {
 		const base = leagueName.replace(/\.json(\.gz)?$/i, "").replace(/\.gz$/i, "");
 		const years = out.seasons.slice().sort((a, b) => a - b).join("_");
-		download(base + "_with_" + years + "_class.json", body, "application/json");
+		download(base + "_with_" + years + "_class.json" + (gz ? ".gz" : ""), body,
+			gz ? "application/gzip" : "application/json");
 		exported("merged " + (out.replaced + out.added) + " players into " +
 			leagueName + " (" + out.replaced + " replaced, " + out.added + " added, " +
 			out.removed + " generated prospects dropped) for the " +
@@ -11910,6 +12251,22 @@
 			(out.seasons.length === 1 ? "" : "s") + ". Load the new file with " +
 			"Create New League \u2192 upload" +
 			(out.warnings && out.warnings.length ? ". " + out.warnings.join(" ") : ""));
+	}
+
+	/* A league read for a merge: through the scanner when it can be (the
+	   stores the merge does not touch stay on disk until the write copies
+	   them), otherwise as text. Resolves to {league, source}. */
+	function readLeagueForMerge(f, onBytes) {
+		if (canScan(f)) {
+			return global.LeagueScan.scanBlob(f, { onBytes }).then((r) => ({
+				league: r.data,
+				source: r.scan ? { blob: f, scan: r.scan, gz: r.gz } : { gz: r.gz },
+			}));
+		}
+		return readTextFile(f, onBytes).then((text) => ({
+			league: global.LeagueScan ? global.LeagueScan.parseText(text) : JSON.parse(text),
+			source: { gz: /\.gz$/i.test(f.name || "") },
+		}));
 	}
 
 	/* Where the league file comes from. When the classes were lifted out of a
@@ -11935,7 +12292,16 @@
 			state.mergeIndices = null;
 			setStatus("Merging into " + src.name + "\u2026", true);
 			// mergeInto paints its own stages before each blocking step.
-			mergeInto(src.data, src.name, picked);
+			if (src.data) { mergeInto(src.data, src.name, picked, 0, src); return; }
+			/* A restored session keeps the league as its file, not parsed. */
+			progressShow("Reading " + src.name, 0, "");
+			readLeagueForMerge(src.blob, (seen, size) => progressShow("Reading " + src.name,
+				0.5 * seen / Math.max(1, size), mb(seen) + " of " + mb(size)))
+				.then((r) => mergeInto(r.league, src.name, picked, 0.55, r.source))
+				.catch((err) => {
+					progressHide();
+					setStatus(src.name + " could not be read: " + (err && err.message ? err.message : err));
+				});
 		}, "Merge into " + src.name);
 	}
 
@@ -12297,34 +12663,67 @@
 		   way to use this tool, so the fallback below has to be just as usable:
 		   it slices the work into single classes on a timer, which yields to
 		   the UI between each one and can be canceled the same way. */
-		try {
-			batchWorker = new Worker("js/worker.js");
-			batchWorker.onmessage = (e) => {
+		/* A worker that dies costs one class, not the batch (audit P11): it
+		   is respawned once and resumes at the first unfinished class, on the
+		   same base#i seeds, so the rows are the ones an uninterrupted batch
+		   writes; only if that fails too does the rest run on this tab. */
+		let respawned = false;
+		const inline = (from, why) => {
+			if (batchWorker) { batchWorker.terminate(); batchWorker = null; }
+			if (why) setStatus(why, true);
+			runBatchInline(file, cfg, n, from);
+		};
+		const start = (from) => {
+			const w = new Worker("js/worker.js");
+			batchWorker = w;
+			w.onmessage = (e) => {
+				if (batchWorker !== w) return;
 				const m = e.data;
+				if (m.type === "hello") {
+					// See the search: a worker on a newer engine than the page.
+					if (global.Universe && m.rev !== undefined && m.rev !== global.Universe.ENGINE_REV) {
+						inline(batchPartial.length, "A new version of this tool is available — " +
+							"reload the page. The batch is running on this tab meanwhile.");
+					}
+					return;
+				}
 				if (m.type === "progress") {
 					// Keep the finished classes, so a cancel keeps its work.
 					if (m.row) batchPartial.push(m.row);
 					batchProgress(m.done, m.total);
-				} else if (m.type === "done") batchDone(m.rows);
+				} else if (m.type === "done") batchDone(from ? batchPartial.slice() : m.rows);
 				else if (m.type === "error") {
 					showError(new Error(m.message));
 					batchDone(null, true);
 				}
 			};
-			batchWorker.onerror = () => {
-				if (batchWorker) { batchWorker.terminate(); batchWorker = null; }
-				runBatchInline(file, cfg, n);
+			w.onerror = (ev) => {
+				if (ev && ev.preventDefault) ev.preventDefault();
+				if (batchWorker !== w) return;
+				w.terminate();
+				batchWorker = null;
+				const at = batchPartial.length;
+				if (!respawned) {
+					respawned = true;
+					setStatus("The batch worker stopped at class " + (at + 1) + "; restarting it there.", true);
+					try { start(at); return; } catch (e) { /* fall through to this tab */ }
+				}
+				inline(at, "The batch worker stopped at class " + (at + 1) +
+					"; continuing on this tab.");
 			};
-			batchWorker.postMessage({
-				type: "batch", leagueFile: file.data, cfg, n, baseSeed: batchBaseSeed,
+			w.postMessage({
+				type: "batch", leagueFile: file.data, cfg, n, baseSeed: batchBaseSeed, start: from,
 			});
+		};
+		try {
+			start(0);
 		} catch (cannotStartWorker) {
 			batchWorker = null;
-			runBatchInline(file, cfg, n);
+			runBatchInline(file, cfg, n, 0);
 		}
 	}
 
-	function runBatchInline(file, cfgLive, n) {
+	function runBatchInline(file, cfgLive, n, from) {
 		/* The worker is handed a structured clone of the settings and the
 		   file at click time; this path used to keep the live objects
 		   (state.overrides, the loaded file) across timer steps, and the
@@ -12335,8 +12734,9 @@
 			: (x) => JSON.parse(JSON.stringify(x));
 		const cfg = copy(cfgLive);
 		const runner = global.Engine.createRunner(copy(file.data));
-		const rows = [];
-		let i = 0;
+		// Resuming a batch a worker started: its finished rows stand.
+		let i = Math.max(0, Math.min(n, Number(from) || 0));
+		const rows = batchPartial.slice(0, i);
 		const step = () => {
 			if (batchCancel) { batchDone(null); return; }
 			if (i >= n) { batchDone(rows); return; }
@@ -12496,6 +12896,14 @@
 		!navigator.webdriver) {
 		window.addEventListener("load", () => {
 			navigator.serviceWorker.register("sw.js").catch(() => { /* optional */ });
+		});
+		/* A new service worker took over this tab (a deploy since it was
+		   opened): the page still runs the old scripts, so say so (P13). */
+		const hadController = !!navigator.serviceWorker.controller;
+		navigator.serviceWorker.addEventListener("controllerchange", () => {
+			if (hadController) {
+				setStatus("A new version of this tool is available — reload the page to use it.", true);
+			}
 		});
 	}
 
@@ -12670,6 +13078,7 @@
 	};
 	Promise.resolve().then(loadAutosave).then(afterAutosave, afterAutosave);
 	bindSessionCard();
+	bindProgressCancel();
 	loadSessionMeta();
 
 	$("errClose").addEventListener("click", clearError);
@@ -12752,13 +13161,19 @@
 
 	$("btnReroll").addEventListener("click", reroll);
 	// The same button cancels a search in flight; see rerollUntil.
-	$("btnRerollUntil").addEventListener("click", () => {
+	$("btnRerollUntil").addEventListener("click", (e) => {
 		if (untilSearch) untilSearch.cancel();
+		else if (busyDepth > 0 || queuedWhileBusy(e)) return;
 		else rerollUntilDialog();
 	});
 	// Not `run` directly: run takes an `after` callback and a listener
 	// would pass it the click event.
-	$("btnRerun").addEventListener("click", () => run());
+	/* Not while a run is under way or queued behind one (audit P10): five
+	   quick clicks were five full runs and five renders. */
+	$("btnRerun").addEventListener("click", (e) => {
+		if (busyDepth > 0 || queuedWhileBusy(e)) return;
+		run();
+	});
 	$("btnUndo").addEventListener("click", undo);
 	$("btnUndo").addEventListener("contextmenu", (e) => { e.preventDefault(); undoHistoryDialog(); });
 	$("btnExport").addEventListener("click", () => {
@@ -12780,25 +13195,12 @@
 		if (!picked.length) return;
 		setStatus("Reading " + f.name + "…", true);
 		progressShow("Reading " + f.name, 0, "0 of " + mb(f.size || 0));
-		readTextFile(f, (seen, size, gz) => progressShow(
-			(gz && seen < size ? "Reading and unzipping " : "Reading ") + f.name,
+		readLeagueForMerge(f, (seen, size) => progressShow("Reading " + f.name,
 			// Reading is the first half of the job; the merge and the write
 			// are the rest.
 			0.5 * seen / Math.max(1, size), mb(seen) + " of " + mb(size)))
-			.then((text) => {
-				progressShow("Parsing " + f.name, 0.55, mb(text.length) + " of JSON");
-				return nextPaint().then(() => text);
-			}).then((text) => {
-				let league;
-				try {
-					league = JSON.parse(text);
-				} catch (err) {
-					progressHide();
-					setStatus("Could not merge: " + (err && err.message ? err.message : err));
-					return;
-				}
-				return mergeInto(league, f.name, picked, 0.6);
-			}).catch((err) => {
+			.then((r) => mergeInto(r.league, f.name, picked, 0.55, r.source))
+			.catch((err) => {
 				progressHide();
 				setStatus(f.name + " could not be read: " +
 					(err && err.message ? err.message : err));
@@ -13020,7 +13422,7 @@
 			   replaced underneath it. */
 			if (!$("modal").hidden) return;
 			e.preventDefault();
-			if (!$("btnReroll").disabled) reroll();
+			if (!$("btnReroll").disabled) reroll(e);
 			return;
 		}
 		/* Nor undo, redo or the shortcut sheet: undo re-ran the class under
@@ -13102,7 +13504,7 @@
 			}
 		}
 		if (quickWinKey(e, k)) return;
-		if (k === "r" && !$("btnReroll").disabled) { e.preventDefault(); reroll(); return; }
+		if (k === "r" && !$("btnReroll").disabled) { e.preventDefault(); reroll(e); return; }
 		if (k === "g") {
 			e.preventDefault();
 			/* state.randomScope, full stop. #randomScope became a chip row

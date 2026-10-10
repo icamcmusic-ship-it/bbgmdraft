@@ -25,6 +25,8 @@
 		["colleges", "all"], ["config", "all"], ["calibration", "all"],
 		["ratings", "all"], ["traits", "all"], ["teams", "all"], ["stats", "all"],
 		["rankings", "all"], ["tournament", "all"], ["awards", "all"], ["engine", "all"],
+		// The league-file scanner: page and Node (the CLI streams merges with it).
+		["leaguescan", "node"],
 		/* The batch worker has no use for sample, but Node does: it is how a test
 		   gets a class without a file, and nothing in it touches the DOM. */
 		["sample", "node"], ["batch", "all"],

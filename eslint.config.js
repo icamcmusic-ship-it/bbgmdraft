@@ -13,7 +13,7 @@ const browserGlobals = {
 	setTimeout: "readonly", clearTimeout: "readonly", setInterval: "readonly",
 	clearInterval: "readonly", requestAnimationFrame: "readonly", fetch: "readonly",
 	URL: "readonly", Blob: "readonly", Worker: "readonly", FileReader: "readonly",
-	CompressionStream: "readonly", DecompressionStream: "readonly", Response: "readonly",
+	CompressionStream: "readonly", DecompressionStream: "readonly", Response: "readonly", ReadableStream: "readonly", TransformStream: "readonly",
 	Request: "readonly", Headers: "readonly", Event: "readonly", ErrorEvent: "readonly",
 	CustomEvent: "readonly", MutationObserver: "readonly", ResizeObserver: "readonly",
 	IntersectionObserver: "readonly", FormData: "readonly", File: "readonly",
@@ -80,7 +80,7 @@ module.exports = [
 		rules,
 	},
 	{
-		files: ["js/manifest.js"],
+		files: ["js/manifest.js", "js/leaguescan.js"],
 		languageOptions: { ecmaVersion: 2022, sourceType: "script",
 			globals: Object.assign({}, browserGlobals, { module: "writable" }) },
 		rules,

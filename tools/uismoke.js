@@ -603,7 +603,7 @@ async function gotoProspects(page) {
 		const fresh = seeds.map((s) => BatchStats.fingerprint(Engine.createRunner(file).run(mk(s))));
 		const w = new window.__batchRealWorker("js/worker.js");
 		const workerReused = await new Promise((resolve) => {
-			w.onmessage = (e) => resolve(e.data.rows || e.data.message);
+			w.onmessage = (e) => { if (e.data && e.data.type === "hello") return; resolve(e.data.rows || e.data.message); };
 			w.postMessage({ type: "probe", leagueFile: file, cfg, seed: seeds });
 		});
 		w.terminate();
@@ -2509,6 +2509,107 @@ async function gotoProspects(page) {
 			/still loaded/.test(mergeText), mergeText.slice(0, 200));
 		await page.locator("#modalCancel").click();
 		await page.waitForTimeout(200);
+	}
+
+	/* ---------------------------------------------------------------------
+	   LARGE LEAGUE FILES (audit 2026-10-10, section 3).
+
+	   A gzipped league with box scores: read through the scanner (the box
+	   scores are not parsed, the league is kept as its file), merged back by
+	   splicing the untouched stores through, and written as a .json.gz like
+	   the one dropped. Then the wrong files: a .zip and a truncated export
+	   are sentences, not parser text. */
+	console.log("\nLarge league files");
+	{
+		const zlib = require("zlib");
+		const league = { version: 64, startingSeason: 2027, gameAttributes: { season: 2027 },
+			meta: { name: "Smoke" }, teams: [{ tid: 5, region: "A", name: "B" }], players: [],
+			games: Array.from({ length: 400 }, (_, i) => ({ gid: i, note: "box \"score\" ]}" + i })),
+			events: [{ text: "an event" }] };
+		let pid = 0;
+		for (const year of [2027, 2028]) {
+			for (const p of V.syntheticClass(year + 40, 50).players) {
+				const copy = JSON.parse(JSON.stringify(p));
+				copy.pid = pid++;
+				copy.tid = -2;
+				copy.draft = { year, round: 0, pick: 0, tid: -1 };
+				copy.born = { year: year - 19, loc: "USA" };
+				league.players.push(copy);
+			}
+		}
+		for (const p of V.syntheticClass(11, 160).players) {
+			const copy = JSON.parse(JSON.stringify(p));
+			copy.pid = pid++;
+			copy.tid = 5;
+			copy.draft = { year: 2020, round: 1, pick: 3, tid: 5 };
+			copy.born = { year: 2000, loc: "USA" };
+			league.players.push(copy);
+		}
+		// One long-retired man with no birth year: a warning, not a refusal (L8).
+		const broken = JSON.parse(JSON.stringify(league.players[league.players.length - 1]));
+		broken.pid = pid++;
+		delete broken.born;
+		league.players.push(broken);
+		const tmp = require("os").tmpdir();
+		const gzFixture = path.join(tmp, "bbgm-uismoke-big.json.gz");
+		fs.writeFileSync(gzFixture, zlib.gzipSync(Buffer.from(JSON.stringify(league))));
+
+		await page.goto(base);
+		await clearStorage(page);
+		await page.goto(base);
+		await page.setInputFiles("#file", gzFixture);
+		await page.waitForSelector("table tbody tr", { timeout: 60000 });
+		const src = await page.evaluate(() => {
+			const s = window.App.state.leagueSource;
+			return s ? { blob: !!s.blob, scan: !!(s.scan && s.scan.ranges && s.scan.ranges.games),
+				games: s.data.games === undefined, gz: s.gz, players: s.data.players.length,
+				files: window.App.state.files.length } : null;
+		});
+		ok("a gzipped league loads through the scanner: box scores left on disk, the file kept",
+			src && src.blob && src.scan && src.games && src.gz === true && src.files === 2 &&
+			src.players === league.players.length, JSON.stringify(src));
+		const warn = await page.locator("#warnBanner .bannertext").innerText().catch(() => "");
+		ok("a broken retired row is a warning, not a refusal", /not a draft prospect/.test(warn),
+			warn.slice(0, 200));
+		await page.locator("#btnExportMenu").click();
+		await page.waitForTimeout(250);
+		await page.locator('#modal button:has-text("Merge into a league file")').click();
+		await page.waitForTimeout(350);
+		await page.locator("#modalOk").click();
+		await page.waitForTimeout(350);
+		const [dl] = await Promise.all([
+			page.waitForEvent("download", { timeout: 120000 }),
+			page.locator("#modalOk").click(),
+		]);
+		const name = dl.suggestedFilename();
+		const saved = path.join(tmp, "bbgm-uismoke-merged-" + Date.now() + ".gz");
+		await dl.saveAs(saved);
+		let back = null;
+		try { back = JSON.parse(zlib.gunzipSync(fs.readFileSync(saved)).toString("utf8")); } catch (e) { back = null; }
+		ok("the merge of a .gz league downloads a .json.gz", /_with_2027_2028_class\.json\.gz$/.test(name), name);
+		ok("and its box scores and events are the league's own, byte for byte",
+			back && JSON.stringify(back.games) === JSON.stringify(league.games) &&
+			JSON.stringify(back.events) === JSON.stringify(league.events) &&
+			back.players.length === league.players.length && !!back.bbgmdraft,
+			back ? Object.keys(back).join(",") : "unreadable");
+		ok("the meter is gone afterwards", await page.locator("#loadProgress").isHidden());
+
+		// The wrong files.
+		const zipFixture = path.join(tmp, "bbgm-uismoke-class.zip");
+		fs.writeFileSync(zipFixture, Buffer.from("PK\x03\x04" + "x".repeat(64), "latin1"));
+		const truncFixture = path.join(tmp, "bbgm-uismoke-trunc.json");
+		const whole = JSON.stringify(V.syntheticClass(12, 40));
+		fs.writeFileSync(truncFixture, whole.slice(0, Math.floor(whole.length * 0.8)));
+		await page.goto(base);
+		await clearStorage(page);
+		await page.goto(base);
+		await page.setInputFiles("#file", [zipFixture, truncFixture]);
+		await page.waitForFunction(() => !document.getElementById("errBanner").hidden, null,
+			{ timeout: 30000 }).catch(() => null);
+		const err = await page.evaluate(() =>
+			(document.querySelector("#errBanner .bannertext") || {}).textContent || "");
+		ok("a .zip is named as one", /\.zip archive/.test(err), err.slice(0, 200));
+		ok("a file that stops partway says so", /stops partway/.test(err), err.slice(0, 300));
 	}
 
 	console.log("\nThe randomizer, per loaded class");

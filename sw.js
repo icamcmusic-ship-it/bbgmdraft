@@ -38,20 +38,33 @@ self.addEventListener("activate", (e) => {
 		.then(() => self.clients.claim()));
 });
 
+/* Network first, but not forever (audit P13): on a flaky connection each of
+   the ~33 requests used to wait for the network to give up before the cache
+   answered. After NET_WAIT ms a cached copy is served; the network answer,
+   when it comes, still refreshes the cache for next time. */
+const NET_WAIT = 3000;
 self.addEventListener("fetch", (e) => {
 	const req = e.request;
 	if (req.method !== "GET" || new URL(req.url).origin !== self.location.origin) return;
-	e.respondWith(fetch(req).then((res) => {
-		if (res && res.ok) {
-			const copy = res.clone();
-			caches.open(CACHE).then((c) => c.put(req, copy));
-		}
-		return res;
-	}).catch(() => caches.match(req).then((hit) => {
-		if (hit) return hit;
-		/* The page is the only thing that may stand in for another request:
-		   answering a script or a stylesheet with index.html is a syntax
-		   error, not a fallback. */
-		return req.mode === "navigate" ? caches.match("index.html") : Response.error();
-	})));
+	/* The page is the only thing that may stand in for another request:
+	   answering a script or a stylesheet with index.html is a syntax
+	   error, not a fallback. */
+	const fromCache = () => caches.match(req).then((hit) => hit ||
+		(req.mode === "navigate" ? caches.match("index.html") : null));
+	e.respondWith(new Promise((resolve) => {
+		let settled = false;
+		const answer = (res) => { if (!settled && res) { settled = true; resolve(res); } };
+		const timer = setTimeout(() => { fromCache().then(answer); }, NET_WAIT);
+		fetch(req).then((res) => {
+			clearTimeout(timer);
+			if (res && res.ok) {
+				const copy = res.clone();
+				caches.open(CACHE).then((c) => c.put(req, copy));
+			}
+			answer(res);
+		}, () => {
+			clearTimeout(timer);
+			fromCache().then((hit) => answer(hit || Response.error()));
+		});
+	}));
 });

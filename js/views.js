@@ -1187,32 +1187,45 @@
 			let leagueDropped = false;
 			let leagueBytes = 0;
 			list.forEach((f, i) => {
-				const lg = f.league && f.league.data && typeof f.league.data === "object"
-					? f.league : null;
-				if (!lg) return;
-				if (!at.has(lg.data)) {
-					// false in the cache: known to break the cap on its own.
-					let json = cache && cache.has(lg.data) ? cache.get(lg.data) : undefined;
-					if (json === undefined) {
-						json = JSON.stringify(lg.data);
-						if (cache) cache.set(lg.data, json.length > max ? false : json);
-						if (json.length > max) json = false;
-					}
-					if (json === false) at.set(lg.data, -1);
-					else {
-						at.set(lg.data, leagues.length);
-						leagues.push({ name: String(lg.name || ""), json });
-						leagueBytes += json.length;
+				const lg = f.league && typeof f.league === "object" ? f.league : null;
+				/* The league as the FILE it was dropped as (audit L5): IndexedDB
+				   stores a Blob natively, so nothing is stringified on the main
+				   thread, the size is the file's own (a .gz is 6-7x smaller
+				   than its JSON) and the decision is made without measuring. */
+				const blob = lg && typeof Blob === "function" && lg.blob instanceof Blob ? lg.blob : null;
+				const data = lg && lg.data && typeof lg.data === "object" ? lg.data : null;
+				const key = blob || data;
+				if (!key) return;
+				if (!at.has(key)) {
+					if (blob) {
+						const n = Number(blob.size) || 0;
+						if (n > max) at.set(key, -1);
+						else {
+							at.set(key, leagues.length);
+							leagues.push({ name: String(lg.name || ""), blob, gz: !!lg.gz });
+							leagueBytes += n;
+						}
+					} else {
+						/* A league with no file behind it (an older session's).
+						   Its string is not kept in the cache: a league held
+						   twice for the whole session was the +105 MB. */
+						const json = JSON.stringify(data);
+						if (json.length > max) at.set(key, -1);
+						else {
+							at.set(key, leagues.length);
+							leagues.push({ name: String(lg.name || ""), json });
+							leagueBytes += json.length;
+						}
 					}
 				}
-				recFiles[i].league = at.get(lg.data);
+				recFiles[i].league = at.get(key);
 			});
 			if (bytes + leagueBytes > max) {
 				leagues.length = 0;
 				for (const rf of recFiles) rf.league = -1;
 				leagueBytes = 0;
 			}
-			leagueDropped = list.some((f) => f.league && f.league.data) &&
+			leagueDropped = list.some((f) => f.league && (f.league.data || f.league.blob)) &&
 				recFiles.every((rf) => rf.league === -1);
 			const total = bytes + leagueBytes;
 			const sig = list.map((f, i) => (f.name || "") + "|" + (f.fingerprint || "") + "|" +
@@ -1243,7 +1256,11 @@
 		try {
 			const leagues = (Array.isArray(rec.leagues) ? rec.leagues : []).map((l) =>
 				(l && typeof l.json === "string"
-					? { name: String(l.name || ""), data: JSON.parse(l.json) } : null));
+					? { name: String(l.name || ""), data: JSON.parse(l.json) }
+					// A stored file is read again by the page (js/leaguescan.js).
+					: l && typeof Blob === "function" && l.blob instanceof Blob
+						? { name: String(l.name || ""), data: null, blob: l.blob, gz: !!l.gz }
+						: null));
 			const out = [];
 			for (const f of rec.files) {
 				if (!f || typeof f.json !== "string") return null;
@@ -3883,10 +3900,27 @@
 
 	/* The season as dated articles (see js/news.js), replacing the four
 	   ·-joined strips that used to sit above the prospect table. */
+	/* News.build per result and followed-program list, built once (audit
+	   P8): it ran every template on every visit to the tab and after every
+	   debounced filter keystroke — the heaviest single view. The articles
+	   are a pure function of the result (its seed-derived stream) and the
+	   followed list. */
+	const newsCache = new WeakMap();
+	function newsFor(res, followed) {
+		if (!global.News) return [];
+		let byKey = newsCache.get(res);
+		if (!byKey) { byKey = new Map(); newsCache.set(res, byKey); }
+		const key = JSON.stringify(followed === undefined ? null : followed);
+		if (!byKey.has(key)) {
+			if (byKey.size > 8) byKey.clear();
+			byKey.set(key, global.News.build(res, { followed }));
+		}
+		return byKey.get(key).slice();
+	}
 	function viewNews(view, res) {
 		const stN = A().state;
 		const followed = stN.cfg.universe && stN.universe ? stN.universe.followed : null;
-		const articles = global.News ? global.News.build(res, { followed }) : [];
+		const articles = res && typeof res === "object" ? newsFor(res, followed) : [];
 		view.appendChild(el("h3", null, "The season, as it happened"));
 		view.appendChild(el("p", "legendline",
 			"Every article is read off results the sim actually produced — " +

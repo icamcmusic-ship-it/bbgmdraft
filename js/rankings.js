@@ -56,6 +56,11 @@
 				}
 				return sorted.length > 1 ? lo / (sorted.length - 1) : 0.5;
 			};
+			/* Each team's percentile once per pass, not once per game it
+			   appears in (audit P3): 364 binary searches instead of ~11k.
+			   The same function of the same numbers, so the same answer. */
+			const pct = new Map();
+			for (const t of list) pct.set(t.name, pctOf(s.get(t.name)));
 			const next = new Map();
 			for (const t of list) {
 				let credit = 0;
@@ -63,7 +68,8 @@
 				if (!games.length) { next.set(t.name, 50); continue; }
 				for (const g of games) {
 					const opp = byName[g.opp];
-					const oppPct = opp ? pctOf(s.get(opp.name)) : 0.5;
+					const oppPct = opp ? (pct.has(opp.name) ? pct.get(opp.name)
+						: pctOf(s.get(opp.name))) : 0.5;
 					// A road win is worth more than a home win; a home loss
 					// costs more than a road loss.
 					if (g.won) {

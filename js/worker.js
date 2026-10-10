@@ -17,6 +17,11 @@
 self.importScripts("manifest.js");
 self.importScripts.apply(self, self.BBGMManifest.worker.map((f) => f + ".js"));
 
+/* Which engine this worker loaded. A page opened before a deploy runs the
+   old engine and would get a worker with the new one; it compares and falls
+   back to running on its own tab (audit P13). */
+self.postMessage({ type: "hello", rev: self.Universe && self.Universe.ENGINE_REV });
+
 /* THE SEARCH, WHICH IS THE OTHER THING WORTH SENDING HERE.
 
    The interactive path cannot move off the main thread: the staged runner
@@ -43,7 +48,11 @@ function runSearch(msg) {
 	const hits = clauses.map(() => 0);
 	let found = null;
 	let k = 0;
-	for (; k < msg.maxTries && !found; k++) {
+	// Candidates the engine threw on, counted and reported (audit P12).
+	let failed = 0;
+	let failedRun = 0;
+	let firstError = null;
+	for (; k < msg.maxTries && !found && failedRun < 3; k++) {
 		const seed = "u" + Math.floor(rng.random() * 1e9).toString(36);
 		const cfg = self.Config.make(msg.cfg);
 		cfg.seed = seed;
@@ -57,14 +66,21 @@ function runSearch(msg) {
 				if (hit) hits[i]++; else all = false;
 			});
 			if (all) found = seed;
-		} catch (err) { /* a failed candidate is just not the one */ }
-		self.postMessage({ type: "searchProgress", done: k + 1, total: msg.maxTries });
+			failedRun = 0;
+		} catch (err) {
+			failed++;
+			failedRun++;
+			if (!firstError) firstError = err && err.message ? err.message : String(err);
+		}
+		self.postMessage({ type: "searchProgress", done: k + 1, total: msg.maxTries,
+			hits: hits.slice(), failed });
 	}
 	/* The SEED, not the result. The main thread re-runs it through its own
 	   runner, which is what puts the class in the pill, the history and the
 	   undo stack — and means nothing about the result graph has to survive a
 	   structured clone. */
-	self.postMessage({ type: "searchDone", found, tries: k, hits });
+	self.postMessage({ type: "searchDone", found, tries: k, hits, failed, firstError,
+		aborted: failedRun >= 3 });
 }
 
 self.onmessage = function (e) {
@@ -102,7 +118,8 @@ self.onmessage = function (e) {
 		   derived from the batch's own seed instead, so "class 37 of this
 		   batch" is a reproducible thing. */
 		const base = self.BatchStats.batchSeed(msg.cfg, msg.baseSeed);
-		for (let i = 0; i < msg.n; i++) {
+		// A respawned worker resumes where the last one died (audit P11).
+		for (let i = Math.max(0, Number(msg.start) || 0); i < msg.n; i++) {
 			const cfg = self.Config.make(msg.cfg);
 			cfg.seed = base + "#" + i;
 			cfg.overrides = msg.cfg.overrides || {};

@@ -893,6 +893,8 @@ body.busy button, body.busy input[type=range] { cursor: progress; }
 .loadprog .lp-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .loadprog .lp-detail { color: var(--dim); font-variant-numeric: tabular-nums; text-align: right; }
 .loadprog progress { grid-column: 1 / -1; width: 100%; height: 8px; accent-color: var(--accent); }
+.loadprog .lp-cancel { grid-column: 1 / -1; justify-self: end; }
+.loadprog .lp-cancel[hidden] { display: none; }
 @media (prefers-reduced-motion: reduce) {
 	#status.working::before { animation: none; border-right-color: var(--accent); }
 }
