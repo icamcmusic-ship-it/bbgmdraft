@@ -3002,8 +3002,7 @@ async function gotoProspects(page) {
 			const bad = A.CHALLENGES.filter((c) => c.goals.some((g) =>
 				!global_parse(g)));
 			function global_parse(g) {
-				const bare = g.replace(/^!/, "");
-				return A.REROLL_PREDICATES.some((p) => p.key === bare);
+				return !!window.Engine.parseRerollClause(g);
 			}
 			return { keys, bad: bad.map((c) => c.key) };
 		});

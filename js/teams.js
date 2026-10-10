@@ -249,7 +249,8 @@
 		   the awards page read like a spreadsheet. Every rotation filler gets
 		   a name; the award model shows it when one of them beats the class
 		   to a trophy. */
-		const displayName = rng.pick(PLAYER_FIRST) + " " + rng.pick(PLAYER_LAST);
+		let displayName = rng.pick(PLAYER_FIRST) + " " + rng.pick(PLAYER_LAST);
+		while (REAL_TEAM_NAMES.has(displayName)) displayName = rng.pick(PLAYER_FIRST) + " " + rng.pick(PLAYER_LAST);
 		const year = starReturner
 			? rng.pick(["Junior", "Senior", "Senior", "Graduate"])
 			: rng.pick(["Sophomore", "Junior", "Junior", "Senior", "Senior"]);
@@ -303,6 +304,10 @@
 		{ name: "returning conference player of the year", w: 0.6, boostLo: 20, boostHi: 28 },
 		{ name: "senior leader who came back", w: 1.4, boostLo: 10, boostHi: 18 },
 		{ name: "returning starter with a year of growth", w: 2.0, boostLo: 8, boostHi: 16 },
+		{ name: "returning sixth man of the year", w: 1.0, boostLo: 10, boostHi: 17 },
+		{ name: "returning All-America honorable mention", w: 0.9, boostLo: 15, boostHi: 23 },
+		{ name: "back from a season-ending injury", w: 0.9, boostLo: 12, boostHi: 24 },
+		{ name: "a fifth-year senior on a waiver", w: 0.7, boostLo: 10, boostHi: 18 },
 	];
 	function capFillers(fillers, prospects) {
 		if (!prospects.length || !fillers.length) return;
@@ -430,6 +435,11 @@
 
 	   Nothing downstream reads the pool SIZE — the fillers are drawn by
 	   rng.pick and identified by their slot, not their name. */
+	/* Real people the synthetic pools can spell out (NBA players and
+	   sitting college coaches). Any draw that lands on one is redrawn. */
+	const REAL_TEAM_NAMES = new Set(["Kobe Bryant", "Brandon Ingram", "Myles Turner", "Evan Mobley",
+		"Malik Beasley", "Keon Ellis", "Jordan Hawkins", "Jalen Brooks", "Marcus Banks",
+		"Brad Underwood", "Barry Larkin", "Gary Payton"]);
 	const PLAYER_FIRST = [
 		"Jalen", "Marcus", "Tyrese", "DeShawn", "Caleb", "Jordan", "Malik",
 		"Trey", "Isaiah", "Xavier", "Devin", "Cam", "Andre", "Darius",
@@ -555,6 +565,10 @@
 		"Sheridan", "Slattery", "Stroud", "Sutter", "Tanaka", "Thackeray",
 		"Toussaint", "Truitt", "Vasquez", "Wendell", "Whitaker", "Wilkerson",
 		"Winslow", "Yates", "Zielinski", "Ainsworth", "Bergstrom", "Coyle",
+		"Abernethy", "Bartley", "Bellamy", "Cardenas", "Coughlin", "Dalrymple", "Easterly", "Fennimore",
+		"Gallagher", "Halloran", "Iwamoto", "Kaczmarek", "Lombardi", "Mbeki", "Nakashima", "Ostrowski",
+		"Pellegrino", "Quintero", "Rutledge", "Sorensen", "Tolliver", "Uribe", "Valdivia", "Wainwright",
+		"Yablonski", "Zamora", "Achterberg", "Boateng", "Castellanos", "Delacroix",
 	];
 
 	/* Coaching philosophy archetypes (task 4.4).
@@ -613,6 +627,9 @@
 			form: 0.8, dev: 0.7, levelAdj: 0.8,
 		},
 		{ name: "settled", label: null, w: 0, form: 0, dev: 0, levelAdj: 0 },
+		{ name: "extension year", label: "fresh off a contract extension", w: 0, form: 0.3, dev: 0.2, levelAdj: 0.4 },
+		{ name: "returning alum", label: "back at his alma mater", w: 0, form: 1.0, dev: 0.5, levelAdj: -1.0 },
+		{ name: "final season", label: "in what he has said is his final season", w: 0, form: 0.6, dev: -0.3, levelAdj: 0.3 },
 	];
 	const SITUATION_BY_NAME = {};
 	for (const c of COACH_SITUATIONS) SITUATION_BY_NAME[c.name] = c;
@@ -678,6 +695,10 @@
 		if (tenure === 1) situation = roll < 0.22 ? "interim" : "first year";
 		else if (tenure >= 16 && roll < 0.55) situation = "fixture";
 		else if (level < prestige - 12 && roll < 0.40) situation = "hot seat";
+		// The rarer situations reuse the same roll: no extra draw.
+		else if (tenure >= 14 && roll > 0.92) situation = "final season";
+		else if (tenure >= 3 && tenure <= 6 && roll > 0.93) situation = "extension year";
+		else if (tenure >= 2 && tenure <= 5 && roll < 0.05) situation = "returning alum";
 		const sit = SITUATION_BY_NAME[situation];
 		/* Coaching philosophy (task 4.4): how this staff develops players and
 		   distributes usage. A "player-developer" raises ceilings across the
@@ -703,7 +724,7 @@
 		let name = rng.pick(COACH_FIRST) + " " + rng.pick(COACH_LAST);
 		/* Two programs with the same head coach in one season: 364 draws
 		   from 12,672 names collide about five times a year. */
-		for (let guard = 0; used && used.has(name) && guard < 12; guard++) {
+		for (let guard = 0; (REAL_TEAM_NAMES.has(name) || (used && used.has(name))) && guard < 12; guard++) {
 			name = rng.pick(COACH_FIRST) + " " + rng.pick(COACH_LAST);
 		}
 		if (used) used.add(name);
@@ -2302,7 +2323,10 @@
 				if (t === host) return null;
 				const cause = r.pick(["a snowstorm", "a frozen floor",
 					"an arena roof leak", "a travel failure", "an ice storm",
-					"a burst pipe under the north stand", "a power cut at the arena"]);
+					"a burst pipe under the north stand", "a power cut at the arena",
+					"a water-main break", "a flooded locker room", "a bus that broke down on the interstate",
+					"a scoreboard that fell onto the floor", "an outbreak of flu in the traveling party",
+					"a fire alarm that emptied the arena"]);
 				return ["postponement", r.pick([
 					t.name + "'s trip to " + host.name + " was postponed by " + cause,
 					host.name + " and " + t.name + " will play later in the year after " +
@@ -2323,6 +2347,12 @@
 					"The clip of the year so far is " +
 						global.Text.withArticle(t.name + " chase-down block") +
 						" that nobody in the building saw coming",
+					global.Text.withArticle(t.name + " half-court buzzer-beater") +
+						" is the most-shared shot of the season",
+					"A walk-on's first career basket at " + t.name +
+						" has more views than the rest of the game combined",
+					global.Text.withArticle(t.name + " alley-oop off the backboard") +
+						" has been looped on every highlight show",
 				]), [t.name]];
 			},
 			(r) => {
@@ -2336,6 +2366,10 @@
 						" stopped playing basketball in the second half",
 					a.name + " and " + b.name + " needed eleven minutes of review and " +
 						"four ejections to finish a game neither will forget",
+					"The handshake line between " + a.name + " and " + b.name +
+						" did not get as far as a handshake",
+					a.name + " and " + b.name +
+						" finished with nine players between them after a second-half fight",
 				]), [a.name, b.name]];
 			},
 			(r) => {
@@ -2373,10 +2407,13 @@
 				const t = r.pick(ranked.slice(0, 80));
 				return ["attendance", r.pick([
 					t.name + " played in front of the largest home crowd in the " +
-						"programme's history",
+						"program's history",
 					"The student section at " + t.name + " camped out for two nights " +
 						"and filled the building an hour before tip",
-					t.name + " sold out its arena for the first time in eleven years",
+					t.name + " sold out " + ((global.Colleges.ARENAS || {})[t.name] || "its arena") +
+						" for the first time in eleven years",
+					t.name + " moved a home game to the NBA arena downtown and filled that too",
+					"Fans at " + t.name + " stormed the floor, and the conference has fined the school for it",
 				]), [t.name]];
 			},
 			(r) => {
@@ -2391,6 +2428,10 @@
 						"loss at " + a.name,
 					"Two technical fouls in the last minute decided " + a.name +
 						" against " + b.name + ", which is not how anybody wanted it decided",
+					"A shot-clock violation that was never called decided " + a.name +
+						"'s win over " + b.name,
+					"The conference has apologized to " + b.name +
+						" for the final ninety seconds at " + a.name,
 				]), [a.name, b.name]];
 			},
 		];

@@ -148,10 +148,10 @@
 		"Albany Anchors", "Anchorage Glaciers", "Birmingham Steel", "Boise Bison",
 		"Buffalo Blizzard", "Charleston Tides", "Columbus Captains", "El Paso Suns",
 		"Fresno Raisins", "Hartford Harbor", "Honolulu Waves", "Jacksonville Pilots",
-		"Kansas City Monarchs", "Las Vegas Aces High", "Louisville Thoroughbreds",
+		"Kansas City Stockyards", "Las Vegas Neon", "Louisville Thoroughbreds",
 		"Madison Lakers", "Memphis Blues", "Montreal Voyageurs", "Nashville Sound",
-		"Norfolk Admirals", "Omaha Stockmen", "Pittsburgh Ironmen", "Portland Pines",
-		"Providence Friars", "Raleigh Oaks", "Richmond Rebels", "Sacramento Gold",
+		"Norfolk Mariners", "Omaha Stockmen", "Pittsburgh Ironmen", "Portland Pines",
+		"Providence Lamplighters", "Raleigh Oaks", "Richmond Rebels", "Sacramento Gold",
 		"San Juan Coquis", "St. Louis Arches", "Tulsa Roughnecks",
 	];
 	const GROUP = { PG: "guard", SG: "guard", G: "guard", GF: "wing", SF: "wing", F: "wing",

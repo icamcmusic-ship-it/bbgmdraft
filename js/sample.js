@@ -18,13 +18,19 @@
 		"Bryce", "Keon", "Tariq", "Josh", "Nikola", "Luka", "Dario", "Matteo", "Tomas",
 		"Kai", "Andre", "Xavier", "Micah", "Reece", "Cole", "Tyler", "Chris", "Julian",
 		"Omar", "Rasheed", "Grant", "Ethan", "Nate", "Dominic", "Cody", "Terrence",
-		"Jordan", "Aaron", "Dylan", "Ian", "Sam", "Miles", "Jamal", "Vince"];
+		"Jordan", "Aaron", "Dylan", "Ian", "Sam", "Miles", "Jamal", "Vince",
+		"Ade", "Bennett", "Cyrus", "Desmond", "Emeka", "Felix", "Gideon", "Hassan", "Idris", "Jonah",
+		"Kendall", "Leandro", "Mateus", "Nnamdi", "Oskar", "Pascal", "Quincy", "Rui", "Soren", "Tobias",
+	];
 	const LAST = ["Williams", "Johnson", "Carter", "Brooks", "Mitchell", "Hendricks",
 		"Okafor", "Thompson", "Reeves", "Garland", "Bates", "Coleman", "Diallo", "Foster",
 		"Grant", "Harris", "Jenkins", "Kessler", "Lawson", "Morgan", "Nwosu", "Osei",
 		"Pierce", "Quinn", "Ramirez", "Sanders", "Turner", "Vaughn", "Walker", "Young",
 		"Jokic", "Petrovic", "Bogdanovic", "Markkanen", "Sarr", "Ndiaye", "Abdullahi",
-		"Kuminga", "Wembanyama", "Daniels", "Hardaway", "Whitmore", "Sheppard", "Castle"];
+		"Kuminga", "Wembanyama", "Daniels", "Hardaway", "Whitmore", "Sheppard", "Castle",
+		"Adeyemi", "Bertrand", "Calloway", "Drummond", "Esteves", "Fairley", "Gaston", "Holmberg", "Ilic", "Juarez",
+		"Kowalski", "Lindqvist", "Nakamura", "Ogunleye", "Pacheco", "Rademacher", "Strickland", "Tshimanga", "Underhill",
+	];
 	/* NAMES THAT BELONG TO SOMEBODY. The two pools are generic first and
 	   last names with a few recognisably international surnames, and their
 	   product includes real NBA players — "Nikola Jokic" came up in 13 of
@@ -46,6 +52,7 @@
 		"Caleb Foster", "Caleb Daniels", "Amari Williams", "Malik Williams",
 		"Xavier Johnson", "Andre Johnson", "Chris Walker", "Marcus Foster",
 		"Jaylen Brown", "Cole Anthony", "Trey Murphy",
+		"Andre Drummond",
 	]);
 	const HOME = [
 		["Chicago, IL", 6], ["Atlanta, GA", 5], ["Houston, TX", 5], ["Los Angeles, CA", 5],
@@ -56,6 +63,10 @@
 		["Zagreb, Croatia", 1], ["Vilnius, Lithuania", 1], ["Paris, France", 2],
 		["Madrid, Spain", 1], ["Melbourne, Australia", 2], ["Lagos, Nigeria", 2],
 		["Dakar, Senegal", 1], ["Tokyo, Japan", 1], ["São Paulo, Brazil", 1],
+		["Newark, NJ", 2], ["Raleigh, NC", 2], ["Milwaukee, WI", 1], ["Oakland, CA", 2], ["Las Vegas, NV", 1],
+		["New Orleans, LA", 2], ["Birmingham, AL", 1], ["Louisville, KY", 1], ["Kaunas, Lithuania", 1],
+		["Istanbul, Turkey", 1], ["Yaounde, Cameroon", 1], ["Sydney, Australia", 1], ["Auckland, New Zealand", 1],
+		["Buenos Aires, Argentina", 1], ["Ljubljana, Slovenia", 1],
 	];
 
 	const pickWeighted = (rng, rows) => {

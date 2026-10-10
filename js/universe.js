@@ -4227,6 +4227,14 @@
 		(s, f) => s + " Rising",
 		(s, f) => "A " + cap(f) + " World",
 		(s, f) => "After " + s,
+		(s, f) => "The " + s + " Dynasty",
+		(s, f) => "Long Live " + s,
+		(s, f) => cap(f) + " and After",
+		(s, f) => "Seasons of " + s,
+		(s, f) => "The Road Through " + s,
+		(s, f) => "When " + s + " Ruled",
+		(s, f) => "The " + cap(f) + " Chronicles",
+		(s, f) => "Ghosts of " + s,
 	];
 	function cap(x) { x = String(x || ""); return x.charAt(0).toUpperCase() + x.slice(1); }
 	function randomName(seed, schools, flavors) {

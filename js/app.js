@@ -3941,6 +3941,9 @@
 			["Stat sheet", ["summary", "team", "stats", "shooting", "advanced", "defense",
 				"playmaking", "highs", "ranks"]],
 			["Everything", global.Engine.NOTE_LINES.map((x) => x[0])],
+			["Draft room", ["summary", "team", "archetype", "traits", "stock", "ranks"]],
+			["Biography", ["summary", "team", "path", "coach", "record", "injury"]],
+			["Tournament", ["summary", "team", "record", "march", "signature", "awards"]],
 		];
 		const presetBar = el("div", "notepresets");
 		presetBar.setAttribute("role", "group");
@@ -6832,6 +6835,18 @@
 			budget: 3,
 			forbid: ["midMajorLift"],
 		},
+		{ key: "passport", name: "Passports", seed: "challenge-passport",
+			blurb: "Three of the top fourteen played abroad, and the No. 1 pick did not.",
+			cfg: {}, goals: ["abroadLottery", "!abroadNo1"], budget: 3 },
+		{ key: "underdog", name: "Nobody wanted him", seed: "challenge-underdog",
+			blurb: "A two-star recruit in the top ten without raising the anomaly budget.",
+			cfg: {}, goals: ["unrankedTop10"], budget: 2, forbid: ["surpriseBudget"] },
+		{ key: "dukebound", name: "Blue-blood pipeline", seed: "challenge-blueblood",
+			blurb: "A top-five pick plays at Kentucky, and the No. 1 pick is a freshman.",
+			cfg: {}, goals: ["school:Kentucky", "freshmanNo1"], budget: 4 },
+		{ key: "chalk", name: "Chalk and stars", seed: "challenge-chalk",
+			blurb: "No Cinderella, an unbeaten team, and six freshmen in the top ten.",
+			cfg: {}, goals: ["!cinderella", "unbeaten", "freshmen:6"], budget: 4 },
 	];
 
 	/* How a challenge attempt stands right now: which goals the class on

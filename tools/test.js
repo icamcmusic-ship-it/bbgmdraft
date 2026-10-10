@@ -2514,10 +2514,10 @@ console.log("\nEarlier seasons: nights, highs and honors; statlines abroad; the 
 				share >= 0.11 && share <= 0.15,
 				(share * 100).toFixed(1) + "% of " + RBt.ARCHETYPES.length);
 		}
-		ok("the Tim Duncan Award replaced the Karl Malone Award",
-			global.Awards.POSITION_AWARDS.some((a) => a.name === "Tim Duncan Award") &&
-			!global.Awards.POSITION_AWARDS.some((a) => /Malone/.test(a.name)) &&
-			global.Awards.isMajorAward("Tim Duncan Award"));
+		ok("the power-forward award is the Karl Malone Award (Hall of Fame)",
+			global.Awards.POSITION_AWARDS.some((a) => a.name === "Karl Malone Award") &&
+			!global.Awards.POSITION_AWARDS.some((a) => /Duncan/.test(a.name)) &&
+			global.Awards.isMajorAward("Karl Malone Award"));
 	}
 }
 
