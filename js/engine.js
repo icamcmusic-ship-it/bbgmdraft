@@ -8140,6 +8140,27 @@
 			r.pot = p.newPot;
 			r.pos = p.newPos;
 			r.skills = p.newSkills.slice();
+			/* opts.ratingsHistory (audit Q19, off by default): one ratings row
+			   per simulated college season before this one, at the overall
+			   ovrYearsAgo gave that season, so BBGM's rating-history chart
+			   shows his development. Older rows first; the draft season's row
+			   stays last, which is the row BBGM's draft import reads. */
+			if (opts.ratingsHistory && Array.isArray(p.priorSeasons) && p.priorSeasons.length) {
+				const rows = p.priorSeasons.filter((ps) => ps && Number.isFinite(ps.season) &&
+					Number.isFinite(ps.ovr) && ps.season < result.season)
+					.sort((a, b) => a.season - b.season)
+					.map((ps) => {
+						const d = ps.ovr - p.newOvr;
+						const row = Object.assign({}, r, { season: exportSeason - (result.season - ps.season),
+							ovr: ps.ovr, pot: p.newPot, skills: [] });
+						for (const k of BB.RATING_KEYS) {
+							if (k === "hgt") continue;
+							row[k] = clamp(Math.round((r[k] || 0) + d), 0, 100);
+						}
+						return row;
+					});
+				if (rows.length) out.ratings = out.ratings.slice(0, last).concat(rows, [r]);
+			}
 			out.draft = Object.assign({}, out.draft, {
 				ovr: p.newOvr, pot: p.newPot, skills: p.newSkills.slice(),
 			});

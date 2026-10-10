@@ -4401,6 +4401,131 @@
 			.slice(0, n || 40);
 	}
 
+	/* LINKING CAREERS ACROSS FILES (moved from js/app.js for the CLI, audit
+	   Q30). Pure over its arguments: `u` is the universe (its `links`),
+	   `results` the per-file results (mutated: priorSeasons, laterSeasons,
+	   priorAwards, notes), `order` the chain's [{index}], `onlyIndex` one
+	   file. */
+	function linkCareers(u, results, order, onlyIndex) {
+		const inChain = new Set((order || []).map((d) => d.index));
+		/* READ FROM WHAT THE CHAIN RECORDED, NOT FROM EVERY EARLIER RESULT.
+
+		   This used to walk every target file and, for each, rehydrate every
+		   EARLIER season with ensureResult to read its futurePlayers — which
+		   at the end of a long chain re-simulated every evicted season and
+		   held all of them at once, undoing the memory bound the chain had
+		   just kept. The chain now records, as each season runs, the rows it
+		   produced for men from other files (state.universe.links, keyed by
+		   the file each man belongs to — see Universe.beginChain), so linking
+		   a file needs that file and nothing else.
+
+		   And BOTH directions are applied. The returner branch (a man from an
+		   EARLIER class playing a LATER season) sat inside a loop over the
+		   seasons BEFORE each file, where no returner can be, so it never
+		   ran: laterSeasons was only ever empty. */
+		const targets = onlyIndex !== undefined ? [onlyIndex] : Array.from(inChain);
+		/* The earlier season's page links forward to the man he became. The
+		   fields it needs are on the row itself, so a rehydrated source gets
+		   its links back without the target file being live. */
+		for (const i of targets) {
+			const res = results[i];
+			if (!res) continue;
+			for (const fp of res.futurePlayers || []) {
+				if (!fp || !fp.stats || !inChain.has(fp.fileIndex)) continue;
+				const key = fp.past ? (fp.homeKey || fp.key) : fp.homeKey;
+				if (!key) continue;
+				fp.laterKey = key;
+				fp.laterFileIndex = fp.fileIndex;
+			}
+		}
+		for (const j of targets) {
+			const resJ = results[j];
+			if (!resJ || !resJ.players) continue;
+			const entries = (u && u.links && u.links[j]) || [];
+			if (!entries.length) continue;
+			const byKey = new Map();
+			for (const p of resJ.players) if (p && p.key !== undefined) byKey.set(p.key, p);
+			const touched = new Set();
+			for (const x of entries) {
+				const fp = x.fp;
+				const team = x.team;
+				if (!fp || !fp.stats) continue;
+				/* THE SEASONS AFTER HIS DRAFT YEAR. A returner went undrafted
+				   and came back; it belongs on his career table and NOT in his
+				   priorSeasons, because exportFile writes those as BBGM stats
+				   rows dated before the draft. */
+				if (fp.past) {
+					const owner = byKey.get(fp.homeKey || fp.key);
+					if (!owner) continue;
+					if (!Array.isArray(owner.laterSeasons)) owner.laterSeasons = [];
+					const row = {
+						season: x.season, team: fp.newCollege,
+						classYear: fp.classYear, ovr: fp.newOvr,
+						gp: Math.round(fp.stats.gp), mpg: fp.stats.mpg,
+						ppg: fp.stats.ppg, rpg: fp.stats.rpg, apg: fp.stats.apg,
+						ts: fp.stats.ts,
+						record: team ? { w: team.w, l: team.l } : null,
+						awards: (fp.awards || []).slice(),
+						universeFileIndex: x.source, universeKey: fp.key,
+						after: true,
+					};
+					/* REFRESHED, not only added: a warm re-run produces a new
+					   line for the same season, and the old code kept the first
+					   one it ever saw. */
+					const at = owner.laterSeasons.findIndex((r) => r.season === x.season);
+					if (at >= 0) owner.laterSeasons[at] = row;
+					else owner.laterSeasons.push(row);
+					owner.laterSeasons.sort((a, b) => a.season - b.season);
+					touched.add(owner);
+					continue;
+				}
+				const p = byKey.get(fp.homeKey);
+				if (!p) continue;
+				if (!Array.isArray(p.priorSeasons)) p.priorSeasons = [];
+				let row = p.priorSeasons.filter((r) => r.season === x.season && !r.redshirt)[0];
+				if (!row) {
+					row = { season: x.season, redshirt: false };
+					p.priorSeasons.push(row);
+					p.priorSeasons.sort((a, b) => a.season - b.season);
+				}
+				const gl = fp.gameLog || null;
+				/* THE SEASON THIS ROW EXPORTS AS: the absolute season, computed
+				   where the file it was played in is known (see
+				   Universe.beginChain), so exportFile does not shift it by this
+				   file's own startingSeason-to-draft-year difference. */
+				Object.assign(row, {
+					exportSeason: x.exportSeason,
+					team: fp.newCollege, classYear: fp.classYear, ovr: fp.newOvr,
+					gp: Math.round(fp.stats.gp), mpg: fp.stats.mpg, ppg: fp.stats.ppg,
+					rpg: fp.stats.rpg, apg: fp.stats.apg, usg: fp.stats.usg, ts: fp.stats.ts,
+					line: fp.stats, box: team ? team.box : null, lines: team ? team.lines : null,
+					pos: fp.newPos, gameLog: gl, highs: gl ? gl.highs : null, best: gl ? gl.best : null,
+					twentyPointGames: gl ? gl.twentyPointGames : 0,
+					doubleDoubles: gl ? gl.doubleDoubles : 0,
+					record: team ? { w: team.w, l: team.l } : null,
+					awards: (fp.awards || []).slice(),
+					simulated: true, universe: true,
+					universeFileIndex: x.source, universeKey: fp.key,
+					postseason: team ? team.postseason : null,
+				});
+				touched.add(p);
+			}
+			for (const p of touched) {
+				p.priorAwards = [];
+				for (const r of p.priorSeasons || []) {
+					for (const award of r.awards || []) {
+						p.priorAwards.push({ season: r.season, classYear: r.classYear, award,
+							exportSeason: r.exportSeason });
+					}
+				}
+				try {
+					p.note = global.Engine.buildNote(p, resJ.teams, resJ.season, resJ.cfg);
+				} catch (e) { /* the note is a convenience; the page still renders */ }
+			}
+		}
+	}
+
+
 	/* THE PRO CAREER TAIL. Seeded from the player id, so the same man has
 	   the same pro career on every machine; pot sets the odds and the draft
 	   slot nudges them. Not a simulation: a plausible epilogue. */
@@ -4546,6 +4671,6 @@
 		synthFile, synthFiles, synthFromOrder, synthFingerprint, returnerEntrants, applyEntrants,
 		SYNTH_SIZE,
 		rowMentions, followedCard, followedLead, dynastyProgress, lowPrestige,
-		proOutcome, proText, proHall, seasonDetail,
+		proOutcome, proText, proHall, seasonDetail, linkCareers,
 	};
 })(typeof window !== "undefined" ? window : self);
