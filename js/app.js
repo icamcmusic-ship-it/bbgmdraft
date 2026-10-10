@@ -65,6 +65,8 @@
 		flavorHistory: [],
 		// The season storylines, a list of name lists (audit R8).
 		narrativeHistory: [],
+		// Season-event templates used, a list of lists (audit R10).
+		templateHistory: [],
 		presetName: "default",
 		presetDirty: false,
 		customPresets: {},
@@ -392,6 +394,7 @@
 			anomalyHistory: state.anomalyHistory,
 			flavorHistory: state.flavorHistory,
 			narrativeHistory: state.narrativeHistory,
+			templateHistory: state.templateHistory,
 			mutators: state.mutators,
 			presetName: state.presetName,
 			presetDirty: state.presetDirty,
@@ -623,6 +626,10 @@
 			state.narrativeHistory = saved.narrativeHistory.filter(Array.isArray)
 				.map((a) => a.filter((n) => typeof n === "string"));
 		}
+		if (Array.isArray(saved.templateHistory)) {
+			state.templateHistory = saved.templateHistory.filter(Array.isArray)
+				.map((a) => a.filter((n) => typeof n === "string"));
+		}
 		state.mutators = global.ReplayMeta.cleanMutators(saved.mutators);
 		if (validString(saved.presetName)) state.presetName = saved.presetName;
 		state.presetDirty = !!saved.presetDirty;
@@ -824,6 +831,7 @@
 			// And the flavor memory, for the same reason.
 			flavorHistory: (state.flavorHistory || []).slice(),
 			narrativeHistory: (state.narrativeHistory || []).map((a) => a.slice()),
+			templateHistory: (state.templateHistory || []).map((a) => a.slice()),
 			/* Per-file randomized-settings patches (see randomizeSettings'
 			   "draw separately for each loaded class"), for the same reason
 			   lastSeed is here: it is an input that lives outside cfg, and an
@@ -866,6 +874,7 @@
 		if (Array.isArray(snap.anomalyHistory)) state.anomalyHistory = snap.anomalyHistory;
 		if (Array.isArray(snap.flavorHistory)) state.flavorHistory = snap.flavorHistory;
 		if (Array.isArray(snap.narrativeHistory)) state.narrativeHistory = snap.narrativeHistory;
+		if (Array.isArray(snap.templateHistory)) state.templateHistory = snap.templateHistory;
 		state.fileCfgs = snap.fileCfgs && typeof snap.fileCfgs === "object"
 			? snap.fileCfgs : {};
 		if (snap.universeBiography !== undefined) state.universeBiography = snap.universeBiography;
@@ -5532,6 +5541,7 @@
 		// forty-six builds does; this is the same memory on that axis.
 		cfg.recentFlavors = (state.flavorHistory || []).slice(0, POOL_HISTORY);
 		cfg.recentNarratives = (state.narrativeHistory || []).slice(0, POOL_HISTORY);
+		cfg.recentTemplates = (state.templateHistory || []).slice(0, POOL_HISTORY);
 		/* A challenge is the same class for everybody, so this browser's
 		   memory of its last few classes stays out of it. */
 		if (state.challenge) {
@@ -5539,6 +5549,7 @@
 			cfg.recentAnomalies = [];
 			cfg.recentFlavors = [];
 			cfg.recentNarratives = [];
+			cfg.recentTemplates = [];
 		}
 		/* Reroll scope "schools too" (audit R2): the file's colleges are what
 		   make one program the favourite in every reroll, so this redraws them
@@ -5612,6 +5623,15 @@
 			if (hist[0] !== res.flavor.name) {
 				hist.unshift(res.flavor.name);
 				state.flavorHistory = hist.slice(0, POOL_HISTORY);
+			}
+		}
+		// And the season-event phrasing (audit R10), on the same terms.
+		const tpls = (res.seasonEvents || []).map((e) => e && e.tpl).filter(Boolean);
+		if (tpls.length) {
+			const hist = (state.templateHistory || []).slice();
+			if (!hist.length || hist[0].join("|") !== tpls.join("|")) {
+				hist.unshift(tpls);
+				state.templateHistory = hist.slice(0, POOL_HISTORY);
 			}
 		}
 		// And the storylines (audit R8), on the same terms.

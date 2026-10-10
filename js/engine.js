@@ -4560,6 +4560,211 @@
 				return true;
 			},
 		},
+		/* NINE MORE (audit 2026-10-10, R10): nine kinds and about five a
+		   class meant every class showed more than half of them. Same rules
+		   as the three above: every move lands inside the draft and none
+		   takes a man from past the last pick. */
+		{
+			name: "pre-draft injury", w: 1.0,
+			label: "slid on a pre-draft injury",
+			pick: (i, n) => i >= 0 && i < Math.min(30, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const to = Math.min(board.length - 1, DRAFT_PICKS - 1, i + r.int(3, 8));
+				if (to <= i) return false;
+				const p = board[i];
+				p.draftEvent = {
+					kind: "fall",
+					from: i,
+					say: (moved) => (moved > 0
+						? "slid " + Text.plural(moved, "spot") + " with an injury picked up in June"
+						: "was hurt in June and went where the board had him anyway"),
+					detail: r.pick([
+						"a sprained ankle in his last workout",
+						"a broken finger that needed a pin",
+						"a hamstring that kept him out of the combine",
+					]),
+				};
+				move(board, i, to);
+				return true;
+			},
+		},
+		{
+			name: "film riser", w: 1.0,
+			label: "rose on the film",
+			pick: (i, n) => i >= 20 && i < Math.min(50, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const to = Math.max(0, i - r.int(3, 8));
+				if (to >= i) return false;
+				const p = board[i];
+				p.draftEvent = {
+					kind: "rise",
+					from: i,
+					say: (moved) => (moved < 0
+						? "rose " + Text.plural(-moved, "spot") + " as teams went back to the film"
+						: "rose on the film"),
+					detail: r.pick([
+						"his defensive tape aged better than his box score",
+						"teams liked what he did against ranked opponents",
+						"a second look at his March changed minds",
+					]),
+				};
+				move(board, i, to);
+				return true;
+			},
+		},
+		{
+			name: "measurements disappointed", w: 0.9,
+			label: "measured smaller than listed",
+			pick: (i, n) => i >= 4 && i < Math.min(35, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const to = Math.min(board.length - 1, DRAFT_PICKS - 1, i + r.int(3, 7));
+				if (to <= i) return false;
+				const p = board[i];
+				p.draftEvent = {
+					kind: "fall",
+					from: i,
+					say: (moved) => (moved > 0
+						? "slid " + Text.plural(moved, "spot") + " after measuring smaller than his listing"
+						: "measured smaller than listed"),
+					detail: r.pick([
+						"an inch and a half shorter in shoes than his program said",
+						"a wingspan barely longer than his height",
+						"lighter than anyone had expected",
+					]),
+				};
+				move(board, i, to);
+				return true;
+			},
+		},
+		{
+			name: "agent steered him", w: 0.8,
+			label: "his agent steered him to a team",
+			pick: (i, n) => i >= 25 && i < Math.min(60, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const to = Math.max(0, i - r.int(2, 6));
+				if (to >= i) return false;
+				const p = board[i];
+				p.draftEvent = {
+					kind: "steered",
+					from: i,
+					say: (moved) => (moved < 0
+						? "went " + Text.plural(-moved, "spot") + " early to the team his agent had chosen"
+						: "went to the team his agent had steered him toward"),
+					detail: r.pick([
+						"he worked out for exactly one team",
+						"his camp told everybody else he would play overseas",
+						"the medical records went to one front office",
+					]),
+				};
+				move(board, i, to);
+				return true;
+			},
+		},
+		{
+			name: "consolidation trade", w: 0.8,
+			label: "a team packaged picks to take him",
+			pick: (i, n) => i >= 10 && i < Math.min(40, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const to = Math.max(0, i - r.int(2, 5));
+				if (to >= i) return false;
+				const p = board[i];
+				p.draftEvent = {
+					kind: "trade",
+					from: i,
+					say: (moved) => (moved < 0
+						? "a team packaged two picks to move up " + Text.plural(-moved, "spot") + " for him"
+						: "a team packaged two picks to take him"),
+					detail: r.pick([
+						"two seconds and a swap",
+						"both of the team's late firsts",
+						"a pick and a player on a rookie deal",
+					]),
+				};
+				move(board, i, to);
+				return true;
+			},
+		},
+		{
+			name: "cancelled workouts", w: 0.8,
+			label: "fell after cancelling workouts",
+			pick: (i, n) => i >= 0 && i < Math.min(28, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const to = Math.min(board.length - 1, DRAFT_PICKS - 1, i + r.int(2, 6));
+				if (to <= i) return false;
+				const p = board[i];
+				p.draftEvent = {
+					kind: "fall",
+					from: i,
+					say: (moved) => (moved > 0
+						? "slid " + Text.plural(moved, "spot") + " after cancelling his lottery workouts"
+						: "cancelled his lottery workouts"),
+					detail: r.pick([
+						"he would only work out for teams in the top five",
+						"his camp wanted a specific market",
+						"a promise that turned out not to be one",
+					]),
+				};
+				move(board, i, to);
+				return true;
+			},
+		},
+		{
+			name: "hometown pick", w: 0.7,
+			label: "drafted by his hometown team",
+			pick: (i, n) => i >= 0 && i < Math.min(60, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const p = board[i];
+				p.draftEvent = {
+					kind: "hometown",
+					from: i,
+					say: (moved, at) => "was taken at No. " + (at + 1) + " by the team he grew up watching",
+					detail: r.pick([
+						"the arena he went to as a kid",
+						"his high school coach was in the building",
+						"the local paper ran him on the front page",
+					]),
+				};
+				return true;
+			},
+		},
+		{
+			name: "draft and stash", w: 0.7,
+			label: "drafted to stay overseas",
+			pick: (i, n, p) => i >= 30 && i < Math.min(n, DRAFT_PICKS) && !!p && (p.nonNcaa || /Senior|Graduate/.test(String(p.classYear || ''))),
+			apply: (board, i, r) => {
+				const p = board[i];
+				p.draftEvent = {
+					kind: "stash",
+					from: i,
+					say: (moved, at) => "was taken at No. " + (at + 1) + " to be stashed for a season",
+					detail: r.pick([
+						"he signed a two-year deal abroad the same week",
+						"the team had no roster spot to give him",
+						"his buyout made the timing easy",
+					]),
+				};
+				return true;
+			},
+		},
+		{
+			name: "two-way promise", w: 0.7,
+			label: "taken late on a two-way promise",
+			pick: (i, n) => i >= 45 && i < Math.min(60, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const p = board[i];
+				p.draftEvent = {
+					kind: "twoway",
+					from: i,
+					say: (moved, at) => "went at No. " + (at + 1) + " with a two-way contract waiting",
+					detail: r.pick([
+						"the contract was agreed before the pick",
+						"the G League affiliate had wanted him all year",
+						"he turned down a guaranteed deal abroad for it",
+					]),
+				};
+				return true;
+			},
+		},
 	];
 
 	/* Why a team reached, in the player's own terms. A reach is a bet on
@@ -5150,7 +5355,7 @@
 			   that skipped it left the box score and the results page in two
 			   different eras. */
 			deps: ["era", "pace", "scoringEnv", "injuryRate", "realignmentRate",
-				"bluebloodDownYears", "midMajorLift", "teamMomentum", "seasonEvents",
+				"bluebloodDownYears", "midMajorLift", "teamMomentum", "seasonEvents", "recentTemplates",
 				// The world dials: all three are read by buildPrograms.
 				"realignmentMemory", "starReturners", "portalRate", "styleDrift",
 				// weirdness bends realignmentRate, styleDrift and the down-year
@@ -6327,9 +6532,36 @@
 				: Text.withArticle(who) + build + at) +
 				(clause ? " — " + clause : "") + "."),
 		];
+		/* THREE MORE OPENERS (audit 2026-10-10, R10): 69% of notes opened
+		   "A 6'10" freshman…". Stat-led, story-led and origin-led, each only
+		   when it has something to lead with. */
+		if (numbers) {
+			variants.push(() => Text.capitalize(numbers + (place ? " for " + place : "") +
+				" from " + Text.withArticle(who) + build + (clause ? ", with " + clause : "") + "."));
+		}
+		const rec = p.recruiting;
+		const story = p.transfer && p.transfer.from ? "a transfer from " + p.transfer.from
+			: rec && Number.isFinite(rec.rank) ? "the No. " + rec.rank + " recruit in his class"
+				: p.reclassified ? "a reclassified prospect" : "";
+		if (story) {
+			variants.push(() => Text.capitalize(story + ", now " + Text.withArticle(who) + build + at +
+				(numbers ? " putting up " + numbers : "") + (clause ? "; " + clause : "") + "."));
+		}
+		const loc = p.born && typeof p.born.loc === "string" && p.born.loc && p.born.loc !== "USA"
+			? p.born.loc : "";
+		if (loc) {
+			variants.push(() => "Out of " + loc + ", " + Text.withArticle(who) + build + at +
+				(numbers ? ": " + numbers : "") + (clause ? ", with " + clause : "") + ".");
+		}
 		void season;
 		return rng.pick(variants)();
 	}
+
+	/* Who says it (audit R10): every scouting paragraph opened "Scouts
+	   note". Each takes the trait clause as its object. */
+	const SCOUT_ATTRIBUTIONS = ["Scouts note", "Scouts point to", "Evaluators cite",
+		"One Western Conference scout cites", "Front offices mention", "Area scouts highlight",
+		"League personnel flag", "The book on him starts with"];
 
 	function buildNote(p, teams, season, cfg, state, seasonShift) {
 		const s = p.stats;
@@ -6428,7 +6660,8 @@
 		if (on("traits") && p.traits && p.traits.length) {
 			const clause = TR.noteClause(p.traits);
 			const rest = p.traits.slice(2).map((t) => t.name);
-			lines.push("Scouts note " + clause + "." +
+			lines.push(SCOUT_ATTRIBUTIONS[new Rng("scoutnote|" + p.key).int(0, SCOUT_ATTRIBUTIONS.length - 1)] +
+				" " + clause + "." +
 				(rest.length ? " Also: " + rest.join("; ") + "." : ""));
 		}
 		if (s && on("stats")) {

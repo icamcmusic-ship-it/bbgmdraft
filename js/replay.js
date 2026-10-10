@@ -416,7 +416,7 @@
 	   no engine work. Only the fields a challenge is made of survive, every
 	   goal must parse, and a pack runs on the canonical class of its seed. */
 	function encodePack(name, list) {
-		return encodeCode({ pk: String(name || "pack"), l: (list || []).map(cleanChallenge).filter(Boolean) });
+		return encodeCode({ pk: String(name || "pack"), l: (list || []).map((c) => cleanChallenge(c)).filter(Boolean) });
 	}
 	function cleanChallenge(c, parse) {
 		if (!c || typeof c !== "object") return null;

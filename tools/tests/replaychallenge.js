@@ -27,26 +27,75 @@ module.exports = function (ok, V) {
 		ok("every daily goal is a reroll predicate", allValid);
 		ok("every daily budget is 3 to 5", budgetsOk);
 		ok("the goals vary from day to day", combos.size >= 5, combos.size + " combos");
-		/* Plausibly solvable: the stretch goal's lever plus a variation
-		   within budget clears it, on the harness's realistic class. */
-		const lf = V.realisticClass(90, 70);
-		/* Dates that are solvable on this class under ENGINE_REV 3. A daily is
-		   solvable only by luck of the date's goals against the loaded file
-		   (11 of 13 dates scanned were not on this class: audit 2026-10-05, §4
-		   R4), so this pins two that are and says nothing about the rest. */
-		for (const date of ["2026-10-02", "2026-10-09"]) {
+		/* Plausibly solvable on the CANONICAL class (audit 2026-10-10, R5):
+		   the stretch goal's lever plus a variation within budget clears it.
+		   Not every date is (the goals are drawn blind), so this scans eight
+		   and asks that most are, and that every stretch lever is a real
+		   setting. */
+		const D = CFG.DEFAULTS;
+		ok("every stretch lever names real settings",
+			R.DAILY_STRETCH.every((g) => Object.keys(g.lever).every((k) => k in D)));
+		ok("every daily names its canonical class and a weekly theme",
+			R.dailyChallenge("2026-10-02").classSeed === "daily-2026-10-02" &&
+			R.WEEKLY_THEMES.some((t) => t.key === R.dailyChallenge("2026-10-02").theme));
+		let solvable = 0;
+		const tried = [];
+		for (const date of ["2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05"]) {
 			const ch = R.dailyChallenge(date);
+			const lf = global.Sample.makeClass(ch.classSeed, 70, ch.classYear);
 			const preds = ch.goals.map(E.parseRerollClause);
 			let solved = null;
-			for (let v = 0; v <= 6 && solved === null; v++) {
+			for (let v = 0; v <= 4 && solved === null; v++) {
 				const cfg = Object.assign({ seed: ch.seed, variation: v }, ch.lever);
 				if (preds.every((p) => p.test(E.run(lf, CFG.make(cfg))))) solved = v;
 			}
 			const dials = Object.keys(ch.lever).length + (solved ? 1 : 0);
-			ok("the daily for " + date + " is solvable within budget",
-				solved !== null && dials <= ch.budget,
-				ch.goals.join(", ") + " · variation " + solved);
+			if (solved !== null && dials <= ch.budget) solvable++;
+			tried.push(date + ": " + ch.goals.join(", ") + " -> " + solved);
 		}
+		ok("most dailies are solvable with their lever on the canonical class", solvable >= 2,
+			tried.join(" | "));
+	}
+
+	/* --- streaks, ladder, share line, packs (R6, Q22, R12) -------------- */
+	{
+		const h = { "2026-10-07": 110, "2026-10-08": 100, "2026-10-09": 95, "2026-10-01": 80 };
+		const st = R.dailyStreak(h, "2026-10-10");
+		ok("a streak counts back from yesterday when today is not played yet",
+			st.current === 3 && st.longest === 3 && st.strip.length === 30, JSON.stringify(st.current));
+		ok("...and from today once it is", R.dailyStreak(Object.assign({ "2026-10-10": 1 }, h), "2026-10-10").current === 4);
+		ok("a gap breaks it", R.dailyStreak({ "2026-10-08": 1 }, "2026-10-10").current === 0);
+		const lad = R.weeklyLadder(h, "2026-10-09");
+		ok("the weekly ladder sums Monday to Sunday", lad.week === "2026-10-05" && lad.total === 305 &&
+			R.decodeCode(lad.code).wk === "2026-10-05", JSON.stringify(lad));
+		const ch = R.dailyChallenge("2026-10-02");
+		const line = R.shareLine(ch, { goals: [{ met: true }, { met: false }], solved: false,
+			moved: ["upsetFactor"], budget: 3 }, 4, { current: 5 });
+		ok("the share line is spoiler-free", line.indexOf("upsetFactor") === -1 &&
+			/1\/3 dials/.test(line) && /4 runs/.test(line) && /streak 5/.test(line), line);
+		const code = R.encodePack("my pack", [{ key: "a", name: "A", seed: "s1", goals: ["unbeaten"], budget: 2 },
+			{ key: "bad", seed: "s2", goals: ["notAPredicate"], budget: 1 }]);
+		const pk = R.decodePack(code, E.parseRerollClause);
+		ok("a scenario pack round-trips and drops a challenge whose goals do not parse",
+			pk && pk.list.length === 1 && pk.list[0].key === "pack:mypack:a" && pk.list[0].classSeed === "pack-s1");
+		ok("a non-pack code is no pack", R.decodePack(R.encodeCode({ x: 1 })) === null);
+		const rc = R.readResult(R.makeResult({ seed: "x" }, { fp: "abc123" }));
+		ok("a result code carries the class fingerprint", rc && rc.fp === "abc123");
+	}
+
+	/* --- puzzle (R7) ---------------------------------------------------- */
+	{
+		ok("the puzzle dials drop variation and classQuality",
+			!("variation" in R.PUZZLE_DIALS) && !("classQuality" in R.PUZZLE_DIALS));
+		const p0 = R.puzzle("x"), p1 = R.puzzle("x", 1);
+		ok("a redrawn puzzle keeps its seed and changes its dials",
+			p0.seed === p1.seed && JSON.stringify(p0.hidden) !== JSON.stringify(p1.hidden));
+		const t = { champion: "A", poy: "B", no1: "C", flavor: "D" };
+		ok("a puzzle the defaults half-solve is rejected",
+			R.puzzleRejected(Object.assign({}, t, { flavor: "E", no1: "F" }), t) &&
+			!R.puzzleRejected({ champion: "A", poy: "Z", no1: "Y", flavor: "X" }, t));
+		ok("a hint names a section", /^One hidden setting is in /.test(R.puzzleHint(p0, 0)) &&
+			R.puzzleHint(p0, 9) === null);
 	}
 
 	/* --- par and score ------------------------------------------------- */

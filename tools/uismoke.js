@@ -661,7 +661,7 @@ async function gotoProspects(page) {
 		   turns is flavorMemory, which does have a control. */
 		const EXEMPT = ["seed", "overrides", "leagueWeights", "archetypeWeights",
 			"noteLines", "wEuroLeague", "wGLeague", "wNBL", "recentPools",
-			"biography", "anomalyPicks", "recentFlavors", "recentNarratives"];
+			"biography", "anomalyPicks", "recentFlavors", "recentNarratives", "recentTemplates"];
 		const missing = await page.evaluate((exempt) =>
 			Object.keys(window.Config.DEFAULTS)
 				.filter((k) => exempt.indexOf(k) === -1)
