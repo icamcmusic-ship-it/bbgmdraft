@@ -87,7 +87,7 @@
 		   against a table of 361, in the very comment written to stop exactly
 		   that. A sentence nothing reads is a sentence that goes stale.
 
-		   the table is 385 builds today */
+		   the table is 447 builds today */
 		archetypePool: 46,
 		/* How many forced anomalies a class gets: a five-star bust, an
 		   unranked recruit who turns into a lottery pick, a 24-year-old JUCO,
@@ -892,7 +892,7 @@
 		/* The ceiling is the build table's size, read lazily: config.js
 		   loads before ratings.js, and a literal here went stale once. */
 		archetypePool: { lo: 0, get hi() {
-			return global.RatingsBuilder ? global.RatingsBuilder.ARCHETYPES.length : 385;
+			return global.RatingsBuilder ? global.RatingsBuilder.ARCHETYPES.length : 447;
 		} },
 		weirdness: { lo: -2, hi: 3 },
 		anomalyChoices: { lo: 0, hi: 8 },
