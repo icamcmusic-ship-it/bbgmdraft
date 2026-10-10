@@ -258,4 +258,35 @@ module.exports = function (ok, V) {
 			threads: [], registry: reg });
 		ok("a universe almanac (Q26)", /^# W/.test(md) && /All-decade teams/.test(md));
 	}
+
+	/* --- R6: a redrawn daily ------------------------------------------- */
+	{
+		const R = global.Replay;
+		const d0 = R.dailyChallenge("2026-10-10"), d1 = R.dailyChallenge("2026-10-10#1");
+		ok("a redrawn daily keeps its class and seed and changes its key",
+			d1.key === "daily-2026-10-10#1" && d1.date === "2026-10-10" && d1.seed === d0.seed &&
+			d1.classSeed === d0.classSeed);
+	}
+
+	/* --- Q29, Q31: the command line ------------------------------------ */
+	{
+		const cp = require("child_process");
+		const os = require("os");
+		const path = require("path");
+		const fs = require("fs");
+		const file = path.join(os.tmpdir(), "bbgm-audit-cli.json");
+		fs.writeFileSync(file, JSON.stringify(V.realisticClass(92, 40)));
+		const bin = path.join(__dirname, "..", "..", "bin", "bbgmdraft.js");
+		const run = (args) => cp.execFileSync(process.execPath, [bin].concat(args), { encoding: "utf8",
+			maxBuffer: 64 << 20 });
+		const news = run(["news", file, "--seed", "c1", "-q"]);
+		ok("bbgmdraft news prints the paper (Q31)", /^\[[^\]]+\] \(/.test(news) && news.split("\n\n").length > 20);
+		const md = run(["news", file, "--seed", "c1", "--md", "-q"]);
+		const kind = (/\(([^)]+)\) /.exec(news) || [])[1];
+		const one = run(["news", file, "--seed", "c1", "--kind", kind, "-q"]);
+		ok("...as Markdown, or one kind", /^## /.test(md) && one.trim().split("\n\n")
+			.every((a) => a.indexOf("(" + kind + ")") !== -1), kind);
+		ok("bbgmdraft almanac prints the almanac (Q29)", /^# The \d{4} season/.test(run(["almanac", file, "--seed", "c1", "-q"])));
+		ok("...and site the static site", /^<!doctype html>/i.test(run(["site", file, "--seed", "c1", "-q"])));
+	}
 };
