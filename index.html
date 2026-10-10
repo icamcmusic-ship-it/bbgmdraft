@@ -423,6 +423,13 @@
 	</div>
 
 	<p id="status" class="status" role="status" hidden></p>
+	<!-- The load / merge meter: see progressShow in js/app.js. -->
+	<div id="loadProgress" class="loadprog" role="progressbar" aria-valuemin="0"
+		aria-valuemax="100" aria-label="File progress" hidden>
+		<span class="lp-label"></span>
+		<progress max="100"></progress>
+		<span class="lp-detail"></span>
+	</div>
 	<!-- Collapsed by default: one line per loaded class buried the page
 	     under a wall of text on a 70-file universe. -->
 	<details id="fileSummary" class="legendline" hidden><summary></summary><div class="filelist"></div></details>

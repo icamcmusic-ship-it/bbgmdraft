@@ -281,6 +281,9 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
    had to be added to four lists. A theme now sets the six tokens in its own
    block (see the theme definitions at the top) and these rules never change. */
 .tag.arch { border-color: var(--tag-arch-border, #9dc0e4); color: var(--tag-arch-text, #17548d); }
+.tag.posbest { border-color: var(--accent); color: var(--accent); margin-left: 2px; }
+.tag.posbest.gem { border-color: var(--accent-2); color: var(--accent-2); font-weight: 600; }
+.gem { color: var(--accent-2); }
 .tag.pro { border-color: var(--tag-pro-border, #d8b98a); color: var(--tag-pro-text, #8a5714); }
 @media (prefers-color-scheme: dark) {
 	:root:not([data-theme="light"]) {
@@ -877,6 +880,19 @@ body.busy button, body.busy input[type=range] { cursor: progress; }
 	animation: spin .7s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+/* The file meter (progressShow). Sticky, so a drop onto a long page still
+   shows it, and wide enough to read the byte count on a phone. */
+.loadprog {
+	position: sticky; top: var(--stickyTop, 0); z-index: 9;
+	display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center;
+	font-size: 12px; color: var(--text); background: var(--bg, inherit);
+	border: 1px solid var(--line); border-left: 3px solid var(--accent);
+	border-radius: 6px; padding: 7px 10px; margin: 0 0 10px;
+}
+.loadprog[hidden] { display: none; }
+.loadprog .lp-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.loadprog .lp-detail { color: var(--dim); font-variant-numeric: tabular-nums; text-align: right; }
+.loadprog progress { grid-column: 1 / -1; width: 100%; height: 8px; accent-color: var(--accent); }
 @media (prefers-reduced-motion: reduce) {
 	#status.working::before { animation: none; border-right-color: var(--accent); }
 }

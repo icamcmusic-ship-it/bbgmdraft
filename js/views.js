@@ -51,6 +51,7 @@
 		{ key: "pos", label: "Pos", num: false },
 		{ key: "year", label: "Year", num: false },
 		{ key: "board", label: "Brd", num: true, title: "Position on the mock draft board" },
+		{ key: "posRank", label: "Pos#", num: true, title: "Rank on the board among his position group (guards, wings, forwards, bigs). \u25c6 marks the best at his position who was not a five-star recruit" },
 		{ key: "move", label: "±", num: true, title: "Movement from the preseason board" },
 		{ key: "newOvr", label: "Ovr", num: true },
 		{ key: "newPot", label: "Pot", num: true },
@@ -488,6 +489,16 @@
 		if ((p.awards || []).length) out.push("Honors: " + p.awards.slice(0, 4).join("; "));
 		return out;
 	}
+	function posRankTitle(p) {
+		const stars = p.recruiting && p.recruiting.stars;
+		return "No. " + p.posBoardRank + " " + p.posGroup + " on the board (No. " +
+			p.boardRank + " overall)" + (p.posLeader
+			? " \u2014 the best " + p.posGroup + " in the class" + (p.posGem
+				? (stars ? ", and only a " + stars + "-star recruit" : ", and never a ranked recruit")
+				: "")
+			: "");
+	}
+
 	function whyButton(p, res) {
 		const btn = el("button", "whybtn tiny", "?");
 		btn.type = "button";
@@ -2792,6 +2803,13 @@
 				case "name":
 					td = el("td", "sticky");
 					td.appendChild(document.createTextNode(p.name));
+					if (p.posLeader) {
+						const b = el("span", "tag posbest" + (p.posGem ? " gem" : ""),
+							"Best " + p.posGroup);
+						b.title = posRankTitle(p);
+						td.appendChild(document.createTextNode(" "));
+						td.appendChild(b);
+					}
 					td.appendChild(whyButton(p, res));
 					sortVals.name = p.name;
 					break;
@@ -2807,6 +2825,17 @@
 					td = el("td", "num", p.boardRank === undefined ? "" : String(p.boardRank));
 					sortVals.board = p.boardRank;
 					break;
+				case "posRank": {
+					td = el("td", "num");
+					if (p.posBoardRank) {
+						td.appendChild(document.createTextNode(
+							(p.posGroup || "").charAt(0).toUpperCase() + p.posBoardRank));
+						if (p.posGem) td.appendChild(el("span", "gem", " \u25c6"));
+						td.title = posRankTitle(p);
+					}
+					sortVals.posRank = p.posBoardRank;
+					break;
+				}
 				case "move": {
 					td = el("td", "num");
 					const m = p.stockMove || 0;
@@ -7828,6 +7857,9 @@
 					n1(gl.clutch.delta) + " on his average)");
 			}
 			if (p.hand === "left") row("Hand", "Left-handed");
+		}
+		if (p.posBoardRank) {
+			row("Position", posRankTitle(p).replace(/^No\./, "No."));
 		}
 		if (p.recruiting) {
 			/* The whole recruitment, not the box score of one. Rank and stars

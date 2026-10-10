@@ -4736,6 +4736,7 @@
 			p.stockMove = p.preseasonRank - p.boardRank;   // + = riser
 			p.draftSlot = null;
 		});
+		markPositionLeaders(board);
 		const order = board.slice();
 		state.draftEvents = applyDraftEvents(order, rng.child("draftday"),
 			state.effectiveCfg || state.cfg, state);
@@ -4747,6 +4748,35 @@
 		state.fallers = board.slice().sort((a, b) => a.stockMove - b.stockMove)
 			.filter((p) => p.stockMove < 0).slice(0, 8);
 		return state;
+	}
+
+	/* WHERE HE STANDS AMONG THE MEN WHO PLAY HIS POSITION.
+
+	   The board is one list, and a 3-star recruit at No. 19 who is the best
+	   centre in the class is a different prospect from a 3-star at No. 19 who
+	   is the fourth-best guard — and a draft room needing a big knows which
+	   one it is talking about. Each prospect carries his rank inside his
+	   position group on the pre-event board; the group leader is marked, and
+	   a leader who was NOT a blue-chip recruit (four stars or fewer, or not
+	   ranked at all) is a `posGem`: the man the recruiting services missed
+	   who is now the best at what he does. Pure read of the board — no draw,
+	   no effect on any other phase. */
+	const POS_GROUP = { PG: "guard", SG: "guard", G: "guard", GF: "wing", SF: "wing",
+		F: "forward", PF: "forward", FC: "big", C: "big" };
+	function positionGroupOf(pos) {
+		return POS_GROUP[pos] || "wing";
+	}
+	function markPositionLeaders(board) {
+		const seen = {};
+		for (const p of board) {
+			const g = positionGroupOf(p.newPos || p.pos);
+			seen[g] = (seen[g] || 0) + 1;
+			p.posGroup = g;
+			p.posBoardRank = seen[g];
+			p.posLeader = seen[g] === 1;
+			const stars = p.recruiting && p.recruiting.stars;
+			p.posGem = p.posLeader && p.boardRank > 3 && !(stars >= 5);
+		}
 	}
 
 	/* ------------------------------------------------------------- phase 8 */

@@ -4349,7 +4349,17 @@
 	   magic number (1f 8b) is checked — the extension is a hint, not the
 	   truth — and DecompressionStream does the rest. Everything else is the
 	   old path: decode UTF-8, drop a BOM, parse. */
-	function readTextFile(f) {
+	function readTextFile(f, onBytes) {
+		/* The streamed path, which can say how far it has got. A league
+		   export is tens or hundreds of megabytes and reading, unzipping and
+		   decoding it used to happen behind a single "Reading…" line with no
+		   sign of life for many seconds. Counting the bytes as they leave the
+		   disk — BEFORE the gzip stage, so the fraction is of the file's own
+		   size whether or not it is compressed — gives an honest meter. */
+		if (onBytes && f.stream && typeof f.size === "number" &&
+			typeof TransformStream === "function" && typeof Response === "function") {
+			return readTextStreamed(f, onBytes);
+		}
 		const buf = f.arrayBuffer
 			? f.arrayBuffer()
 			: new Promise((resolve, reject) => {
@@ -4374,6 +4384,82 @@
 					"or export it again");
 			});
 		}).then((out) => new TextDecoder("utf-8").decode(out).replace(/^\ufeff/, ""));
+	}
+
+	function readTextStreamed(f, onBytes) {
+		return f.slice(0, 2).arrayBuffer().then((h) => {
+			const head = new Uint8Array(h);
+			const gz = head.length === 2 && head[0] === 0x1f && head[1] === 0x8b;
+			if (gz && typeof DecompressionStream === "undefined") {
+				throw new Error("this browser cannot open a .gz file — unzip it first");
+			}
+			let seen = 0;
+			let last = 0;
+			const counter = new TransformStream({
+				transform(chunk, ctl) {
+					seen += chunk.byteLength;
+					// A repaint per 64 KB chunk is thousands of them; one per
+					// percent is plenty.
+					if (seen - last >= f.size / 100 || seen === f.size) {
+						last = seen;
+						onBytes(seen, f.size, gz);
+					}
+					ctl.enqueue(chunk);
+				},
+			});
+			let s = f.stream().pipeThrough(counter);
+			if (gz) s = s.pipeThrough(new DecompressionStream("gzip"));
+			return new Response(s).arrayBuffer().catch((e) => {
+				throw gz
+					? new Error("the .gz file is incomplete or corrupt — download " +
+						"or export it again")
+					: (e && e.message ? e : new Error("could not be read from disk"));
+			});
+		}).then((out) => {
+			onBytes(f.size, f.size, false, out.byteLength);
+			return new TextDecoder("utf-8").decode(out).replace(/^\ufeff/, "");
+		});
+	}
+
+	/* THE PROGRESS METER. One bar under the status line, for the paths that
+	   can take seconds: reading a big file from disk, unzipping it, parsing
+	   it, splitting the classes out of a league, merging them back in and
+	   writing the result. Small files never show it (under a megabyte a
+	   meter is a flash, not information). `frac` null is an indeterminate
+	   stage — JSON.parse cannot report how far it has got. */
+	const PROGRESS_MIN_BYTES = 1 << 20;
+	function progressShow(label, frac, detail) {
+		const box = $("loadProgress");
+		if (!box) return;
+		box.hidden = false;
+		box.querySelector(".lp-label").textContent = label;
+		box.querySelector(".lp-detail").textContent = detail || "";
+		const bar = box.querySelector("progress");
+		if (frac === null || frac === undefined || !Number.isFinite(frac)) {
+			bar.removeAttribute("value");
+			box.removeAttribute("aria-valuenow");
+		} else {
+			const pct = Math.max(0, Math.min(100, Math.round(frac * 100)));
+			bar.value = pct;
+			box.setAttribute("aria-valuenow", String(pct));
+		}
+		box.setAttribute("aria-valuetext", label + (detail ? " " + detail : ""));
+	}
+	function progressHide() {
+		const box = $("loadProgress");
+		if (box) box.hidden = true;
+	}
+	/* Two frames, so a label set just before a long synchronous step (a parse,
+	   a merge, a stringify) is actually on screen while the step runs. */
+	function nextPaint() {
+		return new Promise((resolve) => {
+			if (typeof requestAnimationFrame !== "function") { setTimeout(resolve, 0); return; }
+			requestAnimationFrame(() => setTimeout(resolve, 0));
+		});
+	}
+	function mb(n) {
+		return n >= 1 << 20 ? (n / (1 << 20)).toFixed(n >= 100 * (1 << 20) ? 0 : 1) + " MB"
+			: Math.max(1, Math.round(n / 1024)) + " KB";
 	}
 
 	/* Every draft class a dropped file contains, as loadable classes.
@@ -4483,8 +4569,26 @@
 		   malformed classes. They are set aside and handed to their own
 		   importer once the classes in the same drop are in. */
 		const side = { universe: [], settings: [], csv: [] };
-		const jobs = Array.from(fileList).map(
-			(f) => readTextFile(f).then(
+		const files = Array.from(fileList);
+		const total = files.reduce((a, f) => a + (Number(f.size) || 0), 0);
+		const meter = total >= PROGRESS_MIN_BYTES;
+		const got = files.map(() => 0);
+		let gzAny = false;
+		const label = files.length === 1 ? files[0].name : files.length + " files";
+		if (meter) progressShow("Reading " + label, 0, "0 of " + mb(total));
+		const tick = meter ? (i) => (seen, size, gz) => {
+			got[i] = seen;
+			gzAny = gzAny || gz;
+			const sum = got.reduce((a, b) => a + b, 0);
+			progressShow((gzAny && sum < total ? "Reading and unzipping " : "Reading ") + label,
+				sum / total, mb(sum) + " of " + mb(total));
+		} : () => null;
+		const jobs = files.map(
+			(f, i) => readTextFile(f, tick(i) || undefined).then((text) => {
+				if (!meter) return text;
+				progressShow("Parsing " + f.name, null, mb(text.length) + " of JSON");
+				return nextPaint().then(() => text);
+			}).then(
 				(text) => {
 					if (/\.csv$/i.test(f.name || "") || f.type === "text/csv") {
 						side.csv.push(text);
@@ -4514,6 +4618,7 @@
 			}),
 		);
 		Promise.all(jobs).then((loaded) => {
+			progressHide();
 			const classes = loaded.filter(Boolean).reduce((a, b) => a.concat(b), []);
 			const other = side.universe.length + side.settings.length + side.csv.length;
 			if (classes.length || !other) installFiles(classes, problems, opts);
@@ -11745,27 +11850,59 @@
 	/* The merge itself, once both halves are in hand: the classes to write and
 	   the league to write them into. Shared by the file-picker route and the
 	   in-memory route (the league the classes were lifted out of). */
-	function mergeInto(league, leagueName, picked) {
-		const results = [];
-		for (const i of picked) {
-			const r = ensureResult(i);
-			if (r) results.push((state.mergeOpts && state.mergeOpts.myMarks) ? stampUserMarks(r) : r);
-		}
-		if (!results.length) return;
-		let out;
-		try {
-			out = global.Engine.mergeManyIntoLeague(results, league,
-				state.mergeOpts || {});
-		} catch (err) {
+	/* Staged, with the meter: each step is one long synchronous block, so
+	   the label for it is painted first and then the step runs. `from` is
+	   where the bar already stands (the file read before it, if any). */
+	function mergeInto(league, leagueName, picked, from) {
+		const at = Number.isFinite(from) ? from : 0;
+		const step = (label, frac) => {
+			progressShow(label, at + (1 - at) * frac);
+			return nextPaint();
+		};
+		return step("Simulating the classes to merge", 0).then(() => {
+			const results = [];
+			for (const i of picked) {
+				const r = ensureResult(i);
+				if (r) results.push((state.mergeOpts && state.mergeOpts.myMarks) ? stampUserMarks(r) : r);
+			}
+			return results;
+		}).then((results) => {
+			if (!results.length) { progressHide(); return null; }
+			return step("Merging " + results.length + " class" +
+				(results.length === 1 ? "" : "es") + " into " + leagueName, 0.25)
+				.then(() => {
+					try {
+						return global.Engine.mergeManyIntoLeague(results, league,
+							state.mergeOpts || {});
+					} catch (err) {
+						progressHide();
+						setStatus("Could not merge: " + (err && err.message ? err.message : err));
+						return null;
+					}
+				});
+		}).then((out) => {
+			if (!out) return;
+			return step("Writing the new league file", 0.7).then(() => {
+				/* No BOM here, unlike the CSV exports: this file is read back by
+				   BBGM's own league loader, not by a spreadsheet. */
+				const body = JSON.stringify(out.file);
+				return step("Saving " + mb(body.length), 0.95).then(() => [out, body]);
+			});
+		}).then((pair) => {
+			if (!pair) return;
+			const out = pair[0];
+			progressHide();
+			mergeDone(out, leagueName, pair[1]);
+		}, (err) => {
+			progressHide();
 			setStatus("Could not merge: " + (err && err.message ? err.message : err));
-			return;
-		}
-		/* No BOM here, unlike the CSV exports: this file is read back by
-		   BBGM's own league loader, not by a spreadsheet. */
+		});
+	}
+
+	function mergeDone(out, leagueName, body) {
 		const base = leagueName.replace(/\.json(\.gz)?$/i, "").replace(/\.gz$/i, "");
 		const years = out.seasons.slice().sort((a, b) => a - b).join("_");
-		download(base + "_with_" + years + "_class.json",
-			JSON.stringify(out.file), "application/json");
+		download(base + "_with_" + years + "_class.json", body, "application/json");
 		exported("merged " + (out.replaced + out.added) + " players into " +
 			leagueName + " (" + out.replaced + " replaced, " + out.added + " added, " +
 			out.removed + " generated prospects dropped) for the " +
@@ -11797,9 +11934,8 @@
 		modal("Merge into a league file", box, () => {
 			state.mergeIndices = null;
 			setStatus("Merging into " + src.name + "\u2026", true);
-			// A frame, so the status paints before a multi-megabyte merge
-			// blocks the main thread.
-			requestAnimationFrame(() => mergeInto(src.data, src.name, picked));
+			// mergeInto paints its own stages before each blocking step.
+			mergeInto(src.data, src.name, picked);
 		}, "Merge into " + src.name);
 	}
 
@@ -12643,19 +12779,30 @@
 		state.mergeIndices = null;
 		if (!picked.length) return;
 		setStatus("Reading " + f.name + "…", true);
-		readTextFile(f).then((text) => {
-			let league;
-			try {
-				league = JSON.parse(text);
-			} catch (err) {
-				setStatus("Could not merge: " + (err && err.message ? err.message : err));
-				return;
-			}
-			mergeInto(league, f.name, picked);
-		}).catch((err) => {
-			setStatus(f.name + " could not be read: " +
-				(err && err.message ? err.message : err));
-		});
+		progressShow("Reading " + f.name, 0, "0 of " + mb(f.size || 0));
+		readTextFile(f, (seen, size, gz) => progressShow(
+			(gz && seen < size ? "Reading and unzipping " : "Reading ") + f.name,
+			// Reading is the first half of the job; the merge and the write
+			// are the rest.
+			0.5 * seen / Math.max(1, size), mb(seen) + " of " + mb(size)))
+			.then((text) => {
+				progressShow("Parsing " + f.name, 0.55, mb(text.length) + " of JSON");
+				return nextPaint().then(() => text);
+			}).then((text) => {
+				let league;
+				try {
+					league = JSON.parse(text);
+				} catch (err) {
+					progressHide();
+					setStatus("Could not merge: " + (err && err.message ? err.message : err));
+					return;
+				}
+				return mergeInto(league, f.name, picked, 0.6);
+			}).catch((err) => {
+				progressHide();
+				setStatus(f.name + " could not be read: " +
+					(err && err.message ? err.message : err));
+			});
 	});
 	$("csvFile").addEventListener("change", (e) => {
 		const f = e.target.files[0];
