@@ -129,6 +129,9 @@
 		   belong to the file that was imported, and they are consumed by the
 		   chain it starts. */
 		universeBiography: null,
+		/* UV12: a loaded league's last drafted classes, offered as the
+		   universe's history ({name, data, classes}); not persisted. */
+		pastProOffer: null,
 		universeExpect: null,
 		// The randomizer's scope select, persisted like every other control.
 		randomScope: "gentle",
@@ -325,22 +328,33 @@
 			/* The imported biographies: a rebuilt season without them draws
 			   different men. Held on state, not on the universe; see 6020. */
 			biography: state.universeBiography || null,
+			proImports: state.universe.proImports || null,
 		};
 	}
 
+	/* UV9: kept by what a man did (national honors, a lottery slot, span, a
+	   real pro career), not by span alone — span >= 2 dropped every
+	   one-and-done No. 1 pick and player of the year, and (UV12) every man
+	   imported from a league's pro history. */
 	function registryForStorage() {
 		const reg = state.universe.registry;
 		if (!reg) return null;
+		const U = global.Universe;
 		const keep = Object.keys(reg)
 			.map((id) => reg[id])
-			.filter((x) => x && x.span >= 2)
-			.sort((a, b) => b.span - a.span)
-			.slice(0, PERSIST_REGISTRY);
+			.filter((x) => x && x.id)
+			.map((x) => ({ x, score: U.registryKeepScore(x) }))
+			.filter((o) => o.score > 0)
+			.sort((a, b) => b.score - a.score || cmpIds(a.x.id, b.x.id))
+			.slice(0, PERSIST_REGISTRY)
+			.map((o) => o.x);
 		if (!keep.length) return null;
 		const out = {};
 		for (const x of keep) out[x.id] = x;
 		return out;
 	}
+
+	function cmpIds(a, b) { return a < b ? -1 : a > b ? 1 : 0; }
 
 	function persist() {
 		scheduleAutosave();
@@ -556,6 +570,7 @@
 			/* Only a full (IndexedDB) save carries these. */
 			programs: su.programs && typeof su.programs === "object" ? su.programs : {},
 			recruiting: Array.isArray(su.recruiting) ? su.recruiting : null,
+			proImports: su.proImports && typeof su.proImports === "object" ? su.proImports : null,
 		};
 	}
 
@@ -4499,6 +4514,7 @@
 	}
 
 	function classesFromFile(name, data, check) {
+		notePastClasses(name, data);
 		const base = name.replace(/\.json(\.gz)?$|\.gz$/i, "");
 		const found = global.Engine.draftClassesIn(data);
 		/* Not a league export: an ordinary draft-class file, loaded as
@@ -7644,9 +7660,11 @@
 				finish(cancelled);
 				return;
 			}
-			try {
-				chain.step(k);
-			} catch (err) {
+			/* UV1: one engine phase per task, so the page paints and Stop is
+			   read during a season, not only between seasons (a season was
+			   one 4-10 s long task). Same season as chain.step(k). */
+			let season;
+			const fail = (err) => {
 				/* step() guards the season itself, but the work around it
 				   (extrapolating a gap, handing entrants over, ageing the
 				   carry) is outside that guard. A throw here left the chain
@@ -7655,8 +7673,19 @@
 				showError(err);
 				universeCancel = false;
 				finish(true);
-				return;
-			}
+			};
+			try {
+				season = chain.stepPhased(k);
+			} catch (err) { fail(err); return; }
+			const phase = () => {
+				let done;
+				try { done = season.next(); } catch (err) { fail(err); return; }
+				if (!done) { setTimeout(phase, 0); return; }
+				seasonDone(k);
+			};
+			phase();
+		};
+		const seasonDone = (k) => {
 			evictUniverseResults(chain.runnable.slice(Math.max(0, k - UNIVERSE_LIVE_RESULTS + 1), k + 1)
 				.map((x) => x.index));
 			setStatus("Universe: season " + (k + 1) + " of " + total + "…", true);
@@ -7668,6 +7697,67 @@
 			setTimeout(() => step(k + 1), 0);
 		};
 		setTimeout(() => step(0), 0);
+	}
+
+	/* PRO HISTORY FROM A LEAGUE (UV12). A league export also holds the men
+	   it drafted in the last four seasons. They are offered as the
+	   universe's history: with no universe yet, their classes are played as
+	   the world's first seasons (real schools, class years and draft order
+	   pinned; their real pro careers attached); with a universe already
+	   built, they go in as a ledger without re-simulating anything, because
+	   a season before the world's first cannot be added to a finished chain. */
+	function notePastClasses(name, data) {
+		let found = [];
+		try {
+			found = global.Engine.isLeagueFile(data) ? global.Engine.pastClassesIn(data, { back: 4 }) : [];
+		} catch (e) { found = []; }
+		if (found.length) state.pastProOffer = { name, data, classes: found };
+	}
+
+	function pastProLabel(offer) {
+		const years = offer.classes.map((c) => c.year);
+		const n = offer.classes.reduce((a, c) => a + c.count, 0);
+		return "Pro history " + years[0] + (years.length > 1 ? "\u2013" + years[years.length - 1] : "") +
+			" (" + n + " players)";
+	}
+
+	function addPastProClasses() {
+		const offer = state.pastProOffer;
+		const E = global.Engine;
+		const U = global.Universe;
+		if (!offer) { setStatus("Load a BBGM league export that has past drafts first."); return; }
+		if (state.universe.running) { setStatus("Wait for the universe to finish first."); return; }
+		let classes;
+		try { classes = offer.classes.map((c) => E.extractPastClass(offer.data, c.year)); }
+		catch (e) { showError(e); return; }
+		const u = state.universe;
+		if (u.rows && u.rows.length) {
+			pushUndo("added a league's pro history");
+			const out = U.importProHistory(u, classes);
+			try {
+				u.records = U.records(u.rows, u.alumni, u.registry || null,
+					{ programs: u.programs, tree: u.coachTree, carry: u.tail && u.tail.carry });
+			} catch (e) { /* the records are a view */ }
+			state.pastProOffer = null;
+			persist();
+			render();
+			setStatus(pastProLabel(offer) + ": " + out.added + " men added to the universe's " +
+				"registry and alumni with their real pro careers. The world was already " +
+				"built, so their college seasons were not replayed.");
+			return;
+		}
+		const base = offer.name.replace(/\.json(\.gz)?$|\.gz$/i, "");
+		const files = classes.map((cls) => {
+			const sub = E.validateLeagueFile(cls);
+			cls.startingSeason = sub.season;
+			return { name: base + " \u2014 " + cls.startingSeason + " pro history", data: cls,
+				warnings: sub.warnings, pastPro: true };
+		});
+		state.pastProOffer = null;
+		state.cfg.universe = true;
+		installFiles(files, [], { append: true, noRun: true });
+		state.tab = "universe";
+		runUniverse();
 	}
 
 	/* The control for it. Offered only on a finished chain of three or more
@@ -7730,7 +7820,8 @@
 		if ($("seed")) $("seed").value = seed;
 		paintConfig();
 		state.universeBiography = null;
-		installFiles(U.synthFiles(seed, first, n), [], { noRun: true });
+		// UV4: the world's first season is its name epoch.
+		installFiles(U.synthFiles(seed, first, n, undefined, first), [], { noRun: true });
 		state.tab = "universe";
 		runUniverse();
 	}
@@ -7778,7 +7869,8 @@
 			return;
 		}
 		n = Math.max(1, Math.min(SYNTH_MAX_SEASONS, Math.round(Number(n) || 5)));
-		const files = U.synthFiles(tail.baseSeed || u.baseSeed, tail.lastSeason + 1, n);
+		const files = U.synthFiles(tail.baseSeed || u.baseSeed, tail.lastSeason + 1, n,
+			undefined, U.synthEpochOf(u));
 		state.cfg.universe = true;
 		if (state.files.length) installFiles(files, [], { append: true, noRun: true });
 		else installFiles(files, [], { noRun: true });
@@ -8174,7 +8266,7 @@
 	// The universe in full: no row, thread, alumni or registry cap.
 	function universeFull() {
 		const u = state.universe;
-		return JSON.parse(JSON.stringify(Object.assign(universeForStorage(), {
+		const raw = Object.assign(universeForStorage(), {
 			rows: u.rows.slice(),
 			threads: (u.threads || []).slice(),
 			alumni: (u.alumni || []).slice(),
@@ -8183,7 +8275,13 @@
 			recruiting: u.recruiting || null,
 			truncated: !!u.truncated,
 			tail: u.running ? null : (u.tail || null),
-		})));
+		});
+		/* UV10: structuredClone where there is one — the JSON round-trip
+		   cost ~420 ms of main thread per autosave at 30 seasons. */
+		if (typeof structuredClone === "function") {
+			try { return structuredClone(raw); } catch (e) { /* fall through */ }
+		}
+		return JSON.parse(JSON.stringify(raw));
 	}
 
 	function slotRecord(slot, name) {
@@ -11317,6 +11415,8 @@
 		const files = [];
 		let warn = 0;
 		for (let i = 0; i < state.files.length; i++) {
+			// UV12: pro history is never written back out.
+			if (global.Engine.pastProOf(state.files[i].data)) continue;
 			const res = ensureResult(i);
 			if (!res) {
 				showError(new Error("Could not export " + state.files[i].name +
@@ -12460,6 +12560,7 @@
 		clearLock, showPlayer, showTeam, showGame,
 		runUniverse, cancelUniverse, resumeUniverseDialog, exportUniverse, exportUniversePlayers,
 		newSyntheticUniverse, syntheticUniverseDialog, simulateForward, simulateForwardDialog,
+		addPastProClasses,
 		restoreSyntheticUniverse,
 		exportUniverseCsv, randomizeUniverseName, PERSIST_CAPS,
 		followProgram, dynastyDialog, dynastyStatus, abandonDynasty, seasonDrawer,

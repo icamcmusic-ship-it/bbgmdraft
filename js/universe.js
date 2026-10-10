@@ -116,6 +116,34 @@
 		return ((x && x.honors) || []).filter(isPersonalHonor);
 	}
 
+	/* WHAT AN HONOR IS WORTH (UV9). 38% of a registry's honors were watch
+	   lists, honorable mentions and All-Region/Tournament/Freshman teams, and
+	   the hall counted each like a national trophy. National trophy 5,
+	   All-America 3, a player-of-the-year award 2, an all-conference or other
+	   all-league team 1, lists 0. */
+	function honorWeight(h) {
+		const a = String(h && h.award != null ? h.award : h || "");
+		if (!isPersonalHonor(a)) return 0;
+		if (/watch list|honorable mention|All-Region|All-Tournament|All-Freshman|Preseason|Midseason|semifinalist|finalist/i.test(a)) return 0;
+		if (nationalPOYSet().has(a)) return 5;
+		if (/All-America/i.test(a)) return 3;
+		if (/Player of the Year|Freshman of the Year|Defensive Player|Most Outstanding/i.test(a)) return 2;
+		if (/^All-|Team$/i.test(a)) return 1;
+		return 1;
+	}
+	function honorScore(x) {
+		return personalHonors(x).reduce((t, h) => t + honorWeight(h), 0);
+	}
+	/* Which registry entries are worth keeping when storage is bounded
+	   (UV9): honors, a high draft slot, span and a real pro career, not
+	   span alone — span dropped exactly the one-and-done stars. */
+	function registryKeepScore(x) {
+		if (!x) return 0;
+		const slot = x.draft && Number.isFinite(x.draft.slot) ? x.draft.slot : null;
+		return honorScore(x) * 2 + (slot && slot <= 14 ? 15 - slot + 6 : slot && slot <= 30 ? 3 : 0) +
+			(x.span || 0) * 2 + (x.pro && x.pro.real ? 40 : 0);
+	}
+
 	/* THE SEED FOR ONE SEASON OF A CHAIN.
 
 	   It used to be baseSeed + "#" + (d.season || k), which is a seed keyed on
@@ -624,7 +652,158 @@
 				replaced: carry.coaches[to].coach ? carry.coaches[to].coach.name : null };
 			if (carry.coaches[from]) carry.coaches[from].hiredBy = to;
 		}
+		coachLadder(res, prev, carry, moves);
+		holdLevelShape(carry, prev);
+		damDynasty(carry, prev);
 		return carry;
+	}
+
+	/* THE LADDER KEEPS ITS SHAPE (UV8). Every season's regression pulled
+	   programs toward the MEAN, so over decades the top flattened (the 25th
+	   best fell from ~75 to ~69) while the mean held. The first season's
+	   level distribution is kept, sorted, and each program is pulled part of
+	   the way toward the level of its RANK in it: order can change freely,
+	   the shape of the ladder cannot drift away. */
+	const LEVEL_SHAPE_PULL = 0.3;
+	function holdLevelShape(carry, prev) {
+		const names = Object.keys(carry.levels || {});
+		if (names.length < 20) return;
+		/* Read by quantile, so a field that gained or lost a program keeps
+		   the same reference shape. */
+		let ref = prev && Array.isArray(prev.levelRef) && prev.levelRef.length >= 20
+			? prev.levelRef : null;
+		const order = names.slice().sort((a, b) => carry.levels[b] - carry.levels[a] ||
+			(a < b ? -1 : 1));
+		if (!ref) {
+			ref = order.map((n) => Math.round(carry.levels[n] * 10) / 10);
+		} else {
+			const span = Math.max(1, order.length - 1);
+			order.forEach((n, i) => {
+				const lv = carry.levels[n];
+				const target = ref[Math.round(i * (ref.length - 1) / span)];
+				carry.levels[n] = Math.max(5, Math.min(99, lv + LEVEL_SHAPE_PULL * (target - lv)));
+			});
+		}
+		carry.levelRef = ref;
+	}
+
+	/* DYNASTIES PAY FOR THEIR TITLES (UV5). A champion's best returners turn
+	   pro early: after one title the best returner leaves 45% of the time,
+	   after back-to-back titles always, and the second-best too from a
+	   three-peat on. Deterministic in the season and school. */
+	function damDynasty(carry, prev) {
+		const champ = carry.champion;
+		if (!champ) { carry.streak = null; return; }
+		const was = prev && prev.streak && prev.streak.school === champ ? prev.streak.n : 0;
+		const n = was + 1;
+		carry.streak = { school: champ, n };
+		const list = (carry.returners[champ] || []).slice()
+			.sort((a, b) => (b.talent || 0) - (a.talent || 0));
+		if (!list.length) return;
+		const rng = new global.BBGMRng.Rng("dynasty|" + champ + "|" + n + "|" +
+			((prev && prev.titles && prev.titles[champ]) || 0));
+		const leave = n >= 3 ? 2 : n === 2 ? 1 : rng.random() < 0.45 ? 1 : 0;
+		if (!leave) return;
+		const gone = new Set(list.slice(0, leave).map((r) => r.name));
+		carry.returners[champ] = carry.returners[champ].filter((r) => !gone.has(r.name));
+		if (!carry.returners[champ].length) delete carry.returners[champ];
+	}
+
+	/* THE COACHING LADDER (UV7). carouselMoves only moved a man the carousel
+	   had already drawn as "hired away" into a better job that happened to be
+	   open, so 2.3 sitting coaches a season changed programs and fired men
+	   vanished. Here the jobs still open after that are filled best first:
+	   each by the sitting coach at a lower program who most beat expectation
+	   over two seasons, whose own job then opens and is filled the same way;
+	   then by a retread from the pool of men fired in the last three seasons,
+	   a rung below where he was; a stranger only takes what is left. */
+	const LADDER_POOL_YEARS = 3;
+	const LADDER_MIN_FORM = 0.08;
+	// The share of open jobs that go to a sitting coach at all.
+	const LADDER_TAKE = 0.55;
+	const LADDER_MIN_STEP = 4;
+	function coachLadder(res, prev, carry, moves) {
+		const teams = res.teams || {};
+		const season = Number.isFinite(res.season) ? res.season
+			: res.leagueFile ? res.leagueFile.startingSeason : null;
+		const pct = (t) => (t.w || 0) / Math.max(1, (t.w || 0) + (t.l || 0));
+		const expected = (t) => {
+			const lv = Number.isFinite(t.baseLevel) ? t.baseLevel : t.level || 50;
+			return Math.max(0.15, Math.min(0.9, 0.2 + 0.6 * (lv - 30) / 50));
+		};
+		const prevForm = (prev && prev.coachForm) || {};
+		carry.coachForm = {};
+		for (const t of Object.values(teams)) {
+			if (!t || !t.name || !t.log) continue;
+			carry.coachForm[t.name] = Math.round((pct(t) - expected(t)) * 1000) / 1000;
+		}
+		const form = (name) => 0.6 * (carry.coachForm[name] || 0) + 0.4 * (prevForm[name] || 0);
+		const opened = new Set(Object.keys(carry.coaches).filter((n) =>
+			carry.coaches[n].fired && !moves[n]));
+		const busy = new Set(Object.keys(moves).concat(Object.values(moves)));
+		const open = Array.from(opened).map((school) => ({ school, p: priorPrestige(school) }));
+		const byP = (a, b) => b.p - a.p || (a.school < b.school ? -1 : 1);
+		open.sort(byP);
+		const sitting = Object.values(teams).filter((t) => t && t.name && t.log && t.coach &&
+			!opened.has(t.name) && !busy.has(t.name) && pct(t) >= 0.55)
+			.map((t) => ({ school: t.name, p: priorPrestige(t.name), f: form(t.name), t }))
+			.filter((c) => c.f >= LADDER_MIN_FORM)
+			.sort((a, b) => b.f - a.f || (a.school < b.school ? -1 : 1));
+		const used = new Set();
+		const filled = new Set();
+		let guard = 0;
+		const take = new global.BBGMRng.Rng("ladder|" + season);
+		while (open.length && guard++ < 400) {
+			const job = open.shift();
+			if (take.random() >= LADDER_TAKE) continue;
+			const c = sitting.filter((x) => !used.has(x.school) && x.school !== job.school &&
+				job.p - x.p >= LADDER_MIN_STEP)[0];
+			if (!c) continue;
+			used.add(c.school);
+			filled.add(job.school);
+			const coach = stripCoach(c.t.coach);
+			coach.tenure = 0;
+			coach.movedFrom = c.school;
+			carry.coaches[job.school] = { coach, fired: false, reason: "hired", from: c.school,
+				ladder: true,
+				replaced: carry.coaches[job.school] && carry.coaches[job.school].coach
+					? carry.coaches[job.school].coach.name : null };
+			carry.coaches[c.school] = { coach: stripCoach(c.t.coach), fired: true,
+				reason: "hired away", hiredBy: job.school };
+			// His old job is open now, and is filled the same way.
+			open.push({ school: c.school, p: c.p });
+			open.sort(byP);
+		}
+		/* The retread pool: men fired in the last three seasons. */
+		const pool = ((prev && prev.coachPool) || []).filter((x) =>
+			x && x.coach && Number.isFinite(season) && season - x.season < LADDER_POOL_YEARS);
+		for (const c of res.coachingCarousel || []) {
+			if (!c || !c.school || !/fired|not retained/.test(c.reason || "")) continue;
+			const t = teams[c.school];
+			if (!t || !t.coach || (t.coach.age || 50) > 66) continue;
+			pool.push({ coach: stripCoach(t.coach), from: c.school, p: priorPrestige(c.school), season });
+		}
+		const rest = Object.keys(carry.coaches)
+			.filter((n) => carry.coaches[n].fired && !moves[n] && !filled.has(n) &&
+				carry.coaches[n].reason !== "hired away")
+			.map((school) => ({ school, p: priorPrestige(school) })).sort(byP);
+		const rng = new global.BBGMRng.Rng("retread|" + season);
+		const hired = new Set();
+		for (const job of rest) {
+			if (rng.random() >= 0.45) continue;
+			const i = pool.findIndex((x, k) => !hired.has(k) && x.from !== job.school &&
+				x.p > job.p && x.p - job.p <= 30);
+			if (i < 0) continue;
+			hired.add(i);
+			const coach = Object.assign({}, pool[i].coach);
+			coach.tenure = 0;
+			coach.movedFrom = pool[i].from;
+			coach.age = (coach.age || 50) + Math.max(0, season - pool[i].season);
+			carry.coaches[job.school] = { coach, fired: false, reason: "hired", from: pool[i].from,
+				retread: true,
+				replaced: carry.coaches[job.school].coach ? carry.coaches[job.school].coach.name : null };
+		}
+		carry.coachPool = pool.filter((x, k) => !hired.has(k)).slice(-120);
 	}
 
 	/* THE PROGRAM DIGEST: what the news desk remembers about each program.
@@ -708,6 +887,9 @@
 			rivalries: carry.rivalries || {},
 			digest: carry.digest || {},
 		};
+		// UV7/UV8: the ladder's shape and the retread pool are history too.
+		if (carry.levelRef) out.levelRef = carry.levelRef;
+		if (carry.coachPool) out.coachPool = carry.coachPool;
 		if (carry.extrapolatedTitles) {
 			out.extrapolatedTitles = Object.assign({}, carry.extrapolatedTitles);
 		}
@@ -893,15 +1075,35 @@
 	   The fingerprint is optional so that a caller without one (and every
 	   version 1 or 2 export already in the wild) degrades to exactly the
 	   behavior it has today rather than failing. */
-	function alumniOf(res, season, fingerprint) {
+	/* UV2: the national player of the year is often an underclassman from a
+	   LATER class file (or an undrafted returner from an earlier one), who
+	   lives in res.futurePlayers. He is picked from both, and identified by
+	   his OWN file's fingerprint (fpOf(fileIndex)), so the entry links to his
+	   career rather than to whoever holds his pid in this season's file. */
+	function poyOf(res) {
+		return pickPOY((res.players || []).concat(res.futurePlayers || []), nationalPOYSet());
+	}
+	// A futurePlayers entry (a later class's underclassman or a returner).
+	function res0IsOther(p) { return !!(p && (p.homeKey || p.past)); }
+	function idOfAny(p, fingerprint, fpOf) {
+		if (!p) return null;
+		if (res0IsOther(p)) {
+			const fp = fpOf && Number.isFinite(p.fileIndex) ? fpOf(p.fileIndex) : null;
+			return fp ? playerId(fp, p.homeKey || p.key) : null;
+		}
+		return fingerprint ? playerId(fingerprint, p.key) : null;
+	}
+	function alumniOf(res, season, fingerprint, fpOf) {
 		const out = [];
 		const seen = new Set();
 		const add = (p, why) => {
-			if (!p || seen.has(p.key)) return;
-			seen.add(p.key);
+			const other = res0IsOther(p);
+			const sk = p ? (other ? "f:" + p.fileIndex + ":" + (p.homeKey || p.key) : p.key) : null;
+			if (!p || seen.has(sk)) return;
+			seen.add(sk);
 			out.push({
 				season, name: p.name, key: p.key,
-				id: fingerprint ? playerId(fingerprint, p.key) : null,
+				id: idOfAny(p, fingerprint, fpOf),
 				/* The NCAA program, always — `proClub || newCollege` put a
 				   EuroLeague club name here and the alumni link then pointed
 				   at a team page that does not exist. The club is kept beside
@@ -924,7 +1126,7 @@
 		   AW.NATIONAL_POY is the list the awards module actually mints from,
 		   plus the consensus row it derives; reading it here means a trophy
 		   added there is picked up rather than missed. */
-		add(pickPOY(res.players, nationalPOYSet()), "player of the year");
+		add(poyOf(res), "player of the year");
 		const board = (res.players || []).slice()
 			.sort((a, b) => (a.boardRank || 999) - (b.boardRank || 999));
 		for (const p of board.slice(0, 3)) add(p, "top of the board");
@@ -937,13 +1139,13 @@
 	}
 
 	/* One row of the timeline. */
-	function summarize(res, seed, fileName) {
+	function summarize(res, seed, fileName, fpOf, fingerprint) {
 		const t = res.tourney;
 		/* One definition of player of the year, shared with alumniOf — see
 		   nationalPOYSet. This used to be a second hardcoded pair of trophy
 		   names, so the timeline column and the alumni index could name two
 		   different men for the same season. */
-		const poy = pickPOY(res.players, nationalPOYSet());
+		const poy = poyOf(res);
 		const no1 = (res.players || []).filter((p) => p.boardRank === 1)[0];
 		return Object.assign({
 			season: res.leagueFile ? res.leagueFile.startingSeason : null,
@@ -960,7 +1162,10 @@
 			   players of the year" matched two pro clubs. The club rides
 			   beside it so the timeline can still say where he played. */
 			poy: poy ? { name: poy.name, school: poy.newCollege, key: poy.key,
-				club: poy.proClub || null, nonNcaa: !!poy.nonNcaa } : null,
+				club: poy.proClub || null, nonNcaa: !!poy.nonNcaa,
+				id: idOfAny(poy, fingerprint || null, fpOf || null),
+				classSeason: res0IsOther(poy) && Number.isFinite(poy.classSeason)
+					? poy.classSeason : (res.leagueFile ? res.leagueFile.startingSeason : null) } : null,
 			no1: no1 ? { name: no1.name, school: no1.newCollege, key: no1.key,
 				club: no1.proClub || null, nonNcaa: !!no1.nonNcaa } : null,
 			apOne: res.poll && res.poll[0] ? res.poll[0].name : null,
@@ -3186,8 +3391,12 @@
 			   rank and his honours are. */
 			for (const p of res.players || []) {
 				if (!p.key) continue;
-				const e = touch(playerId(fpOf(self), p.key), p.name);
-				e.fileIndex = self;
+				/* UV3: a named returner re-entering a synthetic class carries
+				   the identity he already has, so he stays one person. */
+				const known = p.bbgmdraftId || (p.src && p.src.bbgmdraftId) || null;
+				const e = touch(known || playerId(fpOf(self), p.key), p.name);
+				if (!known) e.fileIndex = self;
+				else if (!Number.isFinite(e.fileIndex)) e.fileIndex = self;
 				e.draft = {
 					season, boardRank: p.boardRank || null,
 					slot: p.draftSlot || null, school: p.newCollege,
@@ -3491,51 +3700,92 @@
 	let uniqueSynthNames = true;
 	const nameDeals = new Map();
 	function setUniqueSynthNames(on) { uniqueSynthNames = !!on; }
-	function nameDeal(seed) {
-		const key = String(seed);
+	/* UV4: the extra pools a versioned (epoch-carrying) synthetic world deals
+	   from — about 9,000 pairs, so a world runs well over a century before a
+	   generation suffix appears. An unversioned world keeps the old pools and
+	   the old absolute-season index, so it replays exactly. */
+	const SYNTH_FIRST_MORE = ["Adrian", "Bennett", "Brandon", "Carlos", "Darnell", "Desmond",
+		"Emeka", "Felix", "Garrett", "Hakeem", "Isaac", "Jabari", "Jalen", "Kendall", "Khalil",
+		"Lamar", "Lorenzo", "Mason", "Nolan", "Oscar", "Parker", "Quentin", "Rashad", "Rodney",
+		"Seth", "Theo", "Tobias", "Victor", "Wesley", "Zach", "Mateo", "Aleksa", "Bogdan",
+		"Ousmane", "Yuki", "Hugo", "Leon", "Kofi", "Mikael", "Sergio", "Jonas", "Brice",
+		"Corey", "DeShawn", "Elias", "Frankie", "Gavin", "Henry", "Jace", "Kellen"];
+	const SYNTH_LAST_MORE = ["Adams", "Bailey", "Bennett", "Bryant", "Campbell", "Chambers",
+		"Dixon", "Edwards", "Fleming", "Gibson", "Graves", "Hayes", "Holloway", "Ingram",
+		"Jefferson", "Kendrick", "Lambert", "Lyons", "Manning", "McCoy", "Nash", "Norris",
+		"Owens", "Patton", "Price", "Rhodes", "Robinson", "Shaw", "Simmons", "Stokes",
+		"Tate", "Underwood", "Vance", "Wallace", "Watkins", "Webb", "Wheeler", "Wright",
+		"Yates", "Zeller", "Adebayo", "Bamba", "Camara", "Diop", "Eze", "Fofana", "Gueye",
+		"Ibeh", "Jovic", "Kovac", "Lindqvist", "Mensah", "Nkemelu", "Okoro", "Popovic",
+		"Rakic", "Sissoko", "Traore", "Vukovic", "Zubac", "Aldridge", "Bellamy", "Crowder",
+		"Dunbar", "Easley", "Farrow", "Hollins", "Kirkland", "Langford", "Merritt"];
+	function nameDeal(seed, wide) {
+		const key = String(seed) + (wide ? "|v2" : "");
 		let deal = nameDeals.get(key);
 		if (deal) return deal;
 		const real = (global.Sample && global.Sample.REAL_NAMES) || new Set();
 		const pairs = [];
-		for (const f of SYNTH_FIRST) {
-			for (const l of SYNTH_LAST) if (!real.has(f + " " + l)) pairs.push([f, l]);
+		const firsts = wide ? Array.from(new Set(SYNTH_FIRST.concat(SYNTH_FIRST_MORE))) : SYNTH_FIRST;
+		const lasts = wide ? Array.from(new Set(SYNTH_LAST.concat(SYNTH_LAST_MORE))) : SYNTH_LAST;
+		for (const f of firsts) {
+			for (const l of lasts) if (!real.has(f + " " + l)) pairs.push([f, l]);
 		}
 		deal = new global.BBGMRng.Rng("synth-names|" + key).shuffle(pairs);
 		if (nameDeals.size > 8) nameDeals.clear();
 		nameDeals.set(key, deal);
 		return deal;
 	}
-	function uniqueNames(data, seed, season, n) {
-		const deal = nameDeal(seed);
+	function uniqueNames(data, seed, season, n, epoch) {
+		const versioned = Number.isFinite(epoch);
+		const deal = nameDeal(seed, versioned);
 		const P = deal.length;
 		const stride = Math.max(1, n);
 		(data.players || []).forEach((p, i) => {
-			const idx = season * stride + (Number.isFinite(p.pid) ? p.pid : i);
+			/* Counted from the world's first season when it has one (UV4):
+			   counted from year 0, a 2030 season was ~28 deals in and every
+			   name carried "Jr." or "III". */
+			const s = versioned ? Math.max(0, season - epoch) : season;
+			const idx = s * stride + (Number.isFinite(p.pid) ? p.pid : i);
 			const pair = deal[idx % P];
 			p.firstName = pair[0];
 			p.lastName = pair[1] + NAME_GENERATIONS[Math.floor(idx / P) % NAME_GENERATIONS.length];
 		});
 	}
-	function synthFile(seed, season, size) {
+	/* `epoch` (UV4): the world's first season. Present, it moves the names
+	   and so is part of the fingerprint ("v2"); absent (every world made
+	   before it), the file is exactly the one it always was. */
+	function synthFile(seed, season, size, epoch) {
 		const n = Number.isFinite(size) ? size : SYNTH_SIZE;
+		const ep = Number.isFinite(epoch) ? epoch : undefined;
 		const data = global.Sample.makeClass(hashString(String(seed) + "|" + season), n, season);
-		if (uniqueSynthNames) uniqueNames(data, seed, season, data.players.length);
+		if (uniqueSynthNames) uniqueNames(data, seed, season, data.players.length, ep);
+		const synthetic = { seed: String(seed), season, size: n };
+		if (ep !== undefined) synthetic.epoch = ep;
 		return {
 			name: "synthetic-" + season + ".json", data, base: data,
-			fingerprint: synthFingerprint(seed, season),
-			synthetic: { seed: String(seed), season, size: n },
+			fingerprint: synthFingerprint(seed, season) + (ep !== undefined ? "e" + ep : ""),
+			synthetic,
 		};
 	}
-	function synthFiles(seed, first, count, size) {
+	function synthFiles(seed, first, count, size, epoch) {
 		const out = [];
-		for (let i = 0; i < count; i++) out.push(synthFile(seed, first + i, size));
+		// Only a world that asks for it is versioned; see synthFile.
+		const ep = Number.isFinite(epoch) ? epoch : undefined;
+		for (let i = 0; i < count; i++) out.push(synthFile(seed, first + i, size, ep));
 		return out;
+	}
+	// The epoch a world's synthetic seasons were dealt from, if any.
+	function synthEpochOf(u) {
+		for (const d of (u && u.order) || []) {
+			if (d && d.synth && Number.isFinite(d.synth.epoch)) return d.synth.epoch;
+		}
+		return null;
 	}
 	// The file an order entry names, regenerated; null for a real file.
 	function synthFromOrder(o) {
 		const s = o && o.synth;
 		if (!s || !Number.isFinite(s.season) || s.seed === undefined) return null;
-		const f = synthFile(s.seed, s.season, s.size);
+		const f = synthFile(s.seed, s.season, s.size, s.epoch);
 		return !o.fingerprint || f.fingerprint === o.fingerprint ? f : null;
 	}
 
@@ -3588,6 +3838,7 @@
 			r.skills = [];
 			return {
 				pid: 1000 + i, firstName: sp[0], lastName: sp.slice(1).join(" ") || sp[0],
+				bbgmdraftId: x.id,
 				born: { year: season - 22, loc: "USA" },
 				hgt: 66 + Math.round((r.hgt / 100) * 27), weight: Math.round(165 + r.hgt * 0.9),
 				college: x.school || "", tid: -2,
@@ -3601,6 +3852,111 @@
 			: file.base;
 		file.entrantSig = sig;
 		return true;
+	}
+
+	/* PRO HISTORY (UV12). A class lifted out of a league's past drafts
+	   (Engine.extractPastClass) is played like any other season; these add
+	   what the league knows and the engine cannot: who actually took him, and
+	   what he has done since. */
+	function proWhy(t) {
+		return t && t.slot ? "drafted No. " + t.slot + (t.team ? " by " + t.team : "") : null;
+	}
+	function proHistoryAlumni(res, pastPro, season, fingerprint) {
+		const out = [];
+		for (const p of res.players || []) {
+			const t = pastPro.truth && pastPro.truth[p.key];
+			const why = proWhy(t);
+			if (!why) continue;
+			out.push({
+				season, name: p.name, key: p.key,
+				id: fingerprint ? playerId(fingerprint, p.key) : null,
+				school: p.newCollege, club: p.proClub || null, nonNcaa: !!p.nonNcaa,
+				boardRank: p.boardRank || null, why, imported: true,
+			});
+		}
+		return out;
+	}
+	function attachProCareers(u, pastPro, fingerprint, res) {
+		const reg = u.registry || (u.registry = {});
+		for (const key of Object.keys(pastPro.careers || {})) {
+			const id = fingerprint ? playerId(fingerprint, key) : null;
+			const e = id && reg[id];
+			if (!e) continue;
+			const t = pastPro.truth && pastPro.truth[key];
+			e.pro = Object.assign({}, pastPro.careers[key]);
+			e.league = { fp: pastPro.league || null, pid: key, id: "lg:" + (pastPro.league || "?") + "/" + key };
+			if (e.draft) {
+				e.draft = Object.assign({}, e.draft, {
+					round: t ? t.round : 0, pick: t ? t.pick : 0,
+					slot: t && t.slot ? t.slot : null, club: e.draft.club, team: t ? t.team : null,
+				});
+			}
+		}
+		if (res) u.proImports = Object.assign({}, u.proImports, { [pastPro.year]: {
+			league: pastPro.league || null, count: Object.keys(pastPro.careers || {}).length,
+			mode: "played" } });
+	}
+
+	/* THE LEDGER IMPORT (UV12 tier 2): a league's past classes added to a
+	   universe that already exists, without re-simulating anything. Each man
+	   gets a registry entry keyed "lg:<league>/<pid>", an alumni row and his
+	   real pro career; a re-import replaces rather than duplicates. `classes`
+	   is what Engine.extractPastClass returns, one per year. */
+	function importProHistory(u, classes) {
+		if (!u) return { added: 0 };
+		u.registry = u.registry || {};
+		u.alumni = u.alumni || [];
+		let added = 0;
+		for (const cls of classes || []) {
+			const pp = cls && cls.bbgmdraft && cls.bbgmdraft.pastPro;
+			if (!pp) continue;
+			const lg = pp.league || "?";
+			// A man the played import already covers is left as it is.
+			const covered = new Set();
+			for (const id of Object.keys(u.registry)) {
+				const e = u.registry[id];
+				if (e && e.league && e.league.fp === lg && !/^lg:/.test(id)) covered.add(String(e.league.pid));
+			}
+			u.alumni = u.alumni.filter((a) => !(a && a.imported && a.league === lg && a.season === pp.year));
+			for (const p of cls.players || []) {
+				const key = String(p.pid);
+				if (covered.has(key)) continue;
+				const t = pp.truth && pp.truth[key];
+				const bio = (pp.bio && pp.bio[key]) || {};
+				const career = (pp.careers && pp.careers[key]) || null;
+				const name = ((p.firstName || "") + " " + (p.lastName || "")).trim();
+				const id = "lg:" + lg + "/" + key;
+				const r = (p.ratings || [])[0] || {};
+				const collegeRows = (p.stats || []).filter((st) => st && Number(st.tid) === -7);
+				const seasons = collegeRows.length
+					? collegeRows.map((st) => ({ season: Number(st.season), as: "college (imported)",
+						school: bio.college || null, classYear: null,
+						ppg: st.gp ? Math.round((st.pts / st.gp) * 10) / 10 : null }))
+					: [{ season: pp.year, as: "draft class (imported)", school: bio.college || null,
+						classYear: bio.classYear || null }];
+				u.registry[id] = finalizeEntry({
+					id, name, seasons,
+					draft: { season: pp.year, boardRank: null, slot: t && t.slot ? t.slot : null,
+						round: t ? t.round : 0, pick: t ? t.pick : 0, team: t ? t.team : null,
+						school: bio.college || null, club: null, classYear: bio.classYear || null,
+						ovr: Number.isFinite(r.ovr) ? r.ovr : null, pot: Number.isFinite(r.pot) ? r.pot : null,
+						collegeUnknown: !bio.college },
+					honors: (p.awards || []).map((a) => ({ season: Number(a.season), award: String(a.type || "") }))
+						.filter(isPersonalHonor),
+					returned: [], pro: career, imported: true,
+					league: { fp: lg, pid: key, id },
+				});
+				const why = proWhy(t);
+				if (why) {
+					u.alumni.push({ season: pp.year, name, key, id, school: bio.college || null,
+						club: null, nonNcaa: false, boardRank: null, why, imported: true, league: lg });
+				}
+				added++;
+			}
+			u.proImports = Object.assign({}, u.proImports, { [pp.year]: {
+				league: lg, count: (cls.players || []).length, mode: "ledger" } });
+		}
+		return { added };
 	}
 
 	/* spec: {
@@ -3628,7 +3984,10 @@
 			const syn = files[d.index] && files[d.index].synthetic;
 			const o = { index: d.index, name: d.name, season: d.season, fingerprint: fpAt(d.index) };
 			// A synthetic season records how to regenerate its file.
-			if (syn) o.synth = { seed: syn.seed, season: syn.season, size: syn.size };
+			if (syn) {
+				o.synth = { seed: syn.seed, season: syn.season, size: syn.size };
+				if (Number.isFinite(syn.epoch)) o.synth.epoch = syn.epoch;
+			}
 			return o;
 		});
 		// Previews read the drawn class, never the returners added to it.
@@ -3850,7 +4209,7 @@
 			}
 		};
 
-		function step(k) {
+		function begin(k) {
 			const d = runnable[k];
 			const position = held.length + k;
 			/* A HOLE IN THE FILES IS TIME PASSING. See ageCarry. */
@@ -3874,7 +4233,8 @@
 			if (applyEntrants(files[d.index], handed, d.season) && spec.dataChanged) {
 				spec.dataChanged(d.index);
 			}
-			let res = null;
+			const ctx = { k, d, position, gap, handed, cfg: null, prevCarry: carry,
+				sourcesIn: null, error: null, ran: [] };
 			try {
 				const cfg = make(frozen);
 				cfg.seed = seedAt(k);
@@ -3895,8 +4255,27 @@
 				cfg.universeAlumni = u.alumni.slice(-120);
 				cfg.universeTitles = (carry && carry.titles) || {};
 				cfg.universeDigest = (carry && carry.digest) || {};
-				const prevCarry = carry;
-				res = spec.runnerFor(d.index).run(cfg);
+				/* UV12: a past pro class plays with its men's real schools and
+				   class years and its real draft order (see Engine.withPastPro,
+				   which also reads the file's own mark when this is absent). */
+				const pp = E.pastProOf ? E.pastProOf(files[d.index] && files[d.index].data) : null;
+				if (pp) {
+					const withPro = E.withPastPro(cfg, files[d.index].data);
+					cfg.biography = withPro.biography;
+					cfg.draftTruth = withPro.draftTruth;
+				}
+				ctx.cfg = cfg;
+				ctx.sourcesIn = sourcesIn;
+				ctx.prevCarry = carry;
+			} catch (e) { ctx.error = e; }
+			return ctx;
+		}
+
+		function end(ctx, res) {
+			const { k, d, position, gap, handed, cfg, prevCarry, sourcesIn } = ctx;
+			try {
+				if (ctx.error) throw ctx.error;
+				if (ctx.ran.length) res.phasesRun = ctx.ran.concat(res.phasesRun || []);
 				const heavy = (res.phasesRun || [])
 					.some((x) => x === "build" || x === "regular" || x === "stats");
 				if (heavy) stats.resimulated++;
@@ -3932,18 +4311,26 @@
 				/* A FILE THAT CARRIES PART OF A CLASS. See topUpPartialSeason. */
 				const share = Math.min(1, (res.players || []).length / Math.max(1, fullClass));
 				u.rows.push(topUpPartialSeason(Object.assign(
-					summarize(res, cfg.seed, d.name),
+					summarize(res, cfg.seed, d.name, fpAt, d.fingerprint || null),
 					{
 						fingerprint: d.fingerprint || null,
 						result: resultFingerprint(res),
 						gap,
 						position,
 					}), prevCarry, baseSeed, share));
-				u.alumni = u.alumni.concat(alumniOf(res, d.season, d.fingerprint || null)
+				u.alumni = u.alumni.concat(alumniOf(res, d.season, d.fingerprint || null, fpAt)
 					.map((a) => Object.assign(a, { position })));
 				captureLinks(res, d, position);
 				try { mergeRegistry(u.registry, registryOf([res], files, null)); }
 				catch (e) { /* the registry is a view; the season stands */ }
+				const pastPro = E.pastProOf ? E.pastProOf(files[d.index] && files[d.index].data) : null;
+				if (pastPro) {
+					const row = u.rows[u.rows.length - 1];
+					if (row) row.proHistory = { year: pastPro.year, league: pastPro.league || null };
+					u.alumni = u.alumni.concat(proHistoryAlumni(res, pastPro, d.season,
+						d.fingerprint || null).map((a) => Object.assign(a, { position })));
+					attachProCareers(u, pastPro, d.fingerprint || null, res);
+				}
 				// The returner's own career row says he came back to the draft.
 				for (const x of handed) {
 					if (!u.registry[x.id]) continue;
@@ -3977,6 +4364,51 @@
 			}
 			u.done = k + 1;
 			return res;
+		}
+
+
+		function step(k) {
+			const ctx = begin(k);
+			let res = null;
+			if (!ctx.error) {
+				try { res = spec.runnerFor(ctx.d.index).run(ctx.cfg); }
+				catch (e) { ctx.error = e; }
+			}
+			return end(ctx, res);
+		}
+
+		/* ONE SEASON, ONE PHASE AT A TIME (UV1). The same season step()
+		   plays, handed back between engine phases so the page can paint and
+		   read the Stop button: next() runs one phase and says whether the
+		   season is done. */
+		function stepPhased(k) {
+			const ctx = begin(k);
+			const runner = ctx.error ? null : spec.runnerFor(ctx.d.index);
+			const names = (E.PHASES || []).map((ph) => ph.name);
+			let i = 0;
+			let out = null;
+			let finished = false;
+			return {
+				next() {
+					if (finished) return true;
+					if (!ctx.error && i < names.length - 1) {
+						try {
+							const part = runner.run(ctx.cfg, { stopAfter: names[i] });
+							ctx.ran = ctx.ran.concat(part.phasesRun || []);
+						} catch (e) { ctx.error = e; }
+						i++;
+						return false;
+					}
+					let res = null;
+					if (!ctx.error) {
+						try { res = runner.run(ctx.cfg); } catch (e) { ctx.error = e; }
+					}
+					out = end(ctx, res);
+					finished = true;
+					return true;
+				},
+				get result() { return out; },
+			};
 		}
 
 		/* RUNNING FORWARD PAST THE LAST FILE. Guessed rows past the end are
@@ -4044,7 +4476,7 @@
 		}
 
 		return {
-			universe: u, runnable, held, previews, heldPreviews, step, finish, stats,
+			universe: u, runnable, held, previews, heldPreviews, step, stepPhased, finish, stats,
 			get carry() { return carry; },
 			get lastSeason() { return lastSeason; },
 			get sources() { return sources; },
@@ -4408,6 +4840,8 @@
 		[-Infinity, "bust", [0, 3], [0, 0]],
 	];
 	function proOutcome(entry) {
+		// UV11/UV12: a real pro career, when the league supplied one, wins.
+		if (entry && entry.pro && entry.pro.real) return realProOutcome(entry.pro);
 		const d = entry && entry.draft;
 		if (!entry || !entry.id || !d || !Number.isFinite(d.pot)) return null;
 		const rng = new global.BBGMRng.Rng("pro|" + entry.id);
@@ -4419,12 +4853,30 @@
 		const years = span(t[2]);
 		const allStars = Math.min(years, span(t[3]));
 		const score = years + allStars * 3 + (t[1] === "superstar" ? 10 : t[1] === "star" ? 5 : 0);
-		return { tier: t[1], years, allStars, score,
+		return { tier: t[1], years, allStars, score, projected: true,
 			bust: t[1] === "bust", star: t[1] === "star" || t[1] === "superstar" };
+	}
+	function realProOutcome(pro) {
+		const allStars = (pro.awards || []).filter((a) => /All-Star/.test(a.award)).length;
+		const mvps = (pro.awards || []).filter((a) => /Most Valuable|^MVP/.test(a.award)).length;
+		const ppg = Number(pro.ppg) || 0;
+		const tier = mvps || allStars >= 3 ? "superstar" : allStars ? "star"
+			: ppg >= 12 ? "starter" : pro.gp >= 60 ? "role player" : pro.gp > 0 ? "reserve" : "bust";
+		const years = pro.seasons || 0;
+		const score = years + allStars * 3 + mvps * 6 + Math.round(ppg / 4);
+		return { tier, years, allStars, score, real: true, ppg, gp: pro.gp || 0,
+			team: pro.team || null, status: pro.status || null,
+			bust: tier === "bust", star: tier === "star" || tier === "superstar" };
 	}
 	function proText(o) {
 		if (!o) return "—";
-		return o.tier + ", " + o.years + " season" + (o.years === 1 ? "" : "s") +
+		if (o.real) {
+			return o.tier + " (real), " + o.years + " season" + (o.years === 1 ? "" : "s") +
+				", " + o.ppg + " ppg in " + o.gp + " games" +
+				(o.allStars ? ", " + o.allStars + "x All-Star" : "") +
+				(o.team ? ", " + o.team : o.status && o.status !== "active" ? ", " + o.status : "");
+		}
+		return o.tier + " (projected), " + o.years + " season" + (o.years === 1 ? "" : "s") +
 			(o.allStars ? ", " + o.allStars + "x All-Star" : "");
 	}
 
@@ -4437,12 +4889,51 @@
 			if (!x || !x.id || !x.draft) continue;
 			const pro = proOutcome(x);
 			if (!pro) continue;
-			const college = personalHonors(x).length * 2 + (x.span || 0);
+			const college = honorScore(x) + (x.span || 0);
 			out.push({ id: x.id, name: x.name, school: x.draft.school || null,
 				season: x.draft.season, pro, college, score: college + pro.score * 1.5 });
 		}
 		out.sort((a, b) => b.score - a.score || cmpText(a.name, b.name));
 		return out.slice(0, n || 10);
+	}
+
+	/* ALUMNI / DRAFTED FROM (UV11). Everyone the registry has at one
+	   program: the men it sent to the draft (draft.school) and the
+	   underclassmen of later classes who played there. opts.draftYear narrows
+	   it to one draft. Newest draft first, then by slot. */
+	function programAlumni(u, name, opts) {
+		opts = opts || {};
+		const reg = (u && u.registry) || {};
+		const out = [];
+		for (const id of Object.keys(reg)) {
+			const x = reg[id];
+			if (!x) continue;
+			const d = x.draft;
+			const drafted = !!(d && (!name || d.school === name));
+			const played = (x.seasons || []).filter((s2) => s2.school && (!name || s2.school === name));
+			if (!drafted && !played.length) continue;
+			if (Number.isFinite(opts.draftYear) && !(d && d.season === opts.draftYear)) continue;
+			const seasons = (x.seasons || []).map((s2) => s2.season).filter(Number.isFinite);
+			const pro = proOutcome(x);
+			out.push({
+				id: x.id, name: x.name,
+				school: drafted ? d.school : played[0].school,
+				from: seasons.length ? Math.min.apply(null, seasons) : d ? d.season : null,
+				to: seasons.length ? Math.max.apply(null, seasons) : d ? d.season : null,
+				classYear: d && d.classYear ? d.classYear : (played[played.length - 1] || {}).classYear || null,
+				draftSeason: d ? d.season : null,
+				slot: d && Number.isFinite(d.slot) ? d.slot : null,
+				team: d && d.team ? d.team : null,
+				drafted,
+				honors: personalHonors(x).filter((h) => honorWeight(h) > 0).length,
+				pro: pro ? proText(pro) : null,
+				proReal: !!(pro && pro.real),
+				imported: !!x.imported || !!x.league,
+			});
+		}
+		out.sort((a, b) => (b.draftSeason || 0) - (a.draftSeason || 0) ||
+			(a.slot || 999) - (b.slot || 999) || cmpText(a.name, b.name));
+		return out;
 	}
 
 	/* THE SEASON DRAWER. What the world held about one row: the row, the
@@ -4521,5 +5012,7 @@
 		SYNTH_SIZE,
 		rowMentions, followedCard, followedLead, dynastyProgress, lowPrestige,
 		proOutcome, proText, proHall, seasonDetail,
+		programAlumni, importProHistory, honorWeight, honorScore, registryKeepScore,
+		synthEpochOf, poyOf,
 	};
 })(typeof window !== "undefined" ? window : self);
