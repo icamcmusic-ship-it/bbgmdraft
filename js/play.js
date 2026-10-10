@@ -149,6 +149,18 @@
 		return u < 0.6 ? "Easy (chalk)" : u < 1.2 ? "Normal" : u < 1.6 ? "Hard" : "Chaos";
 	}
 
+	/* THE BASELINE (audit R3): what a player with no information scores —
+	   the most prestigious program to win it, and the preseason No. 1 as both
+	   player of the year and No. 1 pick. Points above it are the skill. */
+	function baselinePrediction(res) {
+		const teams = Object.values((res && res.teams) || {}).filter((t) => t && t.name)
+			.sort((a, b) => (b.prestige || 0) - (a.prestige || 0) || byName(a, b));
+		const pre = ((res && res.players) || []).filter((p) => Number.isFinite(p.preseasonRank))
+			.sort((a, b) => a.preseasonRank - b.preseasonRank)[0];
+		return { champion: teams[0] ? teams[0].name : null,
+			poy: pre && !pre.nonNcaa ? pre.key : "none", no1: pre ? pre.key : null };
+	}
+
 	/* The prediction's answer key, read off a finished result. */
 	function predictionAnswers(res) {
 		const t = res.tourney || {};
@@ -163,7 +175,25 @@
 			no1: res.board && res.board[0] ? res.board[0].key : null,
 			no1Name: res.board && res.board[0] ? res.board[0].name : null,
 			top5: (res.board || []).slice(0, 5).map((p) => p.key),
+			// The advanced card (Q23).
+			foy: (res.players || []).filter((p) => (p.awards || []).indexOf("Wayman Tisdale Award") !== -1)
+				.map((p) => p.key),
+			onesInFF: (t.finalFour || []).filter((x) => x && x.seed === 1).length,
 		};
+	}
+
+	/* THE ADVANCED CARD (audit Q23): a Final Four pick is a point each,
+	   Freshman of the Year 2 ("nobody in this class" when the Tisdale went
+	   elsewhere), the number of 1 seeds in the Final Four 2. Max 8, graded
+	   apart from the main 11 so old records stay comparable. */
+	function gradeAdvanced(picks, ans) {
+		const ff = new Set(ans.finalFour);
+		const mine = Array.from(new Set((picks.ff || []).filter(Boolean)));
+		const ffPts = mine.filter((n) => ff.has(n)).length;
+		const foy = ans.foy.length ? (ans.foy.indexOf(picks.foy) !== -1 ? 2 : 0)
+			: (picks.foy === "none" ? 2 : 0);
+		const ones = Number(picks.ones) === ans.onesInFF ? 2 : 0;
+		return { ff: ffPts, foy, ones, points: ffPts + foy + ones, max: 8 };
 	}
 
 	/* Champion 5 (2 for a Final Four team), POY 3, No. 1 pick 3 (1 for a
@@ -216,9 +246,23 @@
 		} catch (e) { /* storage blocked or corrupt: start clean */ }
 		return {};
 	}
-	function saveRecord(kind, points, max, seed) {
+	/* Only the FIRST reveal of a class counts (audit R3): starting the same
+	   seed again after seeing the answers added to the totals and could take
+	   "best". `opts.fp` names the class (seed + fingerprint); `opts.base` is
+	   the no-information baseline's score, for the above-baseline streak. */
+	function saveRecord(kind, points, max, seed, opts) {
 		const all = loadRecord();
 		const r = all[kind] || { played: 0, points: 0, max: 0, best: null };
+		const id = String(seed) + "|" + ((opts && opts.fp) || "");
+		r.seen = Array.isArray(r.seen) ? r.seen : [];
+		if (r.seen.indexOf(id) !== -1) return Object.assign({}, r, { repeat: true });
+		r.seen.push(id);
+		if (r.seen.length > 300) r.seen = r.seen.slice(-300);
+		if (opts && Number.isFinite(opts.base)) {
+			r.streak = points > opts.base ? (r.streak | 0) + 1 : 0;
+			r.bestStreak = Math.max(r.bestStreak | 0, r.streak);
+			r.above = (r.above || 0) + (points - opts.base);
+		}
 		r.played++;
 		r.points += points;
 		r.max += max;
@@ -234,6 +278,8 @@
 		predict: "Prediction",
 		bracket: "Bracket pool",
 		scout: "Blind scout",
+		draft: "Draft-night GM",
+		follow: "Follow a program",
 	};
 
 	function resKey(res) {
@@ -243,14 +289,29 @@
 
 	// While a game is open and unrevealed, every tab but Play is a spoiler.
 	function gated(st, res) {
-		return !!(st.play && !st.play.revealed && st.tab !== "play" && res);
+		return !!((st.play && !st.play.revealed || st.blindPending) && st.tab !== "play" && res);
+	}
+	function newGame(kind, res) {
+		const g = { kind, key: resKey(res), revealed: false,
+			picks: kind === "bracket" ? emptyPicks() : kind === "scout" ? [] : {},
+			round: 0, rolls: 0 };
+		if (kind === "draft" && global.Pro && global.Pro.draftGame) {
+			g.game = global.Pro.draftGame(res, "1");
+			g.picks = {};
+		}
+		return g;
+	}
+	function classId(res) {
+		const A = global.App;
+		try { return A && A.classFingerprint ? A.classFingerprint(res) : ""; } catch (e) { return ""; }
 	}
 
 	function gateView(view) {
 		const el = global.Views.el;
 		const st = global.App.state;
 		const box = el("div", "empty-state playgate");
-		box.appendChild(el("h3", null, "Spoilers hidden: a " + GAMES[st.play.kind] + " game is open"));
+		box.appendChild(el("h3", null, "Spoilers hidden: a " +
+			GAMES[st.play ? st.play.kind : st.blindPending] + " game is open"));
 		box.appendChild(el("p", "hint", "This tab shows the season's results. Finish the " +
 			"game on the Play tab, or abandon it to look."));
 		const row = el("div", "rowflex");
@@ -275,6 +336,11 @@
 		const App = global.App;
 		const st = App.state;
 		if (st.play && st.play.key !== resKey(res)) st.play = null;   // the class was re-run
+		// A blind reroll opened its game before the class existed (R3).
+		if (st.blindPending && !st.play) {
+			st.play = newGame(st.blindPending, res);
+			st.blindPending = null;
+		}
 		const wrap = el("div", "playtab");
 		wrap.appendChild(el("h2", null, "Play"));
 		if (!st.play) {
@@ -283,6 +349,30 @@
 				"every other tab is hidden, because they would give the answers away."));
 			const rec = loadRecord();
 			const cards = el("div", "cards playcards");
+			const blind = el("div", "rowflex");
+			for (const k of ["predict", "bracket", "scout", "follow"]) {
+				const bb = el("button", null, "Blind reroll: " + GAMES[k]);
+				bb.setAttribute("data-blind", k);
+				bb.title = "A brand-new class with this game already open, so nothing about it is seen first";
+				bb.addEventListener("click", () => App.blindReroll && App.blindReroll(k));
+				blind.appendChild(bb);
+			}
+			wrap.appendChild(blind);
+			const fog = el("label", "check");
+			const fogCb = el("input");
+			fogCb.type = "checkbox";
+			fogCb.setAttribute("data-fog", "1");
+			fogCb.checked = !!st.fog;
+			fogCb.addEventListener("change", () => {
+				st.fog = fogCb.checked;
+				// Fog (R12.4): the board's Blind column preset, the upset factor hidden.
+				if (st.fog && global.Views && global.Views.applyColumnPreset) global.Views.applyColumnPreset("Blind");
+				App.render();
+			});
+			fog.appendChild(fogCb);
+			fog.appendChild(document.createTextNode(" Fog: hide overall and potential on the board " +
+				"and the bracket's difficulty until a reveal"));
+			wrap.appendChild(fog);
 			for (const [kind, blurb] of [
 				["predict", "Before the season: pick the national champion, the player of " +
 					"the year and the No. 1 pick. Graded out of 11."],
@@ -291,6 +381,12 @@
 					difficulty((res.effectiveCfg || res.cfg || {}).upsetFactor) + "."],
 				["scout", "Ratings hidden: rank your top 10 prospects from their bios " +
 					"and stat lines, then compare to the final board. Out of 100."],
+				["draft", "You hold a lottery team's picks in the mock draft. Ratings are " +
+					"scouted (fuzzed); you are graded on your picks' projected peaks against " +
+					"the men the computer took at the same slots."],
+				["follow", "Pick one program before the season and score its year: a point " +
+					"a regular-season win, ten a tournament win. Scored against the " +
+					"preseason favourite's year."],
 			]) {
 				const c = el("div", "card");
 				c.appendChild(el("h4", null, GAMES[kind]));
@@ -299,7 +395,9 @@
 				if (r && r.played) {
 					c.appendChild(el("p", "hint", "Your record: " + r.played + " played, " +
 						Math.round(100 * r.points / Math.max(1, r.max)) + "% of points; best " +
-						r.best.points + "/" + r.best.max + "."));
+						r.best.points + "/" + r.best.max + "." +
+						(Number.isFinite(r.above) ? " Above baseline: " + (r.above >= 0 ? "+" : "") +
+							r.above + " in all · streak " + (r.streak | 0) + " (best " + (r.bestStreak | 0) + ")." : "")));
 				}
 				const b = el("button", "primary", "Start");
 				b.setAttribute("data-play", kind);
@@ -307,10 +405,9 @@
 					b.disabled = true;
 					c.appendChild(el("p", "hint", "This field is too small for a full bracket."));
 				}
+				if (kind === "draft" && !(global.Pro && global.Pro.draftGame)) b.disabled = true;
 				b.addEventListener("click", () => {
-					st.play = { kind, key: resKey(res), revealed: false,
-						picks: kind === "bracket" ? emptyPicks() : kind === "scout" ? [] : {},
-						round: 0, rolls: 0 };
+					st.play = newGame(kind, res);
 					App.render();
 				});
 				c.appendChild(b);
@@ -334,6 +431,8 @@
 		}
 		if (g.kind === "predict") predictView(wrap, res, g, el);
 		else if (g.kind === "bracket") bracketView(wrap, res, g, el);
+		else if (g.kind === "draft") draftView(wrap, res, g, el);
+		else if (g.kind === "follow") followView(wrap, res, g, el);
 		else scoutView(wrap, res, g, el);
 		view.appendChild(wrap);
 	}
@@ -369,13 +468,46 @@
 		field("Player of the year", "poy", [["none", "Nobody in this class"]]
 			.concat(players.filter((p) => !p.nonNcaa).map((p) => [p.key, playerLabel(p)])));
 		field("No. 1 pick", "no1", players.map((p) => [p.key, playerLabel(p)]));
+		// The advanced card (Q23), optional, graded apart.
+		const adv = el("details", "card playadvanced");
+		adv.open = !!g.picks.advanced;
+		adv.appendChild(el("summary", null, "Advanced (optional, out of 8): Final Four, " +
+			"Freshman of the Year, 1 seeds in the Final Four"));
+		adv.addEventListener("toggle", () => { g.picks.advanced = adv.open; });
+		const sub = (label, key, options, i) => {
+			const row = el("label", "rowflex");
+			row.appendChild(el("span", null, label));
+			const s2 = el("select");
+			s2.setAttribute("data-play-adv", key + (i === undefined ? "" : i));
+			s2.appendChild(new Option("—", ""));
+			for (const [v, t] of options) s2.appendChild(new Option(t, v));
+			const cur = i === undefined ? g.picks[key] : (g.picks[key] || [])[i];
+			s2.value = cur === undefined || cur === null ? "" : String(cur);
+			s2.disabled = g.revealed;
+			s2.addEventListener("change", () => {
+				if (i === undefined) g.picks[key] = s2.value || null;
+				else { g.picks[key] = (g.picks[key] || []).slice(); g.picks[key][i] = s2.value || null; }
+			});
+			row.appendChild(s2);
+			adv.appendChild(row);
+		};
+		for (let i = 0; i < 4; i++) sub("Final Four team " + (i + 1), "ff", teams.map((t) => [t.name, t.name]), i);
+		sub("Freshman of the Year", "foy", [["none", "Nobody in this class"]]
+			.concat(players.filter((p) => !p.nonNcaa && p.classYear === "Freshman").map((p) => [p.key, playerLabel(p)])));
+		sub("1 seeds in the Final Four", "ones", [0, 1, 2, 3, 4].map((n) => [String(n), String(n)]));
+		wrap.appendChild(adv);
 		if (!g.revealed) {
 			wrap.appendChild(revealButton("Lock in and reveal",
 				g.picks.champion && g.picks.poy && g.picks.no1, () => {
 					g.revealed = true;
 					g.answers = predictionAnswers(res);
 					g.grade = gradePrediction(g.picks, g.answers);
-					g.record = saveRecord("predict", g.grade.points, g.grade.max, res.seed);
+					g.base = gradePrediction(baselinePrediction(res), g.answers);
+					const advPicked = (g.picks.ff || []).some(Boolean) || g.picks.foy || g.picks.ones;
+					if (advPicked) g.adv = gradeAdvanced(g.picks, g.answers);
+					g.record = saveRecord("predict", g.grade.points, g.grade.max, res.seed,
+						{ fp: classId(res), base: g.base.points });
+					if (g.adv) saveRecord("predictAdvanced", g.adv.points, g.adv.max, res.seed, { fp: classId(res) });
 				}, el));
 			return;
 		}
@@ -387,6 +519,17 @@
 		out.appendChild(el("p", null, "Player of the year: " +
 			(a.poyName || "nobody in this class") + " (+" + gr.poy + ")"));
 		out.appendChild(el("p", null, "No. 1 pick: " + (a.no1Name || "?") + " (+" + gr.no1 + ")"));
+		if (g.base) {
+			const d = gr.points - g.base.points;
+			out.appendChild(el("p", "hint", "The no-information baseline (prestige favourite, " +
+				"preseason No. 1) scored " + g.base.points + ": you are " + (d >= 0 ? "+" : "") + d + " above it."));
+		}
+		if (g.adv) {
+			out.appendChild(el("p", null, "Advanced: " + g.adv.points + " / 8 (Final Four " + g.adv.ff +
+				", Freshman of the Year " + g.adv.foy + ", 1 seeds " + g.adv.ones + "). Final Four: " +
+				a.finalFour.join(", ") + "."));
+		}
+		if (g.record && g.record.repeat) out.appendChild(el("p", "hint", "Already played on this class: not counted again."));
 		wrap.appendChild(out);
 	}
 
@@ -395,8 +538,10 @@
 		const seedOf = {};
 		for (const s of base) seedOf[s.name] = s.seed;
 		const u = (res.effectiveCfg || res.cfg || {}).upsetFactor;
-		wrap.appendChild(el("p", "hint", "Difficulty: " + difficulty(u) +
-			" (upset factor " + (Number.isFinite(u) ? u.toFixed(2) : "1.00") + "). " +
+		const fogged = global.App.state.fog && !g.revealed;
+		wrap.appendChild(el("p", "hint", (fogged ? "Difficulty: hidden until the reveal (fog). "
+			: "Difficulty: " + difficulty(u) +
+			" (upset factor " + (Number.isFinite(u) ? u.toFixed(2) : "1.00") + "). ") +
 			"Seeds are after the First Four."));
 		const tools = el("div", "rowflex");
 		if (!g.revealed) {
@@ -459,7 +604,10 @@
 				g.revealed = true;
 				g.truth = bracketTruth(res.tourney, base);
 				g.score = scoreBracket(g.picks, g.truth);
-				g.record = saveRecord("bracket", g.score.points, g.score.max, res.seed);
+				g.pool = bracketPool(res, base, g.truth);
+				g.record = saveRecord("bracket", g.score.points, g.score.max, res.seed,
+					{ fp: classId(res), base: g.pool.filter((x) => x.name === "The model")[0]
+						? g.pool.filter((x) => x.name === "The model")[0].points : g.pool[0].points });
 			}, el));
 			return;
 		}
@@ -467,6 +615,16 @@
 		out.appendChild(el("h4", null, "Score: " + g.score.points + " / " + g.score.max));
 		out.appendChild(el("p", "hint", g.score.byRound.map((r, j) =>
 			ROUND_LABEL[j] + " " + r.hits + "/" + r.games).join(" · ")));
+		// The pool (Q10): you against three computer entrants.
+		if (g.pool) {
+			const rows = [{ name: "You", points: g.score.points }].concat(g.pool)
+				.sort((x, y) => y.points - x.points);
+			const lb = el("ol", "playpool");
+			for (const r of rows) lb.appendChild(el("li", r.name === "You" ? "me" : "", r.name + " — " + r.points));
+			out.appendChild(el("h4", null, "Pool"));
+			out.appendChild(lb);
+		}
+		if (g.record && g.record.repeat) out.appendChild(el("p", "hint", "Already played on this class: not counted again."));
 		wrap.appendChild(out);
 	}
 
@@ -504,7 +662,8 @@
 				g.revealed = true;
 				g.score = scoreScout(g.picks, res.board);
 				g.ref = scoreScout(preseasonTop10(res.players), res.board);
-				g.record = saveRecord("scout", g.score.points, g.score.max, res.seed);
+				g.record = saveRecord("scout", g.score.points, g.score.max, res.seed,
+					{ fp: classId(res), base: g.ref.points });
 			}, el));
 			// The blind table: bio and box score only, alphabetical.
 			const cols = [["Pos", "pos"], ["Yr", "year"], ["College", "college"],
@@ -554,7 +713,132 @@
 		wrap.appendChild(out);
 	}
 
+	/* THE BRACKET POOL'S COMPUTER ENTRANTS (audit Q10): Chalk (the better
+	   seed), the Coin-flipper (randomFill off the seed) and The model (each
+	   game's favourite by Tournament.titleOdds' pairwise chances). */
+	function bracketPool(res, base, truth) {
+		const out = [];
+		const Rng = global.BBGMRng.Rng;
+		out.push({ name: "Chalk", points: scoreBracket(autoFillBySeed(base), truth).points });
+		out.push({ name: "Coin-flipper", points: scoreBracket(
+			randomFill(base, emptyPicks(), new Rng(res.seed + "|coin")), truth).points });
+		const TT = global.Tournament;
+		const odds = TT && TT.titleOdds ? TT.titleOdds(res.tourney, res.effectiveCfg || res.cfg) : null;
+		if (odds) {
+			const strength = {};
+			// A team's chance to win it all orders every game it could play.
+			for (const o of odds) strength[o.team] = o.rounds[5] + 1e-6 * o.rounds[0];
+			const model = fillWith(base, emptyPicks(), (a, b) => (strength[a] >= strength[b] ? a : b));
+			out.push({ name: "The model", points: scoreBracket(model, truth).points });
+		}
+		return out;
+	}
+
+	/* DRAFT-NIGHT GM (audit R12.1, Q24). */
+	function draftView(wrap, res, g, el) {
+		const game = g.game;
+		if (!game) { wrap.appendChild(el("p", "hint", "No lottery picks in this mock.")); return; }
+		const byKey = {};
+		for (const p of res.players || []) byKey[p.key] = p;
+		wrap.appendChild(el("p", "hint", "You are " + game.team + ", picking at No. " +
+			game.slots.join(", No. ") + ". Overall and potential are your scouts' reads, " +
+			"not the truth. Picks before yours are made by the other teams once you lock in."));
+		const taken = new Set(Object.values(g.picks));
+		game.slots.forEach((n) => {
+			const row = el("label", "rowflex");
+			row.appendChild(el("span", null, "Pick No. " + n));
+			const s2 = el("select");
+			s2.setAttribute("data-play-draft", String(n));
+			s2.appendChild(new Option("—", ""));
+			const pool = (res.players || []).slice().sort((a, b) =>
+				game.fuzz[b.key].ovr - game.fuzz[a.key].ovr || byName(a, b));
+			for (const p of pool) {
+				if (taken.has(p.key) && g.picks[n] !== p.key) continue;
+				s2.appendChild(new Option(playerLabel(p) + " · " + p.newPos + " · scouted " +
+					game.fuzz[p.key].ovr + "/" + game.fuzz[p.key].pot, p.key));
+			}
+			s2.value = g.picks[n] || "";
+			s2.disabled = g.revealed;
+			s2.addEventListener("change", () => {
+				if (s2.value) g.picks[n] = s2.value; else delete g.picks[n];
+				global.App.render();
+			});
+			row.appendChild(s2);
+			wrap.appendChild(row);
+		});
+		if (!g.revealed) {
+			wrap.appendChild(revealButton("Lock in and run the draft",
+				game.slots.every((n) => g.picks[n]), () => {
+					g.revealed = true;
+					g.result = global.Pro.gradeDraftGame(res, game, g.picks);
+					g.record = saveRecord("draft", Math.max(0, Math.round(g.result.delta) + 50), 100,
+						res.seed, { fp: classId(res), base: 50 });
+				}, el));
+			return;
+		}
+		const r = g.result;
+		const out = el("div", "card playresult");
+		out.appendChild(el("h4", null, "Your picks' projected peaks: " + r.you + " against the " +
+			"computer's " + r.cpu + " (" + (r.delta >= 0 ? "+" : "") + r.delta + ")"));
+		for (const row of r.rows) {
+			out.appendChild(el("p", null, "No. " + row.slot + ": you took " + (row.mine || "—") +
+				" (peak " + row.minePeak + "), the computer took " + (row.cpu || "—") +
+				" (peak " + row.cpuPeak + ")"));
+		}
+		if (g.record && g.record.repeat) out.appendChild(el("p", "hint", "Already played on this class: not counted again."));
+		wrap.appendChild(out);
+	}
+
+	/* FOLLOW A PROGRAM (audit R12.3): a regular-season win is a point, a
+	   tournament win ten. Scored against the preseason favourite's year. */
+	function tourneyWins(res, name) {
+		const games = global.ReplayMeta ? global.ReplayMeta.tourneyGames(res) : [];
+		return games.filter((gm) => gm.winner && gm.winner.team && gm.winner.team.name === name).length;
+	}
+	function followView(wrap, res, g, el) {
+		const teams = Object.values(res.teams || {}).filter((t) => t && t.name)
+			.sort((a, b) => (b.prestige || 0) - (a.prestige || 0) || byName(a, b));
+		const row = el("label", "rowflex");
+		row.appendChild(el("span", null, "Your program"));
+		const s2 = el("select");
+		s2.setAttribute("data-play-follow", "1");
+		s2.appendChild(new Option("—", ""));
+		for (const t of teams) s2.appendChild(new Option(t.name, t.name));
+		s2.value = g.picks.team || "";
+		s2.disabled = g.revealed;
+		s2.addEventListener("change", () => { g.picks.team = s2.value || null; global.App.render(); });
+		row.appendChild(s2);
+		wrap.appendChild(row);
+		const score = (name) => {
+			const t = teams.filter((x) => x.name === name)[0];
+			if (!t) return 0;
+			return (Number.isFinite(t.regW) ? t.regW : 0) + 10 * tourneyWins(res, name);
+		};
+		if (!g.revealed) {
+			wrap.appendChild(revealButton("Lock in and play the season", !!g.picks.team, () => {
+				g.revealed = true;
+				g.points = score(g.picks.team);
+				g.basePoints = teams[0] ? score(teams[0].name) : 0;
+				g.record = saveRecord("follow", g.points, 66, res.seed, { fp: classId(res), base: g.basePoints });
+			}, el));
+			return;
+		}
+		const t = teams.filter((x) => x.name === g.picks.team)[0];
+		const out = el("div", "card playresult");
+		out.appendChild(el("h4", null, g.picks.team + ": " + g.points + " points"));
+		if (t) {
+			out.appendChild(el("p", null, "Regular season " + (t.regW || 0) + "-" + (t.regL || 0) +
+				" · " + tourneyWins(res, t.name) + " NCAA tournament wins" +
+				(Number.isFinite(t.apRank) ? " · final AP No. " + t.apRank : "")));
+		}
+		out.appendChild(el("p", "hint", "The preseason favourite (" + (teams[0] ? teams[0].name : "?") +
+			") scored " + g.basePoints + "."));
+		if (g.record && g.record.repeat) out.appendChild(el("p", "hint", "Already played on this class: not counted again."));
+		wrap.appendChild(out);
+	}
+
 	global.Play = {
+		baselinePrediction, gradeAdvanced, bracketPool, GAMES,
 		POINTS, ROUND_LABEL, bracketBase, emptyPicks, participants, setPick,
 		autoFillBySeed, randomFill, complete, bracketTruth, scoreBracket, difficulty,
 		predictionAnswers, gradePrediction, scoreScout, preseasonTop10,

@@ -1357,14 +1357,45 @@
 			(Array.isArray(userCfg.pinned) && userCfg.pinned.indexOf(key) !== -1);
 	}
 
+	/* Storylines that cannot both be the season (audit 2026-10-10, R8): a
+	   year is not "wide open" and "chalk all the way" at once. Drawing one
+	   takes its contradictions out of the pool. */
+	const NARRATIVE_CONFLICTS = [
+		["a dominant favourite", "a wide-open year"],
+		["a wide-open year", "chalk all the way"],
+		["the mid-majors run", "chalk all the way"],
+		["a scoring explosion", "a defensive slog"],
+		["a scoring explosion", "the year of the whistle"],
+		["a season of streaks", "chalk all the way"],
+	];
+	function narrativeConflicts(a, b) {
+		return NARRATIVE_CONFLICTS.some((c) =>
+			(c[0] === a && c[1] === b) || (c[0] === b && c[1] === a));
+	}
+	/* The storylines the last few classes drew (cfg.recentNarratives, newest
+	   first, a list of name lists — the app's memory, like recentFlavors)
+	   are down-weighted by the flavor memory's own strength. */
+	function narrativeMemoryFactor(name, recent, strength) {
+		if (!strength || !Array.isArray(recent) || !recent.length) return 1;
+		let f = 1;
+		recent.forEach((names, i) => {
+			if (Array.isArray(names) && names.indexOf(name) !== -1) {
+				f *= 1 - strength * 0.7 / (i + 1);
+			}
+		});
+		return Math.max(0.05, f);
+	}
+
 	function applyNarrative(cfg, rng, userCfg) {
 		if (!cfg || cfg.narrative === false) return { cfg, narrative: [] };
-		const pool = NARRATIVES.slice();
+		let pool = NARRATIVES.slice();
 		const n = rng.random() < 0.35 ? 3 : 2;
 		const drawn = [];
+		const mem = clamp(Number.isFinite(cfg.flavorMemory) ? cfg.flavorMemory : 0, 0, 1);
+		const recent = cfg.recentNarratives;
 		for (let i = 0; i < n && pool.length; i++) {
-			const pick = rng.weighted(pool, (x) => x.w);
-			pool.splice(pool.indexOf(pick), 1);
+			const pick = rng.weighted(pool, (x) => x.w * narrativeMemoryFactor(x.name, recent, mem));
+			pool = pool.filter((x) => x !== pick && !narrativeConflicts(x.name, pick.name));
 			drawn.push(pick);
 		}
 		const D = global.Config.DEFAULTS;
@@ -1395,6 +1426,56 @@
 			cfg: out,
 			narrative: drawn.map((x) => ({ name: x.name, blurb: x.blurb })),
 		};
+	}
+
+	/* WAS THE STORYLINE TRUE? (audit 2026-10-10, R8.)
+
+	   Storylines are drawn BEFORE the season and bend its settings; whether
+	   the season then did what the storyline said is a fact only the result
+	   knows. Each story gets `held` (true, false, or null when the result
+	   carries nothing to check it against) and a `label` that says so: the
+	   preseason name when it held or cannot be checked, "<name> (that was the
+	   preseason talk)" when it did not. New objects; the drawn list is kept. */
+	const NARRATIVE_CHECKS = {
+		"a dominant favourite": (r) => !!(r.champ && r.champ.seed === 1 && r.champ.team &&
+			r.champ.team.l <= 3),
+		"a wide-open year": (r) => !!(r.champ && (r.champ.seed >= 3 ||
+			r.ffSeeds.some((s) => s >= 10))),
+		"the mid-majors run": (r) => r.ff.some((x) => r.midMajor(x.team)),
+		"a blue-blood down year": (r) => !r.ff.some((x) => x.team && x.team.prestige >= r.bluePrestige),
+		"chalk all the way": (r) => r.ffSeeds.length === 4 && r.ffSeeds.every((s) => s <= 2),
+		"the map moved": (r) => r.realignment > 0,
+		"a chaotic sideline": (r) => r.carousel >= 12,
+	};
+	function verifyNarrative(list, state) {
+		if (!Array.isArray(list) || !list.length) return list || [];
+		const t = (state && state.tourney) || {};
+		const ff = (t.finalFour || []).filter((x) => x && x.team);
+		const prestige = Object.values((state && state.teams) || {})
+			.map((x) => (x && Number(x.prestige)) || 0).sort((a, b) => b - a);
+		const r = {
+			champ: t.champion || null,
+			ff,
+			ffSeeds: ff.map((x) => x.seed).filter(Number.isFinite),
+			midMajor: (team) => {
+				const conf = team && team.conf && C.CONFERENCES[team.conf];
+				return !!team && (!conf || conf.tier !== "high");
+			},
+			bluePrestige: prestige.length ? prestige[Math.min(9, prestige.length - 1)] : Infinity,
+			realignment: ((state && state.realignment) || []).length,
+			carousel: ((state && state.coachingCarousel) || []).length,
+		};
+		return list.map((s) => {
+			const check = s && NARRATIVE_CHECKS[s.name];
+			let held = null;
+			if (check && t.champion) {
+				try { held = !!check(r); } catch (e) { held = null; }
+			}
+			return Object.assign({}, s, {
+				held,
+				label: held === false ? s.name + " (that was the preseason talk)" : s.name,
+			});
+		});
 	}
 
 	/* HOW FAR FROM THE MIDDLE THIS WORLD SITS.
@@ -1523,6 +1604,21 @@
 			}
 			moved = true;
 			if (LEGACY_LEAGUE[k]) league = true;
+		}
+		/* STRENGTH IN PRESERVE MODE (audit 2026-10-10, R1). classQuality,
+		   eliteCount and classDepth are read only by the curve rebuild, so
+		   under ovrMode "preserve" (the default) "a weak year" or "a two-man
+		   class" bent nothing. The strength half of the bend is carried onto
+		   potential instead — the one class-strength lever preserve mode
+		   leaves live — unless the user has decided potBias. */
+		if (out.ovrMode !== "curve" && !userTouched(user, "potBias")) {
+			const q = Number.isFinite(bend.classQuality) ? bend.classQuality : 0;
+			const e = Number.isFinite(bend.eliteCount) ? bend.eliteCount - D.eliteCount : 0;
+			const shift = (0.6 * q + 0.15 * e) * t;
+			if (shift) {
+				out.potBias = clamp((Number(out.potBias) || 0) + shift, -3, 3);
+				moved = true;
+			}
 		}
 		if (league && untouchedLeagueWeights(user)) {
 			const lw = Object.assign({}, out.leagueWeights);
@@ -4996,7 +5092,7 @@
 				"variation", "flavorHint", "flavorBlend", "poolMemory", "recentPools",
 				/* The flavor's own memory, drawn in pickFlavor — same pair
 				   and same contract as poolMemory/recentPools above. */
-				"flavorMemory", "recentFlavors",
+				"flavorMemory", "recentFlavors", "recentNarratives",
 				"anomalyMemory", "recentAnomalies", "flavorReach", "narrative",
 				/* The anomaly shortlist, and the meta-dial that moves half of
 				   the settings above. Both reshape the class from here down. */
@@ -5477,7 +5573,7 @@
 				flavor: state.flavor,
 				/* The season's storylines, so the UI can say what kind of year
 				   this was rather than only what kind of class it was. */
-				narrative: state.narrative || [],
+				narrative: verifyNarrative(state.narrative || [], state),
 				/* Whether the source file's own ages carry information. Read
 				   by exportFile, which without it on the result was reading
 				   `undefined` and rewriting born.year even for a file whose

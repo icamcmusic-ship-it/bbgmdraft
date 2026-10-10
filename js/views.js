@@ -6838,7 +6838,23 @@
 	/* What the Mock tab was last left on. A salt of 0 and a noise of 1.2 are the
 	   engine's own draft, and that is the one proFor caches. */
 	const MOCK_NOISE = 1.2;
-	const mockUi = { rounds: 2, salt: 0, noise: MOCK_NOISE, team: "" };
+	// `forced`: the user's own picks for "My team", {pickNo: key} (audit Q1), for one seed.
+	const mockUi = { rounds: 2, salt: 0, noise: MOCK_NOISE, team: "", forced: {}, forcedSeed: null };
+	const rangeCache = new WeakMap();
+	// The mock run at 25 salts (audit Q2), once per result.
+	function mockRangeFor(res, base) {
+		if (!global.Pro || !global.Pro.mockRange) return null;
+		let r = rangeCache.get(res);
+		if (!r) {
+			try { r = global.Pro.mockRange(res, { k: 25, projections: base.projections }); } catch (e) { r = null; }
+			if (r) rangeCache.set(res, r);
+		}
+		return r;
+	}
+	function forcedFor(res) {
+		if (mockUi.forcedSeed !== res.seed) { mockUi.forced = {}; mockUi.forcedSeed = res.seed; }
+		return mockUi.forced;
+	}
 	const mockCache = new WeakMap();
 
 	/* The engine's redraft options (a salt for the pick streams, a taste-noise
@@ -6856,10 +6872,12 @@
 		const rounds = mockUi.rounds;
 		const salt = sup.redraft ? mockUi.salt : 0;
 		const noise = sup.redraft ? mockUi.noise : MOCK_NOISE;
-		if (rounds === 2 && !salt && noise === MOCK_NOISE) return base.mock;
+		const forced = forcedFor(res);
+		const fkey = Object.keys(forced).sort().map((k) => k + "=" + forced[k]).join(",");
+		if (rounds === 2 && !salt && noise === MOCK_NOISE && !fkey) return base.mock;
 		let m = mockCache.get(res);
 		if (!m) { m = new Map(); mockCache.set(res, m); }
-		const key = rounds + "|" + salt + "|" + noise;
+		const key = rounds + "|" + salt + "|" + noise + "|" + fkey;
 		if (!m.has(key)) {
 			if (m.size > 12) m.clear();
 			const st = A().state;
@@ -6868,6 +6886,7 @@
 			const opts = { projections: base.projections, league, rounds };
 			if (salt) opts.salt = salt;
 			if (noise !== MOCK_NOISE) opts.noise = noise;
+			if (fkey) opts.forced = Object.assign({}, forced);
 			m.set(key, global.Pro.mockDraft(res, opts));
 		}
 		return m.get(key);
@@ -6941,13 +6960,27 @@
 			cards.appendChild(t);
 		}
 
+		const range = mockRangeFor(res, proFor(res));
+		if (range) {
+			const rc = el("div", "card mockrange");
+			rc.appendChild(el("h4", null, "Range of outcomes (" + range.k + " drafts)"));
+			const mv = range.mostVolatile;
+			rc.appendChild(el("div", "note",
+				"Most volatile: " + (mv ? mv.name + " (picks " + mv.min + "-" + mv.max + ")" : "none") +
+				"\nLocked-in top 3: " + (range.lockedTop3.length
+					? range.lockedTop3.map((r) => r.name).join(", ") : "nobody")));
+			rc.appendChild(el("p", "hint", "The same teams and order drafting " + range.k +
+				" times with their tastes redrawn (the Redraft button's salts 1-" + range.k + ")."));
+			cards.appendChild(rc);
+		}
+		const grades = global.Pro.gradeMock ? global.Pro.gradeMock(mock, range && range.expectedPeak) : {};
 		const tm = el("details", "card mockteams");
 		tm.appendChild(el("summary", null, "Teams (" + mock.teams.length + "): plan, need, rating, depth"));
 		const mine = {};
 		for (const k of mock.picks) mine[k.team] = (mine[k.team] || 0) + 1;
 		const table = el("table", "mini");
 		const hr = el("tr");
-		for (const h of ["Team", "Plan", "Need", "Ovr", "Depth G · W · B", "Picks"]) hr.appendChild(el("th", null, h));
+		for (const h of ["Team", "Plan", "Need", "Ovr", "Depth G · W · B", "Picks", "Grade"]) hr.appendChild(el("th", null, h));
 		table.appendChild(hr);
 		for (const t of mock.teams) {
 			const tr = el("tr", t.name === mockUi.team ? "myteam" : "");
@@ -6957,6 +6990,10 @@
 			tr.appendChild(el("td", "num", t.ovr === null || t.ovr === undefined ? "—" : String(t.ovr)));
 			tr.appendChild(el("td", "num", t.depth || "—"));
 			tr.appendChild(el("td", "num", String(mine[t.name] || 0)));
+			const g = grades[t.name];
+			const gd = el("td", "num", g ? g.grade : "—");
+			if (g) gd.title = (g.perPick >= 0 ? "+" : "") + g.perPick + " projected peak a pick against the slot's expectation";
+			tr.appendChild(gd);
 			table.appendChild(tr);
 		}
 		const wrap = el("div", "tablewrap");
@@ -7062,7 +7099,10 @@
 		const thead = el("thead");
 		const hr = el("tr");
 		const heads = ["Pick", "Team"].concat(mock.fromLeague ? ["Team ovr", "Depth G · W · B"] : [],
-			["Player", "Pos", "Ovr", "Pot", "Board", "Peak", "Career", "Verdict", "Why"]);
+			["Player", "Pos", "Ovr", "Pot", "Board", "Range", "Peak", "Career", "Verdict", "Why"]);
+		const rangeRows = {};
+		const rng0 = mockRangeFor(res, base);
+		if (rng0) for (const r of rng0.rows) rangeRows[r.key] = r;
 		for (const h of heads) hr.appendChild(el("th", null, h));
 		thead.appendChild(hr);
 		table.appendChild(thead);
@@ -7096,10 +7136,40 @@
 			const board = el("td", "num" + (k.reach >= 8 ? " down" : k.reach <= -8 ? " up" : ""),
 				k.consensus ? String(k.consensus) : "—");
 			tr.appendChild(board);
+			const rr0 = rangeRows[k.key];
+			const rcell = el("td", "num", rr0 ? rr0.mean + " (" + rr0.min + "-" + rr0.max + ")" : "—");
+			if (rr0) rcell.title = Math.round(100 * rr0.pFirst) + "% first round over " + rng0.k + " drafts";
+			tr.appendChild(rcell);
 			tr.appendChild(el("td", "num", proRange(x)));
 			tr.appendChild(el("td", "num", x ? x.years + " yrs" : "—"));
 			tr.appendChild(el("td", null, x ? x.verdict : "—"));
-			tr.appendChild(el("td", "hint", k.why));
+			const whyTd = el("td", "hint", k.why);
+			// On the clock (audit Q1): change "My team"'s pick; the rest re-runs.
+			if (mockUi.team && k.team === mockUi.team && sup.targets) {
+				const ch = el("select", "mockpick");
+				ch.setAttribute("aria-label", "Change pick " + k.pick);
+				ch.setAttribute("data-mock-pick", String(k.pick));
+				ch.appendChild(new Option("Change pick…", ""));
+				let targets = [];
+				try { targets = global.Pro.targetsFor(mock, k.team, k.pick - 1) || []; } catch (e) { targets = []; }
+				const gone = new Set(mock.picks.slice(0, k.pick - 1).map((q) => q.key));
+				const seen = new Set();
+				for (const t of targets) { seen.add(t.key); ch.appendChild(new Option("★ " + t.name + " " + t.ovr + "/" + t.pot, t.key)); }
+				for (const p of (res.board || []).filter((q) => !gone.has(q.key) && !seen.has(q.key))) {
+					ch.appendChild(new Option(p.name + " " + p.newOvr + "/" + p.newPot, p.key));
+				}
+				if (forcedFor(res)[k.pick]) ch.appendChild(new Option("Let the team choose", "__auto"));
+				ch.addEventListener("change", () => {
+					const f = forcedFor(res);
+					if (ch.value === "__auto") delete f[k.pick];
+					else if (ch.value) f[k.pick] = ch.value;
+					// Later forced picks may now name men already gone; the draft skips those.
+					A().render();
+				});
+				whyTd.appendChild(document.createElement("br"));
+				whyTd.appendChild(ch);
+			}
+			tr.appendChild(whyTd);
 			tbody.appendChild(tr);
 		}
 		table.appendChild(tbody);
@@ -9207,7 +9277,7 @@
 		SEARCH_HELP, SKILL_TAGS, neighborKeys, planRenames, planLockRows, lockPatchText,
 		RATING_COLUMN_KEYS,
 		sortRows, classYearRank, CLASS_YEAR_ORDER, defaultHiddenColumns, closeWhy,
-		currentColumnPreset, COLUMN_PRESETS,
+		currentColumnPreset, COLUMN_PRESETS, applyColumnPreset,
 		compareWith, sortableTable,
 		el, n1, pc, wrapCell, COMPARE_MAX, ratingRadar, RADAR_AXES,
 	};

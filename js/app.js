@@ -63,6 +63,8 @@
 		   UP, and the one axis of the three that never had it. See
 		   rememberPool and flavorMemoryFactor in js/ratings.js. */
 		flavorHistory: [],
+		// The season storylines, a list of name lists (audit R8).
+		narrativeHistory: [],
 		presetName: "default",
 		presetDirty: false,
 		customPresets: {},
@@ -181,6 +183,16 @@
 		replayRun: null,
 		ghost: null,
 		puzzle: null,
+		/* Dailies, campaigns and puzzles run on a canonical synthetic class
+		   (audit R5); this is the explicit "on my own file" opt-out. */
+		challengeOwnFile: false,
+		// Scenario packs loaded from codes (R12.2): [{name, list}].
+		packs: [],
+		/* "players" (a reroll redraws the class) or "schools" (and every
+		   prospect's college too, audit R2). */
+		rerollScope: "players",
+		// A Play game opened before the class it is played on exists (R3).
+		blindPending: null,
 		/* Which season's carry-over the Universe tab's world table is showing.
 		   See worldSection in js/views.js. */
 		worldSeason: null,
@@ -379,6 +391,7 @@
 			poolHistory: state.poolHistory,
 			anomalyHistory: state.anomalyHistory,
 			flavorHistory: state.flavorHistory,
+			narrativeHistory: state.narrativeHistory,
 			mutators: state.mutators,
 			presetName: state.presetName,
 			presetDirty: state.presetDirty,
@@ -419,6 +432,9 @@
 			replayRun: state.replayRun,
 			ghost: state.ghost,
 			puzzle: state.puzzle,
+			challengeOwnFile: state.challengeOwnFile,
+			packs: state.packs,
+			rerollScope: state.rerollScope,
 			lastUntil: state.lastUntil,
 			sessions: state.sessions.slice(0, SESSIONS_MAX),
 			// The branch point, so a reload continues the lineage rather than
@@ -602,6 +618,10 @@
 		if (Array.isArray(saved.flavorHistory)) {
 			state.flavorHistory = saved.flavorHistory
 				.filter((n) => typeof n === "string");
+		}
+		if (Array.isArray(saved.narrativeHistory)) {
+			state.narrativeHistory = saved.narrativeHistory.filter(Array.isArray)
+				.map((a) => a.filter((n) => typeof n === "string"));
 		}
 		state.mutators = global.ReplayMeta.cleanMutators(saved.mutators);
 		if (validString(saved.presetName)) state.presetName = saved.presetName;
@@ -803,6 +823,7 @@
 			anomalyHistory: (state.anomalyHistory || []).map((a) => a.slice()),
 			// And the flavor memory, for the same reason.
 			flavorHistory: (state.flavorHistory || []).slice(),
+			narrativeHistory: (state.narrativeHistory || []).map((a) => a.slice()),
 			/* Per-file randomized-settings patches (see randomizeSettings'
 			   "draw separately for each loaded class"), for the same reason
 			   lastSeed is here: it is an input that lives outside cfg, and an
@@ -844,6 +865,7 @@
 		if (Array.isArray(snap.poolHistory)) state.poolHistory = snap.poolHistory;
 		if (Array.isArray(snap.anomalyHistory)) state.anomalyHistory = snap.anomalyHistory;
 		if (Array.isArray(snap.flavorHistory)) state.flavorHistory = snap.flavorHistory;
+		if (Array.isArray(snap.narrativeHistory)) state.narrativeHistory = snap.narrativeHistory;
 		state.fileCfgs = snap.fileCfgs && typeof snap.fileCfgs === "object"
 			? snap.fileCfgs : {};
 		if (snap.universeBiography !== undefined) state.universeBiography = snap.universeBiography;
@@ -2651,6 +2673,9 @@
 			ledger,
 			// Gated by default; one tick shows every era and flavor.
 			showAll: !!s.showAll,
+			// Builds seen in a top ten: name -> {seed, at, n} (R11).
+			builds: s.builds && typeof s.builds === "object" && !Array.isArray(s.builds)
+				? s.builds : {},
 		};
 		return replayState;
 	}
@@ -2729,10 +2754,16 @@
 		const sc = global.Engine.strangeness(res);
 		const fresh = [];
 		const linesBefore = RM.cardLines(r.card);
-		const marked = RM.markCard(r.card, sc && sc.kinds);
+		const marked = RM.markCard(r.card, RM.bingoKinds(res, sc));
 		for (const id of RM.detect(res, sc)) earn(r, id, res, fresh);
 		if (RM.cardLines(r.card) > 0) earn(r, "bingo-line", res, fresh);
 		if (RM.cardFull(r.card)) earn(r, "bingo-full", res, fresh);
+		// The build collection (audit R11).
+		const newBuilds = RM.collectBuilds(r.builds, res, new Date().toISOString().slice(0, 10));
+		const prog = RM.collectionProgress(r.builds, RB);
+		if (prog.have >= 50) earn(r, "collector-50", res, fresh);
+		if (prog.by.rare[0] >= 10) earn(r, "rare-hunter", res, fresh);
+		if (newBuilds.length) saveReplay();
 		if (!marked.length && !fresh.length) return;
 		if (RM.cardLines(r.card) > linesBefore) replayToast("Bingo! A line on card " + r.card.seed + ".");
 		for (const id of fresh) {
@@ -2786,6 +2817,34 @@
 		}
 		box.appendChild(mu);
 
+		// File gravity and the reroll scope (audit R2).
+		const resNow = state.results[state.active];
+		const grav = resNow ? RM.fileGravity(resNow.players) : null;
+		if (grav) {
+			const gp = el("p", "hint filegravity", "File gravity: " + grav.college + " holds " +
+				grav.count + " of this file's five best prospects, so it will be the favourite in " +
+				"most rerolls. Reroll schools too, or the Transfer frenzy mutator, breaks that.");
+			gp.id = "replayGravity";
+			box.appendChild(gp);
+		}
+		const scopeRow = el("div", "filters");
+		scopeRow.appendChild(el("span", "unit", "Reroll scope:"));
+		const scope = el("select");
+		scope.id = "rerollScope";
+		scope.setAttribute("aria-label", "Reroll scope");
+		scope.appendChild(new Option("players (the file's schools)", "players"));
+		scope.appendChild(new Option("schools too (redraw every college)", "schools"));
+		scope.value = state.rerollScope === "schools" ? "schools" : "players";
+		scope.addEventListener("change", () => {
+			state.rerollScope = scope.value;
+			persist();
+			setStatus(scope.value === "schools"
+				? "Rerolls now redraw every prospect's college (unless you set the college source)."
+				: "Rerolls keep the file's colleges.");
+		});
+		scopeRow.appendChild(scope);
+		box.appendChild(scopeRow);
+
 		// Bingo.
 		const lines = RM.cardLines(r.card);
 		box.appendChild(el("h4", null, "Strangeness bingo — card " + r.card.seed +
@@ -2820,6 +2879,7 @@
 			const li = el("li", e ? "got" : "missing");
 			li.dataset.ach = a.id;
 			li.appendChild(el("b", null, a.label));
+			if (a.tier) li.appendChild(el("span", "achtier " + a.tier, " [" + a.tier + "]"));
 			li.appendChild(document.createTextNode(" — " + a.desc));
 			const u = RM.UNLOCKS.filter((x) => x.requires === a.id)[0];
 			if (u) li.appendChild(el("span", "hint", " (unlocks the " + u.name + " " + u.kind + ")"));
@@ -2839,6 +2899,22 @@
 			list.appendChild(li);
 		}
 		box.appendChild(list);
+
+		// The build collection (R11).
+		const prog = RM.collectionProgress(r.builds, RB);
+		box.appendChild(el("h4", null, "Build collection — " + prog.have + " of " + prog.total));
+		box.appendChild(el("p", "hint", "Builds a top-ten pick was made of, across every class " +
+			"you have run: rare " + prog.by.rare[0] + "/" + prog.by.rare[1] + " · uncommon " +
+			prog.by.uncommon[0] + "/" + prog.by.uncommon[1] + " · common " +
+			prog.by.common[0] + "/" + prog.by.common[1] + "."));
+		const tiers = RM.buildTiers(RB);
+		const rare = Object.keys(r.builds).filter((b) => tiers[b] === "rare").sort();
+		if (rare.length) {
+			const rl = el("p", "hint", "Rare builds collected: " + rare.map((b) => b +
+				" (seed " + r.builds[b].seed + ")").join(", "));
+			rl.id = "replayRareBuilds";
+			box.appendChild(rl);
+		}
 		modal("Replay: bingo, mutators, achievements", box, null, "Close");
 	}
 
@@ -4254,19 +4330,36 @@
 		if (Number.isFinite(res.season)) bits.push("The " + res.season + " class");
 		else bits.push("This class");
 		const flavor = res.flavor && res.flavor.label ? res.flavor.label : null;
-		const story = Array.isArray(res.narrative) && res.narrative[0]
-			? res.narrative[0].name : null;
+		/* The first storyline the season bore out (audit R8): one that did
+		   not happen is not what the class is remembered as. */
+		const held = Array.isArray(res.narrative)
+			? res.narrative.filter((x) => x && x.held !== false)[0] : null;
+		const story = held ? held.name : null;
 		const tail = [];
-		if (flavor) tail.push(flavor);
+		if (flavor) tail.push(flavor + (flavorStrengthIsFile(res) ? " (strength from file)" : ""));
 		/* Only when it says something the flavor did not. Two labels that
 		   amount to the same sentence is how a generated name starts to read
 		   as generated. */
 		if (story && (!flavor || story.toLowerCase() !== flavor.toLowerCase())) {
 			tail.push(story);
 		}
+		const boy = global.ReplayMeta.buildOfTheYear(res, RB);
+		if (boy) tail.push("the year of the " + boy.build);
 		const mu = res.cfg && res.cfg.mutators && res.cfg.mutators.length
 			? " [" + global.ReplayMeta.mutatorLabel(res.cfg.mutators) + "]" : "";
 		return bits[0] + (tail.length ? " — " + tail.join(", ") : "") + mu;
+	}
+
+	/* A flavor whose bend is mostly class STRENGTH (classQuality, eliteCount,
+	   classDepth) under ovrMode "preserve", where the file decides strength:
+	   the strength half of it is mapped onto potential (see
+	   RB.preserveStrengthBend), and the label says the overall curve is the
+	   file's (audit R1). */
+	function flavorStrengthIsFile(res) {
+		const c = res && res.flavor && res.flavor.cfg;
+		const mode = res && res.cfg && res.cfg.ovrMode;
+		return !!c && mode !== "curve" &&
+			["classQuality", "eliteCount", "classDepth"].some((k) => k in c);
 	}
 
 	function classFingerprint(res) {
@@ -5438,12 +5531,22 @@
 		// flavors and one draw a class repeats sooner than a pool of
 		// forty-six builds does; this is the same memory on that axis.
 		cfg.recentFlavors = (state.flavorHistory || []).slice(0, POOL_HISTORY);
+		cfg.recentNarratives = (state.narrativeHistory || []).slice(0, POOL_HISTORY);
 		/* A challenge is the same class for everybody, so this browser's
 		   memory of its last few classes stays out of it. */
 		if (state.challenge) {
 			cfg.recentPools = [];
 			cfg.recentAnomalies = [];
 			cfg.recentFlavors = [];
+			cfg.recentNarratives = [];
+		}
+		/* Reroll scope "schools too" (audit R2): the file's colleges are what
+		   make one program the favourite in every reroll, so this redraws them
+		   with the talent coupling — unless the user set the college source. */
+		if (state.rerollScope === "schools" && !state.challenge &&
+			cfg.collegeSource === CFG.DEFAULTS.collegeSource) {
+			cfg.collegeSource = "rewrite";
+			if (!(cfg.talentCoupling > 0)) cfg.talentCoupling = 1;
 		}
 		// Mutators last: explicit choices, so the flavor treats them as touched.
 		global.ReplayMeta.applyMutators(cfg, state.mutators, RB);
@@ -5509,6 +5612,15 @@
 			if (hist[0] !== res.flavor.name) {
 				hist.unshift(res.flavor.name);
 				state.flavorHistory = hist.slice(0, POOL_HISTORY);
+			}
+		}
+		// And the storylines (audit R8), on the same terms.
+		if (Array.isArray(res.narrative) && res.narrative.length) {
+			const names = res.narrative.map((x) => x.name);
+			const hist = (state.narrativeHistory || []).slice();
+			if (!hist.length || hist[0].join("|") !== names.join("|")) {
+				hist.unshift(names);
+				state.narrativeHistory = hist.slice(0, POOL_HISTORY);
 			}
 		}
 	}
@@ -5920,8 +6032,7 @@
 		pill.dataset.seed = res.seed;
 		/* The fingerprint and flavor in the tab title, so two browser tabs
 		   comparing two classes are distinguishable from the tab strip. */
-		document.title = className(res) + " · " + classFingerprint(res) +
-			" — BBGM Draft Class Workshop";
+		paintDocTitle(res);
 		$("seedPill").title = "Seed and class fingerprint — two people with the same " +
 			"fingerprint are looking at the same seventy players. " +
 			"Click to copy the seed, double-click to type one, shift-click or right-click to paste one" +
@@ -5929,6 +6040,16 @@
 				(res.phasesRun && res.phasesRun.length
 					? res.phasesRun.join(" → ") : "nothing to redo") + ")" : "") +
 			strangenessTip(res);
+	}
+
+	/* The tab title names the class — flavor and storyline — so while a Play
+	   game is open it would spoil the season from the tab strip (audit R3):
+	   masked to the fingerprint until the reveal. */
+	function paintDocTitle(res) {
+		if (!res) return;
+		const hidden = !!state.blindPending || !!(state.play && !state.play.revealed);
+		document.title = (hidden ? "A class in play" : className(res)) + " · " +
+			classFingerprint(res) + " — BBGM Draft Class Workshop";
 	}
 
 	/* With several classes loaded, Export JSON names which one it writes. */
@@ -6734,6 +6855,16 @@
 		const changes = diffConfigs(start, CFG.make(state.cfg))
 			.filter((line) => line.split(" ")[0] !== "seed");
 		const moved = changes.map((line) => line.split(" ")[0]);
+		/* A mutator is a set of dials moved at once, and it was free (audit
+		   R4): "Chaos March" set upsetFactor 2 with nothing counted. Each
+		   setting a mutator writes counts as moved, once. */
+		const RMx = global.ReplayMeta;
+		const mk = RMx.mutatorKeys(state.mutators, CFG.make(state.cfg), RB)
+			.filter((k) => moved.indexOf(k) === -1);
+		if (mk.length) {
+			for (const k of mk) moved.push(k);
+			changes.push("mutators " + RMx.mutatorLabel(state.mutators) + " (" + mk.join(", ") + ")");
+		}
 		const broke = (ch.forbid || []).filter((k) => moved.indexOf(k) !== -1);
 		return {
 			goals,
@@ -6815,8 +6946,39 @@
 		}, "Start");
 	}
 
+	/* THE CANONICAL CLASS (audit R5). A daily, a campaign tier, a puzzle or
+	   a pack challenge names a synthetic class (ch.classSeed); it is added to
+	   the session once and switched to, so the same challenge is the same
+	   seventy men for everybody. "On my own file" skips it. */
+	function ensureChallengeClass(ch) {
+		if (!ch || !ch.classSeed || state.challengeOwnFile || !global.Sample) return false;
+		const find = () => state.files.findIndex((f) => f.challengeClass === ch.classSeed);
+		let i = find();
+		if (i < 0) {
+			const data = global.Sample.makeClass(ch.classSeed, 70, ch.classYear || 2027);
+			const check = global.Engine.validateLeagueFile(data);
+			data.startingSeason = check.season;
+			const f = { name: "challenge-" + ch.classSeed + ".json", data,
+				warnings: check.warnings, challengeClass: ch.classSeed };
+			if (state.files.length) appendFiles([f], [], { noRun: true });
+			else installFiles([f], [], { noRun: true });
+			i = find();
+		}
+		if (i >= 0 && i !== state.active) {
+			state.active = i;
+			state.editing = null;
+			state.selected = {};
+			state.player = null;
+			state.compare = [null, null, null, null];
+			state.logPlayer = null;
+			if ($("fileSelect")) $("fileSelect").value = String(i);
+		}
+		return i >= 0;
+	}
+
 	function startChallenge(ch) {
 		pushUndo("started the " + ch.name + " challenge");
+		ensureChallengeClass(ch);
 		state.challenge = ch.key;
 		state.replayRun = { key: ch.key, runs: 0 };
 		Object.assign(state.cfg, CFG.make(Object.assign({}, ch.cfg)));
@@ -6875,11 +7037,13 @@
 
 	/* One line to paste into a chat: the challenge, how it stands, and
 	   which dials moved from where the challenge started them. */
+	/* Spoiler-free (audit R6): the dials that solved it are the answer, so
+	   the line carries goals as marks, the dial count and the run count —
+	   never the dial names. The code button still carries everything. */
 	function challengeResultText(ch, sc) {
-		return ch.name + ": " + (sc.solved ? "solved" : "not solved") + " · " +
-			sc.met + "/" + sc.total + " goals · " + sc.moved.length + "/" + sc.budget +
-			" settings" + (sc.changes.length ? " (" + sc.changes.join(", ") + ")" : "") +
-			" · seed " + ch.seed;
+		const runs = state.replayRun && state.replayRun.key === ch.key ? state.replayRun.runs : 1;
+		const streak = ch.daily ? dailyStreak() : null;
+		return global.Replay.shareLine(ch, sc, runs, streak);
 	}
 
 	/* ------------------------------------------------------- replayability
@@ -6902,10 +7066,17 @@
 		if (/^daily-/.test(key)) return RP.dailyChallenge(key.slice(6));
 		if (/^campaign:/.test(key)) {
 			const i = CHALLENGES.findIndex((c) => "campaign:" + c.key === key);
-			return i < 0 ? null : RP.campaignTier(CHALLENGES, i, state.challengeProgress);
+			return i < 0 ? null : withClass(RP.campaignTier(CHALLENGES, i, state.challengeProgress));
+		}
+		if (/^pack:/.test(key)) {
+			for (const pk of state.packs || []) {
+				const c = pk.list.filter((x) => x.key === key)[0];
+				if (c) return c;
+			}
+			return null;
 		}
 		if (/^puzzle:/.test(key) && state.puzzle && "puzzle:" + state.puzzle.id === key) {
-			const p = RP.puzzle(state.puzzle.id);
+			const p = RP.puzzle(state.puzzle.id, state.puzzle.attempt);
 			p.goals = RP.puzzleGoals(state.puzzle.target);
 			return p;
 		}
@@ -6932,8 +7103,27 @@
 	function attemptScore(ch, sc) {
 		if (!sc || !sc.solved) return null;
 		const runs = state.replayRun && state.replayRun.key === ch.key ? state.replayRun.runs : 1;
-		return RP.parScore(sc.moved.length, ch.budget, runs);
+		const hints = /^puzzle:/.test(ch.key) && state.puzzle ? (state.puzzle.hints | 0) : 0;
+		return Math.max(0, RP.parScore(sc.moved.length, ch.budget, runs) - RP.HINT_COST * hints);
 	}
+
+	/* ---- dailies: history, streak, ladder (audit Q22, R6, R12.5) ---- */
+	const DAILY_KEY = "bbgm-draft-workshop/daily-history";
+	function readDailyHistory() {
+		try {
+			const h = JSON.parse(localStorage.getItem(DAILY_KEY) || "{}");
+			return h && typeof h === "object" && !Array.isArray(h) ? h : {};
+		} catch (e) { return {}; }
+	}
+	function recordDaily(date, score) {
+		try {
+			const h = readDailyHistory();
+			if (Number.isFinite(h[date]) && h[date] >= score) return;
+			h[date] = score;
+			localStorage.setItem(DAILY_KEY, JSON.stringify(h));
+		} catch (e) { /* storage off: no streak */ }
+	}
+	function dailyStreak() { return RP.dailyStreak(readDailyHistory(), RP.dateKey(new Date())); }
 
 	function challengeHashFields() {
 		const ch = findChallenge(state.challenge);
@@ -6965,6 +7155,15 @@
 			state.puzzle = pz;
 		}
 		if (saved.ghost && typeof saved.ghost === "object") state.ghost = saved.ghost;
+		state.challengeOwnFile = !!saved.challengeOwnFile;
+		if (Array.isArray(saved.packs)) {
+			state.packs = saved.packs.filter((pk) => pk && typeof pk.name === "string" &&
+				Array.isArray(pk.list)).map((pk) => ({ name: pk.name,
+				list: pk.list.map((c) => global.Replay.cleanChallenge(c)).filter(Boolean).map((c, i) =>
+					Object.assign(c, { key: pk.list[i] && pk.list[i].key ? pk.list[i].key : c.key,
+						classSeed: "pack-" + c.seed, classYear: 2027 })) }));
+		}
+		if (saved.rerollScope === "schools") state.rerollScope = "schools";
 	}
 
 	/* The bar's second line: par and score, the campaign, and the rival. */
@@ -6977,6 +7176,7 @@
 		const score = attemptScore(ch, sc);
 		if (score !== null) {
 			writeBest(ch.key, score);
+			if (ch.daily) recordDaily(ch.key.slice(6), score);
 			if (Number.isFinite(ch.tier) &&
 				!state.challengeProgress.cleared[ch.baseKey]) {
 				state.challengeProgress.cleared[ch.baseKey] = sc.moved.slice();
@@ -6996,12 +7196,29 @@
 		if (g && g.challenge === ch.key) {
 			const cmp = RP.ghostCompare(sc.moved, g.moved);
 			const rival = el("div", "unit replayghost",
+				(g.fp && g.fp !== classFingerprint(res) ? "Rival played a different class. " : "") +
 				"Rival: " + (g.moved.length ? g.moved.join(", ") : "no settings moved") +
 				(Number.isFinite(g.score) ? " · score " + g.score : g.solved ? "" : " · unsolved") +
 				(cmp.shared.length ? " · same dials: " + cmp.shared.join(", ") : "") +
 				(cmp.onlyMine.length ? " · only you: " + cmp.onlyMine.join(", ") : ""));
 			rival.id = "challengeGhost";
 			bar.appendChild(rival);
+		}
+		if (/^puzzle:/.test(ch.key) && state.puzzle) {
+			const shown = state.puzzle.hints | 0;
+			const p = RP.puzzle(state.puzzle.id, state.puzzle.attempt);
+			for (let i = 0; i < shown; i++) bar.appendChild(el("div", "unit", RP.puzzleHint(p, i)));
+			if (RP.puzzleHint(p, shown)) {
+				const hb = el("button", "linky", "hint (−" + RP.HINT_COST + ")");
+				hb.type = "button";
+				hb.id = "btnPuzzleHint";
+				hb.addEventListener("click", () => {
+					state.puzzle.hints = shown + 1;
+					persist();
+					paintChallenge();
+				});
+				bar.appendChild(hb);
+			}
 		}
 		const code = el("button", "linky", "code");
 		code.type = "button";
@@ -7017,10 +7234,13 @@
 		delete payload.overrides;
 		delete payload.fp;
 		const ch = findChallenge(state.challenge);
-		if (!ch) return RP.makeResult(payload);
-		const sc = scoreChallenge(ch, state.results[state.active]);
+		const res = state.results[state.active];
+		// The class fingerprint (R5): a rival's code from another class says so.
+		const fp = res ? classFingerprint(res) : null;
+		if (!ch) return RP.makeResult(payload, { fp });
+		const sc = scoreChallenge(ch, res);
 		return RP.makeResult(payload, { challenge: ch.key, moved: sc ? sc.moved : [],
-			score: attemptScore(ch, sc), solved: !!(sc && sc.solved) });
+			score: attemptScore(ch, sc), solved: !!(sc && sc.solved), fp });
 	}
 
 	function applyCode(code) {
@@ -7040,7 +7260,14 @@
 		markDirty();
 		paintConfig();
 		persist();
-		run(() => setStatus("Loaded the code."));
+		if (r.challenge) { const cch = findChallenge(r.challenge); if (cch) ensureChallengeClass(cch); }
+		run(() => {
+			const res = state.results[state.active];
+			setStatus(r.fp && res && r.fp !== classFingerprint(res)
+				? "Loaded the code — but it was made on a different class (fingerprint " + r.fp +
+					"), so the class on screen is not the one it describes."
+				: "Loaded the code.");
+		});
 		return true;
 	}
 
@@ -7050,7 +7277,8 @@
 			setStatus("A rival needs a code copied from a challenge attempt.");
 			return false;
 		}
-		state.ghost = { challenge: r.challenge, moved: r.moved, score: r.score, solved: r.solved };
+		state.ghost = { challenge: r.challenge, moved: r.moved, score: r.score, solved: r.solved,
+			fp: r.fp || null };
 		persist();
 		paintChallenge();
 		setStatus("Rival loaded for " + r.challenge + ".");
@@ -7062,8 +7290,13 @@
 		if (ch) startChallenge(ch);
 	}
 
+	// A campaign tier runs on its own canonical class (R5).
+	function withClass(ch) {
+		return ch ? Object.assign(ch, { classSeed: "campaign-" + ch.seed, classYear: 2027 }) : ch;
+	}
+
 	function startCampaign(i) {
-		const ch = RP.campaignTier(CHALLENGES, i, state.challengeProgress);
+		const ch = withClass(RP.campaignTier(CHALLENGES, i, state.challengeProgress));
 		if (!ch) { setStatus("Clear the previous tier first."); return; }
 		startChallenge(ch);
 	}
@@ -7072,21 +7305,33 @@
 	   settings never reach the panel, the hash or the history. */
 	function startPuzzle(id) {
 		if (!state.files.length) { setStatus("Load a class file first."); return; }
-		const p = RP.puzzle(id || RP.dateKey(new Date()));
+		const name = String(id || RP.dateKey(new Date()));
+		let p = RP.puzzle(name);
+		ensureChallengeClass(p);
 		const was = state.challenge;
 		state.challenge = p.key;   // blanks the class memory; see effectiveCfg
 		let target;
 		try {
-			const cfg = effectiveCfg();
-			Object.assign(cfg, CFG.make(Object.assign({}, p.hidden, { seed: p.seed })));
-			cfg.overrides = {};
-			target = RP.headlines(state.runners[state.active].run(cfg));
+			const runAt = (hidden) => {
+				const cfg = effectiveCfg();
+				Object.assign(cfg, CFG.make(Object.assign({}, hidden, { seed: p.seed })));
+				cfg.overrides = {};
+				return RP.headlines(state.runners[state.active].run(cfg));
+			};
+			/* A puzzle the untouched defaults already half-solve is no puzzle
+			   (audit R7): redraw the hidden dials, same seed, up to five times. */
+			const defaults = runAt({});
+			for (let k = 0; k < 6; k++) {
+				if (k) p = RP.puzzle(name, k);
+				target = runAt(p.hidden);
+				if (!RP.puzzleRejected(defaults, target)) break;
+			}
 		} catch (e) {
 			state.challenge = was;
 			showError(e);
 			return;
 		}
-		state.puzzle = { id: p.key.slice(7), target };
+		state.puzzle = { id: p.key.slice(7), target, attempt: p.attempt, hints: 0 };
 		p.goals = RP.puzzleGoals(target);
 		startChallenge(p);
 	}
@@ -7112,6 +7357,31 @@
 			.appendChild(button("replayDaily", "Play today's", () => {
 				closeModal(); startDaily(today);
 			}));
+		// Streak, the last thirty days and the week's ladder (Q22, R6, R12.5).
+		const hist = readDailyHistory();
+		const streak = RP.dailyStreak(hist, today);
+		const ladder = RP.weeklyLadder(hist, today);
+		const sline = row("Streak " + streak.current + " (longest " + streak.longest + ") · " +
+			RP.weeklyTheme(today).name + " · week total " + ladder.total + ":");
+		const strip = el("span", "dailystrip");
+		strip.id = "replayStrip";
+		strip.textContent = streak.strip.map((d) => (d.score === null ? "\u00b7" : "\u2588")).join("");
+		strip.title = "The last thirty days: a block for each daily solved";
+		sline.appendChild(strip);
+		sline.appendChild(button("replayLadder", "Copy week", (e) =>
+			copyText("Week of " + ladder.week + ": " + ladder.total + " (" +
+				ladder.days.map((d) => (d === null ? "-" : d)).join(" ") + ") " + ladder.code,
+			e.target, null, "weekly ladder")));
+		// The canonical class is the default; this is the opt-out (R5).
+		const own = el("label", "check");
+		const ownCb = el("input");
+		ownCb.type = "checkbox";
+		ownCb.id = "replayOwnFile";
+		ownCb.checked = !!state.challengeOwnFile;
+		ownCb.addEventListener("change", () => { state.challengeOwnFile = ownCb.checked; persist(); });
+		own.appendChild(ownCb);
+		own.appendChild(document.createTextNode(" Play challenges on my own file (not the shared class)"));
+		row("").appendChild(own);
 		const unlocked = RP.campaignUnlocked(CHALLENGES, state.challengeProgress);
 		const tier = el("select");
 		tier.id = "replayTier";
@@ -7150,7 +7420,45 @@
 			if (importGhost(paste.value)) closeModal();
 		}));
 		codes.appendChild(button("replayCopy", "Copy mine", (e) => copyText(resultCode(), e.target, null, "result code")));
+		// Scenario packs (R12.2): a challenge table as a code.
+		const packRow = row("Scenario pack:");
+		const packIn = el("input");
+		packIn.id = "replayPack";
+		packIn.placeholder = "BB1-… pack code";
+		packIn.setAttribute("aria-label", "Scenario pack code");
+		packRow.appendChild(packIn);
+		packRow.appendChild(button("replayPackLoad", "Add pack", () => {
+			const pk = RP.decodePack(packIn.value, global.Engine.parseRerollClause);
+			if (!pk) { setStatus("That is not a scenario pack code."); return; }
+			state.packs = (state.packs || []).filter((x) => x.name !== pk.name).concat([pk]);
+			persist();
+			setStatus("Pack \u201c" + pk.name + "\u201d added: " + pk.list.length + " challenges.");
+			closeModal();
+			challengeDialog();
+		}));
+		packRow.appendChild(button("replayPackCopy", "Copy campaign as a pack", (e) =>
+			copyText(RP.encodePack("campaign", CHALLENGES), e.target, null, "scenario pack")));
+		for (const pk of state.packs || []) {
+			const pr = row(pk.name + ":");
+			const sel = el("select");
+			sel.setAttribute("aria-label", "Pack challenge");
+			for (const c of pk.list) sel.appendChild(new Option(c.name, c.key));
+			pr.appendChild(sel);
+			pr.appendChild(button("replayPackPlay-" + pk.name.replace(/\W/g, ""), "Play", () => {
+				const c = findChallenge(sel.value);
+				if (c) { closeModal(); startChallenge(c); }
+			}));
+		}
 		return box;
+	}
+
+	/* BLIND REROLL (audit R3): a new class with a Play game already open, so
+	   the gating applies before the first render and nothing is seen "warm". */
+	function blindReroll(kind) {
+		state.play = null;
+		state.blindPending = kind || "predict";
+		state.tab = "play";
+		reroll();
 	}
 
 	function reroll(opts) {
@@ -9069,6 +9377,7 @@
 
 	function render() {
 		paintExportLabel();
+		paintDocTitle(state.results[state.active]);
 		const tabs = $("tabs");
 		tabs.innerHTML = "";
 		tabs.setAttribute("role", "tablist");
@@ -12485,7 +12794,8 @@
 		replayStore, replayDialog, replayAfterRun, chaosDraft, className,
 		// Replayability (js/replay.js), for tools/uismoke.js.
 		findChallenge, resultCode, applyCode, importGhost, startDaily, startCampaign,
-		startPuzzle,
+		startPuzzle, blindReroll, reroll, ensureChallengeClass, readDailyHistory, dailyStreak,
+		paintDocTitle, classFingerprint,
 	});
 
 	/* Offline install. A service worker needs http(s) (a file:// page cannot

@@ -19,10 +19,10 @@ module.exports = function (ok, V) {
 		for (const seed of ["b1", "b2", "b3", "b4"]) {
 			const sc = E.strangeness(E.run(lf, CFG.make({ seed, weirdness: 3 })));
 			if (sc.kinds.length !== sc.reasons.length) parallel = false;
-			if (!sc.kinds.every((k) => known.has(k))) allKnown = false;
+			if (!sc.kinds.every((k) => known.has(k) || RM.RETIRED_KINDS.indexOf(k) !== -1)) allKnown = false;
 		}
 		ok("strangeness returns one kind per reason", parallel);
-		ok("...and every kind is a bingo square", allKnown);
+		ok("...and every kind is a bingo square (or a retired absolute cut-off)", allKnown);
 
 		const a = RM.drawCard("card-1");
 		ok("a bingo card is nine distinct kinds",
