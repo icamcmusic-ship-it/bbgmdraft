@@ -526,6 +526,15 @@
 				let w = Math.pow(Math.max(1, level - 20) / 60, 2.4);
 				if (carry.champion === name) w *= 2.2;
 				w *= 1 + 0.18 * Math.min(6, (carry.titles && carry.titles[name]) || 0);
+				/* A program that keeps winning stops getting the pile-on:
+				   every extra title in the recent window (carry.titleWindow,
+				   see damDynasty in js/universe.js) takes the boost back
+				   toward plain level. One program took five titles in a
+				   20-season audit chain on this loop. */
+				if (Array.isArray(carry.titleWindow)) {
+					const extra = carry.titleWindow.filter((x) => x === name).length - 1;
+					if (extra > 0) w /= 1 + extra;
+				}
 				/* The prospect, at last: a dynasty recruits like a dynasty
 				   in quality and not only in volume. Level and prestige
 				   together, because a program's level is one season and

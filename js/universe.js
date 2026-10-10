@@ -691,18 +691,37 @@
 	   pro early: after one title the best returner leaves 45% of the time,
 	   after back-to-back titles always, and the second-best too from a
 	   three-peat on. Deterministic in the season and school. */
+	const DYNASTY_WINDOW = 8;
+	const DYNASTY_TAX = 4;
 	function damDynasty(carry, prev) {
 		const champ = carry.champion;
+		/* Titles that are not back to back pile up too (a 20-season audit
+		   chain gave one program five): every season a program holds two or
+		   more of the last DYNASTY_WINDOW titles its carried level pays
+		   DYNASTY_TAX per extra banner (the carry keeps ~64% of it, so the
+		   tax compounds only while the titles keep coming), and in a title
+		   season the extra banners also cost returners. */
+		const recentList = ((prev && Array.isArray(prev.titleWindow)) ? prev.titleWindow : [])
+			.concat(champ ? [champ] : []).slice(-DYNASTY_WINDOW);
+		carry.titleWindow = recentList;
+		const held = {};
+		for (const x of recentList) held[x] = (held[x] || 0) + 1;
+		for (const name of Object.keys(held)) {
+			if (held[name] < 2 || !carry.levels || !Number.isFinite(carry.levels[name])) continue;
+			carry.levels[name] = Math.max(5, carry.levels[name] - DYNASTY_TAX * (held[name] - 1));
+		}
 		if (!champ) { carry.streak = null; return; }
 		const was = prev && prev.streak && prev.streak.school === champ ? prev.streak.n : 0;
 		const n = was + 1;
 		carry.streak = { school: champ, n };
+		const recent = held[champ] || 1;
 		const list = (carry.returners[champ] || []).slice()
 			.sort((a, b) => (b.talent || 0) - (a.talent || 0));
 		if (!list.length) return;
 		const rng = new global.BBGMRng.Rng("dynasty|" + champ + "|" + n + "|" +
 			((prev && prev.titles && prev.titles[champ]) || 0));
-		const leave = n >= 3 ? 2 : n === 2 ? 1 : rng.random() < 0.45 ? 1 : 0;
+		const leave = Math.max(n >= 3 ? 2 : n === 2 ? 1 : rng.random() < 0.45 ? 1 : 0,
+			recent >= 3 ? 2 : recent - 1);
 		if (!leave) return;
 		const gone = new Set(list.slice(0, leave).map((r) => r.name));
 		carry.returners[champ] = carry.returners[champ].filter((r) => !gone.has(r.name));
@@ -889,6 +908,7 @@
 		};
 		// UV7/UV8: the ladder's shape and the retread pool are history too.
 		if (carry.levelRef) out.levelRef = carry.levelRef;
+		if (carry.titleWindow) out.titleWindow = carry.titleWindow.slice();
 		if (carry.coachPool) out.coachPool = carry.coachPool;
 		if (carry.extrapolatedTitles) {
 			out.extrapolatedTitles = Object.assign({}, carry.extrapolatedTitles);
