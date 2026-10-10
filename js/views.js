@@ -3525,7 +3525,14 @@
 			return;
 		}
 		if (A().state.team) {
-			view.appendChild(teamPage(view, res, A().state.team));
+			/* Coach, conference and team-versus-team pages ride on the team
+			   destination with a prefix, so history, refresh and Back work the
+			   same way (audit Q11, Q12, Q13). */
+			const tk = String(A().state.team);
+			if (/^coach:/.test(tk)) view.appendChild(coachPage(res, tk.slice(6)));
+			else if (/^conf:/.test(tk)) view.appendChild(conferencePage(res, tk.slice(5)));
+			else if (/^vs:/.test(tk)) view.appendChild(versusPage(res, tk.slice(3)));
+			else view.appendChild(teamPage(view, res, A().state.team));
 			return;
 		}
 		view.appendChild(el("h3", null, "AP Top 25"));
@@ -5705,6 +5712,81 @@
 				.join("\n");
 			view.appendChild(nit);
 		}
+		bracketOdds(view, res);
+		confTourneySection(view, res);
+	}
+
+	/* Pre-tournament odds (audit Q9): exact DP over the bracket with the
+	   model's pairwise chances, so this is what the bracket looked like
+	   before a game was played. Behind a details so it is no spoiler. */
+	function bracketOdds(view, res) {
+		const TT = global.Tournament;
+		if (!TT || !TT.titleOdds) return;
+		let odds = null;
+		try { odds = TT.titleOdds(res.tourney, res.effectiveCfg || res.cfg); } catch (e) { odds = null; }
+		if (!odds) return;
+		const d = el("details", "card bracketodds");
+		d.appendChild(el("summary", null, "Pre-tournament odds (the model, before tip-off)"));
+		const pc0 = (x) => (x >= 0.995 ? ">99" : x < 0.005 ? "<1" : String(Math.round(100 * x))) + "%";
+		const rows = odds.slice().sort((a, b) => b.rounds[5] - a.rounds[5] || b.rounds[3] - a.rounds[3]).slice(0, 24);
+		const table = el("table", "mini");
+		const hr = el("tr");
+		for (const h of ["Seed", "Team", "Region", "S16", "E8", "F4", "Win"]) hr.appendChild(el("th", null, h));
+		table.appendChild(hr);
+		for (const r of rows) {
+			const tr = el("tr");
+			tr.appendChild(el("td", "num", String(r.seed)));
+			const td = el("td");
+			td.appendChild(teamLink(r.team));
+			tr.appendChild(td);
+			tr.appendChild(el("td", null, r.region));
+			for (const k of [1, 2, 3, 5]) tr.appendChild(el("td", "num", pc0(r.rounds[k])));
+			table.appendChild(tr);
+		}
+		const wrap = el("div", "tablewrap");
+		wrap.appendChild(table);
+		d.appendChild(wrap);
+		d.appendChild(el("p", "hint", "Approximate: the game model's margin and noise without the " +
+			"endgame and overtime adjustments. The top 24 by title odds."));
+		view.appendChild(d);
+	}
+
+	/* Conference tournaments (audit Q7): thirty-odd brackets the season
+	   simulated and the app only marked with a trophy. */
+	const confUi = { conf: "" };
+	function confTourneySection(view, res) {
+		const ct = res.confTourneys;
+		if (!ct || typeof ct !== "object") return;
+		const names = Object.keys(ct).filter((k) => ct[k] && Array.isArray(ct[k].log) && ct[k].log.length).sort();
+		if (!names.length) return;
+		if (names.indexOf(confUi.conf) === -1) confUi.conf = names[0];
+		const sec = el("details", "card conftourneys");
+		sec.open = !!confUi.open;
+		sec.addEventListener("toggle", () => { confUi.open = sec.open; });
+		sec.appendChild(el("summary", null, "Conference tournaments (" + names.length + ")"));
+		const sel = el("select");
+		sel.id = "confTourneyPick";
+		sel.setAttribute("aria-label", "Conference tournament");
+		for (const n of names) sel.appendChild(new Option(n, n));
+		sel.value = confUi.conf;
+		sel.addEventListener("change", () => { confUi.conf = sel.value; A().render(); });
+		sec.appendChild(sel);
+		const c = ct[confUi.conf];
+		const seedOf = {};
+		(c.seeds || []).forEach((x, i) => { seedOf[x && x.name ? x.name : x] = i + 1; });
+		if (c.champ) {
+			const p0 = el("p", null, "Champion (the automatic bid): ");
+			p0.appendChild(teamLink(c.champ.name || c.champ));
+			sec.appendChild(p0);
+		}
+		const games = el("div", "confgames");
+		for (const g of c.log) {
+			const a = { name: g.a }, b = { name: g.b };
+			games.appendChild(gameNode(a, b, g.winner === g.a ? a : b, seedOf[g.a], seedOf[g.b],
+				g.score + (g.ot ? " (" + (g.ot > 1 ? g.ot : "") + "OT)" : "")));
+		}
+		sec.appendChild(games);
+		view.appendChild(sec);
 	}
 
 	/* --------------------------------------------------------------- awards */
@@ -7182,6 +7264,32 @@
 		mockExtras(view, res, mock, sup);
 	}
 
+	/* "Reminds of: 2029's X (same build, ±2 ovr, 1" taller) — went No. 4,
+	   star". The nearest registry entry from ANOTHER season with the same
+	   build and an overall within two (audit Q17). */
+	function universeComparable(registry, selfId, p, season) {
+		if (!registry || !p || !p.archetype) return null;
+		let best = null;
+		for (const id of Object.keys(registry)) {
+			const e = registry[id];
+			const d = e && e.draft;
+			if (!d || id === selfId || d.archetype !== p.archetype || d.season === season) continue;
+			if (!Number.isFinite(d.ovr) || Math.abs(d.ovr - p.newOvr) > 2) continue;
+			const dh = Number.isFinite(d.hgt) && Number.isFinite(p.newHgtInches) ? d.hgt - p.newHgtInches : 0;
+			const dist = Math.abs(d.ovr - p.newOvr) + Math.abs(dh) * 0.5;
+			if (!best || dist < best.dist) best = { e, d, dh, dist };
+		}
+		if (!best) return null;
+		const U = global.Universe;
+		const pro = U && U.proOutcome ? U.proOutcome(best.e) : null;
+		const dov = best.d.ovr - p.newOvr;
+		return (best.d.season || "?") + "'s " + (best.e.name || "?") + " (same build, " +
+			(dov === 0 ? "same ovr" : (dov > 0 ? "+" : "\u2212") + Math.abs(dov) + " ovr") +
+			(best.dh ? ", " + Math.abs(best.dh) + "\" " + (best.dh > 0 ? "taller" : "shorter") : "") + ")" +
+			(best.d.slot ? " — went No. " + best.d.slot : " — undrafted") +
+			(pro ? ", " + pro.tier : "");
+	}
+
 	/* The projection block on a player page. */
 	function proBlock(res, p) {
 		const { projections, mock } = proFor(res);
@@ -7971,9 +8079,13 @@
 				const f = stP.files[fi];
 				const id = UP.playerId(f && f.fingerprint, p.key);
 				const entry = (stP.universe.registry && stP.universe.registry[id]) ||
-					{ id, draft: { pot: p.newPot, slot: p.draftSlot || null } };
+					{ id, draft: { pot: p.newPot, ovr: p.newOvr, classYear: p.classYear,
+						slot: p.draftSlot || null } };
 				const pro = UP.proOutcome(entry);
 				if (pro) row("Pro career", UP.proText(pro) + " (projected)");
+				// Comparables from this universe's own history (audit Q17).
+				const cmp = universeComparable(stP.universe.registry, id, p, entry.draft && entry.draft.season);
+				if (cmp) row("Reminds of", cmp);
 			}
 		}
 		if (p.awards && p.awards.length) row("Honors", p.awards.join("; "));
@@ -8386,6 +8498,7 @@
 			A().render();
 		});
 		bar.appendChild(sel);
+		bar.appendChild(pageLink("Conference page", "conf:" + st.standingsConf));
 		box.appendChild(bar);
 		const pool = (byConf[st.standingsConf] || []).slice()
 			.sort((a, b) => (b.cw - b.cl) - (a.cw - a.cl) || b.rating - a.rating);
@@ -8512,6 +8625,182 @@
 		return svg;
 	}
 
+	function pageLink(text, target) {
+		const b = el("button", "linky", text);
+		b.type = "button";
+		b.setAttribute("data-page", target);
+		b.addEventListener("click", () => A().showTeam(target));
+		return b;
+	}
+	function backToTeams() {
+		const back = el("button", "tiny", "← All teams");
+		back.addEventListener("click", () => { A().state.team = null; A().persist(); A().render(); });
+		return back;
+	}
+	function dlRows(box) {
+		const dl = el("dl", "shortcuts");
+		box.appendChild(dl);
+		return (k, v) => {
+			dl.appendChild(el("dt", null, k));
+			const dd = el("dd");
+			if (typeof v === "string") dd.textContent = v;
+			else if (v) dd.appendChild(v);
+			dl.appendChild(dd);
+		};
+	}
+
+	/* A COACH PAGE (audit Q11). */
+	function coachPage(res, name) {
+		const box = el("div", "coachpage");
+		box.appendChild(backToTeams());
+		const t = Object.values(res.teams).filter((x) => x && x.coach && x.coach.name === name)[0];
+		box.appendChild(el("h3", null, name));
+		if (!t) { box.appendChild(el("p", "hint", "No coach of that name this season.")); return box; }
+		const c = t.coach;
+		const row = dlRows(box);
+		const tl = el("span");
+		tl.appendChild(teamLink(t.name));
+		tl.appendChild(document.createTextNode(" (" + t.conf + ") · year " + c.tenure));
+		row("Program", tl);
+		if (Number.isFinite(c.age)) row("Age", String(c.age));
+		if (t.style) row("Style", t.style.name + (t.style.defScheme ? ", " + t.style.defScheme + " defense" : "") +
+			(c.style && c.style.name !== t.style.name ? " (drifted from " + c.style.name + ")" : ""));
+		row("Situation", c.situationLabel || c.situation || "—");
+		if (c.philosophy) row("Philosophy", c.philosophy);
+		/* Against expectation: the record a program of this level usually
+		   has, read off the rest of the country. */
+		const all = Object.values(res.teams).filter((x) => x && Number.isFinite(x.level) && x.w + x.l > 0);
+		const near = all.filter((x) => Math.abs(x.level - t.level) <= 4);
+		const exp = near.length ? near.reduce((a, x) => a + x.w / (x.w + x.l), 0) / near.length : null;
+		const pct = t.w / Math.max(1, t.w + t.l);
+		row("This season", t.w + "-" + t.l + (exp !== null ? " · programs at his level won " +
+			Math.round(100 * exp) + "% of their games; he won " + Math.round(100 * pct) + "%" : "") +
+			(t.ncaaSeed ? " · No. " + t.ncaaSeed + " seed, " + t.ncaaResult : ""));
+		const honors = (res.coachHonors || []).filter((h) => h.coach === name);
+		row("Coach of the Year", honors.length ? honors.map((h) => h.award).join("; ") : "none this season");
+		const st = A().state;
+		if (st.universe && st.universe.rows && st.universe.rows.length && global.Universe &&
+			global.Universe.coachHistory) {
+			try {
+				const hist = global.Universe.coachHistory(st.universe, name);
+				if (hist && hist.length) {
+					box.appendChild(el("h4", null, "Career in this universe"));
+					box.appendChild(el("div", "note", hist.map((h) => h.season + " " + h.team + " " +
+						h.w + "-" + h.l + (h.result ? " · " + h.result : "")).join("\n")));
+				}
+			} catch (e) { /* history is optional */ }
+		}
+		return box;
+	}
+
+	/* A CONFERENCE PAGE (audit Q12). */
+	function conferencePage(res, conf) {
+		const box = el("div", "confpage");
+		box.appendChild(backToTeams());
+		box.appendChild(el("h3", null, conf));
+		const pool = Object.values(res.teams).filter((x) => x && x.conf === conf)
+			.sort((a, b) => (b.cw - b.cl) - (a.cw - a.cl) || b.rating - a.rating);
+		if (!pool.length) { box.appendChild(el("p", "hint", "No such conference this season.")); return box; }
+		const row = dlRows(box);
+		const meta = C.CONFERENCES[conf];
+		const bids = pool.filter((x) => x.ncaaSeed).length;
+		row("NCAA bids", bids + (meta && Number.isFinite(meta.bids) ? " (a typical year: " + meta.bids + ")" : ""));
+		const moved = pool.filter((x) => x.movedFrom);
+		if (moved.length) row("Arrived this season", moved.map((x) => x.name + " (from the " + x.movedFrom + ")").join(", "));
+		const ct = res.confTourneys && res.confTourneys[conf];
+		if (ct && ct.champ) row("Tournament champion", ct.champ.name || String(ct.champ));
+		box.appendChild(el("h4", null, "Standings"));
+		const table = el("table", "mini");
+		const hr = el("tr");
+		for (const h of ["Team", "Conf", "Overall", "Postseason"]) hr.appendChild(el("th", null, h));
+		table.appendChild(hr);
+		for (const t of pool) {
+			const tr = el("tr");
+			const td = el("td");
+			td.appendChild(teamLink(t.name));
+			tr.appendChild(td);
+			tr.appendChild(el("td", null, t.cw + "-" + t.cl));
+			tr.appendChild(el("td", null, t.w + "-" + t.l));
+			tr.appendChild(el("td", null, t.ncaaSeed ? "No. " + t.ncaaSeed + ", " + t.ncaaResult : (t.nitResult || "—")));
+			table.appendChild(tr);
+		}
+		const wrap = el("div", "tablewrap");
+		wrap.appendChild(table);
+		box.appendChild(wrap);
+		// The league's honors, read off the award names that carry its name.
+		const honors = [];
+		for (const p of res.players || []) {
+			for (const a of p.awards || []) if (a.indexOf(conf) !== -1) honors.push(a + " — " + p.name);
+		}
+		for (const h of res.fieldHonors || []) {
+			if (h && h.award && h.award.indexOf(conf) !== -1) honors.push(h.award + " — " + h.name);
+		}
+		if (honors.length) {
+			box.appendChild(el("h4", null, "Honors"));
+			box.appendChild(el("div", "note", honors.sort().join("\n")));
+		}
+		return box;
+	}
+
+	/* TEAM VERSUS TEAM (audit Q13). */
+	function versusPage(res, pair) {
+		const box = el("div", "versuspage");
+		box.appendChild(backToTeams());
+		const [an, bn] = String(pair).split("|");
+		const A0 = res.teams[an], B0 = res.teams[bn];
+		if (!A0 || !B0) { box.appendChild(el("p", "hint", "Pick two programs from this season.")); return box; }
+		const h = el("h3");
+		h.appendChild(teamLink(an));
+		h.appendChild(document.createTextNode(" vs "));
+		h.appendChild(teamLink(bn));
+		box.appendChild(h);
+		const table = el("table", "mini");
+		const hr = el("tr");
+		for (const x of ["", an, bn]) hr.appendChild(el("th", null, x));
+		table.appendChild(hr);
+		const line = (label, f) => {
+			const tr = el("tr");
+			tr.appendChild(el("td", null, label));
+			for (const t of [A0, B0]) {
+				let v;
+				try { v = f(t); } catch (e) { v = "—"; }
+				tr.appendChild(el("td", "num", v === undefined || v === null ? "—" : String(v)));
+			}
+			table.appendChild(tr);
+		};
+		line("Record", (t) => t.w + "-" + t.l);
+		line("Rating", (t) => t.rating.toFixed(1));
+		line("NET", (t) => t.netRank);
+		line("AP", (t) => t.apRank || "—");
+		line("Style", (t) => (t.style ? t.style.name : "—"));
+		line("Tempo", (t) => (Number.isFinite(t.pace) ? t.pace.toFixed(1) : "—"));
+		line("ORtg / DRtg", (t) => (t.offRtg ? t.offRtg.toFixed(1) : "—") + " / " + (t.defRtg ? t.defRtg.toFixed(1) : "—"));
+		line("Quad 1", (t) => (t.quads && t.quads[0] ? t.quads[0].w + "-" + t.quads[0].l : "—"));
+		line("NCAA", (t) => (t.ncaaSeed ? "No. " + t.ncaaSeed + ", " + t.ncaaResult : "—"));
+		const wrap = el("div", "tablewrap");
+		wrap.appendChild(table);
+		box.appendChild(wrap);
+		const TT = global.Tournament;
+		const wc = TT && TT.winChance ? TT.winChance(A0, B0, 0, res.effectiveCfg || res.cfg || {}, 1, false) : null;
+		if (wc) box.appendChild(el("p", "legendline", "On a neutral floor today: " + TT.lineText(A0, B0, wc) + " (approximate)"));
+		const met = (A0.log || []).filter((g) => g.opp === bn);
+		box.appendChild(el("h4", null, "Meetings this season"));
+		box.appendChild(el("div", "note", met.length ? met.map((g) => (g.won ? an : bn) + " won " +
+			Math.max(g.teamPts, g.oppPts) + "-" + Math.min(g.teamPts, g.oppPts) + (g.round ? " (" + g.round + ")" : "")).join("\n")
+			: "They did not play."));
+		const mA = {}, mB = {};
+		for (const g of A0.log || []) if (Number.isFinite(g.teamPts)) mA[g.opp] = (mA[g.opp] || []).concat([g.teamPts - g.oppPts]);
+		for (const g of B0.log || []) if (Number.isFinite(g.teamPts)) mB[g.opp] = (mB[g.opp] || []).concat([g.teamPts - g.oppPts]);
+		const common = Object.keys(mA).filter((o) => mB[o] && o !== an && o !== bn).sort();
+		if (common.length) {
+			const fmt = (l) => l.map((d) => (d > 0 ? "+" : "") + d).join(", ");
+			box.appendChild(el("h4", null, "Common opponents (" + common.length + ")"));
+			box.appendChild(el("div", "note", common.map((o) => o + ": " + an + " " + fmt(mA[o]) +
+				" · " + bn + " " + fmt(mB[o])).join("\n")));
+		}
+		return box;
+	}
+
 	function teamPage(view, res, name) {
 		const t = res.teams[name];
 		const box = el("div");
@@ -8542,9 +8831,28 @@
 		// Guard on t.style, which is the object actually read: it comes from
 		// the coach today, but the guard was on the wrong object.
 		if (t.coach && t.style) {
-			row("Coach", t.coach.name + ", year " + t.coach.tenure +
+			const cl = el("span");
+			cl.appendChild(pageLink(t.coach.name, "coach:" + t.coach.name));
+			cl.appendChild(document.createTextNode(", year " + t.coach.tenure +
 				" — plays " + t.style.name +
-				(t.coach.movedFrom ? " · hired away from " + t.coach.movedFrom : ""));
+				(t.coach.movedFrom ? " · hired away from " + t.coach.movedFrom : "")));
+			row("Coach", cl);
+		}
+		{
+			const cl = el("span");
+			cl.appendChild(pageLink(t.conf + " page", "conf:" + t.conf));
+			cl.appendChild(document.createTextNode(" · "));
+			const vs = el("select");
+			vs.setAttribute("aria-label", "Compare with another program");
+			vs.setAttribute("data-versus", "1");
+			vs.appendChild(new Option("Compare with…", ""));
+			for (const o of Object.values(res.teams).filter((x) => x && x.name !== t.name &&
+				!(/^__/.test(x.name))).sort((a, b) => (b.rating || 0) - (a.rating || 0))) {
+				vs.appendChild(new Option(o.name, o.name));
+			}
+			vs.addEventListener("change", () => { if (vs.value) A().showTeam("vs:" + t.name + "|" + vs.value); });
+			cl.appendChild(vs);
+			row("More", cl);
 		}
 		row("Program level", Math.round(t.level) + " (rating " +
 			t.rating.toFixed(1) + ")");
@@ -8759,7 +9067,10 @@
 			tr.appendChild(td);
 			tr.appendChild(el("td", null,
 				g.home > 0 ? "home" : g.home < 0 ? "away" : "neutral"));
-			tr.appendChild(el("td", null, g.won ? "W" : "L"));
+			// "won at 18%" for an upset the model did not see coming (Q8).
+			const wc = g.won ? pregameChance(res, t, res.teams[g.opp], g) : null;
+			tr.appendChild(el("td", null, (g.won ? "W" : "L") +
+				(wc && wc.p < 0.3 ? " (won at " + Math.round(100 * wc.p) + "%)" : "")));
 			tr.appendChild(el("td", null, g.teamPts !== null
 				? g.teamPts + "-" + g.oppPts + (g.ot ? " (" + g.ot + "OT)" : "") : "—"));
 			tr.appendChild(el("td", null,
@@ -8789,6 +9100,16 @@
 	   claim is that it is a record. The page says so rather than filling the
 	   space. */
 	function gameKeyFor(team, index) { return team + "|" + index; }
+
+	// Tournament.winChance for one logged game, from team A's side.
+	function pregameChance(res, A0, B0, g) {
+		const TT = global.Tournament;
+		if (!TT || !TT.winChance || !A0 || !B0 || !g) return null;
+		try {
+			return TT.winChance(A0, B0, g.home || 0, res.effectiveCfg || res.cfg || {},
+				Number.isFinite(g.when) ? g.when : 0.5, g.stage === "ncaa");
+		} catch (e) { return null; }
+	}
 
 	// A game's stage in words; "reg" was printed as-is.
 	const STAGE_LABEL = {
@@ -8835,6 +9156,13 @@
 				: STAGE_LABEL[g.stage] || g.stage || "")) +
 			(away ? " · " + g.opp + " " + away.w + "-" + away.l +
 				" · " + home.name + " " + home.w + "-" + home.l : "")));
+		// The pregame line (audit Q8).
+		const wc = pregameChance(res, home, away, g);
+		if (wc) {
+			box.appendChild(el("p", "legendline gameline", "Line: " +
+				global.Tournament.lineText(home, away, wc) + " (approximate: the game model " +
+				"without the endgame and overtime adjustments)"));
+		}
 
 		const side = function (team, gameIndex, score) {
 			if (!team) return;

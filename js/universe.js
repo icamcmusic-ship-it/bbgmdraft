@@ -3193,6 +3193,10 @@
 					slot: p.draftSlot || null, school: p.newCollege,
 					club: p.proClub || null, classYear: p.classYear,
 					ovr: p.newOvr, pot: p.newPot,
+					// For comparables across the universe (audit Q17).
+					archetype: p.archetype || null, pos: p.newPos || p.pos || null,
+					hgt: Number.isFinite(p.newHgtInches) ? p.newHgtInches : null,
+					ppg: p.stats && Number.isFinite(p.stats.ppg) ? Math.round(p.stats.ppg * 10) / 10 : null,
 				};
 				if (Number.isFinite(season)) e.seasons.push({ season, as: "draft class" });
 				for (const a of p.awards || []) if (isPersonalHonor(a)) e.honors.push({ season, award: a });
@@ -4407,9 +4411,31 @@
 		[47, "role player", [3, 8], [0, 0]],
 		[-Infinity, "bust", [0, 3], [0, 0]],
 	];
+	/* ONE PRO MODEL (audit Q4). Where js/pro.js is loaded (the page and
+	   Node), the tail is the career Pro.project simulates for this man,
+	   seeded on his registry id: the median-peak career's peak sets the tier
+	   and its length the years, and All-Star selections follow the peak. So
+	   the player page's "Pro career" row and its projection box are one
+	   model. Without pro.js (the batch worker) the old epilogue stands. */
 	function proOutcome(entry) {
 		const d = entry && entry.draft;
 		if (!entry || !entry.id || !d || !Number.isFinite(d.pot)) return null;
+		const P = global.Pro;
+		if (P && P.project && Number.isFinite(d.ovr)) {
+			const x = P.project({ key: entry.id, newOvr: d.ovr, newPot: d.pot,
+				classYear: d.classYear || "", archetype: d.archetype || null }, d.season, "universe");
+			if (x) {
+				const peak = x.curve && x.curve.length
+					? Math.max.apply(null, x.curve.map((c) => c.ovr)) : x.peak;
+				const years = x.curve ? x.curve.length : x.years;
+				const tier = peak >= 70 ? "superstar" : peak >= 64 ? "star" : peak >= 55 ? "starter"
+					: peak >= 47 && years >= 3 ? "role player" : "bust";
+				const allStars = Math.min(years, Math.max(0, Math.round((peak - 61) * 0.8)));
+				const score = years + allStars * 3 + (tier === "superstar" ? 10 : tier === "star" ? 5 : 0);
+				return { tier, years, allStars, score, peak,
+					bust: tier === "bust", star: tier === "star" || tier === "superstar" };
+			}
+		}
 		const rng = new global.BBGMRng.Rng("pro|" + entry.id);
 		const slot = Number.isFinite(d.slot) && d.slot > 0 ? d.slot : null;
 		const nudge = slot ? Math.max(0, 61 - slot) / 60 * 4 : -3;

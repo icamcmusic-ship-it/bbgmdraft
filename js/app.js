@@ -11982,6 +11982,32 @@
 			"Adds what you wrote under “My notes” on a player page as the last " +
 			"lines of his note (so BBGM shows it), and marks starred prospects " +
 			"as watched. Off by default: they stay in this browser."));
+		/* Q6: what only the command line could ask for. */
+		const oProLines = opt("proLines", "Add \u201cMock:\u201d and \u201cPro projection:\u201d lines to each note");
+		const oHometowns = opt("hometowns", "Draw a hometown (\u201cCity, ST, USA\u201d) for anybody the file left at \u201cUSA\u201d");
+		const oRecipe = opt("recipe", "Stamp the recipe (seed, engine revision, settings) into the file");
+		const fuzzWrap = el("label", "check");
+		fuzzWrap.appendChild(document.createTextNode("Scouting fuzz "));
+		const fuzzSel = el("select");
+		fuzzSel.id = "exportFuzz";
+		for (const [v, l] of [["keep", "keep the file's"], ["zero", "zero (true ratings)"],
+			["regenerate", "redraw at a scouting level"]]) fuzzSel.appendChild(new Option(l, v));
+		fuzzSel.value = remembered && remembered.fuzz ? remembered.fuzz : "keep";
+		const lvl = el("input");
+		lvl.type = "number";
+		lvl.id = "exportScoutingLevel";
+		lvl.min = "1";
+		lvl.max = "100";
+		lvl.style.width = "60px";
+		lvl.value = String(remembered && Number.isFinite(remembered.scoutingLevel) ? remembered.scoutingLevel : 34);
+		lvl.setAttribute("aria-label", "Scouting level (1-100, BBGM's default 34)");
+		const paintFuzz = () => { lvl.hidden = fuzzSel.value !== "regenerate"; };
+		fuzzSel.addEventListener("change", () => { paintFuzz(); rememberExportOpts(exportOpts()); });
+		lvl.addEventListener("change", () => rememberExportOpts(exportOpts()));
+		fuzzWrap.appendChild(fuzzSel);
+		fuzzWrap.appendChild(lvl);
+		optBox.appendChild(fuzzWrap);
+		paintFuzz();
 		list.appendChild(optBox);
 		paintScope();
 		/* Q5: the file name, as a template. */
@@ -12044,6 +12070,9 @@
 			ages: oAges(), noteAppend: oNoteAppend(), includeNotes: oIncludeNotes(),
 			myMarks: oMyMarks(),
 			injuries: oInjuries(), jerseys: oJerseys(),
+			proLines: oProLines(), hometowns: oHometowns(), recipe: oRecipe(),
+			fuzz: fuzzSel.value,
+			scoutingLevel: Math.max(1, Math.min(100, Number(lvl.value) || 34)),
 			awardsScope: scopeSel.value,
 			majorConferences: confInput.value.split(",")
 				.map((x) => x.trim()).filter(Boolean),
