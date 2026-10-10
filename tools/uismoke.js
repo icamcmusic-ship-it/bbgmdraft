@@ -19,6 +19,9 @@ const os = require("os");
 
 const ROOT = path.join(__dirname, "..");
 const PORT = Number(process.env.UISMOKE_PORT) || 8791;
+/* Fixtures in a directory of this run's own: two runs on one machine (another
+   port) wrote the same tmp file names and read each other's half-written files. */
+const RUN_TMP = fs.mkdtempSync(path.join(os.tmpdir(), "bbgm-uismoke-run-"));
 const TYPES = {
 	".html": "text/html", ".js": "text/javascript",
 	".css": "text/css", ".json": "application/json",
@@ -130,7 +133,7 @@ async function gotoProspects(page) {
 (async () => {
 	const V = require("./validate.js");
 	V.loadEngine();
-	const fixture = path.join(require("os").tmpdir(), "bbgm-uismoke-class.json");
+	const fixture = path.join(RUN_TMP, "bbgm-uismoke-class.json");
 	fs.writeFileSync(fixture, JSON.stringify(V.syntheticClass(3, 70)));
 
 	const server = await serve();
@@ -1451,7 +1454,7 @@ async function gotoProspects(page) {
 		   extension, and the download's own temp name has none — the page
 		   arrives as plain text and every check below fails on an empty
 		   document rather than on anything real. */
-		const sitePath = path.join(os.tmpdir(),
+		const sitePath = path.join(RUN_TMP,
 			"bbgmdraft-smoke-" + process.pid + ".html");
 		await site.saveAs(sitePath);
 		{
@@ -2463,7 +2466,7 @@ async function gotoProspects(page) {
 			copy.college = "Duke";
 			league.players.push(copy);
 		}
-		const leagueFixture = path.join(require("os").tmpdir(), "bbgm-uismoke-league.json");
+		const leagueFixture = path.join(RUN_TMP, "bbgm-uismoke-league.json");
 		fs.writeFileSync(leagueFixture, JSON.stringify(league));
 
 		await page.goto(base);
@@ -2550,7 +2553,7 @@ async function gotoProspects(page) {
 		broken.pid = pid++;
 		delete broken.born;
 		league.players.push(broken);
-		const tmp = require("os").tmpdir();
+		const tmp = RUN_TMP;
 		const gzFixture = path.join(tmp, "bbgm-uismoke-big.json.gz");
 		fs.writeFileSync(gzFixture, zlib.gzipSync(Buffer.from(JSON.stringify(league))));
 
@@ -2642,7 +2645,7 @@ async function gotoProspects(page) {
 			copy.college = "Duke";
 			league.players.push(copy);
 		}
-		const leagueFixture = path.join(require("os").tmpdir(), "bbgm-uismoke-randomfile.json");
+		const leagueFixture = path.join(RUN_TMP, "bbgm-uismoke-randomfile.json");
 		fs.writeFileSync(leagueFixture, JSON.stringify(league));
 
 		await page.goto(base);
@@ -2719,7 +2722,7 @@ async function gotoProspects(page) {
 		await page.locator("#btnRandomize").click();
 		await page.waitForTimeout(400);
 		const leagueFixture2 = path.join(
-			require("os").tmpdir(), "bbgm-uismoke-randomfile-2.json");
+			RUN_TMP, "bbgm-uismoke-randomfile-2.json");
 		fs.writeFileSync(leagueFixture2, JSON.stringify(league));
 		await page.setInputFiles("#file", leagueFixture2);
 		await page.waitForSelector("table tbody tr", { timeout: 60000 });
@@ -3691,7 +3694,7 @@ async function gotoProspects(page) {
 		}
 		ok("the star is on before the class changes",
 			(await page.locator("table.boardtable .watchstar.on").count()) === 1);
-		const other = path.join(require("os").tmpdir(), "bbgm-uismoke-class-b.json");
+		const other = path.join(RUN_TMP, "bbgm-uismoke-class-b.json");
 		/* A different class: the fingerprint reads the count, the season and the
 		   first and last few names, and two synthetic classes draw the same
 		   names, so the season is what tells them apart here. */
@@ -3714,8 +3717,8 @@ async function gotoProspects(page) {
 			(await page.locator("table.boardtable .watchstar.on").count()) === 1);
 
 		// Universe mode: the template changes the notes.
-		const a = path.join(require("os").tmpdir(), "bbgm-uismoke-uni-a.json");
-		const b = path.join(require("os").tmpdir(), "bbgm-uismoke-uni-b.json");
+		const a = path.join(RUN_TMP, "bbgm-uismoke-uni-a.json");
+		const b = path.join(RUN_TMP, "bbgm-uismoke-uni-b.json");
 		fs.writeFileSync(a, JSON.stringify(V.syntheticClass(2, 40)));
 		fs.writeFileSync(b, JSON.stringify(V.syntheticClass(3, 40)));
 		await page.setInputFiles("#file", [a, b]);
@@ -3752,8 +3755,7 @@ async function gotoProspects(page) {
 		// has moved something.
 		await clearStorage(page);
 		await page.goto(base);
-		const os = require("os");
-		const dirU = fs.mkdtempSync(path.join(os.tmpdir(), "bbgm-uismoke-uni-"));
+		const dirU = fs.mkdtempSync(path.join(RUN_TMP, "bbgm-uismoke-uni-"));
 		const fileU = [1, 2, 3].map((y) => {
 			const c = V.realisticClass("par" + y, 50);
 			c.startingSeason = 2024 + y;
@@ -3829,7 +3831,7 @@ async function gotoProspects(page) {
 			lg.players.push(Object.assign({}, p, { pid: lpid++, tid: i % 4,
 				draft: { year: 2019, round: 1, pick: 3, tid: i % 4 }, born: { year: 1999, loc: "USA" } }));
 		});
-		const lgFile = path.join(require("os").tmpdir(), "bbgm-uismoke-mock-league.json");
+		const lgFile = path.join(RUN_TMP, "bbgm-uismoke-mock-league.json");
 		fs.writeFileSync(lgFile, JSON.stringify(lg));
 		await page.setInputFiles("#file", lgFile);
 		await page.waitForFunction(() => window.App.state.files.length === 1 &&
@@ -3872,9 +3874,8 @@ async function gotoProspects(page) {
 	   actions, the locks CSV round trip, pasted names, New class..., the zip
 	   and print. The pure halves are in tools/tests/quickwins-ui.js. */
 	{
-		const os = require("os");
 		console.log("\nQuick wins: board, tables and export");
-		const dirQ = fs.mkdtempSync(path.join(os.tmpdir(), "bbgm-uismoke-qw-"));
+		const dirQ = fs.mkdtempSync(path.join(RUN_TMP, "bbgm-uismoke-qw-"));
 		const second = path.join(dirQ, "second.json");
 		fs.writeFileSync(second, JSON.stringify(V.syntheticClass(7, 40)));
 		const settleQ = () => page.waitForTimeout(500);
@@ -4335,8 +4336,7 @@ async function gotoProspects(page) {
 	   tools/tests/bugfixes-ui.js. */
 	{
 		console.log("\nOctober 2026 audit: UI fixes");
-		const os = require("os");
-		const other = path.join(os.tmpdir(), "bbgm-uismoke-oct-b.json");
+		const other = path.join(RUN_TMP, "bbgm-uismoke-oct-b.json");
 		fs.writeFileSync(other, JSON.stringify(V.syntheticClass(5, 60)));
 		const settle = () => page.waitForTimeout(700);
 		const noteBtn = (label) => page.evaluate((l) => {
@@ -4488,7 +4488,7 @@ async function gotoProspects(page) {
 			!/potBias/.test(await page.textContent("#presetDiff")));
 
 		// UV2: a saved real-file universe is visible after a reload.
-		const dirU = fs.mkdtempSync(path.join(os.tmpdir(), "bbgm-uismoke-oct-"));
+		const dirU = fs.mkdtempSync(path.join(RUN_TMP, "bbgm-uismoke-oct-"));
 		const uFiles = [1, 2].map((y) => {
 			const c = V.realisticClass("oct" + y, 40);
 			c.startingSeason = 2024 + y;
@@ -4539,7 +4539,7 @@ async function gotoProspects(page) {
 		};
 		const download = async (click) => {
 			const [d] = await Promise.all([page.waitForEvent("download"), click()]);
-			const f = path.join(os.tmpdir(), "bbgm-qw-" + process.pid + "-" + d.suggestedFilename());
+			const f = path.join(RUN_TMP, "bbgm-qw-" + process.pid + "-" + d.suggestedFilename());
 			await d.saveAs(f);
 			return { name: d.suggestedFilename(), path: f };
 		};
@@ -4697,7 +4697,7 @@ async function gotoProspects(page) {
 		ok("opened with the same file, the link lands on that prospect's page",
 			(await page.evaluate(() => window.App.state.player)) === wanted &&
 			(await page.locator(".playerhead").count()) === 1);
-		const other = path.join(os.tmpdir(), "bbgm-uismoke-qw-other.json");
+		const other = path.join(RUN_TMP, "bbgm-uismoke-qw-other.json");
 		fs.writeFileSync(other, JSON.stringify(V.syntheticClass(11, 60)));
 		await page.goto("about:blank");
 		await page.goto(base + deep);
@@ -5173,7 +5173,7 @@ async function gotoProspects(page) {
 		ok("...and a reload no longer offers it", await page.locator("#sessionCard").isHidden());
 
 		// Several files: the active one comes back; a stranded universe still offers the card.
-		const dirS = fs.mkdtempSync(path.join(os.tmpdir(), "bbgm-uismoke-sess-"));
+		const dirS = fs.mkdtempSync(path.join(RUN_TMP, "bbgm-uismoke-sess-"));
 		const sFiles = [1, 2].map((y) => {
 			const c = V.realisticClass("sess" + y, 40);
 			c.startingSeason = 2024 + y;

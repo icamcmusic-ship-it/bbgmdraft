@@ -350,7 +350,14 @@
 	let persistPending = null;
 	function persistSoon() {
 		if (persistPending !== null) return;
-		const go = () => { persistPending = null; persist(); };
+		const go = () => {
+			persistPending = null;
+			try {
+				// See persistFlush: a cleared store is not written back.
+				if (localStorage.getItem(STORE_KEY) === null) return;
+			} catch (e) { return; }
+			persist();
+		};
 		persistPending = typeof global.requestIdleCallback === "function"
 			? global.requestIdleCallback(go, { timeout: 1000 }) : setTimeout(go, 300);
 	}
@@ -359,6 +366,12 @@
 		if (typeof global.cancelIdleCallback === "function") global.cancelIdleCallback(persistPending);
 		clearTimeout(persistPending);
 		persistPending = null;
+		/* Storage cleared since the last write (the user, another tab, a
+		   "clear site data") is not overwritten by a deferred navigation
+		   write; the sync write it replaced would have landed before. */
+		try {
+			if (localStorage.getItem(STORE_KEY) === null) return;
+		} catch (e) { return; }
 		persist();
 	}
 	window.addEventListener("pagehide", persistFlush);
@@ -4641,7 +4654,8 @@
 				data: cls,
 				// The note is about the FILE, so it is said once rather than
 				// once per class it produced.
-				warnings: (i === 0 ? [note] : []).concat(sub.warnings),
+				warnings: (i === 0 ? [note].concat((check.warnings || []).filter((w) =>
+					/not a draft prospect/.test(w))) : []).concat(sub.warnings),
 				league: leagueRef,
 			};
 		});
