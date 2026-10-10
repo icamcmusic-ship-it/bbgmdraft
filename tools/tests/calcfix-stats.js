@@ -394,7 +394,7 @@ module.exports = function (ok, V) {
 			ident === 0 && rowsN > 100, ident + " broken of " + rowsN);
 	}
 	/* 2026-10-10 audit section 4: injuryRate is a hazard (monotone past 1.8),
-	   winProb quotes the sim's own probit, NET's home edge is the sim's mean,
+	   winProb quotes the sim's own probit, NET's home edge matches the sim's on capped margins,
 	   and the recruiting position rank is per high-school class. */
 	{
 		const lf = V.realisticClass("inj-hz", 60);
@@ -407,8 +407,8 @@ module.exports = function (ok, V) {
 			Math.abs(T.winProb(40, 40) - 0.5) < 1e-6 && T.winProb(40, 40, 3.2) > 0.55 &&
 			T.winProb(62, 52) - 0.5 > T.winProb(42, 32) - 0.5,
 			[T.winProb(40, 40, 3.2), T.winProb(62, 52), T.winProb(42, 32)].join(","));
-		ok("C7/NET home edge is the game model's mean home edge",
-			global.Rankings.HOME_EDGE === 3.2, String(global.Rankings.HOME_EDGE));
+		ok("C7/NET home edge is the capped-margin equivalent of the game model's (1.5-1.8)",
+			global.Rankings.HOME_EDGE >= 1.5 && global.Rankings.HOME_EDGE <= 1.8, String(global.Rankings.HOME_EDGE));
 		const res = E.run(lf, C.make({ seed: "posrank", narrative: false }));
 		const seen = new Set();
 		let dup = 0;
