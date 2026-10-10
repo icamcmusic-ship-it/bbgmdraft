@@ -2556,6 +2556,14 @@
 			traits: { medical: 1.6, background: 1.6, character: 0.7 },
 			c: { injuryRate: 1.6, upsetFactor: 1.5, realignmentRate: 1,
 				coachTurnover: 175, transferShare: 60, bluebloodDownYears: 4 } },
+		{ name: "glass-eaters", w: 0.6, label: "the year everybody crashed the boards",
+			m: { rebounding: 2.4, big: 1.3, shooting: 0.7 }, traits: { rebounding: 1.8 }, c: { pace: 66 } },
+		{ name: "point-guard year", w: 0.6, label: "a class of floor generals",
+			m: { playmaking: 2.4, guard: 1.6, big: 0.7 }, traits: { passing: 1.8 } },
+		{ name: "late bloomers", w: 0.55, label: "the year the upperclassmen grew",
+			m: { durability: 1.3, raw: 0.7 }, c: { freshmanShare: 16, potBias: 0.6, potSpread: 2.0 } },
+		{ name: "finishers' year", w: 0.55, label: "everybody could finish at the rim",
+			m: { athletic: 1.6, scoring: 1.4, shooting: 0.7 }, traits: { finishing: 1.8, athleticism: 1.3 } },
 	];
 
 	/* The config bend a flavor applies to the whole class. Returned separately

@@ -25,6 +25,14 @@
 		{ kind: "unbeaten", label: "An unbeaten regular season" },
 		{ kind: "starStudded", label: "Six prospects at 55+" },
 		{ kind: "noStars", label: "Nobody reaches 55" },
+		{ kind: "freshmanNo1", label: "Freshman No. 1 pick" },
+		{ kind: "midMajorChamp", label: "Mid-major champion" },
+		{ kind: "abroadLottery", label: "Three abroad in the lottery" },
+		{ kind: "unrankedTop10", label: "Two-star recruit in the top ten" },
+		{ kind: "poyOutsideClass", label: "Player of the year not in the class" },
+		{ kind: "sixteenOverOne", label: "A 16 seed wins" },
+		{ kind: "allOnesFF", label: "All four 1 seeds in the Final Four" },
+		{ kind: "unbeatenChamp", label: "Unbeaten national champion" },
 	];
 	const BINGO_LINES = [
 		[0, 1, 2], [3, 4, 5], [6, 7, 8],
@@ -103,6 +111,32 @@
 			patch: () => ({ injuryRate: 3 }) },
 		{ id: "anomaly-storm", label: "Anomaly storm", note: "ten anomalies a class",
 			patch: () => ({ surpriseBudget: 10 }) },
+		{ id: "small-ball", label: "Small ball", note: "centers weighted to zero, pace up",
+			patch: (cfg, RB) => {
+				const w = Object.assign({}, cfg.archetypeWeights || {});
+				for (const a of (RB && RB.ARCHETYPES) || []) {
+					if (a.max >= 80 && (a.t || []).indexOf("big") !== -1) w[a.name] = 0;
+				}
+				return { archetypeWeights: w, pace: 74 };
+			} },
+		{ id: "blue-blood-collapse", label: "Fallen giants", note: "five blue bloods have down years",
+			patch: () => ({ bluebloodDownYears: 5, midMajorLift: 4 }) },
+		{ id: "mid-major-march", label: "Mid-major March", note: "the small leagues at full lift",
+			patch: () => ({ midMajorLift: 10, upsetFactor: 1.4 }) },
+		{ id: "seniors-only", label: "Old heads", note: "almost no freshmen",
+			patch: () => ({ freshmanShare: 5, transferShare: 55 }) },
+		{ id: "realignment-chaos", label: "Map in pieces", note: "realignment at its maximum",
+			patch: () => ({ realignmentRate: 1, realignmentMemory: 0 }) },
+		{ id: "fired-everyone", label: "Carousel", note: "coach turnover at its maximum",
+			patch: () => ({ coachTurnover: 200 }) },
+		{ id: "abroad", label: "Passport class", note: "blank colleges lean to Europe and Australia",
+			patch: () => ({ wEuroLeague: 70, wNBL: 30, pDII: 0 }) },
+		{ id: "specialists", label: "Specialists", note: "one-skill builds everywhere",
+			patch: () => ({ specialization: 2, archetypeDiversity: 98 }) },
+		{ id: "iron-men", label: "Iron men", note: "nobody gets hurt",
+			patch: () => ({ injuryRate: 0.2 }) },
+		{ id: "noisy", label: "Static", note: "build and stat noise at their maximum",
+			patch: () => ({ buildNoise: 12, statNoise: 1.6 }) },
 	];
 	const MUTATOR_BY_ID = {};
 	for (const m of MUTATORS) MUTATOR_BY_ID[m.id] = m;
@@ -192,6 +226,24 @@
 			test: (res) => eliteCount(res) >= 8 },
 		{ id: "anomaly-six", label: "Anomalous", desc: "six or more anomalies in one class",
 			test: (res) => ((res && res.surprises) || []).length >= 6 },
+		{ id: "walk-on-first", label: "From the end of the bench", desc: "a walk-on went in the first round",
+			test: (res) => ((res && res.board) || []).slice(0, 30).some((p) => p && p.transfer &&
+				p.transfer.kind === "walk-on turned starter") },
+		{ id: "juco-lottery", label: "Junior college to the lottery", desc: "a JUCO transfer in the top fourteen",
+			test: (res) => ((res && res.board) || []).slice(0, 14).some((p) => p && p.transfer &&
+				p.transfer.kind === "JUCO transfer") },
+		{ id: "low-major-poy", label: "Small school, big trophy", desc: "the national POY plays in a one-bid league",
+			test: (res) => ((res && res.players) || []).some((p) =>
+				(p.awards || []).indexOf("Consensus National Player of the Year") !== -1 &&
+				(global.Colleges.CONFERENCES[global.Colleges.conferenceOf(p.newCollege)] || {}).tier === "low") },
+		{ id: "same-school-12", label: "One school, one and two", desc: "the top two picks played together",
+			test: (res) => {
+				const b = (res && res.board) || [];
+				return !!(b[0] && b[1] && !b[0].nonNcaa && !b[1].nonNcaa && b[0].newCollege &&
+					b[0].newCollege === b[1].newCollege);
+			} },
+		{ id: "no-ff-one-seed", label: "No 1s left", desc: "no 1 seed reached the Final Four",
+			test: (res) => { const s = ffSeeds(res); return s.length === 4 && s.indexOf(1) === -1; } },
 		{ id: "bingo-line", label: "Bingo", desc: "a line on the strangeness bingo card", bingo: true },
 		{ id: "bingo-full", label: "Blackout", desc: "a full strangeness bingo card", bingo: true },
 	];
@@ -218,6 +270,9 @@
 		{ kind: "flavor", name: "bloodlines", requires: "unbeaten-champ" },
 		{ kind: "flavor", name: "reclassified", requires: "double-digit-champ" },
 		{ kind: "flavor", name: "volatile", requires: "bingo-line" },
+		{ kind: "flavor", name: "everything at once", requires: "strange-50" },
+		{ kind: "flavor", name: "one-man class", requires: "same-school-12" },
+		{ kind: "flavor", name: "walk-on year", requires: "walk-on-first" },
 	];
 
 	function lockFor(kind, name) {

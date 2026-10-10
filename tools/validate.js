@@ -174,7 +174,7 @@ const FIXTURES = { realistic: realisticClass, synthetic: syntheticClass };
    "National Player of the Year" string. */
 const POY_RE = /^(Naismith Trophy|John R\. Wooden Award|Oscar Robertson Trophy|AP Player of the Year|NABC Player of the Year|Sporting News Player of the Year)$/;
 const FINALIST_RE = /finalist|Late Season Top|honorable mention|watch list/;
-const NATIONAL_RE = /All-American|All-Freshman Team|NABC All-Defensive|^(Naismith|John R\.|Oscar Robertson|AP Player|NABC Player|Sporting News|Lefty Driesell|Bob Cousy|Jerry West|Julius Erving|Tim Duncan|Kareem|Pete Newell|Lute Olson|Wayman Tisdale|Consensus National)/;
+const NATIONAL_RE = /All-American|All-Freshman Team|NABC All-Defensive|^(Naismith|John R\.|Oscar Robertson|AP Player|NABC Player|Sporting News|Lefty Driesell|Bob Cousy|Jerry West|Julius Erving|Karl Malone|Kareem|Pete Newell|Lute Olson|Wayman Tisdale|Consensus National)/;
 
 function pct(vals, p) {
 	const s = vals.slice().sort((a, b) => a - b);
@@ -1985,7 +1985,7 @@ function main() {
 		});
 		checks.push({
 			name: "Narrative: distinct storylines over 16 classes",
-			value: names.size, lo: 7, hi: 12, ok: names.size >= 7 && names.size <= 12,
+			value: names.size, lo: 7, hi: 22, ok: names.size >= 7 && names.size <= 22,
 		});
 		/* The point of them: a season with storylines varies more class to
 		   class than one without. If this ratio is near 1 the narratives are

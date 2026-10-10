@@ -111,8 +111,8 @@ module.exports = function (ok, V) {
 
 	/* --- achievements --------------------------------------------------- */
 	{
-		ok("between 15 and 20 achievements, unique ids",
-			RM.ACHIEVEMENTS.length >= 15 && RM.ACHIEVEMENTS.length <= 20 &&
+		ok("between 15 and 25 achievements, unique ids",
+			RM.ACHIEVEMENTS.length >= 15 && RM.ACHIEVEMENTS.length <= 25 &&
 			new Set(RM.ACHIEVEMENTS.map((a) => a.id)).size === RM.ACHIEVEMENTS.length);
 		const team = (seed, w, l) => ({ seed, team: { name: "T" + seed, w, l } });
 		const g = (a, b, winA) => ({ a, b, winner: winA ? a : b });

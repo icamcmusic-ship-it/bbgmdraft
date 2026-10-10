@@ -584,6 +584,9 @@
 			["Westchester Knicks", -2], ["Cleveland Charge", -3],
 			["Birmingham Squadron", -3], ["College Park Skyhawks", -3],
 			["Capital City Go-Go", -4],
+			["Mexico City Capitanes", -1], ["Motor City Cruise", -1], ["Texas Legends", 0], ["Windy City Bulls", -1],
+			["South Bay Lakers", 1], ["San Diego Clippers", 0], ["Valley Suns", -2], ["Osceola Magic", 0],
+			["Noblesville Boom", -2], ["Greensboro Swarm", -2], ["Rip City Remix", -3],
 		],
 		"Basketball Champions League": [
 			["Unicaja Malaga", 6], ["La Laguna Tenerife", 5], ["Hapoel Jerusalem", 4],
@@ -596,11 +599,14 @@
 			["Bahcesehir Koleji", 2], ["Pinar Karsiyaka", 1], ["Besiktas", 0],
 			["Turk Telekom", 0], ["Merkezefendi", -2], ["Bursaspor", -3],
 			["Manisa BBSK", -4],
+			// Tofas plays in the BSL as well as in the Champions League.
+			["Tofas Bursa", 1], ["Darussafaka", 0], ["Aliaga Petkimspor", -1], ["Trabzonspor", -3], ["Mersin MSK", -3],
 		],
 		"Greek Basket League": [
 			["Panathinaikos", 9], ["Olympiacos", 9], ["AEK Athens", 3],
 			["Peristeri", 1], ["PAOK", 0], ["Aris Midea", 0], ["Promitheas", -2],
 			["Kolossos Rodou", -3], ["Lavrio", -4], ["Panionios", -5],
+			["Maroussi", -3], ["Karditsa", -3], ["Iraklis", -4],
 		],
 		"Israeli Premier League": [
 			["Maccabi Tel Aviv", 9], ["Hapoel Tel Aviv", 4], ["Hapoel Jerusalem", 4],
@@ -612,6 +618,9 @@
 			["Utsunomiya Brex", 3], ["Hiroshima Dragonflies", 2], ["Nagoya Diamond Dolphins", 1],
 			["Shimane Susanoo Magic", -1], ["Kawasaki Brave Thunders", 0],
 			["SeaHorses Mikawa", -2], ["Osaka Evessa", -4],
+			["Sunrockers Shibuya", 2], ["Gunma Crane Thunders", 1], ["Levanga Hokkaido", -2], ["Sendai 89ers", -2],
+			["Kyoto Hannaryz", -3], ["Nagasaki Velca", 0], ["San-en NeoPhoenix", 1], ["Yokohama B-Corsairs", 0],
+			["Akita Northern Happinets", -3], ["Koshigaya Alphas", -3],
 		],
 		"Brazil NBB": [
 			["Flamengo", 7], ["Franca", 6], ["Minas", 4], ["Sao Paulo", 3],
@@ -712,6 +721,17 @@
 			["Vincennes", 0], ["Casper College", -1], ["Cowley College", -1],
 			["Eastern Florida State", -2], ["Moberly Area CC", -2], ["Tallahassee State College", -3],
 			["Northeastern JC", -4],
+			// The engine draws its JUCO transfers from this list, so a school has one spelling.
+			["Ranger College", 1], ["Coffeyville CC", 0], ["Northwest Kansas Tech", -1], ["Western Nebraska CC", -1],
+			["Mineral Area College", -1], ["Iowa Western CC", 1], ["Southeastern CC", -2], ["Panola College", -2],
+			["Wabash Valley College", 0], ["Cochise College", -1], ["Barton CC", 0], ["Snow College", 0],
+			["Southern Idaho", 2], ["Gillette College", -2],
+			["Florida SouthWestern", 2], ["Kilgore College", 1], ["Navarro College", 1], ["Tyler JC", 2],
+			["Jones College", 1], ["Northeast Mississippi CC", 0], ["Pensacola State", 1], ["State Fair CC", 0],
+			["Three Rivers College", 0], ["Midland College", 1], ["Hill College", -1], ["Shelton State", 0],
+			["Wallace State", 1], ["Gulf Coast State", 1], ["Lee College", -1], ["Butler CC", 0],
+			["Seward County CC", 0], ["Dodge City CC", -1], ["Western Texas College", -1], ["New Mexico JC", 1],
+			["College of Central Florida", 0], ["Sheridan College", -1], ["Northwest Mississippi CC", 0], ["Kirkwood CC", -1],
 		],
 		"DIII NCAA": [
 			["Christopher Newport", 5], ["Trinity (CT)", 4], ["Wisconsin-Platteville", 4],
@@ -724,6 +744,10 @@
 			["Arizona Christian", 1], ["Freed-Hardeman", 0], ["Cumberlands", 0],
 			["Ottawa (AZ)", -2], ["Bethel (IN)", -2], ["Grace (IN)", -3],
 			["Xavier (LA)", -4],
+			["Langston", 1], ["Dillard", -1], ["William Carey", 2], ["Loyola (LA)", 1],
+			["Oklahoma Wesleyan", 0], ["Science & Arts (OK)", 0], ["Life (GA)", -1], ["Southeastern (FL)", 1],
+			["Marian (IN)", 0], ["Saint Francis (IN)", -1], ["Westmont", 2], ["The Master's", -2], ["Lewis-Clark State", 3],
+			["Benedictine (KS)", -2], ["Keiser", 1], ["Carroll (MT)", 0],
 		],
 		"Liga ACB": [
 			["Real Madrid", 8], ["FC Barcelona", 7], ["Unicaja Malaga", 5],
@@ -750,6 +774,7 @@
 			["Jiangsu Dragons", -2], ["Qingdao Eagles", -2],
 			["Nanjing Monkey Kings", -3], ["Sichuan Blue Whales", -3],
 			["Fujian Sturgeons", -4], ["Tianjin Pioneers", -5],
+			["Guangzhou Loong Lions", -2], ["Beijing Royal Fighters", -2], ["Ningbo Rockets", -4], ["Jilin Northeast Tigers", -3],
 		],
 		"LNB Pro A": [
 			["AS Monaco", 7], ["LDLC ASVEL", 5], ["Paris Basketball", 5],
@@ -1318,7 +1343,27 @@
 		(byConference[c] = byConference[c] || []).push(name);
 	}
 
+	/* Home arenas for the best-known programs. Optional: a text that names
+	   an arena falls back to "its arena" for a program not listed here. */
+	const ARENAS = {
+		"Duke": "Cameron Indoor Stadium", "North Carolina": "the Dean E. Smith Center", "Kentucky": "Rupp Arena",
+		"Kansas": "Allen Fieldhouse", "Indiana": "Assembly Hall", "Michigan State": "the Breslin Center",
+		"Purdue": "Mackey Arena", "Illinois": "the State Farm Center", "Wisconsin": "the Kohl Center",
+		"Iowa": "Carver-Hawkeye Arena", "UCLA": "Pauley Pavilion", "Arizona": "the McKale Center",
+		"Gonzaga": "the McCarthey Athletic Center", "Villanova": "the Finneran Pavilion", "Louisville": "the KFC Yum! Center",
+		"Kansas State": "Bramlage Coliseum", "Houston": "the Fertitta Center", "Tennessee": "Thompson-Boling Arena",
+		"Auburn": "Neville Arena", "Alabama": "Coleman Coliseum", "Arkansas": "Bud Walton Arena",
+		"Marquette": "Fiserv Forum", "Creighton": "the CHI Health Center", "Connecticut": "Gampel Pavilion",
+		"Virginia": "John Paul Jones Arena", "Maryland": "the Xfinity Center", "Texas": "the Moody Center",
+		"BYU": "the Marriott Center", "Iowa State": "Hilton Coliseum", "Butler": "Hinkle Fieldhouse",
+		"Xavier": "the Cintas Center", "Dayton": "UD Arena", "Memphis": "FedExForum",
+		"San Diego State": "Viejas Arena", "UNLV": "the Thomas & Mack Center", "New Mexico": "the Pit",
+		"Syracuse": "the JMA Wireless Dome", "Michigan": "the Crisler Center", "Ohio State": "the Schottenstein Center",
+		"Baylor": "the Foster Pavilion", "Texas Tech": "United Supermarkets Arena", "Providence": "Amica Mutual Pavilion",
+	};
+
 	global.Colleges = {
+		ARENAS,
 		COLLEGES, CONFERENCES, NON_NCAA, PRO_CLUBS, byConference,
 		conferenceOf, frequencyOf, prestige, prestigeOrLowMajor, isKnown,
 		UNKNOWN_PRESTIGE, region, isUSA, leagueWeight,

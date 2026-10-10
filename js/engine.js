@@ -139,15 +139,35 @@
 		{ kind: "walk-on turned starter", w: 0.5, from: "walkon", sameSchool: true },
 		{ kind: "grad transfer", w: 1.0, from: "mid", fifthYear: true },
 	];
-	const ACADEMIES = ["Army", "Navy", "Air Force", "VMI", "The Citadel", "Merchant Marine"];
+	/* Weighted: Army, Navy and Air Force are Division I; Kings Point and
+	   the Coast Guard are Division III. VMI and the Citadel are senior
+	   military colleges, not service academies, and are labelled as such.
+	   Names are the COLLEGES spellings. */
+	const ACADEMIES = [
+		["Army", 3], ["Navy", 3], ["Air Force", 3],
+		["Coast Guard", 0.6], ["Merchant Marine", 0.4],
+		["Virginia Military", 1], ["Citadel", 1],
+	];
+	const SENIOR_MILITARY = new Set(["Virginia Military", "Citadel"]);
+	// Overtime Elite is in Atlanta, so it is not an overseas origin.
 	const OVERSEAS_ORIGINS = [
 		"Real Madrid's academy", "FC Barcelona's academy", "Ratiopharm Ulm",
 		"KK Mega Basket", "Zalgiris Kaunas", "the NBA Global Academy",
-		"Overtime Elite", "the Australian NBL's Next Stars",
+		"the Australian NBL's Next Stars",
+		"Joventut Badalona's cantera", "Alba Berlin's youth program", "Bayern Munich's academy",
+		"INSEP in Paris", "ASVEL's youth side", "Partizan's youth system", "Crvena Zvezda's academy",
+		"Cedevita Olimpija", "Unicaja Malaga's youth program", "Baskonia's academy",
+		"Stella Azzurra Roma", "Rytas Vilnius", "Anadolu Efes' youth side", "Fenerbahce's academy",
+		"Canarias Basketball Academy", "the NBA Academy Africa", "SEED Academy in Senegal",
+		"the Australian Centre of Excellence", "a Spanish second-division club",
 	];
 	const NAIA_ORIGINS = [
 		"Indiana Wesleyan", "Talladega", "Georgetown (KY)", "Arizona Christian",
 		"Freed-Hardeman", "Ottawa (AZ)", "Bethel (IN)", "Xavier (LA)",
+		"Cumberlands", "Grace (IN)", "Langston", "Dillard", "William Carey", "Loyola (LA)",
+		"Oklahoma Wesleyan", "Science & Arts (OK)", "Life (GA)", "Southeastern (FL)",
+		"Marian (IN)", "Saint Francis (IN)", "Westmont", "The Master's", "Lewis-Clark State",
+		"Benedictine (KS)", "Keiser", "Carroll (MT)",
 	];
 
 	function assignClassYears(players, cfg, rng, ageIsInformative) {
@@ -172,17 +192,8 @@
 		}
 		/* Nine schools was the entire junior-college world, so every JUCO
 		   transfer in every class came from the same nine names. */
-		const JUCO = [
-			"Chipola College", "Northwest Florida State", "Salt Lake CC",
-			"Hutchinson CC", "Vincennes University", "Indian Hills CC",
-			"Ranger College", "South Plains College", "Trinity Valley CC",
-			"Odessa College", "Coffeyville CC", "Moberly Area CC",
-			"Eastern Florida State", "Northwest Kansas Tech", "Casper College",
-			"Western Nebraska CC", "Mineral Area College", "Iowa Western CC",
-			"John A. Logan College", "Southeastern CC", "Panola College",
-			"Wabash Valley College", "Cochise College", "Barton CC",
-			"Snow College", "Southern Idaho", "Tallahassee CC", "Gillette College",
-		];
+		// One list, shared with PRO_CLUBS.JUCO, so a school has one spelling.
+		const JUCO = C.PRO_CLUBS.JUCO.map((c) => c[0]);
 
 		/* THE BIOGRAPHY A SHARED UNIVERSE CARRIES.
 
@@ -263,11 +274,17 @@
 					: kind.from === "naia" ? NAIA_ORIGINS
 					: kind.from === "high" ? highMajors
 					: kind.from === "mid" ? midMajors : lowMajors;
+				let from = kind.sameSchool ? null
+					: kind.from === "academy" ? r.weighted(pool, (x) => x[1])[0]
+					: (pool.length ? r.pick(pool) : "junior college");
+				if (kind.from === "academy" && from === p.newCollege) {
+					from = (pool.find((x) => x[0] !== p.newCollege) || pool[0])[0];
+				}
 				p.transfer = {
-					kind: kind.kind,
+					kind: kind.from === "academy" && SENIOR_MILITARY.has(from)
+						? "senior military college transfer" : kind.kind,
 					// A walk-on did not come from anywhere: he was already here.
-					from: kind.sameSchool ? null
-						: (pool.length ? r.pick(pool) : "junior college"),
+					from,
 					fifthYear: !!kind.fifthYear,
 				};
 				if (kind.fifthYear) {
@@ -1259,7 +1276,7 @@
 	   labelled. */
 	const NARRATIVES = [
 		{
-			name: "a dominant favourite", w: 2.0,
+			name: "a dominant favorite", w: 2.0,
 			blurb: "one team was better than everybody all year",
 			bend: { teamMomentum: 1.5, upsetFactor: 0.72, bluebloodDownYears: 0 },
 		},
@@ -1315,9 +1332,29 @@
 		},
 		{
 			name: "chalk all the way", w: 1.1,
-			blurb: "the seeds held and the favourites won",
+			blurb: "the seeds held and the favorites won",
 			bend: { upsetFactor: 0.5, teamMomentum: 1.2, midMajorLift: 0 },
 		},
+		{ name: "the portal year", w: 1.1, blurb: "half the sport changed jerseys over the summer",
+			bend: { portalRate: 180, transferShare: 52, teamMomentum: 0.8 } },
+		{ name: "a freshman year", w: 1.0, blurb: "the teenagers ran the sport",
+			bend: { freshmanShare: 48, statNoise: 1.15 } },
+		{ name: "the veterans' season", w: 1.0, blurb: "fifth-year seniors were everywhere that mattered",
+			bend: { freshmanShare: 20, transferShare: 46, upsetFactor: 0.9 } },
+		{ name: "a healthy year", w: 0.9, blurb: "for once, everybody was available in March",
+			bend: { injuryRate: 0.55, upsetFactor: 0.85 } },
+		{ name: "a cold-shooting winter", w: 0.9, blurb: "the rims seemed smaller everywhere",
+			bend: { efficiencyEnv: -1.3, upsetFactor: 1.2 } },
+		{ name: "the three-point season", w: 1.0, blurb: "everybody let it fly, and enough of them went in",
+			bend: { scoringEnv: 1, paceShift: 2, statNoise: 1.15 } },
+		{ name: "a quiet carousel", w: 0.8, blurb: "nobody fired anybody",
+			bend: { coachTurnover: 45, teamMomentum: 1.1 } },
+		{ name: "the blue bloods are back", w: 0.9, blurb: "the usual names were the names again",
+			bend: { bluebloodDownYears: 0, midMajorLift: 0, upsetFactor: 0.8 } },
+		{ name: "a bubble mess", w: 1.0, blurb: "thirty teams had a case and twelve of them were right",
+			bend: { midMajorLift: 3, upsetFactor: 1.15, statNoise: 1.1 } },
+		{ name: "a style war", w: 0.8, blurb: "every coach copied somebody else's offense",
+			bend: { styleDrift: 2.2, seasonEvents: 9 } },
 	];
 
 	/* The tempo a season is set at, from the (bent) slider and the class
@@ -3062,6 +3099,13 @@
 		{ kind: "a shoulder injury", w: 1.0, lo: 3, hi: 11 },
 		{ kind: "a broken hand", w: 0.7, lo: 8, hi: 20 },
 		{ kind: "a high ankle sprain", w: 0.9, lo: 5, hi: 13 },
+		{ kind: "a hamstring strain", w: 1.2, lo: 2, hi: 6 },
+		{ kind: "a sprained wrist", w: 0.9, lo: 1, hi: 5 },
+		{ kind: "a broken nose", w: 0.6, lo: 1, hi: 2 },
+		{ kind: "a hip pointer", w: 0.7, lo: 1, hi: 4 },
+		{ kind: "a torn meniscus", w: 0.4, lo: 8, hi: 18 },
+		{ kind: "plantar fasciitis", w: 0.6, lo: 3, hi: 10 },
+		{ kind: "a groin strain", w: 0.8, lo: 2, hi: 6 },
 	];
 	const ABSENCES = [
 		{ kind: "illness", w: 2.2, lo: 1, hi: 3 },
@@ -3070,6 +3114,10 @@
 		{ kind: "a one-game suspension", w: 1.0, lo: 1, hi: 1 },
 		{ kind: "load management", w: 0.5, lo: 1, hi: 3 },
 		{ kind: "a personal matter", w: 0.8, lo: 1, hi: 4 },
+		{ kind: "a team rules violation", w: 0.8, lo: 1, hi: 2 },
+		{ kind: "a family bereavement", w: 0.5, lo: 1, hi: 2 },
+		{ kind: "academic eligibility", w: 0.4, lo: 2, hi: 6 },
+		{ kind: "a flu bug that went through the roster", w: 0.9, lo: 1, hi: 2 },
 	];
 	// A season's worth of `when`, matching the schedule's own axis.
 	const SEASON_GAMES = T.CONF_GAMES + T.NON_CONF_GAMES;
@@ -4257,6 +4305,9 @@
 						"a back issue teams could not agree on",
 						"a knee that failed two physicals",
 						"a shoulder that had been managed all season",
+						"a hip that had been scoped twice",
+						"a heart screening that needed a second opinion",
+						"an ankle with three sprains in two years",
 					]),
 				};
 				move(board, i, to);
@@ -4281,6 +4332,8 @@
 						"shot it far better in a gym than he had all season",
 						"was the best athlete at the combine",
 						"tested out of the building and interviewed better still",
+						"made thirteen straight from the corner in front of six teams",
+						"his vertical was eight inches higher than anyone expected",
 					]),
 				};
 				move(board, i, to);
@@ -4300,7 +4353,10 @@
 					say: (moved) => (moved < 0
 						? "a team moved up " + Text.plural(-moved, "spot") + " to take him"
 						: "a team traded up to take him"),
-					detail: "the pick cost a future first",
+					detail: r.pick(["the pick cost a future first",
+						"two seconds and a pick swap went the other way",
+						"they had him top ten on their board and he was still there",
+						"the trade was agreed before the draft began"]),
 				};
 				move(board, i, to);
 				return true;
@@ -4352,6 +4408,8 @@
 						"teams could not agree on the position he plays",
 						"a fit nobody in the lottery wanted to solve",
 						"an off-court question that never went away",
+						"his camp turned down two promises in the teens",
+						"a medical that only one team had seen",
 					]),
 				};
 				move(board, i, to);
@@ -4384,8 +4442,9 @@
 						: "went where a team had promised to take him"),
 					detail: r.pick([
 						"he shut down his workouts after one visit",
-						"his agent cancelled every other workout in June",
+						"his agent canceled every other workout in June",
 						"the promise was the worst-kept secret of the week",
+						"the promise had been made in May, at a dinner nobody was supposed to know about",
 					]),
 				};
 				move(board, i, to);
@@ -4410,6 +4469,7 @@
 						"teams came away unsure how much he wanted it",
 						"he did not know the playbook he had run all season",
 						"two front offices took him off their boards after meeting him",
+						"teams heard different stories from him and from his college staff",
 					]),
 				};
 				move(board, i, to);
@@ -5156,6 +5216,27 @@
 		const elite = (res.players || []).filter((p) => p.newOvr >= 55).length;
 		if (elite >= 6) add(9, elite + " prospects at 55+ overall", "starStudded");
 		if (elite === 0) add(9, "nobody in the class reached 55 overall", "noStars");
+		// Bingo squares read off the reroll predicates where one exists.
+		const pred = (k) => {
+			const pr = REROLL_PREDICATES.filter((x) => x.key === k)[0];
+			try { return !!(pr && pr.test(res)); } catch (e) { return false; }
+		};
+		if (pred("freshmanNo1")) add(2, "the No. 1 pick is a freshman", "freshmanNo1");
+		if (pred("midMajorChamp")) add(10, "a mid-major won the title", "midMajorChamp");
+		if (pred("abroadLottery")) add(6, "three or more of the lottery played abroad", "abroadLottery");
+		if (pred("unrankedTop10")) add(6, "a two-star recruit in the top ten", "unrankedTop10");
+		if (pred("poyOutsideClass")) add(5, "the player of the year is not in this class", "poyOutsideClass");
+		const tg = global.ReplayMeta && global.ReplayMeta.tourneyGames
+			? global.ReplayMeta.tourneyGames(res) : [];
+		if (tg.some((g) => g.winner.seed === 16 && (g.winner === g.a ? g.b : g.a).seed === 1)) {
+			add(15, "a 16 seed beat a 1 seed", "sixteenOverOne");
+		}
+		if (ff.length === 4 && ff.every((x) => x && x.seed === 1)) {
+			add(4, "all four 1 seeds reached the Final Four", "allOnesFF");
+		}
+		if (champ && champ.team && champ.team.l === 0 && champ.team.w >= 20) {
+			add(12, "an unbeaten national champion", "unbeatenChamp");
+		}
 		return {
 			score: Math.min(100, score),
 			reasons,
@@ -5537,11 +5618,24 @@
 		"LNB Pro A": ["INSEP", "a Villeurbanne youth side", "a Pau-Orthez academy"],
 		"Basketball Bundesliga": ["a Bundesliga youth program",
 			"the Ulm youth system", "a Bavarian academy"],
+		"Turkish BSL": ["the Anadolu Efes youth side", "the Fenerbahce academy", "an Istanbul youth system"],
+		"Greek Basket League": ["the Panathinaikos youth teams", "the Olympiacos academy", "an Athens youth program"],
+		"Israeli Premier League": ["the Maccabi Tel Aviv youth system", "a Jerusalem academy"],
+		"Italian LBA": ["the Stella Azzurra academy", "the Virtus youth side", "a Milan youth system"],
+		"Lithuanian LKL": ["the Sabonis basketball school", "the Zalgiris academy", "a Kaunas youth system"],
+		"Japan B.League": ["a Japanese high-school powerhouse", "a B.League youth team"],
+		"Chinese CBA": ["a provincial sports school", "the club's youth team"],
+		"Brazil NBB": ["the Franca youth side", "a Sao Paulo youth program"],
 	};
 	const GENERIC_YOUTH = ["the club's own youth system", "a regional academy",
-		"a national development program"];
+		"a national development program", "a sports high school",
+		"a club academy two hours from home", "a federation development center",
+		"his hometown club's junior side"];
 	const LOAN_TARGETS = ["a second-division side", "a feeder club",
-		"a lower-division team in the same region", "a club two levels down"];
+		"a lower-division team in the same region", "a club two levels down",
+		"a newly promoted side", "a club in a neighboring country's top flight",
+		"a reserve team in the third division",
+		"a relegation-threatened side that needed minutes filled"];
 	const NATIONAL_TEAMS = {
 		"EuroLeague": ["Spain", "Serbia", "France", "Lithuania", "Greece",
 			"Turkey", "Slovenia", "Germany", "Italy", "Israel"],
@@ -7395,21 +7489,21 @@
 	   Drawn off the player's key, so a re-run gives him the same town. */
 	const HOME_STATES = [
 		// abbreviation, name, region, weight, cities
-		["CA", "California", "W", 12, ["Los Angeles", "Oakland", "San Diego", "Sacramento"]],
-		["TX", "Texas", "SW", 11, ["Houston", "Dallas", "San Antonio", "Austin"]],
-		["FL", "Florida", "SE", 9, ["Miami", "Orlando", "Jacksonville", "Tampa"]],
-		["NY", "New York", "NE", 8, ["Brooklyn", "Bronx", "Rochester", "Buffalo"]],
-		["GA", "Georgia", "SE", 7, ["Atlanta", "Savannah", "Decatur", "Macon"]],
-		["IL", "Illinois", "MW", 6, ["Chicago", "Peoria", "Rockford", "Joliet"]],
-		["PA", "Pennsylvania", "NE", 6, ["Philadelphia", "Pittsburgh", "Harrisburg", "Erie"]],
-		["OH", "Ohio", "MW", 6, ["Columbus", "Cleveland", "Cincinnati", "Akron"]],
-		["NC", "North Carolina", "SE", 6, ["Charlotte", "Raleigh", "Greensboro", "Durham"]],
-		["MD", "Maryland", "NE", 5, ["Baltimore", "Silver Spring", "Bowie", "Upper Marlboro"]],
+		["CA", "California", "W", 12, ["Los Angeles", "Oakland", "San Diego", "Sacramento", "Compton", "Inglewood", "Long Beach", "Fresno", "Fontana", "Richmond"]],
+		["TX", "Texas", "SW", 11, ["Houston", "Dallas", "San Antonio", "Austin", "Fort Worth", "Arlington", "Killeen", "Beaumont", "Garland"]],
+		["FL", "Florida", "SE", 9, ["Miami", "Orlando", "Jacksonville", "Tampa", "Fort Lauderdale", "Pensacola", "Gainesville", "St. Petersburg"]],
+		["NY", "New York", "NE", 8, ["Brooklyn", "Bronx", "Rochester", "Buffalo", "Harlem", "Queens", "Mount Vernon", "Syracuse", "Yonkers"]],
+		["GA", "Georgia", "SE", 7, ["Atlanta", "Savannah", "Decatur", "Macon", "Columbus", "Augusta", "Albany", "Marietta"]],
+		["IL", "Illinois", "MW", 6, ["Chicago", "Peoria", "Rockford", "Joliet", "Evanston", "Champaign", "Maywood", "Springfield"]],
+		["PA", "Pennsylvania", "NE", 6, ["Philadelphia", "Pittsburgh", "Harrisburg", "Erie", "Chester", "Allentown", "Reading"]],
+		["OH", "Ohio", "MW", 6, ["Columbus", "Cleveland", "Cincinnati", "Akron", "Dayton", "Toledo", "Youngstown", "Canton"]],
+		["NC", "North Carolina", "SE", 6, ["Charlotte", "Raleigh", "Greensboro", "Durham", "Winston-Salem", "Fayetteville", "Wilmington", "Goldsboro"]],
+		["MD", "Maryland", "NE", 5, ["Baltimore", "Silver Spring", "Bowie", "Upper Marlboro", "Landover", "Hyattsville", "Annapolis"]],
 		["VA", "Virginia", "SE", 5, ["Richmond", "Norfolk", "Virginia Beach", "Alexandria"]],
-		["NJ", "New Jersey", "NE", 5, ["Newark", "Camden", "Paterson", "Trenton"]],
-		["MI", "Michigan", "MW", 4, ["Detroit", "Grand Rapids", "Flint", "Lansing"]],
+		["NJ", "New Jersey", "NE", 5, ["Newark", "Camden", "Paterson", "Trenton", "Jersey City", "Elizabeth", "Plainfield", "East Orange"]],
+		["MI", "Michigan", "MW", 4, ["Detroit", "Grand Rapids", "Flint", "Lansing", "Saginaw", "Pontiac", "Ann Arbor"]],
 		["TN", "Tennessee", "SE", 4, ["Memphis", "Nashville", "Knoxville", "Chattanooga"]],
-		["IN", "Indiana", "MW", 4, ["Indianapolis", "Fort Wayne", "Gary", "Evansville"]],
+		["IN", "Indiana", "MW", 4, ["Indianapolis", "Fort Wayne", "Gary", "Evansville", "Anderson", "Muncie", "South Bend", "Marion"]],
 		["LA", "Louisiana", "SE", 4, ["New Orleans", "Baton Rouge", "Shreveport", "Lafayette"]],
 		["AL", "Alabama", "SE", 3, ["Birmingham", "Mobile", "Montgomery", "Huntsville"]],
 		["SC", "South Carolina", "SE", 3, ["Columbia", "Charleston", "Greenville", "Spartanburg"]],
@@ -7417,7 +7511,7 @@
 		["WA", "Washington", "W", 3, ["Seattle", "Tacoma", "Spokane", "Bellevue"]],
 		["MA", "Massachusetts", "NE", 3, ["Boston", "Worcester", "Springfield", "Lowell"]],
 		["AZ", "Arizona", "SW", 3, ["Phoenix", "Tucson", "Mesa", "Chandler"]],
-		["KY", "Kentucky", "SE", 3, ["Louisville", "Lexington", "Bowling Green", "Owensboro"]],
+		["KY", "Kentucky", "SE", 3, ["Louisville", "Lexington", "Bowling Green", "Owensboro", "Paducah", "Covington"]],
 		["WI", "Wisconsin", "MW", 3, ["Milwaukee", "Madison", "Green Bay", "Racine"]],
 		["MN", "Minnesota", "MW", 3, ["Minneapolis", "St. Paul", "Duluth", "Rochester"]],
 		["CT", "Connecticut", "NE", 2, ["Hartford", "New Haven", "Bridgeport", "Stamford"]],
