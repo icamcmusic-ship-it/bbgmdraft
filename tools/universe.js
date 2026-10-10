@@ -963,7 +963,8 @@ console.log("\nThe carry: gaps, guesses, levels, the carousel");
 		const c = U.harvest(w.results[i], null);
 		for (const school of Object.keys(c.coaches)) {
 			const rec2 = c.coaches[school];
-			if (rec2.reason !== "hired") continue;
+			// Ladder and retread hires read the prior carry (UV7), which this replay lacks.
+			if (rec2.reason !== "hired" || rec2.ladder || rec2.retread) continue;
 			moved++;
 			const t = w.results[i + 1].teams[school];
 			if (t && t.coach && t.coach.name === rec2.coach.name) arrived++;
