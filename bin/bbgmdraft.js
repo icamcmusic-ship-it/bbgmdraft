@@ -268,7 +268,8 @@ function buildConfig(args, data) {
 		for (const a of plan.applied) locks[a.player.key] = Object.assign({}, locks[a.player.key], a.patch);
 		cfg.overrides = locks;
 		say(args, "locks: " + plan.applied.length + " of " + plan.total + " row(s) applied" +
-			(plan.unmatched.length ? "; " + plan.unmatched.length + " matched nobody" : ""));
+			(plan.unmatched.length ? "; " + plan.unmatched.length + " matched nobody" : "") +
+			(plan.empty && plan.empty.length ? "; " + plan.empty.length + " locked nothing" : ""));
 		for (const r of plan.rejected) say(args, "locks: " + r);
 	}
 	for (const s of args.set) {
@@ -339,8 +340,15 @@ function exportOptions(args) {
 
 /* --------------------------------------------------------------- output */
 
+/* `--quiet` and `-q` are one flag. The progress counters below checked
+   only the long form, so `-q` still painted "1/2" over the terminal
+   (audit 2026-10-10 B16); everything asks this now. */
+function quiet(args) {
+	return !!(args.flags["--quiet"] || args.flags["-q"]);
+}
+
 function say(args, text) {
-	if (!args.flags["--quiet"] && !args.flags["-q"]) process.stderr.write(text + "\n");
+	if (!quiet(args)) process.stderr.write(text + "\n");
 }
 
 function table(rows) {
@@ -348,11 +356,10 @@ function table(rows) {
 	return rows.map((r) => r.map((c, i) => String(c).padEnd(w[i])).join("  ").trimEnd()).join("\n");
 }
 
-function csvCell(v) {
-	if (v === null || v === undefined) return "";
-	const s = String(v);
-	return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-}
+/* One CSV cell writer for the page and the command line: Share.csvCell
+   carries the spreadsheet-formula guard and the bare-\r quoting this copy
+   lacked (audit 2026-10-10 B15). */
+const csvCell = (v) => global.Share.csvCell(v);
 
 /* ------------------------------------------------------------- commands */
 
@@ -455,9 +462,9 @@ function cmdRunMany(args, file, data, cfg, kinds) {
 		const dest = path.join(dir, name + "_" + safe + "_" + i + ".json" + (f["--gzip"] ? ".gz" : ""));
 		fs.writeFileSync(dest, bodyOf(args, global.Engine.exportFile(res, opts)));
 		written.push({ seed: c.seed, file: dest });
-		if (process.stderr.isTTY && !f["--quiet"]) process.stderr.write("\r  " + (i + 1) + "/" + n);
+		if (process.stderr.isTTY && !quiet(args)) process.stderr.write("\r  " + (i + 1) + "/" + n);
 	}
-	if (process.stderr.isTTY && !f["--quiet"]) process.stderr.write("\r          \r");
+	if (process.stderr.isTTY && !quiet(args)) process.stderr.write("\r          \r");
 	if (f["--json"]) process.stderr.write(JSON.stringify({ baseSeed: base, written,
 		engineRev: global.Universe.ENGINE_REV }, null, 2) + "\n");
 	else say(args, "wrote " + n + " classes to " + dir + " · base seed " + base +
@@ -489,9 +496,9 @@ function cmdBatch(args) {
 		const c = global.Config.make(cfg);
 		c.seed = base + "#" + i;
 		rows.push(B.summarize(runner.run(c)));
-		if (process.stderr.isTTY && !args.flags["--quiet"]) process.stderr.write("\r  " + (i + 1) + "/" + n);
+		if (process.stderr.isTTY && !quiet(args)) process.stderr.write("\r  " + (i + 1) + "/" + n);
 	}
-	if (process.stderr.isTTY && !args.flags["--quiet"]) process.stderr.write("\r          \r");
+	if (process.stderr.isTTY && !quiet(args)) process.stderr.write("\r          \r");
 	const cols = ["seed", "flavor", "ovr", "pot", "ppg", "usg", "ts", "topPpg", "awards",
 		"archetypes", "champion", "champSeed", "teamPpg"];
 	if (args.flags["--json"]) {
@@ -549,9 +556,9 @@ function cmdSeek(args) {
 		const c = global.Config.make(cfg);
 		c.seed = base + "#" + i;
 		const res = runner.run(c);
-		if (process.stderr.isTTY && !f["--quiet"]) process.stderr.write("\r  " + (i + 1) + "/" + tries);
+		if (process.stderr.isTTY && !quiet(args)) process.stderr.write("\r  " + (i + 1) + "/" + tries);
 		if (!clauses.every((cl) => cl.test(res))) continue;
-		if (process.stderr.isTTY && !f["--quiet"]) process.stderr.write("\r          \r");
+		if (process.stderr.isTTY && !quiet(args)) process.stderr.write("\r          \r");
 		const top = (res.board || [])[0];
 		if (f["--json"]) {
 			process.stdout.write(JSON.stringify({ seed: c.seed, tries: i + 1,
@@ -567,7 +574,7 @@ function cmdSeek(args) {
 		}
 		return;
 	}
-	if (process.stderr.isTTY && !f["--quiet"]) process.stderr.write("\r          \r");
+	if (process.stderr.isTTY && !quiet(args)) process.stderr.write("\r          \r");
 	say(args, "no class met " + clauses.map((cl) => cl.key).join(" and ") + " in " + tries +
 		" tries (base seed " + base + ")");
 	process.exitCode = 1;
@@ -614,12 +621,12 @@ function cmdUniverse(args) {
 	});
 	for (let k = 0; k < chain.runnable.length; k++) {
 		chain.step(k);
-		if (process.stderr.isTTY && !args.flags["--quiet"]) {
+		if (process.stderr.isTTY && !quiet(args)) {
 			process.stderr.write("\r  season " + (k + 1) + " of " + chain.runnable.length);
 		}
 	}
 	chain.finish({ cancelled: false, extrapolateYears: cfg.extrapolateYears || 0 });
-	if (process.stderr.isTTY && !args.flags["--quiet"]) process.stderr.write("\r                         \r");
+	if (process.stderr.isTTY && !quiet(args)) process.stderr.write("\r                         \r");
 	const u = chain.universe;
 	const name = (x) => (x && x.name) || "";
 	if (args.flags["--json"]) {

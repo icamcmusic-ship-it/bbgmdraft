@@ -112,7 +112,10 @@
 		if (full) return Object.assign(full, { lean: false });
 		const lean = Object.assign({}, payload);
 		delete lean.overrides;
-		delete lean.fp;
+		/* `fp` also says which file the deep fields (tab, prospect, compare)
+		   belong to: dropping it and keeping them made readDeep refuse the
+		   link on the very file it was copied from (audit 2026-10-10 B13). */
+		if (lean.tab === undefined && lean.pk === undefined && lean.cmp === undefined) delete lean.fp;
 		const slim = await attempt(lean);
 		if (slim) return Object.assign(slim, { lean: true });
 		// Settings alone are over the limit: write them anyway, as plain.
@@ -198,6 +201,20 @@
 			}
 			if (v !== null && typeof v === "object") { tables.push(k); continue; }
 			if (v === null || v === undefined) continue;
+			sets.push(k + "=" + (typeof v === "boolean" ? (v ? "true" : "false") : String(v)));
+		}
+		/* A setting the user touched is pinned even when it is back at its
+		   default, and a storyline or flavor leaves a pinned setting alone.
+		   The delta only carries non-default values, so the pin was lost and
+		   the command line let a storyline bend it: a different class (audit
+		   2026-10-10 B9). `--set k=<default>` pins it on the CLI side too,
+		   since Config.make pins every key it is given. */
+		const defaults = o.defaults || (global.Config && global.Config.DEFAULTS) || {};
+		const setKeys = new Set(sets.map((x) => x.slice(0, x.indexOf("="))));
+		for (const k of (Array.isArray(delta.pinned) ? delta.pinned : []).slice().sort()) {
+			if (setKeys.has(k) || delta[k] !== undefined || NOT_FLAGS[k]) continue;
+			const v = defaults[k];
+			if (v === null || v === undefined || typeof v === "object") continue;
 			sets.push(k + "=" + (typeof v === "boolean" ? (v ? "true" : "false") : String(v)));
 		}
 		const parts = ["bbgmdraft", "run", shellQuote(o.file || "class.json")];
@@ -306,8 +323,16 @@
 
 	/* ------------------------------------------- the batch contact sheet (Q27) */
 
+	/* The page's CSV cell (esc() in js/app.js), shared so the contact sheet
+	   and the command line's --csv writers get the same guards: a non-finite
+	   number is an empty cell, and a string starting with =, +, -, @, a tab
+	   or a carriage return is prefixed with an apostrophe so a spreadsheet
+	   does not run it as a formula. Both writers skipped that guard (audit
+	   2026-10-10 B15). */
 	const csvCell = (v) => {
-		const s = v === null || v === undefined ? "" : String(v);
+		if (typeof v === "number" && !Number.isFinite(v)) return "";
+		let s = v === null || v === undefined ? "" : String(v);
+		if (typeof v !== "number" && /^[=+\-@\t\r]/.test(s)) s = "'" + s;
 		return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 	};
 
@@ -329,7 +354,7 @@
 		return lines.join("\r\n") + "\r\n";
 	}
 
-	global.Share = { HASH_LIMIT, KEPT_FORMAT, KEPT_MAX, b64uEncode, b64uDecode, plainBody, zipBody, parseHash,
+	global.Share = { HASH_LIMIT, KEPT_FORMAT, KEPT_MAX, csvCell, b64uEncode, b64uDecode, plainBody, zipBody, parseHash,
 		decodePlain, encodeLink, decodeLink, canStream, deepFields, readDeep, deepApplies,
 		shellQuote, commandLine, cleanKept, keptList, makeBundle, parseBundle, mergeKept, contactCsv, topLine };
 })(typeof window !== "undefined" ? window : self);

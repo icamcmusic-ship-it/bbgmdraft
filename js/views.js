@@ -1345,92 +1345,10 @@
 			lines: names.length, duplicates };
 	}
 
-	/* Q11. The locks CSV, parsed rows in, a plan out. Columns (matched by
-	   header, any order): key and/or name to find the prospect; then
-	   ovr, pot, archetype, college, newname (the new name), hgtinches,
-	   weight and the fifteen ratings hgt, stre, spd, jmp, endu, ins, dnk, ft,
-	   fg, tp, oiq, diq, drb, pss, reb. An empty cell is no lock. Anything out
-	   of range or unknown is refused and listed, never half-applied. */
-	function planLockRows(rows, players, lists) {
-		if (!rows || !rows.length) return { error: "That CSV has no rows." };
-		const head = rows[0].map((h) => String(h).trim().toLowerCase());
-		const idx = (name) => head.indexOf(name);
-		const byKey = {};
-		const byName = {};
-		for (const p of players) {
-			byKey[p.key] = p;
-			byName[p.name.toLowerCase()] = p;
-		}
-		const cols = {
-			key: idx("key"), name: idx("name"), ovr: idx("ovr"), pot: idx("pot"),
-			archetype: idx("archetype"), college: idx("college"), newname: idx("newname"),
-			hgtinches: idx("hgtinches"), weight: idx("weight"),
-		};
-		if (cols.key < 0 && cols.name < 0) {
-			return { error: "The CSV needs a `key` or `name` column to match players." };
-		}
-		const L = lists || {};
-		const applied = [];
-		const unmatched = [];
-		const rejected = [];
-		let total = 0;
-		for (let i = 1; i < rows.length; i++) {
-			const r = rows[i];
-			if (!r.length || r.every((c) => !String(c).trim())) continue;
-			total++;
-			const cell = (c) => (c >= 0 && r[c] !== undefined ? String(r[c]).trim() : "");
-			const k = cols.key >= 0 ? cell(cols.key) : null;
-			const nm = cols.name >= 0 ? cell(cols.name).toLowerCase() : null;
-			const p = (k && byKey[k]) || (nm && byName[nm]);
-			if (!p) { unmatched.push(k || nm); continue; }
-			const patch = {};
-			// An empty cell is no lock, not a lock at 0 (Number("") is 0).
-			const num = (c) => {
-				const t = cell(c);
-				const v = Number(t);
-				return t !== "" && Number.isFinite(v) ? v : null;
-			};
-			if (num(cols.ovr) !== null) patch.ovr = num(cols.ovr);
-			if (num(cols.pot) !== null) patch.pot = num(cols.pot);
-			/* A name the tool does not know is refused here, not applied:
-			   an unknown archetype fell back to the rolled build while the
-			   lock badge said otherwise, and an unknown school was written
-			   verbatim into the export with no team behind it. */
-			const a = cell(cols.archetype);
-			if (a) {
-				if (!L.archetypes || L.archetypes.has(a)) patch.archetype = a;
-				else rejected.push(p.name + ": unknown archetype \u201c" + a + "\u201d");
-			}
-			const c = cell(cols.college);
-			if (c) {
-				if (!L.schools || L.schools.has(c)) patch.college = c;
-				else rejected.push(p.name + ": unknown school \u201c" + c + "\u201d");
-			}
-			const nn = cell(cols.newname).replace(/\s+/g, " ").slice(0, 100).trim();
-			if (nn && nn !== p.name) patch.name = nn;
-			const h = num(cols.hgtinches);
-			if (h !== null) {
-				if (h >= 58 && h <= 96) patch.hgtInches = Math.round(h);
-				else rejected.push(p.name + ": hgtinches " + h + " is outside 58-96");
-			}
-			const w = num(cols.weight);
-			if (w !== null) {
-				if (w >= 120 && w <= 400) patch.weight = Math.round(w);
-				else rejected.push(p.name + ": weight " + w + " is outside 120-400");
-			}
-			const ratings = {};
-			for (const rk of RATING_COLUMN_KEYS) {
-				const v = num(idx(rk));
-				if (v === null) continue;
-				if (v >= 0 && v <= 100) ratings[rk] = Math.round(v);
-				else rejected.push(p.name + ": " + rk + " " + v + " is outside 0-100");
-			}
-			if (Object.keys(ratings).length) patch.ratings = ratings;
-			if (!Object.keys(patch).length) continue;
-			applied.push({ player: p, patch });
-		}
-		return { applied, unmatched, rejected, total };
-	}
+	/* Q11. The locks CSV, parsed rows in, a plan out. The parser lives in
+	   js/engine.js (Engine.planLockRows) now, so the command line's --locks
+	   reads the same columns the page writes (audit 2026-10-10 B10). */
+	const planLockRows = (rows, players, lists) => global.Engine.planLockRows(rows, players, lists);
 
 	/* One lock patch as a line for the import preview. */
 	function lockPatchText(patch) {

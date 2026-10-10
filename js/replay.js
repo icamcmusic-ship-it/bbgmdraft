@@ -30,10 +30,12 @@
 		(c[0] === a && c[1] === b) || (c[0] === b && c[1] === a));
 
 	const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-	// A local calendar date as YYYY-MM-DD; the caller owns the clock.
+	/* The UTC calendar date as YYYY-MM-DD; the caller owns the clock. UTC,
+	   like the daily seed and the achievement ledger, so a daily challenge
+	   is the same one everywhere at the same moment (audit 2026-10-10 B21). */
 	function dateKey(d) {
 		const p = (n) => (n < 10 ? "0" : "") + n;
-		return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+		return d.getUTCFullYear() + "-" + p(d.getUTCMonth() + 1) + "-" + p(d.getUTCDate());
 	}
 
 	function dailyChallenge(date) {
