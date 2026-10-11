@@ -35,7 +35,10 @@
 		["news", "all"], ["universe", "all"], ["pro", "node"],
 		/* These build text and files from result objects and touch no DOM, so the
 		   harness loads them to test what they write; the worker never needs them. */
-		["almanac", "node"], ["replay", "node"], ["site", "node"], ["replaymeta", "node"],
+		["almanac", "node"], ["replay", "node"], ["site", "node"],
+		/* replaymeta is "all": Engine.strangeness reads its tourneyGames, and a
+		   batch worker without it scored strangeness differently from the page. */
+		["replaymeta", "all"],
 		["share", "node"], ["views", "page"], ["play", "node"], ["app", "page"],
 	];
 

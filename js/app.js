@@ -389,10 +389,7 @@
 		if (persistPending !== null) return;
 		const go = () => {
 			persistPending = null;
-			try {
-				// See persistFlush: a cleared store is not written back.
-				if (localStorage.getItem(STORE_KEY) === null) return;
-			} catch (e) { return; }
+			if (!storeIsOurs()) return;
 			persist();
 		};
 		persistPending = typeof global.requestIdleCallback === "function"
@@ -406,10 +403,19 @@
 		/* Storage cleared since the last write (the user, another tab, a
 		   "clear site data") is not overwritten by a deferred navigation
 		   write; the sync write it replaced would have landed before. */
-		try {
-			if (localStorage.getItem(STORE_KEY) === null) return;
-		} catch (e) { return; }
+		if (!storeIsOurs()) return;
 		persist();
+	}
+	/* A deferred write lands only on storage this page wrote last. Cleared,
+	   or rewritten by another tab or a reset since, it is somebody else's
+	   now, and writing this page's stale state over it would bring back
+	   exactly what they removed. */
+	function storeIsOurs() {
+		try {
+			const cur = localStorage.getItem(STORE_KEY);
+			if (cur === null) return false;
+			return persistedJson === null || cur === persistedJson;
+		} catch (e) { return false; }
 	}
 	window.addEventListener("pagehide", persistFlush);
 	document.addEventListener("visibilitychange", () => {
@@ -662,7 +668,12 @@
 	function restore(given) {
 		let saved = given || null;
 		if (!given) {
-			try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) { saved = null; }
+			try {
+				const raw = localStorage.getItem(STORE_KEY);
+				// What this page found is what it last "wrote", for storeIsOurs.
+				if (raw !== null && persistedJson === null) persistedJson = raw;
+				saved = JSON.parse(raw || "null");
+			} catch (e) { saved = null; }
 		}
 		if (!saved || typeof saved !== "object" || Array.isArray(saved)) return null;
 		/* A payload from an older schema is MIGRATED. One that cannot be

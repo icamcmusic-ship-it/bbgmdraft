@@ -122,7 +122,7 @@ module.exports = function (ok, V) {
 		(HTML.match(/<li><b>(Load|Read the board|Export)<\/b>/g) || []).length === 3);
 	ok("U32/a first visit starts at Basic", /settingTier: "shape",/.test(APP));
 	ok("U33/the re-run cost is hover/focus only, long hints fold behind (i)",
-		/#settings \.ctl \.rerun \{ display: none; \}/.test(CSS) && /function foldLongHints/.test(APP) &&
+		/#settings \.ctl \.rerun \{\s*display: none; position: absolute;/.test(CSS) && /function foldLongHints/.test(APP) &&
 		/hintclamp/.test(CSS));
 	ok("U34/the export menu is in headed sections with folded options",
 		/\["bbgm", "Back to BBGM"\]/.test(APP) && /\["pics", "Pictures and pages"\]/.test(APP) &&

@@ -1305,8 +1305,11 @@ async function gotoProspects(page) {
 		await page.waitForSelector("table tbody tr", { timeout: 30000 });
 		/* The board carries a divider row per round (see bandOf in
 		   js/views.js), so the player rows are the ones that are not one. */
-		ok("the sample class renders a board with a row per prospect",
-			(await page.locator("table tbody tr:not(.bandrow)").count()) === 70);
+		{
+			const rows = await page.locator("table tbody tr:not(.bandrow)").count();
+			ok("the sample class renders a board with a row per prospect", rows === 70,
+				rows + " rows; hash " + (await page.evaluate(() => location.hash)));
+		}
 		ok("the sample class is named as one",
 			/sample/i.test(await page.locator("#fileSummary").textContent()));
 		await page.locator("#tabs button", { hasText: "News" }).first().click();
@@ -2120,7 +2123,8 @@ async function gotoProspects(page) {
 			await page.waitForTimeout(150);
 			const tp = await page.evaluate(() => ({
 				heads: Array.from(document.querySelectorAll("#view h4")).map((h) => h.textContent),
-				rows: document.querySelectorAll("#view table.proghist tbody tr").length,
+				// The alumni table (audit UV11) shares the class; count history only.
+				rows: document.querySelectorAll("#view table.proghist:not(.alumni) tbody tr").length,
 				spark: !!document.querySelector("#view svg.levelspark path.lvlline"),
 			}));
 			ok("a team page in universe mode shows the program's history",
@@ -4148,7 +4152,9 @@ async function gotoProspects(page) {
 		}, csv.text());
 		ok("the CSV and the engine agree on every row", csvAgree.rows === 70 && csvAgree.bad === 0, JSON.stringify(csvAgree));
 
-		// Q23: units are display only
+		// Q23: units are display only. The units control folds behind
+		// Player Edit's "Filters" (U24).
+		await openFilters(page);
 		await page.selectOption('select[aria-label="Height and weight units"]', "metric");
 		await settleQ();
 		await page.evaluate(() => { delete window.App.state.hiddenColumns.hgtInches; delete window.App.state.hiddenColumns.weight; window.App.render(); });
@@ -4172,8 +4178,12 @@ async function gotoProspects(page) {
 		await page.waitForTimeout(800);
 		ok("the units choice survives a reload", (await page.evaluate(() => window.App.state.units)) === "metric");
 		await page.setInputFiles("#file", fixture);
-		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		/* The reload restores the player page the link named (#pk, kept
+		   since audit B13), so wait for the class rather than for a table. */
+		await page.waitForFunction(() => window.App.state.results[window.App.state.active],
+			null, { timeout: 30000 });
 		await gotoProspects(page);
+		await openFilters(page);
 		await page.selectOption('select[aria-label="Height and weight units"]', "imperial");
 		await settleQ();
 

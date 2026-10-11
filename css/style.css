@@ -1630,7 +1630,15 @@ details.grp > summary .grp-changed {
 details.grp > summary .grp-changed[hidden] { display: none; }
 details.grp > summary .grp-changed:not([hidden]) + .grp-reset { margin-left: 6px; }
 /* U33: "re-runs: …" appears on hover or focus, at every level. */
-#settings .ctl .rerun { display: none; }
+/* Shown as an overlay under the control, not in the flow: in the flow it
+   grew the control on mousedown (focus) and moved the star out from under
+   the pointer, so a click on a select's or checkbox's star landed on the
+   row instead and did nothing. */
+#settings .ctl { position: relative; }
+#settings .ctl .rerun {
+	display: none; position: absolute; left: 0; right: 0; top: 100%; z-index: 4;
+	margin: 0; padding: 1px 4px; background: var(--panel, var(--bg)); pointer-events: none;
+}
 #settings .ctl:hover .rerun,
 #settings .ctl:focus-within .rerun { display: block; }
 /* U33: a long explanation shows two lines; ⓘ more opens the rest. */
