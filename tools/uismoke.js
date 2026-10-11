@@ -654,7 +654,20 @@ async function gotoProspects(page) {
 			}
 			return label + " matches fresh";
 		};
-		return "probe " + base + ": " + diff("worker", workerReused) + " | " + diff("page", pageReused);
+		/* What the worker's copy could lack: a run on the page from a
+		   structured clone of the same file, and the settings that are not
+		   at their defaults (the CI-only disagreement was not reproducible
+		   on a default config). */
+		let cloneNote = "";
+		try {
+			const cl = seeds.map((s) => BatchStats.fingerprint(Engine.createRunner(structuredClone(file)).run(mk(s))));
+			cloneNote = diff("clone", cl);
+		} catch (e) { cloneNote = "clone threw: " + e.message; }
+		const D = Config.DEFAULTS;
+		const moved = Object.keys(cfg).filter((k) => JSON.stringify(cfg[k]) !== JSON.stringify(D[k]))
+			.map((k) => k + "=" + JSON.stringify(cfg[k]).slice(0, 80)).join(", ");
+		return "probe " + base + ": " + diff("worker", workerReused) + " | " + diff("page", pageReused) +
+			" | " + cloneNote + " | moved: " + moved;
 	}, withWorker).catch((e) => "probe threw: " + e.message);
 	const parity = strip(inlineText) === strip(withWorker);
 	ok("the fallback produces the same batch the worker does", parity,
