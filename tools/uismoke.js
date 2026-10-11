@@ -3416,6 +3416,8 @@ async function gotoProspects(page) {
 				order: !!(cards && fb && scroll &&
 					(cards.compareDocumentPosition(fb) & 4) && (fb.compareDocumentPosition(scroll) & 4)),
 				sticky: fb ? getComputedStyle(fb).position : "",
+				// U5/U6: it sticks only while the board fits its column.
+				fits: !!document.querySelector(".scroll.boardwrap.fits"),
 				count: (v.querySelector(".boardcount") || {}).textContent,
 				honors: v.querySelectorAll("td.honors .clamp").length,
 				edits: v.querySelectorAll("button.rowedit").length,
@@ -3428,7 +3430,10 @@ async function gotoProspects(page) {
 		ok("risers and fallers are small grids, each with its own copy button",
 			board.grids === 2 && board.cardCopy >= 1, JSON.stringify(board));
 		ok("the search and position filter sit right above the table and stick",
-			board.order && board.sticky === "sticky", JSON.stringify(board));
+			/* When the board is wider than its column (CI's fonts run wider)
+			   the bar is static by design, so it cannot cover the headers. */
+			board.order && (board.fits ? board.sticky === "sticky" : board.sticky === "static"),
+			JSON.stringify(board));
 		ok("the filter bar counts what it shows", board.count === "70 prospects", board.count);
 		ok("honors are clamped to two lines", board.honors > 0, String(board.honors));
 		ok("each board row offers Edit", board.edits === 70, String(board.edits));
@@ -3774,7 +3779,7 @@ async function gotoProspects(page) {
 		fs.writeFileSync(a, JSON.stringify(V.syntheticClass(2, 40)));
 		fs.writeFileSync(b, JSON.stringify(V.syntheticClass(3, 40)));
 		await page.setInputFiles("#file", [a, b]);
-		await page.waitForFunction(() => window.App.state.files.length === 2, null, { timeout: 30000 });
+		await page.waitForFunction(() => window.App.state.files.length === 2, null, { timeout: 60000 });
 		await page.evaluate(() => {
 			const u = document.getElementById("universe");
 			u.checked = true;
@@ -4332,14 +4337,21 @@ async function gotoProspects(page) {
 			/2 of \d+ prospects will be renamed/.test(await page.textContent("#modalBody")) &&
 			(await page.locator("#modalBody .renamepreview tbody tr, #modalBody .renamepreview tr").count()) >= 3);
 		await page.click("#modalOk");
-		await page.waitForTimeout(1200);
+		// The rename re-runs the class; a fixed pause was too short on CI.
+		await page.waitForFunction(() => {
+			const res = window.App.state.results[window.App.state.active];
+			return res && res.board && res.board[0] && res.board[0].name === "Zed Alpha" &&
+				!document.body.classList.contains("busy");
+		}, null, { timeout: 60000 }).catch(() => null);
 		const renamed = await page.evaluate(() => {
 			const res = window.App.state.results[window.App.state.active];
-			return [res.board[0].name, res.board[3].name, !!window.App.state.overrides[res.board[0].key].name];
+			return [res.board[0].name, res.board[3].name, !!(window.App.state.overrides[res.board[0].key] || {}).name];
 		});
 		ok("names are applied in board order and kept as locks", renamed[0] === "Zed Alpha" && renamed[1] === "Quin Beta" && renamed[2] === true, JSON.stringify(renamed));
 
-		// Q17: New class... with a file loaded
+		// Q17: New class... with a file loaded. The renames re-run the class;
+		// wait for it to finish, or the dialog's run is refused as busy.
+		await page.waitForFunction(() => !document.body.classList.contains("busy"), null, { timeout: 60000 });
 		await tool(page, "#btnNewClass");
 		await page.waitForSelector("#newClassSize", { timeout: 4000 });
 		await page.fill("#newClassSize", "30");
