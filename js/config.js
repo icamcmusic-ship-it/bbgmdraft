@@ -178,6 +178,14 @@
 		/* The last few classes' flavor names, newest first. Supplied by the
 		   caller exactly as `recentPools` is; the engine never writes it. */
 		recentFlavors: null,
+		/* The last few classes' storylines (a list of name lists, newest
+		   first), down-weighted in applyNarrative by flavorMemory. Same
+		   contract: supplied by the caller, never written by the engine. */
+		recentNarratives: null,
+		/* The season-event templates ("kind#index") the last few classes
+		   used, a list of lists, newest first: down-weighted in
+		   TeamsSim.midSeasonEvents (audit R10). Supplied by the caller. */
+		recentTemplates: null,
 		/* The class year, transfer path and college a SHARED universe already
 		   drew for each player key, so replaying it reproduces the same men
 		   rather than the same seeds. Supplied by the caller (importUniverse);

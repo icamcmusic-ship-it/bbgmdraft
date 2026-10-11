@@ -1203,9 +1203,42 @@
 		return list.length ? list[0].adj : null;
 	}
 
+	/* COMBINE MEASURABLES (audit Q15). Derived, never drawn into the model:
+	   seeded off the player's key, from his height, his frame traits and his
+	   jumping and speed ratings, so a "plus wingspan" MEASURES plus five to
+	   plus eight. Wingspan and standing reach in inches, no-step vertical in
+	   inches, lane agility in seconds (lower is quicker). */
+	function measurables(p) {
+		if (!p || !Number.isFinite(p.newHgtInches)) return null;
+		const h = global.BBGMRng.hashSeed("combine|" + p.key);
+		const u = () => (h() % 1000) / 1000;
+		const names = (p.traits || []).map((t) => t.name || t);
+		const has = (n) => names.indexOf(n) !== -1;
+		const r = p.newRatings || {};
+		let ape = 2 + u() * 3;   // a typical prospect: +2 to +5
+		if (has("plus wingspan")) ape = 5 + u() * 3;
+		if (has("short arms")) ape = -1 + u() * 2;
+		if (has("seven-foot wingspan at six-five")) ape = Math.max(ape, 84 - p.newHgtInches);
+		const wingspan = Math.round((p.newHgtInches + ape) * 4) / 4;
+		let reach = p.newHgtInches * 1.33 + (ape - 3) * 0.5 + (u() - 0.5) * 2;
+		if (has("elite standing reach")) reach += 2;
+		const jmp = Number.isFinite(r.jmp) ? r.jmp : 50;
+		const spd = Number.isFinite(r.spd) ? r.spd : 50;
+		const vertical = Math.round((22 + (jmp - 40) * 0.22 + (u() - 0.5) * 3) * 2) / 2;
+		const lane = Math.round((12.4 - (spd - 40) * 0.025 + (p.newHgtInches - 78) * 0.03 +
+			(u() - 0.5) * 0.4) * 100) / 100;
+		return { wingspan, reach: Math.round(reach * 2) / 2, vertical: Math.max(18, vertical),
+			lane: Math.max(10, lane) };
+	}
+	function inchesText(x) {
+		const ft = Math.floor(x / 12);
+		const inch = Math.round((x - ft * 12) * 4) / 4;
+		return ft + "'" + inch + "\"";
+	}
+
 	global.Traits = {
 		TRAITS, GROUPS, assign, matches, matchesFinished, eligible, classContext,
 		regateAfterAvailability, percentile, REF_DECILES,
-		noteClause, adjective, tagsOf, VOL_SPREAD,
+		noteClause, adjective, tagsOf, VOL_SPREAD, measurables, inchesText,
 	};
 })(typeof window !== "undefined" ? window : self);

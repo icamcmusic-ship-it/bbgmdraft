@@ -1633,14 +1633,45 @@
 			(Array.isArray(userCfg.pinned) && userCfg.pinned.indexOf(key) !== -1);
 	}
 
+	/* Storylines that cannot both be the season (audit 2026-10-10, R8): a
+	   year is not "wide open" and "chalk all the way" at once. Drawing one
+	   takes its contradictions out of the pool. */
+	const NARRATIVE_CONFLICTS = [
+		["a dominant favourite", "a wide-open year"],
+		["a wide-open year", "chalk all the way"],
+		["the mid-majors run", "chalk all the way"],
+		["a scoring explosion", "a defensive slog"],
+		["a scoring explosion", "the year of the whistle"],
+		["a season of streaks", "chalk all the way"],
+	];
+	function narrativeConflicts(a, b) {
+		return NARRATIVE_CONFLICTS.some((c) =>
+			(c[0] === a && c[1] === b) || (c[0] === b && c[1] === a));
+	}
+	/* The storylines the last few classes drew (cfg.recentNarratives, newest
+	   first, a list of name lists — the app's memory, like recentFlavors)
+	   are down-weighted by the flavor memory's own strength. */
+	function narrativeMemoryFactor(name, recent, strength) {
+		if (!strength || !Array.isArray(recent) || !recent.length) return 1;
+		let f = 1;
+		recent.forEach((names, i) => {
+			if (Array.isArray(names) && names.indexOf(name) !== -1) {
+				f *= 1 - strength * 0.7 / (i + 1);
+			}
+		});
+		return Math.max(0.05, f);
+	}
+
 	function applyNarrative(cfg, rng, userCfg) {
 		if (!cfg || cfg.narrative === false) return { cfg, narrative: [] };
-		const pool = NARRATIVES.slice();
+		let pool = NARRATIVES.slice();
 		const n = rng.random() < 0.35 ? 3 : 2;
 		const drawn = [];
+		const mem = clamp(Number.isFinite(cfg.flavorMemory) ? cfg.flavorMemory : 0, 0, 1);
+		const recent = cfg.recentNarratives;
 		for (let i = 0; i < n && pool.length; i++) {
-			const pick = rng.weighted(pool, (x) => x.w);
-			pool.splice(pool.indexOf(pick), 1);
+			const pick = rng.weighted(pool, (x) => x.w * narrativeMemoryFactor(x.name, recent, mem));
+			pool = pool.filter((x) => x !== pick && !narrativeConflicts(x.name, pick.name));
 			drawn.push(pick);
 		}
 		const D = global.Config.DEFAULTS;
@@ -1671,6 +1702,56 @@
 			cfg: out,
 			narrative: drawn.map((x) => ({ name: x.name, blurb: x.blurb })),
 		};
+	}
+
+	/* WAS THE STORYLINE TRUE? (audit 2026-10-10, R8.)
+
+	   Storylines are drawn BEFORE the season and bend its settings; whether
+	   the season then did what the storyline said is a fact only the result
+	   knows. Each story gets `held` (true, false, or null when the result
+	   carries nothing to check it against) and a `label` that says so: the
+	   preseason name when it held or cannot be checked, "<name> (that was the
+	   preseason talk)" when it did not. New objects; the drawn list is kept. */
+	const NARRATIVE_CHECKS = {
+		"a dominant favourite": (r) => !!(r.champ && r.champ.seed === 1 && r.champ.team &&
+			r.champ.team.l <= 3),
+		"a wide-open year": (r) => !!(r.champ && (r.champ.seed >= 3 ||
+			r.ffSeeds.some((s) => s >= 10))),
+		"the mid-majors run": (r) => r.ff.some((x) => r.midMajor(x.team)),
+		"a blue-blood down year": (r) => !r.ff.some((x) => x.team && x.team.prestige >= r.bluePrestige),
+		"chalk all the way": (r) => r.ffSeeds.length === 4 && r.ffSeeds.every((s) => s <= 2),
+		"the map moved": (r) => r.realignment > 0,
+		"a chaotic sideline": (r) => r.carousel >= 12,
+	};
+	function verifyNarrative(list, state) {
+		if (!Array.isArray(list) || !list.length) return list || [];
+		const t = (state && state.tourney) || {};
+		const ff = (t.finalFour || []).filter((x) => x && x.team);
+		const prestige = Object.values((state && state.teams) || {})
+			.map((x) => (x && Number(x.prestige)) || 0).sort((a, b) => b - a);
+		const r = {
+			champ: t.champion || null,
+			ff,
+			ffSeeds: ff.map((x) => x.seed).filter(Number.isFinite),
+			midMajor: (team) => {
+				const conf = team && team.conf && C.CONFERENCES[team.conf];
+				return !!team && (!conf || conf.tier !== "high");
+			},
+			bluePrestige: prestige.length ? prestige[Math.min(9, prestige.length - 1)] : Infinity,
+			realignment: ((state && state.realignment) || []).length,
+			carousel: ((state && state.coachingCarousel) || []).length,
+		};
+		return list.map((s) => {
+			const check = s && NARRATIVE_CHECKS[s.name];
+			let held = null;
+			if (check && t.champion) {
+				try { held = !!check(r); } catch (e) { held = null; }
+			}
+			return Object.assign({}, s, {
+				held,
+				label: held === false ? s.name + " (that was the preseason talk)" : s.name,
+			});
+		});
 	}
 
 	/* HOW FAR FROM THE MIDDLE THIS WORLD SITS.
@@ -1799,6 +1880,21 @@
 			}
 			moved = true;
 			if (LEGACY_LEAGUE[k]) league = true;
+		}
+		/* STRENGTH IN PRESERVE MODE (audit 2026-10-10, R1). classQuality,
+		   eliteCount and classDepth are read only by the curve rebuild, so
+		   under ovrMode "preserve" (the default) "a weak year" or "a two-man
+		   class" bent nothing. The strength half of the bend is carried onto
+		   potential instead — the one class-strength lever preserve mode
+		   leaves live — unless the user has decided potBias. */
+		if (out.ovrMode !== "curve" && !userTouched(user, "potBias")) {
+			const q = Number.isFinite(bend.classQuality) ? bend.classQuality : 0;
+			const e = Number.isFinite(bend.eliteCount) ? bend.eliteCount - D.eliteCount : 0;
+			const shift = (0.6 * q + 0.15 * e) * t;
+			if (shift) {
+				out.potBias = clamp((Number(out.potBias) || 0) + shift, -3, 3);
+				moved = true;
+			}
 		}
 		if (league && untouchedLeagueWeights(user)) {
 			const lw = Object.assign({}, out.leagueWeights);
@@ -4816,6 +4912,211 @@
 				return true;
 			},
 		},
+		/* NINE MORE (audit 2026-10-10, R10): nine kinds and about five a
+		   class meant every class showed more than half of them. Same rules
+		   as the three above: every move lands inside the draft and none
+		   takes a man from past the last pick. */
+		{
+			name: "pre-draft injury", w: 1.0,
+			label: "slid on a pre-draft injury",
+			pick: (i, n) => i >= 0 && i < Math.min(30, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const to = Math.min(board.length - 1, DRAFT_PICKS - 1, i + r.int(3, 8));
+				if (to <= i) return false;
+				const p = board[i];
+				p.draftEvent = {
+					kind: "fall",
+					from: i,
+					say: (moved) => (moved > 0
+						? "slid " + Text.plural(moved, "spot") + " with an injury picked up in June"
+						: "was hurt in June and went where the board had him anyway"),
+					detail: r.pick([
+						"a sprained ankle in his last workout",
+						"a broken finger that needed a pin",
+						"a hamstring that kept him out of the combine",
+					]),
+				};
+				move(board, i, to);
+				return true;
+			},
+		},
+		{
+			name: "film riser", w: 1.0,
+			label: "rose on the film",
+			pick: (i, n) => i >= 20 && i < Math.min(50, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const to = Math.max(0, i - r.int(3, 8));
+				if (to >= i) return false;
+				const p = board[i];
+				p.draftEvent = {
+					kind: "rise",
+					from: i,
+					say: (moved) => (moved < 0
+						? "rose " + Text.plural(-moved, "spot") + " as teams went back to the film"
+						: "rose on the film"),
+					detail: r.pick([
+						"his defensive tape aged better than his box score",
+						"teams liked what he did against ranked opponents",
+						"a second look at his March changed minds",
+					]),
+				};
+				move(board, i, to);
+				return true;
+			},
+		},
+		{
+			name: "measurements disappointed", w: 0.9,
+			label: "measured smaller than listed",
+			pick: (i, n) => i >= 4 && i < Math.min(35, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const to = Math.min(board.length - 1, DRAFT_PICKS - 1, i + r.int(3, 7));
+				if (to <= i) return false;
+				const p = board[i];
+				p.draftEvent = {
+					kind: "fall",
+					from: i,
+					say: (moved) => (moved > 0
+						? "slid " + Text.plural(moved, "spot") + " after measuring smaller than his listing"
+						: "measured smaller than listed"),
+					detail: r.pick([
+						"an inch and a half shorter in shoes than his program said",
+						"a wingspan barely longer than his height",
+						"lighter than anyone had expected",
+					]),
+				};
+				move(board, i, to);
+				return true;
+			},
+		},
+		{
+			name: "agent steered him", w: 0.8,
+			label: "his agent steered him to a team",
+			pick: (i, n) => i >= 25 && i < Math.min(60, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const to = Math.max(0, i - r.int(2, 6));
+				if (to >= i) return false;
+				const p = board[i];
+				p.draftEvent = {
+					kind: "steered",
+					from: i,
+					say: (moved) => (moved < 0
+						? "went " + Text.plural(-moved, "spot") + " early to the team his agent had chosen"
+						: "went to the team his agent had steered him toward"),
+					detail: r.pick([
+						"he worked out for exactly one team",
+						"his camp told everybody else he would play overseas",
+						"the medical records went to one front office",
+					]),
+				};
+				move(board, i, to);
+				return true;
+			},
+		},
+		{
+			name: "consolidation trade", w: 0.8,
+			label: "a team packaged picks to take him",
+			pick: (i, n) => i >= 10 && i < Math.min(40, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const to = Math.max(0, i - r.int(2, 5));
+				if (to >= i) return false;
+				const p = board[i];
+				p.draftEvent = {
+					kind: "trade",
+					from: i,
+					say: (moved) => (moved < 0
+						? "a team packaged two picks to move up " + Text.plural(-moved, "spot") + " for him"
+						: "a team packaged two picks to take him"),
+					detail: r.pick([
+						"two seconds and a swap",
+						"both of the team's late firsts",
+						"a pick and a player on a rookie deal",
+					]),
+				};
+				move(board, i, to);
+				return true;
+			},
+		},
+		{
+			name: "cancelled workouts", w: 0.8,
+			label: "fell after cancelling workouts",
+			pick: (i, n) => i >= 0 && i < Math.min(28, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const to = Math.min(board.length - 1, DRAFT_PICKS - 1, i + r.int(2, 6));
+				if (to <= i) return false;
+				const p = board[i];
+				p.draftEvent = {
+					kind: "fall",
+					from: i,
+					say: (moved) => (moved > 0
+						? "slid " + Text.plural(moved, "spot") + " after cancelling his lottery workouts"
+						: "cancelled his lottery workouts"),
+					detail: r.pick([
+						"he would only work out for teams in the top five",
+						"his camp wanted a specific market",
+						"a promise that turned out not to be one",
+					]),
+				};
+				move(board, i, to);
+				return true;
+			},
+		},
+		{
+			name: "hometown pick", w: 0.7,
+			label: "drafted by his hometown team",
+			pick: (i, n) => i >= 0 && i < Math.min(60, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const p = board[i];
+				p.draftEvent = {
+					kind: "hometown",
+					from: i,
+					say: (moved, at) => "was taken at No. " + (at + 1) + " by the team he grew up watching",
+					detail: r.pick([
+						"the arena he went to as a kid",
+						"his high school coach was in the building",
+						"the local paper ran him on the front page",
+					]),
+				};
+				return true;
+			},
+		},
+		{
+			name: "draft and stash", w: 0.7,
+			label: "drafted to stay overseas",
+			pick: (i, n, p) => i >= 30 && i < Math.min(n, DRAFT_PICKS) && !!p && (p.nonNcaa || /Senior|Graduate/.test(String(p.classYear || ''))),
+			apply: (board, i, r) => {
+				const p = board[i];
+				p.draftEvent = {
+					kind: "stash",
+					from: i,
+					say: (moved, at) => "was taken at No. " + (at + 1) + " to be stashed for a season",
+					detail: r.pick([
+						"he signed a two-year deal abroad the same week",
+						"the team had no roster spot to give him",
+						"his buyout made the timing easy",
+					]),
+				};
+				return true;
+			},
+		},
+		{
+			name: "two-way promise", w: 0.7,
+			label: "taken late on a two-way promise",
+			pick: (i, n) => i >= 45 && i < Math.min(60, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const p = board[i];
+				p.draftEvent = {
+					kind: "twoway",
+					from: i,
+					say: (moved, at) => "went at No. " + (at + 1) + " with a two-way contract waiting",
+					detail: r.pick([
+						"the contract was agreed before the pick",
+						"the G League affiliate had wanted him all year",
+						"he turned down a guaranteed deal abroad for it",
+					]),
+				};
+				return true;
+			},
+		},
 	];
 
 	/* Why a team reached, in the player's own terms. A reach is a bet on
@@ -5235,12 +5536,61 @@
 				const no1 = res && res.board && res.board[0];
 				return !!no1 && (no1.awards || []).some((a) => set.has(a));
 			} },
+		/* Seven more (audit 2026-10-10, Q21): what the achievements test and
+		   the search could not target. The bracket ones read the games the
+		   same way ReplayMeta.seedBeat does, here so the worker has them. */
+		{ key: "sixteenOverOne", label: "a 16 seed beat a 1 seed",
+			test: (res) => bracketSeedBeat(res, 16, 1) },
+		{ key: "fifteenOverTwo", label: "a 15 seed beat a 2 seed",
+			test: (res) => bracketSeedBeat(res, 15, 2) },
+		{ key: "freshmanPoy", label: "the player of the year is a freshman",
+			test: (res) => poyPlayers(res).some((p) => p.classYear === "Freshman") },
+		{ key: "midMajorPoy", label: "the player of the year plays at a mid-major",
+			test: (res) => poyPlayers(res).some((p) => {
+				if (p.nonNcaa) return false;
+				const t = res.teams && res.teams[p.newCollege];
+				const conf = t && t.conf && C.CONFERENCES[t.conf];
+				return !!t && (!conf || conf.tier !== "high");
+			}) },
+		{ key: "leftyNo1", label: "the No. 1 pick is left-handed",
+			test: (res) => !!(res && res.board && res.board[0] && res.board[0].hand === "left") },
+		{ key: "unbeatenChamp", label: "an unbeaten national champion",
+			test: (res) => {
+				const c = res && res.tourney && res.tourney.champion;
+				return !!(c && c.team && c.team.l === 0 && c.team.w >= 20);
+			} },
+		{ key: "allOneSeedsFF", label: "all four 1 seeds in the Final Four",
+			test: (res) => {
+				const ff = (res && res.tourney && res.tourney.finalFour) || [];
+				return ff.length === 4 && ff.every((x) => x && x.seed === 1);
+			} },
 		/* Strangeness as a clause: "reroll until the world comes out weird".
 		   Any "strangeness:N" key parses (see parseRerollClause); these two
 		   are the thresholds the dialog lists. */
 		strangenessPredicate(30),
 		strangenessPredicate(50),
 	];
+
+	function bracketSeedBeat(res, lo, hi) {
+		const t = res && res.tourney;
+		if (!t) return false;
+		const games = [];
+		for (const r of Object.values(t.regions || {})) {
+			for (const round of (r && r.rounds) || []) for (const g of round || []) games.push(g);
+		}
+		for (const g of t.semis || []) games.push(g);
+		if (t.final) games.push(t.final);
+		return games.some((g) => {
+			if (!g || !g.a || !g.b || !g.winner) return false;
+			const loser = g.winner === g.a ? g.b : g.a;
+			return g.winner.seed === lo && loser.seed === hi;
+		});
+	}
+	function poyPlayers(res) {
+		const set = global.Universe && global.Universe.nationalPOYSet
+			? global.Universe.nationalPOYSet() : new Set();
+		return ((res && res.players) || []).filter((p) => (p.awards || []).some((a) => set.has(a)));
+	}
 
 	function strangenessPredicate(n) {
 		const t = Math.max(0, Math.min(100, Math.round(Number(n) || 0)));
@@ -5361,7 +5711,7 @@
 				"variation", "flavorHint", "flavorBlend", "poolMemory", "recentPools",
 				/* The flavor's own memory, drawn in pickFlavor — same pair
 				   and same contract as poolMemory/recentPools above. */
-				"flavorMemory", "recentFlavors",
+				"flavorMemory", "recentFlavors", "recentNarratives",
 				"anomalyMemory", "recentAnomalies", "flavorReach", "narrative",
 				/* The anomaly shortlist, and the meta-dial that moves half of
 				   the settings above. Both reshape the class from here down. */
@@ -5423,7 +5773,7 @@
 			   declared on the stats phase only, and a warm re-run after the
 			   slider moved kept last run's points and W-L (audit 2026-10-10 B4). */
 			deps: ["era", "pace", "scoringEnv", "efficiencyEnv", "injuryRate", "realignmentRate",
-				"bluebloodDownYears", "midMajorLift", "teamMomentum", "seasonEvents",
+				"bluebloodDownYears", "midMajorLift", "teamMomentum", "seasonEvents", "recentTemplates",
 				// The world dials: all three are read by buildPrograms.
 				"realignmentMemory", "starReturners", "portalRate", "styleDrift",
 				// weirdness bends realignmentRate, styleDrift and the down-year
@@ -5876,7 +6226,7 @@
 				flavor: state.flavor,
 				/* The season's storylines, so the UI can say what kind of year
 				   this was rather than only what kind of class it was. */
-				narrative: state.narrative || [],
+				narrative: verifyNarrative(state.narrative || [], state),
 				/* Whether the source file's own ages carry information. Read
 				   by exportFile, which without it on the result was reading
 				   `undefined` and rewriting born.year even for a file whose
@@ -6643,9 +6993,36 @@
 				: Text.withArticle(who) + build + at) +
 				(clause ? " — " + clause : "") + "."),
 		];
+		/* THREE MORE OPENERS (audit 2026-10-10, R10): 69% of notes opened
+		   "A 6'10" freshman…". Stat-led, story-led and origin-led, each only
+		   when it has something to lead with. */
+		if (numbers) {
+			variants.push(() => Text.capitalize(numbers + (place ? " for " + place : "") +
+				" from " + Text.withArticle(who) + build + (clause ? ", with " + clause : "") + "."));
+		}
+		const rec = p.recruiting;
+		const story = p.transfer && p.transfer.from ? "a transfer from " + p.transfer.from
+			: rec && Number.isFinite(rec.rank) ? "the No. " + rec.rank + " recruit in his class"
+				: p.reclassified ? "a reclassified prospect" : "";
+		if (story) {
+			variants.push(() => Text.capitalize(story + ", now " + Text.withArticle(who) + build + at +
+				(numbers ? " putting up " + numbers : "") + (clause ? "; " + clause : "") + "."));
+		}
+		const loc = p.born && typeof p.born.loc === "string" && p.born.loc && p.born.loc !== "USA"
+			? p.born.loc : "";
+		if (loc) {
+			variants.push(() => "Out of " + loc + ", " + Text.withArticle(who) + build + at +
+				(numbers ? ": " + numbers : "") + (clause ? ", with " + clause : "") + ".");
+		}
 		void season;
 		return rng.pick(variants)();
 	}
+
+	/* Who says it (audit R10): every scouting paragraph opened "Scouts
+	   note". Each takes the trait clause as its object. */
+	const SCOUT_ATTRIBUTIONS = ["Scouts note", "Scouts point to", "Evaluators cite",
+		"One Western Conference scout cites", "Front offices mention", "Area scouts highlight",
+		"League personnel flag", "The book on him starts with"];
 
 	function buildNote(p, teams, season, cfg, state, seasonShift) {
 		const s = p.stats;
@@ -6752,7 +7129,8 @@
 		if (on("traits") && p.traits && p.traits.length) {
 			const clause = TR.noteClause(p.traits);
 			const rest = p.traits.slice(2).map((t) => t.name);
-			lines.push("Scouts note " + clause + "." +
+			lines.push(SCOUT_ATTRIBUTIONS[new Rng("scoutnote|" + p.key).int(0, SCOUT_ATTRIBUTIONS.length - 1)] +
+				" " + clause + "." +
 				(rest.length ? " Also: " + rest.join("; ") + "." : ""));
 		}
 		if (s && on("stats")) {
@@ -8242,6 +8620,27 @@
 			r.pot = p.newPot;
 			r.pos = p.newPos;
 			r.skills = p.newSkills.slice();
+			/* opts.ratingsHistory (audit Q19, off by default): one ratings row
+			   per simulated college season before this one, at the overall
+			   ovrYearsAgo gave that season, so BBGM's rating-history chart
+			   shows his development. Older rows first; the draft season's row
+			   stays last, which is the row BBGM's draft import reads. */
+			if (opts.ratingsHistory && Array.isArray(p.priorSeasons) && p.priorSeasons.length) {
+				const rows = p.priorSeasons.filter((ps) => ps && Number.isFinite(ps.season) &&
+					Number.isFinite(ps.ovr) && ps.season < result.season)
+					.sort((a, b) => a.season - b.season)
+					.map((ps) => {
+						const d = ps.ovr - p.newOvr;
+						const row = Object.assign({}, r, { season: exportSeason - (result.season - ps.season),
+							ovr: ps.ovr, pot: p.newPot, skills: [] });
+						for (const k of BB.RATING_KEYS) {
+							if (k === "hgt") continue;
+							row[k] = clamp(Math.round((r[k] || 0) + d), 0, 100);
+						}
+						return row;
+					});
+				if (rows.length) out.ratings = out.ratings.slice(0, last).concat(rows, [r]);
+			}
 			out.draft = Object.assign({}, out.draft, {
 				ovr: p.newOvr, pot: p.newPot, skills: p.newSkills.slice(),
 			});

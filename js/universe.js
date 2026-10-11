@@ -3422,6 +3422,10 @@
 					slot: p.draftSlot || null, school: p.newCollege,
 					club: p.proClub || null, classYear: p.classYear,
 					ovr: p.newOvr, pot: p.newPot,
+					// For comparables across the universe (audit Q17).
+					archetype: p.archetype || null, pos: p.newPos || p.pos || null,
+					hgt: Number.isFinite(p.newHgtInches) ? p.newHgtInches : null,
+					ppg: p.stats && Number.isFinite(p.stats.ppg) ? Math.round(p.stats.ppg * 10) / 10 : null,
 				};
 				if (Number.isFinite(season)) e.seasons.push({ season, as: "draft class" });
 				for (const a of p.awards || []) if (isPersonalHonor(a)) e.honors.push({ season, award: a });
@@ -4857,6 +4861,225 @@
 			.slice(0, n || 40);
 	}
 
+	/* LINKING CAREERS ACROSS FILES (moved from js/app.js for the CLI, audit
+	   Q30). Pure over its arguments: `u` is the universe (its `links`),
+	   `results` the per-file results (mutated: priorSeasons, laterSeasons,
+	   priorAwards, notes), `order` the chain's [{index}], `onlyIndex` one
+	   file. */
+	function linkCareers(u, results, order, onlyIndex) {
+		const inChain = new Set((order || []).map((d) => d.index));
+		/* READ FROM WHAT THE CHAIN RECORDED, NOT FROM EVERY EARLIER RESULT.
+
+		   This used to walk every target file and, for each, rehydrate every
+		   EARLIER season with ensureResult to read its futurePlayers — which
+		   at the end of a long chain re-simulated every evicted season and
+		   held all of them at once, undoing the memory bound the chain had
+		   just kept. The chain now records, as each season runs, the rows it
+		   produced for men from other files (state.universe.links, keyed by
+		   the file each man belongs to — see Universe.beginChain), so linking
+		   a file needs that file and nothing else.
+
+		   And BOTH directions are applied. The returner branch (a man from an
+		   EARLIER class playing a LATER season) sat inside a loop over the
+		   seasons BEFORE each file, where no returner can be, so it never
+		   ran: laterSeasons was only ever empty. */
+		const targets = onlyIndex !== undefined ? [onlyIndex] : Array.from(inChain);
+		/* The earlier season's page links forward to the man he became. The
+		   fields it needs are on the row itself, so a rehydrated source gets
+		   its links back without the target file being live. */
+		for (const i of targets) {
+			const res = results[i];
+			if (!res) continue;
+			for (const fp of res.futurePlayers || []) {
+				if (!fp || !fp.stats || !inChain.has(fp.fileIndex)) continue;
+				const key = fp.past ? (fp.homeKey || fp.key) : fp.homeKey;
+				if (!key) continue;
+				fp.laterKey = key;
+				fp.laterFileIndex = fp.fileIndex;
+			}
+		}
+		for (const j of targets) {
+			const resJ = results[j];
+			if (!resJ || !resJ.players) continue;
+			const entries = (u && u.links && u.links[j]) || [];
+			if (!entries.length) continue;
+			const byKey = new Map();
+			for (const p of resJ.players) if (p && p.key !== undefined) byKey.set(p.key, p);
+			const touched = new Set();
+			for (const x of entries) {
+				const fp = x.fp;
+				const team = x.team;
+				if (!fp || !fp.stats) continue;
+				/* THE SEASONS AFTER HIS DRAFT YEAR. A returner went undrafted
+				   and came back; it belongs on his career table and NOT in his
+				   priorSeasons, because exportFile writes those as BBGM stats
+				   rows dated before the draft. */
+				if (fp.past) {
+					const owner = byKey.get(fp.homeKey || fp.key);
+					if (!owner) continue;
+					if (!Array.isArray(owner.laterSeasons)) owner.laterSeasons = [];
+					const row = {
+						season: x.season, team: fp.newCollege,
+						classYear: fp.classYear, ovr: fp.newOvr,
+						gp: Math.round(fp.stats.gp), mpg: fp.stats.mpg,
+						ppg: fp.stats.ppg, rpg: fp.stats.rpg, apg: fp.stats.apg,
+						ts: fp.stats.ts,
+						record: team ? { w: team.w, l: team.l } : null,
+						awards: (fp.awards || []).slice(),
+						universeFileIndex: x.source, universeKey: fp.key,
+						after: true,
+					};
+					/* REFRESHED, not only added: a warm re-run produces a new
+					   line for the same season, and the old code kept the first
+					   one it ever saw. */
+					const at = owner.laterSeasons.findIndex((r) => r.season === x.season);
+					if (at >= 0) owner.laterSeasons[at] = row;
+					else owner.laterSeasons.push(row);
+					owner.laterSeasons.sort((a, b) => a.season - b.season);
+					touched.add(owner);
+					continue;
+				}
+				const p = byKey.get(fp.homeKey);
+				if (!p) continue;
+				if (!Array.isArray(p.priorSeasons)) p.priorSeasons = [];
+				let row = p.priorSeasons.filter((r) => r.season === x.season && !r.redshirt)[0];
+				if (!row) {
+					row = { season: x.season, redshirt: false };
+					p.priorSeasons.push(row);
+					p.priorSeasons.sort((a, b) => a.season - b.season);
+				}
+				const gl = fp.gameLog || null;
+				/* THE SEASON THIS ROW EXPORTS AS: the absolute season, computed
+				   where the file it was played in is known (see
+				   Universe.beginChain), so exportFile does not shift it by this
+				   file's own startingSeason-to-draft-year difference. */
+				Object.assign(row, {
+					exportSeason: x.exportSeason,
+					team: fp.newCollege, classYear: fp.classYear, ovr: fp.newOvr,
+					gp: Math.round(fp.stats.gp), mpg: fp.stats.mpg, ppg: fp.stats.ppg,
+					rpg: fp.stats.rpg, apg: fp.stats.apg, usg: fp.stats.usg, ts: fp.stats.ts,
+					line: fp.stats, box: team ? team.box : null, lines: team ? team.lines : null,
+					pos: fp.newPos, gameLog: gl, highs: gl ? gl.highs : null, best: gl ? gl.best : null,
+					twentyPointGames: gl ? gl.twentyPointGames : 0,
+					doubleDoubles: gl ? gl.doubleDoubles : 0,
+					record: team ? { w: team.w, l: team.l } : null,
+					awards: (fp.awards || []).slice(),
+					simulated: true, universe: true,
+					universeFileIndex: x.source, universeKey: fp.key,
+					postseason: team ? team.postseason : null,
+				});
+				touched.add(p);
+			}
+			for (const p of touched) {
+				p.priorAwards = [];
+				for (const r of p.priorSeasons || []) {
+					for (const award of r.awards || []) {
+						p.priorAwards.push({ season: r.season, classYear: r.classYear, award,
+							exportSeason: r.exportSeason });
+					}
+				}
+				try {
+					p.note = global.Engine.buildNote(p, resJ.teams, resJ.season, resJ.cfg);
+				} catch (e) { /* the note is a convenience; the page still renders */ }
+			}
+		}
+	}
+
+
+	/* --- the registry as a corpus (audit Q25, Q27, Q28) ---------------- */
+
+	// Everyone in the registry, not only the multi-season men, as CSV rows.
+	function careersTable(registry) {
+		const out = [["id", "name", "draft season", "school", "class year", "ovr", "pot", "board",
+			"slot", "seasons", "honors", "pro"]];
+		for (const id of Object.keys(registry || {}).sort()) {
+			const x = registry[id];
+			if (!x) continue;
+			const d = x.draft || {};
+			out.push([id, x.name || "", d.season || "", d.school || d.club || "", d.classYear || "",
+				Number.isFinite(d.ovr) ? d.ovr : "", Number.isFinite(d.pot) ? d.pot : "",
+				d.boardRank || "", d.slot || "",
+				(x.seasons || []).map((sn) => sn.season + " " + (sn.school || sn.as || "")).join("; "),
+				personalHonors(x).map((h) => h.season + " " + h.award).join("; "),
+				proText(proOutcome(x))]);
+		}
+		return out;
+	}
+	// Name or school, case-blind, over the whole registry; newest draft first.
+	function searchRegistry(registry, query, limit) {
+		const q = String(query || "").trim().toLowerCase();
+		if (!q) return [];
+		const out = [];
+		for (const id of Object.keys(registry || {})) {
+			const x = registry[id];
+			if (!x) continue;
+			const schools = (x.seasons || []).map((sn) => sn.school).concat([x.draft && x.draft.school])
+				.filter(Boolean).map((t) => String(t).toLowerCase());
+			if (String(x.name || "").toLowerCase().indexOf(q) !== -1 || schools.some((t) => t.indexOf(q) !== -1)) out.push(x);
+		}
+		return out.sort((a, b) => ((b.draft && b.draft.season) || 0) - ((a.draft && a.draft.season) || 0))
+			.slice(0, limit || 50);
+	}
+
+	/* ALL-DECADE TEAMS (Q27): five men a calendar decade by honors weighted
+	   POY 10, All-American 5 (first team 6), all-conference 2, counted once
+	   per man per season at its best tier. */
+	function decadeWeight(award) {
+		const set = nationalPOYSet();
+		if (set.has(award)) return 10;
+		if (/First Team All-American/.test(award)) return 6;
+		if (/All-American/.test(award)) return 5;
+		if (/^All-.* First Team$/.test(award)) return 2;
+		return 0;
+	}
+	function allDecadeTeams(registry) {
+		const by = {};
+		for (const id of Object.keys(registry || {})) {
+			const x = registry[id];
+			if (!x) continue;
+			const best = {};
+			for (const h of x.honors || []) {
+				const w = decadeWeight(h.award);
+				if (w && Number.isFinite(h.season)) best[h.season] = Math.max(best[h.season] || 0, w);
+			}
+			for (const sn of Object.keys(best)) {
+				const dec = Math.floor(Number(sn) / 10) * 10;
+				const d = by[dec] || (by[dec] = {});
+				const e = d[id] || (d[id] = { id, name: x.name, school: (x.draft && (x.draft.school || x.draft.club)) || "", score: 0 });
+				e.score += best[sn];
+			}
+		}
+		return Object.keys(by).map(Number).sort((a, b) => a - b).map((dec) => ({
+			decade: dec,
+			team: Object.values(by[dec]).sort((a, b) => b.score - a.score || String(a.name).localeCompare(String(b.name))).slice(0, 5),
+		}));
+	}
+
+	/* HINDSIGHT REDRAFT (Q28): each played class re-ranked by the pro tail,
+	   against where each man actually went. */
+	function hindsight(registry) {
+		const by = {};
+		for (const id of Object.keys(registry || {})) {
+			const x = registry[id];
+			const d = x && x.draft;
+			if (!d || !Number.isFinite(d.season)) continue;
+			const pro = proOutcome(x);
+			if (!pro) continue;
+			(by[d.season] = by[d.season] || []).push({ id, name: x.name, slot: d.slot || null, pro });
+		}
+		const classes = Object.keys(by).map(Number).sort((a, b) => a - b).map((season) => {
+			const men = by[season].sort((a, b) => b.pro.score - a.pro.score);
+			return { season, top5: men.slice(0, 5).map((m, i) => Object.assign({ redraft: i + 1 }, m)) };
+		});
+		const all = [];
+		for (const c of classes) for (const m of by[c.season].map((mm, i) => Object.assign({ redraft: i + 1, season: c.season }, mm))) all.push(m);
+		const steals = all.filter((m) => m.redraft <= 5 && (!m.slot || m.slot >= 20))
+			.sort((a, b) => (b.slot || 99) - (a.slot || 99)).slice(0, 5);
+		const busts = all.filter((m) => m.slot && m.slot <= 5 && m.pro.bust)
+			.sort((a, b) => a.slot - b.slot).slice(0, 5);
+		return { classes, steals, busts };
+	}
+
 	/* THE PRO CAREER TAIL. Seeded from the player id, so the same man has
 	   the same pro career on every machine; pot sets the odds and the draft
 	   slot nudges them. Not a simulation: a plausible epilogue. */
@@ -4867,11 +5090,33 @@
 		[47, "role player", [3, 8], [0, 0]],
 		[-Infinity, "bust", [0, 3], [0, 0]],
 	];
+	/* ONE PRO MODEL (audit Q4). Where js/pro.js is loaded (the page and
+	   Node), the tail is the career Pro.project simulates for this man,
+	   seeded on his registry id: the median-peak career's peak sets the tier
+	   and its length the years, and All-Star selections follow the peak. So
+	   the player page's "Pro career" row and its projection box are one
+	   model. Without pro.js (the batch worker) the old epilogue stands. */
 	function proOutcome(entry) {
 		// UV11/UV12: a real pro career, when the league supplied one, wins.
 		if (entry && entry.pro && entry.pro.real) return realProOutcome(entry.pro);
 		const d = entry && entry.draft;
 		if (!entry || !entry.id || !d || !Number.isFinite(d.pot)) return null;
+		const P = global.Pro;
+		if (P && P.project && Number.isFinite(d.ovr)) {
+			const x = P.project({ key: entry.id, newOvr: d.ovr, newPot: d.pot,
+				classYear: d.classYear || "", archetype: d.archetype || null }, d.season, "universe");
+			if (x) {
+				const peak = x.curve && x.curve.length
+					? Math.max.apply(null, x.curve.map((c) => c.ovr)) : x.peak;
+				const years = x.curve ? x.curve.length : x.years;
+				const tier = peak >= 70 ? "superstar" : peak >= 64 ? "star" : peak >= 55 ? "starter"
+					: peak >= 47 && years >= 3 ? "role player" : "bust";
+				const allStars = Math.min(years, Math.max(0, Math.round((peak - 61) * 0.8)));
+				const score = years + allStars * 3 + (tier === "superstar" ? 10 : tier === "star" ? 5 : 0);
+				return { tier, years, allStars, score, peak,
+					bust: tier === "bust", star: tier === "star" || tier === "superstar" };
+			}
+		}
 		const rng = new global.BBGMRng.Rng("pro|" + entry.id);
 		const slot = Number.isFinite(d.slot) && d.slot > 0 ? d.slot : null;
 		const nudge = slot ? Math.max(0, 61 - slot) / 60 * 4 : -3;
@@ -5039,8 +5284,9 @@
 		synthFile, synthFiles, synthFromOrder, synthFingerprint, returnerEntrants, applyEntrants,
 		SYNTH_SIZE,
 		rowMentions, followedCard, followedLead, dynastyProgress, lowPrestige,
-		proOutcome, proText, proHall, seasonDetail,
-		programAlumni, importProHistory, honorWeight, honorScore, registryKeepScore,
+		proOutcome, proText, proHall, seasonDetail, linkCareers,
+		careersTable, searchRegistry, allDecadeTeams, hindsight, honorWeight,
+		programAlumni, importProHistory, honorScore, registryKeepScore,
 		synthEpochOf, poyOf,
 	};
 })(typeof window !== "undefined" ? window : self);

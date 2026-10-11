@@ -59,13 +59,13 @@ const FLAGS = {
 	"--settings": true, "--locks": true, "--gzip": false, "--no-gzip": false, "--count": true, "--merge": true,
 	"--players-file": false, "--fragment": false, "--rounds": true, "--want": true, "--not": true,
 	"--tries": true, "--fuzz": true, "--scouting": true, "--recipe": false, "--hometowns": false,
-	"--pro-lines": false,
+	"--pro-lines": false, "--html": false, "--md": false, "--kind": true, "--ratings-history": false,
 };
 // Options that may be given more than once, kept as lists.
-const REPEATABLE = { "--set": "set", "--want": "want", "--not": "not" };
+const REPEATABLE = { "--set": "set", "--want": "want", "--not": "not", "--kind": "kind" };
 
 function parseArgs(argv) {
-	const out = { positional: [], set: [], want: [], not: [], flags: {} };
+	const out = { positional: [], set: [], want: [], not: [], kind: [], flags: {} };
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		if (a.indexOf("--") === 0 && a.indexOf("=") > 0) {
@@ -335,6 +335,7 @@ function exportOptions(args) {
 	if (f["--recipe"]) opts.recipe = true;
 	if (f["--hometowns"]) opts.hometowns = true;
 	if (f["--pro-lines"]) opts.proLines = true;
+	if (f["--ratings-history"]) opts.ratingsHistory = true;
 	return opts;
 }
 
@@ -678,9 +679,9 @@ function cmdSeek(args) {
 /* A UNIVERSE, the way js/app.js's runUniverse builds one: the files in season
    order, one chain, each season handing its world to the next. Prints the
    timeline and writes the universe export (seeds, fingerprints, the rows and
-   the records), which the page's Universe tab imports. The players file is
-   not written here: it needs the career links the page adds after the chain
-   (js/app.js linkCareers), and that step is not yet shared. */
+   the records), which the page's Universe tab imports. With --players-file
+   it also writes the Tools -> Import players file for the whole world, after
+   the same career linking the page does (Universe.linkCareers, audit Q30). */
 function cmdUniverse(args) {
 	const U = global.Universe;
 	const files = args.positional.slice(1);
@@ -697,6 +698,7 @@ function cmdUniverse(args) {
 	const baseSeed = cfg.seed && cfg.seed.trim() ? cfg.seed.trim()
 		: "universe-" + Math.floor(Math.random() * 1e9).toString(36);
 	const runners = loaded.map((f) => global.Engine.createRunner(f.data));
+	const results = [];
 	const diags = U.validate(loaded);
 	const runnable = diags.filter((d) => d.ok)
 		.sort((a, b) => (a.season || 0) - (b.season || 0) || a.index - b.index);
@@ -707,7 +709,7 @@ function cmdUniverse(args) {
 		name: null, createdAt: null,
 		make: (st) => global.Config.make(st),
 		runnerFor: (i) => runners[i],
-		store: () => {},
+		store: (i, res) => { results[i] = res; },
 		dataChanged: (i) => { runners[i] = global.Engine.createRunner(loaded[i].data); },
 		biographyFor: () => null,
 		extrapolateGaps: !args.flags["--no-gaps"] && cfg.extrapolateGaps !== false,
@@ -737,6 +739,17 @@ function cmdUniverse(args) {
 	if (args.flags["--out"]) {
 		fs.writeFileSync(args.flags["--out"], JSON.stringify(U.exportUniverse(u), null, 1));
 		say(args, "wrote " + args.flags["--out"]);
+	}
+	if (args.flags["--players-file"]) {
+		U.linkCareers(u, results, chain.runnable, undefined);
+		const live = chain.runnable.map((d) => results[d.index]).filter(Boolean);
+		const out = global.Engine.universePlayersFile(live, Object.assign(exportOptions(args),
+			{ stats: true, prior: true, awards: true, seed: baseSeed }));
+		const dest = args.flags["--out"] ? String(args.flags["--out"]).replace(/(\.json)?$/, "-players.json")
+			: "universe-" + baseSeed + "-players.json";
+		fs.writeFileSync(dest, JSON.stringify(out.file, null, "\t"));
+		say(args, "wrote " + out.file.players.length + " players across " + out.seasons.length +
+			" seasons to " + dest);
 	}
 	if (u.broken) process.exitCode = 1;
 }
@@ -774,6 +787,54 @@ function cmdMock(args) {
 		say(args, "seed " + res.seed + " · " + mock.picks.length + " picks · " +
 			mock.undrafted.length + " undrafted · " + mock.source);
 	}
+}
+
+/* The season's most readable outputs (audit Q29): the almanac as Markdown
+   (or --html) and the static season site, on stdout or to --out. */
+function runClass(args) {
+	const { data } = readClassFile(args.positional[1], args.flags["--year"]);
+	return global.Engine.run(data, buildConfig(args, data));
+}
+function emit(args, text, what) {
+	const dest = args.flags["--out"];
+	if (dest && dest !== "-") { fs.writeFileSync(dest, text); say(args, "wrote " + what + " to " + dest); }
+	else process.stdout.write(text.endsWith("\n") ? text : text + "\n");
+}
+function cmdAlmanac(args) {
+	const res = runClass(args);
+	const A = global.Almanac;
+	emit(args, args.flags["--html"] ? A.html(res) : A.markdown(res), "the almanac");
+}
+function cmdSite(args) {
+	const res = runClass(args);
+	emit(args, global.SeasonSite.html(res), "the season site");
+}
+
+/* The paper (audit Q31): News.build as dated plain text or Markdown, every
+   article or only the --kind ones, so two engine revisions can be diffed. */
+function newsText(seg) {
+	return (seg || []).map((x) => (x && typeof x === "object" ? (x.v === undefined ? "" : String(x.v)) : String(x))).join("");
+}
+function cmdNews(args) {
+	const res = runClass(args);
+	let arts = global.News.build(res);
+	const kinds = [].concat(...(args.kind || []).map((k) => String(k).split(","))).map((k) => k.trim()).filter(Boolean);
+	if (kinds.length) arts = arts.filter((a) => kinds.indexOf(a.kind) !== -1);
+	const md = !!args.flags["--md"];
+	const out = [];
+	for (const a of arts) {
+		const head = newsText(a.headline);
+		const date = a.dateline || "";
+		const paras = Array.isArray(a.paras) && a.paras.length
+			? a.paras.map((p) => newsText(p)) : [newsText(a.body)];
+		if (md) {
+			out.push("## " + head + "\n\n*" + [date, a.byline || "", a.kind].filter(Boolean).join(" · ") + "*\n\n" +
+				paras.join("\n\n"));
+		} else {
+			out.push("[" + date + "] (" + a.kind + ") " + head + "\n" + paras.join("\n"));
+		}
+	}
+	emit(args, out.join(md ? "\n\n" : "\n\n"), arts.length + " articles");
 }
 
 function cmdCheck(args) {
@@ -836,6 +897,9 @@ const HELP = `BBGM Draft Class Workshop (command line, experimental)
   bbgmdraft seek  <file> [options]    find the first seed that meets some conditions
   bbgmdraft universe <file>... [opts] run the classes as one continuous world
   bbgmdraft mock  <file> [options]    mock draft and pro career projections
+  bbgmdraft almanac <file> [options]  the season's almanac (Markdown, or --html)
+  bbgmdraft site  <file> [options]    the season as a one-file static site (HTML)
+  bbgmdraft news  <file> [options]    the season's paper as text (or --md)
   bbgmdraft check <file>              validate a file
   bbgmdraft settings [name|presets]   settings, defaults, ranges; presets
 
@@ -885,6 +949,8 @@ Options (run)
 
 Options (universe)
   --out FILE         write the universe export (the page's Universe tab imports it)
+  --players-file     also write the whole world as one Tools -> Import players file
+                     (<out>-players.json), careers linked across seasons
   --no-gaps          do not extrapolate seasons missing between the files
   --json             the rows and threads as JSON on stdout
 
@@ -894,6 +960,13 @@ Options (batch)
 
 Options (mock)
   --rounds N         rounds of the mock draft (default 2)
+
+Options (almanac, site, news)
+  --html             almanac: HTML instead of Markdown
+  --md               news: Markdown instead of dated plain text
+  --kind K           news: only articles of this kind (repeatable or comma-separated)
+  --out FILE         write there instead of stdout
+  --ratings-history  run: one ratings row per simulated college season (BBGM's chart)
 
 Options (seek)
   --want NAME        a condition the class must meet (repeatable, or comma-separated):
@@ -939,6 +1012,9 @@ function main() {
 		else if (cmd === "seek") cmdSeek(args);
 		else if (cmd === "universe") cmdUniverse(args);
 		else if (cmd === "mock") cmdMock(args);
+		else if (cmd === "almanac") cmdAlmanac(args);
+		else if (cmd === "site") cmdSite(args);
+		else if (cmd === "news") cmdNews(args);
 		else if (cmd === "check") cmdCheck(args);
 		else if (cmd === "settings") cmdSettings(args);
 		else throw new Error("unknown command \"" + cmd + "\" (try: bbgmdraft help)");

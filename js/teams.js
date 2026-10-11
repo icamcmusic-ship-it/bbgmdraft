@@ -2195,8 +2195,24 @@
 		}
 		if (!games.length) return [];
 
+		/* THE PHRASE MEMORY (audit 2026-10-10, R10): 62 templates for ~290
+		   events made the same sentences turn up in a class in five. Each
+		   template is "kind#index"; the ones the last few classes used
+		   (cfg.recentTemplates, supplied by the app) are down-weighted. With
+		   no memory the draw is exactly rng.pick's, stream and all. */
+		const recentT = new Set([].concat.apply([], (cfg && Array.isArray(cfg.recentTemplates)
+			? cfg.recentTemplates : []).filter(Array.isArray)));
+		const tplOf = new Map();
+		const pickT = (r, kind, list) => {
+			const idx = list.map((_, j) => j);
+			const i = recentT.size
+				? r.weighted(idx, (j) => (recentT.has(kind + "#" + j) ? 0.2 : 1))
+				: r.pick(idx);
+			tplOf.set(list[i], kind + "#" + i);
+			return list[i];
+		};
 		const add = (kind, text, when, teamsInvolved) => {
-			events.push({ kind, text, when, teams: teamsInvolved });
+			events.push({ kind, text, when, teams: teamsInvolved, tpl: tplOf.get(text) || null });
 		};
 		/* Whether a consequential event makes the feed this season. With a
 		   budget of seven and five consequential kinds that nearly always
@@ -2222,7 +2238,7 @@
 			   text is the body of the article — see pushEvent — so this is
 			   where the variety has to be. */
 			const half = u.g.when < 0.5 ? "season's first half" : "conference season";
-			add("upset", rng.pick([
+			add("upset", pickT(rng, "upset", [
 				u.winner.name + " beat " + u.loser.name + " " + u.g.teamPts + "-" + u.g.oppPts +
 					", the result of the " + half,
 				u.loser.name + " lost at " + u.winner.name + ", " + u.g.oppPts + "-" + u.g.teamPts +
@@ -2242,7 +2258,7 @@
 			const gm = rng.pick(good);
 			const otTag = gm.g.ot
 				? " (" + (gm.g.ot > 1 ? gm.g.ot + "OT" : "OT") + ")" : "";
-			add("game of the year", rng.pick([
+			add("game of the year", pickT(rng, "game of the year", [
 				gm.winner.name + " " + gm.g.teamPts + ", " + gm.loser.name + " " + gm.g.oppPts +
 					otTag + " — the game of the year",
 				gm.winner.name + " beat " + gm.loser.name + " " + gm.g.teamPts + "-" + gm.g.oppPts +
@@ -2278,7 +2294,7 @@
 				if (g.won) w++; else l++;
 			}
 			const rec = w + "-" + l;
-			add("coaching change", rng.pick([
+			add("coaching change", pickT(rng, "coaching change", [
 				t.name + " fired " + who + " in " + month + " at " + rec,
 				t.name + " and " + who + " parted ways in " + month + ", with the team " + rec,
 				who + " coached his last game at " + t.name + " in " + month + "; the " +
@@ -2295,7 +2311,7 @@
 		if (blowouts.length && tells(0.55)) {
 			const b = blowouts[0];
 			const by = b.g.teamPts - b.g.oppPts;
-			add("blowout", rng.pick([
+			add("blowout", pickT(rng, "blowout", [
 				b.winner.name + " beat " + b.loser.name + " by " + by,
 				b.winner.name + " led " + b.loser.name + " by more than thirty at the " +
 					"half and won by " + by,
@@ -2311,7 +2327,7 @@
 			.filter((x) => x.n >= 12).sort((a, b) => b.n - a.n);
 		if (streaks.length && tells(0.55)) {
 			const st = rng.pick(streaks.slice(0, 5));
-			add("streak", rng.pick([
+			add("streak", pickT(rng, "streak", [
 				st.t.name + " won " + st.n + " in a row",
 				st.t.name + " has not lost in " + st.n + " games",
 				st.n + " straight for " + st.t.name + ", and the schedule ahead does " +
@@ -2346,7 +2362,7 @@
 					"a water-main break", "a flooded locker room", "a bus that broke down on the interstate",
 					"a scoreboard that fell onto the floor", "an outbreak of flu in the traveling party",
 					"a fire alarm that emptied the arena"]);
-				return ["postponement", r.pick([
+				return ["postponement", pickT(r, "postponement", [
 					t.name + "'s trip to " + host.name + " was postponed by " + cause,
 					host.name + " and " + t.name + " will play later in the year after " +
 						cause + " closed the building",
@@ -2358,7 +2374,7 @@
 				const t = r.pick(ranked.slice(0, 60));
 				// "a Arizona State dunk": the article has to agree with the
 				// name, and js/text.js is where that rule lives.
-				return ["viral", r.pick([
+				return ["viral", pickT(r, "viral", [
 					global.Text.withArticle(t.name + " dunk") +
 						" was the most-watched clip of the college season",
 					global.Text.withArticle(t.name + " lob") +
@@ -2379,7 +2395,7 @@
 				const a = gm.winner;
 				const b = gm.loser;
 				if (a === b) return null;
-				return ["altercation", r.pick([
+				return ["altercation", pickT(r, "altercation", [
 					a.name + " and " + b.name + " cleared the benches with four minutes left",
 					"Six players were ejected when " + a.name + " and " + b.name +
 						" stopped playing basketball in the second half",
@@ -2411,7 +2427,7 @@
 				const pick = r.pick(cands);
 				const t = pick.t;
 				const n = pick.n;
-				return ["storm", r.pick([
+				return ["storm", pickT(r, "storm", [
 					t.name + " played three ranked opponents in eight days and won " +
 						n + " of them",
 					t.name + " came out of the hardest week on anybody's schedule " +
@@ -2424,7 +2440,7 @@
 			   time meant a season's color was nearly always the same three. */
 			(r) => {
 				const t = r.pick(ranked.slice(0, 80));
-				return ["attendance", r.pick([
+				return ["attendance", pickT(r, "attendance", [
 					t.name + " played in front of the largest home crowd in the " +
 						"program's history",
 					"The student section at " + t.name + " camped out for two nights " +
@@ -2440,7 +2456,7 @@
 				const a = gm.winner;
 				const b = gm.loser;
 				if (a === b) return null;
-				return ["officiating", r.pick([
+				return ["officiating", pickT(r, "officiating", [
 					"The last call in " + a.name + "'s win over " + b.name +
 						" was reviewed for six minutes and is still being argued about",
 					b.name + " filed a formal complaint about the officiating in its " +
