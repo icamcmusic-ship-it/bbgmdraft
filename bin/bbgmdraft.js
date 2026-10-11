@@ -56,7 +56,7 @@ const FLAGS = {
 	"--awards": false, "--awards-major": false, "--no-ages": false, "--no-jerseys": false,
 	"--no-injuries": false, "--no-notes": false, "--keep-notes": false, "--csv": false, "--json": false,
 	"--quiet": false, "-q": false, "--no-gaps": false, "--help": false, "-h": false,
-	"--settings": true, "--locks": true, "--gzip": false, "--count": true, "--merge": true,
+	"--settings": true, "--locks": true, "--gzip": false, "--no-gzip": false, "--count": true, "--merge": true,
 	"--players-file": false, "--fragment": false, "--rounds": true, "--want": true, "--not": true,
 	"--tries": true, "--fuzz": true, "--scouting": true, "--recipe": false, "--hometowns": false,
 	"--pro-lines": false,
@@ -96,12 +96,12 @@ function readClassFile(file, year, opts) {
 	}
 	// "-" is standard input (a pipe: `cat class.json.gz | bbgmdraft run - ...`).
 	const shown = file === "-" ? "standard input" : file;
-	let buf = fs.readFileSync(file === "-" ? 0 : file);
-	if (buf[0] === 0x1f && buf[1] === 0x8b) buf = zlib.gunzipSync(buf);
-	const text = buf.toString("utf8").replace(/^﻿/, "");
+	// Through the scanner: a league's box scores are never parsed, and no
+	// whole-file string is built (audit L1).
 	let data;
-	try { data = JSON.parse(text); } catch (e) {
-		throw new Error(shown + " is not JSON: " + e.message);
+	try { data = readLeagueScan(file, shown).league; } catch (e) {
+		throw new Error(e.code && e.code !== "badjson" ? shown + ": " + e.message
+			: shown + " is not JSON: " + e.message);
 	}
 	const E = global.Engine;
 	// A league export holds a class per future draft year; pick one.
@@ -391,14 +391,28 @@ function cmdRun(args) {
 	let out;
 	let defaultDest;
 	if (f["--merge"]) {
-		const league = readJsonFile(f["--merge"]);
-		const merged = global.Engine.mergeIntoLeague(res, league, opts);
-		out = merged.file;
+		/* Read through the scanner (js/leaguescan.js): the stores the merge
+		   never touches are not parsed, and the write copies their bytes
+		   through, compact, with no BOM (BBGM's league loader reads it, not a
+		   spreadsheet), streamed through gzip when the league was a .gz. No
+		   whole-league string is built, so a league over the 512 MiB string
+		   limit merges (audit L7). */
+		let src;
+		try { src = readLeagueScan(f["--merge"]); } catch (e) {
+			throw new Error(f["--merge"] + (e.code && e.code !== "badjson" ? ": " : " is not JSON: ") + e.message);
+		}
+		const merged = global.Engine.mergeIntoLeague(res, src.league, opts);
 		for (const w of merged.warnings) say(args, "warning: " + w);
 		say(args, "merged into " + path.basename(f["--merge"]) + ": " + merged.replaced +
 			" prospects replaced, " + merged.added + " added, " + merged.removed + " removed");
 		const lb = path.basename(f["--merge"]).replace(/\.json(\.gz)?$|\.gz$/i, "");
-		defaultDest = path.join(path.dirname(f["--merge"]), lb + "_merged.json" + gz);
+		const gzOut = !!f["--gzip"] || (src.gz && !f["--no-gzip"]);
+		const dest = f["--out"] || path.join(path.dirname(f["--merge"]),
+			lb + "_merged.json" + (gzOut ? ".gz" : ""));
+		return writeMerged(dest, src, merged.file, gzOut).then(() => {
+			say(args, "seed " + res.seed + " · " + res.season + " · engine rev " + global.Universe.ENGINE_REV);
+			if (dest !== "-") say(args, "wrote " + dest);
+		});
 	} else if (f["--players-file"]) {
 		out = global.Engine.exportPlayersFile(res, opts);
 		defaultDest = path.join(file === "-" ? "." : path.dirname(file), base + "_players.json" + gz);
@@ -469,6 +483,87 @@ function cmdRunMany(args, file, data, cfg, kinds) {
 		engineRev: global.Universe.ENGINE_REV }, null, 2) + "\n");
 	else say(args, "wrote " + n + " classes to " + dir + " · base seed " + base +
 		" · engine rev " + global.Universe.ENGINE_REV);
+}
+
+function coded(code, message) {
+	const e = new Error(message);
+	e.code = code;
+	return e;
+}
+
+/* A league or class file, through the scanner (js/leaguescan.js). */
+function readLeagueScan(file, shown) {
+	const LS = global.LeagueScan;
+	let buf = fs.readFileSync(file === "-" ? 0 : file);
+	let layers = 0;
+	while (buf.length > 1 && buf[0] === 0x1f && buf[1] === 0x8b && layers < 3) {
+		try { buf = zlib.gunzipSync(buf); } catch (e) {
+			throw coded("gzbad", "the .gz file is incomplete or corrupt — download or export it again");
+		}
+		layers++;
+	}
+	const kind = LS.sniff(buf.subarray(0, 8));
+	if (LS.sniffMessage(kind)) throw coded(kind, LS.sniffMessage(kind));
+	if (kind === "utf16le" || kind === "utf16be") {
+		const text = new TextDecoder(kind === "utf16le" ? "utf-16le" : "utf-16be").decode(buf);
+		return { league: LS.parseText(text.replace(/^\ufeff/, ""), buf.length), scan: null, gz: layers > 0 };
+	}
+	const sc = LS.createScanner();
+	const CH = 1 << 20;
+	try {
+		for (let i = 0; i < buf.length; i += CH) sc.push(buf.subarray(i, i + CH));
+		const scan = sc.end();
+		if (scan.top !== "object") {
+			return { league: LS.parseText(buf.toString("utf8").replace(/^\ufeff/, ""), buf.length),
+				scan: null, gz: layers > 0 };
+		}
+		return { league: scan.data, scan, buf, gz: layers > 0 };
+	} catch (e) {
+		throw e.code ? e : new Error(e.message);
+	}
+}
+
+/* The merged league, streamed: the source's own bytes for every store the
+   merge left alone, the new values (players one at a time) for the rest. */
+function writeMerged(dest, src, file, gzip) {
+	const LS = global.LeagueScan;
+	const changed = {};
+	for (const k of Object.keys(file)) if (file[k] !== src.league[k]) changed[k] = file[k];
+	const out = dest === "-" ? process.stdout : fs.createWriteStream(dest);
+	const gz = gzip ? zlib.createGzip() : null;
+	if (gz) gz.pipe(out);
+	const sink = gz || out;
+	const write = (chunk) => (sink.write(chunk) ? null
+		: new Promise((resolve) => sink.once("drain", resolve)));
+	const pieces = function* () {
+		if (!src.scan) {
+			yield* LS.valueChunks(file);
+			return;
+		}
+		const sp = LS.createSplicer(src.scan, Object.keys(changed));
+		const CH = 1 << 20;
+		for (let i = 0; i < src.buf.length; i += CH) {
+			for (const piece of sp.push(src.buf.subarray(i, i + CH))) {
+				if (piece instanceof Uint8Array) yield piece;
+				else if (piece.append) yield* LS.addedChunks(src.scan, changed);
+				else yield* LS.valueChunks(changed[piece.key]);
+			}
+		}
+	};
+	const it = pieces();
+	const finished = new Promise((resolve, reject) => {
+		if (dest === "-") { (gz || out).once("finish", resolve); } else out.once("finish", resolve);
+		out.once("error", reject);
+	});
+	const pump = () => {
+		for (;;) {
+			const r = it.next();
+			if (r.done) { sink.end(); return finished; }
+			const w = write(r.value);
+			if (w) return w.then(pump);
+		}
+	};
+	return pump();
 }
 
 function readJsonFile(file) {
@@ -766,7 +861,9 @@ Options (run)
   --count N          write N classes, seeds <base>#0 .. #N-1, one file each into the
                      directory --out names (default <file>_classes)
   --merge LEAGUE     merge the class into this league file (replacing its class for
-                     that draft) and write the league (default <league>_merged.json)
+                     that draft) and write the league, compact JSON, streamed (default
+                     <league>_merged.json, or .json.gz when the league was gzipped;
+                     --no-gzip writes plain JSON)
   --players-file     write the Tools -> Import players file instead of a class file
   --fragment         write the college-league fragment (teams, standings) instead
   --fuzz MODE        scouting fuzz: keep (default), zero, or regenerate (a seeded draw
@@ -829,7 +926,15 @@ function main() {
 	}
 	loadEngine();
 	try {
-		if (cmd === "run") cmdRun(args);
+		if (cmd === "run") {
+			const p = cmdRun(args);
+			if (p && typeof p.then === "function") {
+				p.catch((e) => {
+					process.stderr.write("bbgmdraft: " + (e && e.message ? e.message : e) + "\n");
+					process.exit(1);
+				});
+			}
+		}
 		else if (cmd === "batch") cmdBatch(args);
 		else if (cmd === "seek") cmdSeek(args);
 		else if (cmd === "universe") cmdUniverse(args);

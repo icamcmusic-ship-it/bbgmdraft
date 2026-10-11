@@ -689,6 +689,16 @@
 		   and any caller that revalidated got a different `seasonRecovered`
 		   answer the second time. The callers apply it themselves now. */
 		const bad = [];
+		/* A LEAGUE IS NOT REFUSED OVER A ROW THE TOOL NEVER USES (audit L8).
+		   The classes come from the undrafted prospect rows only, and the
+		   merge passes every other row through untouched, so one long-retired
+		   veteran without a birth year (or a null left in the array) is a
+		   warning about the file, not a reason to refuse it. A prospect row
+		   is still held to the strict check, here and again on the class the
+		   loader cuts out of the league. */
+		const loose = [];
+		const strictRow = (p) => !isLeagueShaped ||
+			(p && typeof p === "object" && PROSPECT_TIDS.includes(Number(p.tid)));
 		let missingPid = 0;
 		const seenPid = new Set();
 		let duplicatePid = 0;
@@ -700,12 +710,13 @@
 			const who = p && (p.firstName || p.lastName)
 				? ((p.firstName || "") + " " + (p.lastName || "")).trim()
 				: "player #" + i;
-			if (!p || typeof p !== "object") { bad.push("player #" + i + " is not an object"); return; }
+			const sink = strictRow(p) ? bad : loose;
+			if (!p || typeof p !== "object") { sink.push("player #" + i + " is not an object"); return; }
 			/* Independent checks, not an else-chain: a player broken in both
 			   ways used to report one problem, the user fixed it, reloaded,
 			   and got a second error for the same row. */
 			if (!Array.isArray(p.ratings) || !p.ratings.length) {
-				bad.push(who + " has no ratings");
+				sink.push(who + " has no ratings");
 			} else {
 				/* A partial ratings block reached exportFile's ratings[last]
 				   write and silently produced a player with zeros. */
@@ -714,7 +725,7 @@
 					? BB.RATING_KEYS.filter((k) => !Number.isFinite(Number(last[k])))
 					: BB.RATING_KEYS;
 				if (missing.length) {
-					bad.push(who + " last ratings row is missing " +
+					sink.push(who + " last ratings row is missing " +
 						(missing.length === BB.RATING_KEYS.length
 							? "every rating key"
 							: missing.slice(0, 5).join(", ") +
@@ -729,7 +740,7 @@
 						!Number.isFinite(Number(last.pot)))) missingOvrPot++;
 			}
 			if (!p.born || num(p.born.year) === undefined) {
-				bad.push(who + " has no born.year");
+				sink.push(who + " has no born.year");
 			}
 			/* A file without pids used to collapse the entire generator in
 			   silence. Every RNG stream is keyed off it — rng.child("build:" +
@@ -751,6 +762,13 @@
 				bad.slice(0, 4).join("; ") + (bad.length > 4 ? "; …" : ""));
 		}
 		const warnings = [];
+		if (loose.length) {
+			warnings.push(loose.length + " row" + (loose.length === 1 ? " that is" : "s that are") +
+				" not a draft prospect " + (loose.length === 1 ? "is" : "are") +
+				" malformed and " + (loose.length === 1 ? "was" : "were") +
+				" left as " + (loose.length === 1 ? "it is" : "they are") + " (" +
+				loose.slice(0, 3).join("; ") + (loose.length > 3 ? "; …" : "") + ").");
+		}
 		/* The schema version the file says it is. BBGM migrates on the way in by
 		   it (see LEAGUE_DATABASE_VERSION in js/bbgm.js): at 23 or below it
 		   recomputes every hgt rating from the listed height, and at 32 or
@@ -3444,6 +3462,8 @@
 		   phase, so anything that changes it re-runs this phase too. */
 		const cfg = state.effectiveCfg || state.cfg;
 		const rng = state.rng;
+		// A new regular season: the postseason's rankings memo is stale.
+		state.rankMemo = null;
 		const bySchool = {};
 		for (const p of state.players) {
 			if (p.nonNcaa) continue;
@@ -3636,6 +3656,11 @@
 		"apHistory", "apPeak", "apPreseason", "apFirstPlace",
 	];
 
+	// What computeRankings and weeklyPoll write on a team (see phasePostseason).
+	const RANK_KEYS = ["netRank", "netScore", "tvi", "adjEff", "quads", "roadW", "roadL",
+		"last12W", "last12L", "committeeScore", "apRank", "apHistory", "apPeak",
+		"apPreseason", "apFirstPlace"];
+
 	function resetPostseason(teams) {
 		for (const name of Object.keys(teams)) {
 			const t = teams[name];
@@ -3661,8 +3686,41 @@
 		   margin-capped adjusted efficiency), quadrant records, a committee
 		   score over observables only, and a weekly AP poll voted by a
 		   persistent 60-member electorate. See js/rankings.js. */
-		RK.computeRankings(teams);
-		state.pollHistory = RK.weeklyPoll(teams, rng.child("appoll"));
+		/* Computed once per regular season (audit P3). Both read only the
+		   regular-season games, the programs' levels and ratings and a
+		   seed-derived stream — nothing the conference tournaments or a
+		   postseason setting touches — and they were ~80% of this phase,
+		   paid again by every "March upsets" re-run. The memo is dropped
+		   whenever the regular phase runs again. */
+		const memo = state.rankMemo;
+		if (memo && memo.teams === teams) {
+			for (const name of Object.keys(memo.fields)) {
+				const t = teams[name];
+				const f = memo.fields[name];
+				if (!t) continue;
+				for (const k of RANK_KEYS) {
+					if (!(k in f)) continue;
+					const v = f[k];
+					t[k] = Array.isArray(v) ? v.slice() : v && typeof v === "object" ? Object.assign({}, v) : v;
+				}
+			}
+			state.pollHistory = memo.pollHistory.slice();
+		} else {
+			RK.computeRankings(teams);
+			state.pollHistory = RK.weeklyPoll(teams, rng.child("appoll"));
+			const fields = {};
+			for (const name of Object.keys(teams)) {
+				const t = teams[name];
+				const f = {};
+				for (const k of RANK_KEYS) {
+					if (!(k in t)) continue;
+					const v = t[k];
+					f[k] = Array.isArray(v) ? v.slice() : v && typeof v === "object" ? Object.assign({}, v) : v;
+				}
+				fields[name] = f;
+			}
+			state.rankMemo = { teams, fields, pollHistory: state.pollHistory.slice() };
+		}
 		// Same shape the old one-shot poll produced: the top 25, in order.
 		const finalWeek = state.pollHistory[state.pollHistory.length - 1];
 		state.poll = finalWeek
@@ -9441,7 +9499,7 @@
 		/* -4 and -5 are the UNDRAFTED_2 / UNDRAFTED_3 tids older saves used
 		   for the next two classes; a file that still carries them would
 		   otherwise keep its generated class beside the merged one. */
-		const isProspect = (p) => [-2, -4, -5].includes(Number(p.tid)) &&
+		const isProspect = (p) => !!p && [-2, -4, -5].includes(Number(p.tid)) &&
 			p.draft && Number(p.draft.year) === season &&
 			!(protect && protect.has(Number(p.pid)));
 		const sameName = (a, b) => {
@@ -9451,7 +9509,7 @@
 
 		const byPid = new Map();
 		for (const p of league.players) {
-			const pid = Number(p.pid);
+			const pid = Number(p && p.pid);
 			if (Number.isFinite(pid) && isProspect(p)) byPid.set(pid, p);
 		}
 		/* Which league prospect each class row will overlay, by pid and name,
@@ -9468,10 +9526,17 @@
 		const aged = exportFile.bornRewritten || new Set();
 		const noted = exportFile.noteDecided || new Set();
 		let maxPid = -1;
+		let anyPid = false;
 		for (const p of league.players) {
-			const pid = Number(p.pid);
-			if (Number.isFinite(pid) && pid > maxPid) maxPid = pid;
+			const pid = Number(p && p.pid);
+			if (!Number.isFinite(pid)) continue;
+			anyPid = true;
+			if (pid > maxPid) maxPid = pid;
 		}
+		/* A league with no pids at all identifies a player by his row (see
+		   validateLeagueFile), so the new pids start past the last row rather
+		   than at 0, where they named rows already in the file (audit L12). */
+		if (!anyPid) maxPid = league.players.length - 1;
 
 		/* An overlay, not a swap. A draft-class export is a TRIMMED player: a
 		   league file's own prospect carries fields it does not (value,
