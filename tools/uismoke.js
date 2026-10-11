@@ -4542,11 +4542,12 @@ async function gotoProspects(page) {
 			(await page.evaluate(() => parseInt(getComputedStyle(document.body).paddingBottom, 10))) >= 60);
 		await page.setViewportSize({ width: 1500, height: 980 });
 		await page.waitForTimeout(300);
+		// Polled: straight after the resize the layout can still be settling.
 		ok("the sidebar does not scroll sideways",
-			(await page.evaluate(() => {
+			await page.waitForFunction(() => {
 				const a = document.getElementById("settings");
 				return a.scrollWidth <= a.clientWidth;
-			})) === true);
+			}, null, { timeout: 3000 }).then(() => true, () => false));
 
 		// U7: the preset diff names the setting as the sidebar does.
 		await page.selectOption("#preset", presetName);
