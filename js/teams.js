@@ -249,7 +249,8 @@
 		   the awards page read like a spreadsheet. Every rotation filler gets
 		   a name; the award model shows it when one of them beats the class
 		   to a trophy. */
-		const displayName = rng.pick(PLAYER_FIRST) + " " + rng.pick(PLAYER_LAST);
+		let displayName = rng.pick(PLAYER_FIRST) + " " + rng.pick(PLAYER_LAST);
+		while (REAL_TEAM_NAMES.has(displayName)) displayName = rng.pick(PLAYER_FIRST) + " " + rng.pick(PLAYER_LAST);
 		const year = starReturner
 			? rng.pick(["Junior", "Senior", "Senior", "Graduate"])
 			: rng.pick(["Sophomore", "Junior", "Junior", "Senior", "Senior"]);
@@ -303,6 +304,10 @@
 		{ name: "returning conference player of the year", w: 0.6, boostLo: 20, boostHi: 28 },
 		{ name: "senior leader who came back", w: 1.4, boostLo: 10, boostHi: 18 },
 		{ name: "returning starter with a year of growth", w: 2.0, boostLo: 8, boostHi: 16 },
+		{ name: "returning sixth man of the year", w: 1.0, boostLo: 10, boostHi: 17 },
+		{ name: "returning All-America honorable mention", w: 0.9, boostLo: 15, boostHi: 23 },
+		{ name: "back from a season-ending injury", w: 0.9, boostLo: 12, boostHi: 24 },
+		{ name: "a fifth-year senior on a waiver", w: 0.7, boostLo: 10, boostHi: 18 },
 	];
 	function capFillers(fillers, prospects) {
 		if (!prospects.length || !fillers.length) return;
@@ -430,6 +435,11 @@
 
 	   Nothing downstream reads the pool SIZE — the fillers are drawn by
 	   rng.pick and identified by their slot, not their name. */
+	/* Real people the synthetic pools can spell out (NBA players and
+	   sitting college coaches). Any draw that lands on one is redrawn. */
+	const REAL_TEAM_NAMES = new Set(["Kobe Bryant", "Brandon Ingram", "Myles Turner", "Evan Mobley",
+		"Malik Beasley", "Keon Ellis", "Jordan Hawkins", "Jalen Brooks", "Marcus Banks",
+		"Brad Underwood", "Barry Larkin", "Gary Payton"]);
 	const PLAYER_FIRST = [
 		"Jalen", "Marcus", "Tyrese", "DeShawn", "Caleb", "Jordan", "Malik",
 		"Trey", "Isaiah", "Xavier", "Devin", "Cam", "Andre", "Darius",
@@ -555,6 +565,10 @@
 		"Sheridan", "Slattery", "Stroud", "Sutter", "Tanaka", "Thackeray",
 		"Toussaint", "Truitt", "Vasquez", "Wendell", "Whitaker", "Wilkerson",
 		"Winslow", "Yates", "Zielinski", "Ainsworth", "Bergstrom", "Coyle",
+		"Abernethy", "Bartley", "Bellamy", "Cardenas", "Coughlin", "Dalrymple", "Easterly", "Fennimore",
+		"Gallagher", "Halloran", "Iwamoto", "Kaczmarek", "Lombardi", "Mbeki", "Nakashima", "Ostrowski",
+		"Pellegrino", "Quintero", "Rutledge", "Sorensen", "Tolliver", "Uribe", "Valdivia", "Wainwright",
+		"Yablonski", "Zamora", "Achterberg", "Boateng", "Castellanos", "Delacroix",
 	];
 
 	/* Coaching philosophy archetypes (task 4.4).
@@ -613,6 +627,9 @@
 			form: 0.8, dev: 0.7, levelAdj: 0.8,
 		},
 		{ name: "settled", label: null, w: 0, form: 0, dev: 0, levelAdj: 0 },
+		{ name: "extension year", label: "fresh off a contract extension", w: 0, form: 0.3, dev: 0.2, levelAdj: 0.4 },
+		{ name: "returning alum", label: "back at his alma mater", w: 0, form: 1.0, dev: 0.5, levelAdj: -1.0 },
+		{ name: "final season", label: "in what he has said is his final season", w: 0, form: 0.6, dev: -0.3, levelAdj: 0.3 },
 	];
 	const SITUATION_BY_NAME = {};
 	for (const c of COACH_SITUATIONS) SITUATION_BY_NAME[c.name] = c;
@@ -678,6 +695,10 @@
 		if (tenure === 1) situation = roll < 0.22 ? "interim" : "first year";
 		else if (tenure >= 16 && roll < 0.55) situation = "fixture";
 		else if (level < prestige - 12 && roll < 0.40) situation = "hot seat";
+		// The rarer situations reuse the same roll: no extra draw.
+		else if (tenure >= 14 && roll > 0.92) situation = "final season";
+		else if (tenure >= 3 && tenure <= 6 && roll > 0.93) situation = "extension year";
+		else if (tenure >= 2 && tenure <= 5 && roll < 0.05) situation = "returning alum";
 		const sit = SITUATION_BY_NAME[situation];
 		/* Coaching philosophy (task 4.4): how this staff develops players and
 		   distributes usage. A "player-developer" raises ceilings across the
@@ -703,7 +724,7 @@
 		let name = rng.pick(COACH_FIRST) + " " + rng.pick(COACH_LAST);
 		/* Two programs with the same head coach in one season: 364 draws
 		   from 12,672 names collide about five times a year. */
-		for (let guard = 0; used && used.has(name) && guard < 12; guard++) {
+		for (let guard = 0; (REAL_TEAM_NAMES.has(name) || (used && used.has(name))) && guard < 12; guard++) {
 			name = rng.pick(COACH_FIRST) + " " + rng.pick(COACH_LAST);
 		}
 		if (used) used.add(name);
@@ -1466,9 +1487,28 @@
 		return teams;
 	}
 
-	function winProb(a, b, homeEdge) {
-		const diff = a - b + (homeEdge || 0);
-		return 1 / (1 + Math.exp(-diff / 7.5));
+	/* The chance that a team rated `a` beats one rated `b`, quoted from the
+	   same model playGameScore plays: the stretched strengths, ~0.72 points
+	   of margin per point, and a normal margin with sd MARGIN_SD x the
+	   regular-season (or postseason) noise. It used to be a logistic on
+	   7.5 rating points with no stretch, which nothing called and which
+	   disagreed with the sim (audit C8). `homePts` is a home edge in
+	   points, as homeEdge() returns it. */
+	function winProb(a, b, homePts, opts) {
+		const post = !!(opts && opts.postseason);
+		const noise = post
+			? 1 + 0.2 * clamp(opts && Number.isFinite(opts.upsetFactor) ? opts.upsetFactor : 1, 0, 3)
+			: REGULAR_NOISE;
+		const edge = gameStrength(a, post, b) - gameStrength(b, post, a) + (homePts || 0);
+		return normCdf((edge * 0.72) / (MARGIN_SD * noise));
+	}
+	function normCdf(z) {
+		// Abramowitz-Stegun 7.1.26 on erf; |error| < 1.5e-7.
+		const x = Math.abs(z) / Math.SQRT2;
+		const t = 1 / (1 + 0.3275911 * x);
+		const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t -
+			0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+		return z >= 0 ? 0.5 * (1 + y) : 0.5 * (1 - y);
 	}
 
 	/* A team's rating on a given day. Programs are not frozen at build time:
@@ -1588,7 +1628,7 @@
 	   direction, since a curve steep enough for Kentucky to win every year
 	   is the opposite failure. */
 	const TOP_KNEE = 50;
-	const TOP_STRETCH = 0.7;
+	const TOP_STRETCH = 0.2;
 	/* A second knee for the true elite, in the POSTSEASON and only against
 	   another team above TOP_KNEE — where titles are decided. The real
 	   curve keeps bending above the 1-seed line; applied to every game the
@@ -1599,7 +1639,7 @@
 	   1 seeds win 60% of titles over 300 seasons (44% before) and 5 seeds
 	   or worse 8% (16%); 1v16, 5v12 and 8v9 are unchanged. */
 	const ELITE_KNEE = 56;
-	const ELITE_STRETCH = 1.0;
+	const ELITE_STRETCH = 0.6;
 	function gameStrength(r, postseason, vsRating) {
 		const base = r + TOP_STRETCH * Math.max(0, r - TOP_KNEE);
 		if (!postseason || !(vsRating > TOP_KNEE)) return base;
@@ -2155,8 +2195,24 @@
 		}
 		if (!games.length) return [];
 
+		/* THE PHRASE MEMORY (audit 2026-10-10, R10): 62 templates for ~290
+		   events made the same sentences turn up in a class in five. Each
+		   template is "kind#index"; the ones the last few classes used
+		   (cfg.recentTemplates, supplied by the app) are down-weighted. With
+		   no memory the draw is exactly rng.pick's, stream and all. */
+		const recentT = new Set([].concat.apply([], (cfg && Array.isArray(cfg.recentTemplates)
+			? cfg.recentTemplates : []).filter(Array.isArray)));
+		const tplOf = new Map();
+		const pickT = (r, kind, list) => {
+			const idx = list.map((_, j) => j);
+			const i = recentT.size
+				? r.weighted(idx, (j) => (recentT.has(kind + "#" + j) ? 0.2 : 1))
+				: r.pick(idx);
+			tplOf.set(list[i], kind + "#" + i);
+			return list[i];
+		};
 		const add = (kind, text, when, teamsInvolved) => {
-			events.push({ kind, text, when, teams: teamsInvolved });
+			events.push({ kind, text, when, teams: teamsInvolved, tpl: tplOf.get(text) || null });
 		};
 		/* Whether a consequential event makes the feed this season. With a
 		   budget of seven and five consequential kinds that nearly always
@@ -2182,7 +2238,7 @@
 			   text is the body of the article — see pushEvent — so this is
 			   where the variety has to be. */
 			const half = u.g.when < 0.5 ? "season's first half" : "conference season";
-			add("upset", rng.pick([
+			add("upset", pickT(rng, "upset", [
 				u.winner.name + " beat " + u.loser.name + " " + u.g.teamPts + "-" + u.g.oppPts +
 					", the result of the " + half,
 				u.loser.name + " lost at " + u.winner.name + ", " + u.g.oppPts + "-" + u.g.teamPts +
@@ -2202,7 +2258,7 @@
 			const gm = rng.pick(good);
 			const otTag = gm.g.ot
 				? " (" + (gm.g.ot > 1 ? gm.g.ot + "OT" : "OT") + ")" : "";
-			add("game of the year", rng.pick([
+			add("game of the year", pickT(rng, "game of the year", [
 				gm.winner.name + " " + gm.g.teamPts + ", " + gm.loser.name + " " + gm.g.oppPts +
 					otTag + " — the game of the year",
 				gm.winner.name + " beat " + gm.loser.name + " " + gm.g.teamPts + "-" + gm.g.oppPts +
@@ -2238,7 +2294,7 @@
 				if (g.won) w++; else l++;
 			}
 			const rec = w + "-" + l;
-			add("coaching change", rng.pick([
+			add("coaching change", pickT(rng, "coaching change", [
 				t.name + " fired " + who + " in " + month + " at " + rec,
 				t.name + " and " + who + " parted ways in " + month + ", with the team " + rec,
 				who + " coached his last game at " + t.name + " in " + month + "; the " +
@@ -2255,7 +2311,7 @@
 		if (blowouts.length && tells(0.55)) {
 			const b = blowouts[0];
 			const by = b.g.teamPts - b.g.oppPts;
-			add("blowout", rng.pick([
+			add("blowout", pickT(rng, "blowout", [
 				b.winner.name + " beat " + b.loser.name + " by " + by,
 				b.winner.name + " led " + b.loser.name + " by more than thirty at the " +
 					"half and won by " + by,
@@ -2271,7 +2327,7 @@
 			.filter((x) => x.n >= 12).sort((a, b) => b.n - a.n);
 		if (streaks.length && tells(0.55)) {
 			const st = rng.pick(streaks.slice(0, 5));
-			add("streak", rng.pick([
+			add("streak", pickT(rng, "streak", [
 				st.t.name + " won " + st.n + " in a row",
 				st.t.name + " has not lost in " + st.n + " games",
 				st.n + " straight for " + st.t.name + ", and the schedule ahead does " +
@@ -2302,8 +2358,11 @@
 				if (t === host) return null;
 				const cause = r.pick(["a snowstorm", "a frozen floor",
 					"an arena roof leak", "a travel failure", "an ice storm",
-					"a burst pipe under the north stand", "a power cut at the arena"]);
-				return ["postponement", r.pick([
+					"a burst pipe under the north stand", "a power cut at the arena",
+					"a water-main break", "a flooded locker room", "a bus that broke down on the interstate",
+					"a scoreboard that fell onto the floor", "an outbreak of flu in the traveling party",
+					"a fire alarm that emptied the arena"]);
+				return ["postponement", pickT(r, "postponement", [
 					t.name + "'s trip to " + host.name + " was postponed by " + cause,
 					host.name + " and " + t.name + " will play later in the year after " +
 						cause + " closed the building",
@@ -2315,7 +2374,7 @@
 				const t = r.pick(ranked.slice(0, 60));
 				// "a Arizona State dunk": the article has to agree with the
 				// name, and js/text.js is where that rule lives.
-				return ["viral", r.pick([
+				return ["viral", pickT(r, "viral", [
 					global.Text.withArticle(t.name + " dunk") +
 						" was the most-watched clip of the college season",
 					global.Text.withArticle(t.name + " lob") +
@@ -2323,6 +2382,12 @@
 					"The clip of the year so far is " +
 						global.Text.withArticle(t.name + " chase-down block") +
 						" that nobody in the building saw coming",
+					global.Text.withArticle(t.name + " half-court buzzer-beater") +
+						" is the most-shared shot of the season",
+					"A walk-on's first career basket at " + t.name +
+						" has more views than the rest of the game combined",
+					global.Text.withArticle(t.name + " alley-oop off the backboard") +
+						" has been looped on every highlight show",
 				]), [t.name]];
 			},
 			(r) => {
@@ -2330,12 +2395,16 @@
 				const a = gm.winner;
 				const b = gm.loser;
 				if (a === b) return null;
-				return ["altercation", r.pick([
+				return ["altercation", pickT(r, "altercation", [
 					a.name + " and " + b.name + " cleared the benches with four minutes left",
 					"Six players were ejected when " + a.name + " and " + b.name +
 						" stopped playing basketball in the second half",
 					a.name + " and " + b.name + " needed eleven minutes of review and " +
 						"four ejections to finish a game neither will forget",
+					"The handshake line between " + a.name + " and " + b.name +
+						" did not get as far as a handshake",
+					a.name + " and " + b.name +
+						" finished with nine players between them after a second-half fight",
 				]), [a.name, b.name]];
 			},
 			(r) => {
@@ -2358,7 +2427,7 @@
 				const pick = r.pick(cands);
 				const t = pick.t;
 				const n = pick.n;
-				return ["storm", r.pick([
+				return ["storm", pickT(r, "storm", [
 					t.name + " played three ranked opponents in eight days and won " +
 						n + " of them",
 					t.name + " came out of the hardest week on anybody's schedule " +
@@ -2371,12 +2440,15 @@
 			   time meant a season's color was nearly always the same three. */
 			(r) => {
 				const t = r.pick(ranked.slice(0, 80));
-				return ["attendance", r.pick([
+				return ["attendance", pickT(r, "attendance", [
 					t.name + " played in front of the largest home crowd in the " +
-						"programme's history",
+						"program's history",
 					"The student section at " + t.name + " camped out for two nights " +
 						"and filled the building an hour before tip",
-					t.name + " sold out its arena for the first time in eleven years",
+					t.name + " sold out " + ((global.Colleges.ARENAS || {})[t.name] || "its arena") +
+						" for the first time in eleven years",
+					t.name + " moved a home game to the NBA arena downtown and filled that too",
+					"Fans at " + t.name + " stormed the floor, and the conference has fined the school for it",
 				]), [t.name]];
 			},
 			(r) => {
@@ -2384,13 +2456,17 @@
 				const a = gm.winner;
 				const b = gm.loser;
 				if (a === b) return null;
-				return ["officiating", r.pick([
+				return ["officiating", pickT(r, "officiating", [
 					"The last call in " + a.name + "'s win over " + b.name +
 						" was reviewed for six minutes and is still being argued about",
 					b.name + " filed a formal complaint about the officiating in its " +
 						"loss at " + a.name,
 					"Two technical fouls in the last minute decided " + a.name +
 						" against " + b.name + ", which is not how anybody wanted it decided",
+					"A shot-clock violation that was never called decided " + a.name +
+						"'s win over " + b.name,
+					"The conference has apologized to " + b.name +
+						" for the final ninety seconds at " + a.name,
 				]), [a.name, b.name]];
 			},
 		];

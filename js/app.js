@@ -50,6 +50,10 @@
 		},
 		noteQuery: "",   // the Notes tab has its own search; it used to share one
 		overrides: {},   // player key -> {ovr, pot, archetype, college, ratings, …}
+		/* The locks of the OTHER loaded files, by file fingerprint. `overrides`
+		   is the active file's; switching files parks it here and brings back
+		   the new file's. See checkLockFingerprint. */
+		lockStash: {},
 		overrideFingerprint: null,
 		selected: {},    // player key -> true, for bulk editing
 		history: [],     // recent seeds, newest first
@@ -63,6 +67,10 @@
 		   UP, and the one axis of the three that never had it. See
 		   rememberPool and flavorMemoryFactor in js/ratings.js. */
 		flavorHistory: [],
+		// The season storylines, a list of name lists (audit R8).
+		narrativeHistory: [],
+		// Season-event templates used, a list of lists (audit R10).
+		templateHistory: [],
 		presetName: "default",
 		presetDirty: false,
 		customPresets: {},
@@ -89,6 +97,10 @@
 		units: "imperial",
 		// Board heatmap: shade Ovr / Pot / PPG by percentile within the class.
 		boardHeat: false,
+		// U35/U36: the board's compact rows and its own column choice.
+		boardCompact: false,
+		boardHidden: {},
+		boardExtra: [],
 		// "auto" | "on" | "off" — see cardMode() in js/views.js.
 		cardView: "auto",
 		cardAll: false,
@@ -129,6 +141,9 @@
 		   belong to the file that was imported, and they are consumed by the
 		   chain it starts. */
 		universeBiography: null,
+		/* UV12: a loaded league's last drafted classes, offered as the
+		   universe's history ({name, data, classes}); not persisted. */
+		pastProOffer: null,
 		universeExpect: null,
 		// The randomizer's scope select, persisted like every other control.
 		randomScope: "gentle",
@@ -155,7 +170,8 @@
 		   of sliders a new user needs, "season" adds the college season and
 		   awards, "model" is everything. Persisted like every other view
 		   choice. The search box and "only what I changed" cut across it. */
-		settingTier: "model",
+		// U32: a first visit shows the Basic settings; the level is remembered.
+		settingTier: "shape",
 		/* The settings starred into the "Pinned" group at the top of the
 		   panel (audit Q5), in the order they were pinned. Not to be confused
 		   with cfg.pinned (settings the user has decided; see pinSetting) or
@@ -181,6 +197,16 @@
 		replayRun: null,
 		ghost: null,
 		puzzle: null,
+		/* Dailies, campaigns and puzzles run on a canonical synthetic class
+		   (audit R5); this is the explicit "on my own file" opt-out. */
+		challengeOwnFile: false,
+		// Scenario packs loaded from codes (R12.2): [{name, list}].
+		packs: [],
+		/* "players" (a reroll redraws the class) or "schools" (and every
+		   prospect's college too, audit R2). */
+		rerollScope: "players",
+		// A Play game opened before the class it is played on exists (R3).
+		blindPending: null,
 		/* Which season's carry-over the Universe tab's world table is showing.
 		   See worldSection in js/views.js. */
 		worldSeason: null,
@@ -325,28 +351,91 @@
 			/* The imported biographies: a rebuilt season without them draws
 			   different men. Held on state, not on the universe; see 6020. */
 			biography: state.universeBiography || null,
+			proImports: state.universe.proImports || null,
 		};
 	}
 
+	/* UV9: kept by what a man did (national honors, a lottery slot, span, a
+	   real pro career), not by span alone — span >= 2 dropped every
+	   one-and-done No. 1 pick and player of the year, and (UV12) every man
+	   imported from a league's pro history. */
 	function registryForStorage() {
 		const reg = state.universe.registry;
 		if (!reg) return null;
+		const U = global.Universe;
 		const keep = Object.keys(reg)
 			.map((id) => reg[id])
-			.filter((x) => x && x.span >= 2)
-			.sort((a, b) => b.span - a.span)
-			.slice(0, PERSIST_REGISTRY);
+			.filter((x) => x && x.id)
+			.map((x) => ({ x, score: U.registryKeepScore(x) }))
+			.filter((o) => o.score > 0)
+			.sort((a, b) => b.score - a.score || cmpIds(a.x.id, b.x.id))
+			.slice(0, PERSIST_REGISTRY)
+			.map((o) => o.x);
 		if (!keep.length) return null;
 		const out = {};
 		for (const x of keep) out[x.id] = x;
 		return out;
 	}
 
+	function cmpIds(a, b) { return a < b ? -1 : a > b ? 1 : 0; }
+
+	/* A write per idle moment, not per tab switch (audit P6). Navigation and
+	   a <details> toggle used to stringify and write the whole state —
+	   hundreds of KB with a universe — synchronously, every time. They call
+	   persistSoon; anything that must be on disk now still calls persist,
+	   and a hidden or closing page flushes what is pending. */
+	let persistPending = null;
+	function persistSoon() {
+		if (persistPending !== null) return;
+		const go = () => {
+			persistPending = null;
+			if (!storeIsOurs()) return;
+			persist();
+		};
+		persistPending = typeof global.requestIdleCallback === "function"
+			? global.requestIdleCallback(go, { timeout: 1000 }) : setTimeout(go, 300);
+	}
+	function persistFlush() {
+		if (persistPending === null) return;
+		if (typeof global.cancelIdleCallback === "function") global.cancelIdleCallback(persistPending);
+		clearTimeout(persistPending);
+		persistPending = null;
+		/* Storage cleared since the last write (the user, another tab, a
+		   "clear site data") is not overwritten by a deferred navigation
+		   write; the sync write it replaced would have landed before. */
+		if (!storeIsOurs()) return;
+		persist();
+	}
+	/* A deferred write lands only on storage this page wrote last. Cleared,
+	   or rewritten by another tab or a reset since, it is somebody else's
+	   now, and writing this page's stale state over it would bring back
+	   exactly what they removed. */
+	function storeIsOurs() {
+		try {
+			const cur = localStorage.getItem(STORE_KEY);
+			if (cur === null) return false;
+			return persistedJson === null || cur === persistedJson;
+		} catch (e) { return false; }
+	}
+	window.addEventListener("pagehide", persistFlush);
+	document.addEventListener("visibilitychange", () => {
+		if (document.visibilityState === "hidden") persistFlush();
+	});
+	// What was last written, so an unchanged state is not written again.
+	let persistedJson = null;
 	function persist() {
 		scheduleAutosave();
 		scheduleSessionSave();
+		if (persistPending !== null) {
+			if (typeof global.cancelIdleCallback === "function") global.cancelIdleCallback(persistPending);
+			clearTimeout(persistPending);
+			persistPending = null;
+		}
 		try {
-			localStorage.setItem(STORE_KEY, JSON.stringify(payload()));
+			const json = JSON.stringify(payload());
+			if (json === persistedJson && localStorage.getItem(STORE_KEY) === json) return;
+			localStorage.setItem(STORE_KEY, json);
+			persistedJson = json;
 		} catch (e) {
 			const quota = e && (e.name === "QuotaExceededError" ||
 				e.name === "NS_ERROR_DOM_QUOTA_REACHED" || e.code === 22);
@@ -375,10 +464,18 @@
 			cfg: state.cfg,
 			overrides: state.overrides,
 			overrideFingerprint: state.overrideFingerprint,
+			lockStash: state.lockStash,
+			/* The seed a reroll drew. A reroll blanks cfg.seed and keeps the
+			   drawn one only here, so without it every reload and every
+			   "Restore last session" drew a new random class from the same
+			   files and settings (audit 2026-10-10 B3). */
+			lastSeed: state.lastSeed || null,
 			history: state.history.slice(0, 12),
 			poolHistory: state.poolHistory,
 			anomalyHistory: state.anomalyHistory,
 			flavorHistory: state.flavorHistory,
+			narrativeHistory: state.narrativeHistory,
+			templateHistory: state.templateHistory,
 			mutators: state.mutators,
 			presetName: state.presetName,
 			presetDirty: state.presetDirty,
@@ -405,6 +502,9 @@
 			// So a column added later can be told from one the user hid.
 			knownColumns: V.COLUMNS.map((c) => c.key),
 			boardHeat: state.boardHeat,
+			boardCompact: state.boardCompact,
+			boardHidden: state.boardHidden,
+			boardExtra: state.boardExtra,
 			cardView: state.cardView,
 			cardAll: state.cardAll,
 			compactBracket: state.compactBracket,
@@ -419,6 +519,9 @@
 			replayRun: state.replayRun,
 			ghost: state.ghost,
 			puzzle: state.puzzle,
+			challengeOwnFile: state.challengeOwnFile,
+			packs: state.packs,
+			rerollScope: state.rerollScope,
 			lastUntil: state.lastUntil,
 			sessions: state.sessions.slice(0, SESSIONS_MAX),
 			// The branch point, so a reload continues the lineage rather than
@@ -556,6 +659,7 @@
 			/* Only a full (IndexedDB) save carries these. */
 			programs: su.programs && typeof su.programs === "object" ? su.programs : {},
 			recruiting: Array.isArray(su.recruiting) ? su.recruiting : null,
+			proImports: su.proImports && typeof su.proImports === "object" ? su.proImports : null,
 		};
 	}
 
@@ -564,7 +668,12 @@
 	function restore(given) {
 		let saved = given || null;
 		if (!given) {
-			try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) { saved = null; }
+			try {
+				const raw = localStorage.getItem(STORE_KEY);
+				// What this page found is what it last "wrote", for storeIsOurs.
+				if (raw !== null && persistedJson === null) persistedJson = raw;
+				saved = JSON.parse(raw || "null");
+			} catch (e) { saved = null; }
 		}
 		if (!saved || typeof saved !== "object" || Array.isArray(saved)) return null;
 		/* A payload from an older schema is MIGRATED. One that cannot be
@@ -585,6 +694,14 @@
 		if (validString(saved.overrideFingerprint)) {
 			state.overrideFingerprint = saved.overrideFingerprint;
 		}
+		if (saved.lockStash && typeof saved.lockStash === "object" && !Array.isArray(saved.lockStash)) {
+			state.lockStash = {};
+			for (const fp of Object.keys(saved.lockStash)) {
+				const m = saved.lockStash[fp];
+				if (m && typeof m === "object" && !Array.isArray(m)) state.lockStash[fp] = m;
+			}
+		}
+		if (validString(saved.lastSeed)) state.lastSeed = saved.lastSeed;
 		if (Array.isArray(saved.history)) {
 			state.history = saved.history.filter((h) => typeof h === "string");
 		}
@@ -602,6 +719,14 @@
 		if (Array.isArray(saved.flavorHistory)) {
 			state.flavorHistory = saved.flavorHistory
 				.filter((n) => typeof n === "string");
+		}
+		if (Array.isArray(saved.narrativeHistory)) {
+			state.narrativeHistory = saved.narrativeHistory.filter(Array.isArray)
+				.map((a) => a.filter((n) => typeof n === "string"));
+		}
+		if (Array.isArray(saved.templateHistory)) {
+			state.templateHistory = saved.templateHistory.filter(Array.isArray)
+				.map((a) => a.filter((n) => typeof n === "string"));
 		}
 		state.mutators = global.ReplayMeta.cleanMutators(saved.mutators);
 		if (validString(saved.presetName)) state.presetName = saved.presetName;
@@ -678,6 +803,10 @@
 			}
 		}
 		state.boardHeat = !!saved.boardHeat;
+		state.boardCompact = !!saved.boardCompact;
+		state.boardHidden = validFlagMap(saved.boardHidden) || {};
+		state.boardExtra = Array.isArray(saved.boardExtra)
+			? saved.boardExtra.filter((k) => typeof k === "string").slice(0, 20) : [];
 		if (validString(saved.cardView, ["auto", "on", "off"])) state.cardView = saved.cardView;
 		state.cardAll = !!saved.cardAll;
 		state.compactBracket = !!saved.compactBracket;
@@ -780,8 +909,16 @@
 	/* Named for what it is, and not `snapshot`: there is already a snapshot()
 	   further down for the class-comparison panel, and a duplicate function
 	   declaration silently hands both call sites the later one. */
-	function undoSnapshot(label) {
-		return {
+	/* `withWorld` (undo and redo only) also holds the universe, by
+	   reference, and its dynasty goal: loading a saved universe, importing
+	   one, building a synthetic one and starting a dynasty goal pushed a
+	   labelled undo entry that restored the settings and left the world
+	   (audit 2026-10-10 B7). A run-history row or a kept class is persisted,
+	   so it never carries the universe. */
+	function undoSnapshot(label, withWorld) {
+		const world = withWorld && state.universe
+			? { universe: state.universe, dynasty: state.universe.dynasty || null } : {};
+		return Object.assign(world, {
 			label,
 			cfg: JSON.parse(JSON.stringify(state.cfg)),
 			overrides: JSON.parse(JSON.stringify(state.overrides)),
@@ -803,6 +940,8 @@
 			anomalyHistory: (state.anomalyHistory || []).map((a) => a.slice()),
 			// And the flavor memory, for the same reason.
 			flavorHistory: (state.flavorHistory || []).slice(),
+			narrativeHistory: (state.narrativeHistory || []).map((a) => a.slice()),
+			templateHistory: (state.templateHistory || []).map((a) => a.slice()),
 			/* Per-file randomized-settings patches (see randomizeSettings'
 			   "draw separately for each loaded class"), for the same reason
 			   lastSeed is here: it is an input that lives outside cfg, and an
@@ -812,11 +951,19 @@
 			fileCfgs: JSON.parse(JSON.stringify(state.fileCfgs || {})),
 			// An input outside cfg too: the biographies decide who is drawn.
 			universeBiography: state.universeBiography || null,
-		};
+			/* The mutators change the class effectiveCfg builds and live
+			   outside cfg, so an undone mutator toggle, a run-history row or a
+			   kept class made with them on came back without them; and the
+			   challenge wipes the memories in effectiveCfg (audit 2026-10-10
+			   B7). */
+			mutators: (state.mutators || []).slice(),
+			challenge: state.challenge || null,
+			replayRun: state.replayRun ? JSON.parse(JSON.stringify(state.replayRun)) : null,
+		});
 	}
 
 	function pushUndo(label) {
-		state.undo.push(undoSnapshot(label));
+		state.undo.push(undoSnapshot(label, true));
 		if (state.undo.length > 40) state.undo.shift();
 		// A new action forks the history: whatever was undone is no longer
 		// reachable, which is what every undo stack does.
@@ -844,9 +991,20 @@
 		if (Array.isArray(snap.poolHistory)) state.poolHistory = snap.poolHistory;
 		if (Array.isArray(snap.anomalyHistory)) state.anomalyHistory = snap.anomalyHistory;
 		if (Array.isArray(snap.flavorHistory)) state.flavorHistory = snap.flavorHistory;
+		if (Array.isArray(snap.narrativeHistory)) state.narrativeHistory = snap.narrativeHistory;
+		if (Array.isArray(snap.templateHistory)) state.templateHistory = snap.templateHistory;
 		state.fileCfgs = snap.fileCfgs && typeof snap.fileCfgs === "object"
 			? snap.fileCfgs : {};
 		if (snap.universeBiography !== undefined) state.universeBiography = snap.universeBiography;
+		// Absent from a snapshot written before they were recorded.
+		if (Array.isArray(snap.mutators)) state.mutators = global.ReplayMeta.cleanMutators(snap.mutators);
+		if (snap.challenge !== undefined) state.challenge = snap.challenge;
+		if (snap.replayRun !== undefined) state.replayRun = snap.replayRun;
+		// Never swapped out from under a running chain.
+		if (snap.universe && !(state.universe && state.universe.running)) {
+			state.universe = snap.universe;
+			state.universe.dynasty = snap.dynasty || null;
+		}
 	}
 
 	function undo() {
@@ -854,7 +1012,7 @@
 		if (!prev) return;
 		// Ctrl+Z existed and Ctrl+Shift+Z did not, so an undo was a one-way
 		// trip: the state you were in a moment ago was simply gone.
-		state.redo.push(undoSnapshot(prev.label));
+		state.redo.push(undoSnapshot(prev.label, true));
 		if (state.redo.length > 40) state.redo.shift();
 		applySnapshot(prev, "Undid");
 	}
@@ -867,7 +1025,7 @@
 		let prev = null;
 		for (let i = 0; i < n; i++) {
 			prev = state.undo.pop();
-			state.redo.push(undoSnapshot(prev.label));
+			state.redo.push(undoSnapshot(prev.label, true));
 			if (state.redo.length > 40) state.redo.shift();
 			setSnapshot(prev);
 		}
@@ -903,7 +1061,7 @@
 	function redo() {
 		const next = state.redo.pop();
 		if (!next) return;
-		state.undo.push(undoSnapshot(next.label));
+		state.undo.push(undoSnapshot(next.label, true));
 		if (state.undo.length > 40) state.undo.shift();
 		applySnapshot(next, "Redid");
 	}
@@ -1554,7 +1712,9 @@
 			champ.regSnapshot.w >= 20;
 		const bits = [];
 		if (perfect) bits.push(champ.name + " went unbeaten and won it all");
-		if (sc && sc.score >= 50) bits.push("strangeness " + sc.score + "/100");
+		/* U28: the strangeness score is replay-goal jargon; it lives in the
+		   seed pill's tooltip, not in the status line after a first run. */
+		void sc;
 		if (bits.length) setStatus("\u2605 Achievement: " + bits.join(" · ") + ".");
 	}
 
@@ -1715,6 +1875,14 @@
 			n.style.opacity = curve ? "1" : ".38";
 			n.querySelectorAll("input").forEach((i) => (i.disabled = !curve));
 			n.title = curve ? "" : "Unused while overalls are preserved; pick Rebuild class curve";
+			// U22: the reason on the control itself, not only on hover.
+			let note = n.querySelector(".curvenote");
+			if (!note) {
+				note = el("span", "unit curvenote", "(only with Rebuild class curve)");
+				const lab = n.querySelector("label") || n;
+				lab.appendChild(note);
+			}
+			note.hidden = curve;
 		}
 		$("ovrModeHint").textContent = curve
 			? "Rebuild: overalls are re-dealt along a configurable curve, so the class can get better or worse."
@@ -1938,9 +2106,13 @@
 			const y = b[k];
 			if (sameSetting(k, x, y)) continue;
 			if (x && typeof x === "object") { out.push(k + " (edited)"); continue; }
-			out.push(k + " " + x + " → " + y);
+			out.push(k + " " + settingWord(x) + " → " + settingWord(y));
 		}
 		return out;
+	}
+	// U28: a boolean reads as off/on, not as JavaScript.
+	function settingWord(v) {
+		return v === true ? "on" : v === false ? "off" : v;
 	}
 
 	/* Any two presets against each other. The dropdown told you what the
@@ -1989,30 +2161,51 @@
 	   The old code only repainted when cfg.archetypeWeights was truthy, so
 	   "Reset weights" followed by a preset change left stale numbers on screen. */
 	let archFilterHook = null;
-	function paintArchWeights() {
+	/* Repainted only when what it shows changed (audit P1): the last result
+	   and the custom weights. It ran on every render and every slider tick,
+	   and looked each of ~385 inputs up with a filter over the ~385
+	   archetypes — 45% of a tab switch and 70% of a slider event. */
+	let archPainted = null;
+	let archByName = null;
+	function paintArchWeights(force) {
 		const aw = $("archWeights");
 		if (!aw) return;
-		if (archFilterHook) archFilterHook();
-		// Realized frequency from the last run, beside the weight that asked
-		// for it.
-		const res = state.results[state.active];
-		const counts = {};
-		if (res) {
-			for (const p of res.players) counts[p.archetype] = (counts[p.archetype] || 0) + 1;
-		}
-		const n = res ? res.players.length : 0;
-		for (const g of aw.querySelectorAll(".archgot")) {
-			const c = counts[g.dataset.arch] || 0;
-			g.textContent = n ? (c ? (100 * c / n).toFixed(1) + "%" : "—") : "";
-			g.className = "archgot" + (c ? "" : " none");
-		}
+		const res = state.results[state.active] || null;
 		const custom = state.cfg.archetypeWeights;
+		const customKey = custom ? JSON.stringify(custom) : "";
+		if (!force && archPainted && archPainted.res === res && archPainted.custom === customKey &&
+			archPainted.aw === aw) return;
+		const resChanged = !archPainted || archPainted.res !== res || archPainted.aw !== aw;
+		archPainted = { res, custom: customKey, aw };
+		// The pool filter follows the class; a weight change does not move it.
+		if (archFilterHook && (resChanged || force)) archFilterHook();
+		if (resChanged || force) {
+			// Realized frequency from the last run, beside the weight that asked
+			// for it.
+			const counts = {};
+			if (res) {
+				for (const p of res.players) counts[p.archetype] = (counts[p.archetype] || 0) + 1;
+			}
+			const n = res ? res.players.length : 0;
+			for (const g of aw.querySelectorAll(".archgot")) {
+				const c = counts[g.dataset.arch] || 0;
+				const text = n ? (c ? (100 * c / n).toFixed(1) + "%" : "—") : "";
+				const cls = "archgot" + (c ? "" : " none");
+				if (g.textContent !== text) g.textContent = text;
+				if (g.className !== cls) g.className = cls;
+			}
+		}
+		if (!archByName) {
+			archByName = {};
+			for (const x of RB.ARCHETYPES) archByName[x.name] = x;
+		}
 		for (const i of aw.querySelectorAll("input[data-arch]")) {
-			const a = RB.ARCHETYPES.filter((x) => x.name === i.dataset.arch)[0];
+			const a = archByName[i.dataset.arch];
 			const fallback = a && a.w !== undefined ? a.w : 1;
 			const v = custom && Number.isFinite(custom[i.dataset.arch])
 				? custom[i.dataset.arch] : fallback;
-			i.value = v;
+			// Only a value that differs is written: each write dirties layout.
+			if (i.value !== String(v)) i.value = v;
 		}
 	}
 
@@ -2556,11 +2749,15 @@
 	}
 
 	/* Today's seed: the same class for everyone on the same settings and
-	   date, which is what makes a class something to compare notes on. */
+	   date, which is what makes a class something to compare notes on.
+	   The UTC date: a local one gave two users in different time zones two
+	   different dailies at the same moment, and the achievement ledger
+	   (which stamps toISOString's UTC date) a different day from the daily
+	   just played (audit 2026-10-10 B21). */
 	function dailySeed(d) {
 		d = d || new Date();
 		const pad = (n) => String(n).padStart(2, "0");
-		return "daily-" + d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+		return "daily-" + d.getUTCFullYear() + "-" + pad(d.getUTCMonth() + 1) + "-" + pad(d.getUTCDate());
 	}
 
 	function dailyReroll() {
@@ -2651,6 +2848,10 @@
 			ledger,
 			// Gated by default; one tick shows every era and flavor.
 			showAll: !!s.showAll,
+			quiet: !!s.quiet,
+			// Builds seen in a top ten: name -> {seed, at, n} (R11).
+			builds: s.builds && typeof s.builds === "object" && !Array.isArray(s.builds)
+				? s.builds : {},
 		};
 		return replayState;
 	}
@@ -2693,10 +2894,24 @@
 			box.setAttribute("aria-live", "polite");
 			document.body.appendChild(box);
 		}
-		const t = el("div", "replaytoast", text);
+		const t = el("div", "replaytoast toast", text);
+		// U9: every toast can be closed.
+		const x = el("button", "toastx", "\u00d7");
+		x.type = "button";
+		x.setAttribute("aria-label", "Dismiss");
+		x.addEventListener("click", () => t.remove());
+		t.appendChild(x);
 		box.appendChild(t);
 		setTimeout(() => t.remove(), 5000);
 		return t;
+	}
+	/* U9: achievement and bingo toasts stay quiet on the first run of a
+	   session (a first-time visitor came for a draft class, not a bingo
+	   card) and when the user ticked "Quiet achievements". They are still
+	   recorded in the ledger. */
+	let replayRunsSeen = 0;
+	function achievementsQuiet() {
+		return replayRunsSeen <= 1 || !!replayStore().quiet;
 	}
 	const replayToast = toast;
 
@@ -2729,13 +2944,26 @@
 		const sc = global.Engine.strangeness(res);
 		const fresh = [];
 		const linesBefore = RM.cardLines(r.card);
-		const marked = RM.markCard(r.card, sc && sc.kinds);
+		const marked = RM.markCard(r.card, RM.bingoKinds(res, sc));
 		for (const id of RM.detect(res, sc)) earn(r, id, res, fresh);
 		if (RM.cardLines(r.card) > 0) earn(r, "bingo-line", res, fresh);
 		if (RM.cardFull(r.card)) earn(r, "bingo-full", res, fresh);
+		replayRunsSeen++;
+		// The build collection (audit R11).
+		const newBuilds = RM.collectBuilds(r.builds, res, new Date().toISOString().slice(0, 10));
+		const prog = RM.collectionProgress(r.builds, RB);
+		if (prog.have >= 50) earn(r, "collector-50", res, fresh);
+		if (prog.by.rare[0] >= 10) earn(r, "rare-hunter", res, fresh);
+		if (newBuilds.length) saveReplay();
 		if (!marked.length && !fresh.length) return;
-		if (RM.cardLines(r.card) > linesBefore) replayToast("Bingo! A line on card " + r.card.seed + ".");
-		for (const id of fresh) {
+		const quiet = achievementsQuiet();
+		if (!quiet && RM.cardLines(r.card) > linesBefore) replayToast("Bingo! A line on card " + r.card.seed + ".");
+		if (!quiet && fresh.length > 2) {
+			// U9: several at once are one toast, not a stack over the board.
+			replayToast(fresh.length + " achievements: " +
+				fresh.map((id) => RM.ACH_BY_ID[id].label).join(", ") + " — see Challenges (\u2691).");
+		}
+		for (const id of (quiet || fresh.length > 2) ? [] : fresh) {
 			const a = RM.ACH_BY_ID[id];
 			const opens = RM.UNLOCKS.filter((u) => u.requires === id)
 				.map((u) => (u.kind === "era"
@@ -2786,6 +3014,34 @@
 		}
 		box.appendChild(mu);
 
+		// File gravity and the reroll scope (audit R2).
+		const resNow = state.results[state.active];
+		const grav = resNow ? RM.fileGravity(resNow.players) : null;
+		if (grav) {
+			const gp = el("p", "hint filegravity", "File gravity: " + grav.college + " holds " +
+				grav.count + " of this file's five best prospects, so it will be the favourite in " +
+				"most rerolls. Reroll schools too, or the Transfer frenzy mutator, breaks that.");
+			gp.id = "replayGravity";
+			box.appendChild(gp);
+		}
+		const scopeRow = el("div", "filters");
+		scopeRow.appendChild(el("span", "unit", "Reroll scope:"));
+		const scope = el("select");
+		scope.id = "rerollScope";
+		scope.setAttribute("aria-label", "Reroll scope");
+		scope.appendChild(new Option("players (the file's schools)", "players"));
+		scope.appendChild(new Option("schools too (redraw every college)", "schools"));
+		scope.value = state.rerollScope === "schools" ? "schools" : "players";
+		scope.addEventListener("change", () => {
+			state.rerollScope = scope.value;
+			persist();
+			setStatus(scope.value === "schools"
+				? "Rerolls now redraw every prospect's college (unless you set the college source)."
+				: "Rerolls keep the file's colleges.");
+		});
+		scopeRow.appendChild(scope);
+		box.appendChild(scopeRow);
+
 		// Bingo.
 		const lines = RM.cardLines(r.card);
 		box.appendChild(el("h4", null, "Strangeness bingo — card " + r.card.seed +
@@ -2820,6 +3076,7 @@
 			const li = el("li", e ? "got" : "missing");
 			li.dataset.ach = a.id;
 			li.appendChild(el("b", null, a.label));
+			if (a.tier) li.appendChild(el("span", "achtier " + a.tier, " [" + a.tier + "]"));
 			li.appendChild(document.createTextNode(" — " + a.desc));
 			const u = RM.UNLOCKS.filter((x) => x.requires === a.id)[0];
 			if (u) li.appendChild(el("span", "hint", " (unlocks the " + u.name + " " + u.kind + ")"));
@@ -2839,6 +3096,22 @@
 			list.appendChild(li);
 		}
 		box.appendChild(list);
+
+		// The build collection (R11).
+		const prog = RM.collectionProgress(r.builds, RB);
+		box.appendChild(el("h4", null, "Build collection — " + prog.have + " of " + prog.total));
+		box.appendChild(el("p", "hint", "Builds a top-ten pick was made of, across every class " +
+			"you have run: rare " + prog.by.rare[0] + "/" + prog.by.rare[1] + " · uncommon " +
+			prog.by.uncommon[0] + "/" + prog.by.uncommon[1] + " · common " +
+			prog.by.common[0] + "/" + prog.by.common[1] + "."));
+		const tiers = RM.buildTiers(RB);
+		const rare = Object.keys(r.builds).filter((b) => tiers[b] === "rare").sort();
+		if (rare.length) {
+			const rl = el("p", "hint", "Rare builds collected: " + rare.map((b) => b +
+				" (seed " + r.builds[b].seed + ")").join(", "));
+			rl.id = "replayRareBuilds";
+			box.appendChild(rl);
+		}
 		modal("Replay: bingo, mutators, achievements", box, null, "Close");
 	}
 
@@ -2885,6 +3158,17 @@
 		lab.appendChild(document.createTextNode(" Show everything (no unlocks needed)"));
 		lab.title = "Eras and flavors that achievements unlock are listed from the start";
 		sel.parentNode.insertBefore(lab, $("eraNote"));
+		// U9: achievements and bingo can be told to stay out of the way.
+		const qlab = el("label", "check");
+		const qcb = el("input");
+		qcb.type = "checkbox";
+		qcb.id = "replayQuiet";
+		qcb.checked = replayStore().quiet;
+		qcb.addEventListener("change", () => { replayStore().quiet = qcb.checked; saveReplay(); });
+		qlab.appendChild(qcb);
+		qlab.appendChild(document.createTextNode(" Quiet achievements (no pop-ups)"));
+		qlab.title = "Achievements and bingo lines are still recorded; they just do not pop up";
+		sel.parentNode.insertBefore(qlab, $("eraNote"));
 	}
 
 	/* Replay a randomizer draw by its seed. */
@@ -2957,6 +3241,7 @@
 			});
 			box.appendChild(b);
 		}
+		rovingRadios(box);
 	}
 
 	/* The one-press version of the whole loop. Placed beside Randomize
@@ -3065,9 +3350,10 @@
 	   "only what I changed" does too, since a changed model dial is exactly
 	   what you would want to see. */
 	const SETTING_TIERS = [
-		["shape", "Shape", "The class: quality, depth, builds, flavor, paths"],
-		["season", "Season", "Plus the college season and its awards"],
-		["model", "Model", "Everything, memories and noise dials included"],
+		// U32: cumulative depth levels, named as levels rather than topics.
+		["shape", "Basic", "The class: quality, depth, builds, flavor, paths"],
+		["season", "More", "Plus the college season and its awards"],
+		["model", "Everything", "Everything, memories and noise dials included"],
 	];
 	const TIER_SHAPE = new Set([
 		"preset", "seed", "ovrMode", "classQuality", "classDepth", "eliteCount",
@@ -3109,13 +3395,39 @@
 			});
 			row.appendChild(b);
 		}
+		rovingRadios(row);
+	}
+	/* U15: a role="radio" group behaves like one — a single tab stop, and
+	   the arrow keys move the choice. */
+	function rovingRadios(box) {
+		const items = Array.from(box.querySelectorAll('[role="radio"]'));
+		if (!items.length) return;
+		let any = false;
+		for (const b of items) {
+			const on = b.getAttribute("aria-checked") === "true";
+			b.tabIndex = on ? 0 : -1;
+			any = any || on;
+		}
+		if (!any) items[0].tabIndex = 0;
+		box.onkeydown = (e) => {
+			const d = (e.key === "ArrowRight" || e.key === "ArrowDown") ? 1
+				: (e.key === "ArrowLeft" || e.key === "ArrowUp") ? -1 : 0;
+			if (!d) return;
+			const list = Array.from(box.querySelectorAll('[role="radio"]'));
+			const i = list.indexOf(document.activeElement);
+			if (i === -1) return;
+			e.preventDefault();
+			list[(i + d + list.length) % list.length].click();
+			const now = box.querySelector('[role="radio"][aria-checked="true"]');
+			if (now) now.focus();
+		};
 	}
 
 	function bindSettingTier() {
 		const anchor = $("settingSearchBox");
 		if (!anchor || $("settingTier")) return;
 		const ctl = el("div", "ctl");
-		const lbl = el("span", "lbl", "Show settings about:");
+		const lbl = el("span", "lbl", "Show settings:");
 		lbl.id = "settingTierLabel";
 		ctl.appendChild(lbl);
 		const chips = el("div", "chips");
@@ -3195,15 +3507,35 @@
 		// The re-run fine print is for the Model view (or a focused control).
 		const aside = $("settings");
 		if (aside) aside.classList.toggle("tier-model", state.settingTier === "model");
+		foldLongHints();
 		if (note) {
 			note.textContent = (q || changedOnly)
 				? shown + " of " + total + " settings" +
 					(shown === 0 ? " — nothing matches" : "")
 				: tiered
 					? tiered + " of " + total + " settings are behind the " +
-						(state.settingTier === "shape" ? "Season and Model" : "Model") +
-						" tier"
+						(state.settingTier === "shape" ? "More and Everything levels" : "Everything level")
 					: "";
+		}
+	}
+	/* U33: a setting's long explanation shows its first two lines, with an
+	   (i) that opens the rest. Idempotent: a hint is folded once. */
+	const LONG_HINT = 150;
+	function foldLongHints() {
+		for (const p of document.querySelectorAll("#settings .ctl p.unit:not([data-fold]), #settings .ctl p.hint:not([data-fold])")) {
+			if ((p.textContent || "").length < LONG_HINT) continue;
+			p.dataset.fold = "1";
+			p.classList.add("hintclamp");
+			const b = el("button", "hintmore", "\u24d8 more");
+			b.type = "button";
+			b.setAttribute("aria-expanded", "false");
+			b.title = "Show the whole explanation";
+			b.addEventListener("click", () => {
+				const open = p.classList.toggle("hintclamp");
+				b.setAttribute("aria-expanded", open ? "false" : "true");
+				b.textContent = open ? "\u24d8 more" : "less";
+			});
+			p.after(b);
 		}
 	}
 	function bindSettingFilter() {
@@ -3358,16 +3690,43 @@
 			const input = $(key);
 			if (!input) continue;
 			let pushed = false;
-			input.addEventListener("pointerdown", () => { pushed = false; });
+			/* No engine run while the pointer is down (audit P2): a drag used
+			   to start a multi-second run mid-drag, and the input events that
+			   queued behind it replayed as more. The run starts on release;
+			   the repaint during the drag is one per frame. A keyboard step
+			   still runs after the short debounce. */
+			let dragging = false;
+			let dragMoved = false;
+			let paintQueued = false;
+			const release = () => {
+				if (!dragging) return;
+				dragging = false;
+				if (dragMoved) { dragMoved = false; paintConfig(); scheduleRun(); }
+			};
+			input.addEventListener("pointerdown", () => {
+				pushed = false;
+				dragging = true;
+				dragMoved = false;
+				window.addEventListener("pointerup", release, { once: true });
+				window.addEventListener("pointercancel", release, { once: true });
+			});
 			input.addEventListener("input", () => {
 				if (!pushed) { pushUndo("moved " + key); pushed = true; }
 				state.cfg[key] = Number(input.value);
 				pinSetting(key, true);
 				markDirty();
+				if (dragging && typeof requestAnimationFrame === "function") {
+					dragMoved = true;
+					if (!paintQueued) {
+						paintQueued = true;
+						requestAnimationFrame(() => { paintQueued = false; paintConfig(); });
+					}
+					return;
+				}
 				paintConfig();
 				scheduleRun();
 			});
-			input.addEventListener("change", () => { pushed = false; persist(); });
+			input.addEventListener("change", () => { pushed = false; release(); persist(); });
 		}
 		/* The class flavor, as a choice rather than a draw. See
 		   Config.DEFAULTS.flavorHint. */
@@ -3894,6 +4253,9 @@
 			["Stat sheet", ["summary", "team", "stats", "shooting", "advanced", "defense",
 				"playmaking", "highs", "ranks"]],
 			["Everything", global.Engine.NOTE_LINES.map((x) => x[0])],
+			["Draft room", ["summary", "team", "archetype", "traits", "stock", "ranks"]],
+			["Biography", ["summary", "team", "path", "coach", "record", "injury"]],
+			["Tournament", ["summary", "team", "record", "march", "signature", "awards"]],
 		];
 		const presetBar = el("div", "notepresets");
 		presetBar.setAttribute("role", "group");
@@ -3949,7 +4311,7 @@
 		}
 
 		for (const d of document.querySelectorAll("details.grp")) {
-			d.addEventListener("toggle", persist);
+			d.addEventListener("toggle", persistSoon);
 		}
 	}
 
@@ -4092,7 +4454,10 @@
 
 	function setHash(hash) {
 		lastWrittenHash = hash;
-		history.replaceState(null, "", hash || "#");
+		/* Keep the entry's state: replacing it with null erased the bbgmNav
+		   record syncNav wrote, and the next Back press after Copy link was
+		   ignored by the popstate handler (audit 2026-10-10 B12). */
+		history.replaceState(history.state, "", hash || "#");
 	}
 
 	function warnLeanLink() {
@@ -4121,7 +4486,8 @@
 			}
 			const lean = Object.assign({}, payload);
 			delete lean.overrides;
-			delete lean.fp;
+			// fp names the file the deep fields belong to; see Share.encodeLink.
+			if (lean.tab === undefined && lean.pk === undefined && lean.cmp === undefined) delete lean.fp;
 			setHash("#c=" + encodeURIComponent(JSON.stringify(lean)));
 			if (!global.Share.canStream()) { if (payload.overrides) warnLeanLink(); return undefined; }
 			return global.Share.encodeLink(payload).then((r) => {
@@ -4254,19 +4620,36 @@
 		if (Number.isFinite(res.season)) bits.push("The " + res.season + " class");
 		else bits.push("This class");
 		const flavor = res.flavor && res.flavor.label ? res.flavor.label : null;
-		const story = Array.isArray(res.narrative) && res.narrative[0]
-			? res.narrative[0].name : null;
+		/* The first storyline the season bore out (audit R8): one that did
+		   not happen is not what the class is remembered as. */
+		const held = Array.isArray(res.narrative)
+			? res.narrative.filter((x) => x && x.held !== false)[0] : null;
+		const story = held ? held.name : null;
 		const tail = [];
-		if (flavor) tail.push(flavor);
+		if (flavor) tail.push(flavor + (flavorStrengthIsFile(res) ? " (strength from file)" : ""));
 		/* Only when it says something the flavor did not. Two labels that
 		   amount to the same sentence is how a generated name starts to read
 		   as generated. */
 		if (story && (!flavor || story.toLowerCase() !== flavor.toLowerCase())) {
 			tail.push(story);
 		}
+		const boy = global.ReplayMeta.buildOfTheYear(res, RB);
+		if (boy) tail.push("the year of the " + boy.build);
 		const mu = res.cfg && res.cfg.mutators && res.cfg.mutators.length
 			? " [" + global.ReplayMeta.mutatorLabel(res.cfg.mutators) + "]" : "";
 		return bits[0] + (tail.length ? " — " + tail.join(", ") : "") + mu;
+	}
+
+	/* A flavor whose bend is mostly class STRENGTH (classQuality, eliteCount,
+	   classDepth) under ovrMode "preserve", where the file decides strength:
+	   the strength half of it is mapped onto potential (see
+	   RB.preserveStrengthBend), and the label says the overall curve is the
+	   file's (audit R1). */
+	function flavorStrengthIsFile(res) {
+		const c = res && res.flavor && res.flavor.cfg;
+		const mode = res && res.cfg && res.cfg.ovrMode;
+		return !!c && mode !== "curve" &&
+			["classQuality", "eliteCount", "classDepth"].some((k) => k in c);
 	}
 
 	function classFingerprint(res) {
@@ -4349,7 +4732,40 @@
 	   magic number (1f 8b) is checked — the extension is a hint, not the
 	   truth — and DecompressionStream does the rest. Everything else is the
 	   old path: decode UTF-8, drop a BOM, parse. */
-	function readTextFile(f) {
+	function readTextFile(f, onBytes) {
+		/* The streamed path, which can say how far it has got, unwraps a
+		   file gzipped twice, reads a UTF-16 file (Windows Notepad's
+		   "Unicode") and names a .zip instead of quoting the parser (audit
+		   L9). The bytes are counted as they leave the disk — BEFORE the
+		   gzip stage — so the fraction is of the file's own size. */
+		const LS = global.LeagueScan;
+		if (LS && f && typeof f.stream === "function" && typeof f.size === "number" &&
+			typeof TransformStream === "function" && typeof Response === "function" &&
+			typeof ReadableStream === "function") {
+			let gz = false;
+			return LS.openBlob(f, onBytes ? (seen, size) => onBytes(seen, size, gz) : null)
+				.then(({ first, stream, layers }) => {
+					gz = layers > 0;
+					const kind = LS.sniff(first);
+					if (kind === "zip" || kind === "gzip") throw new Error(LS.sniffMessage(kind));
+					return new Response(stream).arrayBuffer().catch((e) => {
+						throw gz ? LS.gzFail(e) : (e && e.message ? e : new Error("could not be read from disk"));
+					}).then((out) => {
+						if (onBytes) onBytes(f.size, f.size, false, out.byteLength);
+						if (kind === "utf16le" || kind === "utf16be") {
+							return new TextDecoder(kind === "utf16le" ? "utf-16le" : "utf-16be")
+								.decode(out).replace(/^\ufeff/, "");
+						}
+						let text = "";
+						try { text = new TextDecoder("utf-8").decode(out); } catch (e) { text = ""; }
+						/* Chromium returns "" rather than throwing for a text
+						   past V8's string limit (about 512 MiB): that is not a
+						   corrupt file and must not be reported as one (L1). */
+						if (!text.length && out.byteLength) throw LS.tooLong(out.byteLength);
+						return text.replace(/^\ufeff/, "");
+					});
+				});
+		}
 		const buf = f.arrayBuffer
 			? f.arrayBuffer()
 			: new Promise((resolve, reject) => {
@@ -4374,6 +4790,84 @@
 					"or export it again");
 			});
 		}).then((out) => new TextDecoder("utf-8").decode(out).replace(/^\ufeff/, ""));
+	}
+
+	/* A JSON file read through the scanner (js/leaguescan.js): no whole-file
+	   string, the big stores the tool never reads skipped, players parsed one
+	   at a time between paints. Null when this browser lacks web streams
+	   (the caller then reads the text the old way). */
+	function canScan(f) {
+		return !!(global.LeagueScan && f && typeof f.stream === "function" &&
+			typeof f.size === "number" && typeof TransformStream === "function" &&
+			typeof ReadableStream === "function" && typeof Response === "function" &&
+			typeof TextDecoder === "function");
+	}
+
+	/* THE PROGRESS METER. One bar under the status line, for the paths that
+	   can take seconds: reading a big file from disk, unzipping it, parsing
+	   it, splitting the classes out of a league, merging them back in and
+	   writing the result. Small files never show it (under a megabyte a
+	   meter is a flash, not information). `frac` null is an indeterminate
+	   stage — JSON.parse cannot report how far it has got. */
+	const PROGRESS_MIN_BYTES = 1 << 20;
+	/* U38: the ONE progress component. Every long job — file reads, merges,
+	   reroll-until, batch runs, universe runs, the export zip — reports
+	   through it; `onCancel`, when given, shows a Cancel button on it. */
+	function progressShow(label, frac, detail, onCancel) {
+		const box = $("loadProgress");
+		if (!box) return;
+		box.hidden = false;
+		box.querySelector(".lp-label").textContent = label;
+		box.querySelector(".lp-detail").textContent = detail || "";
+		const bar = box.querySelector("progress");
+		box.classList.toggle("indet", frac === null || frac === undefined || !Number.isFinite(frac));
+		if (frac === null || frac === undefined || !Number.isFinite(frac)) {
+			bar.removeAttribute("value");
+			box.removeAttribute("aria-valuenow");
+		} else {
+			const pct = Math.max(0, Math.min(100, Math.round(frac * 100)));
+			bar.value = pct;
+			box.setAttribute("aria-valuenow", String(pct));
+		}
+		box.setAttribute("aria-valuetext", label + (detail ? " " + detail : ""));
+		const stop = box.querySelector(".lp-cancel");
+		if (stop) {
+			const fn = typeof onCancel === "function" ? onCancel : progressCancel;
+			stop.hidden = !fn;
+			stop.onclick = fn ? () => fn() : null;
+		}
+	}
+	function progressHide() {
+		const box = $("loadProgress");
+		if (box) box.hidden = true;
+		progressCancelable(null);
+	}
+	/* A Cancel button on the meter while a cancellable job runs (L4): a
+	   wrong 500 MB file could only be escaped by closing the tab. A job
+	   that passes its own onCancel to progressShow wins over this one. */
+	let progressCancel = null;
+	function progressCancelable(fn) {
+		progressCancel = fn || null;
+		const btn = $("loadProgress") && $("loadProgress").querySelector(".lp-cancel");
+		if (btn) {
+			btn.hidden = !fn;
+			btn.onclick = fn ? () => fn() : null;
+		}
+	}
+	function bindProgressCancel() {
+		// The button's handler is set per job (progressShow / progressCancelable).
+	}
+	/* Two frames, so a label set just before a long synchronous step (a parse,
+	   a merge, a stringify) is actually on screen while the step runs. */
+	function nextPaint() {
+		return new Promise((resolve) => {
+			if (typeof requestAnimationFrame !== "function") { setTimeout(resolve, 0); return; }
+			requestAnimationFrame(() => setTimeout(resolve, 0));
+		});
+	}
+	function mb(n) {
+		return n >= 1 << 20 ? (n / (1 << 20)).toFixed(n >= 100 * (1 << 20) ? 0 : 1) + " MB"
+			: Math.max(1, Math.round(n / 1024)) + " KB";
 	}
 
 	/* Every draft class a dropped file contains, as loadable classes.
@@ -4409,10 +4903,15 @@
 	   question — a league is warned about a birth year a class file is
 	   refused for. Two copies of it would drift. */
 	function looksLikeLeague(data) {
-		return global.Engine.isLeagueFile(data);
+		/* A scanned league has its schedule and box scores left on disk
+		   (js/leaguescan.js); the scanner marks the stores it skipped. */
+		return global.Engine.isLeagueFile(data) ||
+			!!(data && Array.isArray(data.__omitted) && data.__omitted.length);
 	}
 
-	function classesFromFile(name, data, check) {
+	function classesFromFile(name, data, check, src) {
+		const leagueRef = Object.assign({ name, data }, src || {});
+		notePastClasses(name, data);
 		const base = name.replace(/\.json(\.gz)?$|\.gz$/i, "");
 		const found = global.Engine.draftClassesIn(data);
 		/* Not a league export: an ordinary draft-class file, loaded as
@@ -4431,7 +4930,7 @@
 					keep.has(Number.isFinite(Number(p.pid)) ? Number(p.pid) : -1 - i));
 				return [{
 					name, data: Object.assign({}, data, { players }),
-					warnings: check.warnings, league: { name, data },
+					warnings: check.warnings, league: leagueRef,
 				}];
 			}
 			return [{ name, data, warnings: check.warnings }];
@@ -4458,8 +4957,9 @@
 				data: cls,
 				// The note is about the FILE, so it is said once rather than
 				// once per class it produced.
-				warnings: (i === 0 ? [note] : []).concat(sub.warnings),
-				league: { name, data },
+				warnings: (i === 0 ? [note].concat((check.warnings || []).filter((w) =>
+					/not a draft prospect/.test(w))) : []).concat(sub.warnings),
+				league: leagueRef,
 			};
 		});
 	}
@@ -4483,40 +4983,103 @@
 		   malformed classes. They are set aside and handed to their own
 		   importer once the classes in the same drop are in. */
 		const side = { universe: [], settings: [], csv: [] };
-		const jobs = Array.from(fileList).map(
-			(f) => readTextFile(f).then(
-				(text) => {
-					if (/\.csv$/i.test(f.name || "") || f.type === "text/csv") {
-						side.csv.push(text);
-						return null;
-					}
-					const data = JSON.parse(text);
-					if (data && data.format === "bbgm-draft-workshop/universe") {
-						side.universe.push(data);
-						return null;
-					}
-					if (data && data.format === SETTINGS_FORMAT) {
-						side.settings.push(data);
-						return null;
-					}
-					// Full schema check up front, so a bad file is rejected
-					// with a sentence instead of throwing a raw TypeError
-					// out of the middle of the sim.
-					const check = global.Engine.validateLeagueFile(data);
-					/* validateLeagueFile is a check now, not a migration, so
-					   the season it recovered is applied here. */
-					data.startingSeason = check.season;
-					return classesFromFile(f.name, data, check);
-				},
-			).catch((e) => {
+		const files = Array.from(fileList);
+		const total = files.reduce((a, f) => a + (Number(f.size) || 0), 0);
+		const meter = total >= PROGRESS_MIN_BYTES;
+		const got = files.map(() => 0);
+		let gzAny = false;
+		const label = files.length === 1 ? files[0].name : files.length + " files";
+		const abort = typeof AbortController === "function" ? new AbortController() : null;
+		let cancelled = false;
+		if (meter) {
+			progressShow("Reading " + label, 0, "0 of " + mb(total));
+			progressCancelable(() => {
+				cancelled = true;
+				if (abort) abort.abort();
+			});
+		}
+		const tick = meter ? (i) => (seen, size, gz) => {
+			got[i] = seen;
+			gzAny = gzAny || gz;
+			const sum = got.reduce((a, b) => a + b, 0);
+			progressShow((gzAny && sum < total ? "Reading and unzipping " : "Reading ") +
+				(files.length > 1 ? files[i].name + " (file " + (i + 1) + " of " + files.length + ")" : label),
+				sum / total, mb(sum) + " of " + mb(total));
+		} : () => null;
+		/* One file at a time (L10): a drop of two 200 MB leagues used to read
+		   and parse both at once, and the peaks added up. */
+		const readOne = (f, i) => {
+			const isCsv = /\.csv$/i.test(f.name || "") || f.type === "text/csv";
+			const LS = global.LeagueScan;
+			const scanned = !isCsv && canScan(f);
+			const got1 = scanned
+				? LS.scanBlob(f, { onBytes: tick(i) || undefined, signal: abort ? abort.signal : null })
+					.then((r) => ({ data: r.data, src: r }))
+				: readTextFile(f, tick(i) || undefined).then((text) => {
+					if (isCsv) return { csv: text };
+					if (meter) progressShow("Parsing " + f.name, null, mb(text.length) + " of JSON");
+					return (meter ? nextPaint() : Promise.resolve()).then(() =>
+						({ data: LS ? LS.parseText(text) : parseJsonFriendly(text) }));
+				});
+			return got1.then((r) => {
+				if (r.csv !== undefined) { side.csv.push(r.csv); return null; }
+				if (!meter) return r;
+				progressShow("Finding the draft classes in " + f.name, null, "");
+				return nextPaint().then(() => r);
+			}).then((r) => {
+				if (!r) return null;
+				const data = r.data;
+				if (data && data.format === "bbgm-draft-workshop/universe") {
+					side.universe.push(data);
+					return null;
+				}
+				if (data && data.format === SETTINGS_FORMAT) {
+					side.settings.push(data);
+					return null;
+				}
+				// Full schema check up front, so a bad file is rejected
+				// with a sentence instead of throwing a raw TypeError
+				// out of the middle of the sim.
+				const check = global.Engine.validateLeagueFile(data);
+				/* validateLeagueFile is a check now, not a migration, so
+				   the season it recovered is applied here. */
+				data.startingSeason = check.season;
+				/* The file the classes came from, by handle: a merge streams
+				   it again and copies the stores this read skipped (L6, L11). */
+				const src = r.src && r.src.scan ? {
+					blob: f, bytes: Number(f.size) || 0, gz: !!r.src.gz, scan: r.src.scan,
+				} : null;
+				return classesFromFile(f.name, data, check, src);
+			}).catch((e) => {
+				if (cancelled || (e && e.name === "AbortError")) return null;
 				problems.push(f.name + ": " + (e && e.message ? e.message : e));
 				return null;
-			}),
-		);
-		Promise.all(jobs).then((loaded) => {
+			});
+		};
+		const jobs = [];
+		const chain = files.reduce((p, f, i) => p.then(() => {
+			if (cancelled) return null;
+			const job = readOne(f, i);
+			jobs.push(job);
+			return job;
+		}), Promise.resolve());
+		chain.then(() => Promise.all(jobs)).then((loaded) => {
+			if (cancelled) {
+				progressHide();
+				$("empty").classList.remove("busy");
+				setStatus("Loading cancelled; nothing was loaded.");
+				return;
+			}
+			progressHide();
 			const classes = loaded.filter(Boolean).reduce((a, b) => a.concat(b), []);
 			const other = side.universe.length + side.settings.length + side.csv.length;
-			if (classes.length || !other) installFiles(classes, problems, opts);
+			/* A universe export in the same drop replays these classes itself;
+			   a run of installFiles' own would cancel that replay (B5 above
+			   importUniverse). */
+			if (classes.length || !other) {
+				installFiles(classes, problems, side.universe.length
+					? Object.assign({}, opts, { noRun: true }) : opts);
+			}
 			else {
 				$("empty").classList.remove("busy");
 				if (problems.length) showError(new Error(problems.join("\n")));
@@ -4524,6 +5087,10 @@
 			}
 			for (const s of side.settings) applySettingsJson(s);
 			for (const u of side.universe) importUniverse(u);
+			// The classes still run when the import did not start a replay
+			// (refused, or installed as a view).
+			if (side.universe.length && classes.length && state.files.length &&
+				!state.universeExpect && !state.universe.running) run();
 			for (const text of side.csv) {
 				if (!state.files.length) {
 					showError(new Error("Load a draft class first — a locks CSV is " +
@@ -4532,6 +5099,25 @@
 				else run(() => importLocksCsv(text));
 			}
 		});
+	}
+
+	/* U16: JSON.parse's own messages ("Unexpected end of JSON input",
+	   "Unexpected token 'h'…") say nothing a person can act on. The raw
+	   detail stays on the error (`.detail`) for the bug report. */
+	function friendlyJsonError(e) {
+		const raw = e && e.message ? e.message : String(e);
+		const cut = /end of (JSON )?input|Unterminated|Unexpected end/i.test(raw);
+		const err = new Error(cut
+			? "isn't a complete JSON file — the export may have been cut off. Export it again from BBGM (Tools → Export) and load the new file."
+			: "isn't a JSON file this tool can read. Load a BBGM draft class or league export (.json or .json.gz).");
+		err.detail = raw;
+		return err;
+	}
+	function parseJsonFriendly(text) {
+		try { return JSON.parse(text); } catch (e) {
+			if (e instanceof SyntaxError) throw friendlyJsonError(e);
+			throw e;
+		}
 	}
 
 	/* THE SETTINGS, AS A FILE. What "More ▾ → Export settings JSON" writes
@@ -4557,7 +5143,14 @@
 			return;
 		}
 		pushUndo("loaded settings from a file");
-		state.cfg = fitEra(CFG.make(cfg));
+		/* The mutators ride in the file as `mu`, as in a link. This path never
+		   read them: loading the file kept the current mutators and stored a
+		   stray state.cfg.mu (audit 2026-10-10 B11). Done as applyLinkPayload
+		   does it. */
+		const rest = Object.assign({}, cfg);
+		state.mutators = global.ReplayMeta.cleanMutators(rest.mu);
+		delete rest.mu;
+		state.cfg = fitEra(CFG.make(rest));
 		state.presetDirty = true;
 		paintConfig();
 		persist();
@@ -4832,6 +5425,26 @@
 	function checkLockFingerprint() {
 		const file = activeFile();
 		if (!file) return;
+		/* A switch between two LOADED files is not "locks from a different
+		   class": it used to wipe every lock, with no undo, on an ordinary
+		   change of the file picker (and on a reload, which comes back on file
+		   0). The outgoing file's locks are parked under its fingerprint and
+		   the incoming file's come back (audit 2026-10-10 B1). */
+		const from = state.overrideFingerprint;
+		if (from && from !== file.fingerprint &&
+			state.files.some((f) => f.fingerprint === from)) {
+			if (!state.lockStash) state.lockStash = {};
+			if (Object.keys(state.overrides).length) state.lockStash[from] = state.overrides;
+			else delete state.lockStash[from];
+			state.overrides = state.lockStash[file.fingerprint] || {};
+			delete state.lockStash[file.fingerprint];
+			state.overrideFingerprint = file.fingerprint;
+			// A file closed and dropped again finds its locks; a dozen is plenty.
+			const parked = Object.keys(state.lockStash);
+			for (const fp of parked.slice(0, Math.max(0, parked.length - 12))) delete state.lockStash[fp];
+			if (Object.keys(state.overrides).length) reportUnmatchedLocks(file);
+			return;
+		}
 		const n = Object.keys(state.overrides).length;
 		if (!n) { state.overrideFingerprint = file.fingerprint; return; }
 		if (!state.overrideFingerprint) {
@@ -4839,6 +5452,8 @@
 			return;
 		}
 		if (state.overrideFingerprint !== file.fingerprint) {
+			// Never without a way back.
+			pushUndo("dropped " + n + " lock" + (n === 1 ? "" : "s") + " from another class");
 			state.overrides = {};
 			state.overrideFingerprint = file.fingerprint;
 			showWarning(n + " lock" + (n === 1 ? "" : "s") +
@@ -4907,9 +5522,10 @@
 			const name = b.getAttribute("aria-label");
 			b.setAttribute("data-tip", name);
 		});
+		// U45: inside the Tools menu every tool shows its name beside its icon.
+		document.querySelectorAll("#headerTools > button").forEach((b) => b.setAttribute("role", "menuitem"));
 	}
 
-	/* Below 560px the tools fold behind "⋯". */
 	/* ---- kept classes, the command line, install and file handling ----------
 
 	   The sharing tools that are not a link: a class kept under a name outside
@@ -5104,23 +5720,23 @@
 	function bindShareTools() {
 		loadKept();
 		const tools = $("headerTools");
-		const add = (id, text, title, onClick, hidden) => {
+		const add = (id, text, name, title, onClick, hidden) => {
 			if (!tools || $(id)) return null;
 			const b = el("button", "iconbtn", text);
 			b.id = id;
 			b.type = "button";
 			b.title = title;
-			b.setAttribute("aria-label", title);
+			b.setAttribute("aria-label", name);
 			b.hidden = !!hidden;
 			b.addEventListener("click", onClick);
 			tools.appendChild(b);
 			return b;
 		};
-		add("btnKept", "★", "Kept classes — keep this class under a name and a note, outside the run history's cap",
+		add("btnKept", "★", "Kept classes", "Kept classes — keep this class under a name and a note, outside the run history's cap",
 			keptDialog);
-		add("btnCopyCmd", ">_", "Copy these settings as a bbgmdraft command line",
+		add("btnCopyCmd", ">_", "Copy command line", "Copy these settings as a bbgmdraft command line",
 			() => copyCommandLine($("btnCopyCmd")));
-		add("btnInstall", "Install", "Install this tool as an app", () => {
+		add("btnInstall", "\u2913", "Install as an app", "Install this tool as an app", () => {
 			const ev = installPrompt;
 			if (!ev) return;
 			installPrompt = null;
@@ -5150,12 +5766,37 @@
 		}
 	}
 
+	/* U10: the small tools are one "Tools ▾" menu at every width. It closes
+	   on Escape, on a click outside it and once one of its tools is used. */
 	function bindHeaderMore() {
 		const btn = $("btnHeaderMore");
-		if (!btn) return;
-		btn.addEventListener("click", () => {
-			const open = document.querySelector("header").classList.toggle("toolsopen");
+		const menu = $("headerTools");
+		if (!btn || !menu) return;
+		const header = document.querySelector("header");
+		const setOpen = (open, focusBtn) => {
+			header.classList.toggle("toolsopen", open);
 			btn.setAttribute("aria-expanded", open ? "true" : "false");
+			if (open) {
+				const first = menu.querySelector("button:not([hidden]):not(:disabled)");
+				if (first) first.focus();
+			} else if (focusBtn) btn.focus();
+		};
+		btn.addEventListener("click", () => setOpen(!header.classList.contains("toolsopen")));
+		menu.addEventListener("click", (e) => {
+			if (e.target.closest("button")) setOpen(false);
+		});
+		menu.addEventListener("keydown", (e) => {
+			if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setOpen(false, true); return; }
+			const d = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+			if (!d) return;
+			const items = Array.from(menu.querySelectorAll("button:not([hidden]):not(:disabled)"));
+			const at = items.indexOf(document.activeElement);
+			if (!items.length) return;
+			e.preventDefault();
+			items[(at + d + items.length) % items.length].focus();
+		});
+		document.addEventListener("click", (e) => {
+			if (header.classList.contains("toolsopen") && !e.target.closest(".toolsmenu")) setOpen(false);
 		});
 	}
 
@@ -5302,7 +5943,25 @@
 		const b = $("warnBanner");
 		b.hidden = false;
 		b.querySelector(".bannertext").textContent = text;
-		remember("Warning: " + text);
+		/* U18: the league-split note on its own is information, not a
+		   problem: neutral styling, and the universe checkbox it points at
+		   is a button right here instead of a hunt through the settings. */
+		const lines = String(text).split("\n");
+		const info = lines.every((l) => /full league export/.test(l));
+		b.classList.toggle("info", info);
+		const old = b.querySelector(".bannerbtn.unibtn");
+		if (old) old.remove();
+		if (info && /draft classes were found/.test(text) && $("universe") && !$("universe").checked) {
+			const go = el("button", "bannerbtn unibtn", "Run as one universe");
+			go.type = "button";
+			go.addEventListener("click", () => {
+				$("universe").checked = true;
+				$("universe").dispatchEvent(new Event("change", { bubbles: true }));
+				go.remove();
+			});
+			b.insertBefore(go, b.querySelector(".bannerclose"));
+		}
+		remember((info ? "Note: " : "Warning: ") + text);
 	}
 
 	/* The settings actually handed to the engine.
@@ -5333,12 +5992,24 @@
 		// flavors and one draw a class repeats sooner than a pool of
 		// forty-six builds does; this is the same memory on that axis.
 		cfg.recentFlavors = (state.flavorHistory || []).slice(0, POOL_HISTORY);
+		cfg.recentNarratives = (state.narrativeHistory || []).slice(0, POOL_HISTORY);
+		cfg.recentTemplates = (state.templateHistory || []).slice(0, POOL_HISTORY);
 		/* A challenge is the same class for everybody, so this browser's
 		   memory of its last few classes stays out of it. */
 		if (state.challenge) {
 			cfg.recentPools = [];
 			cfg.recentAnomalies = [];
 			cfg.recentFlavors = [];
+			cfg.recentNarratives = [];
+			cfg.recentTemplates = [];
+		}
+		/* Reroll scope "schools too" (audit R2): the file's colleges are what
+		   make one program the favourite in every reroll, so this redraws them
+		   with the talent coupling — unless the user set the college source. */
+		if (state.rerollScope === "schools" && !state.challenge &&
+			cfg.collegeSource === CFG.DEFAULTS.collegeSource) {
+			cfg.collegeSource = "rewrite";
+			if (!(cfg.talentCoupling > 0)) cfg.talentCoupling = 1;
 		}
 		// Mutators last: explicit choices, so the flavor treats them as touched.
 		global.ReplayMeta.applyMutators(cfg, state.mutators, RB);
@@ -5404,6 +6075,24 @@
 			if (hist[0] !== res.flavor.name) {
 				hist.unshift(res.flavor.name);
 				state.flavorHistory = hist.slice(0, POOL_HISTORY);
+			}
+		}
+		// And the season-event phrasing (audit R10), on the same terms.
+		const tpls = (res.seasonEvents || []).map((e) => e && e.tpl).filter(Boolean);
+		if (tpls.length) {
+			const hist = (state.templateHistory || []).slice();
+			if (!hist.length || hist[0].join("|") !== tpls.join("|")) {
+				hist.unshift(tpls);
+				state.templateHistory = hist.slice(0, POOL_HISTORY);
+			}
+		}
+		// And the storylines (audit R8), on the same terms.
+		if (Array.isArray(res.narrative) && res.narrative.length) {
+			const names = res.narrative.map((x) => x.name);
+			const hist = (state.narrativeHistory || []).slice();
+			if (!hist.length || hist[0].join("|") !== names.join("|")) {
+				hist.unshift(names);
+				state.narrativeHistory = hist.slice(0, POOL_HISTORY);
 			}
 		}
 	}
@@ -5499,123 +6188,7 @@
 	   played, which is the same disagreement between tabs that keeping the
 	   results was meant to end. See ensureResult. */
 	function linkCareers(order, onlyIndex) {
-		const u = state.universe;
-		const inChain = new Set((order || []).map((d) => d.index));
-		/* READ FROM WHAT THE CHAIN RECORDED, NOT FROM EVERY EARLIER RESULT.
-
-		   This used to walk every target file and, for each, rehydrate every
-		   EARLIER season with ensureResult to read its futurePlayers — which
-		   at the end of a long chain re-simulated every evicted season and
-		   held all of them at once, undoing the memory bound the chain had
-		   just kept. The chain now records, as each season runs, the rows it
-		   produced for men from other files (state.universe.links, keyed by
-		   the file each man belongs to — see Universe.beginChain), so linking
-		   a file needs that file and nothing else.
-
-		   And BOTH directions are applied. The returner branch (a man from an
-		   EARLIER class playing a LATER season) sat inside a loop over the
-		   seasons BEFORE each file, where no returner can be, so it never
-		   ran: laterSeasons was only ever empty. */
-		const targets = onlyIndex !== undefined ? [onlyIndex] : Array.from(inChain);
-		/* The earlier season's page links forward to the man he became. The
-		   fields it needs are on the row itself, so a rehydrated source gets
-		   its links back without the target file being live. */
-		for (const i of targets) {
-			const res = state.results[i];
-			if (!res) continue;
-			for (const fp of res.futurePlayers || []) {
-				if (!fp || !fp.stats || !inChain.has(fp.fileIndex)) continue;
-				const key = fp.past ? (fp.homeKey || fp.key) : fp.homeKey;
-				if (!key) continue;
-				fp.laterKey = key;
-				fp.laterFileIndex = fp.fileIndex;
-			}
-		}
-		for (const j of targets) {
-			const resJ = state.results[j];
-			if (!resJ || !resJ.players) continue;
-			const entries = (u && u.links && u.links[j]) || [];
-			if (!entries.length) continue;
-			const byKey = new Map();
-			for (const p of resJ.players) if (p && p.key !== undefined) byKey.set(p.key, p);
-			const touched = new Set();
-			for (const x of entries) {
-				const fp = x.fp;
-				const team = x.team;
-				if (!fp || !fp.stats) continue;
-				/* THE SEASONS AFTER HIS DRAFT YEAR. A returner went undrafted
-				   and came back; it belongs on his career table and NOT in his
-				   priorSeasons, because exportFile writes those as BBGM stats
-				   rows dated before the draft. */
-				if (fp.past) {
-					const owner = byKey.get(fp.homeKey || fp.key);
-					if (!owner) continue;
-					if (!Array.isArray(owner.laterSeasons)) owner.laterSeasons = [];
-					const row = {
-						season: x.season, team: fp.newCollege,
-						classYear: fp.classYear, ovr: fp.newOvr,
-						gp: Math.round(fp.stats.gp), mpg: fp.stats.mpg,
-						ppg: fp.stats.ppg, rpg: fp.stats.rpg, apg: fp.stats.apg,
-						ts: fp.stats.ts,
-						record: team ? { w: team.w, l: team.l } : null,
-						awards: (fp.awards || []).slice(),
-						universeFileIndex: x.source, universeKey: fp.key,
-						after: true,
-					};
-					/* REFRESHED, not only added: a warm re-run produces a new
-					   line for the same season, and the old code kept the first
-					   one it ever saw. */
-					const at = owner.laterSeasons.findIndex((r) => r.season === x.season);
-					if (at >= 0) owner.laterSeasons[at] = row;
-					else owner.laterSeasons.push(row);
-					owner.laterSeasons.sort((a, b) => a.season - b.season);
-					touched.add(owner);
-					continue;
-				}
-				const p = byKey.get(fp.homeKey);
-				if (!p) continue;
-				if (!Array.isArray(p.priorSeasons)) p.priorSeasons = [];
-				let row = p.priorSeasons.filter((r) => r.season === x.season && !r.redshirt)[0];
-				if (!row) {
-					row = { season: x.season, redshirt: false };
-					p.priorSeasons.push(row);
-					p.priorSeasons.sort((a, b) => a.season - b.season);
-				}
-				const gl = fp.gameLog || null;
-				/* THE SEASON THIS ROW EXPORTS AS: the absolute season, computed
-				   where the file it was played in is known (see
-				   Universe.beginChain), so exportFile does not shift it by this
-				   file's own startingSeason-to-draft-year difference. */
-				Object.assign(row, {
-					exportSeason: x.exportSeason,
-					team: fp.newCollege, classYear: fp.classYear, ovr: fp.newOvr,
-					gp: Math.round(fp.stats.gp), mpg: fp.stats.mpg, ppg: fp.stats.ppg,
-					rpg: fp.stats.rpg, apg: fp.stats.apg, usg: fp.stats.usg, ts: fp.stats.ts,
-					line: fp.stats, box: team ? team.box : null, lines: team ? team.lines : null,
-					pos: fp.newPos, gameLog: gl, highs: gl ? gl.highs : null, best: gl ? gl.best : null,
-					twentyPointGames: gl ? gl.twentyPointGames : 0,
-					doubleDoubles: gl ? gl.doubleDoubles : 0,
-					record: team ? { w: team.w, l: team.l } : null,
-					awards: (fp.awards || []).slice(),
-					simulated: true, universe: true,
-					universeFileIndex: x.source, universeKey: fp.key,
-					postseason: team ? team.postseason : null,
-				});
-				touched.add(p);
-			}
-			for (const p of touched) {
-				p.priorAwards = [];
-				for (const r of p.priorSeasons || []) {
-					for (const award of r.awards || []) {
-						p.priorAwards.push({ season: r.season, classYear: r.classYear, award,
-							exportSeason: r.exportSeason });
-					}
-				}
-				try {
-					p.note = global.Engine.buildNote(p, resJ.teams, resJ.season, resJ.cfg);
-				} catch (e) { /* the note is a convenience; the page still renders */ }
-			}
-		}
+		global.Universe.linkCareers(state.universe, state.results, order, onlyIndex);
 	}
 
 	/* A player page in ANOTHER loaded file: the later-class freshman on a
@@ -5638,6 +6211,20 @@
 	   simulation produces, so an unlinked one is the right input. */
 	let linking = false;
 
+	/* The locks file `i` is run with. effectiveCfg carries the ACTIVE file's
+	   locks, which are keyed by pid; a sibling file with the same pids was
+	   simulated with them (Export all, the zip, a multi-class merge), the
+	   cross-class mis-lock checkLockFingerprint exists to prevent (audit
+	   2026-10-10 B2). Any other file gets its own parked locks, or none. */
+	function withFileLocks(cfg, i) {
+		if (!cfg || i === state.active) return cfg;
+		const f = state.files[i];
+		const fp = f && f.fingerprint;
+		if (fp && fp === state.overrideFingerprint) return cfg;
+		const own = fp && state.lockStash && state.lockStash[fp];
+		return Object.assign({}, cfg, { overrides: own || {} });
+	}
+
 	function ensureResult(i) {
 		if (state.results[i]) return state.results[i];
 		const runner = state.runners[i];
@@ -5657,7 +6244,7 @@
 		// Every file in a batch shares the seed, so they stay one set —
 		// unless it has its own randomized-settings patch (fileCfgFor), or
 		// is a universe-mode season with its own carry-over (universeCfgFor).
-		state.results[i] = runner.run(ucfg || fileCfgFor(i) || effectiveCfg());
+		state.results[i] = runner.run(withFileLocks(ucfg || fileCfgFor(i) || effectiveCfg(), i));
 		/* WHICH FILE THIS RESULT IS. Universe.biographyOf and
 		   Universe.registryOf are handed a LIST of results beside
 		   state.files, and liveResults() skips any file the chain did not
@@ -5738,9 +6325,21 @@
 		if (v) v.setAttribute("aria-busy", "true");
 	}
 
+	/* When the last busy stretch ended (audit P9). Clicks and keys pressed
+	   while the page was frozen are dispatched only AFTER the work, when
+	   busyDepth is already back to 0, so a guard on busyDepth let three
+	   impatient presses of r become two more rerolls. An event stamped
+	   before this moment was queued during the freeze and is dropped. */
+	let busyEndedAt = 0;
+	function queuedWhileBusy(e) {
+		return !!(e && typeof e.timeStamp === "number" && e.timeStamp > 0 &&
+			e.timeStamp < busyEndedAt);
+	}
+
 	function endBusy() {
 		busyDepth = Math.max(0, busyDepth - 1);
 		if (busyDepth) return;
+		busyEndedAt = typeof performance !== "undefined" && performance.now ? performance.now() : 0;
 		document.body.classList.remove("busy");
 		const s = $("status");
 		s.classList.remove("working");
@@ -5768,8 +6367,16 @@
 	function withBusy(what, fn) {
 		if (typeof requestAnimationFrame !== "function") { fn(); return; }
 		beginBusy(what);
+		/* U3: the very first class blocks the page for seconds. The meter
+		   goes up with a spinner that turns on the compositor (a CSS
+		   transform), so it keeps moving while the engine has the thread. */
+		const first = what === "Generating the class…" && !state.results[state.active];
+		if (first) progressShow("Generating the class…", null, "the first class takes a few seconds");
 		requestAnimationFrame(() => requestAnimationFrame(() => {
-			try { fn(); } finally { endBusy(); }
+			try { fn(); } finally {
+				endBusy();
+				if (first) progressHide();
+			}
 		}));
 	}
 
@@ -5788,6 +6395,12 @@
 	   is on screen. Split out of runNow because the universe chain has to
 	   stamp it too — it produces the result the tabs are showing, and the pill
 	   used to keep saying whatever the last standalone run had said. */
+	/* U28: a universe class's internal seed ("synth-913#0:2027:syn57f3")
+	   reads as "world seed synth-913 · 2027"; a plain seed is unchanged. */
+	function seedPillLabel(seed) {
+		const m = /^([^#:]+)#\d+:(\d{4})(?::|$)/.exec(String(seed));
+		return m ? "world seed " + m[1] + " · " + m[2] : "seed " + seed;
+	}
 	function stampSeedPill(res, ms) {
 		$("seedPill").hidden = false;
 		/* A short hash OF THE CLASS, not of the seed. Two people can share a
@@ -5810,13 +6423,12 @@
 			delete pill.dataset.flashTimer;
 		}
 		paintExportLabel();
-		pill.dataset.label = "seed " + res.seed + " · " + classFingerprint(res);
+		pill.dataset.label = seedPillLabel(res.seed) + " · " + classFingerprint(res);
 		pill.textContent = pill.dataset.label;
 		pill.dataset.seed = res.seed;
 		/* The fingerprint and flavor in the tab title, so two browser tabs
 		   comparing two classes are distinguishable from the tab strip. */
-		document.title = className(res) + " · " + classFingerprint(res) +
-			" — BBGM Draft Class Workshop";
+		paintDocTitle(res);
 		$("seedPill").title = "Seed and class fingerprint — two people with the same " +
 			"fingerprint are looking at the same seventy players. " +
 			"Click to copy the seed, double-click to type one, shift-click or right-click to paste one" +
@@ -5824,6 +6436,16 @@
 				(res.phasesRun && res.phasesRun.length
 					? res.phasesRun.join(" → ") : "nothing to redo") + ")" : "") +
 			strangenessTip(res);
+	}
+
+	/* The tab title names the class — flavor and storyline — so while a Play
+	   game is open it would spoil the season from the tab strip (audit R3):
+	   masked to the fingerprint until the reveal. */
+	function paintDocTitle(res) {
+		if (!res) return;
+		const hidden = !!state.blindPending || !!(state.play && !state.play.revealed);
+		document.title = (hidden ? "A class in play" : className(res)) + " · " +
+			classFingerprint(res) + " — BBGM Draft Class Workshop";
 	}
 
 	/* With several classes loaded, Export JSON names which one it writes. */
@@ -6312,8 +6934,12 @@
 	/* What a search's answer is only valid for. A seed is found under one set
 	   of settings and locks; applied under another it is just a seed. */
 	function untilKey() {
+		/* The mutators and the challenge as well: both change the class
+		   effectiveCfg builds, and a seed found under one set of mutators was
+		   applied under another and still said it "satisfies" the search
+		   (audit 2026-10-10 B17). */
 		return JSON.stringify([state.cfg, state.overrides, state.active, state.fileCfgs,
-			state.files.map((f) => f.fingerprint)]);
+			state.files.map((f) => f.fingerprint), state.mutators || [], state.challenge || null]);
 	}
 
 	function rerollUntil(keys, maxTries) {
@@ -6332,11 +6958,21 @@
 		   takes its undo entry back and gives the redo history back with it;
 		   left behind, undo did nothing visible and redo was gone. */
 		function unwind() {
+			/* The memories too. rememberPool below pushed the on-screen class
+			   into the pool/anomaly/flavor memories, which the build phase
+			   reads, so the run() that "restores" the class after a failed or
+			   cancelled search rebuilt it against a different memory: same
+			   seed, different class (audit 2026-10-10 B6). */
+			state.poolHistory = memoriesBefore.pool;
+			state.anomalyHistory = memoriesBefore.anomaly;
+			state.flavorHistory = memoriesBefore.flavor;
 			if (state.undo[state.undo.length - 1] !== undoEntry) return;
 			state.undo.pop();
 			state.redo = redoBefore;
 			paintUndo();
 		}
+		const memoriesBefore = { pool: (state.poolHistory || []).slice(),
+			anomaly: (state.anomalyHistory || []).slice(), flavor: (state.flavorHistory || []).slice() };
 		rememberSession();
 		rememberPool();
 		const base = (state.lastSeed || state.cfg.seed || mintRandomSeed()) +
@@ -6355,6 +6991,14 @@
 		let timer = null;
 		let searchWorker = null;
 		let inline = false;
+		/* Candidates the ENGINE threw on (audit P12). They used to be
+		   swallowed, so settings that broke every run read as "no match in
+		   60 tries" after 60 wasted runs. Three in a row stops the search
+		   and the first error is shown. */
+		let failed = 0;
+		let failedRun = 0;
+		let firstError = null;
+		let watchdog = null;
 
 		/* PROGRESS AND A WAY OUT. The Until… button becomes the search's
 		   Cancel for as long as it runs, with the count on it; Esc does the
@@ -6362,21 +7006,25 @@
 		   through setStatus, so sixty "try n of 60" lines do not bury the
 		   message history. */
 		const untilBtn = $("btnRerollUntil");
-		const restLabel = untilBtn ? untilBtn.textContent : "";
+		const restLabel = untilBtn ? untilBtn.innerHTML : "";
 		const restTitle = untilBtn ? untilBtn.title : "";
 		function progress(done, total) {
 			const s = $("status");
 			s.textContent = "Reroll until: try " + done + " of " + total + "… (Esc cancels)";
 			s.hidden = false;
 			if (untilBtn) untilBtn.textContent = "Cancel " + done + "/" + total;
+			progressShow("Reroll until: try " + done + " of " + total, total ? done / total : null,
+				"Esc cancels", () => { if (untilSearch) untilSearch.cancel(); });
 		}
 		function end() {
 			untilSearch = null;
+			progressHide();
 			clearTimeout(timer);
+			clearTimeout(watchdog);
 			if (searchWorker) { searchWorker.terminate(); searchWorker = null; }
 			document.body.classList.remove("searching");
 			if (untilBtn) {
-				untilBtn.textContent = restLabel;
+				untilBtn.innerHTML = restLabel;
 				untilBtn.title = restTitle;
 				untilBtn.removeAttribute("aria-pressed");
 			}
@@ -6433,6 +7081,13 @@
 			if (found) { apply(found.seed); return; }
 			end();
 			unwind();
+			if (failedRun >= 3 || (failed && failed === k)) {
+				setStatus("The search stopped: the engine failed on " + failed + " of " + k +
+					" candidate" + (k === 1 ? "" : "s") + " under these settings (" +
+					(firstError || "unknown error") + "). The class on screen is unchanged.", true);
+				run();
+				return;
+			}
 			const breakdown = preds
 				.map((p, i) => ({ label: p.label, n: hits[i] }))
 				.sort((a, b) => a.n - b.n)
@@ -6452,11 +7107,12 @@
 		   initialised on that path — the fallback threw instead of running. */
 		function step() {
 			if (untilSearch === null) return;
-			if (found || k >= maxTries) { finish(); return; }
+			if (found || k >= maxTries || failedRun >= 3) { finish(); return; }
 			const seed = "u" + Math.floor(searchRng.random() * 1e9).toString(36);
 			k++;
 			try {
 				const res = runner.run(Object.assign({}, cfg, { seed }));
+				failedRun = 0;
 				let all = true;
 				preds.forEach((p, i) => {
 					let hit = false;
@@ -6464,17 +7120,32 @@
 					if (hit) hits[i]++; else all = false;
 				});
 				if (all) found = res;
-			} catch (e) { /* a failed candidate is just not the one */ }
+			} catch (e) {
+				// A failed candidate is not the one — but it is counted.
+				failed++;
+				failedRun++;
+				if (!firstError) firstError = e && e.message ? e.message : String(e);
+			}
 			progress(k, maxTries);
 			timer = setTimeout(step, 0);
 		}
-		function startInline() {
+		/* From try `from` on: a worker that died at try 23 hands over at 23
+		   rather than starting again from zero (audit P11). The seeds are a
+		   stream off `base`, so the ones already tried are drawn and skipped. */
+		function startInline(from, why) {
 			inline = true;
+			clearTimeout(watchdog);
+			const at = Math.max(0, Math.min(maxTries, Number(from) || 0));
+			while (k < at) { searchRng.random(); k++; }
+			if (why) setStatus(why, true);
 			timer = setTimeout(step, 0);
 		}
-		function finishFound(seed, tries, got) {
+		function finishFound(seed, tries, got, fails, err, aborted) {
 			k = tries;
 			for (let i = 0; i < got.length && i < hits.length; i++) hits[i] = got[i];
+			if (Number.isFinite(fails)) failed = fails;
+			if (aborted) failedRun = 3;
+			if (err && !firstError) firstError = err;
 			if (seed) apply(seed);
 			else finish();
 		}
@@ -6496,17 +7167,50 @@
 		try {
 			const w = new Worker("js/worker.js");
 			searchWorker = w;
+			/* Hit counts as of the last progress message, for a hand-over. */
+			const started = Date.now();
+			/* No word from the worker for far longer than a try takes is a
+			   worker that died without an error event (an out-of-memory
+			   kill): the same hand-over as onerror (audit P12). */
+			const arm = () => {
+				clearTimeout(watchdog);
+				const per = k > 0 ? (Date.now() - started) / k : 0;
+				watchdog = setTimeout(() => {
+					if (searchWorker !== w) return;
+					w.terminate();
+					searchWorker = null;
+					startInline(k, "The search worker stopped answering at try " + k +
+						"; continuing on this tab.");
+				}, Math.max(30000, 10 * per));
+			};
+			arm();
 			w.onmessage = (e) => {
 				if (searchWorker !== w) return;
 				const m = e.data || {};
+				if (m.type === "hello") {
+					/* A tab opened before a deploy runs the OLD engine and would
+					   spawn a worker with the NEW one: a seed found there need
+					   not satisfy the clause here (audit P13). */
+					if (global.Universe && m.rev !== undefined && m.rev !== global.Universe.ENGINE_REV) {
+						w.terminate();
+						searchWorker = null;
+						startInline(0, "A new version of this tool is available — reload the page. " +
+							"Searching on this tab meanwhile.");
+					}
+					return;
+				}
 				if (m.type === "searchProgress") {
 					// The cancel message reports this count.
 					k = m.done;
+					if (Array.isArray(m.hits)) for (let i = 0; i < m.hits.length && i < hits.length; i++) hits[i] = m.hits[i];
+					if (Number.isFinite(m.failed)) failed = m.failed;
 					progress(m.done, m.total);
+					arm();
 				} else if (m.type === "searchDone") {
 					w.terminate();
 					searchWorker = null;
-					finishFound(m.found, m.tries, m.hits || []);
+					clearTimeout(watchdog);
+					finishFound(m.found, m.tries, m.hits || [], m.failed, m.firstError, m.aborted);
 				} else if (m.type === "error") {
 					end();
 					unwind();
@@ -6518,7 +7222,7 @@
 				if (searchWorker !== w) return;
 				w.terminate();
 				searchWorker = null;
-				startInline();
+				startInline(k, "The search worker stopped at try " + k + "; continuing on this tab.");
 			};
 			w.postMessage({
 				type: "search", leagueFile: activeFile().data, cfg,
@@ -6609,6 +7313,18 @@
 			budget: 3,
 			forbid: ["midMajorLift"],
 		},
+		{ key: "passport", name: "Passports", seed: "challenge-passport",
+			blurb: "Three of the top fourteen played abroad, and the No. 1 pick did not.",
+			cfg: {}, goals: ["abroadLottery", "!abroadNo1"], budget: 3 },
+		{ key: "underdog", name: "Nobody wanted him", seed: "challenge-underdog",
+			blurb: "A two-star recruit in the top ten without raising the anomaly budget.",
+			cfg: {}, goals: ["unrankedTop10"], budget: 2, forbid: ["surpriseBudget"] },
+		{ key: "dukebound", name: "Blue-blood pipeline", seed: "challenge-blueblood",
+			blurb: "A top-five pick plays at Kentucky, and the No. 1 pick is a freshman.",
+			cfg: {}, goals: ["school:Kentucky", "freshmanNo1"], budget: 4 },
+		{ key: "chalk", name: "Chalk and stars", seed: "challenge-chalk",
+			blurb: "No Cinderella, an unbeaten team, and six freshmen in the top ten.",
+			cfg: {}, goals: ["!cinderella", "unbeaten", "freshmen:6"], budget: 4 },
 	];
 
 	/* How a challenge attempt stands right now: which goals the class on
@@ -6629,6 +7345,16 @@
 		const changes = diffConfigs(start, CFG.make(state.cfg))
 			.filter((line) => line.split(" ")[0] !== "seed");
 		const moved = changes.map((line) => line.split(" ")[0]);
+		/* A mutator is a set of dials moved at once, and it was free (audit
+		   R4): "Chaos March" set upsetFactor 2 with nothing counted. Each
+		   setting a mutator writes counts as moved, once. */
+		const RMx = global.ReplayMeta;
+		const mk = RMx.mutatorKeys(state.mutators, CFG.make(state.cfg), RB)
+			.filter((k) => moved.indexOf(k) === -1);
+		if (mk.length) {
+			for (const k of mk) moved.push(k);
+			changes.push("mutators " + RMx.mutatorLabel(state.mutators) + " (" + mk.join(", ") + ")");
+		}
 		const broke = (ch.forbid || []).filter((k) => moved.indexOf(k) !== -1);
 		return {
 			goals,
@@ -6710,8 +7436,39 @@
 		}, "Start");
 	}
 
+	/* THE CANONICAL CLASS (audit R5). A daily, a campaign tier, a puzzle or
+	   a pack challenge names a synthetic class (ch.classSeed); it is added to
+	   the session once and switched to, so the same challenge is the same
+	   seventy men for everybody. "On my own file" skips it. */
+	function ensureChallengeClass(ch) {
+		if (!ch || !ch.classSeed || state.challengeOwnFile || !global.Sample) return false;
+		const find = () => state.files.findIndex((f) => f.challengeClass === ch.classSeed);
+		let i = find();
+		if (i < 0) {
+			const data = global.Sample.makeClass(ch.classSeed, 70, ch.classYear || 2027);
+			const check = global.Engine.validateLeagueFile(data);
+			data.startingSeason = check.season;
+			const f = { name: "challenge-" + ch.classSeed + ".json", data,
+				warnings: check.warnings, challengeClass: ch.classSeed };
+			if (state.files.length) appendFiles([f], [], { noRun: true });
+			else installFiles([f], [], { noRun: true });
+			i = find();
+		}
+		if (i >= 0 && i !== state.active) {
+			state.active = i;
+			state.editing = null;
+			state.selected = {};
+			state.player = null;
+			state.compare = [null, null, null, null];
+			state.logPlayer = null;
+			if ($("fileSelect")) $("fileSelect").value = String(i);
+		}
+		return i >= 0;
+	}
+
 	function startChallenge(ch) {
 		pushUndo("started the " + ch.name + " challenge");
+		ensureChallengeClass(ch);
 		state.challenge = ch.key;
 		state.replayRun = { key: ch.key, runs: 0 };
 		Object.assign(state.cfg, CFG.make(Object.assign({}, ch.cfg)));
@@ -6770,11 +7527,13 @@
 
 	/* One line to paste into a chat: the challenge, how it stands, and
 	   which dials moved from where the challenge started them. */
+	/* Spoiler-free (audit R6): the dials that solved it are the answer, so
+	   the line carries goals as marks, the dial count and the run count —
+	   never the dial names. The code button still carries everything. */
 	function challengeResultText(ch, sc) {
-		return ch.name + ": " + (sc.solved ? "solved" : "not solved") + " · " +
-			sc.met + "/" + sc.total + " goals · " + sc.moved.length + "/" + sc.budget +
-			" settings" + (sc.changes.length ? " (" + sc.changes.join(", ") + ")" : "") +
-			" · seed " + ch.seed;
+		const runs = state.replayRun && state.replayRun.key === ch.key ? state.replayRun.runs : 1;
+		const streak = ch.daily ? dailyStreak() : null;
+		return global.Replay.shareLine(ch, sc, runs, streak);
 	}
 
 	/* ------------------------------------------------------- replayability
@@ -6797,10 +7556,17 @@
 		if (/^daily-/.test(key)) return RP.dailyChallenge(key.slice(6));
 		if (/^campaign:/.test(key)) {
 			const i = CHALLENGES.findIndex((c) => "campaign:" + c.key === key);
-			return i < 0 ? null : RP.campaignTier(CHALLENGES, i, state.challengeProgress);
+			return i < 0 ? null : withClass(RP.campaignTier(CHALLENGES, i, state.challengeProgress));
+		}
+		if (/^pack:/.test(key)) {
+			for (const pk of state.packs || []) {
+				const c = pk.list.filter((x) => x.key === key)[0];
+				if (c) return c;
+			}
+			return null;
 		}
 		if (/^puzzle:/.test(key) && state.puzzle && "puzzle:" + state.puzzle.id === key) {
-			const p = RP.puzzle(state.puzzle.id);
+			const p = RP.puzzle(state.puzzle.id, state.puzzle.attempt);
 			p.goals = RP.puzzleGoals(state.puzzle.target);
 			return p;
 		}
@@ -6827,8 +7593,27 @@
 	function attemptScore(ch, sc) {
 		if (!sc || !sc.solved) return null;
 		const runs = state.replayRun && state.replayRun.key === ch.key ? state.replayRun.runs : 1;
-		return RP.parScore(sc.moved.length, ch.budget, runs);
+		const hints = /^puzzle:/.test(ch.key) && state.puzzle ? (state.puzzle.hints | 0) : 0;
+		return Math.max(0, RP.parScore(sc.moved.length, ch.budget, runs) - RP.HINT_COST * hints);
 	}
+
+	/* ---- dailies: history, streak, ladder (audit Q22, R6, R12.5) ---- */
+	const DAILY_KEY = "bbgm-draft-workshop/daily-history";
+	function readDailyHistory() {
+		try {
+			const h = JSON.parse(localStorage.getItem(DAILY_KEY) || "{}");
+			return h && typeof h === "object" && !Array.isArray(h) ? h : {};
+		} catch (e) { return {}; }
+	}
+	function recordDaily(date, score) {
+		try {
+			const h = readDailyHistory();
+			if (Number.isFinite(h[date]) && h[date] >= score) return;
+			h[date] = score;
+			localStorage.setItem(DAILY_KEY, JSON.stringify(h));
+		} catch (e) { /* storage off: no streak */ }
+	}
+	function dailyStreak() { return RP.dailyStreak(readDailyHistory(), RP.dateKey(new Date())); }
 
 	function challengeHashFields() {
 		const ch = findChallenge(state.challenge);
@@ -6860,6 +7645,15 @@
 			state.puzzle = pz;
 		}
 		if (saved.ghost && typeof saved.ghost === "object") state.ghost = saved.ghost;
+		state.challengeOwnFile = !!saved.challengeOwnFile;
+		if (Array.isArray(saved.packs)) {
+			state.packs = saved.packs.filter((pk) => pk && typeof pk.name === "string" &&
+				Array.isArray(pk.list)).map((pk) => ({ name: pk.name,
+				list: pk.list.map((c) => global.Replay.cleanChallenge(c)).filter(Boolean).map((c, i) =>
+					Object.assign(c, { key: pk.list[i] && pk.list[i].key ? pk.list[i].key : c.key,
+						classSeed: "pack-" + c.seed, classYear: 2027 })) }));
+		}
+		if (saved.rerollScope === "schools") state.rerollScope = "schools";
 	}
 
 	/* The bar's second line: par and score, the campaign, and the rival. */
@@ -6872,6 +7666,7 @@
 		const score = attemptScore(ch, sc);
 		if (score !== null) {
 			writeBest(ch.key, score);
+			if (ch.daily) recordDaily(ch.date || ch.key.slice(6, 16), score);
 			if (Number.isFinite(ch.tier) &&
 				!state.challengeProgress.cleared[ch.baseKey]) {
 				state.challengeProgress.cleared[ch.baseKey] = sc.moved.slice();
@@ -6891,12 +7686,29 @@
 		if (g && g.challenge === ch.key) {
 			const cmp = RP.ghostCompare(sc.moved, g.moved);
 			const rival = el("div", "unit replayghost",
+				(g.fp && g.fp !== classFingerprint(res) ? "Rival played a different class. " : "") +
 				"Rival: " + (g.moved.length ? g.moved.join(", ") : "no settings moved") +
 				(Number.isFinite(g.score) ? " · score " + g.score : g.solved ? "" : " · unsolved") +
 				(cmp.shared.length ? " · same dials: " + cmp.shared.join(", ") : "") +
 				(cmp.onlyMine.length ? " · only you: " + cmp.onlyMine.join(", ") : ""));
 			rival.id = "challengeGhost";
 			bar.appendChild(rival);
+		}
+		if (/^puzzle:/.test(ch.key) && state.puzzle) {
+			const shown = state.puzzle.hints | 0;
+			const p = RP.puzzle(state.puzzle.id, state.puzzle.attempt);
+			for (let i = 0; i < shown; i++) bar.appendChild(el("div", "unit", RP.puzzleHint(p, i)));
+			if (RP.puzzleHint(p, shown)) {
+				const hb = el("button", "linky", "hint (−" + RP.HINT_COST + ")");
+				hb.type = "button";
+				hb.id = "btnPuzzleHint";
+				hb.addEventListener("click", () => {
+					state.puzzle.hints = shown + 1;
+					persist();
+					paintChallenge();
+				});
+				bar.appendChild(hb);
+			}
 		}
 		const code = el("button", "linky", "code");
 		code.type = "button";
@@ -6912,10 +7724,13 @@
 		delete payload.overrides;
 		delete payload.fp;
 		const ch = findChallenge(state.challenge);
-		if (!ch) return RP.makeResult(payload);
-		const sc = scoreChallenge(ch, state.results[state.active]);
+		const res = state.results[state.active];
+		// The class fingerprint (R5): a rival's code from another class says so.
+		const fp = res ? classFingerprint(res) : null;
+		if (!ch) return RP.makeResult(payload, { fp });
+		const sc = scoreChallenge(ch, res);
 		return RP.makeResult(payload, { challenge: ch.key, moved: sc ? sc.moved : [],
-			score: attemptScore(ch, sc), solved: !!(sc && sc.solved) });
+			score: attemptScore(ch, sc), solved: !!(sc && sc.solved), fp });
 	}
 
 	function applyCode(code) {
@@ -6935,7 +7750,14 @@
 		markDirty();
 		paintConfig();
 		persist();
-		run(() => setStatus("Loaded the code."));
+		if (r.challenge) { const cch = findChallenge(r.challenge); if (cch) ensureChallengeClass(cch); }
+		run(() => {
+			const res = state.results[state.active];
+			setStatus(r.fp && res && r.fp !== classFingerprint(res)
+				? "Loaded the code — but it was made on a different class (fingerprint " + r.fp +
+					"), so the class on screen is not the one it describes."
+				: "Loaded the code.");
+		});
 		return true;
 	}
 
@@ -6945,20 +7767,46 @@
 			setStatus("A rival needs a code copied from a challenge attempt.");
 			return false;
 		}
-		state.ghost = { challenge: r.challenge, moved: r.moved, score: r.score, solved: r.solved };
+		state.ghost = { challenge: r.challenge, moved: r.moved, score: r.score, solved: r.solved,
+			fp: r.fp || null };
 		persist();
 		paintChallenge();
 		setStatus("Rival loaded for " + r.challenge + ".");
 		return true;
 	}
 
+	/* A day the shared class already solves at the defaults is no puzzle:
+	   the goals are redrawn (same class, same seed) until it is not, up to
+	   four times. Deterministic, so everybody lands on the same draw. */
 	function startDaily(date) {
-		const ch = RP.dailyChallenge(date || RP.dateKey(new Date()));
-		if (ch) startChallenge(ch);
+		const day = date || RP.dateKey(new Date());
+		let ch = RP.dailyChallenge(day);
+		if (!ch) return;
+		if (!state.challengeOwnFile && ensureChallengeClass(ch) && state.runners[state.active]) {
+			try {
+				const cfg = CFG.make({ seed: ch.seed });
+				cfg.overrides = {};
+				const res = state.runners[state.active].run(cfg);
+				for (let k = 1; k <= 4; k++) {
+					const solved = ch.goals.every((g) => {
+						const cl = parseClause(g);
+						try { return !!(cl && cl.test(res)); } catch (e) { return false; }
+					});
+					if (!solved) break;
+					ch = RP.dailyChallenge(day + "#" + k);
+				}
+			} catch (e) { /* the first draw stands */ }
+		}
+		startChallenge(ch);
+	}
+
+	// A campaign tier runs on its own canonical class (R5).
+	function withClass(ch) {
+		return ch ? Object.assign(ch, { classSeed: "campaign-" + ch.seed, classYear: 2027 }) : ch;
 	}
 
 	function startCampaign(i) {
-		const ch = RP.campaignTier(CHALLENGES, i, state.challengeProgress);
+		const ch = withClass(RP.campaignTier(CHALLENGES, i, state.challengeProgress));
 		if (!ch) { setStatus("Clear the previous tier first."); return; }
 		startChallenge(ch);
 	}
@@ -6967,21 +7815,33 @@
 	   settings never reach the panel, the hash or the history. */
 	function startPuzzle(id) {
 		if (!state.files.length) { setStatus("Load a class file first."); return; }
-		const p = RP.puzzle(id || RP.dateKey(new Date()));
+		const name = String(id || RP.dateKey(new Date()));
+		let p = RP.puzzle(name);
+		ensureChallengeClass(p);
 		const was = state.challenge;
 		state.challenge = p.key;   // blanks the class memory; see effectiveCfg
 		let target;
 		try {
-			const cfg = effectiveCfg();
-			Object.assign(cfg, CFG.make(Object.assign({}, p.hidden, { seed: p.seed })));
-			cfg.overrides = {};
-			target = RP.headlines(state.runners[state.active].run(cfg));
+			const runAt = (hidden) => {
+				const cfg = effectiveCfg();
+				Object.assign(cfg, CFG.make(Object.assign({}, hidden, { seed: p.seed })));
+				cfg.overrides = {};
+				return RP.headlines(state.runners[state.active].run(cfg));
+			};
+			/* A puzzle the untouched defaults already half-solve is no puzzle
+			   (audit R7): redraw the hidden dials, same seed, up to five times. */
+			const defaults = runAt({});
+			for (let k = 0; k < 6; k++) {
+				if (k) p = RP.puzzle(name, k);
+				target = runAt(p.hidden);
+				if (!RP.puzzleRejected(defaults, target)) break;
+			}
 		} catch (e) {
 			state.challenge = was;
 			showError(e);
 			return;
 		}
-		state.puzzle = { id: p.key.slice(7), target };
+		state.puzzle = { id: p.key.slice(7), target, attempt: p.attempt, hints: 0 };
 		p.goals = RP.puzzleGoals(target);
 		startChallenge(p);
 	}
@@ -7007,6 +7867,31 @@
 			.appendChild(button("replayDaily", "Play today's", () => {
 				closeModal(); startDaily(today);
 			}));
+		// Streak, the last thirty days and the week's ladder (Q22, R6, R12.5).
+		const hist = readDailyHistory();
+		const streak = RP.dailyStreak(hist, today);
+		const ladder = RP.weeklyLadder(hist, today);
+		const sline = row("Streak " + streak.current + " (longest " + streak.longest + ") · " +
+			RP.weeklyTheme(today).name + " · week total " + ladder.total + ":");
+		const strip = el("span", "dailystrip");
+		strip.id = "replayStrip";
+		strip.textContent = streak.strip.map((d) => (d.score === null ? "\u00b7" : "\u2588")).join("");
+		strip.title = "The last thirty days: a block for each daily solved";
+		sline.appendChild(strip);
+		sline.appendChild(button("replayLadder", "Copy week", (e) =>
+			copyText("Week of " + ladder.week + ": " + ladder.total + " (" +
+				ladder.days.map((d) => (d === null ? "-" : d)).join(" ") + ") " + ladder.code,
+			e.target, null, "weekly ladder")));
+		// The canonical class is the default; this is the opt-out (R5).
+		const own = el("label", "check");
+		const ownCb = el("input");
+		ownCb.type = "checkbox";
+		ownCb.id = "replayOwnFile";
+		ownCb.checked = !!state.challengeOwnFile;
+		ownCb.addEventListener("change", () => { state.challengeOwnFile = ownCb.checked; persist(); });
+		own.appendChild(ownCb);
+		own.appendChild(document.createTextNode(" Play challenges on my own file (not the shared class)"));
+		row("").appendChild(own);
 		const unlocked = RP.campaignUnlocked(CHALLENGES, state.challengeProgress);
 		const tier = el("select");
 		tier.id = "replayTier";
@@ -7045,14 +7930,52 @@
 			if (importGhost(paste.value)) closeModal();
 		}));
 		codes.appendChild(button("replayCopy", "Copy mine", (e) => copyText(resultCode(), e.target, null, "result code")));
+		// Scenario packs (R12.2): a challenge table as a code.
+		const packRow = row("Scenario pack:");
+		const packIn = el("input");
+		packIn.id = "replayPack";
+		packIn.placeholder = "BB1-… pack code";
+		packIn.setAttribute("aria-label", "Scenario pack code");
+		packRow.appendChild(packIn);
+		packRow.appendChild(button("replayPackLoad", "Add pack", () => {
+			const pk = RP.decodePack(packIn.value, global.Engine.parseRerollClause);
+			if (!pk) { setStatus("That is not a scenario pack code."); return; }
+			state.packs = (state.packs || []).filter((x) => x.name !== pk.name).concat([pk]);
+			persist();
+			setStatus("Pack \u201c" + pk.name + "\u201d added: " + pk.list.length + " challenges.");
+			closeModal();
+			challengeDialog();
+		}));
+		packRow.appendChild(button("replayPackCopy", "Copy campaign as a pack", (e) =>
+			copyText(RP.encodePack("campaign", CHALLENGES), e.target, null, "scenario pack")));
+		for (const pk of state.packs || []) {
+			const pr = row(pk.name + ":");
+			const sel = el("select");
+			sel.setAttribute("aria-label", "Pack challenge");
+			for (const c of pk.list) sel.appendChild(new Option(c.name, c.key));
+			pr.appendChild(sel);
+			pr.appendChild(button("replayPackPlay-" + pk.name.replace(/\W/g, ""), "Play", () => {
+				const c = findChallenge(sel.value);
+				if (c) { closeModal(); startChallenge(c); }
+			}));
+		}
 		return box;
+	}
+
+	/* BLIND REROLL (audit R3): a new class with a Play game already open, so
+	   the gating applies before the first render and nothing is seen "warm". */
+	function blindReroll(kind) {
+		state.play = null;
+		state.blindPending = kind || "predict";
+		state.tab = "play";
+		reroll();
 	}
 
 	function reroll(opts) {
 		/* A second reroll inside the busy window of the first one read a
 		   lastSeed the first had blanked, and pushed an undo entry that
 		   restored nothing. One at a time. */
-		if (busyDepth > 0 || untilSearch || state.universe.running) return;
+		if (busyDepth > 0 || untilSearch || state.universe.running || queuedWhileBusy(opts)) return;
 		const previous = state.lastSeed;
 		if (!(opts && opts.noUndo)) pushUndo("rerolled the class");
 		// The class being replaced goes into the run history, with everything
@@ -7106,6 +8029,9 @@
 		// Prediction, bracket pool and blind scout; see js/play.js.
 		["play", "Play", "Play"],
 	];
+	/* U42: the short form a tab wears below 1600px, so the twelve tabs sit
+	   on one row on a laptop. The full name stays the accessible name. */
+	const TAB_SHORT = { teams: "Teams", awards: "Awards", notes: "Notes", distribution: "Charts", gamelog: "Games" };
 
 	/* ----------------------------------------------------------- universe */
 
@@ -7137,7 +8063,10 @@
 	   state.universe.cfgs (see universeCfgFor), so past a budget the older
 	   ones are dropped and rehydrated lazily by ensureResult. The active file
 	   and the files linkCareers still needs are never evicted. */
-	const UNIVERSE_LIVE_RESULTS = 15;
+	/* About 8 MB a live result: a low-memory phone keeps five (audit P16),
+	   since rebuilding an evicted one is a single cold run. */
+	const UNIVERSE_LIVE_RESULTS = typeof navigator !== "undefined" &&
+		Number(navigator.deviceMemory) > 0 && Number(navigator.deviceMemory) <= 4 ? 5 : 15;
 
 	/* What a whole draft class is, for the purpose of deciding whether a file
 	   carried one. A BBGM class is sixty to eighty men; a league export's
@@ -7459,6 +8388,7 @@
 		const started = Date.now();
 		let lastRender = 0;
 		const finish = (cancelled) => {
+			progressHide();
 			let out;
 			try {
 				out = chain.finish({
@@ -7539,9 +8469,11 @@
 				finish(cancelled);
 				return;
 			}
-			try {
-				chain.step(k);
-			} catch (err) {
+			/* UV1: one engine phase per task, so the page paints and Stop is
+			   read during a season, not only between seasons (a season was
+			   one 4-10 s long task). Same season as chain.step(k). */
+			let season;
+			const fail = (err) => {
 				/* step() guards the season itself, but the work around it
 				   (extrapolating a gap, handing entrants over, ageing the
 				   carry) is outside that guard. A throw here left the chain
@@ -7550,11 +8482,28 @@
 				showError(err);
 				universeCancel = false;
 				finish(true);
-				return;
-			}
+			};
+			try {
+				season = chain.stepPhased(k);
+			} catch (err) { fail(err); return; }
+			const phase = () => {
+				let done;
+				try { done = season.next(); } catch (err) { fail(err); return; }
+				if (!done) { setTimeout(phase, 0); return; }
+				seasonDone(k);
+			};
+			phase();
+		};
+		const seasonDone = (k) => {
 			evictUniverseResults(chain.runnable.slice(Math.max(0, k - UNIVERSE_LIVE_RESULTS + 1), k + 1)
 				.map((x) => x.index));
 			setStatus("Universe: season " + (k + 1) + " of " + total + "…", true);
+			/* U23: a bar and an estimate, from the pace so far. */
+			const per = (Date.now() - started) / (k + 1);
+			const left = Math.round(per * (total - k - 1) / 1000);
+			progressShow("Universe: season " + (k + 1) + " of " + total, (k + 1) / total,
+				left > 1 ? "about " + (left >= 90 ? Math.round(left / 60) + " min" : left + " s") + " left" : "",
+				cancelUniverse);
 			// finish() always renders, so the last season is never skipped.
 			if (Date.now() - lastRender >= UNIVERSE_RENDER_MS) {
 				render();
@@ -7563,6 +8512,67 @@
 			setTimeout(() => step(k + 1), 0);
 		};
 		setTimeout(() => step(0), 0);
+	}
+
+	/* PRO HISTORY FROM A LEAGUE (UV12). A league export also holds the men
+	   it drafted in the last four seasons. They are offered as the
+	   universe's history: with no universe yet, their classes are played as
+	   the world's first seasons (real schools, class years and draft order
+	   pinned; their real pro careers attached); with a universe already
+	   built, they go in as a ledger without re-simulating anything, because
+	   a season before the world's first cannot be added to a finished chain. */
+	function notePastClasses(name, data) {
+		let found = [];
+		try {
+			found = global.Engine.isLeagueFile(data) ? global.Engine.pastClassesIn(data, { back: 4 }) : [];
+		} catch (e) { found = []; }
+		if (found.length) state.pastProOffer = { name, data, classes: found };
+	}
+
+	function pastProLabel(offer) {
+		const years = offer.classes.map((c) => c.year);
+		const n = offer.classes.reduce((a, c) => a + c.count, 0);
+		return "Pro history " + years[0] + (years.length > 1 ? "\u2013" + years[years.length - 1] : "") +
+			" (" + n + " players)";
+	}
+
+	function addPastProClasses() {
+		const offer = state.pastProOffer;
+		const E = global.Engine;
+		const U = global.Universe;
+		if (!offer) { setStatus("Load a BBGM league export that has past drafts first."); return; }
+		if (state.universe.running) { setStatus("Wait for the universe to finish first."); return; }
+		let classes;
+		try { classes = offer.classes.map((c) => E.extractPastClass(offer.data, c.year)); }
+		catch (e) { showError(e); return; }
+		const u = state.universe;
+		if (u.rows && u.rows.length) {
+			pushUndo("added a league's pro history");
+			const out = U.importProHistory(u, classes);
+			try {
+				u.records = U.records(u.rows, u.alumni, u.registry || null,
+					{ programs: u.programs, tree: u.coachTree, carry: u.tail && u.tail.carry });
+			} catch (e) { /* the records are a view */ }
+			state.pastProOffer = null;
+			persist();
+			render();
+			setStatus(pastProLabel(offer) + ": " + out.added + " men added to the universe's " +
+				"registry and alumni with their real pro careers. The world was already " +
+				"built, so their college seasons were not replayed.");
+			return;
+		}
+		const base = offer.name.replace(/\.json(\.gz)?$|\.gz$/i, "");
+		const files = classes.map((cls) => {
+			const sub = E.validateLeagueFile(cls);
+			cls.startingSeason = sub.season;
+			return { name: base + " \u2014 " + cls.startingSeason + " pro history", data: cls,
+				warnings: sub.warnings, pastPro: true };
+		});
+		state.pastProOffer = null;
+		state.cfg.universe = true;
+		installFiles(files, [], { append: true, noRun: true });
+		state.tab = "universe";
+		runUniverse();
 	}
 
 	/* The control for it. Offered only on a finished chain of three or more
@@ -7625,7 +8635,8 @@
 		if ($("seed")) $("seed").value = seed;
 		paintConfig();
 		state.universeBiography = null;
-		installFiles(U.synthFiles(seed, first, n), [], { noRun: true });
+		// UV4: the world's first season is its name epoch.
+		installFiles(U.synthFiles(seed, first, n, undefined, first), [], { noRun: true });
 		state.tab = "universe";
 		runUniverse();
 	}
@@ -7673,7 +8684,8 @@
 			return;
 		}
 		n = Math.max(1, Math.min(SYNTH_MAX_SEASONS, Math.round(Number(n) || 5)));
-		const files = U.synthFiles(tail.baseSeed || u.baseSeed, tail.lastSeason + 1, n);
+		const files = U.synthFiles(tail.baseSeed || u.baseSeed, tail.lastSeason + 1, n,
+			undefined, U.synthEpochOf(u));
 		state.cfg.universe = true;
 		if (state.files.length) installFiles(files, [], { append: true, noRun: true });
 		else installFiles(files, [], { noRun: true });
@@ -7813,6 +8825,12 @@
 		const U = global.Universe;
 		const u = state.universe;
 		if (!u.rows.length) { setStatus("Build a timeline first."); return; }
+		if (what === "careers") {
+			// Everyone in the world, not only the multi-season men (audit Q25).
+			download(U.exportBaseName(u) + "-careers.csv",
+				csvJoin(U.careersTable(u.registry || {}).map((r) => r.map(esc).join(","))), "text/csv");
+			return;
+		}
 		const records = what === "records";
 		const table = records ? U.recordsTable(u.records) : U.timelineTable(u.rows);
 		download(U.exportBaseName(u) + (records ? "-records.csv" : "-timeline.csv"),
@@ -8069,7 +9087,7 @@
 	// The universe in full: no row, thread, alumni or registry cap.
 	function universeFull() {
 		const u = state.universe;
-		return JSON.parse(JSON.stringify(Object.assign(universeForStorage(), {
+		const raw = Object.assign(universeForStorage(), {
 			rows: u.rows.slice(),
 			threads: (u.threads || []).slice(),
 			alumni: (u.alumni || []).slice(),
@@ -8078,7 +9096,13 @@
 			recruiting: u.recruiting || null,
 			truncated: !!u.truncated,
 			tail: u.running ? null : (u.tail || null),
-		})));
+		});
+		/* UV10: structuredClone where there is one — the JSON round-trip
+		   cost ~420 ms of main thread per autosave at 30 seasons. */
+		if (typeof structuredClone === "function") {
+			try { return structuredClone(raw); } catch (e) { /* fall through */ }
+		}
+		return JSON.parse(JSON.stringify(raw));
 	}
 
 	function slotRecord(slot, name) {
@@ -8141,6 +9165,31 @@
 		});
 	}
 
+	/* Best-effort storage can be evicted under pressure without a word
+	   (audit L13). The first time something worth keeping is saved — a
+	   universe slot, a remembered session — the browser is asked to keep
+	   this site's storage. It may say no (Chrome decides from engagement;
+	   Firefox asks the user); nothing depends on the answer. */
+	let persistAsked = false;
+	function askPersistentStorage() {
+		if (persistAsked) return;
+		persistAsked = true;
+		try {
+			const st = typeof navigator !== "undefined" && navigator.storage;
+			if (st && typeof st.persist === "function") st.persist().catch(() => null);
+		} catch (e) { /* not offered here */ }
+	}
+	// "using 12 MB of 2,048 MB", or "" where the browser does not say.
+	function storageUsage() {
+		try {
+			const st = typeof navigator !== "undefined" && navigator.storage;
+			if (!st || typeof st.estimate !== "function") return Promise.resolve("");
+			return st.estimate().then((e) => (e && Number.isFinite(e.usage) && Number.isFinite(e.quota)
+				? "This site is using " + mb(e.usage) + " of the " + mb(e.quota) +
+					" the browser allows it." : ""), () => "");
+		} catch (e) { return Promise.resolve(""); }
+	}
+
 	function listUniverseSlots() {
 		return idbRequest("readonly", (s) => s.getAll()).then((all) => {
 			const out = [];
@@ -8163,6 +9212,7 @@
 		}
 		let rec;
 		try { rec = slotRecord(slot, name); } catch (e) { showError(e); return Promise.resolve(false); }
+		askPersistentStorage();
 		return idbRequest("readwrite", (s) => s.put(rec)).then((ok) => {
 			setStatus(ok ? "Saved “" + rec.name + "” (" + rec.seasons + " seasons, in full) to " + slot + "."
 				: idbOk === false ? "Could not save: IndexedDB is not available in this browser."
@@ -8313,6 +9363,7 @@
 				}
 				sessionWritten = shaped.sig;
 				sessionMeta = shaped.state;
+				askPersistentStorage();
 				sessionSaid = "";
 				if (shaped.leagueDropped) {
 					sessionSay("league", "The league file itself is too big to remember; the classes " +
@@ -8369,6 +9420,30 @@
 			}
 			const files = V.sessionFiles(rec);
 			if (!files) return fail("The saved session could not be read, so it was not restored.");
+			/* A league remembered as its file is read again (scanned, not
+			   parsed whole) so the mock draft and the merge have it. A league
+			   that no longer reads is let go: the classes stand without it. */
+			const pending = new Set(files.map((f) => f.league).filter((l) => l && !l.data && l.blob));
+			return Promise.all(Array.from(pending).map((l) => (canScan(l.blob)
+				? global.LeagueScan.scanBlob(l.blob).then((r) => {
+					l.data = r.data;
+					l.scan = r.scan;
+					l.gz = r.gz;
+				}) : Promise.reject(new Error("no streams"))).catch(() => {
+				for (const f of files) if (f.league === l) delete f.league;
+			}))).then(() => restoreInstall(meta, files));
+		});
+	}
+
+	function restoreInstall(meta, files) {
+		const fail = (text) => {
+			const btn = $("btnSessionRestore");
+			if (btn) btn.disabled = false;
+			$("empty").classList.remove("busy");
+			setStatus(text, true);
+			return false;
+		};
+		{
 			let snap = null;
 			try { snap = meta.payload ? JSON.parse(meta.payload) : null; } catch (e) { snap = null; }
 			try {
@@ -8392,7 +9467,7 @@
 				showError(e);
 				return fail("The saved session could not be restored.");
 			}
-		});
+		}
 	}
 
 	function discardLastSession() {
@@ -8439,6 +9514,9 @@
 		bar.appendChild(sel);
 		bar.appendChild(nm);
 		box.appendChild(bar);
+		const usage = el("p", "hint", "");
+		box.appendChild(usage);
+		storageUsage().then((t) => { usage.textContent = t; });
 		const paint = () => listUniverseSlots().then((slots) => {
 			list.innerHTML = "";
 			sel.innerHTML = "";
@@ -8636,7 +9714,12 @@
 						(e && e.message ? e.message : String(e)));
 				}
 			}
-			if (loaded.length) installFiles(loaded, problems);
+			/* Without a run of its own: installFiles schedules run() two frames
+			   later, by which time the replay below has started, and runNow
+			   took the replay for a settings change mid-chain — cancelled it,
+			   cleared universeExpect and universeImported, and ran a plain
+			   cold chain (audit 2026-10-10 B5). The replay is the run. */
+			if (loaded.length) installFiles(loaded, problems, { noRun: true });
 		}
 		/* A synthetic season needs no file: it is regenerated from the seed
 		   its order entry records. Installed without a run; the replay
@@ -8908,7 +9991,7 @@
 			state.tab = key;
 		}
 		pushNav();
-		persist();
+		persistSoon();
 		render();
 	}
 	global.App.showTab = showTab;
@@ -8917,7 +10000,7 @@
 		state.player = key || null;
 		if (key) state.tab = "board";
 		pushNav();
-		persist();
+		persistSoon();
 		render();
 	}
 
@@ -8928,7 +10011,7 @@
 		state.game = null;
 		if (name) state.tab = "teams";
 		pushNav();
-		persist();
+		persistSoon();
 		render();
 	}
 
@@ -8936,7 +10019,7 @@
 		state.game = ref || null;
 		if (ref) state.tab = "teams";
 		pushNav();
-		persist();
+		persistSoon();
 		render();
 	}
 
@@ -8962,11 +10045,13 @@
 			state.player || "", state.team || "", state.game || ""].join("|");
 	}
 
-	function render() {
-		paintExportLabel();
-		const tabs = $("tabs");
+	const tabStrip = { el: null, buttons: new Map(), active: null };
+	function buildTabStrip(tabs) {
 		tabs.innerHTML = "";
 		tabs.setAttribute("role", "tablist");
+		tabStrip.el = tabs;
+		tabStrip.buttons = new Map();
+		tabStrip.active = null;
 		let lastGroup = null;
 		// One span per group, so the strip wraps between groups, not inside one.
 		let set = null;
@@ -8980,10 +10065,18 @@
 				tabs.appendChild(set);
 				lastGroup = group;
 			}
-			const b = el("button", key === state.tab ? "active" : "", label);
+			const b = el("button", "");
+			if (TAB_SHORT[key]) {
+				b.appendChild(el("span", "tl-long", label));
+				const sh = el("span", "tl-short", TAB_SHORT[key]);
+				sh.setAttribute("aria-hidden", "true");
+				b.appendChild(sh);
+				b.setAttribute("aria-label", label);
+				b.title = label;
+			} else b.textContent = label;
 			b.setAttribute("role", "tab");
-			b.setAttribute("aria-selected", key === state.tab ? "true" : "false");
-			b.tabIndex = key === state.tab ? 0 : -1;
+			b.setAttribute("aria-selected", "false");
+			b.tabIndex = -1;
 			b.addEventListener("click", () => showTab(key));
 			b.addEventListener("keydown", (e) => {
 				const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
@@ -9000,20 +10093,45 @@
 				if (next) next.focus();
 			});
 			set.appendChild(b);
+			tabStrip.buttons.set(key, b);
 		});
-		/* On a phone the tab strip is one sideways-scrolling row; keep the
-		   active tab in it rather than off the right edge. */
-		{
-			const act = tabs.querySelector("button.active");
-			if (act && tabs.scrollWidth > tabs.clientWidth) {
-				const r = act.getBoundingClientRect();
-				const t = tabs.getBoundingClientRect();
-				if (r.left < t.left || r.right > t.right) {
-					tabs.scrollLeft += (r.left - t.left) - (t.width - r.width) / 2;
-				}
-			}
+	}
+
+	function render() {
+		paintExportLabel();
+		paintDocTitle(state.results[state.active]);
+		const tabs = $("tabs");
+		/* Built once and then only marked (audit P7): the strip was emptied
+		   and twelve buttons with 24 listeners rebuilt on every render, and
+		   its geometry read straight after, forcing a layout each time. */
+		if (tabStrip.el !== tabs || tabs.childNodes.length === 0) buildTabStrip(tabs);
+		for (const [key, b] of tabStrip.buttons) {
+			const on = key === state.tab;
+			if (b.classList.contains("active") !== on) b.classList.toggle("active", on);
+			const sel = on ? "true" : "false";
+			if (b.getAttribute("aria-selected") !== sel) b.setAttribute("aria-selected", sel);
+			const ti = on ? 0 : -1;
+			if (b.tabIndex !== ti) b.tabIndex = ti;
 		}
-		tabEdgeCue();
+		/* On a phone the tab strip is one sideways-scrolling row; keep the
+		   active tab in it rather than off the right edge. Only when the tab
+		   changed, and in a frame, so a render does not read layout. */
+		if (tabStrip.active !== state.tab) {
+			tabStrip.active = state.tab;
+			const fit = () => {
+				const act = tabs.querySelector("button.active");
+				if (act && tabs.scrollWidth > tabs.clientWidth) {
+					const r = act.getBoundingClientRect();
+					const t = tabs.getBoundingClientRect();
+					if (r.left < t.left || r.right > t.right) {
+						tabs.scrollLeft += (r.left - t.left) - (t.width - r.width) / 2;
+					}
+				}
+				tabEdgeCue();
+			};
+			if (typeof requestAnimationFrame === "function") requestAnimationFrame(fit);
+			else fit();
+		}
 		const view = $("view");
 		/* Every interaction rebuilds this view from scratch — clicking a row to
 		   open the editor, ticking a sort level, typing in a filter. With a
@@ -9098,9 +10216,67 @@
 		(V[state.tab] || V.players)(view, res);
 		// A "copy this table" strip above every real table in the view.
 		V.decorateTables(view);
+		tabHeading(view);
+		jumpRow(view);
+		fitBoard();
 		restoreScroll(view, scrolls);
 		restoreFocus(view, focus);
 	}
+
+	/* U14: one h2 per tab. Most views open at h3 or h4; the tab's own name
+	   goes in as a visually hidden h2 so heading navigation has a top. */
+	function tabHeading(view) {
+		if (view.querySelector("h2") || state.game || state.player) return;
+		const t = TABS.find((x) => x[0] === state.tab);
+		const h = el("h2", "visually-hidden tabh2", t ? t[1] : "Draft board");
+		view.insertBefore(h, view.firstChild);
+	}
+	/* U29: the long tabs get an "On this page" row built from their own
+	   section headings. */
+	const JUMP_TABS = { teams: 1, awards: 1, news: 1, notes: 1, gamelog: 1 };
+	function jumpRow(view) {
+		if (!JUMP_TABS[state.tab] || state.player) return;
+		const heads = Array.from(view.querySelectorAll("h3")).filter((h) => h.textContent.trim());
+		if (heads.length < 3) return;
+		const nav = el("nav", "jumprow chips");
+		nav.setAttribute("aria-label", "On this page");
+		nav.appendChild(el("span", "unit", "On this page:"));
+		heads.slice(0, 14).forEach((h, i) => {
+			if (!h.id) h.id = "sec-" + state.tab + "-" + i;
+			const b = el("button", "chip", h.textContent.trim().slice(0, 40));
+			b.type = "button";
+			b.addEventListener("click", () => {
+				h.scrollIntoView({ block: "start" });
+				h.tabIndex = -1;
+				h.focus({ preventScroll: true });
+			});
+			nav.appendChild(b);
+		});
+		const first = view.querySelector(".tabh2");
+		view.insertBefore(nav, first ? first.nextSibling : view.firstChild);
+	}
+	/* U5/U6: a board narrow enough to fit its column needs no scroller of
+	   its own — the page scrolls, and the headers stick under the filter
+	   bar (whose height they are offset by). */
+	function fitBoard() {
+		const wrap = document.querySelector("#view .scroll.boardwrap");
+		if (!wrap) return;
+		const bar = document.querySelector("#view .boardfilters");
+		wrap.classList.remove("fits");
+		const table = wrap.querySelector("table");
+		const fits = !!table && table.scrollWidth <= wrap.clientWidth + 1;
+		/* A board that needs its own scroller keeps its headers inside it;
+		   the filter bar then stops sticking, so it can never cover them. */
+		if (bar) bar.classList.toggle("nosticky", !fits);
+		if (!fits) return;
+		wrap.classList.add("fits");
+		if (bar) wrap.style.setProperty("--bfH", bar.offsetHeight + "px");
+	}
+	let fitTimer = 0;
+	global.addEventListener("resize", () => {
+		clearTimeout(fitTimer);
+		fitTimer = setTimeout(fitBoard, 120);
+	});
 
 	const SCROLLERS = ".scroll, .tablewrap, .drawer";
 
@@ -10124,9 +11300,24 @@
 			ta.value = text;
 			document.body.appendChild(ta);
 			ta.select();
-			try { document.execCommand("copy"); done(); } catch (e) { /* nothing to do */ }
+			/* execCommand returns false rather than throwing when the copy
+			   is refused, and "Copied" was shown either way (audit P15). */
+			let copied = false;
+			try { copied = document.execCommand("copy") === true; } catch (e) { copied = false; }
 			ta.remove();
 			if (had && had !== document.body && had.isConnected && had.focus) had.focus();
+			if (copied) { done(); return; }
+			const box = el("div");
+			box.appendChild(el("p", null, "The browser would not copy to the clipboard. " +
+				"Select the text below and copy it yourself (Ctrl+C or \u2318C)."));
+			const area = document.createElement("textarea");
+			area.readOnly = true;
+			area.rows = 6;
+			area.style.width = "100%";
+			area.value = text;
+			box.appendChild(area);
+			modal("Copy this text", box, null, "Close");
+			try { area.focus(); area.select(); } catch (e) { /* the text is on screen */ }
 		}
 		if (navigator.clipboard && navigator.clipboard.writeText) {
 			navigator.clipboard.writeText(text).then(done, fallback);
@@ -10223,10 +11414,12 @@
 	   needs it — JSON exports add their own at the call site. */
 	function download(name, text, type) {
 		const t = type || "text/plain";
-		const body = t === "text/csv" && text.charAt(0) !== "\ufeff"
+		// A Blob is written as it is (the merge's streamed, possibly gzipped, league).
+		const isBlob = typeof Blob === "function" && text instanceof Blob;
+		const body = !isBlob && t === "text/csv" && text.charAt(0) !== "\ufeff"
 			? "\ufeff" + text
 			: text;
-		const blob = new Blob([body], { type: t });
+		const blob = isBlob ? text : new Blob([body], { type: t });
 		const a = document.createElement("a");
 		a.href = URL.createObjectURL(blob);
 		a.download = name;
@@ -10239,16 +11432,25 @@
 		   ever naming the file — so "which of these four JSONs is the one I
 		   just made" was unanswerable from inside the tool. */
 		lastDownload = name;
+		lastDownloadBytes = blob.size;
 		markExported();
-		setStatus("Wrote " + name + ".");
+		setStatus("Wrote " + name + " (" + fmtBytes(blob.size) + ").", blob.size > 1e6);
 		return name;
 	}
 
 	/* The status a caller writes after download(): its own sentence, with the
 	   file name download() recorded in front of it. */
 	let lastDownload = "";
+	/* U2/U39: what was written, with its size, and a large file's line
+	   stays up (a merge takes long enough that a 3.5-second line is gone
+	   before anyone looks back at the page). */
+	let lastDownloadBytes = 0;
+	function fmtBytes(n) {
+		return n >= 1e6 ? (n / 1e6).toFixed(1) + " MB" : n >= 1e3 ? Math.round(n / 1e3) + " KB" : n + " bytes";
+	}
 	function exported(extra) {
-		setStatus("Wrote " + lastDownload + (extra ? " — " + extra : "") + ".");
+		setStatus("Wrote " + lastDownload + (lastDownloadBytes ? " (" + fmtBytes(lastDownloadBytes) + ")" : "") +
+			(extra ? " — " + extra : "") + ".", lastDownloadBytes > 1e6 || /merged/.test(extra || ""));
 	}
 
 	/* The user's notes and stars for ONE class, by player key, stamped on the
@@ -10594,6 +11796,82 @@
 		if (g.measureText(text).width <= maxW) return text;
 		while (text.length > 1 && g.measureText(text + "…").width > maxW) text = text.slice(0, -1);
 		return text + "…";
+	}
+
+	/* THE BRACKET AS A PICTURE (audit Q14): the 64 in four regions, the left
+	   two read left to right and the right two mirrored, the Final Four and
+	   the champion in the middle. Winners in ink, losers dimmed. */
+	function exportBracketImage(res) {
+		res = res || state.results[state.active];
+		const t = res && res.tourney;
+		if (!t || !t.regions) { setStatus("No bracket to draw."); return; }
+		const order = t.semiRegions || Object.keys(t.regions);
+		if (order.length !== 4) { setStatus("This field is too small for a full bracket."); return; }
+		const W = 1600, H = 1000, top = 90, regionH = 420, colW = 150;
+		const c = newCardCanvas(W, H);
+		if (!c) return;
+		const g = c.g;
+		g.fillStyle = CARD_INK;
+		g.font = "600 26px " + CARD_FONT;
+		g.fillText(fitText(g, (res.season ? res.season + " " : "") + "NCAA tournament — " +
+			className(res), W - 56), 28, 44);
+		g.fillStyle = CARD_DIM;
+		g.font = "13px " + CARD_MONO;
+		g.fillText("seed " + res.seed + " · " + classFingerprint(res), 28, 68);
+		const label = (x) => (x && x.team ? x.seed + " " + x.team.name : "");
+		const drawName = (txt, x, y, won, align) => {
+			g.fillStyle = won ? CARD_INK : CARD_DIM;
+			g.font = (won ? "600 " : "") + "11px " + CARD_FONT;
+			g.textAlign = align;
+			g.fillText(fitText(g, txt, colW - 10), x, y);
+		};
+		order.forEach((rn, ri) => {
+			const reg = t.regions[rn];
+			if (!reg || !reg.rounds) return;
+			const left = ri < 2;
+			const y0 = top + (ri % 2) * (regionH + 40);
+			g.fillStyle = CARD_DIM;
+			g.font = "600 12px " + CARD_FONT;
+			g.textAlign = left ? "left" : "right";
+			g.fillText(String(rn).toUpperCase(), left ? 28 : W - 28, y0 - 8);
+			for (let k = 0; k < 4; k++) {
+				const games = reg.rounds[k] || [];
+				const n = games.length * 2;
+				const x = left ? 28 + k * colW : W - 28 - k * colW;
+				games.forEach((gm, i) => {
+					for (const [side, j] of [[gm.a, 2 * i], [gm.b, 2 * i + 1]]) {
+						const y = y0 + (j + 0.5) * (regionH / n) + 4;
+						drawName(label(side), x, y, gm.winner === side, left ? "left" : "right");
+					}
+				});
+			}
+			const last = reg.rounds[3] && reg.rounds[3][0];
+			if (last && last.winner) {
+				const x = left ? 28 + 4 * colW : W - 28 - 4 * colW;
+				drawName(label(last.winner), x, y0 + regionH / 2 + 4, true, left ? "left" : "right");
+			}
+		});
+		// The Final Four and the title game, in the middle.
+		const cx = W / 2;
+		g.textAlign = "center";
+		(t.semis || []).forEach((gm, i) => {
+			const y = top + 300 + i * 200;
+			drawName(label(gm.a), cx, y, gm.winner === gm.a, "center");
+			drawName(label(gm.b), cx, y + 18, gm.winner === gm.b, "center");
+		});
+		if (t.champion && t.champion.team) {
+			g.fillStyle = CARD_INK;
+			g.font = "600 18px " + CARD_FONT;
+			g.textAlign = "center";
+			g.fillText("Champion: " + t.champion.team.name, cx, top + 420);
+			if (t.final && t.final.score) {
+				g.font = "12px " + CARD_MONO;
+				g.fillStyle = CARD_DIM;
+				g.fillText(String(t.final.score), cx, top + 440);
+			}
+		}
+		g.textAlign = "left";
+		saveCanvasPng(c.cv, "bracket_" + res.seed + ".png", "the bracket");
 	}
 
 	function exportClassCard(res) {
@@ -11206,36 +12484,61 @@
 	/* Q6. Every loaded class in ONE .zip, so a set of classes is one click
 	   rather than "Export next" once per file (a browser blocks several
 	   downloads from one click). Same options as a single export. */
+	/* U38: one class at a time behind the shared meter, a paint between
+	   each, so a forty-class zip says how far it has got. */
 	function exportAllZip(opts) {
 		const o = Object.assign({}, opts || currentExportOpts());
 		delete o.only;
 		const files = [];
 		let warn = 0;
+		const todo = [];
 		for (let i = 0; i < state.files.length; i++) {
-			const res = ensureResult(i);
-			if (!res) {
-				showError(new Error("Could not export " + state.files[i].name +
-					": it has not been run yet."));
-				return false;
-			}
-			if (o.myMarks) stampUserMarks(res);
-			try {
-				const out = global.Engine.exportFile(res, o);
-				warn += global.Engine.exportFile.passthroughs || 0;
-				files.push({
-					name: exportName(i, o),
-					data: "\ufeff" + JSON.stringify(out, null, 2),
-				});
-			} catch (err) {
-				showError(new Error("Could not export " + state.files[i].name + ": " + err.message));
-				return false;
-			}
+			// UV12: pro history is never written back out.
+			if (!global.Engine.pastProOf(state.files[i].data)) todo.push(i);
 		}
-		const bytes = V.zipStore(files, new Date());
-		download("bbgm_draft_classes_" + files.length + ".zip", bytes, "application/zip");
-		exported(files.length + " classes in one zip" +
-			(warn ? ". Warning: " + warn + " player(s) could not be matched and were exported unmodified." : ""));
-		return true;
+		let cancelled = false;
+		const cancel = () => { cancelled = true; };
+		const one = (n) => {
+			if (cancelled) { progressHide(); setStatus("Zip export cancelled."); return false; }
+			if (n >= todo.length) {
+				progressShow("Writing the zip", 1, files.length + " classes");
+				return nextPaint().then(() => {
+					const bytes = V.zipStore(files, new Date());
+					progressHide();
+					download("bbgm_draft_classes_" + files.length + ".zip", bytes, "application/zip");
+					exported(files.length + " classes in one zip" +
+						(warn ? ". Warning: " + warn + " player(s) could not be matched and were exported unmodified." : ""));
+					return true;
+				});
+			}
+			const i = todo[n];
+			progressShow("Exporting " + state.files[i].name, n / todo.length,
+				(n + 1) + " of " + todo.length + " classes", cancel);
+			return nextPaint().then(() => {
+				const res = ensureResult(i);
+				if (!res) {
+					progressHide();
+					showError(new Error("Could not export " + state.files[i].name +
+						": it has not been run yet."));
+					return false;
+				}
+				if (o.myMarks) stampUserMarks(res);
+				try {
+					const out = global.Engine.exportFile(res, o);
+					warn += global.Engine.exportFile.passthroughs || 0;
+					files.push({
+						name: exportName(i, o),
+						data: "\ufeff" + JSON.stringify(out, null, 2),
+					});
+				} catch (err) {
+					progressHide();
+					showError(new Error("Could not export " + state.files[i].name + ": " + err.message));
+					return false;
+				}
+				return one(n + 1);
+			});
+		};
+		return one(0);
 	}
 
 	/* Q2. What the tool did to the file: the engine's change report as a
@@ -11406,17 +12709,27 @@
 	}
 	window.addEventListener("beforeprint", paintPrintHeader);
 
+	let exportOptionsOpen = false;
 	function exportMenu() {
 		const res = state.results[state.active];
 		if (!res) return;
-		const box = el("div");
-		box.appendChild(el("p", "hint",
-			"The simulated season used to be thrown away except for the note strings."));
+		const box = el("div", "exportmenu");
+		/* U34: headed sections instead of one flat list of 26, and the
+		   options for BBGM files folded behind a one-line summary. */
 		const list = el("div", "checks");
-		const item = (label, fn) => {
+		const SECTIONS = [
+			["bbgm", "Back to BBGM"],
+			["sheets", "Spreadsheets and data"],
+			["pics", "Pictures and pages"],
+			["import", "Import"],
+			["tools", "Tools"],
+		];
+		const sections = {};
+		for (const [k] of SECTIONS) sections[k] = el("div", "checks exportsec");
+		const item = (label, fn, sec) => {
 			const b = el("button", null, label);
 			b.addEventListener("click", () => { closeModal(); fn(); });
-			list.appendChild(b);
+			sections[sec || "tools"].appendChild(b);
 		};
 		/* §8.13: the simulated season, honors and career were computed and
 		   then thrown away at export time. Opt-in, so the default file is
@@ -11548,6 +12861,33 @@
 			"Adds what you wrote under “My notes” on a player page as the last " +
 			"lines of his note (so BBGM shows it), and marks starred prospects " +
 			"as watched. Off by default: they stay in this browser."));
+		/* Q6: what only the command line could ask for. */
+		const oProLines = opt("proLines", "Add \u201cMock:\u201d and \u201cPro projection:\u201d lines to each note");
+		const oHometowns = opt("hometowns", "Draw a hometown (\u201cCity, ST, USA\u201d) for anybody the file left at \u201cUSA\u201d");
+		const oRecipe = opt("recipe", "Stamp the recipe (seed, engine revision, settings) into the file");
+		const oRatingsHistory = opt("ratingsHistory", "Write a ratings row for each simulated college season (BBGM's development chart)");
+		const fuzzWrap = el("label", "check");
+		fuzzWrap.appendChild(document.createTextNode("Scouting fuzz "));
+		const fuzzSel = el("select");
+		fuzzSel.id = "exportFuzz";
+		for (const [v, l] of [["keep", "keep the file's"], ["zero", "zero (true ratings)"],
+			["regenerate", "redraw at a scouting level"]]) fuzzSel.appendChild(new Option(l, v));
+		fuzzSel.value = remembered && remembered.fuzz ? remembered.fuzz : "keep";
+		const lvl = el("input");
+		lvl.type = "number";
+		lvl.id = "exportScoutingLevel";
+		lvl.min = "1";
+		lvl.max = "100";
+		lvl.style.width = "60px";
+		lvl.value = String(remembered && Number.isFinite(remembered.scoutingLevel) ? remembered.scoutingLevel : 34);
+		lvl.setAttribute("aria-label", "Scouting level (1-100, BBGM's default 34)");
+		const paintFuzz = () => { lvl.hidden = fuzzSel.value !== "regenerate"; };
+		fuzzSel.addEventListener("change", () => { paintFuzz(); rememberExportOpts(exportOpts()); });
+		lvl.addEventListener("change", () => rememberExportOpts(exportOpts()));
+		fuzzWrap.appendChild(fuzzSel);
+		fuzzWrap.appendChild(lvl);
+		optBox.appendChild(fuzzWrap);
+		paintFuzz();
 		list.appendChild(optBox);
 		paintScope();
 		/* Q5: the file name, as a template. */
@@ -11610,6 +12950,10 @@
 			ages: oAges(), noteAppend: oNoteAppend(), includeNotes: oIncludeNotes(),
 			myMarks: oMyMarks(),
 			injuries: oInjuries(), jerseys: oJerseys(),
+			proLines: oProLines(), hometowns: oHometowns(), recipe: oRecipe(),
+			ratingsHistory: oRatingsHistory(),
+			fuzz: fuzzSel.value,
+			scoutingLevel: Math.max(1, Math.min(100, Number(lvl.value) || 34)),
 			awardsScope: scopeSel.value,
 			majorConferences: confInput.value.split(",")
 				.map((x) => x.trim()).filter(Boolean),
@@ -11667,7 +13011,7 @@
 			"Tools → Import players also stamps every imported season's team " +
 			"“DNE” itself, whatever team the file named — that is BBGM, not " +
 			"this export."));
-		item("BBGM class file, with the options above", () => {
+		item("BBGM class file, with the options below", () => {
 			const popts = exportOpts();
 			const keys = partialKeys(res, onlySel.value, onlyN.value);
 			if (keys) {
@@ -11679,12 +13023,12 @@
 				popts.only = keys;
 			}
 			exportActive(popts);
-		});
+		}, "bbgm");
 		if (state.files.length > 1) {
-			item("Every loaded class as ONE .zip (with the options above)", () => exportAllZip(exportOpts()));
+			item("Every loaded class as ONE .zip (with the options below)", () => exportAllZip(exportOpts()), "bbgm");
 		}
-		item("What the tool changed in my file — report as Markdown", () => exportChangeReport(res, "md", exportOpts()));
-		item("What the tool changed in my file — report as CSV", () => exportChangeReport(res, "csv", exportOpts()));
+		item("What the tool changed in my file — report as Markdown", () => exportChangeReport(res, "md", exportOpts()), "pics");
+		item("What the tool changed in my file — report as CSV", () => exportChangeReport(res, "csv", exportOpts()), "sheets");
 		item("Players file, for Tools → Import players (keeps the statline)", () => {
 			const res2 = ensureResult(state.active);
 			if (!res2) return;
@@ -11700,37 +13044,68 @@
 			} catch (err) {
 				setStatus("Could not export: " + (err && err.message ? err.message : err));
 			}
-		});
+		}, "bbgm");
 		item("Merge into a league file… (keeps the statline AND the awards)", () => {
 			state.mergeOpts = exportOpts();
 			chooseMergeClasses();
-		});
+		}, "bbgm");
 		/* The one export that needs nothing but a browser to read. */
-		item("Mock first round as a picture (PNG) — for a forum post", () => exportMockImage(res));
-		item("Class card as a picture (PNG) — the top five and the class in numbers", () => exportClassCard(res));
-		item("Prospect table as CSV (the current filter)", () => exportCsv(res));
-		item("Prospect table as CSV (whole class)", () => exportCsv(res, true));
-		item("Season as JSON — records, bracket, awards, board", () => exportSeasonJson(res));
-		item("Season as CSV", () => exportSeasonCsv(res));
+		item("Mock first round as a picture (PNG) — for a forum post", () => exportMockImage(res), "pics");
+		item("Class card as a picture (PNG) — the top five and the class in numbers", () => exportClassCard(res), "pics");
+		item("Bracket as a picture (PNG) — the 64, the Final Four and the champion", () => exportBracketImage(res), "pics");
+		item("Prospect table as CSV (the current filter)", () => exportCsv(res), "sheets");
+		item("Prospect table as CSV (whole class)", () => exportCsv(res, true), "sheets");
+		item("Season as JSON — records, bracket, awards, board", () => exportSeasonJson(res), "sheets");
+		item("Season as CSV", () => exportSeasonCsv(res), "sheets");
 		item("Season almanac — the whole season as Markdown or a PDF\u2026",
-			() => almanacDialog());
+			() => almanacDialog(), "pics");
 		item("Season as an interactive website — one HTML file with the JSON in it\u2026",
-			() => almanacDialog());
-		item("Season as a BBGM league fragment — teams, records, coaches", () => exportLeagueFragment(res));
-		item("Note text only, for a spreadsheet", () => exportNotes(res));
-		item("Notes as Markdown, for a forum post", () => exportNotesMarkdown(res));
-		item("Locked prospects as CSV — the file Import locks reads back", exportLocksCsv);
-		item("Import locks from a CSV…", () => $("csvFile").click());
-		item("Rename prospects from a pasted list of names…", renameDialog);
-		item("New synthetic class… (size, year, seed)", newClassDialog);
-		item("Print this page, or save it as a PDF…", printPage);
-		item("Settings as JSON — drop it on the page to load them again", exportSettingsJson);
-		item("Message history", messageHistory);
+			() => almanacDialog(), "pics");
+		item("Season as a BBGM league fragment — teams, records, coaches", () => exportLeagueFragment(res), "bbgm");
+		item("Note text only, for a spreadsheet", () => exportNotes(res), "sheets");
+		item("Notes as Markdown, for a forum post", () => exportNotesMarkdown(res), "pics");
+		item("Locked prospects as CSV — the file Import locks reads back", exportLocksCsv, "sheets");
+		item("Import locks from a CSV…", () => $("csvFile").click(), "import");
+		item("Rename prospects from a pasted list of names…", renameDialog, "import");
+		item("New synthetic class… (size, year, seed)", newClassDialog, "tools");
+		item("Print this page, or save it as a PDF…", printPage, "pics");
+		item("Settings as JSON — drop it on the page to load them again", exportSettingsJson, "sheets");
+		item("Message history", messageHistory, "tools");
 		item("Copy a bug report (seed, settings, engine revision, last error — no player data)", () => {
 			copyText(bugReport(), null, "", "the bug report");
-		});
-		item("Compare two presets…", comparePresets);
-		box.appendChild(list);
+		}, "tools");
+		item("Compare two presets…", comparePresets, "tools");
+		const optFold = el("details", "exportopts");
+		optFold.id = "exportOptions";
+		optFold.open = !!exportOptionsOpen;
+		optFold.addEventListener("toggle", () => { exportOptionsOpen = optFold.open; });
+		const optSum = el("summary");
+		const paintOptSum = () => {
+			const o = exportOpts();
+			const on = [];
+			if (o.stats) on.push("statline" + (o.prior ? " + prior" : "") + (o.highs ? " + highs" : ""));
+			if (o.awards) on.push(o.awardsScope === "major" ? "major awards" : "awards");
+			if (o.ages) on.push("ages");
+			if (o.injuries) on.push("injuries");
+			if (o.jerseys) on.push("jerseys");
+			if (o.includeNotes) on.push(o.noteAppend ? "notes (kept)" : "notes");
+			if (o.myMarks) on.push("my notes");
+			if (onlySel.value !== "all") on.push(onlySel.options[onlySel.selectedIndex].text);
+			optSum.textContent = "Options for BBGM files: " + (on.length ? on.join(" · ") : "none");
+		};
+		paintOptSum();
+		optFold.addEventListener("change", paintOptSum);
+		optFold.addEventListener("input", paintOptSum);
+		optFold.appendChild(optSum);
+		optFold.appendChild(list);
+		for (const [k, title] of SECTIONS) {
+			if (!sections[k].children.length) continue;
+			const sec = el("section", "exportgroup");
+			sec.appendChild(el("h4", null, title));
+			sec.appendChild(sections[k]);
+			if (k === "bbgm") sec.appendChild(optFold);
+			box.appendChild(sec);
+		}
 		modal("Export and import", box, null, "Close");
 	}
 
@@ -11745,27 +13120,100 @@
 	/* The merge itself, once both halves are in hand: the classes to write and
 	   the league to write them into. Shared by the file-picker route and the
 	   in-memory route (the league the classes were lifted out of). */
-	function mergeInto(league, leagueName, picked) {
-		const results = [];
-		for (const i of picked) {
-			const r = ensureResult(i);
-			if (r) results.push((state.mergeOpts && state.mergeOpts.myMarks) ? stampUserMarks(r) : r);
-		}
-		if (!results.length) return;
-		let out;
-		try {
-			out = global.Engine.mergeManyIntoLeague(results, league,
-				state.mergeOpts || {});
-		} catch (err) {
-			setStatus("Could not merge: " + (err && err.message ? err.message : err));
-			return;
-		}
-		/* No BOM here, unlike the CSV exports: this file is read back by
-		   BBGM's own league loader, not by a spreadsheet. */
+	/* Staged, with the meter: each step is one long synchronous block, so
+	   the label for it is painted first and then the step runs. `from` is
+	   where the bar already stands (the file read before it, if any). */
+	/* The write is a SPLICE when the league came through the scanner (L6):
+	   every store the merge did not change is copied from the file's own
+	   bytes, `players` is written one man at a time, and the result is
+	   gzipped on the way out when the league was a .gz — the 213 MB .json
+	   this used to hand back for a 28 MB .gz is now a .json.gz of about the
+	   size that was dropped. No whole-file string is ever built. */
+	function mergeInto(league, leagueName, picked, from, source) {
+		const at = Number.isFinite(from) ? from : 0;
+		const step = (label, frac, detail) => {
+			progressShow(label, at + (1 - at) * frac, detail);
+			return nextPaint();
+		};
+		const LS = global.LeagueScan;
+		const splice = !!(source && source.blob && source.scan && LS && canScan(source.blob));
+		const gzip = !!(source && source.gz) && typeof CompressionStream === "function";
+		return step("Simulating the classes to merge", 0).then(() => {
+			const results = [];
+			const skipped = [];
+			for (const i of picked) {
+				const r = ensureResult(i);
+				if (r) results.push((state.mergeOpts && state.mergeOpts.myMarks) ? stampUserMarks(r) : r);
+				else skipped.push(state.files[i] ? state.files[i].name : "file " + (i + 1));
+			}
+			/* A class with no result yet (a universe season the chain has not
+			   recorded, during or after a reload) was silently left out, and
+			   the league came out with only some of the chosen classes (audit
+			   2026-10-10 B20). Refuse and name them, as exportAllZip does. */
+			if (skipped.length) {
+				progressHide();
+				setStatus("Not merged: " + skipped.join(", ") + (skipped.length === 1 ? " has" : " have") +
+					" not been simulated yet. Let the universe finish, then merge again.", true);
+				return [];
+			}
+			return results;
+		}).then((results) => {
+			if (!results.length) { progressHide(); return null; }
+			return step("Merging " + results.length + " class" +
+				(results.length === 1 ? "" : "es") + " into " + leagueName, 0.25)
+				.then(() => {
+					try {
+						return global.Engine.mergeManyIntoLeague(results, league,
+							state.mergeOpts || {});
+					} catch (err) {
+						progressHide();
+						showError(new Error("Could not merge: " + (err && err.message ? err.message : err)), err);
+						return null;
+					}
+				});
+		}).then((out) => {
+			if (!out) return null;
+			return step("Writing the new league file", 0.4).then(() => {
+				if (splice) {
+					// Every top-level key the merge produced anew.
+					const changed = {};
+					for (const k of Object.keys(out.file)) if (out.file[k] !== league[k]) changed[k] = out.file[k];
+					return LS.spliceBlob(source.blob, source.scan, changed, changed, {
+						gzip,
+						onProgress: (f) => progressShow("Writing the new league file" +
+							(gzip ? " (gzipped)" : ""), at + (1 - at) * (0.4 + 0.58 * f)),
+					}).then((blob) => [out, blob, gzip]);
+				}
+				/* No BOM here, unlike the CSV exports: this file is read back by
+				   BBGM's own league loader, not by a spreadsheet. Inside the
+				   try, so a league too big for one string is a sentence (L6). */
+				let body;
+				try { body = JSON.stringify(out.file); } catch (err) {
+					throw /string length/i.test(String(err && err.message))
+						? new Error("the merged league is too big to write as one text in this " +
+							"browser — drop the league file itself (not a restored session) so it " +
+							"can be streamed")
+						: err;
+				}
+				if (!gzip) return step("Saving " + mb(body.length), 0.95).then(() => [out, body, false]);
+				return new Response(new Blob([body]).stream().pipeThrough(new CompressionStream("gzip")))
+					.blob().then((b) => [out, b, true]);
+			});
+		}).then((triple) => {
+			if (!triple) return;
+			progressHide();
+			mergeDone(triple[0], leagueName, triple[1], triple[2]);
+		}, (err) => {
+			progressHide();
+			showError(new Error("Could not merge: " + (err && err.message ? err.message : err)), err);
+		});
+	}
+
+	function mergeDone(out, leagueName, body, gz) {
 		const base = leagueName.replace(/\.json(\.gz)?$/i, "").replace(/\.gz$/i, "");
 		const years = out.seasons.slice().sort((a, b) => a - b).join("_");
-		download(base + "_with_" + years + "_class.json",
-			JSON.stringify(out.file), "application/json");
+		download(base + "_with_" + years + "_class.json" + (gz ? ".gz" : ""), body,
+			gz ? "application/gzip" : "application/json");
 		exported("merged " + (out.replaced + out.added) + " players into " +
 			leagueName + " (" + out.replaced + " replaced, " + out.added + " added, " +
 			out.removed + " generated prospects dropped) for the " +
@@ -11773,6 +13221,22 @@
 			(out.seasons.length === 1 ? "" : "s") + ". Load the new file with " +
 			"Create New League \u2192 upload" +
 			(out.warnings && out.warnings.length ? ". " + out.warnings.join(" ") : ""));
+	}
+
+	/* A league read for a merge: through the scanner when it can be (the
+	   stores the merge does not touch stay on disk until the write copies
+	   them), otherwise as text. Resolves to {league, source}. */
+	function readLeagueForMerge(f, onBytes) {
+		if (canScan(f)) {
+			return global.LeagueScan.scanBlob(f, { onBytes }).then((r) => ({
+				league: r.data,
+				source: r.scan ? { blob: f, scan: r.scan, gz: r.gz } : { gz: r.gz },
+			}));
+		}
+		return readTextFile(f, onBytes).then((text) => ({
+			league: global.LeagueScan ? global.LeagueScan.parseText(text) : JSON.parse(text),
+			source: { gz: /\.gz$/i.test(f.name || "") },
+		}));
 	}
 
 	/* Where the league file comes from. When the classes were lifted out of a
@@ -11797,9 +13261,17 @@
 		modal("Merge into a league file", box, () => {
 			state.mergeIndices = null;
 			setStatus("Merging into " + src.name + "\u2026", true);
-			// A frame, so the status paints before a multi-megabyte merge
-			// blocks the main thread.
-			requestAnimationFrame(() => mergeInto(src.data, src.name, picked));
+			// mergeInto paints its own stages before each blocking step.
+			if (src.data) { mergeInto(src.data, src.name, picked, 0, src); return; }
+			/* A restored session keeps the league as its file, not parsed. */
+			progressShow("Reading " + src.name, 0, "");
+			readLeagueForMerge(src.blob, (seen, size) => progressShow("Reading " + src.name,
+				0.5 * seen / Math.max(1, size), mb(seen) + " of " + mb(size)))
+				.then((r) => mergeInto(r.league, src.name, picked, 0.55, r.source))
+				.catch((err) => {
+					progressHide();
+					setStatus(src.name + " could not be read: " + (err && err.message ? err.message : err));
+				});
 		}, "Merge into " + src.name);
 	}
 
@@ -11913,6 +13385,7 @@
 		$("batchBar").style.width = p + "%";
 		$("batchGauge").setAttribute("aria-valuenow", String(p));
 		$("batchNote").textContent = done + " of " + total + " classes";
+		progressShow("Batch: " + done + " of " + total + " classes", total ? done / total : null, "", cancelBatch);
 	}
 
 	/* The classes a running batch has already finished. A cancelled sweep used
@@ -11923,6 +13396,7 @@
 
 	function batchDone(rows, failed) {
 		$("batchProgress").hidden = true;
+		progressHide();
 		$("btnBatch").disabled = false;
 		$("btnBatchCancel").hidden = true;
 		// An idle worker still holds the league file it was sent.
@@ -12074,6 +13548,33 @@
 			.map((k) => String(flavors[k]).padStart(3) + "  " + k).join("\n")));
 		cards.appendChild(fBox);
 		view.appendChild(cards);
+		// Range of outcomes per prospect (audit Q20).
+		const ranges = B.prospectRanges ? B.prospectRanges(rows) : [];
+		if (ranges.length) {
+			const d = el("details", "card batchranges");
+			d.appendChild(el("summary", null, "Range of outcomes per prospect (" + ranges.length + ")"));
+			const t = el("table", "mini");
+			const hr = el("tr");
+			for (const h of ["Prospect", "Board p10-p90", "Top 3", "Usual schools", "Builds", "PPG"]) hr.appendChild(el("th", null, h));
+			t.appendChild(hr);
+			const pc0 = (x) => Math.round(100 * x) + "%";
+			for (const r of ranges.slice(0, 40)) {
+				const tr = el("tr");
+				tr.appendChild(el("td", null, r.name));
+				tr.appendChild(el("td", "num", r.boardP10 === null ? "—"
+					: Math.round(r.boardP10) + "-" + Math.round(r.boardP90) + " (" + Math.round(r.boardMedian) + ")"));
+				tr.appendChild(el("td", "num", pc0(r.top3)));
+				tr.appendChild(el("td", null, r.colleges.map((c) => c.name + " " + pc0(c.share)).join(", ")));
+				tr.appendChild(el("td", null, r.archetypes.map((c) => c.name + " " + pc0(c.share)).join(", ")));
+				tr.appendChild(el("td", "num", r.ppgP10 === null ? "—" : r.ppgP10.toFixed(1) + "-" + r.ppgP90.toFixed(1)));
+				t.appendChild(tr);
+			}
+			const w = el("div", "tablewrap");
+			w.appendChild(t);
+			d.appendChild(w);
+			d.appendChild(el("p", "hint", "Player keys survive seeds, so each row is one man across the batch. The top 40 by median board rank."));
+			view.appendChild(d);
+		}
 	}
 
 	/* THE BATCH AS A CONTACT SHEET.
@@ -12161,34 +13662,67 @@
 		   way to use this tool, so the fallback below has to be just as usable:
 		   it slices the work into single classes on a timer, which yields to
 		   the UI between each one and can be canceled the same way. */
-		try {
-			batchWorker = new Worker("js/worker.js");
-			batchWorker.onmessage = (e) => {
+		/* A worker that dies costs one class, not the batch (audit P11): it
+		   is respawned once and resumes at the first unfinished class, on the
+		   same base#i seeds, so the rows are the ones an uninterrupted batch
+		   writes; only if that fails too does the rest run on this tab. */
+		let respawned = false;
+		const inline = (from, why) => {
+			if (batchWorker) { batchWorker.terminate(); batchWorker = null; }
+			if (why) setStatus(why, true);
+			runBatchInline(file, cfg, n, from);
+		};
+		const start = (from) => {
+			const w = new Worker("js/worker.js");
+			batchWorker = w;
+			w.onmessage = (e) => {
+				if (batchWorker !== w) return;
 				const m = e.data;
+				if (m.type === "hello") {
+					// See the search: a worker on a newer engine than the page.
+					if (global.Universe && m.rev !== undefined && m.rev !== global.Universe.ENGINE_REV) {
+						inline(batchPartial.length, "A new version of this tool is available — " +
+							"reload the page. The batch is running on this tab meanwhile.");
+					}
+					return;
+				}
 				if (m.type === "progress") {
 					// Keep the finished classes, so a cancel keeps its work.
 					if (m.row) batchPartial.push(m.row);
 					batchProgress(m.done, m.total);
-				} else if (m.type === "done") batchDone(m.rows);
+				} else if (m.type === "done") batchDone(from ? batchPartial.slice() : m.rows);
 				else if (m.type === "error") {
 					showError(new Error(m.message));
 					batchDone(null, true);
 				}
 			};
-			batchWorker.onerror = () => {
-				if (batchWorker) { batchWorker.terminate(); batchWorker = null; }
-				runBatchInline(file, cfg, n);
+			w.onerror = (ev) => {
+				if (ev && ev.preventDefault) ev.preventDefault();
+				if (batchWorker !== w) return;
+				w.terminate();
+				batchWorker = null;
+				const at = batchPartial.length;
+				if (!respawned) {
+					respawned = true;
+					setStatus("The batch worker stopped at class " + (at + 1) + "; restarting it there.", true);
+					try { start(at); return; } catch (e) { /* fall through to this tab */ }
+				}
+				inline(at, "The batch worker stopped at class " + (at + 1) +
+					"; continuing on this tab.");
 			};
-			batchWorker.postMessage({
-				type: "batch", leagueFile: file.data, cfg, n, baseSeed: batchBaseSeed,
+			w.postMessage({
+				type: "batch", leagueFile: file.data, cfg, n, baseSeed: batchBaseSeed, start: from,
 			});
+		};
+		try {
+			start(0);
 		} catch (cannotStartWorker) {
 			batchWorker = null;
-			runBatchInline(file, cfg, n);
+			runBatchInline(file, cfg, n, 0);
 		}
 	}
 
-	function runBatchInline(file, cfgLive, n) {
+	function runBatchInline(file, cfgLive, n, from) {
 		/* The worker is handed a structured clone of the settings and the
 		   file at click time; this path used to keep the live objects
 		   (state.overrides, the loaded file) across timer steps, and the
@@ -12199,8 +13733,9 @@
 			: (x) => JSON.parse(JSON.stringify(x));
 		const cfg = copy(cfgLive);
 		const runner = global.Engine.createRunner(copy(file.data));
-		const rows = [];
-		let i = 0;
+		// Resuming a batch a worker started: its finished rows stand.
+		let i = Math.max(0, Math.min(n, Number(from) || 0));
+		const rows = batchPartial.slice(0, i);
 		const step = () => {
 			if (batchCancel) { batchDone(null); return; }
 			if (i >= n) { batchDone(rows); return; }
@@ -12324,6 +13859,7 @@
 		clearLock, showPlayer, showTeam, showGame,
 		runUniverse, cancelUniverse, resumeUniverseDialog, exportUniverse, exportUniversePlayers,
 		newSyntheticUniverse, syntheticUniverseDialog, simulateForward, simulateForwardDialog,
+		addPastProClasses,
 		restoreSyntheticUniverse,
 		exportUniverseCsv, randomizeUniverseName, PERSIST_CAPS,
 		followProgram, dynastyDialog, dynastyStatus, abandonDynasty, seasonDrawer,
@@ -12343,13 +13879,14 @@
 		REROLL_PREDICATES,
 		exportCsv, setStatus, showError, indexSnapshot, readTextFile,
 		// The analytics, mock and sharing UI (js/share.js, js/views.js).
-		exportMockImage, exportClassCard, exportPlayerCard, downloadText: download, copyLink,
+		exportMockImage, exportClassCard, exportBracketImage, exportPlayerCard, downloadText: download, copyLink,
 		keepCurrentClass, keptDialog, commandLineText, copyCommandLine,
 		// The replay layer, for tools/uismoke.js.
 		replayStore, replayDialog, replayAfterRun, chaosDraft, className,
 		// Replayability (js/replay.js), for tools/uismoke.js.
 		findChallenge, resultCode, applyCode, importGhost, startDaily, startCampaign,
-		startPuzzle,
+		startPuzzle, blindReroll, reroll, ensureChallengeClass, readDailyHistory, dailyStreak,
+		paintDocTitle, classFingerprint,
 	});
 
 	/* Offline install. A service worker needs http(s) (a file:// page cannot
@@ -12360,6 +13897,14 @@
 		!navigator.webdriver) {
 		window.addEventListener("load", () => {
 			navigator.serviceWorker.register("sw.js").catch(() => { /* optional */ });
+		});
+		/* A new service worker took over this tab (a deploy since it was
+		   opened): the page still runs the old scripts, so say so (P13). */
+		const hadController = !!navigator.serviceWorker.controller;
+		navigator.serviceWorker.addEventListener("controllerchange", () => {
+			if (hadController) {
+				setStatus("A new version of this tool is available — reload the page to use it.", true);
+			}
 		});
 	}
 
@@ -12534,6 +14079,7 @@
 	};
 	Promise.resolve().then(loadAutosave).then(afterAutosave, afterAutosave);
 	bindSessionCard();
+	bindProgressCancel();
 	loadSessionMeta();
 
 	$("errClose").addEventListener("click", clearError);
@@ -12610,19 +14156,48 @@
 			if (modalEl && !modalEl.hidden) return;
 			toggle();
 		});
+		/* U41: on a phone the open settings sheet gets a sticky "Done" bar,
+		   and Escape closes it, instead of a 4,700px scroll back to the page. */
+		const aside = $("settings");
+		if (aside && !aside.querySelector(".sheetdone")) {
+			const bar = el("div", "sheetdone");
+			bar.appendChild(el("strong", null, "Settings"));
+			const done = el("button", "primary", "Done");
+			done.type = "button";
+			done.addEventListener("click", () => {
+				if (isOpen()) toggle();
+				const v = $("view");
+				if (v) v.scrollIntoView({ block: "start" });
+			});
+			bar.appendChild(done);
+			aside.insertBefore(bar, aside.firstChild);
+		}
+		document.addEventListener("keydown", (e) => {
+			if (e.key !== "Escape" || !narrow() || !isOpen()) return;
+			const modalEl = $("modal");
+			if (modalEl && !modalEl.hidden) return;
+			if (document.querySelector(".whypop")) return;
+			toggle();
+		});
 		window.addEventListener("resize", apply);
 		apply();
 	})();
 
 	$("btnReroll").addEventListener("click", reroll);
 	// The same button cancels a search in flight; see rerollUntil.
-	$("btnRerollUntil").addEventListener("click", () => {
+	$("btnRerollUntil").addEventListener("click", (e) => {
 		if (untilSearch) untilSearch.cancel();
+		else if (busyDepth > 0 || queuedWhileBusy(e)) return;
 		else rerollUntilDialog();
 	});
 	// Not `run` directly: run takes an `after` callback and a listener
 	// would pass it the click event.
-	$("btnRerun").addEventListener("click", () => run());
+	/* Not while a run is under way or queued behind one (audit P10): five
+	   quick clicks were five full runs and five renders. */
+	$("btnRerun").addEventListener("click", (e) => {
+		if (busyDepth > 0 || queuedWhileBusy(e)) return;
+		run();
+	});
 	$("btnUndo").addEventListener("click", undo);
 	$("btnUndo").addEventListener("contextmenu", (e) => { e.preventDefault(); undoHistoryDialog(); });
 	$("btnExport").addEventListener("click", () => {
@@ -12643,19 +14218,17 @@
 		state.mergeIndices = null;
 		if (!picked.length) return;
 		setStatus("Reading " + f.name + "…", true);
-		readTextFile(f).then((text) => {
-			let league;
-			try {
-				league = JSON.parse(text);
-			} catch (err) {
-				setStatus("Could not merge: " + (err && err.message ? err.message : err));
-				return;
-			}
-			mergeInto(league, f.name, picked);
-		}).catch((err) => {
-			setStatus(f.name + " could not be read: " +
-				(err && err.message ? err.message : err));
-		});
+		progressShow("Reading " + f.name, 0, "0 of " + mb(f.size || 0));
+		readLeagueForMerge(f, (seen, size) => progressShow("Reading " + f.name,
+			// Reading is the first half of the job; the merge and the write
+			// are the rest.
+			0.5 * seen / Math.max(1, size), mb(seen) + " of " + mb(size)))
+			.then((r) => mergeInto(r.league, f.name, picked, 0.55, r.source))
+			.catch((err) => {
+				progressHide();
+				showError(new Error(f.name + " could not be read: " +
+					(err && err.message ? err.message : err)), err);
+			});
 	});
 	$("csvFile").addEventListener("change", (e) => {
 		const f = e.target.files[0];
@@ -12814,12 +14387,20 @@
 	$("btnCopyLink").addEventListener("click", (e) => {
 		// Shift-click copies the settings as prose instead of as a URL, for
 		// the forums and chat clients that eat links. Advertised in the title.
+		if (needClassFirst()) return;
 		if (e.shiftKey) {
 			writeHash(true);
 			copyText(configAsText(), $("btnCopyLink"), null, "settings as text");
 		} else copyLink($("btnCopyLink"), "link to these settings");
 	});
+	/* U21: with nothing loaded these used to do nothing at all. */
+	function needClassFirst() {
+		if (state.files.length) return false;
+		setStatus("Load a class first — try a sample class or load a BBGM file.");
+		return true;
+	}
 	$("btnCopyText").addEventListener("click", () => {
+		if (needClassFirst()) return;
 		writeHash(true);
 		copyText(configAsText(), $("btnCopyText"), null, "settings as text");
 	});
@@ -12873,7 +14454,7 @@
 			   replaced underneath it. */
 			if (!$("modal").hidden) return;
 			e.preventDefault();
-			if (!$("btnReroll").disabled) reroll();
+			if (!$("btnReroll").disabled) reroll(e);
 			return;
 		}
 		/* Nor undo, redo or the shortcut sheet: undo re-ran the class under
@@ -12914,8 +14495,23 @@
 			}
 			return;
 		}
+		/* U30: [ and ] step through the tabs, so the two without a number
+		   key (and every other) are one key away. */
+		if ((k === "[" || k === "]") && !$("archFilter")) {
+			const usable = TABS.filter((t) => t[0] !== "compare" || state.pinned);
+			const i = usable.findIndex((t) => t[0] === state.tab);
+			const next = usable[(i + (k === "]" ? 1 : -1) + usable.length) % usable.length];
+			if (next) { e.preventDefault(); showTab(next[0]); }
+			return;
+		}
 		if (k === "/") {
 			e.preventDefault();
+			/* U30: the search box on the page in front of you first (the board
+			   has its own, as do News and the tables); Player Edit's only when
+			   the page has none. */
+			const here = Array.from(document.querySelectorAll('#view input[type="search"]'))
+				.find((x) => x.offsetParent !== null);
+			if (here) { here.focus(); here.select(); return; }
 			/* The search box lives on the prospect table, which is now a mode
 			   of the Draft board rather than a tab of its own — so "/" takes
 			   you there rather than doing nothing on every other page. */
@@ -12955,7 +14551,7 @@
 			}
 		}
 		if (quickWinKey(e, k)) return;
-		if (k === "r" && !$("btnReroll").disabled) { e.preventDefault(); reroll(); return; }
+		if (k === "r" && !$("btnReroll").disabled) { e.preventDefault(); reroll(e); return; }
 		if (k === "g") {
 			e.preventDefault();
 			/* state.randomScope, full stop. #randomScope became a chip row
@@ -13093,9 +14689,9 @@
 		["b", "Draft board \u2194 Player Edit"],
 		["r", "Reroll the class"],
 		["g", "Randomize the settings in the chosen scope"],
-		["/", "Focus the prospect search (opens Player Edit)"],
+		["/", "Focus this page's search (Player Edit's when the page has none)"],
 		["l", "Lock or unlock the focused row"],
-		["[ / ]", "Previous / next archetype filter"],
+		["[ / ]", "Previous / next tab (in Player Edit: previous / next archetype filter)"],
 		["p", "Pin this class as the comparison baseline"],
 		["e", "Export the active file"],
 		["x", "Open the export menu"],

@@ -139,15 +139,35 @@
 		{ kind: "walk-on turned starter", w: 0.5, from: "walkon", sameSchool: true },
 		{ kind: "grad transfer", w: 1.0, from: "mid", fifthYear: true },
 	];
-	const ACADEMIES = ["Army", "Navy", "Air Force", "VMI", "The Citadel", "Merchant Marine"];
+	/* Weighted: Army, Navy and Air Force are Division I; Kings Point and
+	   the Coast Guard are Division III. VMI and the Citadel are senior
+	   military colleges, not service academies, and are labelled as such.
+	   Names are the COLLEGES spellings. */
+	const ACADEMIES = [
+		["Army", 3], ["Navy", 3], ["Air Force", 3],
+		["Coast Guard", 0.6], ["Merchant Marine", 0.4],
+		["Virginia Military", 1], ["Citadel", 1],
+	];
+	const SENIOR_MILITARY = new Set(["Virginia Military", "Citadel"]);
+	// Overtime Elite is in Atlanta, so it is not an overseas origin.
 	const OVERSEAS_ORIGINS = [
 		"Real Madrid's academy", "FC Barcelona's academy", "Ratiopharm Ulm",
 		"KK Mega Basket", "Zalgiris Kaunas", "the NBA Global Academy",
-		"Overtime Elite", "the Australian NBL's Next Stars",
+		"the Australian NBL's Next Stars",
+		"Joventut Badalona's cantera", "Alba Berlin's youth program", "Bayern Munich's academy",
+		"INSEP in Paris", "ASVEL's youth side", "Partizan's youth system", "Crvena Zvezda's academy",
+		"Cedevita Olimpija", "Unicaja Malaga's youth program", "Baskonia's academy",
+		"Stella Azzurra Roma", "Rytas Vilnius", "Anadolu Efes' youth side", "Fenerbahce's academy",
+		"Canarias Basketball Academy", "the NBA Academy Africa", "SEED Academy in Senegal",
+		"the Australian Centre of Excellence", "a Spanish second-division club",
 	];
 	const NAIA_ORIGINS = [
 		"Indiana Wesleyan", "Talladega", "Georgetown (KY)", "Arizona Christian",
 		"Freed-Hardeman", "Ottawa (AZ)", "Bethel (IN)", "Xavier (LA)",
+		"Cumberlands", "Grace (IN)", "Langston", "Dillard", "William Carey", "Loyola (LA)",
+		"Oklahoma Wesleyan", "Science & Arts (OK)", "Life (GA)", "Southeastern (FL)",
+		"Marian (IN)", "Saint Francis (IN)", "Westmont", "The Master's", "Lewis-Clark State",
+		"Benedictine (KS)", "Keiser", "Carroll (MT)",
 	];
 
 	function assignClassYears(players, cfg, rng, ageIsInformative) {
@@ -172,17 +192,8 @@
 		}
 		/* Nine schools was the entire junior-college world, so every JUCO
 		   transfer in every class came from the same nine names. */
-		const JUCO = [
-			"Chipola College", "Northwest Florida State", "Salt Lake CC",
-			"Hutchinson CC", "Vincennes University", "Indian Hills CC",
-			"Ranger College", "South Plains College", "Trinity Valley CC",
-			"Odessa College", "Coffeyville CC", "Moberly Area CC",
-			"Eastern Florida State", "Northwest Kansas Tech", "Casper College",
-			"Western Nebraska CC", "Mineral Area College", "Iowa Western CC",
-			"John A. Logan College", "Southeastern CC", "Panola College",
-			"Wabash Valley College", "Cochise College", "Barton CC",
-			"Snow College", "Southern Idaho", "Tallahassee CC", "Gillette College",
-		];
+		// One list, shared with PRO_CLUBS.JUCO, so a school has one spelling.
+		const JUCO = C.PRO_CLUBS.JUCO.map((c) => c[0]);
 
 		/* THE BIOGRAPHY A SHARED UNIVERSE CARRIES.
 
@@ -263,11 +274,17 @@
 					: kind.from === "naia" ? NAIA_ORIGINS
 					: kind.from === "high" ? highMajors
 					: kind.from === "mid" ? midMajors : lowMajors;
+				let from = kind.sameSchool ? null
+					: kind.from === "academy" ? r.weighted(pool, (x) => x[1])[0]
+					: (pool.length ? r.pick(pool) : "junior college");
+				if (kind.from === "academy" && from === p.newCollege) {
+					from = (pool.find((x) => x[0] !== p.newCollege) || pool[0])[0];
+				}
 				p.transfer = {
-					kind: kind.kind,
+					kind: kind.from === "academy" && SENIOR_MILITARY.has(from)
+						? "senior military college transfer" : kind.kind,
 					// A walk-on did not come from anywhere: he was already here.
-					from: kind.sameSchool ? null
-						: (pool.length ? r.pick(pool) : "junior college"),
+					from,
 					fifthYear: !!kind.fifthYear,
 				};
 				if (kind.fifthYear) {
@@ -509,6 +526,15 @@
 				let w = Math.pow(Math.max(1, level - 20) / 60, 2.4);
 				if (carry.champion === name) w *= 2.2;
 				w *= 1 + 0.18 * Math.min(6, (carry.titles && carry.titles[name]) || 0);
+				/* A program that keeps winning stops getting the pile-on:
+				   every extra title in the recent window (carry.titleWindow,
+				   see damDynasty in js/universe.js) takes the boost back
+				   toward plain level. One program took five titles in a
+				   20-season audit chain on this loop. */
+				if (Array.isArray(carry.titleWindow)) {
+					const extra = carry.titleWindow.filter((x) => x === name).length - 1;
+					if (extra > 0) w /= 1 + extra;
+				}
 				/* The prospect, at last: a dynasty recruits like a dynasty
 				   in quality and not only in volume. Level and prestige
 				   together, because a program's level is one season and
@@ -663,6 +689,16 @@
 		   and any caller that revalidated got a different `seasonRecovered`
 		   answer the second time. The callers apply it themselves now. */
 		const bad = [];
+		/* A LEAGUE IS NOT REFUSED OVER A ROW THE TOOL NEVER USES (audit L8).
+		   The classes come from the undrafted prospect rows only, and the
+		   merge passes every other row through untouched, so one long-retired
+		   veteran without a birth year (or a null left in the array) is a
+		   warning about the file, not a reason to refuse it. A prospect row
+		   is still held to the strict check, here and again on the class the
+		   loader cuts out of the league. */
+		const loose = [];
+		const strictRow = (p) => !isLeagueShaped ||
+			(p && typeof p === "object" && PROSPECT_TIDS.includes(Number(p.tid)));
 		let missingPid = 0;
 		const seenPid = new Set();
 		let duplicatePid = 0;
@@ -674,12 +710,13 @@
 			const who = p && (p.firstName || p.lastName)
 				? ((p.firstName || "") + " " + (p.lastName || "")).trim()
 				: "player #" + i;
-			if (!p || typeof p !== "object") { bad.push("player #" + i + " is not an object"); return; }
+			const sink = strictRow(p) ? bad : loose;
+			if (!p || typeof p !== "object") { sink.push("player #" + i + " is not an object"); return; }
 			/* Independent checks, not an else-chain: a player broken in both
 			   ways used to report one problem, the user fixed it, reloaded,
 			   and got a second error for the same row. */
 			if (!Array.isArray(p.ratings) || !p.ratings.length) {
-				bad.push(who + " has no ratings");
+				sink.push(who + " has no ratings");
 			} else {
 				/* A partial ratings block reached exportFile's ratings[last]
 				   write and silently produced a player with zeros. */
@@ -688,7 +725,7 @@
 					? BB.RATING_KEYS.filter((k) => !Number.isFinite(Number(last[k])))
 					: BB.RATING_KEYS;
 				if (missing.length) {
-					bad.push(who + " last ratings row is missing " +
+					sink.push(who + " last ratings row is missing " +
 						(missing.length === BB.RATING_KEYS.length
 							? "every rating key"
 							: missing.slice(0, 5).join(", ") +
@@ -703,7 +740,7 @@
 						!Number.isFinite(Number(last.pot)))) missingOvrPot++;
 			}
 			if (!p.born || num(p.born.year) === undefined) {
-				bad.push(who + " has no born.year");
+				sink.push(who + " has no born.year");
 			}
 			/* A file without pids used to collapse the entire generator in
 			   silence. Every RNG stream is keyed off it — rng.child("build:" +
@@ -725,6 +762,13 @@
 				bad.slice(0, 4).join("; ") + (bad.length > 4 ? "; …" : ""));
 		}
 		const warnings = [];
+		if (loose.length) {
+			warnings.push(loose.length + " row" + (loose.length === 1 ? " that is" : "s that are") +
+				" not a draft prospect " + (loose.length === 1 ? "is" : "are") +
+				" malformed and " + (loose.length === 1 ? "was" : "were") +
+				" left as " + (loose.length === 1 ? "it is" : "they are") + " (" +
+				loose.slice(0, 3).join("; ") + (loose.length > 3 ? "; …" : "") + ").");
+		}
 		/* The schema version the file says it is. BBGM migrates on the way in by
 		   it (see LEAGUE_DATABASE_VERSION in js/bbgm.js): at 23 or below it
 		   recomputes every hgt rating from the listed height, and at 32 or
@@ -1016,6 +1060,218 @@
 		return out;
 	}
 
+	/* PRO HISTORY: THE CLASSES A LEAGUE HAS ALREADY DRAFTED (audit UV12).
+
+	   draftClassesIn reads only the classes still to come. A league export
+	   also holds the men it drafted in the last few seasons, on teams, in
+	   free agency, retired or undrafted-and-signed, with their real pro
+	   careers. pastClassesIn says which of those years are there;
+	   extractPastClass rewinds one of them to draft night (ratings as of his
+	   draft year, tid -2, no pro stats) so the universe can play the college
+	   season he was drafted out of, and carries his real draft slot, his
+	   school and his pro career beside the class in bbgmdraft.pastPro. That
+	   mark is also what tells every exporter to leave these men alone: they
+	   already exist in the league. */
+	function leaguePhase(lf) {
+		const ga = lf && lf.gameAttributes;
+		if (!ga) return null;
+		const rows = Array.isArray(ga) ? ga : Object.keys(ga).map((k) => ({ key: k, value: ga[k] }));
+		for (const row of rows) {
+			if (!row || row.key !== "phase") continue;
+			let v = row.value && typeof row.value === "object" && "value" in row.value
+				? row.value.value : row.value;
+			if (Array.isArray(v) && v.length) v = v[v.length - 1] && v[v.length - 1].value;
+			return Number.isFinite(Number(v)) ? Number(v) : null;
+		}
+		return null;
+	}
+	const PAST_MIN_CLASS = 10;
+	function pastYearsOf(leagueFile, back) {
+		let season = null;
+		try { season = findSeason(leagueFile); } catch (e) { season = null; }
+		if (season === null) return { season: null, years: [] };
+		const n = Math.max(1, Math.min(10, Math.round(back || 4)));
+		const phase = leaguePhase(leagueFile);
+		// Phase 5 (DRAFT) and later: this season's draft has been held.
+		const last = phase !== null && phase >= 5 ? season : season - 1;
+		const years = [];
+		for (let y = last - n + 1; y <= last; y++) years.push(y);
+		return { season, years };
+	}
+	function isPastDrafted(p, year) {
+		if (!p || !p.draft || Number(p.draft.year) !== year) return false;
+		// Still a prospect (an unsigned undrafted man keeps tid -2): not history.
+		return !PROSPECT_TIDS.includes(Number(p.tid)) && Number(p.tid) !== -7;
+	}
+	function pastClassesIn(leagueFile, opts) {
+		if (!leagueFile || !Array.isArray(leagueFile.players) || !isLeagueFile(leagueFile)) return [];
+		const { years } = pastYearsOf(leagueFile, opts && opts.back);
+		const out = [];
+		for (const year of years) {
+			const men = leagueFile.players.filter((p) => isPastDrafted(p, year));
+			const drafted = men.filter((p) => Number(p.draft.round) > 0).length;
+			if (drafted < PAST_MIN_CLASS) continue;
+			const ours = men.some((p) => (p.stats || []).some((s) => s && Number(s.tid) === -7)) ||
+				!!potStampFor(leagueFile, year);
+			out.push({ year, count: men.length, drafted, undrafted: men.length - drafted, ours });
+		}
+		return out;
+	}
+	function pastClassYear(p, year) {
+		const age = year - Number(p.born && p.born.year);
+		if (!Number.isFinite(age)) return null;
+		return age <= 19 ? "Freshman" : age === 20 ? "Sophomore" : age === 21 ? "Junior" : "Senior";
+	}
+	function numPerRound(lf) {
+		const ga = lf && lf.gameAttributes;
+		let v = ga && !Array.isArray(ga) ? ga.numDraftPicksPerRound : null;
+		if (Array.isArray(ga)) {
+			const row = ga.filter((r) => r && r.key === "numDraftPicksPerRound")[0];
+			v = row ? row.value : null;
+		}
+		if (v && typeof v === "object" && "value" in v) v = v.value;
+		return Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v)
+			: Math.max(30, (lf && Array.isArray(lf.teams) ? lf.teams.length : 30));
+	}
+	// His real pro career, summed from regular-season stats after his draft.
+	function proCareerOf(p, lf, year) {
+		const teams = (lf && lf.teams) || [];
+		const abbrevOf = (tid) => {
+			const t = teams.filter((x) => x && Number(x.tid) === Number(tid))[0];
+			return t ? t.abbrev || t.region || null : null;
+		};
+		const rows = (p.stats || []).filter((s) => s && Number(s.tid) >= 0 && !s.playoffs &&
+			Number(s.season) >= year);
+		const seasons = new Set(rows.map((s) => s.season)).size;
+		const gp = rows.reduce((a, s) => a + (Number(s.gp) || 0), 0);
+		const pts = rows.reduce((a, s) => a + (Number(s.pts) || 0), 0);
+		const tid = Number(p.tid);
+		const status = tid >= 0 ? "active" : tid === -1 ? "free agent" : tid === -3 ? "retired" : "unsigned";
+		return {
+			real: true, seasons, gp, ppg: gp ? Math.round((pts / gp) * 10) / 10 : 0,
+			team: tid >= 0 ? abbrevOf(tid) : null, status,
+			awards: (p.awards || []).filter((a) => a && Number(a.season) > year)
+				.map((a) => ({ season: Number(a.season), award: String(a.type || a.name || "") })),
+		};
+	}
+	function extractPastClass(leagueFile, year) {
+		const want = Number(year);
+		const C = global.Colleges;
+		const teams = (leagueFile && leagueFile.teams) || [];
+		const perRound = numPerRound(leagueFile);
+		const truth = {};
+		const bio = {};
+		const careers = {};
+		const players = (leagueFile.players || []).filter((p) => isPastDrafted(p, want))
+			.map((p) => {
+				const rows = (p.ratings || []).filter((r) => r && Number(r.season) <= want)
+					.sort((a, b) => Number(a.season) - Number(b.season));
+				const r = rows.length ? rows[rows.length - 1]
+					: (p.ratings || [])[0] || null;
+				if (!r) return null;
+				const key = String(p.pid);
+				const round = Number(p.draft.round) || 0;
+				const pick = Number(p.draft.pick) || 0;
+				const team = teams.filter((t) => t && Number(t.tid) === Number(p.draft.tid))[0];
+				truth[key] = round > 0
+					? { round, pick, slot: (round - 1) * perRound + pick,
+						team: team ? team.abbrev || team.region || null : null }
+					: { round: 0, pick: 0, slot: null, team: null };
+				const school = p.college && C && C.isKnown(C.canonical(p.college))
+					? C.canonical(p.college) : null;
+				bio[key] = { classYear: pastClassYear(p, want) };
+				if (school) bio[key].college = school;
+				careers[key] = Object.assign(proCareerOf(p, leagueFile, want),
+					{ college: p.college || null, collegeKnown: !!school });
+				const out = Object.assign({}, p, {
+					tid: -2,
+					ratings: [Object.assign({}, r, { season: want })],
+					draft: Object.assign({}, p.draft, { round: 0, pick: 0, tid: -1, originalTid: -1 }),
+					// Pro stats stripped; college rows this tool wrote (tid -7) stay.
+					stats: (p.stats || []).filter((s) => s && Number(s.tid) === -7 &&
+						Number(s.season) <= want),
+					awards: (p.awards || []).filter((a) => a && Number(a.season) <= want),
+					transactions: [], contract: undefined, salaries: [],
+				});
+				delete out.contract;
+				return out;
+			}).filter(Boolean);
+		if (!players.length) throw new Error("No " + want + " drafted class in that league file.");
+		const out = { startingSeason: want, players };
+		if (leagueFile.version !== undefined) out.version = leagueFile.version;
+		const mark = potStampFor(leagueFile, want);
+		out.bbgmdraft = mark
+			? withPotStamp(null, want, { potBias: mark.bias, potSpread: mark.spread, potModel: mark.model })
+			: {};
+		const recipes = leagueFile.bbgmdraft && leagueFile.bbgmdraft.recipes;
+		out.bbgmdraft.pastPro = {
+			year: want, truth, bio, careers,
+			league: leagueFp(leagueFile),
+			recipe: recipes && recipes[want] ? recipes[want] : null,
+		};
+		return out;
+	}
+	function leagueFp(lf) {
+		const meta = (lf && lf.meta) || {};
+		let start = lf && lf.startingSeason;
+		const ga = lf && lf.gameAttributes;
+		const lid = ga && !Array.isArray(ga) ? ga.lid : null;
+		return "lg" + hashText(String(meta.name || lid || "") + "|" + String(start || ""));
+	}
+	function hashText(str) {
+		let h = 0x811c9dc5;
+		for (let i = 0; i < str.length; i++) {
+			h ^= str.charCodeAt(i);
+			h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+		}
+		return ("00000000" + h.toString(16)).slice(-8);
+	}
+	function pastProOf(lf) {
+		return lf && lf.bbgmdraft && lf.bbgmdraft.pastPro ? lf.bbgmdraft.pastPro : null;
+	}
+	/* A past class runs with its men's real schools and class years pinned
+	   and its real draft order forced, from the mark extractPastClass left on
+	   the file. Explicit cfg values win. */
+	function withPastPro(cfg, lf) {
+		const pp = pastProOf(lf);
+		if (!pp) return cfg;
+		const out = Object.assign({}, cfg);
+		const bio = Object.assign({}, pp.bio || {});
+		if (cfg.biography) {
+			for (const k of Object.keys(cfg.biography)) {
+				bio[k] = Object.assign({}, bio[k] || {}, cfg.biography[k]);
+			}
+		}
+		out.biography = bio;
+		if (!out.draftTruth) out.draftTruth = pp.truth || null;
+		return out;
+	}
+	/* cfg.draftTruth: {key: {round, pick, slot}}. Drafted men in real pick
+	   order, everyone else after them in the board's order; the draft-night
+	   events of anyone it moved are dropped (they described a move that did
+	   not happen). boardRank stays the mock. */
+	function applyDraftTruth(order, truth, events) {
+		if (!truth) return { order, events };
+		const slotOf = (p) => {
+			const t = truth[p.key];
+			return t && Number.isFinite(t.slot) && t.slot > 0 ? t.slot : null;
+		};
+		const drafted = order.filter((p) => slotOf(p) !== null)
+			.sort((a, b) => slotOf(a) - slotOf(b));
+		const rest = order.filter((p) => slotOf(p) === null);
+		const next = drafted.concat(rest);
+		const at = {};
+		order.forEach((p, i) => { at[p.key] = i; });
+		const kept = (events || []).filter((e) => {
+			const i = next.findIndex((p) => p.key === e.key);
+			if (i === at[e.key]) return true;
+			const p = next[i];
+			if (p) p.draftEvent = null;
+			return false;
+		});
+		return { order: next, events: kept };
+	}
+
 	/* A per-player salt for the RNG streams. `reroll` re-draws ONE prospect:
 	   every stream in the generator is keyed off the player's key, so salting
 	   his key changes his draw and leaves every other player's stream
@@ -1259,7 +1515,7 @@
 	   labelled. */
 	const NARRATIVES = [
 		{
-			name: "a dominant favourite", w: 2.0,
+			name: "a dominant favorite", w: 2.0,
 			blurb: "one team was better than everybody all year",
 			bend: { teamMomentum: 1.5, upsetFactor: 0.72, bluebloodDownYears: 0 },
 		},
@@ -1315,9 +1571,29 @@
 		},
 		{
 			name: "chalk all the way", w: 1.1,
-			blurb: "the seeds held and the favourites won",
+			blurb: "the seeds held and the favorites won",
 			bend: { upsetFactor: 0.5, teamMomentum: 1.2, midMajorLift: 0 },
 		},
+		{ name: "the portal year", w: 1.1, blurb: "half the sport changed jerseys over the summer",
+			bend: { portalRate: 180, transferShare: 52, teamMomentum: 0.8 } },
+		{ name: "a freshman year", w: 1.0, blurb: "the teenagers ran the sport",
+			bend: { freshmanShare: 48, statNoise: 1.15 } },
+		{ name: "the veterans' season", w: 1.0, blurb: "fifth-year seniors were everywhere that mattered",
+			bend: { freshmanShare: 20, transferShare: 46, upsetFactor: 0.9 } },
+		{ name: "a healthy year", w: 0.9, blurb: "for once, everybody was available in March",
+			bend: { injuryRate: 0.55, upsetFactor: 0.85 } },
+		{ name: "a cold-shooting winter", w: 0.9, blurb: "the rims seemed smaller everywhere",
+			bend: { efficiencyEnv: -1.3, upsetFactor: 1.2 } },
+		{ name: "the three-point season", w: 1.0, blurb: "everybody let it fly, and enough of them went in",
+			bend: { scoringEnv: 1, paceShift: 2, statNoise: 1.15 } },
+		{ name: "a quiet carousel", w: 0.8, blurb: "nobody fired anybody",
+			bend: { coachTurnover: 45, teamMomentum: 1.1 } },
+		{ name: "the blue bloods are back", w: 0.9, blurb: "the usual names were the names again",
+			bend: { bluebloodDownYears: 0, midMajorLift: 0, upsetFactor: 0.8 } },
+		{ name: "a bubble mess", w: 1.0, blurb: "thirty teams had a case and twelve of them were right",
+			bend: { midMajorLift: 3, upsetFactor: 1.15, statNoise: 1.1 } },
+		{ name: "a style war", w: 0.8, blurb: "every coach copied somebody else's offense",
+			bend: { styleDrift: 2.2, seasonEvents: 9 } },
 	];
 
 	/* The tempo a season is set at, from the (bent) slider and the class
@@ -1357,14 +1633,45 @@
 			(Array.isArray(userCfg.pinned) && userCfg.pinned.indexOf(key) !== -1);
 	}
 
+	/* Storylines that cannot both be the season (audit 2026-10-10, R8): a
+	   year is not "wide open" and "chalk all the way" at once. Drawing one
+	   takes its contradictions out of the pool. */
+	const NARRATIVE_CONFLICTS = [
+		["a dominant favourite", "a wide-open year"],
+		["a wide-open year", "chalk all the way"],
+		["the mid-majors run", "chalk all the way"],
+		["a scoring explosion", "a defensive slog"],
+		["a scoring explosion", "the year of the whistle"],
+		["a season of streaks", "chalk all the way"],
+	];
+	function narrativeConflicts(a, b) {
+		return NARRATIVE_CONFLICTS.some((c) =>
+			(c[0] === a && c[1] === b) || (c[0] === b && c[1] === a));
+	}
+	/* The storylines the last few classes drew (cfg.recentNarratives, newest
+	   first, a list of name lists — the app's memory, like recentFlavors)
+	   are down-weighted by the flavor memory's own strength. */
+	function narrativeMemoryFactor(name, recent, strength) {
+		if (!strength || !Array.isArray(recent) || !recent.length) return 1;
+		let f = 1;
+		recent.forEach((names, i) => {
+			if (Array.isArray(names) && names.indexOf(name) !== -1) {
+				f *= 1 - strength * 0.7 / (i + 1);
+			}
+		});
+		return Math.max(0.05, f);
+	}
+
 	function applyNarrative(cfg, rng, userCfg) {
 		if (!cfg || cfg.narrative === false) return { cfg, narrative: [] };
-		const pool = NARRATIVES.slice();
+		let pool = NARRATIVES.slice();
 		const n = rng.random() < 0.35 ? 3 : 2;
 		const drawn = [];
+		const mem = clamp(Number.isFinite(cfg.flavorMemory) ? cfg.flavorMemory : 0, 0, 1);
+		const recent = cfg.recentNarratives;
 		for (let i = 0; i < n && pool.length; i++) {
-			const pick = rng.weighted(pool, (x) => x.w);
-			pool.splice(pool.indexOf(pick), 1);
+			const pick = rng.weighted(pool, (x) => x.w * narrativeMemoryFactor(x.name, recent, mem));
+			pool = pool.filter((x) => x !== pick && !narrativeConflicts(x.name, pick.name));
 			drawn.push(pick);
 		}
 		const D = global.Config.DEFAULTS;
@@ -1395,6 +1702,56 @@
 			cfg: out,
 			narrative: drawn.map((x) => ({ name: x.name, blurb: x.blurb })),
 		};
+	}
+
+	/* WAS THE STORYLINE TRUE? (audit 2026-10-10, R8.)
+
+	   Storylines are drawn BEFORE the season and bend its settings; whether
+	   the season then did what the storyline said is a fact only the result
+	   knows. Each story gets `held` (true, false, or null when the result
+	   carries nothing to check it against) and a `label` that says so: the
+	   preseason name when it held or cannot be checked, "<name> (that was the
+	   preseason talk)" when it did not. New objects; the drawn list is kept. */
+	const NARRATIVE_CHECKS = {
+		"a dominant favourite": (r) => !!(r.champ && r.champ.seed === 1 && r.champ.team &&
+			r.champ.team.l <= 3),
+		"a wide-open year": (r) => !!(r.champ && (r.champ.seed >= 3 ||
+			r.ffSeeds.some((s) => s >= 10))),
+		"the mid-majors run": (r) => r.ff.some((x) => r.midMajor(x.team)),
+		"a blue-blood down year": (r) => !r.ff.some((x) => x.team && x.team.prestige >= r.bluePrestige),
+		"chalk all the way": (r) => r.ffSeeds.length === 4 && r.ffSeeds.every((s) => s <= 2),
+		"the map moved": (r) => r.realignment > 0,
+		"a chaotic sideline": (r) => r.carousel >= 12,
+	};
+	function verifyNarrative(list, state) {
+		if (!Array.isArray(list) || !list.length) return list || [];
+		const t = (state && state.tourney) || {};
+		const ff = (t.finalFour || []).filter((x) => x && x.team);
+		const prestige = Object.values((state && state.teams) || {})
+			.map((x) => (x && Number(x.prestige)) || 0).sort((a, b) => b - a);
+		const r = {
+			champ: t.champion || null,
+			ff,
+			ffSeeds: ff.map((x) => x.seed).filter(Number.isFinite),
+			midMajor: (team) => {
+				const conf = team && team.conf && C.CONFERENCES[team.conf];
+				return !!team && (!conf || conf.tier !== "high");
+			},
+			bluePrestige: prestige.length ? prestige[Math.min(9, prestige.length - 1)] : Infinity,
+			realignment: ((state && state.realignment) || []).length,
+			carousel: ((state && state.coachingCarousel) || []).length,
+		};
+		return list.map((s) => {
+			const check = s && NARRATIVE_CHECKS[s.name];
+			let held = null;
+			if (check && t.champion) {
+				try { held = !!check(r); } catch (e) { held = null; }
+			}
+			return Object.assign({}, s, {
+				held,
+				label: held === false ? s.name + " (that was the preseason talk)" : s.name,
+			});
+		});
 	}
 
 	/* HOW FAR FROM THE MIDDLE THIS WORLD SITS.
@@ -1523,6 +1880,21 @@
 			}
 			moved = true;
 			if (LEGACY_LEAGUE[k]) league = true;
+		}
+		/* STRENGTH IN PRESERVE MODE (audit 2026-10-10, R1). classQuality,
+		   eliteCount and classDepth are read only by the curve rebuild, so
+		   under ovrMode "preserve" (the default) "a weak year" or "a two-man
+		   class" bent nothing. The strength half of the bend is carried onto
+		   potential instead — the one class-strength lever preserve mode
+		   leaves live — unless the user has decided potBias. */
+		if (out.ovrMode !== "curve" && !userTouched(user, "potBias")) {
+			const q = Number.isFinite(bend.classQuality) ? bend.classQuality : 0;
+			const e = Number.isFinite(bend.eliteCount) ? bend.eliteCount - D.eliteCount : 0;
+			const shift = (0.6 * q + 0.15 * e) * t;
+			if (shift) {
+				out.potBias = clamp((Number(out.potBias) || 0) + shift, -3, 3);
+				moved = true;
+			}
 		}
 		if (league && untouchedLeagueWeights(user)) {
 			const lw = Object.assign({}, out.leagueWeights);
@@ -2938,10 +3310,15 @@
 			const g = ({ PG: "point guard", SG: "shooting guard", G: "guard",
 				GF: "wing", SF: "small forward", F: "forward", PF: "power forward",
 				FC: "big", C: "center" })[p.newPos] || "player";
-			(posGroups[g] = posGroups[g] || []).push(p);
+			/* Per high-school class AND position: recruiting.rank is
+			   cohort-local (rankCohort), so a 2026 senior's No. 3 and a 2029
+			   freshman's No. 3 are not on one list (audit C9). */
+			const k = p.recruiting.hsClass + "|" + g;
+			(posGroups[k] = posGroups[k] || []).push(p);
 		}
-		for (const g of Object.keys(posGroups)) {
-			posGroups[g].sort((a, b) => a.recruiting.rank - b.recruiting.rank)
+		for (const k of Object.keys(posGroups)) {
+			const g = k.slice(k.indexOf("|") + 1);
+			posGroups[k].sort((a, b) => a.recruiting.rank - b.recruiting.rank)
 				.forEach((p, i) => { p.recruiting.posRank = i + 1; p.recruiting.posLabel = g; });
 		}
 		for (const p of ncaa) {
@@ -3062,6 +3439,13 @@
 		{ kind: "a shoulder injury", w: 1.0, lo: 3, hi: 11 },
 		{ kind: "a broken hand", w: 0.7, lo: 8, hi: 20 },
 		{ kind: "a high ankle sprain", w: 0.9, lo: 5, hi: 13 },
+		{ kind: "a hamstring strain", w: 1.2, lo: 2, hi: 6 },
+		{ kind: "a sprained wrist", w: 0.9, lo: 1, hi: 5 },
+		{ kind: "a broken nose", w: 0.6, lo: 1, hi: 2 },
+		{ kind: "a hip pointer", w: 0.7, lo: 1, hi: 4 },
+		{ kind: "a torn meniscus", w: 0.4, lo: 8, hi: 18 },
+		{ kind: "plantar fasciitis", w: 0.6, lo: 3, hi: 10 },
+		{ kind: "a groin strain", w: 0.8, lo: 2, hi: 6 },
 	];
 	const ABSENCES = [
 		{ kind: "illness", w: 2.2, lo: 1, hi: 3 },
@@ -3070,6 +3454,10 @@
 		{ kind: "a one-game suspension", w: 1.0, lo: 1, hi: 1 },
 		{ kind: "load management", w: 0.5, lo: 1, hi: 3 },
 		{ kind: "a personal matter", w: 0.8, lo: 1, hi: 4 },
+		{ kind: "a team rules violation", w: 0.8, lo: 1, hi: 2 },
+		{ kind: "a family bereavement", w: 0.5, lo: 1, hi: 2 },
+		{ kind: "academic eligibility", w: 0.4, lo: 2, hi: 6 },
+		{ kind: "a flu bug that went through the roster", w: 0.9, lo: 1, hi: 2 },
 	];
 	// A season's worth of `when`, matching the schedule's own axis.
 	const SEASON_GAMES = T.CONF_GAMES + T.NON_CONF_GAMES;
@@ -3129,8 +3517,16 @@
 				(Number.isFinite(p.traitInjuryMult) ? p.traitInjuryMult : 1);
 			// The draft-year games-played mean is 33.5 against a ~35-game
 			// schedule, so a bit over half a class misses something.
-			if (r.random() >= 0.54 * rate * (0.6 + 0.4 * build)) continue;
-			const hurt = r.random() < Math.min(0.95, 0.55 * rate * build);
+			/* `rate` is a HAZARD multiplier, not a probability one: the old
+			   0.54·rate·(...) passed 1 at about rate 1.8, so everything above
+			   that on the slider did nothing and 2.0 already sidelined 95% of
+			   a class (audit C1-C2 of 2026-10-10). 1-(1-p)^rate is the same p
+			   at rate 1, 0 at rate 0, and keeps rising across the whole 0-3
+			   range without ever reaching certainty. */
+			const hazard = (p1) => Math.min(0.95,
+				1 - Math.pow(1 - clamp(p1, 0, 0.95), rate));
+			if (r.random() >= hazard(0.54 * (0.6 + 0.4 * build))) continue;
+			const hurt = r.random() < hazard(0.55 * build);
 			const table = hurt ? INJURIES : ABSENCES;
 			const pickKind = r.weighted(table);
 			// int(), not round(uniform(lo, hi + 0.999)): the rounding put a
@@ -3162,6 +3558,8 @@
 		   phase, so anything that changes it re-runs this phase too. */
 		const cfg = state.effectiveCfg || state.cfg;
 		const rng = state.rng;
+		// A new regular season: the postseason's rankings memo is stale.
+		state.rankMemo = null;
 		const bySchool = {};
 		for (const p of state.players) {
 			if (p.nonNcaa) continue;
@@ -3354,6 +3752,11 @@
 		"apHistory", "apPeak", "apPreseason", "apFirstPlace",
 	];
 
+	// What computeRankings and weeklyPoll write on a team (see phasePostseason).
+	const RANK_KEYS = ["netRank", "netScore", "tvi", "adjEff", "quads", "roadW", "roadL",
+		"last12W", "last12L", "committeeScore", "apRank", "apHistory", "apPeak",
+		"apPreseason", "apFirstPlace"];
+
 	function resetPostseason(teams) {
 		for (const name of Object.keys(teams)) {
 			const t = teams[name];
@@ -3379,8 +3782,41 @@
 		   margin-capped adjusted efficiency), quadrant records, a committee
 		   score over observables only, and a weekly AP poll voted by a
 		   persistent 60-member electorate. See js/rankings.js. */
-		RK.computeRankings(teams);
-		state.pollHistory = RK.weeklyPoll(teams, rng.child("appoll"));
+		/* Computed once per regular season (audit P3). Both read only the
+		   regular-season games, the programs' levels and ratings and a
+		   seed-derived stream — nothing the conference tournaments or a
+		   postseason setting touches — and they were ~80% of this phase,
+		   paid again by every "March upsets" re-run. The memo is dropped
+		   whenever the regular phase runs again. */
+		const memo = state.rankMemo;
+		if (memo && memo.teams === teams) {
+			for (const name of Object.keys(memo.fields)) {
+				const t = teams[name];
+				const f = memo.fields[name];
+				if (!t) continue;
+				for (const k of RANK_KEYS) {
+					if (!(k in f)) continue;
+					const v = f[k];
+					t[k] = Array.isArray(v) ? v.slice() : v && typeof v === "object" ? Object.assign({}, v) : v;
+				}
+			}
+			state.pollHistory = memo.pollHistory.slice();
+		} else {
+			RK.computeRankings(teams);
+			state.pollHistory = RK.weeklyPoll(teams, rng.child("appoll"));
+			const fields = {};
+			for (const name of Object.keys(teams)) {
+				const t = teams[name];
+				const f = {};
+				for (const k of RANK_KEYS) {
+					if (!(k in t)) continue;
+					const v = t[k];
+					f[k] = Array.isArray(v) ? v.slice() : v && typeof v === "object" ? Object.assign({}, v) : v;
+				}
+				fields[name] = f;
+			}
+			state.rankMemo = { teams, fields, pollHistory: state.pollHistory.slice() };
+		}
 		// Same shape the old one-shot poll produced: the top 25, in order.
 		const finalWeek = state.pollHistory[state.pollHistory.length - 1];
 		state.poll = finalWeek
@@ -4257,6 +4693,9 @@
 						"a back issue teams could not agree on",
 						"a knee that failed two physicals",
 						"a shoulder that had been managed all season",
+						"a hip that had been scoped twice",
+						"a heart screening that needed a second opinion",
+						"an ankle with three sprains in two years",
 					]),
 				};
 				move(board, i, to);
@@ -4281,6 +4720,8 @@
 						"shot it far better in a gym than he had all season",
 						"was the best athlete at the combine",
 						"tested out of the building and interviewed better still",
+						"made thirteen straight from the corner in front of six teams",
+						"his vertical was eight inches higher than anyone expected",
 					]),
 				};
 				move(board, i, to);
@@ -4300,7 +4741,10 @@
 					say: (moved) => (moved < 0
 						? "a team moved up " + Text.plural(-moved, "spot") + " to take him"
 						: "a team traded up to take him"),
-					detail: "the pick cost a future first",
+					detail: r.pick(["the pick cost a future first",
+						"two seconds and a pick swap went the other way",
+						"they had him top ten on their board and he was still there",
+						"the trade was agreed before the draft began"]),
 				};
 				move(board, i, to);
 				return true;
@@ -4352,6 +4796,8 @@
 						"teams could not agree on the position he plays",
 						"a fit nobody in the lottery wanted to solve",
 						"an off-court question that never went away",
+						"his camp turned down two promises in the teens",
+						"a medical that only one team had seen",
 					]),
 				};
 				move(board, i, to);
@@ -4384,8 +4830,9 @@
 						: "went where a team had promised to take him"),
 					detail: r.pick([
 						"he shut down his workouts after one visit",
-						"his agent cancelled every other workout in June",
+						"his agent canceled every other workout in June",
 						"the promise was the worst-kept secret of the week",
+						"the promise had been made in May, at a dinner nobody was supposed to know about",
 					]),
 				};
 				move(board, i, to);
@@ -4410,6 +4857,7 @@
 						"teams came away unsure how much he wanted it",
 						"he did not know the playbook he had run all season",
 						"two front offices took him off their boards after meeting him",
+						"teams heard different stories from him and from his college staff",
 					]),
 				};
 				move(board, i, to);
@@ -4459,6 +4907,211 @@
 						"flipped for two future second-rounders",
 						"part of a package for a veteran guard",
 						"the team that took him was picking for someone else",
+					]),
+				};
+				return true;
+			},
+		},
+		/* NINE MORE (audit 2026-10-10, R10): nine kinds and about five a
+		   class meant every class showed more than half of them. Same rules
+		   as the three above: every move lands inside the draft and none
+		   takes a man from past the last pick. */
+		{
+			name: "pre-draft injury", w: 1.0,
+			label: "slid on a pre-draft injury",
+			pick: (i, n) => i >= 0 && i < Math.min(30, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const to = Math.min(board.length - 1, DRAFT_PICKS - 1, i + r.int(3, 8));
+				if (to <= i) return false;
+				const p = board[i];
+				p.draftEvent = {
+					kind: "fall",
+					from: i,
+					say: (moved) => (moved > 0
+						? "slid " + Text.plural(moved, "spot") + " with an injury picked up in June"
+						: "was hurt in June and went where the board had him anyway"),
+					detail: r.pick([
+						"a sprained ankle in his last workout",
+						"a broken finger that needed a pin",
+						"a hamstring that kept him out of the combine",
+					]),
+				};
+				move(board, i, to);
+				return true;
+			},
+		},
+		{
+			name: "film riser", w: 1.0,
+			label: "rose on the film",
+			pick: (i, n) => i >= 20 && i < Math.min(50, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const to = Math.max(0, i - r.int(3, 8));
+				if (to >= i) return false;
+				const p = board[i];
+				p.draftEvent = {
+					kind: "rise",
+					from: i,
+					say: (moved) => (moved < 0
+						? "rose " + Text.plural(-moved, "spot") + " as teams went back to the film"
+						: "rose on the film"),
+					detail: r.pick([
+						"his defensive tape aged better than his box score",
+						"teams liked what he did against ranked opponents",
+						"a second look at his March changed minds",
+					]),
+				};
+				move(board, i, to);
+				return true;
+			},
+		},
+		{
+			name: "measurements disappointed", w: 0.9,
+			label: "measured smaller than listed",
+			pick: (i, n) => i >= 4 && i < Math.min(35, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const to = Math.min(board.length - 1, DRAFT_PICKS - 1, i + r.int(3, 7));
+				if (to <= i) return false;
+				const p = board[i];
+				p.draftEvent = {
+					kind: "fall",
+					from: i,
+					say: (moved) => (moved > 0
+						? "slid " + Text.plural(moved, "spot") + " after measuring smaller than his listing"
+						: "measured smaller than listed"),
+					detail: r.pick([
+						"an inch and a half shorter in shoes than his program said",
+						"a wingspan barely longer than his height",
+						"lighter than anyone had expected",
+					]),
+				};
+				move(board, i, to);
+				return true;
+			},
+		},
+		{
+			name: "agent steered him", w: 0.8,
+			label: "his agent steered him to a team",
+			pick: (i, n) => i >= 25 && i < Math.min(60, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const to = Math.max(0, i - r.int(2, 6));
+				if (to >= i) return false;
+				const p = board[i];
+				p.draftEvent = {
+					kind: "steered",
+					from: i,
+					say: (moved) => (moved < 0
+						? "went " + Text.plural(-moved, "spot") + " early to the team his agent had chosen"
+						: "went to the team his agent had steered him toward"),
+					detail: r.pick([
+						"he worked out for exactly one team",
+						"his camp told everybody else he would play overseas",
+						"the medical records went to one front office",
+					]),
+				};
+				move(board, i, to);
+				return true;
+			},
+		},
+		{
+			name: "consolidation trade", w: 0.8,
+			label: "a team packaged picks to take him",
+			pick: (i, n) => i >= 10 && i < Math.min(40, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const to = Math.max(0, i - r.int(2, 5));
+				if (to >= i) return false;
+				const p = board[i];
+				p.draftEvent = {
+					kind: "trade",
+					from: i,
+					say: (moved) => (moved < 0
+						? "a team packaged two picks to move up " + Text.plural(-moved, "spot") + " for him"
+						: "a team packaged two picks to take him"),
+					detail: r.pick([
+						"two seconds and a swap",
+						"both of the team's late firsts",
+						"a pick and a player on a rookie deal",
+					]),
+				};
+				move(board, i, to);
+				return true;
+			},
+		},
+		{
+			name: "cancelled workouts", w: 0.8,
+			label: "fell after cancelling workouts",
+			pick: (i, n) => i >= 0 && i < Math.min(28, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const to = Math.min(board.length - 1, DRAFT_PICKS - 1, i + r.int(2, 6));
+				if (to <= i) return false;
+				const p = board[i];
+				p.draftEvent = {
+					kind: "fall",
+					from: i,
+					say: (moved) => (moved > 0
+						? "slid " + Text.plural(moved, "spot") + " after cancelling his lottery workouts"
+						: "cancelled his lottery workouts"),
+					detail: r.pick([
+						"he would only work out for teams in the top five",
+						"his camp wanted a specific market",
+						"a promise that turned out not to be one",
+					]),
+				};
+				move(board, i, to);
+				return true;
+			},
+		},
+		{
+			name: "hometown pick", w: 0.7,
+			label: "drafted by his hometown team",
+			pick: (i, n) => i >= 0 && i < Math.min(60, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const p = board[i];
+				p.draftEvent = {
+					kind: "hometown",
+					from: i,
+					say: (moved, at) => "was taken at No. " + (at + 1) + " by the team he grew up watching",
+					detail: r.pick([
+						"the arena he went to as a kid",
+						"his high school coach was in the building",
+						"the local paper ran him on the front page",
+					]),
+				};
+				return true;
+			},
+		},
+		{
+			name: "draft and stash", w: 0.7,
+			label: "drafted to stay overseas",
+			pick: (i, n, p) => i >= 30 && i < Math.min(n, DRAFT_PICKS) && !!p && (p.nonNcaa || /Senior|Graduate/.test(String(p.classYear || ''))),
+			apply: (board, i, r) => {
+				const p = board[i];
+				p.draftEvent = {
+					kind: "stash",
+					from: i,
+					say: (moved, at) => "was taken at No. " + (at + 1) + " to be stashed for a season",
+					detail: r.pick([
+						"he signed a two-year deal abroad the same week",
+						"the team had no roster spot to give him",
+						"his buyout made the timing easy",
+					]),
+				};
+				return true;
+			},
+		},
+		{
+			name: "two-way promise", w: 0.7,
+			label: "taken late on a two-way promise",
+			pick: (i, n) => i >= 45 && i < Math.min(60, n, DRAFT_PICKS),
+			apply: (board, i, r) => {
+				const p = board[i];
+				p.draftEvent = {
+					kind: "twoway",
+					from: i,
+					say: (moved, at) => "went at No. " + (at + 1) + " with a two-way contract waiting",
+					detail: r.pick([
+						"the contract was agreed before the pick",
+						"the G League affiliate had wanted him all year",
+						"he turned down a guaranteed deal abroad for it",
 					]),
 				};
 				return true;
@@ -4736,17 +5389,60 @@
 			p.stockMove = p.preseasonRank - p.boardRank;   // + = riser
 			p.draftSlot = null;
 		});
+		markPositionLeaders(board);
 		const order = board.slice();
 		state.draftEvents = applyDraftEvents(order, rng.child("draftday"),
 			state.effectiveCfg || state.cfg, state);
-		order.forEach((p, i) => { p.draftSlot = i + 1; });
-		state.draftOrder = order;
+		let finalOrder = order;
+		const truth = (state.cfg && state.cfg.draftTruth) || null;
+		if (truth) {
+			const t = applyDraftTruth(order, truth, state.draftEvents);
+			finalOrder = t.order;
+			state.draftEvents = t.events;
+		}
+		finalOrder.forEach((p, i) => {
+			p.draftSlot = i + 1;
+			if (truth) {
+				const tr = truth[p.key];
+				p.realDraft = tr && tr.slot ? { round: tr.round, pick: tr.pick, team: tr.team } : null;
+			}
+		});
+		state.draftOrder = finalOrder;
 		state.board = board;
 		state.risers = board.slice().sort((a, b) => b.stockMove - a.stockMove)
 			.filter((p) => p.stockMove > 0).slice(0, 8);
 		state.fallers = board.slice().sort((a, b) => a.stockMove - b.stockMove)
 			.filter((p) => p.stockMove < 0).slice(0, 8);
 		return state;
+	}
+
+	/* WHERE HE STANDS AMONG THE MEN WHO PLAY HIS POSITION.
+
+	   The board is one list, and a 3-star recruit at No. 19 who is the best
+	   centre in the class is a different prospect from a 3-star at No. 19 who
+	   is the fourth-best guard — and a draft room needing a big knows which
+	   one it is talking about. Each prospect carries his rank inside his
+	   position group on the pre-event board; the group leader is marked, and
+	   a leader who was NOT a blue-chip recruit (four stars or fewer, or not
+	   ranked at all) is a `posGem`: the man the recruiting services missed
+	   who is now the best at what he does. Pure read of the board — no draw,
+	   no effect on any other phase. */
+	const POS_GROUP = { PG: "guard", SG: "guard", G: "guard", GF: "wing", SF: "wing",
+		F: "forward", PF: "forward", FC: "big", C: "big" };
+	function positionGroupOf(pos) {
+		return POS_GROUP[pos] || "wing";
+	}
+	function markPositionLeaders(board) {
+		const seen = {};
+		for (const p of board) {
+			const g = positionGroupOf(p.newPos || p.pos);
+			seen[g] = (seen[g] || 0) + 1;
+			p.posGroup = g;
+			p.posBoardRank = seen[g];
+			p.posLeader = seen[g] === 1;
+			const stars = p.recruiting && p.recruiting.stars;
+			p.posGem = p.posLeader && p.boardRank > 3 && !(stars >= 5);
+		}
 	}
 
 	/* ------------------------------------------------------------- phase 8 */
@@ -4840,12 +5536,61 @@
 				const no1 = res && res.board && res.board[0];
 				return !!no1 && (no1.awards || []).some((a) => set.has(a));
 			} },
+		/* Seven more (audit 2026-10-10, Q21): what the achievements test and
+		   the search could not target. The bracket ones read the games the
+		   same way ReplayMeta.seedBeat does, here so the worker has them. */
+		{ key: "sixteenOverOne", label: "a 16 seed beat a 1 seed",
+			test: (res) => bracketSeedBeat(res, 16, 1) },
+		{ key: "fifteenOverTwo", label: "a 15 seed beat a 2 seed",
+			test: (res) => bracketSeedBeat(res, 15, 2) },
+		{ key: "freshmanPoy", label: "the player of the year is a freshman",
+			test: (res) => poyPlayers(res).some((p) => p.classYear === "Freshman") },
+		{ key: "midMajorPoy", label: "the player of the year plays at a mid-major",
+			test: (res) => poyPlayers(res).some((p) => {
+				if (p.nonNcaa) return false;
+				const t = res.teams && res.teams[p.newCollege];
+				const conf = t && t.conf && C.CONFERENCES[t.conf];
+				return !!t && (!conf || conf.tier !== "high");
+			}) },
+		{ key: "leftyNo1", label: "the No. 1 pick is left-handed",
+			test: (res) => !!(res && res.board && res.board[0] && res.board[0].hand === "left") },
+		{ key: "unbeatenChamp", label: "an unbeaten national champion",
+			test: (res) => {
+				const c = res && res.tourney && res.tourney.champion;
+				return !!(c && c.team && c.team.l === 0 && c.team.w >= 20);
+			} },
+		{ key: "allOneSeedsFF", label: "all four 1 seeds in the Final Four",
+			test: (res) => {
+				const ff = (res && res.tourney && res.tourney.finalFour) || [];
+				return ff.length === 4 && ff.every((x) => x && x.seed === 1);
+			} },
 		/* Strangeness as a clause: "reroll until the world comes out weird".
 		   Any "strangeness:N" key parses (see parseRerollClause); these two
 		   are the thresholds the dialog lists. */
 		strangenessPredicate(30),
 		strangenessPredicate(50),
 	];
+
+	function bracketSeedBeat(res, lo, hi) {
+		const t = res && res.tourney;
+		if (!t) return false;
+		const games = [];
+		for (const r of Object.values(t.regions || {})) {
+			for (const round of (r && r.rounds) || []) for (const g of round || []) games.push(g);
+		}
+		for (const g of t.semis || []) games.push(g);
+		if (t.final) games.push(t.final);
+		return games.some((g) => {
+			if (!g || !g.a || !g.b || !g.winner) return false;
+			const loser = g.winner === g.a ? g.b : g.a;
+			return g.winner.seed === lo && loser.seed === hi;
+		});
+	}
+	function poyPlayers(res) {
+		const set = global.Universe && global.Universe.nationalPOYSet
+			? global.Universe.nationalPOYSet() : new Set();
+		return ((res && res.players) || []).filter((p) => (p.awards || []).some((a) => set.has(a)));
+	}
 
 	function strangenessPredicate(n) {
 		const t = Math.max(0, Math.min(100, Math.round(Number(n) || 0)));
@@ -4966,7 +5711,7 @@
 				"variation", "flavorHint", "flavorBlend", "poolMemory", "recentPools",
 				/* The flavor's own memory, drawn in pickFlavor — same pair
 				   and same contract as poolMemory/recentPools above. */
-				"flavorMemory", "recentFlavors",
+				"flavorMemory", "recentFlavors", "recentNarratives",
 				"anomalyMemory", "recentAnomalies", "flavorReach", "narrative",
 				/* The anomaly shortlist, and the meta-dial that moves half of
 				   the settings above. Both reshape the class from here down. */
@@ -5023,8 +5768,12 @@
 			   ratio now, which is played out in this phase, and a warm re-run
 			   that skipped it left the box score and the results page in two
 			   different eras. */
-			deps: ["era", "pace", "scoringEnv", "injuryRate", "realignmentRate",
-				"bluebloodDownYears", "midMajorLift", "teamMomentum", "seasonEvents",
+			/* `efficiencyEnv` too: playGameScore's pointsPerPair scales the
+			   score by efficiencyScale(cfg), so the scoreboard reads it. It was
+			   declared on the stats phase only, and a warm re-run after the
+			   slider moved kept last run's points and W-L (audit 2026-10-10 B4). */
+			deps: ["era", "pace", "scoringEnv", "efficiencyEnv", "injuryRate", "realignmentRate",
+				"bluebloodDownYears", "midMajorLift", "teamMomentum", "seasonEvents", "recentTemplates",
 				// The world dials: all three are read by buildPrograms.
 				"realignmentMemory", "starReturners", "portalRate", "styleDrift",
 				// weirdness bends realignmentRate, styleDrift and the down-year
@@ -5040,8 +5789,9 @@
 				"carryOver", "universeRoster", "pastRoster"],
 			run: phaseRegular,
 		},
-		// weirdness bends upsetFactor, which this phase owns.
-		{ name: "postseason", deps: ["upsetFactor", "coachTurnover", "weirdness"],
+		// weirdness bends upsetFactor, which this phase owns. efficiencyEnv
+		// scales the March scores the same way it does the regular season's.
+		{ name: "postseason", deps: ["upsetFactor", "coachTurnover", "weirdness", "efficiencyEnv"],
 			run: phasePostseason },
 		{
 			name: "stats",
@@ -5056,7 +5806,7 @@
 				"awardNoise"],
 			run: phaseAwards,
 		},
-		{ name: "stock", deps: ["draftEvents"], run: phaseStock },
+		{ name: "stock", deps: ["draftEvents", "draftTruth"], run: phaseStock },
 		{ name: "notes", deps: ["noteLines", "noteHeader", "noteFooter"], run: phaseNotes },
 	];
 
@@ -5126,6 +5876,27 @@
 		const elite = (res.players || []).filter((p) => p.newOvr >= 55).length;
 		if (elite >= 6) add(9, elite + " prospects at 55+ overall", "starStudded");
 		if (elite === 0) add(9, "nobody in the class reached 55 overall", "noStars");
+		// Bingo squares read off the reroll predicates where one exists.
+		const pred = (k) => {
+			const pr = REROLL_PREDICATES.filter((x) => x.key === k)[0];
+			try { return !!(pr && pr.test(res)); } catch (e) { return false; }
+		};
+		if (pred("freshmanNo1")) add(2, "the No. 1 pick is a freshman", "freshmanNo1");
+		if (pred("midMajorChamp")) add(10, "a mid-major won the title", "midMajorChamp");
+		if (pred("abroadLottery")) add(6, "three or more of the lottery played abroad", "abroadLottery");
+		if (pred("unrankedTop10")) add(6, "a two-star recruit in the top ten", "unrankedTop10");
+		if (pred("poyOutsideClass")) add(5, "the player of the year is not in this class", "poyOutsideClass");
+		const tg = global.ReplayMeta && global.ReplayMeta.tourneyGames
+			? global.ReplayMeta.tourneyGames(res) : [];
+		if (tg.some((g) => g.winner.seed === 16 && (g.winner === g.a ? g.b : g.a).seed === 1)) {
+			add(15, "a 16 seed beat a 1 seed", "sixteenOverOne");
+		}
+		if (ff.length === 4 && ff.every((x) => x && x.seed === 1)) {
+			add(4, "all four 1 seeds reached the Final Four", "allOnesFF");
+		}
+		if (champ && champ.team && champ.team.l === 0 && champ.team.w >= 20) {
+			add(12, "an unbeaten national champion", "unbeatenChamp");
+		}
 		return {
 			score: Math.min(100, score),
 			reasons,
@@ -5179,7 +5950,7 @@
 		const lf = Object.assign({}, leagueFile, { startingSeason: validation.season });
 		const seed = cfg.seed && String(cfg.seed).trim() !== ""
 			? String(cfg.seed).trim() : String(Math.floor(Math.random() * 1e9));
-		const effective = Object.assign({}, cfg, { seed });
+		const effective = withPastPro(Object.assign({}, cfg, { seed }), leagueFile);
 		const key = phaseKey(PHASES[0], effective);
 		let byKey = previewCache.get(leagueFile);
 		if (byKey && byKey.key === key) {
@@ -5339,11 +6110,15 @@
 		let state = null;
 		let keys = null;
 
-		function run(cfg) {
+		/* opts.stopAfter (UV1): run only up to and including the named phase,
+		   so a caller can hand control back between phases. The next call with
+		   the same cfg carries on from the first phase not yet run; the season
+		   that comes out is exactly the one a single call would make. */
+		function run(cfg, opts) {
 			const seed = cfg.seed && String(cfg.seed).trim() !== ""
 				? String(cfg.seed).trim()
 				: String(Math.floor(Math.random() * 1e9));
-			const effective = Object.assign({}, cfg, { seed });
+			const effective = withPastPro(Object.assign({}, cfg, { seed }), leagueFile);
 			const nextKeys = PHASES.map((p) => phaseKey(p, effective));
 			let from = 0;
 			if (state && keys) {
@@ -5396,8 +6171,11 @@
 				state.seed = seed;
 			}
 			const ran = [];
+			const stopAt = opts && opts.stopAfter
+				? PHASES.findIndex((ph) => ph.name === opts.stopAfter) : -1;
+			const last = stopAt >= 0 ? stopAt : PHASES.length - 1;
 			try {
-				for (let i = from; i < PHASES.length; i++) {
+				for (let i = from; i <= last; i++) {
 					PHASES[i].run(state);
 					ran.push(PHASES[i].name);
 				}
@@ -5412,7 +6190,8 @@
 				keys = null;
 				throw err;
 			}
-			keys = nextKeys;
+			keys = last >= PHASES.length - 1 ? nextKeys
+				: nextKeys.map((k, i) => (i < from || i <= last ? k : null));
 			return {
 				seed: state.seed,
 				season: state.season,
@@ -5447,7 +6226,7 @@
 				flavor: state.flavor,
 				/* The season's storylines, so the UI can say what kind of year
 				   this was rather than only what kind of class it was. */
-				narrative: state.narrative || [],
+				narrative: verifyNarrative(state.narrative || [], state),
 				/* Whether the source file's own ages carry information. Read
 				   by exportFile, which without it on the result was reading
 				   `undefined` and rewriting born.year even for a file whose
@@ -5507,11 +6286,24 @@
 		"LNB Pro A": ["INSEP", "a Villeurbanne youth side", "a Pau-Orthez academy"],
 		"Basketball Bundesliga": ["a Bundesliga youth program",
 			"the Ulm youth system", "a Bavarian academy"],
+		"Turkish BSL": ["the Anadolu Efes youth side", "the Fenerbahce academy", "an Istanbul youth system"],
+		"Greek Basket League": ["the Panathinaikos youth teams", "the Olympiacos academy", "an Athens youth program"],
+		"Israeli Premier League": ["the Maccabi Tel Aviv youth system", "a Jerusalem academy"],
+		"Italian LBA": ["the Stella Azzurra academy", "the Virtus youth side", "a Milan youth system"],
+		"Lithuanian LKL": ["the Sabonis basketball school", "the Zalgiris academy", "a Kaunas youth system"],
+		"Japan B.League": ["a Japanese high-school powerhouse", "a B.League youth team"],
+		"Chinese CBA": ["a provincial sports school", "the club's youth team"],
+		"Brazil NBB": ["the Franca youth side", "a Sao Paulo youth program"],
 	};
 	const GENERIC_YOUTH = ["the club's own youth system", "a regional academy",
-		"a national development program"];
+		"a national development program", "a sports high school",
+		"a club academy two hours from home", "a federation development center",
+		"his hometown club's junior side"];
 	const LOAN_TARGETS = ["a second-division side", "a feeder club",
-		"a lower-division team in the same region", "a club two levels down"];
+		"a lower-division team in the same region", "a club two levels down",
+		"a newly promoted side", "a club in a neighboring country's top flight",
+		"a reserve team in the third division",
+		"a relegation-threatened side that needed minutes filled"];
 	const NATIONAL_TEAMS = {
 		"EuroLeague": ["Spain", "Serbia", "France", "Lithuania", "Greece",
 			"Turkey", "Slovenia", "Germany", "Italy", "Israel"],
@@ -6201,9 +6993,39 @@
 				: Text.withArticle(who) + build + at) +
 				(clause ? " — " + clause : "") + "."),
 		];
+		/* THREE MORE OPENERS (audit 2026-10-10, R10): 69% of notes opened
+		   "A 6'10" freshman…". Stat-led, story-led and origin-led, each only
+		   when it has something to lead with. */
+		if (numbers) {
+			// "Averaged", so the sentence opens on a word, not a digit.
+			variants.push(() => Text.capitalize("averaged " + numbers + (place ? " for " + place : "") +
+				" from " + Text.withArticle(who) + build + (clause ? ", with " + clause : "") + "."));
+		}
+		const rec = p.recruiting;
+		const story = p.transfer && p.transfer.from ? "a transfer from " + p.transfer.from
+						/* The rank is a number, and a summary-only template (no stat
+			   line ticked) promises a sentence without numbers. */
+			: rec && Number.isFinite(rec.rank) && numbers ? "the No. " + rec.rank + " recruit in his class"
+				: p.reclassified ? "a reclassified prospect" : "";
+		if (story) {
+			variants.push(() => Text.capitalize(story + ", now " + Text.withArticle(who) + build + at +
+				(numbers ? " putting up " + numbers : "") + (clause ? "; " + clause : "") + "."));
+		}
+		const loc = p.born && typeof p.born.loc === "string" && p.born.loc && p.born.loc !== "USA"
+			? p.born.loc : "";
+		if (loc) {
+			variants.push(() => "Out of " + loc + ", " + Text.withArticle(who) + build + at +
+				(numbers ? ": " + numbers : "") + (clause ? ", with " + clause : "") + ".");
+		}
 		void season;
 		return rng.pick(variants)();
 	}
+
+	/* Who says it (audit R10): every scouting paragraph opened "Scouts
+	   note". Each takes the trait clause as its object. */
+	const SCOUT_ATTRIBUTIONS = ["Scouts note", "Scouts point to", "Evaluators cite",
+		"One Western Conference scout cites", "Front offices mention", "Area scouts highlight",
+		"League personnel flag", "The book on him starts with"];
 
 	function buildNote(p, teams, season, cfg, state, seasonShift) {
 		const s = p.stats;
@@ -6237,9 +7059,17 @@
 				const rec = p.recruiting;
 				bits.push(rec.stars + "-star recruit (No. " + rec.rank +
 					" nationally" +
-					(rec.posRank ? ", No. " + rec.posRank + " " + rec.posLabel : "") +
+					(rec.posRank ? ", No. " + rec.posRank + " " + rec.posLabel +
+						(rec.hsClass ? " in the " + rec.hsClass + " class" : "") : "") +
 					(Number.isFinite(rec.composite)
 						? ", " + rec.composite.toFixed(4) + " composite" : "") + ")");
+				/* Where he stands NOW among his position — the board, not the
+				   recruiting services. A 3-star who is the best big in the
+				   class says so here. */
+				if (p.posBoardRank) {
+					bits.push("No. " + p.posBoardRank + " " + p.posGroup + " on the board" +
+						(p.posLeader && rec.stars > 0 && rec.stars < 5 ? " (a " + rec.stars + "-star)" : ""));
+				}
 				if (rec.offerCount) {
 					bits.push(rec.offerCount + " offers" +
 						(rec.finalists && rec.finalists.length > 1
@@ -6302,7 +7132,8 @@
 		if (on("traits") && p.traits && p.traits.length) {
 			const clause = TR.noteClause(p.traits);
 			const rest = p.traits.slice(2).map((t) => t.name);
-			lines.push("Scouts note " + clause + "." +
+			lines.push(SCOUT_ATTRIBUTIONS[new Rng("scoutnote|" + p.key).int(0, SCOUT_ATTRIBUTIONS.length - 1)] +
+				" " + clause + "." +
 				(rest.length ? " Also: " + rest.join("; ") + "." : ""));
 		}
 		if (s && on("stats")) {
@@ -7365,21 +8196,21 @@
 	   Drawn off the player's key, so a re-run gives him the same town. */
 	const HOME_STATES = [
 		// abbreviation, name, region, weight, cities
-		["CA", "California", "W", 12, ["Los Angeles", "Oakland", "San Diego", "Sacramento"]],
-		["TX", "Texas", "SW", 11, ["Houston", "Dallas", "San Antonio", "Austin"]],
-		["FL", "Florida", "SE", 9, ["Miami", "Orlando", "Jacksonville", "Tampa"]],
-		["NY", "New York", "NE", 8, ["Brooklyn", "Bronx", "Rochester", "Buffalo"]],
-		["GA", "Georgia", "SE", 7, ["Atlanta", "Savannah", "Decatur", "Macon"]],
-		["IL", "Illinois", "MW", 6, ["Chicago", "Peoria", "Rockford", "Joliet"]],
-		["PA", "Pennsylvania", "NE", 6, ["Philadelphia", "Pittsburgh", "Harrisburg", "Erie"]],
-		["OH", "Ohio", "MW", 6, ["Columbus", "Cleveland", "Cincinnati", "Akron"]],
-		["NC", "North Carolina", "SE", 6, ["Charlotte", "Raleigh", "Greensboro", "Durham"]],
-		["MD", "Maryland", "NE", 5, ["Baltimore", "Silver Spring", "Bowie", "Upper Marlboro"]],
+		["CA", "California", "W", 12, ["Los Angeles", "Oakland", "San Diego", "Sacramento", "Compton", "Inglewood", "Long Beach", "Fresno", "Fontana", "Richmond"]],
+		["TX", "Texas", "SW", 11, ["Houston", "Dallas", "San Antonio", "Austin", "Fort Worth", "Arlington", "Killeen", "Beaumont", "Garland"]],
+		["FL", "Florida", "SE", 9, ["Miami", "Orlando", "Jacksonville", "Tampa", "Fort Lauderdale", "Pensacola", "Gainesville", "St. Petersburg"]],
+		["NY", "New York", "NE", 8, ["Brooklyn", "Bronx", "Rochester", "Buffalo", "Harlem", "Queens", "Mount Vernon", "Syracuse", "Yonkers"]],
+		["GA", "Georgia", "SE", 7, ["Atlanta", "Savannah", "Decatur", "Macon", "Columbus", "Augusta", "Albany", "Marietta"]],
+		["IL", "Illinois", "MW", 6, ["Chicago", "Peoria", "Rockford", "Joliet", "Evanston", "Champaign", "Maywood", "Springfield"]],
+		["PA", "Pennsylvania", "NE", 6, ["Philadelphia", "Pittsburgh", "Harrisburg", "Erie", "Chester", "Allentown", "Reading"]],
+		["OH", "Ohio", "MW", 6, ["Columbus", "Cleveland", "Cincinnati", "Akron", "Dayton", "Toledo", "Youngstown", "Canton"]],
+		["NC", "North Carolina", "SE", 6, ["Charlotte", "Raleigh", "Greensboro", "Durham", "Winston-Salem", "Fayetteville", "Wilmington", "Goldsboro"]],
+		["MD", "Maryland", "NE", 5, ["Baltimore", "Silver Spring", "Bowie", "Upper Marlboro", "Landover", "Hyattsville", "Annapolis"]],
 		["VA", "Virginia", "SE", 5, ["Richmond", "Norfolk", "Virginia Beach", "Alexandria"]],
-		["NJ", "New Jersey", "NE", 5, ["Newark", "Camden", "Paterson", "Trenton"]],
-		["MI", "Michigan", "MW", 4, ["Detroit", "Grand Rapids", "Flint", "Lansing"]],
+		["NJ", "New Jersey", "NE", 5, ["Newark", "Camden", "Paterson", "Trenton", "Jersey City", "Elizabeth", "Plainfield", "East Orange"]],
+		["MI", "Michigan", "MW", 4, ["Detroit", "Grand Rapids", "Flint", "Lansing", "Saginaw", "Pontiac", "Ann Arbor"]],
 		["TN", "Tennessee", "SE", 4, ["Memphis", "Nashville", "Knoxville", "Chattanooga"]],
-		["IN", "Indiana", "MW", 4, ["Indianapolis", "Fort Wayne", "Gary", "Evansville"]],
+		["IN", "Indiana", "MW", 4, ["Indianapolis", "Fort Wayne", "Gary", "Evansville", "Anderson", "Muncie", "South Bend", "Marion"]],
 		["LA", "Louisiana", "SE", 4, ["New Orleans", "Baton Rouge", "Shreveport", "Lafayette"]],
 		["AL", "Alabama", "SE", 3, ["Birmingham", "Mobile", "Montgomery", "Huntsville"]],
 		["SC", "South Carolina", "SE", 3, ["Columbia", "Charleston", "Greenville", "Spartanburg"]],
@@ -7387,7 +8218,7 @@
 		["WA", "Washington", "W", 3, ["Seattle", "Tacoma", "Spokane", "Bellevue"]],
 		["MA", "Massachusetts", "NE", 3, ["Boston", "Worcester", "Springfield", "Lowell"]],
 		["AZ", "Arizona", "SW", 3, ["Phoenix", "Tucson", "Mesa", "Chandler"]],
-		["KY", "Kentucky", "SE", 3, ["Louisville", "Lexington", "Bowling Green", "Owensboro"]],
+		["KY", "Kentucky", "SE", 3, ["Louisville", "Lexington", "Bowling Green", "Owensboro", "Paducah", "Covington"]],
 		["WI", "Wisconsin", "MW", 3, ["Milwaukee", "Madison", "Green Bay", "Racine"]],
 		["MN", "Minnesota", "MW", 3, ["Minneapolis", "St. Paul", "Duluth", "Rochester"]],
 		["CT", "Connecticut", "NE", 2, ["Hartford", "New Haven", "Bridgeport", "Stamford"]],
@@ -7502,8 +8333,19 @@
 	}
 	/* The recipe a file carries, or null. A copy, so the caller can edit it.
 	   `settings` is a plain payload for Config.make; nothing here applies it. */
-	function readRecipe(file) {
-		const r = file && typeof file === "object" ? file.bbgmdraft && file.bbgmdraft.recipe : null;
+	function withRecipe(bd, result, recipe, year) {
+		const y = Number.isFinite(year) ? year
+			: classDraftYear((result.leagueFile && result.leagueFile.players) || [], result.season);
+		const recipes = Object.assign({}, bd && bd.recipes);
+		if (Number.isFinite(y)) recipes[y] = recipe;
+		return Object.assign({}, bd, { recipe, recipes });
+	}
+	/* readRecipe(file) reads the newest; readRecipe(file, year) prefers that
+	   year's entry in `recipes` and falls back to `recipe`. */
+	function readRecipe(file, year) {
+		const bd = file && typeof file === "object" ? file.bbgmdraft : null;
+		const r = bd && year !== undefined && bd.recipes && bd.recipes[year]
+			? bd.recipes[year] : bd && bd.recipe;
 		if (!r || typeof r !== "object" || r.v !== RECIPE_VERSION) return null;
 		if (typeof r.seed !== "string" || !r.seed) return null;
 		if (!r.settings || typeof r.settings !== "object" || Array.isArray(r.settings)) return null;
@@ -7781,6 +8623,27 @@
 			r.pot = p.newPot;
 			r.pos = p.newPos;
 			r.skills = p.newSkills.slice();
+			/* opts.ratingsHistory (audit Q19, off by default): one ratings row
+			   per simulated college season before this one, at the overall
+			   ovrYearsAgo gave that season, so BBGM's rating-history chart
+			   shows his development. Older rows first; the draft season's row
+			   stays last, which is the row BBGM's draft import reads. */
+			if (opts.ratingsHistory && Array.isArray(p.priorSeasons) && p.priorSeasons.length) {
+				const rows = p.priorSeasons.filter((ps) => ps && Number.isFinite(ps.season) &&
+					Number.isFinite(ps.ovr) && ps.season < result.season)
+					.sort((a, b) => a.season - b.season)
+					.map((ps) => {
+						const d = ps.ovr - p.newOvr;
+						const row = Object.assign({}, r, { season: exportSeason - (result.season - ps.season),
+							ovr: ps.ovr, pot: p.newPot, skills: [] });
+						for (const k of BB.RATING_KEYS) {
+							if (k === "hgt") continue;
+							row[k] = clamp(Math.round((r[k] || 0) + d), 0, 100);
+						}
+						return row;
+					});
+				if (rows.length) out.ratings = out.ratings.slice(0, last).concat(rows, [r]);
+			}
 			out.draft = Object.assign({}, out.draft, {
 				ovr: p.newOvr, pot: p.newPot, skills: p.newSkills.slice(),
 			});
@@ -8200,7 +9063,7 @@
 		/* opts.recipe: what made this file (seed, engine revision, settings,
 		   source fingerprint), in the same root key; see recipeFor. */
 		if (opts.recipe) {
-			file.bbgmdraft = Object.assign({}, file.bbgmdraft, { recipe: recipeFor(result, opts.recipe) });
+			file.bbgmdraft = withRecipe(file.bbgmdraft, result, recipeFor(result, opts.recipe));
 		}
 		/* opts.only: a list of player keys; the export carries just those.
 		   Everything is still computed for the WHOLE class first, so a kept
@@ -8346,10 +9209,21 @@
 		if (cell !== "" || row.length) { row.push(cell); rows.push(row); }
 		return rows;
 	}
-	function planLockCsv(text, players) {
-		const rows = parseCsv(String(text).replace(/^\uFEFF/, ""));
-		if (!rows.length) throw new Error("That CSV has no rows.");
-		const head = rows[0].map((h) => h.trim().toLowerCase());
+	/* Q11. The locks CSV, parsed rows in, a plan out. Columns (matched by
+	   header, any order): key and/or name to find the prospect; then
+	   ovr, pot, archetype, college, newname (the new name), hgtinches,
+	   weight and the fifteen ratings hgt, stre, spd, jmp, endu, ins, dnk, ft,
+	   fg, tp, oiq, diq, drb, pss, reb. An empty cell is no lock. Anything out
+	   of range or unknown is refused and listed, never half-applied.
+
+	   One parser for the page and the command line. The CLI's --locks used
+	   to read only key, name, ovr, pot, archetype and college, so a row whose
+	   locks were a new name, a size or a rating built an empty patch and was
+	   skipped without a word: "0 of 2 row(s) applied" (audit 2026-10-10 B10).
+	   A matched row that locks nothing is listed in `empty` now. */
+	function planLockRows(rows, players, lists) {
+		if (!rows || !rows.length) return { error: "That CSV has no rows." };
+		const head = rows[0].map((h) => String(h).trim().toLowerCase());
 		const idx = (name) => head.indexOf(name);
 		const byKey = {};
 		const byName = {};
@@ -8357,48 +9231,87 @@
 			byKey[p.key] = p;
 			byName[String(p.name).toLowerCase()] = p;
 		}
-		const cols = { key: idx("key"), name: idx("name"), ovr: idx("ovr"), pot: idx("pot"),
-			archetype: idx("archetype"), college: idx("college") };
+		const cols = {
+			key: idx("key"), name: idx("name"), ovr: idx("ovr"), pot: idx("pot"),
+			archetype: idx("archetype"), college: idx("college"), newname: idx("newname"),
+			hgtinches: idx("hgtinches"), weight: idx("weight"),
+		};
 		if (cols.key < 0 && cols.name < 0) {
-			throw new Error("The CSV needs a `key` or `name` column to match players.");
+			return { error: "The CSV needs a `key` or `name` column to match players." };
 		}
+		const L = lists || {};
 		const applied = [];
 		const unmatched = [];
 		const rejected = [];
-		const archetypeNames = new Set(RB.ARCHETYPES.map((a) => a.name));
-		const schoolNames = new Set(C.names.concat(Object.keys(C.NON_NCAA)));
+		const empty = [];
 		let total = 0;
 		for (let i = 1; i < rows.length; i++) {
 			const r = rows[i];
-			if (!r.length || r.every((c) => !c.trim())) continue;
+			if (!r.length || r.every((c) => !String(c).trim())) continue;
 			total++;
-			const k = cols.key >= 0 ? String(r[cols.key]).trim() : null;
-			const nm = cols.name >= 0 ? String(r[cols.name]).trim().toLowerCase() : null;
+			const cell = (c) => (c >= 0 && r[c] !== undefined ? String(r[c]).trim() : "");
+			const k = cols.key >= 0 ? cell(cols.key) : null;
+			const nm = cols.name >= 0 ? cell(cols.name).toLowerCase() : null;
 			const p = (k && byKey[k]) || (nm && byName[nm]);
 			if (!p) { unmatched.push(k || nm); continue; }
 			const patch = {};
-			const cell = (c) => {
-				// An empty cell is no lock, not a lock at 0 (Number("") is 0).
-				const t = String(r[c] === undefined ? "" : r[c]).trim();
+			// An empty cell is no lock, not a lock at 0 (Number("") is 0).
+			const num = (c) => {
+				const t = cell(c);
 				const v = Number(t);
 				return t !== "" && Number.isFinite(v) ? v : null;
 			};
-			if (cols.ovr >= 0 && cell(cols.ovr) !== null) patch.ovr = cell(cols.ovr);
-			if (cols.pot >= 0 && cell(cols.pot) !== null) patch.pot = cell(cols.pot);
-			if (cols.archetype >= 0 && String(r[cols.archetype]).trim()) {
-				const a = String(r[cols.archetype]).trim();
-				if (archetypeNames.has(a)) patch.archetype = a;
+			if (num(cols.ovr) !== null) patch.ovr = num(cols.ovr);
+			if (num(cols.pot) !== null) patch.pot = num(cols.pot);
+			/* A name the tool does not know is refused here, not applied:
+			   an unknown archetype fell back to the rolled build while the
+			   lock badge said otherwise, and an unknown school was written
+			   verbatim into the export with no team behind it. */
+			const a = cell(cols.archetype);
+			if (a) {
+				if (!L.archetypes || L.archetypes.has(a)) patch.archetype = a;
 				else rejected.push(p.name + ": unknown archetype \u201c" + a + "\u201d");
 			}
-			if (cols.college >= 0 && String(r[cols.college]).trim()) {
-				const c = String(r[cols.college]).trim();
-				if (schoolNames.has(c)) patch.college = c;
+			const c = cell(cols.college);
+			if (c) {
+				if (!L.schools || L.schools.has(c)) patch.college = c;
 				else rejected.push(p.name + ": unknown school \u201c" + c + "\u201d");
 			}
-			if (!Object.keys(patch).length) continue;
+			const nn = cell(cols.newname).replace(/\s+/g, " ").slice(0, 100).trim();
+			if (nn && nn !== p.name) patch.name = nn;
+			const h = num(cols.hgtinches);
+			if (h !== null) {
+				if (h >= 58 && h <= 96) patch.hgtInches = Math.round(h);
+				else rejected.push(p.name + ": hgtinches " + h + " is outside 58-96");
+			}
+			const w = num(cols.weight);
+			if (w !== null) {
+				if (w >= 120 && w <= 400) patch.weight = Math.round(w);
+				else rejected.push(p.name + ": weight " + w + " is outside 120-400");
+			}
+			const ratings = {};
+			for (const rk of BB.RATING_KEYS) {
+				const v = num(idx(rk));
+				if (v === null) continue;
+				if (v >= 0 && v <= 100) ratings[rk] = Math.round(v);
+				else rejected.push(p.name + ": " + rk + " " + v + " is outside 0-100");
+			}
+			if (Object.keys(ratings).length) patch.ratings = ratings;
+			if (!Object.keys(patch).length) { empty.push(p.name); continue; }
 			applied.push({ player: p, patch });
 		}
-		return { applied, unmatched, rejected, total };
+		return { applied, unmatched, rejected, empty, total };
+	}
+
+	/* The CLI's --locks: the page's parser with the tool's own archetype and
+	   school lists. Throws where planLockRows returns an error. */
+	function planLockCsv(text, players) {
+		const plan = planLockRows(parseCsv(String(text).replace(/^\uFEFF/, "")), players, {
+			archetypes: new Set(RB.ARCHETYPES.map((a) => a.name)),
+			schools: new Set(C.names.concat(Object.keys(C.NON_NCAA))),
+		});
+		if (plan.error) throw new Error(plan.error);
+		return plan;
 	}
 
 	const CHANGE_COLUMNS = ["key", "name", "origOvr", "newOvr", "origPot", "newPot", "origPos",
@@ -8602,6 +9515,11 @@
 	];
 
 	function exportPlayersFile(result, opts) {
+		if (result && pastProOf(result.leagueFile)) {
+			throw new Error("The " + pastProOf(result.leagueFile).year + " class is pro " +
+				"history from a league file: those men are already in the league, so " +
+				"they are never exported or merged back.");
+		}
 		/* `awards` does not survive Tools -> Import players, so the honors go
 		   into the note here whatever the note template says. */
 		const full = exportFile(result, Object.assign({}, opts,
@@ -8661,7 +9579,7 @@
 
 	function universePlayersFile(results, opts) {
 		opts = opts || {};
-		const ordered = (results || []).filter(Boolean).slice()
+		const ordered = (results || []).filter((r) => r && !pastProOf(r.leagueFile)).slice()
 			.sort((a, b) => (exportSeasonOf(a) - exportSeasonOf(b)));
 		const players = [];
 		const perFile = [];
@@ -8962,6 +9880,11 @@
 	}
 
 	function mergeIntoLeague(result, league, opts) {
+		if (result && pastProOf(result.leagueFile)) {
+			throw new Error("The " + pastProOf(result.leagueFile).year + " class is pro " +
+				"history from a league file: those men are already in the league, so " +
+				"they are never exported or merged back.");
+		}
 		if (!league || typeof league !== "object" || !Array.isArray(league.players)) {
 			throw new Error("That file has no players array — it is not a BBGM league file.");
 		}
@@ -8978,7 +9901,7 @@
 		/* -4 and -5 are the UNDRAFTED_2 / UNDRAFTED_3 tids older saves used
 		   for the next two classes; a file that still carries them would
 		   otherwise keep its generated class beside the merged one. */
-		const isProspect = (p) => [-2, -4, -5].includes(Number(p.tid)) &&
+		const isProspect = (p) => !!p && [-2, -4, -5].includes(Number(p.tid)) &&
 			p.draft && Number(p.draft.year) === season &&
 			!(protect && protect.has(Number(p.pid)));
 		const sameName = (a, b) => {
@@ -8988,7 +9911,7 @@
 
 		const byPid = new Map();
 		for (const p of league.players) {
-			const pid = Number(p.pid);
+			const pid = Number(p && p.pid);
 			if (Number.isFinite(pid) && isProspect(p)) byPid.set(pid, p);
 		}
 		/* Which league prospect each class row will overlay, by pid and name,
@@ -9005,10 +9928,17 @@
 		const aged = exportFile.bornRewritten || new Set();
 		const noted = exportFile.noteDecided || new Set();
 		let maxPid = -1;
+		let anyPid = false;
 		for (const p of league.players) {
-			const pid = Number(p.pid);
-			if (Number.isFinite(pid) && pid > maxPid) maxPid = pid;
+			const pid = Number(p && p.pid);
+			if (!Number.isFinite(pid)) continue;
+			anyPid = true;
+			if (pid > maxPid) maxPid = pid;
 		}
+		/* A league with no pids at all identifies a player by his row (see
+		   validateLeagueFile), so the new pids start past the last row rather
+		   than at 0, where they named rows already in the file (audit L12). */
+		if (!anyPid) maxPid = league.players.length - 1;
 
 		/* An overlay, not a swap. A draft-class export is a TRIMMED player: a
 		   league file's own prospect carries fields it does not (value,
@@ -9112,6 +10042,9 @@
 
 		const replacements = new Map();
 		const added = [];
+		/* The class's pid -> the pid it has in the merged league, for the
+		   relatives remap below. */
+		const pidMap = new Map();
 		let oi = -1;
 		for (const p of ours) {
 			oi++;
@@ -9126,9 +10059,11 @@
 			   past the guard below, which only counts the league's side. */
 			if (target && sameName(target, p) && !replacements.has(target)) {
 				replacements.set(target, overlay(target, p, sized.has(oi), aged.has(oi), noted.has(oi)));
+				pidMap.set(pid, Number(target.pid));
 			} else {
 				const copy = JSON.parse(JSON.stringify(p));
 				copy.pid = ++maxPid;
+				pidMap.set(pid, copy.pid);
 				/* An appended player still has to be a prospect of this draft
 				   class; the file he came from may not have said so. An
 				   undrafted prospect is round 0, pick 0, tid -1 in BBGM;
@@ -9146,6 +10081,18 @@
 				}
 				added.push(copy);
 			}
+		}
+		/* An appended player gets a new pid, but his `relatives` still named
+		   the CLASS file's pids — which, in the league, belong to strangers
+		   (a brother turned into an active pro on team 1). Remap each one
+		   through the class's own pids and drop any that point outside the
+		   class, as exportFile does for a file-only export (audit 2026-10-10
+		   B8). */
+		for (const copy of added) {
+			if (!Array.isArray(copy.relatives)) continue;
+			copy.relatives = copy.relatives
+				.filter((r) => r && pidMap.has(Number(r.pid)))
+				.map((r) => Object.assign({}, r, { pid: pidMap.get(Number(r.pid)) }));
 		}
 
 		/* The class this file already had, minus the men we just replaced:
@@ -9177,9 +10124,11 @@
 		const file = Object.assign({}, league, { players });
 		// The class's potential is adjusted once; see potStampFor.
 		file.bbgmdraft = withPotStamp(league.bbgmdraft, season, result.effectiveCfg || result.cfg);
-		// opts.recipe, as exportFile writes it (a multi-class merge keeps the last).
+		/* opts.recipe, as exportFile writes it. `recipe` is the last class
+		   merged (what older readers read); `recipes[year]` keeps every
+		   class's, so a second merge no longer erases the first (UV13). */
 		if (opts && opts.recipe) {
-			file.bbgmdraft = Object.assign({}, file.bbgmdraft, { recipe: recipeFor(result, opts.recipe) });
+			file.bbgmdraft = withRecipe(file.bbgmdraft, result, recipeFor(result, opts.recipe), season);
 		}
 		const mergedPids = [];
 		for (const p of replacements.values()) mergedPids.push(Number(p.pid));
@@ -9218,7 +10167,8 @@
 	   either answer (both classes in one draft, or the second silently winning)
 	   is a guess about what the user meant. */
 	function mergeManyIntoLeague(results, league, opts) {
-		const list = Array.isArray(results) ? results : [results];
+		const list = (Array.isArray(results) ? results : [results])
+			.filter((r) => !(r && pastProOf(r.leagueFile)));
 		if (!list.length) throw new Error("No draft class was selected to merge.");
 		const protect = new Set();
 		const seasons = [];
@@ -9254,13 +10204,14 @@
 		SIZE_OVERRIDE_KEYS, SURPRISES, DRAFT_EVENTS, PACE_MIN, PACE_MAX,
 		heightsLocked,
 		draftClassesIn, extractDraftClass, MIN_CLASS, PROSPECT_TIDS,
+		pastClassesIn, extractPastClass, pastProOf, withPastPro, applyDraftTruth, leagueFp,
 		MAX_CLASS, ANOMALY_MEMORY_DEPTH, NARRATIVES, isLeagueFile,
 		rerollSalt,
 		signatureGame, simulateProLeagues, assignRecruiting,
 		NOTE_LINES, DEFAULT_NOTE_LINES, PHASES, PRO_GAMES, strangeness, pastRosterFor,
 		REROLL_PREDICATES, parseRerollClause, PARAM_CLAUSES,
 		changeReport, changeReportText, readRecipe, settingsPayload, faceKeyFor, scoutingFuzz,
-		planLockCsv, parseCsv, hometownFor, lockedClassYear, lockedJersey, lockedMoodTraits,
+		planLockCsv, planLockRows, parseCsv, hometownFor, lockedClassYear, lockedJersey, lockedMoodTraits,
 		previewClass, futureRosterFor, priorYears, ovrYearsAgo, CLASS_YEARS,
 	};
 })(typeof window !== "undefined" ? window : self);

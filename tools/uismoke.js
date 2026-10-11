@@ -19,6 +19,9 @@ const os = require("os");
 
 const ROOT = path.join(__dirname, "..");
 const PORT = Number(process.env.UISMOKE_PORT) || 8791;
+/* Fixtures in a directory of this run's own: two runs on one machine (another
+   port) wrote the same tmp file names and read each other's half-written files. */
+const RUN_TMP = fs.mkdtempSync(path.join(os.tmpdir(), "bbgm-uismoke-run-"));
 const TYPES = {
 	".html": "text/html", ".js": "text/javascript",
 	".css": "text/css", ".json": "application/json",
@@ -38,9 +41,12 @@ try {
    a section that meant to start from nothing started inside the previous
    section's world. Deletion is blocked while the page holds the database
    open and completes on the navigation that follows. */
+/* U32: a first visit shows the Basic settings. The smoke drives controls
+   from every level, so its clean slate starts at "Everything". */
 function clearStorage(page) {
 	return page.evaluate(() => {
 		localStorage.clear();
+		localStorage.setItem("bbgm-draft-workshop/v1", JSON.stringify({ v: 3, settingTier: "model" }));
 		return new Promise((resolve) => {
 			try {
 				const req = indexedDB.deleteDatabase("bbgm-draft-workshop");
@@ -48,6 +54,22 @@ function clearStorage(page) {
 			} catch (e) { resolve(); }
 		});
 	});
+}
+
+/* U24: Player Edit's filters, column tools and bulk bar fold behind
+   "Filters"; open the fold (it stays open until the page reloads). */
+async function openFilters(page) {
+	await page.evaluate(() => {
+		const d = document.querySelector("#view details.filterfold");
+		if (d && !d.open) d.querySelector("summary").click();
+	});
+	await page.waitForTimeout(100);
+}
+
+/* U10: the small tools live in the header's Tools menu; open it first. */
+async function tool(page, sel) {
+	if (!(await page.locator(sel).isVisible())) await page.locator("#btnHeaderMore").click();
+	await page.locator(sel).click();
 }
 
 function serve() {
@@ -130,7 +152,7 @@ async function gotoProspects(page) {
 (async () => {
 	const V = require("./validate.js");
 	V.loadEngine();
-	const fixture = path.join(require("os").tmpdir(), "bbgm-uismoke-class.json");
+	const fixture = path.join(RUN_TMP, "bbgm-uismoke-class.json");
 	fs.writeFileSync(fixture, JSON.stringify(V.syntheticClass(3, 70)));
 
 	const server = await serve();
@@ -225,7 +247,7 @@ async function gotoProspects(page) {
 	await page.waitForTimeout(700);
 	ok("redo re-applies it",
 		(await page.evaluate(() => Object.keys(window.App.state.overrides).length)) === 0);
-	await page.locator("#btnKeys").click();
+	await tool(page, "#btnKeys");
 	await page.waitForTimeout(200);
 	ok("the keyboard sheet opens",
 		(await page.locator("#modal").innerText()).indexOf("Undo") !== -1);
@@ -237,6 +259,7 @@ async function gotoProspects(page) {
 	// "show me everyone over 18 points a game".
 	const shownRows = () => page.locator("table tbody tr").count();
 	const before = await shownRows();
+	await openFilters(page);
 	await page.locator('button:has-text("+ range filter")').click();
 	await page.waitForTimeout(200);
 	await page.selectOption(".rangefilter select", "ppg");
@@ -454,6 +477,14 @@ async function gotoProspects(page) {
 	/* The export menu, which is also where the new verbs live. */
 	await page.locator("#btnExportMenu").click();
 	await page.waitForTimeout(250);
+	ok("the export menu is in headed sections (U34)",
+		(await page.locator("#modal .exportgroup h4").allTextContents()).join("|")
+			.indexOf("Back to BBGM|Spreadsheets and data|Pictures and pages|Import|Tools") === 0);
+	ok("and its BBGM options fold behind a one-line summary",
+		await page.evaluate(() => !document.getElementById("exportOptions").open &&
+			/^Options for BBGM files: /.test(document.querySelector("#exportOptions > summary").textContent)));
+	await page.evaluate(() => { document.getElementById("exportOptions").open = true; });
+	await page.waitForTimeout(100);
 	const menuText = await page.locator("#modal").innerText();
 	ok("the export menu offers Markdown notes, a message history and a preset diff",
 		/Markdown/.test(menuText) && /Message history/.test(menuText) &&
@@ -603,7 +634,7 @@ async function gotoProspects(page) {
 		const fresh = seeds.map((s) => BatchStats.fingerprint(Engine.createRunner(file).run(mk(s))));
 		const w = new window.__batchRealWorker("js/worker.js");
 		const workerReused = await new Promise((resolve) => {
-			w.onmessage = (e) => resolve(e.data.rows || e.data.message);
+			w.onmessage = (e) => { if (e.data && e.data.type === "hello") return; resolve(e.data.rows || e.data.message); };
 			w.postMessage({ type: "probe", leagueFile: file, cfg, seed: seeds });
 		});
 		w.terminate();
@@ -623,7 +654,20 @@ async function gotoProspects(page) {
 			}
 			return label + " matches fresh";
 		};
-		return "probe " + base + ": " + diff("worker", workerReused) + " | " + diff("page", pageReused);
+		/* What the worker's copy could lack: a run on the page from a
+		   structured clone of the same file, and the settings that are not
+		   at their defaults (the CI-only disagreement was not reproducible
+		   on a default config). */
+		let cloneNote = "";
+		try {
+			const cl = seeds.map((s) => BatchStats.fingerprint(Engine.createRunner(structuredClone(file)).run(mk(s))));
+			cloneNote = diff("clone", cl);
+		} catch (e) { cloneNote = "clone threw: " + e.message; }
+		const D = Config.DEFAULTS;
+		const moved = Object.keys(cfg).filter((k) => JSON.stringify(cfg[k]) !== JSON.stringify(D[k]))
+			.map((k) => k + "=" + JSON.stringify(cfg[k]).slice(0, 80)).join(", ");
+		return "probe " + base + ": " + diff("worker", workerReused) + " | " + diff("page", pageReused) +
+			" | " + cloneNote + " | moved: " + moved;
 	}, withWorker).catch((e) => "probe threw: " + e.message);
 	const parity = strip(inlineText) === strip(withWorker);
 	ok("the fallback produces the same batch the worker does", parity,
@@ -661,7 +705,7 @@ async function gotoProspects(page) {
 		   turns is flavorMemory, which does have a control. */
 		const EXEMPT = ["seed", "overrides", "leagueWeights", "archetypeWeights",
 			"noteLines", "wEuroLeague", "wGLeague", "wNBL", "recentPools",
-			"biography", "anomalyPicks", "recentFlavors"];
+			"biography", "anomalyPicks", "recentFlavors", "recentNarratives", "recentTemplates"];
 		const missing = await page.evaluate((exempt) =>
 			Object.keys(window.Config.DEFAULTS)
 				.filter((k) => exempt.indexOf(k) === -1)
@@ -722,6 +766,7 @@ async function gotoProspects(page) {
 
 	console.log("\nBulk and layout verbs");
 	{
+		await openFilters(page);
 		await page.locator("#bulkBar select").first().selectOption("10");
 		await page.waitForTimeout(300);
 		ok("selecting the top of the board ticks rows",
@@ -750,6 +795,7 @@ async function gotoProspects(page) {
 		await page.waitForTimeout(300);
 
 		// Saved column layouts.
+		await openFilters(page);
 		await page.locator(".filters button", { hasText: "Columns…" }).click();
 		await page.waitForSelector(".colpicker", { timeout: 5000 });
 		// Named inline in the picker now, not through window.prompt.
@@ -769,7 +815,7 @@ async function gotoProspects(page) {
 
 	console.log("\nCompare and reroll");
 	{
-		await page.locator("#btnPin").click();
+		await tool(page, "#btnPin");
 		await page.waitForTimeout(400);
 		const sels = page.locator("#view .filters select");
 		ok("the compare tab offers four slots", (await sels.count()) >= 4);
@@ -917,7 +963,7 @@ async function gotoProspects(page) {
 		});
 		ok("the last tab and board mode are stored",
 			!!stored && typeof stored.tab === "string" && typeof stored.boardMode === "string");
-		await page.locator("#btnKeys").click();
+		await tool(page, "#btnKeys");
 		await page.waitForTimeout(150);
 		const sheet = await page.locator("#modalBody").innerText();
 		ok("the shortcut sheet lists j/k, Enter and l for Player Edit",
@@ -1178,6 +1224,7 @@ async function gotoProspects(page) {
 		   status and then runs, which is the case that was being wiped. */
 		await page.locator("table tbody tr").first().locator("td input[type=checkbox]").check();
 		await page.waitForTimeout(200);
+		await openFilters(page);
 		const locks = page.locator("#bulkBar select");
 		await locks.nth(await locks.count() - 1).selectOption("ovr");
 		await page.waitForTimeout(1200);
@@ -1271,8 +1318,11 @@ async function gotoProspects(page) {
 		await page.waitForSelector("table tbody tr", { timeout: 30000 });
 		/* The board carries a divider row per round (see bandOf in
 		   js/views.js), so the player rows are the ones that are not one. */
-		ok("the sample class renders a board with a row per prospect",
-			(await page.locator("table tbody tr:not(.bandrow)").count()) === 70);
+		{
+			const rows = await page.locator("table tbody tr:not(.bandrow)").count();
+			ok("the sample class renders a board with a row per prospect", rows === 70,
+				rows + " rows; hash " + (await page.evaluate(() => location.hash)));
+		}
 		ok("the sample class is named as one",
 			/sample/i.test(await page.locator("#fileSummary").textContent()));
 		await page.locator("#tabs button", { hasText: "News" }).first().click();
@@ -1295,7 +1345,7 @@ async function gotoProspects(page) {
 		// A copy button restores the label it HAD, not one a call site
 		// remembered: btnCopyLink is an icon and was passed the word "Link".
 		const icon = await page.locator("#btnCopyLink").textContent();
-		await page.locator("#btnCopyLink").click();
+		await tool(page, "#btnCopyLink");
 		await page.waitForTimeout(1800);
 		ok("the copy-link button goes back to its own icon",
 			(await page.locator("#btnCopyLink").textContent()) === icon,
@@ -1451,7 +1501,7 @@ async function gotoProspects(page) {
 		   extension, and the download's own temp name has none — the page
 		   arrives as plain text and every check below fails on an empty
 		   document rather than on anything real. */
-		const sitePath = path.join(os.tmpdir(),
+		const sitePath = path.join(RUN_TMP,
 			"bbgmdraft-smoke-" + process.pid + ".html");
 		await site.saveAs(sitePath);
 		{
@@ -2086,7 +2136,8 @@ async function gotoProspects(page) {
 			await page.waitForTimeout(150);
 			const tp = await page.evaluate(() => ({
 				heads: Array.from(document.querySelectorAll("#view h4")).map((h) => h.textContent),
-				rows: document.querySelectorAll("#view table.proghist tbody tr").length,
+				// The alumni table (audit UV11) shares the class; count history only.
+				rows: document.querySelectorAll("#view table.proghist:not(.alumni) tbody tr").length,
 				spark: !!document.querySelector("#view svg.levelspark path.lvlline"),
 			}));
 			ok("a team page in universe mode shows the program's history",
@@ -2463,7 +2514,7 @@ async function gotoProspects(page) {
 			copy.college = "Duke";
 			league.players.push(copy);
 		}
-		const leagueFixture = path.join(require("os").tmpdir(), "bbgm-uismoke-league.json");
+		const leagueFixture = path.join(RUN_TMP, "bbgm-uismoke-league.json");
 		fs.writeFileSync(leagueFixture, JSON.stringify(league));
 
 		await page.goto(base);
@@ -2511,6 +2562,107 @@ async function gotoProspects(page) {
 		await page.waitForTimeout(200);
 	}
 
+	/* ---------------------------------------------------------------------
+	   LARGE LEAGUE FILES (audit 2026-10-10, section 3).
+
+	   A gzipped league with box scores: read through the scanner (the box
+	   scores are not parsed, the league is kept as its file), merged back by
+	   splicing the untouched stores through, and written as a .json.gz like
+	   the one dropped. Then the wrong files: a .zip and a truncated export
+	   are sentences, not parser text. */
+	console.log("\nLarge league files");
+	{
+		const zlib = require("zlib");
+		const league = { version: 64, startingSeason: 2027, gameAttributes: { season: 2027 },
+			meta: { name: "Smoke" }, teams: [{ tid: 5, region: "A", name: "B" }], players: [],
+			games: Array.from({ length: 400 }, (_, i) => ({ gid: i, note: "box \"score\" ]}" + i })),
+			events: [{ text: "an event" }] };
+		let pid = 0;
+		for (const year of [2027, 2028]) {
+			for (const p of V.syntheticClass(year + 40, 50).players) {
+				const copy = JSON.parse(JSON.stringify(p));
+				copy.pid = pid++;
+				copy.tid = -2;
+				copy.draft = { year, round: 0, pick: 0, tid: -1 };
+				copy.born = { year: year - 19, loc: "USA" };
+				league.players.push(copy);
+			}
+		}
+		for (const p of V.syntheticClass(11, 160).players) {
+			const copy = JSON.parse(JSON.stringify(p));
+			copy.pid = pid++;
+			copy.tid = 5;
+			copy.draft = { year: 2020, round: 1, pick: 3, tid: 5 };
+			copy.born = { year: 2000, loc: "USA" };
+			league.players.push(copy);
+		}
+		// One long-retired man with no birth year: a warning, not a refusal (L8).
+		const broken = JSON.parse(JSON.stringify(league.players[league.players.length - 1]));
+		broken.pid = pid++;
+		delete broken.born;
+		league.players.push(broken);
+		const tmp = RUN_TMP;
+		const gzFixture = path.join(tmp, "bbgm-uismoke-big.json.gz");
+		fs.writeFileSync(gzFixture, zlib.gzipSync(Buffer.from(JSON.stringify(league))));
+
+		await page.goto(base);
+		await clearStorage(page);
+		await page.goto(base);
+		await page.setInputFiles("#file", gzFixture);
+		await page.waitForSelector("table tbody tr", { timeout: 60000 });
+		const src = await page.evaluate(() => {
+			const s = window.App.state.leagueSource;
+			return s ? { blob: !!s.blob, scan: !!(s.scan && s.scan.ranges && s.scan.ranges.games),
+				games: s.data.games === undefined, gz: s.gz, players: s.data.players.length,
+				files: window.App.state.files.length } : null;
+		});
+		ok("a gzipped league loads through the scanner: box scores left on disk, the file kept",
+			src && src.blob && src.scan && src.games && src.gz === true && src.files === 2 &&
+			src.players === league.players.length, JSON.stringify(src));
+		const warn = await page.locator("#warnBanner .bannertext").innerText().catch(() => "");
+		ok("a broken retired row is a warning, not a refusal", /not a draft prospect/.test(warn),
+			warn.slice(0, 200));
+		await page.locator("#btnExportMenu").click();
+		await page.waitForTimeout(250);
+		await page.locator('#modal button:has-text("Merge into a league file")').click();
+		await page.waitForTimeout(350);
+		await page.locator("#modalOk").click();
+		await page.waitForTimeout(350);
+		const [dl] = await Promise.all([
+			page.waitForEvent("download", { timeout: 120000 }),
+			page.locator("#modalOk").click(),
+		]);
+		const name = dl.suggestedFilename();
+		const saved = path.join(tmp, "bbgm-uismoke-merged-" + Date.now() + ".gz");
+		await dl.saveAs(saved);
+		let back = null;
+		try { back = JSON.parse(zlib.gunzipSync(fs.readFileSync(saved)).toString("utf8")); } catch (e) { back = null; }
+		ok("the merge of a .gz league downloads a .json.gz", /_with_2027_2028_class\.json\.gz$/.test(name), name);
+		ok("and its box scores and events are the league's own, byte for byte",
+			back && JSON.stringify(back.games) === JSON.stringify(league.games) &&
+			JSON.stringify(back.events) === JSON.stringify(league.events) &&
+			back.players.length === league.players.length && !!back.bbgmdraft,
+			back ? Object.keys(back).join(",") : "unreadable");
+		ok("the meter is gone afterwards", await page.locator("#loadProgress").isHidden());
+
+		// The wrong files.
+		const zipFixture = path.join(tmp, "bbgm-uismoke-class.zip");
+		fs.writeFileSync(zipFixture, Buffer.from("PK\x03\x04" + "x".repeat(64), "latin1"));
+		const truncFixture = path.join(tmp, "bbgm-uismoke-trunc.json");
+		const whole = JSON.stringify(V.syntheticClass(12, 40));
+		fs.writeFileSync(truncFixture, whole.slice(0, Math.floor(whole.length * 0.8)));
+		await page.goto(base);
+		await clearStorage(page);
+		await page.goto(base);
+		await page.setInputFiles("#file", [zipFixture, truncFixture]);
+		await page.waitForFunction(() => !document.getElementById("errBanner").hidden, null,
+			{ timeout: 30000 }).catch(() => null);
+		const err = await page.evaluate(() =>
+			(document.querySelector("#errBanner .bannertext") || {}).textContent || "");
+		ok("a .zip is named as one", /\.zip archive/.test(err), err.slice(0, 200));
+		ok("a file that stops partway says so", /stops partway/.test(err), err.slice(0, 300));
+	}
+
 	console.log("\nThe randomizer, per loaded class");
 	{
 		const league = { version: 50, startingSeason: 2027, gameAttributes: { season: 2027 },
@@ -2541,7 +2693,7 @@ async function gotoProspects(page) {
 			copy.college = "Duke";
 			league.players.push(copy);
 		}
-		const leagueFixture = path.join(require("os").tmpdir(), "bbgm-uismoke-randomfile.json");
+		const leagueFixture = path.join(RUN_TMP, "bbgm-uismoke-randomfile.json");
 		fs.writeFileSync(leagueFixture, JSON.stringify(league));
 
 		await page.goto(base);
@@ -2618,7 +2770,7 @@ async function gotoProspects(page) {
 		await page.locator("#btnRandomize").click();
 		await page.waitForTimeout(400);
 		const leagueFixture2 = path.join(
-			require("os").tmpdir(), "bbgm-uismoke-randomfile-2.json");
+			RUN_TMP, "bbgm-uismoke-randomfile-2.json");
 		fs.writeFileSync(leagueFixture2, JSON.stringify(league));
 		await page.setInputFiles("#file", leagueFixture2);
 		await page.waitForSelector("table tbody tr", { timeout: 60000 });
@@ -2920,9 +3072,20 @@ async function gotoProspects(page) {
 			clamped[0] === 82 && clamped[1] === "82", clamped.join(" / "));
 
 		// Replayability (js/replay.js): daily, par, codes, rival, campaign, puzzle.
+		/* On this file: the canonical shared class (audit R5) is checked on
+		   its own page at the end, so this section's file set stays one. */
+		await page.evaluate(() => { window.App.state.challengeOwnFile = true; });
 		await page.evaluate(() => window.App.startDaily("2026-09-25"));
 		await page.waitForFunction(() => document.getElementById("challengeScore") &&
 			window.App.state.challenge === "daily-2026-09-25", null, { timeout: 30000 });
+		/* The challenge is set before its run lands; the link and the result
+		   (which the code and the rival's fingerprint are taken from) follow
+		   the run. On a slow runner both were read a beat early. */
+		await page.waitForFunction(() => {
+			const r = window.App.state.results[window.App.state.active];
+			return /"ch":"daily-2026-09-25"/.test(decodeURIComponent(location.hash)) &&
+				r && r.cfg && r.cfg.seed === "daily-2026-09-25";
+		}, null, { timeout: 30000 });
 		const daily = await page.evaluate(() => [document.getElementById("challengeBar").textContent,
 			decodeURIComponent(location.hash), window.App.state.cfg.seed]);
 		ok("the daily challenge starts on its date's seed with par on the bar",
@@ -3002,8 +3165,7 @@ async function gotoProspects(page) {
 			const bad = A.CHALLENGES.filter((c) => c.goals.some((g) =>
 				!global_parse(g)));
 			function global_parse(g) {
-				const bare = g.replace(/^!/, "");
-				return A.REROLL_PREDICATES.some((p) => p.key === bare);
+				return !!window.Engine.parseRerollClause(g);
 			}
 			return { keys, bad: bad.map((c) => c.key) };
 		});
@@ -3021,9 +3183,11 @@ async function gotoProspects(page) {
 			A.state.cfg.weirdness = 2;
 			return A.challengeResultText(c, A.scoreChallenge(c, A.state.results[A.state.active]));
 		});
-		ok("the challenge result line names the challenge, the dials moved and the seed",
-			/^The perfect season: (not )?solved · \d\/2 goals · 1\/3 settings \(weirdness 0 → 2\) · seed undefeated$/
-				.test(line), line);
+		/* Spoiler-free since the 2026-10-10 audit (R6): goals as marks and
+		   the dial and run counts, never the dial names. */
+		ok("the challenge result line names the challenge and counts without naming the dials",
+			/^The perfect season [\u2713\u00b7]{2} · (not )?solved · 1\/3 dials · \d+ runs?$/.test(line) &&
+				line.indexOf("weirdness") === -1, line);
 		const forbidden = await page.evaluate(() => {
 			const A = window.App;
 			const c = A.CHALLENGES.filter((x) => x.key === "perfect")[0];
@@ -3157,8 +3321,9 @@ async function gotoProspects(page) {
 			return { champ: res.tourney.champion.team.name, no1: res.board[0].name };
 		});
 		await playTab();
-		ok("the Play tab offers three games",
-			(await page.locator("[data-play]").count()) === 3);
+		ok("the Play tab offers five games and the blind rerolls",
+			(await page.locator("[data-play]").count()) === 5 &&
+			(await page.locator("[data-blind]").count()) === 4);
 
 		// Prediction.
 		await page.locator('[data-play="predict"]').click();
@@ -3264,6 +3429,8 @@ async function gotoProspects(page) {
 				order: !!(cards && fb && scroll &&
 					(cards.compareDocumentPosition(fb) & 4) && (fb.compareDocumentPosition(scroll) & 4)),
 				sticky: fb ? getComputedStyle(fb).position : "",
+				// U5/U6: it sticks only while the board fits its column.
+				fits: !!document.querySelector(".scroll.boardwrap.fits"),
 				count: (v.querySelector(".boardcount") || {}).textContent,
 				honors: v.querySelectorAll("td.honors .clamp").length,
 				edits: v.querySelectorAll("button.rowedit").length,
@@ -3276,7 +3443,10 @@ async function gotoProspects(page) {
 		ok("risers and fallers are small grids, each with its own copy button",
 			board.grids === 2 && board.cardCopy >= 1, JSON.stringify(board));
 		ok("the search and position filter sit right above the table and stick",
-			board.order && board.sticky === "sticky", JSON.stringify(board));
+			/* When the board is wider than its column (CI's fonts run wider)
+			   the bar is static by design, so it cannot cover the headers. */
+			board.order && (board.fits ? board.sticky === "sticky" : board.sticky === "static"),
+			JSON.stringify(board));
 		ok("the filter bar counts what it shows", board.count === "70 prospects", board.count);
 		ok("honors are clamped to two lines", board.honors > 0, String(board.honors));
 		ok("each board row offers Edit", board.edits === 70, String(board.edits));
@@ -3311,7 +3481,7 @@ async function gotoProspects(page) {
 		});
 
 		// Settings panel.
-		await page.locator("#settingTier button", { hasText: "Shape" }).click();
+		await page.locator("#settingTier button", { hasText: "Basic" }).click();
 		await page.waitForTimeout(150);
 		const tier = await page.evaluate(() => {
 			const r = document.querySelector("#settings .ctl .rerun");
@@ -3322,14 +3492,17 @@ async function gotoProspects(page) {
 			};
 		});
 		ok("the tier chips are labelled and say how many settings they hide",
-			tier.label === "Show settings about:" && /^\d+ hidden$/.test(tier.hidden), JSON.stringify(tier));
+			tier.label === "Show settings:" && /^\d+ hidden$/.test(tier.hidden), JSON.stringify(tier));
 		ok("outside the Model view the re-run cost is hidden", tier.rerun === "none", tier.rerun);
-		await page.locator("#settingTier button", { hasText: "Model" }).click();
+		await page.locator("#settingTier button", { hasText: "Everything" }).click();
 		await page.waitForTimeout(150);
-		ok("the Model view shows the re-run cost", await page.evaluate(() => {
+		// U33: the cost line is hover/focus-only at every level now.
+		ok("the Everything view keeps the re-run cost for hover or focus", await page.evaluate(() => {
 			const r = document.querySelector("#settings .ctl .rerun");
-			return !!r && getComputedStyle(r).display !== "none";
+			return !!r && getComputedStyle(r).display === "none";
 		}));
+		ok("long setting explanations fold behind an (i) toggle", await page.evaluate(() =>
+			document.querySelectorAll("#settings p.hintclamp + .hintmore").length >= 3));
 		ok("#ovrMode options are short enough not to clip", await page.evaluate(() =>
 			[...document.querySelectorAll("#ovrMode option")].every((o) => o.textContent.length <= 20)));
 
@@ -3520,6 +3693,7 @@ async function gotoProspects(page) {
 			window.__copied = null;
 			navigator.clipboard.writeText = (t) => { window.__copied = t; return Promise.resolve(); };
 		});
+		await page.locator(".boardfilters .copymenu > summary").click();
 		await page.locator(".boardfilters button", { hasText: "Copy top 30" }).click();
 		await page.waitForTimeout(300);
 		const copied = await page.evaluate(() => window.__copied || "");
@@ -3590,7 +3764,7 @@ async function gotoProspects(page) {
 		}
 		ok("the star is on before the class changes",
 			(await page.locator("table.boardtable .watchstar.on").count()) === 1);
-		const other = path.join(require("os").tmpdir(), "bbgm-uismoke-class-b.json");
+		const other = path.join(RUN_TMP, "bbgm-uismoke-class-b.json");
 		/* A different class: the fingerprint reads the count, the season and the
 		   first and last few names, and two synthetic classes draw the same
 		   names, so the season is what tells them apart here. */
@@ -3613,12 +3787,12 @@ async function gotoProspects(page) {
 			(await page.locator("table.boardtable .watchstar.on").count()) === 1);
 
 		// Universe mode: the template changes the notes.
-		const a = path.join(require("os").tmpdir(), "bbgm-uismoke-uni-a.json");
-		const b = path.join(require("os").tmpdir(), "bbgm-uismoke-uni-b.json");
+		const a = path.join(RUN_TMP, "bbgm-uismoke-uni-a.json");
+		const b = path.join(RUN_TMP, "bbgm-uismoke-uni-b.json");
 		fs.writeFileSync(a, JSON.stringify(V.syntheticClass(2, 40)));
 		fs.writeFileSync(b, JSON.stringify(V.syntheticClass(3, 40)));
 		await page.setInputFiles("#file", [a, b]);
-		await page.waitForFunction(() => window.App.state.files.length === 2, null, { timeout: 30000 });
+		await page.waitForFunction(() => window.App.state.files.length === 2, null, { timeout: 60000 });
 		await page.evaluate(() => {
 			const u = document.getElementById("universe");
 			u.checked = true;
@@ -3651,8 +3825,7 @@ async function gotoProspects(page) {
 		// has moved something.
 		await clearStorage(page);
 		await page.goto(base);
-		const os = require("os");
-		const dirU = fs.mkdtempSync(path.join(os.tmpdir(), "bbgm-uismoke-uni-"));
+		const dirU = fs.mkdtempSync(path.join(RUN_TMP, "bbgm-uismoke-uni-"));
 		const fileU = [1, 2, 3].map((y) => {
 			const c = V.realisticClass("par" + y, 50);
 			c.startingSeason = 2024 + y;
@@ -3712,7 +3885,7 @@ async function gotoProspects(page) {
 		await page.waitForTimeout(300);
 		const text = (await page.locator(".problock").first().textContent()) || "";
 		ok("the player page carries a pro projection and his mock-draft slot",
-			/median peak of \d+/.test(text) && /Mock draft: No\. 1 /.test(text), text.slice(0, 160));
+			/median peak of \d+/.test(text) && /Team mock: No\. 1 /.test(text), text.slice(0, 160));
 
 		// A class from a league export is drafted by that league's teams.
 		const lg = { version: 73, startingSeason: 2027, gameAttributes: { season: 2027 },
@@ -3728,7 +3901,7 @@ async function gotoProspects(page) {
 			lg.players.push(Object.assign({}, p, { pid: lpid++, tid: i % 4,
 				draft: { year: 2019, round: 1, pick: 3, tid: i % 4 }, born: { year: 1999, loc: "USA" } }));
 		});
-		const lgFile = path.join(require("os").tmpdir(), "bbgm-uismoke-mock-league.json");
+		const lgFile = path.join(RUN_TMP, "bbgm-uismoke-mock-league.json");
 		fs.writeFileSync(lgFile, JSON.stringify(lg));
 		await page.setInputFiles("#file", lgFile);
 		await page.waitForFunction(() => window.App.state.files.length === 1 &&
@@ -3771,9 +3944,8 @@ async function gotoProspects(page) {
 	   actions, the locks CSV round trip, pasted names, New class..., the zip
 	   and print. The pure halves are in tools/tests/quickwins-ui.js. */
 	{
-		const os = require("os");
 		console.log("\nQuick wins: board, tables and export");
-		const dirQ = fs.mkdtempSync(path.join(os.tmpdir(), "bbgm-uismoke-qw-"));
+		const dirQ = fs.mkdtempSync(path.join(RUN_TMP, "bbgm-uismoke-qw-"));
 		const second = path.join(dirQ, "second.json");
 		fs.writeFileSync(second, JSON.stringify(V.syntheticClass(7, 40)));
 		const settleQ = () => page.waitForTimeout(500);
@@ -3784,7 +3956,8 @@ async function gotoProspects(page) {
 		};
 		const openMenu = async () => {
 			await page.click("#btnExportMenu");
-			await page.waitForSelector("#modal:not([hidden]) #exportFilename", { timeout: 5000 });
+			await page.waitForSelector("#modal:not([hidden]) #exportOptions", { timeout: 5000 });
+			await page.evaluate(() => { document.getElementById("exportOptions").open = true; });
 		};
 		const menuItem = (label) => page.locator("#modal .checks button", { hasText: label }).first();
 		await clearStorage(page);
@@ -3800,6 +3973,7 @@ async function gotoProspects(page) {
 		// Q22: the board copies as text, the rows and columns on screen.
 		await page.locator("#tabs button", { hasText: "Draft board" }).first().click();
 		await settleQ();
+		await page.click("#view .copymenu > summary");
 		await page.click('#view button:has-text("Copy for spreadsheet")');
 		await page.waitForTimeout(250);
 		const sheet = await page.evaluate(() => window.__copied || "");
@@ -4004,7 +4178,9 @@ async function gotoProspects(page) {
 		}, csv.text());
 		ok("the CSV and the engine agree on every row", csvAgree.rows === 70 && csvAgree.bad === 0, JSON.stringify(csvAgree));
 
-		// Q23: units are display only
+		// Q23: units are display only. The units control folds behind
+		// Player Edit's "Filters" (U24).
+		await openFilters(page);
 		await page.selectOption('select[aria-label="Height and weight units"]', "metric");
 		await settleQ();
 		await page.evaluate(() => { delete window.App.state.hiddenColumns.hgtInches; delete window.App.state.hiddenColumns.weight; window.App.render(); });
@@ -4028,8 +4204,12 @@ async function gotoProspects(page) {
 		await page.waitForTimeout(800);
 		ok("the units choice survives a reload", (await page.evaluate(() => window.App.state.units)) === "metric");
 		await page.setInputFiles("#file", fixture);
-		await page.waitForSelector("table tbody tr", { timeout: 30000 });
+		/* The reload restores the player page the link named (#pk, kept
+		   since audit B13), so wait for the class rather than for a table. */
+		await page.waitForFunction(() => window.App.state.results[window.App.state.active],
+			null, { timeout: 30000 });
 		await gotoProspects(page);
+		await openFilters(page);
 		await page.selectOption('select[aria-label="Height and weight units"]', "imperial");
 		await settleQ();
 
@@ -4069,6 +4249,7 @@ async function gotoProspects(page) {
 			const k = Object.keys(c).filter((s) => c[s] > 2 && c[s] < 60)[0];
 			return { skill: k, n: c[k] };
 		});
+		await openFilters(page);
 		await page.click('.skillchips .chip:text-is("' + skillPick.skill + '")');
 		await settleQ();
 		ok("a skill chip keeps only players with that skill", (await shownRows()) === skillPick.n, (await shownRows()) + " vs " + skillPick.n);
@@ -4161,6 +4342,7 @@ async function gotoProspects(page) {
 		await page.locator("#tabs button", { hasText: "Draft board" }).first().click();
 		await page.evaluate(() => { window.App.state.boardMode = "board"; window.App.render(); });
 		await settleQ();
+		await page.click("#view .copymenu > summary");
 		await page.click('#view button:has-text("Paste names")');
 		await page.fill("#renameList", "1. Zed Alpha\n\n- \nQuin Beta");
 		await page.waitForTimeout(200);
@@ -4168,15 +4350,22 @@ async function gotoProspects(page) {
 			/2 of \d+ prospects will be renamed/.test(await page.textContent("#modalBody")) &&
 			(await page.locator("#modalBody .renamepreview tbody tr, #modalBody .renamepreview tr").count()) >= 3);
 		await page.click("#modalOk");
-		await page.waitForTimeout(1200);
+		// The rename re-runs the class; a fixed pause was too short on CI.
+		await page.waitForFunction(() => {
+			const res = window.App.state.results[window.App.state.active];
+			return res && res.board && res.board[0] && res.board[0].name === "Zed Alpha" &&
+				!document.body.classList.contains("busy");
+		}, null, { timeout: 60000 }).catch(() => null);
 		const renamed = await page.evaluate(() => {
 			const res = window.App.state.results[window.App.state.active];
-			return [res.board[0].name, res.board[3].name, !!window.App.state.overrides[res.board[0].key].name];
+			return [res.board[0].name, res.board[3].name, !!(window.App.state.overrides[res.board[0].key] || {}).name];
 		});
 		ok("names are applied in board order and kept as locks", renamed[0] === "Zed Alpha" && renamed[1] === "Quin Beta" && renamed[2] === true, JSON.stringify(renamed));
 
-		// Q17: New class... with a file loaded
-		await page.click("#btnNewClass");
+		// Q17: New class... with a file loaded. The renames re-run the class;
+		// wait for it to finish, or the dialog's run is refused as busy.
+		await page.waitForFunction(() => !document.body.classList.contains("busy"), null, { timeout: 60000 });
+		await tool(page, "#btnNewClass");
 		await page.waitForSelector("#newClassSize", { timeout: 4000 });
 		await page.fill("#newClassSize", "30");
 		await page.fill("#newClassYear", "2041");
@@ -4187,7 +4376,7 @@ async function gotoProspects(page) {
 		const made = await page.evaluate(() => window.App.state.files.map((f) => ({ n: f.data.players.length, season: f.data.startingSeason })));
 		ok("New class adds a 30-player 2041 class beside the loaded one",
 			made.some((m) => m.n === 30 && m.season === 2041) && made.some((m) => m.n === 70), JSON.stringify(made));
-		await page.click("#btnNewClass");
+		await tool(page, "#btnNewClass");
 		await page.waitForSelector("#newClassSize", { timeout: 4000 });
 		await page.fill("#newClassSize", "3");
 		await page.click("#modalOk");
@@ -4234,8 +4423,7 @@ async function gotoProspects(page) {
 	   tools/tests/bugfixes-ui.js. */
 	{
 		console.log("\nOctober 2026 audit: UI fixes");
-		const os = require("os");
-		const other = path.join(os.tmpdir(), "bbgm-uismoke-oct-b.json");
+		const other = path.join(RUN_TMP, "bbgm-uismoke-oct-b.json");
 		fs.writeFileSync(other, JSON.stringify(V.syntheticClass(5, 60)));
 		const settle = () => page.waitForTimeout(700);
 		const noteBtn = (label) => page.evaluate((l) => {
@@ -4343,7 +4531,7 @@ async function gotoProspects(page) {
 			(await page.evaluate(() => document.querySelector("#modal .untillabel").getBoundingClientRect().width)) > 200);
 		await page.keyboard.press("Escape");
 		await page.waitForTimeout(200);
-		await page.click("#btnHowTo");
+		await tool(page, "#btnHowTo");
 		await page.waitForTimeout(400);
 		ok("the Guide opens at its top",
 			(await page.evaluate(() => document.querySelector("#modal .modalbox").scrollTop)) === 0);
@@ -4367,11 +4555,12 @@ async function gotoProspects(page) {
 			(await page.evaluate(() => parseInt(getComputedStyle(document.body).paddingBottom, 10))) >= 60);
 		await page.setViewportSize({ width: 1500, height: 980 });
 		await page.waitForTimeout(300);
+		// Polled: straight after the resize the layout can still be settling.
 		ok("the sidebar does not scroll sideways",
-			(await page.evaluate(() => {
+			await page.waitForFunction(() => {
 				const a = document.getElementById("settings");
 				return a.scrollWidth <= a.clientWidth;
-			})) === true);
+			}, null, { timeout: 3000 }).then(() => true, () => false));
 
 		// U7: the preset diff names the setting as the sidebar does.
 		await page.selectOption("#preset", presetName);
@@ -4387,7 +4576,7 @@ async function gotoProspects(page) {
 			!/potBias/.test(await page.textContent("#presetDiff")));
 
 		// UV2: a saved real-file universe is visible after a reload.
-		const dirU = fs.mkdtempSync(path.join(os.tmpdir(), "bbgm-uismoke-oct-"));
+		const dirU = fs.mkdtempSync(path.join(RUN_TMP, "bbgm-uismoke-oct-"));
 		const uFiles = [1, 2].map((y) => {
 			const c = V.realisticClass("oct" + y, 40);
 			c.startingSeason = 2024 + y;
@@ -4438,7 +4627,7 @@ async function gotoProspects(page) {
 		};
 		const download = async (click) => {
 			const [d] = await Promise.all([page.waitForEvent("download"), click()]);
-			const f = path.join(os.tmpdir(), "bbgm-qw-" + process.pid + "-" + d.suggestedFilename());
+			const f = path.join(RUN_TMP, "bbgm-qw-" + process.pid + "-" + d.suggestedFilename());
 			await d.saveAs(f);
 			return { name: d.suggestedFilename(), path: f };
 		};
@@ -4596,7 +4785,7 @@ async function gotoProspects(page) {
 		ok("opened with the same file, the link lands on that prospect's page",
 			(await page.evaluate(() => window.App.state.player)) === wanted &&
 			(await page.locator(".playerhead").count()) === 1);
-		const other = path.join(os.tmpdir(), "bbgm-uismoke-qw-other.json");
+		const other = path.join(RUN_TMP, "bbgm-uismoke-qw-other.json");
 		fs.writeFileSync(other, JSON.stringify(V.syntheticClass(11, 60)));
 		await page.goto("about:blank");
 		await page.goto(base + deep);
@@ -4644,7 +4833,7 @@ async function gotoProspects(page) {
 
 		// Q37: kept classes.
 		const keptSeed = await page.evaluate(() => window.App.state.results[window.App.state.active].seed);
-		await page.click("#btnKept");
+		await tool(page, "#btnKept");
 		await page.waitForTimeout(300);
 		await page.fill("#keptName", "My favourite");
 		await page.fill("#keptNote", "tall centre in the top three");
@@ -5072,7 +5261,7 @@ async function gotoProspects(page) {
 		ok("...and a reload no longer offers it", await page.locator("#sessionCard").isHidden());
 
 		// Several files: the active one comes back; a stranded universe still offers the card.
-		const dirS = fs.mkdtempSync(path.join(os.tmpdir(), "bbgm-uismoke-sess-"));
+		const dirS = fs.mkdtempSync(path.join(RUN_TMP, "bbgm-uismoke-sess-"));
 		const sFiles = [1, 2].map((y) => {
 			const c = V.realisticClass("sess" + y, 40);
 			c.startingSeason = 2024 + y;
@@ -5212,6 +5401,75 @@ async function gotoProspects(page) {
 				JSON.stringify(said) + " " + errs.join(" | "));
 			await pg.close();
 		}
+	}
+
+	console.log("\nReplayability and quick wins (audit 2026-10-10)");
+	{
+		const pg = await browser.newPage();
+		const errs = [];
+		pg.on("pageerror", (e) => errs.push(String(e)));
+		await pg.goto(base);
+		await pg.evaluate(() => localStorage.clear());
+		await pg.setInputFiles("#file", fixture);
+		await pg.waitForSelector("table tbody tr", { timeout: 60000 });
+		await pg.waitForTimeout(800);
+		const A = (fn, arg) => pg.evaluate(fn, arg);
+		await A(() => window.App.showTab("bracket"));
+		await pg.waitForTimeout(800);
+		ok("the March tab has title odds, conference tournaments and a PNG button",
+			(await pg.locator(".bracketodds").count()) === 1 && (await pg.locator(".conftourneys").count()) === 1 &&
+			(await pg.locator("#btnBracketPng").count()) === 1);
+		await A(() => window.App.showTab("mock"));
+		await pg.waitForTimeout(2500);
+		const heads = (await pg.locator(".mocktable thead th").allTextContents()).join("|");
+		ok("the mock has a Range column", /\|Range\|/.test(heads), heads);
+		await pg.selectOption("#mockTeam", { index: 1 });
+		await pg.waitForTimeout(800);
+		ok("My team's picks can be changed (on the clock)", (await pg.locator("[data-mock-pick]").count()) >= 1);
+		ok("the Teams table grades every team", (await pg.locator(".mockteams th", { hasText: "Grade" }).count()) === 1);
+		const key = await A(() => window.App.state.results[window.App.state.active].board[0].key);
+		await A((k) => window.App.showPlayer(k), key);
+		await pg.waitForTimeout(800);
+		ok("a player page has combine numbers, closest builds and the draft-order legend",
+			(await pg.locator("dt", { hasText: "Combine" }).count()) === 1 &&
+			(await pg.locator("dt", { hasText: "Closest builds" }).count()) === 1 &&
+			(await pg.locator(".draftorders").count()) === 1);
+		const team = await A(() => Object.keys(window.App.state.results[window.App.state.active].teams)
+			.filter((n) => !/^__/.test(n))[0]);
+		const coach = await A((t) => window.App.state.results[window.App.state.active].teams[t].coach.name, team);
+		await A((x) => window.App.showTeam(x), "coach:" + coach);
+		await pg.waitForTimeout(500);
+		ok("a coach page", (await pg.locator("#view h3").first().textContent()) === coach);
+		const conf = await A((t) => window.App.state.results[window.App.state.active].teams[t].conf, team);
+		await A((x) => window.App.showTeam(x), "conf:" + conf);
+		await pg.waitForTimeout(500);
+		ok("a conference page", (await pg.locator("#view h3").first().textContent()) === conf);
+		await A(() => window.App.showTab("play"));
+		await pg.waitForTimeout(500);
+		await pg.locator('[data-blind="predict"]').click();
+		await pg.waitForFunction(() => window.App.state.play && window.App.state.play.kind === "predict",
+			null, { timeout: 60000 });
+		ok("a blind reroll opens its game before anything is shown, and masks the tab title",
+			(await A(() => window.App.state.tab)) === "play" && /^A class in play/.test(await pg.title()),
+			await pg.title());
+		await A(() => { window.App.state.play = null; window.App.render(); });
+		await A(() => window.App.replayDialog());
+		await pg.waitForTimeout(300);
+		ok("the replay dialog has the reroll scope and the build collection",
+			(await pg.locator("#rerollScope").count()) === 1 &&
+			(await pg.locator("text=Build collection").count()) === 1);
+		await A(() => window.App.closeModal());
+		await A(() => window.App.startDaily("2026-10-10"));
+		await pg.waitForFunction(() => /^daily-2026-10-10/.test(window.App.state.challenge || "") &&
+			document.getElementById("challengeScore"), null, { timeout: 60000 });
+		const daily = await A(() => [window.App.state.files.length,
+			window.App.state.files[window.App.state.active].name]);
+		ok("a daily runs on its own shared class, added beside the file",
+			daily[0] === 2 && daily[1] === "challenge-daily-2026-10-10.json", daily.join(" / "));
+		ok("...and its result code carries the class fingerprint",
+			!!(await A(() => window.Replay.readResult(window.App.resultCode()).fp)));
+		ok("no page errors in the audit section", errs.length === 0, errs.join(" | "));
+		await pg.close();
 	}
 
 	console.log("\nNo errors");

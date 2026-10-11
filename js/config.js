@@ -87,7 +87,7 @@
 		   against a table of 361, in the very comment written to stop exactly
 		   that. A sentence nothing reads is a sentence that goes stale.
 
-		   the table is 385 builds today */
+		   the table is 447 builds today */
 		archetypePool: 46,
 		/* How many forced anomalies a class gets: a five-star bust, an
 		   unranked recruit who turns into a lottery pick, a 24-year-old JUCO,
@@ -178,6 +178,14 @@
 		/* The last few classes' flavor names, newest first. Supplied by the
 		   caller exactly as `recentPools` is; the engine never writes it. */
 		recentFlavors: null,
+		/* The last few classes' storylines (a list of name lists, newest
+		   first), down-weighted in applyNarrative by flavorMemory. Same
+		   contract: supplied by the caller, never written by the engine. */
+		recentNarratives: null,
+		/* The season-event templates ("kind#index") the last few classes
+		   used, a list of lists, newest first: down-weighted in
+		   TeamsSim.midSeasonEvents (audit R10). Supplied by the caller. */
+		recentTemplates: null,
 		/* The class year, transfer path and college a SHARED universe already
 		   drew for each player key, so replaying it reproduces the same men
 		   rather than the same seeds. Supplied by the caller (importUniverse);
@@ -892,7 +900,7 @@
 		/* The ceiling is the build table's size, read lazily: config.js
 		   loads before ratings.js, and a literal here went stale once. */
 		archetypePool: { lo: 0, get hi() {
-			return global.RatingsBuilder ? global.RatingsBuilder.ARCHETYPES.length : 385;
+			return global.RatingsBuilder ? global.RatingsBuilder.ARCHETYPES.length : 447;
 		} },
 		weirdness: { lo: -2, hi: 3 },
 		anomalyChoices: { lo: 0, hi: 8 },

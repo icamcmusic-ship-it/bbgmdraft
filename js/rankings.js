@@ -56,6 +56,11 @@
 				}
 				return sorted.length > 1 ? lo / (sorted.length - 1) : 0.5;
 			};
+			/* Each team's percentile once per pass, not once per game it
+			   appears in (audit P3): 364 binary searches instead of ~11k.
+			   The same function of the same numbers, so the same answer. */
+			const pct = new Map();
+			for (const t of list) pct.set(t.name, pctOf(s.get(t.name)));
 			const next = new Map();
 			for (const t of list) {
 				let credit = 0;
@@ -63,7 +68,8 @@
 				if (!games.length) { next.set(t.name, 50); continue; }
 				for (const g of games) {
 					const opp = byName[g.opp];
-					const oppPct = opp ? pctOf(s.get(opp.name)) : 0.5;
+					const oppPct = opp ? (pct.has(opp.name) ? pct.get(opp.name)
+						: pctOf(s.get(opp.name))) : 0.5;
 					// A road win is worth more than a home win; a home loss
 					// costs more than a road loss.
 					if (g.won) {
@@ -110,7 +116,15 @@
 	const EFF_TOL = 1e-4;
 	const EFF_DAMP = 0.5;
 	const MARGIN_CAP = 10;
-	const HOME_EDGE = 1.4;
+	/* The game model's mean home edge is 3.2 points (homeEdge() in
+	   js/teams.js), but what is subtracted here is from a margin CAPPED at
+	   +/-10, and a 3.2-point shift moves a capped margin only while the game
+	   sits inside the cap: over the sim's own spread of matchups (game sd
+	   11.3, matchup sd ~10) the capped-margin equivalent is 1.6. The audit
+	   (2026-10-10 C7) compared 1.4 with the raw 3.2; at 3.2 the committee's
+	   NET over-penalised home games and 1 seeds won 35% of titles over 20
+	   seasons (55% before). */
+	const HOME_EDGE = 1.6;
 
 	function computeAdjEff(list, byName) {
 		const idx = new Map();
@@ -255,16 +269,42 @@
 		   exponential term is worth 12 points at No. 1, 3 at No. 12 and
 		   nothing by the bubble, so it orders the top without moving the
 		   cut line. */
+		/* Schedule strength (2026-10-10 UV6): the win-count terms (winning
+		   percentage, road wins, stretch form) are credited in proportion to
+		   how hard the schedule was. Undiscounted, a 28-3 Southern Conference
+		   team out-scored a 22-10 power-league team on record alone and drew
+		   a top-four seed. sosW runs from 0.35 (the weakest schedule in the
+		   country) to 1 (the hardest), by percentile of the opponents' mean
+		   NET score. */
+		const sosRaw = new Map();
+		for (const t of list) {
+			let sum = 0;
+			let k = 0;
+			for (const g of t.regGamesList) {
+				const s = score.get(g.opp);
+				if (Number.isFinite(s)) { sum += s; k++; }
+			}
+			sosRaw.set(t.name, k ? sum / k : -Infinity);
+		}
+		const sosSorted = list.map((t) => sosRaw.get(t.name)).sort((a, b) => a - b);
+		const sosPct = (v) => {
+			let lo = 0;
+			let hi = sosSorted.length;
+			while (lo < hi) { const m = (lo + hi) >> 1; if (sosSorted[m] < v) lo = m + 1; else hi = m; }
+			return sosSorted.length > 1 ? lo / (sosSorted.length - 1) : 1;
+		};
 		for (const t of list) {
 			const q = t.quads;
+			t.sosPct = sosPct(sosRaw.get(t.name));
+			const sosW = 0.35 + 0.65 * t.sosPct;
 			t.committeeScore =
 				-0.16 * t.netRank +
 				12 * Math.exp(-(t.netRank - 1) / 8) +
 				1.35 * q.q1w + 0.45 * q.q2w -
 				1.2 * q.q3l - 2.0 * q.q4l +
-				0.55 * t.roadW +
+				sosW * (0.55 * t.roadW +
 				0.45 * t.last12W +
-				14 * (t.regPct || 0);
+				14 * (t.regPct || 0));
 		}
 		/* Head-to-head among the bubble: a win over another team near the cut
 		   is exactly the argument a committee room hears. Applied to a band

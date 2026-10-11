@@ -393,4 +393,33 @@ module.exports = function (ok, V) {
 		ok("calc/exported stat rows keep fg<=fga, tp<=fg, tp<=tpa, ft<=fta, pts=2fg+tp+ft",
 			ident === 0 && rowsN > 100, ident + " broken of " + rowsN);
 	}
+	/* 2026-10-10 audit section 4: injuryRate is a hazard (monotone past 1.8),
+	   winProb quotes the sim's own probit, NET's home edge matches the sim's on capped margins,
+	   and the recruiting position rank is per high-school class. */
+	{
+		const lf = V.realisticClass("inj-hz", 60);
+		const hurt = (rate) => E.run(lf, C.make({ seed: "inj-hz", narrative: false, injuryRate: rate }))
+			.players.filter((p) => p.availability).length;
+		const h = [0, 1, 2, 3].map(hurt);
+		ok("C2/injuryRate is monotone and still rising from 2 to 3",
+			h[0] < h[1] && h[1] < h[2] && h[2] < h[3], h.join(","));
+		ok("C8/winProb: even teams 50%, home edge helps, stretch steepens the top",
+			Math.abs(T.winProb(40, 40) - 0.5) < 1e-6 && T.winProb(40, 40, 3.2) > 0.55 &&
+			T.winProb(62, 52) - 0.5 > T.winProb(42, 32) - 0.5,
+			[T.winProb(40, 40, 3.2), T.winProb(62, 52), T.winProb(42, 32)].join(","));
+		ok("C7/NET home edge is the capped-margin equivalent of the game model's (1.5-1.8)",
+			global.Rankings.HOME_EDGE >= 1.5 && global.Rankings.HOME_EDGE <= 1.8, String(global.Rankings.HOME_EDGE));
+		const res = E.run(lf, C.make({ seed: "posrank", narrative: false }));
+		const seen = new Set();
+		let dup = 0;
+		for (const p of res.players) {
+			const r = p.recruiting;
+			if (!r || !r.posRank) continue;
+			const k = r.hsClass + "|" + r.posLabel + "|" + r.posRank;
+			if (seen.has(k)) dup++;
+			seen.add(k);
+		}
+		ok("C9/recruiting posRank is unique within (hsClass, position)", dup === 0 && seen.size > 20,
+			dup + " duplicates of " + seen.size);
+	}
 };

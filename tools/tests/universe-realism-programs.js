@@ -370,8 +370,9 @@ module.exports = function (ok, V) {
 		}
 		/* The golden hashes cover the exported players, not the program table
 		   or the realignment, so the team table and the moves are pinned too:
-		   these two digests were recorded from HEAD before the UV11/UV12
-		   change (a standalone class, default settings and realignmentRate 1,
+		   these two digests were re-recorded at ENGINE_REV 5 (the 2026-10-10
+		   strength curve and seeding moved every record on purpose), and before
+		   that from HEAD before the UV11/UV12 change (a standalone class, default settings and realignmentRate 1,
 		   which moves programs on the legacy path). */
 		const digest = (over) => {
 			const res = E.run(V.syntheticClass(7, 40), CFG.make(Object.assign({ seed: "golden" }, over)));
@@ -380,9 +381,9 @@ module.exports = function (ok, V) {
 				res.tourney && res.tourney.champion && res.tourney.champion.team.name]);
 		};
 		ok("standalone/team table and records are byte-identical to HEAD (defaults)",
-			digest({}) === "9bedab539cc5037c");
+			digest({}) === "bc3b252a58241e12");
 		const raided = E.run(V.syntheticClass(7, 40), CFG.make({ seed: "golden", realignmentRate: 1 }));
 		ok("standalone/realignment on the legacy path is byte-identical to HEAD (rate 1)",
-			digest({ realignmentRate: 1 }) === "3feb04f5094734ff" && raided.realignment.length === 2);
+			digest({ realignmentRate: 1 }) === "55d6655d805b36e6" && raided.realignment.length === 2);
 	}
 };

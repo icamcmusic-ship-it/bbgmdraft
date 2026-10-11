@@ -70,7 +70,13 @@
 	}
 
 	/* One career. Returns the ovr for every season he stayed in the league. */
-	function oneCareer(ovr, pot, age, rng) {
+	/* `mods` (audit Q5): `injury` is an extra chance a season ends the
+	   career early (the medical file), `declineShift` moves the age decline
+	   starts (+1: an athletic build fades a year sooner; -1: a shooting or
+	   IQ build lasts a year longer). Both default to nothing. */
+	function oneCareer(ovr, pot, age, rng, mods) {
+		const inj = mods && Number.isFinite(mods.injury) ? mods.injury : 0;
+		const shift = mods && Number.isFinite(mods.declineShift) ? mods.declineShift : 0;
 		// A younger man's ceiling is a wider bet.
 		const potSd = clamp(3 + (23 - age) * 0.9, 2, 7);
 		const ceiling = pot + rng.normal(0, potSd);
@@ -79,7 +85,7 @@
 		let under = 0;
 		for (let a = age; a <= 36; a++) {
 			const grow = Math.max(0, ceiling - x) * growthRate(a);
-			x = x + grow - decline(a) + rng.normal(0, 1.4);
+			x = x + grow - decline(a + shift) + rng.normal(0, 1.4);
 			x = clamp(x, 20, 85);
 			under = x < REPLACEMENT ? under + 1 : 0;
 			// A veteran past his best is kept only while he is still a rotation player.
@@ -89,9 +95,28 @@
 			   fringe player often does. Without it every player who cleared the
 			   line once lasted a decade. */
 			if (a >= 22 && rng.random() < (x >= 58 ? 0.01 : x >= 52 ? 0.06 : 0.2)) break;
+			// The medical file: an early exit nobody chose. Drawn only when it can fire.
+			if (inj > 0 && rng.random() < inj) break;
 			seasons.push({ age: a + 1, ovr: Math.round(x) });
 		}
 		return seasons;
+	}
+
+	/* What the player's own file says about his body and his build (Q5). */
+	function careerMods(p) {
+		const mult = Number.isFinite(p.traitInjuryMult) ? p.traitInjuryMult : 1;
+		const av = p.availability || null;
+		const missed = av && av.injury && Number.isFinite(av.games) ? av.games : 0;
+		const injury = clamp((mult - 1) * 0.03 + missed / 600, 0, 0.1);
+		let tags = [];
+		const RB = global.RatingsBuilder;
+		if (RB && RB.ARCHETYPES && p.archetype) {
+			const a = RB.ARCHETYPES.filter((x) => x.name === p.archetype)[0];
+			tags = (a && a.t) || [];
+		}
+		const declineShift = tags.indexOf("athletic") !== -1 && tags.indexOf("shooting") === -1 ? 1
+			: tags.indexOf("shooting") !== -1 || tags.indexOf("playmaking") !== -1 ? -1 : 0;
+		return { injury, declineShift };
 	}
 
 	function pct(sorted, p) {
@@ -111,7 +136,8 @@
 		const age = draftAge(p, season);
 		const rng = new Rng("pro-career|" + (seed || "") + "|" + p.key);
 		const careers = [];
-		for (let i = 0; i < SIMS; i++) careers.push(oneCareer(ovr, pot, age, rng.child("c" + i)));
+		const mods = careerMods(p);
+		for (let i = 0; i < SIMS; i++) careers.push(oneCareer(ovr, pot, age, rng.child("c" + i), mods));
 		const peaks = careers.map((c) => (c.length ? Math.max.apply(null, c.map((s) => s.ovr)) : ovr))
 			.sort((a, b) => a - b);
 		const years = careers.map((c) => c.length).sort((a, b) => a - b);
@@ -148,10 +174,10 @@
 		"Albany Anchors", "Anchorage Glaciers", "Birmingham Steel", "Boise Bison",
 		"Buffalo Blizzard", "Charleston Tides", "Columbus Captains", "El Paso Suns",
 		"Fresno Raisins", "Hartford Harbor", "Honolulu Waves", "Jacksonville Pilots",
-		"Kansas City Monarchs", "Las Vegas Aces High", "Louisville Thoroughbreds",
+		"Kansas City Stockyards", "Las Vegas Neon", "Louisville Thoroughbreds",
 		"Madison Lakers", "Memphis Blues", "Montreal Voyageurs", "Nashville Sound",
-		"Norfolk Admirals", "Omaha Stockmen", "Pittsburgh Ironmen", "Portland Pines",
-		"Providence Friars", "Raleigh Oaks", "Richmond Rebels", "Sacramento Gold",
+		"Norfolk Mariners", "Omaha Stockmen", "Pittsburgh Ironmen", "Portland Pines",
+		"Providence Lamplighters", "Raleigh Oaks", "Richmond Rebels", "Sacramento Gold",
 		"San Juan Coquis", "St. Louis Arches", "Tulsa Roughnecks",
 	];
 	const GROUP = { PG: "guard", SG: "guard", G: "guard", GF: "wing", SF: "wing", F: "wing",
@@ -236,7 +262,7 @@
 		return rows[rows.length - 1] || null;
 	}
 
-	function leagueDraft(league, season, seed) {
+	function leagueDraft(league, season, seed, wantRounds) {
 		if (!league || !Array.isArray(league.teams) || !Array.isArray(league.players)) return null;
 		const BB = global.BBGM;
 		const teams = league.teams.filter((t) => t && !t.disabled && Number.isFinite(Number(t.tid)))
@@ -320,7 +346,7 @@
 		} else {
 			const first = lotteryOrder();
 			const rounds = picks.length
-				? Math.max.apply(null, picks.map((dp) => Number(dp.round) || 1)) : 2;
+				? Math.max.apply(null, picks.map((dp) => Number(dp.round) || 1)) : (wantRounds || 2);
 			slots = [];
 			for (let round = 1; round <= rounds; round++) {
 				const order = round === 1 ? first : ranked;
@@ -366,7 +392,19 @@
 		const rounds = opts.rounds || 2;
 		const seed = (res && res.seed) || "";
 		const projections = opts.projections || projectClass(res);
-		let plan = opts.league ? leagueDraft(opts.league, res && res.season, seed) : null;
+		let plan = opts.league ? leagueDraft(opts.league, res && res.season, seed, opts.rounds) : null;
+		/* A league plan took its rounds from the league's picks and ignored
+		   `rounds`, so `mock --rounds 3` of a league class quietly drafted two
+		   (audit 2026-10-10 B19). An asked-for count now caps the league's
+		   rounds, and a count the league's picks cannot reach says so. */
+		if (plan && opts.rounds) {
+			plan.slots = plan.slots.filter((x) => x.round <= opts.rounds);
+			const have = plan.slots.reduce((m, x) => Math.max(m, x.round), 0);
+			if (have < opts.rounds) {
+				plan.source += "; the league has picks for " + have + " round" +
+					(have === 1 ? "" : "s") + ", not the " + opts.rounds + " asked for";
+			}
+		}
 		if (!plan) {
 			const order = teamsFor(seed);
 			const slots = [];
@@ -387,7 +425,14 @@
 			inRound[slot.round] = (inRound[slot.round] || 0) + 1;
 			const rng = new Rng("mock-pick|" + seed + saltKey + "|" + n);
 			let best = null;
-			for (const p of pool) {
+			/* "On the clock" (audit Q1): a forced pick takes the named man if
+			   he is still there; his value is recorded as usual. */
+			const want = opts.forced && opts.forced[n];
+			const forcedP = want ? pool.filter((p) => p.key === want)[0] : null;
+			if (forcedP) {
+				best = { p: forcedP, v: valueTo(team, projections[forcedP.key], forcedP, rng.child(forcedP.key), noise) };
+			}
+			for (const p of forcedP ? [] : pool) {
 				const v = valueTo(team, projections[p.key], p, rng.child(p.key), noise);
 				if (!best || v.value > best.v.value) best = { p, v };
 			}
@@ -406,6 +451,7 @@
 					: reach <= -8 ? why + " (a steal: No. " + consensus + " on the board)" : why,
 				projection: projections[best.p.key] || null,
 			});
+			if (forcedP) picks[picks.length - 1].forced = true;
 		}
 		const out = {
 			teams: plan.teams.map((t) => ({ name: t.name, plan: t.planLabel, need: t.needOf,
@@ -445,6 +491,105 @@
 		}).sort((a, b) => b._v - a._v).slice(0, 5).map((t) => { delete t._v; return t; });
 	}
 
-	global.Pro = { project, projectClass, mockDraft, targetsFor, valueTo, teamsFor, leagueDraft, teamRating, draftAge,
+	/* RANGE OF OUTCOMES (audit Q2): the mock run at salts 1..K. Per prospect
+	   the mean, lowest and highest pick and the share of drafts that took him
+	   in the first round. `noise` defaults to the mock's own. */
+	function mockRange(res, opts) {
+		opts = opts || {};
+		const K = Math.max(1, Math.min(200, opts.k | 0 || 25));
+		const projections = opts.projections || projectClass(res);
+		const by = {};
+		const peaksBySlot = [];
+		for (let s = 1; s <= K; s++) {
+			const m = mockDraft(res, Object.assign({}, opts, { salt: s, projections, forced: null }));
+			for (const pk of m.picks) {
+				const r = by[pk.key] || (by[pk.key] = { key: pk.key, name: pk.name, picks: [], first: 0 });
+				r.picks.push(pk.pick);
+				if (pk.round === 1) r.first++;
+				(peaksBySlot[pk.pick - 1] = peaksBySlot[pk.pick - 1] || [])
+					.push(pk.projection ? pk.projection.peak : pk.ovr);
+			}
+		}
+		const rows = Object.values(by).map((r) => ({
+			key: r.key, name: r.name,
+			mean: Math.round(10 * r.picks.reduce((a, b) => a + b, 0) / r.picks.length) / 10,
+			min: Math.min.apply(null, r.picks), max: Math.max.apply(null, r.picks),
+			// Undrafted in some salts: counted out of K, not out of his own picks.
+			pFirst: r.first / K, drafted: r.picks.length / K,
+		})).sort((a, b) => a.mean - b.mean);
+		const expectedPeak = peaksBySlot.map((l) => (l && l.length ? pct(l.slice().sort((a, b) => a - b), 0.5) : null));
+		const vol = rows.filter((r) => r.drafted === 1).slice().sort((a, b) => (b.max - b.min) - (a.max - a.min));
+		return {
+			k: K, rows, expectedPeak,
+			mostVolatile: vol[0] || null,
+			lockedTop3: rows.filter((r) => r.max <= 3 && r.drafted === 1),
+		};
+	}
+
+	/* TEAM GRADES (audit Q3): each team's picks against the expected peak
+	   at their slots (from mockRange, or the class's own sorted peaks), as
+	   A-F. A pick a slot later than expected is not penalised for being
+	   later — the slot's expectation already is. */
+	function gradeMock(mock, expectedPeak) {
+		const exp = Array.isArray(expectedPeak) && expectedPeak.length ? expectedPeak
+			: mock.picks.map((p) => (p.projection ? p.projection.peak : p.ovr))
+				.sort((a, b) => b - a);
+		const by = {};
+		for (const pk of mock.picks) {
+			const e = exp[pk.pick - 1];
+			const got = pk.projection ? pk.projection.peak : pk.ovr;
+			if (!Number.isFinite(e) || !Number.isFinite(got)) continue;
+			const r = by[pk.team] || (by[pk.team] = { team: pk.team, picks: 0, delta: 0 });
+			r.picks++;
+			r.delta += got - e;
+		}
+		const letter = (d) => (d >= 3 ? "A" : d >= 1 ? "B" : d >= -1 ? "C" : d >= -3 ? "D" : "F");
+		const out = {};
+		for (const t of Object.keys(by)) {
+			const r = by[t];
+			const per = r.delta / r.picks;
+			out[t] = { team: t, picks: r.picks, delta: Math.round(r.delta * 10) / 10,
+				perPick: Math.round(per * 10) / 10, grade: letter(per) };
+		}
+		return out;
+	}
+
+	/* DRAFT-NIGHT GM (audit R12.1, Q24). The player holds one lottery team's
+	   picks, seeded off the class; the board he sees is fuzzed (scouted
+	   ratings, Engine.scoutingFuzz) and the grade is the summed projected
+	   median peak of his picks against the men the computer took at the same
+	   slots. Pure: the app owns the picking. */
+	function draftGame(res, salt) {
+		const seed = (res && res.seed) || "";
+		const base = mockDraft(res, {});
+		const rng = new Rng("draft-gm|" + seed + "|" + (salt || ""));
+		const lottery = base.picks.filter((p) => p.round === 1 && p.pick <= 14);
+		if (!lottery.length) return null;
+		const team = lottery[Math.floor(rng.random() * lottery.length)].team;
+		const slots = base.picks.filter((p) => p.team === team).map((p) => p.pick);
+		const E = global.Engine;
+		const fuzz = {};
+		for (const p of (res.board || res.players || [])) {
+			const f = E && E.scoutingFuzz ? E.scoutingFuzz(new Rng("gm-fuzz|" + seed + "|" + salt + "|" + p.key)) : 0;
+			fuzz[p.key] = { ovr: Math.round(p.newOvr + f), pot: Math.round(p.newPot + 1.5 * f) };
+		}
+		return { team, slots, fuzz, seed, salt: salt || "" };
+	}
+	// `picks` is {slot: key}: re-run the mock with them forced, and grade.
+	function gradeDraftGame(res, game, picks) {
+		const projections = projectClass(res);
+		const cpu = mockDraft(res, { projections });
+		const mine = mockDraft(res, { projections, forced: picks || {} });
+		const peak = (pk) => (pk && pk.projection ? pk.projection.peak : pk ? pk.ovr : 0);
+		const rows = game.slots.map((n) => {
+			const a = mine.picks[n - 1], b = cpu.picks[n - 1];
+			return { slot: n, mine: a && a.name, minePeak: peak(a), cpu: b && b.name, cpuPeak: peak(b) };
+		});
+		const you = rows.reduce((t, r) => t + r.minePeak, 0);
+		const them = rows.reduce((t, r) => t + r.cpuPeak, 0);
+		return { rows, you, cpu: them, delta: you - them, mock: mine };
+	}
+
+	global.Pro = { project, mockRange, gradeMock, draftGame, gradeDraftGame, careerMods, projectClass, mockDraft, targetsFor, valueTo, teamsFor, leagueDraft, teamRating, draftAge,
 		VERDICTS, REPLACEMENT };
 })(typeof window !== "undefined" ? window : self);

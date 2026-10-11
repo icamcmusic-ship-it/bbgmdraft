@@ -13,6 +13,14 @@
 (function (global) {
 	"use strict";
 
+	// The combine numbers Traits.measurables derives (audit Q15), as text.
+	function combineOf(p, k) {
+		const TR = global.Traits;
+		const m = TR && TR.measurables ? TR.measurables(p) : null;
+		if (!m) return "";
+		return k === "vertical" ? m.vertical + "-inch" : TR.inchesText(m[k]);
+	}
+
 	/* Code-unit comparison for tie-breaks that feed the simulation. localeCompare
 	   follows the browser's ICU collation, which differs between engines and
 	   versions, so the same seed could order two tied teams differently on two
@@ -242,7 +250,7 @@
 			"I thought our older guys set the tone from the first possession, and the young ones followed them.",
 			"It was not pretty. I have stopped needing it to be pretty.",
 			"We talked all week about sharing it, and they shared it.",
-			"That is what we practise. It is nice when it looks like practice.",
+			"That is what we practice. It is nice when it looks like practice.",
 			"Give the players the credit. I drew up a couple of things and they made them work.",
 		] },
 		{ s: "good", who: "player", lines: [
@@ -287,7 +295,7 @@
 		{ s: "big", who: "coach", lines: [
 			"He is the best player in this league and it is not particularly close.",
 			"I have stopped being surprised. That is the honest truth.",
-			"What people do not see is the twenty minutes he puts in before we practise.",
+			"What people do not see is the twenty minutes he puts in before we practice.",
 			"You can build a program around a young man like that.",
 			"He wanted the ball and we gave it to him. It is not complicated.",
 			"His teammates trust him, and that matters more than any number on the sheet.",
@@ -376,6 +384,34 @@
 			"He has had more on his plate than most people his age, and he still shows up every day.",
 			"People see the player. I see what it took to get him here.",
 		] },
+		{ s: "trait:athleticism", who: "scout", attribution: "an NBA scout in the building", lines: [
+			"He is the best athlete on the floor most nights. The question is the rest of it.",
+			"You cannot teach that burst. Everything else you can coach around it.",
+			"He gets off the floor twice before most people get off it once.",
+			"The athleticism plays in the NBA tomorrow. The skill is the part that needs a year.",
+			"He changes ends faster than anybody in this conference.",
+		] },
+		{ s: "trait:finishing", who: "rival", attribution: "an opposing coach", lines: [
+			"We put two bodies on him at the rim and he scored through both of them.",
+			"Once he gets a shoulder past you, it is two points. We could not keep him out.",
+			"He finishes with either hand, and that is rarer than people think.",
+			"Contact does not bother him. If anything, he goes looking for it.",
+			"We told our bigs to make him miss. He did not miss much.",
+		] },
+		{ s: "trait:rebounding", who: "coach", lines: [
+			"He goes and gets it. You do not have to call a play for that.",
+			"Half his rebounds are ones nobody else on the floor thought were his.",
+			"We win the possession game because of him. That does not show up in his points.",
+			"He boxes out every time, and that rubs off on the other four.",
+			"When a shot goes up, I already know where he is going to be.",
+		] },
+		{ s: "trait:role", who: "coach", lines: [
+			"He does exactly what we ask, and what we ask changes every night.",
+			"Every winning team needs a guy like him. Most of them do not have one.",
+			"He would play any role on this team, and he has played most of them.",
+			"He does not care who scores. That is not a small thing at this level.",
+			"He gives us fourteen minutes and nobody wins those fourteen minutes against him.",
+		] },
 		/* --- an underdog, a surprise ----------------------------------- */
 		{ s: "surprise", who: "coach", lines: [
 			"Our guys have been reading what everybody wrote about us. They can read.",
@@ -404,7 +440,7 @@
 			"We are going to be smart with him. His career is bigger than one week.",
 			"Other guys are going to get minutes, and I am excited to see what they do with them.",
 			"You never want to see one of your guys go down. We will rally around him.",
-			"He is already asking when he can practise. That is who he is.",
+			"He is already asking when he can practice. That is who he is.",
 		] },
 		{ s: "injury", who: "player", lines: [
 			"I will be back for March. Write that down.",
@@ -729,7 +765,7 @@
 			build: (f, rng) => [T(rng.pick([
 				"Seasons like this one are why the bracket exists.",
 				"There is nothing lucky about being good in February.",
-				"They will be favoured next time, and that is its own kind of problem.",
+				"They will be favored next time, and that is its own kind of problem.",
 				"A program does not turn a corner in one night. It turns it in about forty of them.",
 			]))],
 		},
@@ -939,10 +975,16 @@
 		"blowout": [
 			"No mercy: {winner} demolishes {loser}",
 			"{winner} runs {loser} out of the gym",
+			"{winner} by a lot",
+			"A long night for {loser}",
+			"{winner} was done by halftime",
 		],
 		"streak": [
 			"The streak nobody saw coming",
 			"They simply will not lose",
+			"Still unbeaten in this stretch",
+			"Nobody can stop the run",
+			"The win streak keeps growing",
 		],
 		"collapse": [
 			"The wheels have come off",
@@ -1079,7 +1121,7 @@
 			"The green room got quiet for {player}",
 			"{player} waited, and waited",
 			"The slide nobody in the building wanted to watch: {player}",
-			"Fourteen picks of silence for {player}",
+			"Pick after pick of silence for {player}",
 			"{player} fell, and somebody got a bargain",
 			"The longest night belonged to {player}",
 		],
@@ -1113,27 +1155,69 @@
 		"War rooms react to {player}",
 		"The name called next is {player}",
 		"{player}, and the room turns over",
+		"Draft night: {player}",
+		"{player} hears his name",
+		"The pick is in: {player}",
 	];
 
 	const CONF_TOURNEY_HEADS = [
 		"{champ} cut down the {conf} nets",
 		"{champ} win the {conf} tournament",
 		"March starts early for {champ}",
+		"{champ} take the automatic bid out of the {conf}",
+		"{champ} punch their ticket",
+		"The {conf} crown goes to {champ}",
 	];
 
 	const CONF_TOURNEY_UPSET_HEADS = [
 		"{champ} crash the {conf} tournament",
 		"Nobody had {champ} winning the {conf}",
+		"Bid thief: {champ} steal the {conf}",
+		"{champ} were not supposed to win the {conf}",
+		"Chaos in the {conf}: {champ}",
+	];
+
+	const BRACKET_UPSET_HEADS = [
+		"No. {ws} {winner} shocks No. {ls} {loser}",
+		"Madness: {winner} sends {loser} home",
+		"{loser} is out, and {winner} is the reason",
+		"The bracket breaks: No. {ws} {winner} over No. {ls} {loser}",
+		"{winner} punches above its line against {loser}",
+		"Bust your bracket: {winner} knocks out {loser}",
+		"A {ls} seed goes home early — {winner} did it",
+	];
+
+	const CHAMPION_HEADS = [
+		"National champions: {champ}",
+		"The nets come down for {champ}",
+		"{champ} finish it",
+		"One shining moment belongs to {champ}",
+		"{champ} are the last team standing",
+		"Title town: {champ} win it all",
+	];
+
+	const PRESEASON_POLL_HEADS = [
+		"{one} opens the season at No. 1",
+		"The preseason poll is out — {one} on top",
+		"Voters start with {one}",
+		"{one} begins the year as the team to beat",
+		"No. 1 before a ball is tipped: {one}",
 	];
 
 	const NIT_HEADS = [
 		"{champ} take the NIT",
 		"{champ} win the consolation bracket that still means something",
+		"{champ} close the year with a trophy",
+		"The NIT belongs to {champ}",
+		"{champ} win the last game of the season that is not the last game",
 	];
 
 	const FINAL_FOUR_HEADS = [
 		"The Final Four is set",
 		"Four teams left standing",
+		"Four left, one weekend",
+		"The last four are in",
+		"The Final Four, and nobody saw all of it coming",
 	];
 
 	const CINDERELLA_HEADS = [
@@ -1172,16 +1256,25 @@
 	const FRESHMAN_HEADS = [
 		"{player} named the country's top freshman",
 		"{player} sweeps freshman honors",
+		"The best freshman in the country: {player}",
+		"{player} wins the race among the newcomers",
+		"First year, first prize: {player}",
 	];
 
 	const DPOY_HEADS = [
 		"{player} locks down the Defensive Player of the Year award",
 		"The country's best defender: {player}",
+		"Nobody guarded like {player}",
+		"{player} is the country's top stopper",
+		"The defensive trophy goes to {player}",
 	];
 
 	const ALL_AMERICA_HEADS = [
 		"The All-America team is out",
 		"Consensus first team revealed",
+		"Five names, one team: the All-Americans",
+		"The All-America ballots are counted",
+		"Meet the All-Americans",
 	];
 
 	const SIGNING_HEADS = [
@@ -1195,16 +1288,25 @@
 	const TRANSFER_HEADS = [
 		"{player} finds a new home at {college}",
 		"Portal move: {player} to {college}",
+		"{player} lands at {college}",
+		"From the portal to {college}: {player}",
+		"{college} win the portal race for {player}",
 	];
 
 	const ANALYTICS_HEADS = [
 		"The computers see {team} differently",
 		"{team}: the poll and the metrics disagree",
+		"The metrics have a different No. 1 than the voters",
+		"Efficiency says {team}; the poll says otherwise",
+		"{team} is better than its record, and the numbers can prove it",
 	];
 
 	const CLASS_FLAVOR_HEADS = [
 		"Scouts agree: this is {label}",
 		"The scouting consensus on this class: {label}",
+		"What kind of class is this? {label}",
+		"The scouts have a word for this class: {label}",
+		"Draft rooms are calling it {label}",
 	];
 
 	const INJURY_HEADS = [
@@ -1258,6 +1360,9 @@
 	const HOMECOMING_HEADS = [
 		"{player} comes home to {college}",
 		"The portal brings {player} back to {college}",
+		"{player} picks home: {college}",
+		"Back where it started: {player} to {college}",
+		"The hometown kid returns to {college}",
 	];
 
 	const COACH_HIRE_HEADS = [
@@ -1281,7 +1386,7 @@
 	const LOSING_STREAK_HEADS = [
 		"{team} cannot buy a win",
 		"The bottom falls out at {team}",
-		"{team}'s season is unravelling",
+		"{team}'s season is unraveling",
 	];
 
 	const SCORING_TITLE_HEADS = [
@@ -1317,6 +1422,9 @@
 	const CONF_RACE_CLINCH_HEADS = [
 		"{a} run away with the {conf}",
 		"The {conf} race is over — {a} made sure of it early",
+		"{a} clinch the {conf} with time to spare",
+		"Nobody caught {a} in the {conf}",
+		"{a} lock up the {conf} title",
 	];
 
 	const BID_STEALER_HEADS = [
@@ -1346,6 +1454,9 @@
 	const NIT_SEMIS_HEADS = [
 		"The NIT final is set",
 		"Semifinal night in the NIT",
+		"Two left in the NIT",
+		"The NIT final takes shape",
+		"A Tuesday in New York sorts out the NIT",
 	];
 
 	const SNUB_HEADS = [
@@ -1357,12 +1468,18 @@
 	const CONF_POY_HEADS = [
 		"{player} wins the {award}",
 		"The {award} goes to {player}",
+		"{player} takes the {award}",
+		"The league's best: {player} wins the {award}",
+		"No debate: {player}, {award}",
 	];
 
 	const MOCK_DRAFT_HEADS = [
 		"Every mock now starts the same way: {player}",
 		"The consensus No. 1: {player}",
 		"The top of the draft has stopped moving — it's {player}",
+		"Mock draft: {player} goes first again",
+		"{player} sits atop every big board",
+		"The first pick looks settled: {player}",
 	];
 
 	const STOCK_RISER_HEADS = [
@@ -1374,6 +1491,9 @@
 	const STOCK_FALLER_HEADS = [
 		"What happened to {player}'s draft stock?",
 		"{player} is sliding, and the war rooms have noticed",
+		"A rough spring for {player}",
+		"{player}'s stock takes a hit",
+		"The boards are cooling on {player}",
 	];
 
 	const SLEEPER_HEADS = [
@@ -1834,13 +1954,13 @@
 			"{player} is the preseason pick for player of the year",
 			"Everybody's preseason ballot has {player} on it",
 			"The season starts with {player} on top",
-			"{team}'s {player} opens as the favourite",
+			"{team}'s {player} opens as the favorite",
 		],
 		bodies: [
 			"{player} is the preseason player of the year on most ballots, which is a fact {last} as much as about this season. He is a {year} at {team}.",
 			"The vote was not close. {player} of {team} enters the season as the {conf}'s and the country's presumptive best player, and No. {rank} on the preseason draft boards.",
 			"Preseason awards are predictions, and this one is safe: {player} {returns} {team} as the most talked-about player in the sport.",
-			"A season needs a favourite and this one has {player}. What he does with the label is a different question, and one the {conf} will be asking by January.",
+			"A season needs a favorite and this one has {player}. What he does with the label is a different question, and one the {conf} will be asking by January.",
 		],
 	});
 
@@ -1864,7 +1984,7 @@
 			"{team} will retire a number before the opener. The man it belongs to last played here in {era} and has not missed a home game since.",
 			"There is a ceremony at halftime of the opener at {team}, and a {era} roster in the front row for it. The current team will watch from the bench, which is the point of doing it then.",
 			"{team} is raising a jersey into the rafters. The {conf} has spent thirty years trying to produce another one like him.",
-			"A programme's history is a thing it does on purpose, and {team} is doing it on opening night: one number, one banner, one very long ovation.",
+			"A program's history is a thing it does on purpose, and {team} is doing it on opening night: one number, one banner, one very long ovation.",
 		],
 	});
 
@@ -2201,7 +2321,7 @@
 		],
 		bodies: [
 			"{team} beat {rank} {opp} {score}, and the students were on the floor before the horn finished.",
-			"{confArticle} programme with no business winning that game won it {score}. {rank} {opp} shot it badly and {team} did not care why.",
+			"{confArticle} program with no business winning that game won it {score}. {rank} {opp} shot it badly and {team} did not care why.",
 			"{team} does not beat ranked teams. It beat this one: {score} over {rank} {opp}.",
 			"They will replay the last ninety seconds at {team} for a decade. {score}, over {rank} {opp}, on a Tuesday.",
 		],
@@ -2244,7 +2364,7 @@
 		],
 		bodies: [
 			"{team} is {record} and has not won a road game. Every one of its wins has come in its own building.",
-			"A team can be good and unrecognisable in a different gym, and {team} is the season's proof: {l} road losses, {home} home wins.",
+			"A team can be good and unrecognizable in a different gym, and {team} is the season's proof: {l} road losses, {home} home wins.",
 			"The {conf} plays half its games away and {team} has lost all {l} of them. Nobody on the staff has a theory that survives contact with the tape.",
 			"{team} shoots eight points a hundred possessions worse on the road, which is a lot of ways of saying {l} straight.",
 		],
@@ -2789,7 +2909,7 @@
 			"{team} hired right",
 		],
 		bodies: [
-			"{coach} has been at {team} for {seasonsPl} and has a national championship. The programme he inherited was not winning games like this one when he took it.",
+			"{coach} has been at {team} for {seasonsPl} and has a national championship. The program he inherited was not winning games like this one when he took it.",
 			"It took {coach} {yearsPl}. He is {philosophy} and the roster he won with is mostly people he recruited himself.",
 			"There will be four athletic directors in the {conf} watching {coach} lift that trophy and thinking about their own search process.",
 			"{team} is a national champion in {coach}'s {nth} season, which is not how this is supposed to work and is exactly how it happened.",
@@ -2962,6 +3082,8 @@
 				player: PL(p.name, p.key), team: TM(p.newCollege),
 				hgt: T(ft + "'" + inch + "\""), wt: T(String(p.newWeight) + " pounds"),
 				rank: T("No. " + p.boardRank), pos: T(p.newPos),
+				// Audit Q15: the measurables the traits imply.
+				wingspan: T(combineOf(p, "wingspan")), vertical: T(combineOf(p, "vertical")),
 			};
 		},
 		headlines: [
@@ -2973,6 +3095,7 @@
 		bodies: [
 			"{player} measured {hgt} and {wt} at the combine. He played {pos} for {team} and every team in the gym has an opinion about whether he still will.",
 			"The measurements came in at {hgt} and {wt} for {player}, which is what he was listed at and is not always what happens.",
+			"{player} measured {hgt} in shoes with a {wingspan} wingspan and a {vertical} no-step vertical. The {team} {pos} left the combine with more teams interested than he arrived with.",
 			"{rank} on the board and {hgt} in socks. {player} did not scrimmage; nobody at his slot does any more.",
 			"There is a version of the combine that matters and it is the part with the tape measure. {player}: {hgt}, {wt}, and no change to his projection.",
 		],
@@ -3190,7 +3313,7 @@
 		bodies: [
 			"{old} {reason} at {team} after last season. {coach} takes over a roster that returns most of its minutes and none of its certainty.",
 			"{team} has {coach} on the sideline this season. {old} {reason} in April and the players found out from a group message.",
-			"A coaching change is the one roster move a programme cannot undo quietly. {old} {reason}; {coach} inherits the {conf} schedule that broke him.",
+			"A coaching change is the one roster move a program cannot undo quietly. {old} {reason}; {coach} inherits the {conf} schedule that broke him.",
 			"{coach} is the new coach at {team}, where {old} {reason}. The first thing he changed was the practice start time.",
 		],
 	});
@@ -3228,11 +3351,11 @@
 		headlines: [
 			"{team} is better than it was a year ago",
 			"The climb continues at {team}",
-			"{gain} points of programme strength for {team}",
+			"{gain} points of program strength for {team}",
 			"Nobody in the {conf} wants to play {team} now",
 		],
 		bodies: [
-			"{team} is measurably stronger than last season: about {gain} points of programme strength.",
+			"{team} is measurably stronger than last season: about {gain} points of program strength.",
 			"{team} is up {gain} points in a year under {coach}. The {conf} noticed some time around January.",
 			"The ratings have {team} {gain} points better than a year ago. What changed is for the staff to say; that it did is not in doubt.",
 			"{gain} points in a season. {team} has gone from a team that could beat you to a team that is supposed to.",
@@ -4570,7 +4693,7 @@
 		],
 		bodies: [
 			"{player} left {old} for {team} in the offseason and played them in {month}. He scored {pts}, and {team} {result}, {score}.",
-			"Every portal season writes one of these. {player} put up {pts} against {old}, the programme he transferred out of, and {team} {result} {score}.",
+			"Every portal season writes one of these. {player} put up {pts} against {old}, the program he transferred out of, and {team} {result} {score}.",
 			"{pts} points against {old}. {player} did not say anything about it afterwards, which is its own kind of statement; {team} {result} the game {score}.",
 		],
 	});
@@ -4684,7 +4807,7 @@
 			"{rank} {opp} had no answer for {player}",
 		],
 		bodies: [
-			"{team} beat {rank} {opp} {score}, and {player} scored {pts} of it with {reb} in {min} minutes. A prospect at a programme like this gets four chances a season to be seen; he took one.",
+			"{team} beat {rank} {opp} {score}, and {player} scored {pts} of it with {reb} in {min} minutes. A prospect at a program like this gets four chances a season to be seen; he took one.",
 			"{pts} points against {rank} {opp}. {team} won {score}, which nobody outside the building expected, and {player} is the reason it happened.",
 			"There is a particular kind of night that makes a scout book a flight. {player} had one: {pts} points and {reb} in the {score} win over {rank} {opp}.",
 		],
@@ -5273,7 +5396,7 @@
 			record: T(recordAt(t, 0.68).w + "-" + recordAt(t, 0.68).l),
 			/* "a {conf} programme" cannot be written by hand: the ACC and the
 			   American both take "an". */
-			aConf: T(global.Text.withArticle(String(t.conf) + " programme")),
+			aConf: T(global.Text.withArticle(String(t.conf) + " program")),
 			coach: T(t.coach ? t.coach.name : "the staff"),
 			tenure: T(String(t.coach ? t.coach.tenure : 1)),
 		}),
@@ -5284,7 +5407,7 @@
 		],
 		bodies: [
 			"{team} is {record} and the top tier has been closed since January. {coach} is in year {tenure} and the arithmetic of that is being done out loud by people who used to buy season tickets.",
-			"A programme with this history does not usually get to be this empty. {team} at {record} is the kind of season that ends with a search firm.",
+			"A program with this history does not usually get to be this empty. {team} at {record} is the kind of season that ends with a search firm.",
 			"{coach} has coached most of the second half of this season in a building with the sound of individual voices in it. {record} does that to {aConf}.",
 		],
 	});
@@ -5359,7 +5482,7 @@
 		headlines: [
 			"{team} gets {opp} back",
 			"{margin} points down in the first meeting, and level in the second",
-			"{team} returns the favour to {opp}",
+			"{team} returns the favor to {opp}",
 		],
 		bodies: [
 			"{opp} beat {team} by {margin} the first time, {first}. The second meeting went the other way, {second}, and the difference was almost entirely at the defensive end.",
@@ -6334,7 +6457,7 @@
 			"{team} cuts down a regional net",
 		],
 		bodies: [
-			"{team} came out of its region as the {seed} seed at {record}. {coach} has taken a programme to the last weekend, which is the line that goes on a contract extension.",
+			"{team} came out of its region as the {seed} seed at {record}. {coach} has taken a program to the last weekend, which is the line that goes on a contract extension.",
 			"Four wins, four different problems solved. {team} is in the Final Four at {record}.",
 			"The {seed} seed survives the region. {team} has one weekend left and nobody is calling it lucky any more.",
 		],
@@ -6427,7 +6550,7 @@
 		},
 		slots: (t) => ({
 			team: TM(t.name), coach: T(t.coach.name), mentor: T(t.coach.mentor),
-			from: T(t.coach.mentorSchool || "a bigger programme"), conf: T(t.conf),
+			from: T(t.coach.mentorSchool || "a bigger program"), conf: T(t.conf),
 		}),
 		headlines: [
 			"{team} hires {coach} off {mentor}'s staff",
@@ -6437,7 +6560,7 @@
 		bodies: [
 			"{team} has hired {coach}, who spent the last four years working for {mentor} at {from}. Every hire out of that building comes with the same recruiting reputation attached.",
 			"A first head-coaching job in the {conf} is a real one. {coach} takes it after learning it under {mentor}.",
-			"{coach} has never run a programme. He has recruited for one of the best of them, at {from}, and {team} decided that was the harder half.",
+			"{coach} has never run a program. He has recruited for one of the best of them, at {from}, and {team} decided that was the harder half.",
 		],
 	});
 
@@ -6456,7 +6579,7 @@
 			return {
 				team: TM(c.school), coach: T(c.coach || c.name || "the head coach"),
 				conf: T(t ? t.conf : "his league"),
-				aConf: T(global.Text.withArticle((t ? t.conf : "high-major") + " programme")),
+				aConf: T(global.Text.withArticle((t ? t.conf : "high-major") + " program")),
 				record: T(t ? t.w + "-" + t.l : "a good season"),
 			};
 		},
@@ -6540,8 +6663,11 @@
 	TPL({
 		kind: "transfer who did not fit", group: "regular season", p: 0.4, when: 0.72,
 		find: (ctx) => {
+			/* A draft-class transfer is nearly always a starter (one in 135
+			   measured under 26 minutes and 9 points), so "did not fit" is a
+			   role short of a lead one, not the end of the bench. */
 			const cand = ctx.ncaa.filter((p) => p.transfer && p.stats &&
-				p.stats.gp >= 15 && p.stats.mpg <= 26 && p.stats.ppg <= 9);
+				p.stats.gp >= 15 && p.stats.mpg <= 30 && p.stats.ppg <= 11);
 			return cand.length ? ctx.rng.pick(cand) : null;
 		},
 		slots: (p) => ({
@@ -6642,7 +6768,7 @@
 			"{coach} did not sign anybody",
 		],
 		bodies: [
-			"{team} signed the No. {rank} class in the country. At a programme with this history that is not a class, it is a warning, and everybody in the {conf} read it that way.",
+			"{team} signed the No. {rank} class in the country. At a program with this history that is not a class, it is a warning, and everybody in the {conf} read it that way.",
 			"{coach} lost three commitments and did not replace them. No. {rank} nationally is the result and the portal is now the only plan.",
 			"There is a version of this where the rankings are wrong. There is a likelier version where a No. {rank} class at {team} is the first visible sign of something the record has not shown yet.",
 		],
@@ -6708,7 +6834,7 @@
 		],
 		bodies: [
 			"{player} played his last home game for {team} after {years} seasons, averaging {ppg} in this one. A player who stays four years in this era has usually turned down money to do it.",
-			"{years} seasons, one programme, and a {record} record on the night. {player} walked out to a standing ovation from people who watched him be bad at this as a freshman.",
+			"{years} seasons, one program, and a {record} record on the night. {player} walked out to a standing ovation from people who watched him be bad at this as a freshman.",
 			"There was a version of {player}'s career that involved three schools. He chose this one, all {years} years of it, and {team} noticed.",
 		],
 	});
@@ -6733,7 +6859,7 @@
 		],
 		bodies: [
 			"{player} arrived at {team} with “{trait}” in his file and is playing {mpg} minutes a night for {ppg} points. The scholarship was announced in a team meeting, which is where these things are announced.",
-			"There is one of these in every good programme and most of them never play. {player} plays {mpg} minutes.",
+			"There is one of these in every good program and most of them never play. {player} plays {mpg} minutes.",
 			"{ppg} points a game from a player nobody offered. {team}'s staff will tell you they knew; the recruiting rankings say otherwise.",
 		],
 	});
@@ -7276,7 +7402,7 @@
 			"The {conf} awards go through {team}",
 		],
 		bodies: [
-			"{team} had {n} players honoured, {first} and {second} among them. A programme with two selections has either a very good team or a very good ballot position, and usually both.",
+			"{team} had {n} players honoured, {first} and {second} among them. A program with two selections has either a very good team or a very good ballot position, and usually both.",
 			"{first} and {second}. {team} has the two best players in the {conf} by the only measure that gets voted on.",
 			"{n} names from one roster. Whatever else is true of {team}'s season, the talent was not the problem.",
 		],
@@ -7557,9 +7683,9 @@
 			"{first} was only ever staying one year",
 		],
 		bodies: [
-			"{n} first-year players are inside the top thirty, {first} of {team} at the head of them. Every one of those programmes recruited a player it knew it would coach for thirty-two games.",
+			"{n} first-year players are inside the top thirty, {first} of {team} at the head of them. Every one of those programs recruited a player it knew it would coach for thirty-two games.",
 			"{first} and {second} lead a group of {n} freshmen who will not be back. That is the arrangement now and the coaches who complain about it are the ones losing those recruitments.",
-			"{n} of them. A programme that takes a one-year player is buying a season, and {team} has just had a good one.",
+			"{n} of them. A program that takes a one-year player is buying a season, and {team} has just had a good one.",
 		],
 	});
 
@@ -8201,10 +8327,7 @@
 		if (pre && pre.ranks.length) {
 			articles.push({
 				when: -0.2, kind: "preseason poll",
-				headline: fill(rng.pick([
-					"{one} opens the season at No. 1",
-					"The preseason poll is out — {one} on top",
-				]), { one: TM(pre.ranks[0].team) }),
+				headline: fill(rng.pick(PRESEASON_POLL_HEADS), { one: TM(pre.ranks[0].team) }),
 				body: [T("The preseason AP poll: ")]
 					.concat(pre.ranks.slice(0, 5).flatMap((r, i) => [
 						T((i ? ", " : "") + "No. " + r.rank + " "), TM(r.team),
@@ -8773,10 +8896,7 @@
 				const loserSide = g.winner === g.a ? g.b : g.a;
 				articles.push({
 					when: 1.12, kind: "bracket upset",
-					headline: fill(rng.pick([
-						"No. {ws} {winner} shocks No. {ls} {loser}",
-						"Madness: {winner} sends {loser} home",
-					]), {
+					headline: fill(rng.pick(BRACKET_UPSET_HEADS), {
 						winner: TM(g.winner.team.name), loser: TM(loserSide.team.name),
 						ws: T(String(g.winner.seed)), ls: T(String(loserSide.seed)),
 					}),
@@ -8795,10 +8915,7 @@
 				segs.push(T("."));
 				articles.push({
 					when: 1.2, kind: "champion",
-					headline: fill(rng.pick([
-						"National champions: {champ}",
-						"The nets come down for {champ}",
-					]), { champ: TM(t.champion.team.name) }),
+					headline: fill(rng.pick(CHAMPION_HEADS), { champ: TM(t.champion.team.name) }),
 					body: segs,
 				});
 			}
@@ -9117,7 +9234,7 @@
 							"the portal returns him to "), TM(home.newCollege), T(".")],
 						[T("He left, and he is back. "), PL(home.name, home.key),
 							T(" has re-signed with "), TM(home.newCollege),
-							T(", the programme he committed to out of high school.")],
+							T(", the program he committed to out of high school.")],
 						[PL(home.name, home.key), T(" spent a year somewhere else and " +
 							"has come home to "), TM(home.newCollege),
 							T(". Nobody involved is describing it as a failure and " +

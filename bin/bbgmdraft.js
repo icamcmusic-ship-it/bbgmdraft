@@ -56,16 +56,16 @@ const FLAGS = {
 	"--awards": false, "--awards-major": false, "--no-ages": false, "--no-jerseys": false,
 	"--no-injuries": false, "--no-notes": false, "--keep-notes": false, "--csv": false, "--json": false,
 	"--quiet": false, "-q": false, "--no-gaps": false, "--help": false, "-h": false,
-	"--settings": true, "--locks": true, "--gzip": false, "--count": true, "--merge": true,
+	"--settings": true, "--locks": true, "--gzip": false, "--no-gzip": false, "--count": true, "--merge": true,
 	"--players-file": false, "--fragment": false, "--rounds": true, "--want": true, "--not": true,
 	"--tries": true, "--fuzz": true, "--scouting": true, "--recipe": false, "--hometowns": false,
-	"--pro-lines": false,
+	"--pro-lines": false, "--html": false, "--md": false, "--kind": true, "--ratings-history": false,
 };
 // Options that may be given more than once, kept as lists.
-const REPEATABLE = { "--set": "set", "--want": "want", "--not": "not" };
+const REPEATABLE = { "--set": "set", "--want": "want", "--not": "not", "--kind": "kind" };
 
 function parseArgs(argv) {
-	const out = { positional: [], set: [], want: [], not: [], flags: {} };
+	const out = { positional: [], set: [], want: [], not: [], kind: [], flags: {} };
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		if (a.indexOf("--") === 0 && a.indexOf("=") > 0) {
@@ -96,12 +96,12 @@ function readClassFile(file, year, opts) {
 	}
 	// "-" is standard input (a pipe: `cat class.json.gz | bbgmdraft run - ...`).
 	const shown = file === "-" ? "standard input" : file;
-	let buf = fs.readFileSync(file === "-" ? 0 : file);
-	if (buf[0] === 0x1f && buf[1] === 0x8b) buf = zlib.gunzipSync(buf);
-	const text = buf.toString("utf8").replace(/^﻿/, "");
+	// Through the scanner: a league's box scores are never parsed, and no
+	// whole-file string is built (audit L1).
 	let data;
-	try { data = JSON.parse(text); } catch (e) {
-		throw new Error(shown + " is not JSON: " + e.message);
+	try { data = readLeagueScan(file, shown).league; } catch (e) {
+		throw new Error(e.code && e.code !== "badjson" ? shown + ": " + e.message
+			: shown + " is not JSON: " + e.message);
 	}
 	const E = global.Engine;
 	// A league export holds a class per future draft year; pick one.
@@ -268,7 +268,8 @@ function buildConfig(args, data) {
 		for (const a of plan.applied) locks[a.player.key] = Object.assign({}, locks[a.player.key], a.patch);
 		cfg.overrides = locks;
 		say(args, "locks: " + plan.applied.length + " of " + plan.total + " row(s) applied" +
-			(plan.unmatched.length ? "; " + plan.unmatched.length + " matched nobody" : ""));
+			(plan.unmatched.length ? "; " + plan.unmatched.length + " matched nobody" : "") +
+			(plan.empty && plan.empty.length ? "; " + plan.empty.length + " locked nothing" : ""));
 		for (const r of plan.rejected) say(args, "locks: " + r);
 	}
 	for (const s of args.set) {
@@ -334,13 +335,21 @@ function exportOptions(args) {
 	if (f["--recipe"]) opts.recipe = true;
 	if (f["--hometowns"]) opts.hometowns = true;
 	if (f["--pro-lines"]) opts.proLines = true;
+	if (f["--ratings-history"]) opts.ratingsHistory = true;
 	return opts;
 }
 
 /* --------------------------------------------------------------- output */
 
+/* `--quiet` and `-q` are one flag. The progress counters below checked
+   only the long form, so `-q` still painted "1/2" over the terminal
+   (audit 2026-10-10 B16); everything asks this now. */
+function quiet(args) {
+	return !!(args.flags["--quiet"] || args.flags["-q"]);
+}
+
 function say(args, text) {
-	if (!args.flags["--quiet"] && !args.flags["-q"]) process.stderr.write(text + "\n");
+	if (!quiet(args)) process.stderr.write(text + "\n");
 }
 
 function table(rows) {
@@ -348,11 +357,10 @@ function table(rows) {
 	return rows.map((r) => r.map((c, i) => String(c).padEnd(w[i])).join("  ").trimEnd()).join("\n");
 }
 
-function csvCell(v) {
-	if (v === null || v === undefined) return "";
-	const s = String(v);
-	return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-}
+/* One CSV cell writer for the page and the command line: Share.csvCell
+   carries the spreadsheet-formula guard and the bare-\r quoting this copy
+   lacked (audit 2026-10-10 B15). */
+const csvCell = (v) => global.Share.csvCell(v);
 
 /* ------------------------------------------------------------- commands */
 
@@ -384,14 +392,28 @@ function cmdRun(args) {
 	let out;
 	let defaultDest;
 	if (f["--merge"]) {
-		const league = readJsonFile(f["--merge"]);
-		const merged = global.Engine.mergeIntoLeague(res, league, opts);
-		out = merged.file;
+		/* Read through the scanner (js/leaguescan.js): the stores the merge
+		   never touches are not parsed, and the write copies their bytes
+		   through, compact, with no BOM (BBGM's league loader reads it, not a
+		   spreadsheet), streamed through gzip when the league was a .gz. No
+		   whole-league string is built, so a league over the 512 MiB string
+		   limit merges (audit L7). */
+		let src;
+		try { src = readLeagueScan(f["--merge"]); } catch (e) {
+			throw new Error(f["--merge"] + (e.code && e.code !== "badjson" ? ": " : " is not JSON: ") + e.message);
+		}
+		const merged = global.Engine.mergeIntoLeague(res, src.league, opts);
 		for (const w of merged.warnings) say(args, "warning: " + w);
 		say(args, "merged into " + path.basename(f["--merge"]) + ": " + merged.replaced +
 			" prospects replaced, " + merged.added + " added, " + merged.removed + " removed");
 		const lb = path.basename(f["--merge"]).replace(/\.json(\.gz)?$|\.gz$/i, "");
-		defaultDest = path.join(path.dirname(f["--merge"]), lb + "_merged.json" + gz);
+		const gzOut = !!f["--gzip"] || (src.gz && !f["--no-gzip"]);
+		const dest = f["--out"] || path.join(path.dirname(f["--merge"]),
+			lb + "_merged.json" + (gzOut ? ".gz" : ""));
+		return writeMerged(dest, src, merged.file, gzOut).then(() => {
+			say(args, "seed " + res.seed + " · " + res.season + " · engine rev " + global.Universe.ENGINE_REV);
+			if (dest !== "-") say(args, "wrote " + dest);
+		});
 	} else if (f["--players-file"]) {
 		out = global.Engine.exportPlayersFile(res, opts);
 		defaultDest = path.join(file === "-" ? "." : path.dirname(file), base + "_players.json" + gz);
@@ -455,13 +477,94 @@ function cmdRunMany(args, file, data, cfg, kinds) {
 		const dest = path.join(dir, name + "_" + safe + "_" + i + ".json" + (f["--gzip"] ? ".gz" : ""));
 		fs.writeFileSync(dest, bodyOf(args, global.Engine.exportFile(res, opts)));
 		written.push({ seed: c.seed, file: dest });
-		if (process.stderr.isTTY && !f["--quiet"]) process.stderr.write("\r  " + (i + 1) + "/" + n);
+		if (process.stderr.isTTY && !quiet(args)) process.stderr.write("\r  " + (i + 1) + "/" + n);
 	}
-	if (process.stderr.isTTY && !f["--quiet"]) process.stderr.write("\r          \r");
+	if (process.stderr.isTTY && !quiet(args)) process.stderr.write("\r          \r");
 	if (f["--json"]) process.stderr.write(JSON.stringify({ baseSeed: base, written,
 		engineRev: global.Universe.ENGINE_REV }, null, 2) + "\n");
 	else say(args, "wrote " + n + " classes to " + dir + " · base seed " + base +
 		" · engine rev " + global.Universe.ENGINE_REV);
+}
+
+function coded(code, message) {
+	const e = new Error(message);
+	e.code = code;
+	return e;
+}
+
+/* A league or class file, through the scanner (js/leaguescan.js). */
+function readLeagueScan(file, shown) {
+	const LS = global.LeagueScan;
+	let buf = fs.readFileSync(file === "-" ? 0 : file);
+	let layers = 0;
+	while (buf.length > 1 && buf[0] === 0x1f && buf[1] === 0x8b && layers < 3) {
+		try { buf = zlib.gunzipSync(buf); } catch (e) {
+			throw coded("gzbad", "the .gz file is incomplete or corrupt — download or export it again");
+		}
+		layers++;
+	}
+	const kind = LS.sniff(buf.subarray(0, 8));
+	if (LS.sniffMessage(kind)) throw coded(kind, LS.sniffMessage(kind));
+	if (kind === "utf16le" || kind === "utf16be") {
+		const text = new TextDecoder(kind === "utf16le" ? "utf-16le" : "utf-16be").decode(buf);
+		return { league: LS.parseText(text.replace(/^\ufeff/, ""), buf.length), scan: null, gz: layers > 0 };
+	}
+	const sc = LS.createScanner();
+	const CH = 1 << 20;
+	try {
+		for (let i = 0; i < buf.length; i += CH) sc.push(buf.subarray(i, i + CH));
+		const scan = sc.end();
+		if (scan.top !== "object") {
+			return { league: LS.parseText(buf.toString("utf8").replace(/^\ufeff/, ""), buf.length),
+				scan: null, gz: layers > 0 };
+		}
+		return { league: scan.data, scan, buf, gz: layers > 0 };
+	} catch (e) {
+		throw e.code ? e : new Error(e.message);
+	}
+}
+
+/* The merged league, streamed: the source's own bytes for every store the
+   merge left alone, the new values (players one at a time) for the rest. */
+function writeMerged(dest, src, file, gzip) {
+	const LS = global.LeagueScan;
+	const changed = {};
+	for (const k of Object.keys(file)) if (file[k] !== src.league[k]) changed[k] = file[k];
+	const out = dest === "-" ? process.stdout : fs.createWriteStream(dest);
+	const gz = gzip ? zlib.createGzip() : null;
+	if (gz) gz.pipe(out);
+	const sink = gz || out;
+	const write = (chunk) => (sink.write(chunk) ? null
+		: new Promise((resolve) => sink.once("drain", resolve)));
+	const pieces = function* () {
+		if (!src.scan) {
+			yield* LS.valueChunks(file);
+			return;
+		}
+		const sp = LS.createSplicer(src.scan, Object.keys(changed));
+		const CH = 1 << 20;
+		for (let i = 0; i < src.buf.length; i += CH) {
+			for (const piece of sp.push(src.buf.subarray(i, i + CH))) {
+				if (piece instanceof Uint8Array) yield piece;
+				else if (piece.append) yield* LS.addedChunks(src.scan, changed);
+				else yield* LS.valueChunks(changed[piece.key]);
+			}
+		}
+	};
+	const it = pieces();
+	const finished = new Promise((resolve, reject) => {
+		if (dest === "-") { (gz || out).once("finish", resolve); } else out.once("finish", resolve);
+		out.once("error", reject);
+	});
+	const pump = () => {
+		for (;;) {
+			const r = it.next();
+			if (r.done) { sink.end(); return finished; }
+			const w = write(r.value);
+			if (w) return w.then(pump);
+		}
+	};
+	return pump();
 }
 
 function readJsonFile(file) {
@@ -489,9 +592,9 @@ function cmdBatch(args) {
 		const c = global.Config.make(cfg);
 		c.seed = base + "#" + i;
 		rows.push(B.summarize(runner.run(c)));
-		if (process.stderr.isTTY && !args.flags["--quiet"]) process.stderr.write("\r  " + (i + 1) + "/" + n);
+		if (process.stderr.isTTY && !quiet(args)) process.stderr.write("\r  " + (i + 1) + "/" + n);
 	}
-	if (process.stderr.isTTY && !args.flags["--quiet"]) process.stderr.write("\r          \r");
+	if (process.stderr.isTTY && !quiet(args)) process.stderr.write("\r          \r");
 	const cols = ["seed", "flavor", "ovr", "pot", "ppg", "usg", "ts", "topPpg", "awards",
 		"archetypes", "champion", "champSeed", "teamPpg"];
 	if (args.flags["--json"]) {
@@ -549,9 +652,9 @@ function cmdSeek(args) {
 		const c = global.Config.make(cfg);
 		c.seed = base + "#" + i;
 		const res = runner.run(c);
-		if (process.stderr.isTTY && !f["--quiet"]) process.stderr.write("\r  " + (i + 1) + "/" + tries);
+		if (process.stderr.isTTY && !quiet(args)) process.stderr.write("\r  " + (i + 1) + "/" + tries);
 		if (!clauses.every((cl) => cl.test(res))) continue;
-		if (process.stderr.isTTY && !f["--quiet"]) process.stderr.write("\r          \r");
+		if (process.stderr.isTTY && !quiet(args)) process.stderr.write("\r          \r");
 		const top = (res.board || [])[0];
 		if (f["--json"]) {
 			process.stdout.write(JSON.stringify({ seed: c.seed, tries: i + 1,
@@ -567,7 +670,7 @@ function cmdSeek(args) {
 		}
 		return;
 	}
-	if (process.stderr.isTTY && !f["--quiet"]) process.stderr.write("\r          \r");
+	if (process.stderr.isTTY && !quiet(args)) process.stderr.write("\r          \r");
 	say(args, "no class met " + clauses.map((cl) => cl.key).join(" and ") + " in " + tries +
 		" tries (base seed " + base + ")");
 	process.exitCode = 1;
@@ -576,9 +679,9 @@ function cmdSeek(args) {
 /* A UNIVERSE, the way js/app.js's runUniverse builds one: the files in season
    order, one chain, each season handing its world to the next. Prints the
    timeline and writes the universe export (seeds, fingerprints, the rows and
-   the records), which the page's Universe tab imports. The players file is
-   not written here: it needs the career links the page adds after the chain
-   (js/app.js linkCareers), and that step is not yet shared. */
+   the records), which the page's Universe tab imports. With --players-file
+   it also writes the Tools -> Import players file for the whole world, after
+   the same career linking the page does (Universe.linkCareers, audit Q30). */
 function cmdUniverse(args) {
 	const U = global.Universe;
 	const files = args.positional.slice(1);
@@ -595,6 +698,7 @@ function cmdUniverse(args) {
 	const baseSeed = cfg.seed && cfg.seed.trim() ? cfg.seed.trim()
 		: "universe-" + Math.floor(Math.random() * 1e9).toString(36);
 	const runners = loaded.map((f) => global.Engine.createRunner(f.data));
+	const results = [];
 	const diags = U.validate(loaded);
 	const runnable = diags.filter((d) => d.ok)
 		.sort((a, b) => (a.season || 0) - (b.season || 0) || a.index - b.index);
@@ -605,7 +709,7 @@ function cmdUniverse(args) {
 		name: null, createdAt: null,
 		make: (st) => global.Config.make(st),
 		runnerFor: (i) => runners[i],
-		store: () => {},
+		store: (i, res) => { results[i] = res; },
 		dataChanged: (i) => { runners[i] = global.Engine.createRunner(loaded[i].data); },
 		biographyFor: () => null,
 		extrapolateGaps: !args.flags["--no-gaps"] && cfg.extrapolateGaps !== false,
@@ -614,12 +718,12 @@ function cmdUniverse(args) {
 	});
 	for (let k = 0; k < chain.runnable.length; k++) {
 		chain.step(k);
-		if (process.stderr.isTTY && !args.flags["--quiet"]) {
+		if (process.stderr.isTTY && !quiet(args)) {
 			process.stderr.write("\r  season " + (k + 1) + " of " + chain.runnable.length);
 		}
 	}
 	chain.finish({ cancelled: false, extrapolateYears: cfg.extrapolateYears || 0 });
-	if (process.stderr.isTTY && !args.flags["--quiet"]) process.stderr.write("\r                         \r");
+	if (process.stderr.isTTY && !quiet(args)) process.stderr.write("\r                         \r");
 	const u = chain.universe;
 	const name = (x) => (x && x.name) || "";
 	if (args.flags["--json"]) {
@@ -635,6 +739,17 @@ function cmdUniverse(args) {
 	if (args.flags["--out"]) {
 		fs.writeFileSync(args.flags["--out"], JSON.stringify(U.exportUniverse(u), null, 1));
 		say(args, "wrote " + args.flags["--out"]);
+	}
+	if (args.flags["--players-file"]) {
+		U.linkCareers(u, results, chain.runnable, undefined);
+		const live = chain.runnable.map((d) => results[d.index]).filter(Boolean);
+		const out = global.Engine.universePlayersFile(live, Object.assign(exportOptions(args),
+			{ stats: true, prior: true, awards: true, seed: baseSeed }));
+		const dest = args.flags["--out"] ? String(args.flags["--out"]).replace(/(\.json)?$/, "-players.json")
+			: "universe-" + baseSeed + "-players.json";
+		fs.writeFileSync(dest, JSON.stringify(out.file, null, "\t"));
+		say(args, "wrote " + out.file.players.length + " players across " + out.seasons.length +
+			" seasons to " + dest);
 	}
 	if (u.broken) process.exitCode = 1;
 }
@@ -672,6 +787,54 @@ function cmdMock(args) {
 		say(args, "seed " + res.seed + " · " + mock.picks.length + " picks · " +
 			mock.undrafted.length + " undrafted · " + mock.source);
 	}
+}
+
+/* The season's most readable outputs (audit Q29): the almanac as Markdown
+   (or --html) and the static season site, on stdout or to --out. */
+function runClass(args) {
+	const { data } = readClassFile(args.positional[1], args.flags["--year"]);
+	return global.Engine.run(data, buildConfig(args, data));
+}
+function emit(args, text, what) {
+	const dest = args.flags["--out"];
+	if (dest && dest !== "-") { fs.writeFileSync(dest, text); say(args, "wrote " + what + " to " + dest); }
+	else process.stdout.write(text.endsWith("\n") ? text : text + "\n");
+}
+function cmdAlmanac(args) {
+	const res = runClass(args);
+	const A = global.Almanac;
+	emit(args, args.flags["--html"] ? A.html(res) : A.markdown(res), "the almanac");
+}
+function cmdSite(args) {
+	const res = runClass(args);
+	emit(args, global.SeasonSite.html(res), "the season site");
+}
+
+/* The paper (audit Q31): News.build as dated plain text or Markdown, every
+   article or only the --kind ones, so two engine revisions can be diffed. */
+function newsText(seg) {
+	return (seg || []).map((x) => (x && typeof x === "object" ? (x.v === undefined ? "" : String(x.v)) : String(x))).join("");
+}
+function cmdNews(args) {
+	const res = runClass(args);
+	let arts = global.News.build(res);
+	const kinds = [].concat(...(args.kind || []).map((k) => String(k).split(","))).map((k) => k.trim()).filter(Boolean);
+	if (kinds.length) arts = arts.filter((a) => kinds.indexOf(a.kind) !== -1);
+	const md = !!args.flags["--md"];
+	const out = [];
+	for (const a of arts) {
+		const head = newsText(a.headline);
+		const date = a.dateline || "";
+		const paras = Array.isArray(a.paras) && a.paras.length
+			? a.paras.map((p) => newsText(p)) : [newsText(a.body)];
+		if (md) {
+			out.push("## " + head + "\n\n*" + [date, a.byline || "", a.kind].filter(Boolean).join(" · ") + "*\n\n" +
+				paras.join("\n\n"));
+		} else {
+			out.push("[" + date + "] (" + a.kind + ") " + head + "\n" + paras.join("\n"));
+		}
+	}
+	emit(args, out.join(md ? "\n\n" : "\n\n"), arts.length + " articles");
 }
 
 function cmdCheck(args) {
@@ -734,6 +897,9 @@ const HELP = `BBGM Draft Class Workshop (command line, experimental)
   bbgmdraft seek  <file> [options]    find the first seed that meets some conditions
   bbgmdraft universe <file>... [opts] run the classes as one continuous world
   bbgmdraft mock  <file> [options]    mock draft and pro career projections
+  bbgmdraft almanac <file> [options]  the season's almanac (Markdown, or --html)
+  bbgmdraft site  <file> [options]    the season as a one-file static site (HTML)
+  bbgmdraft news  <file> [options]    the season's paper as text (or --md)
   bbgmdraft check <file>              validate a file
   bbgmdraft settings [name|presets]   settings, defaults, ranges; presets
 
@@ -759,7 +925,9 @@ Options (run)
   --count N          write N classes, seeds <base>#0 .. #N-1, one file each into the
                      directory --out names (default <file>_classes)
   --merge LEAGUE     merge the class into this league file (replacing its class for
-                     that draft) and write the league (default <league>_merged.json)
+                     that draft) and write the league, compact JSON, streamed (default
+                     <league>_merged.json, or .json.gz when the league was gzipped;
+                     --no-gzip writes plain JSON)
   --players-file     write the Tools -> Import players file instead of a class file
   --fragment         write the college-league fragment (teams, standings) instead
   --fuzz MODE        scouting fuzz: keep (default), zero, or regenerate (a seeded draw
@@ -781,6 +949,8 @@ Options (run)
 
 Options (universe)
   --out FILE         write the universe export (the page's Universe tab imports it)
+  --players-file     also write the whole world as one Tools -> Import players file
+                     (<out>-players.json), careers linked across seasons
   --no-gaps          do not extrapolate seasons missing between the files
   --json             the rows and threads as JSON on stdout
 
@@ -790,6 +960,13 @@ Options (batch)
 
 Options (mock)
   --rounds N         rounds of the mock draft (default 2)
+
+Options (almanac, site, news)
+  --html             almanac: HTML instead of Markdown
+  --md               news: Markdown instead of dated plain text
+  --kind K           news: only articles of this kind (repeatable or comma-separated)
+  --out FILE         write there instead of stdout
+  --ratings-history  run: one ratings row per simulated college season (BBGM's chart)
 
 Options (seek)
   --want NAME        a condition the class must meet (repeatable, or comma-separated):
@@ -822,11 +999,22 @@ function main() {
 	}
 	loadEngine();
 	try {
-		if (cmd === "run") cmdRun(args);
+		if (cmd === "run") {
+			const p = cmdRun(args);
+			if (p && typeof p.then === "function") {
+				p.catch((e) => {
+					process.stderr.write("bbgmdraft: " + (e && e.message ? e.message : e) + "\n");
+					process.exit(1);
+				});
+			}
+		}
 		else if (cmd === "batch") cmdBatch(args);
 		else if (cmd === "seek") cmdSeek(args);
 		else if (cmd === "universe") cmdUniverse(args);
 		else if (cmd === "mock") cmdMock(args);
+		else if (cmd === "almanac") cmdAlmanac(args);
+		else if (cmd === "site") cmdSite(args);
+		else if (cmd === "news") cmdNews(args);
 		else if (cmd === "check") cmdCheck(args);
 		else if (cmd === "settings") cmdSettings(args);
 		else throw new Error("unknown command \"" + cmd + "\" (try: bbgmdraft help)");

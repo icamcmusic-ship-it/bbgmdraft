@@ -19,10 +19,10 @@ module.exports = function (ok, V) {
 		for (const seed of ["b1", "b2", "b3", "b4"]) {
 			const sc = E.strangeness(E.run(lf, CFG.make({ seed, weirdness: 3 })));
 			if (sc.kinds.length !== sc.reasons.length) parallel = false;
-			if (!sc.kinds.every((k) => known.has(k))) allKnown = false;
+			if (!sc.kinds.every((k) => known.has(k) || RM.RETIRED_KINDS.indexOf(k) !== -1)) allKnown = false;
 		}
 		ok("strangeness returns one kind per reason", parallel);
-		ok("...and every kind is a bingo square", allKnown);
+		ok("...and every kind is a bingo square (or a retired absolute cut-off)", allKnown);
 
 		const a = RM.drawCard("card-1");
 		ok("a bingo card is nine distinct kinds",
@@ -111,8 +111,8 @@ module.exports = function (ok, V) {
 
 	/* --- achievements --------------------------------------------------- */
 	{
-		ok("between 15 and 20 achievements, unique ids",
-			RM.ACHIEVEMENTS.length >= 15 && RM.ACHIEVEMENTS.length <= 20 &&
+		ok("between 15 and 25 achievements, unique ids",
+			RM.ACHIEVEMENTS.length >= 15 && RM.ACHIEVEMENTS.length <= 25 &&
 			new Set(RM.ACHIEVEMENTS.map((a) => a.id)).size === RM.ACHIEVEMENTS.length);
 		const team = (seed, w, l) => ({ seed, team: { name: "T" + seed, w, l } });
 		const g = (a, b, winA) => ({ a, b, winner: winA ? a : b });

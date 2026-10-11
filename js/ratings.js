@@ -834,6 +834,147 @@
 		{ name: "Rehabbed Knee, Full Clearance", min: 0, max: 100, w: 0.8, inj: 1.5, pot: 2, t: ["durability", "scoring", "playmaking"], o: { oiq: 14, fg: 10, pss: 8, ins: 8, spd: -18, jmp: -12, endu: -8, dnk: -4 } },
 		{ name: "Sat Behind an All-American", min: 0, max: 100, w: 0.9, pot: 6, t: ["raw", "shooting", "durability"], o: { tp: 14, endu: 12, ft: 8, jmp: 6, oiq: -16, pss: -12, diq: -8, reb: -4 } },
 		{ name: "Fifth Year at a Fourth School", min: 0, max: 100, w: 0.85, pot: -7, t: ["durability", "rebounding", "scoring"], o: { reb: 14, ins: 12, stre: 10, endu: 6, tp: -16, spd: -12, drb: -10, oiq: -4 } },
+		/* --- sixty-two more: the bands the table was thinnest in ---------------
+
+		   Coverage measured before this batch (385 builds): seven-footer
+		   builds gated min >= 72 numbered eleven, with no playmaking and one
+		   shooting build among them; the guard band had 15 rebounding builds
+		   at hgt 20 against 56 playmaking; and the 6'9"-6'11" band (hgt ~68)
+		   had 57 wing-tagged builds against 101 at hgt 50. Every row below was
+		   run through the same cosine sweep as tools/tests/audit-regressions.js
+		   and rejected at > 0.92 against any build sharing half its gate; the
+		   pass offsets are set so the mean pss offset of the builds a 6'1"
+		   and a 6'9" prospect are eligible for is unchanged (see the PG:C
+		   assist note above). */
+		// --- guards ------------------------------------------------------------
+		// Guard band had 15 rebounding builds at hgt 20 against 56 playmaking; this is the point guard who rebounds AND runs the break off his own board.
+		{ name: "Triple-Double Point Guard", min: 0, max: 48, w: 0.7, t: ["guard", "playmaking", "rebounding"], o: { pss: 16, reb: 16, drb: 10, endu: 8, spd: 6, tp: -14, ft: -10, ins: -8, diq: -8, stre: -4 } },
+		// Grab-and-Go exists at wing and four; the guard who ends the defensive possession and starts the break with a dribble (no passer offset) had no row.
+		{ name: "Grab-and-Go Guard", min: 0, max: 50, w: 0.9, t: ["guard", "rebounding", "athletic"], o: { drb: 14, reb: 14, spd: 10, pss: 6, tp: -12, ft: -10, ins: -8, oiq: -8 } },
+		// A small point who defends, boards and passes but cannot score: the low-usage connector guard.
+		{ name: "Two-Way Rebounding Point", min: 0, max: 46, w: 0.7, t: ["guard", "defense", "rebounding", "playmaking"], o: { diq: 12, reb: 12, pss: 12, endu: 6, tp: -12, fg: -10, dnk: -10, ins: -6 } },
+		// Guard shooter who also rebounds: the only shooting+rebounding build under hgt 54.
+		{ name: "Long-Rebound Sniper", min: 0, max: 52, w: 0.9, t: ["guard", "shooting", "rebounding"], o: { tp: 16, reb: 14, ft: 8, endu: 8, jmp: 4, drb: -12, ins: -12, pss: -8, stre: -6, dnk: -6 } },
+		// Guard rebounding x shooting with jmp/stre rather than endu; a 6'4" two who crashes from the corner.
+		{ name: "Corner-Crash Guard", min: 20, max: 54, w: 0.7, t: ["guard", "rebounding", "shooting"], o: { reb: 16, tp: 12, jmp: 8, stre: 6, drb: -14, pss: -12, ins: -8, ft: -4, oiq: -4 } },
+		// Rebounding scoring two guard on motor (endu) rather than bounce: the offensive-glass guard.
+		{ name: "Crash-the-Glass Two", min: 20, max: 54, w: 0.8, t: ["guard", "rebounding", "scoring", "durability"], o: { reb: 16, ins: 10, endu: 12, fg: 6, tp: -14, pss: -12, drb: -8, ft: -4, diq: -6 } },
+		// Modern pull-up 3 creator: tp+drb, no fg; Deep-Range Bomber is catch-and-shoot and Combo Guard is fg-led.
+		{ name: "Pull-Up Three Creator", min: 0, max: 50, w: 1.1, t: ["guard", "shooting", "scoring"], o: { tp: 20, drb: 16, ft: 8, fg: 6, oiq: 6, pss: 4, ins: -14, reb: -10, jmp: -10, spd: -6, dnk: -4 } },
+		// Chase-Down Blocker starts at hgt 40; nothing below 6'4" carried a jump-led shot-blocking defense shape.
+		{ name: "Shot-Blocking Guard", min: 0, max: 48, w: 0.6, t: ["guard", "defense", "athletic"], o: { jmp: 18, diq: 14, reb: 8, spd: 6, tp: -12, pss: -10, drb: -10, ft: -8 } },
+		// 3&D Wing gates 34-64; the guard-sized 3-and-D role (diq+tp, no handle) had no row of its own.
+		{ name: "3&D Guard", min: 0, max: 50, w: 1.4, t: ["guard", "defense", "shooting"], o: { diq: 14, tp: 14, oiq: 8, stre: 6, fg: -12, drb: -12, ins: -10, dnk: -6, pss: -2 } },
+		// Two-way guard whose case is conditioning: endu-led 3-and-D with low injury multiplier.
+		{ name: "Iron-Lung Two-Way Guard", min: 0, max: 52, w: 0.9, inj: 0.85, t: ["guard", "defense", "durability", "shooting"], o: { endu: 16, diq: 12, tp: 12, spd: 6, ins: -14, drb: -10, dnk: -6, reb: -6, pss: -4 } },
+		// Change-of-direction finisher: ins+drb+spd without jmp, distinct from Crafty Finisher (no speed) and Slasher (jmp/dnk).
+		{ name: "Euro-Step Slasher", min: 0, max: 52, w: 1.0, t: ["guard", "scoring"], o: { ins: 14, drb: 12, spd: 10, ft: 8, oiq: 6, pss: 6, tp: -14, jmp: -10, stre: -8, diq: -8 } },
+		// A strength-led guard who finishes and rebounds through contact with no burst.
+		{ name: "Strong-Base Combo Guard", min: 0, max: 50, w: 0.8, t: ["guard", "scoring", "rebounding"], o: { stre: 18, ins: 10, reb: 10, ft: 8, pss: 6, spd: -14, jmp: -10, tp: -8, drb: -6 } },
+		// Low-athleticism shot-maker for the last four seconds: fg+drb with spd/jmp cuts.
+		{ name: "Shot-Clock Bailout Guard", min: 0, max: 52, w: 0.9, t: ["guard", "scoring"], o: { fg: 18, drb: 12, oiq: 8, ft: 6, spd: -10, reb: -10, jmp: -8, diq: -6, pss: -4 } },
+		// Shooter whose release comes from elevation (tp+jmp), no handle; jmp+tp is a rare pairing in the guard band.
+		{ name: "High-Release Shooting Guard", min: 0, max: 56, w: 0.9, t: ["guard", "shooting", "athletic"], o: { tp: 16, jmp: 10, fg: 8, ft: 6, drb: -14, stre: -10, pss: -8, ins: -8 } },
+		// Sub-6'1" (max 34) shooter: the smallest-gated shooting build, closing the hgt<30 shooting-only gap with a strength price.
+		{ name: "Tiny Floor Spacer", min: 0, max: 34, w: 0.6, t: ["guard", "shooting", "athletic"], o: { tp: 18, ft: 14, spd: 10, drb: 6, pss: 6, stre: -16, reb: -14, ins: -10, dnk: -10 } },
+		// Athletic passer (pss+jmp+spd) with no jumper; the athletic+playmaking pairing was all wings and fours.
+		{ name: "Lob-Throwing Athlete", min: 0, max: 60, w: 0.9, t: ["guard", "wing", "athletic", "playmaking"], o: { pss: 14, jmp: 12, spd: 12, dnk: 8, tp: -14, ft: -10, oiq: -6, ins: -8, stre: -6 } },
+		// Historical: two-hand set-shot guard of the pre-jump-shot era, ft-led with no lift.
+		{ name: "Set-Shot Era Guard", min: 0, max: 54, w: 0.6, t: ["guard", "shooting", "playmaking"], o: { ft: 18, pss: 10, oiq: 10, tp: 8, jmp: -16, dnk: -12, spd: -10, stre: -6, reb: -4 } },
+		// Historical: physical mid-range two guard from before the three-point line mattered (fg/stre/ft, tp -18).
+		{ name: "Hand-Check Era Two Guard", min: 0, max: 54, w: 0.6, t: ["guard", "scoring"], o: { fg: 16, stre: 10, ft: 10, ins: 8, pss: 4, tp: -18, jmp: -6, spd: -6, reb: -6 } },
+		// Biography: the sophomore whose jumper arrived this year (bio years Sophomore, pot +4); no bio gate used Sophomore alone.
+		{ name: "Sophomore-Leap Guard", min: 0, max: 52, w: 0.8, pot: 4, bio: { years: ["Sophomore"] }, t: ["guard", "shooting", "raw"], o: { tp: 14, ft: 10, drb: 10, spd: 6, pss: 6, oiq: -12, diq: -10, stre: -8, reb: -6 } },
+		// International/biography: guard returning from a pro academy (bio proOrReturned), pick-and-roll feel, no lift.
+		{ name: "Academy Guard Back From Pro Ball", min: 0, max: 52, w: 0.8, pot: -3, bio: { proOrReturned: true }, t: ["guard", "playmaking", "shooting"], o: { pss: 14, drb: 12, tp: 10, oiq: 8, jmp: -12, dnk: -12, stre: -8, diq: -6 } },
+		// --- wings -------------------------------------------------------------
+		// ins+tp on one wing (post-up plus three) is a pairing no wing build carried.
+		{ name: "Inside-Out Wing", min: 36, max: 69, w: 1.0, t: ["wing", "scoring", "shooting"], o: { ins: 14, tp: 14, ft: 8, stre: 6, drb: -12, spd: -10, pss: -8, jmp: -8, diq: -6 } },
+		// A wing who posts smaller players and guards bigger ones: ins+diq.
+		{ name: "Two-Way Post Wing", min: 40, max: 70, w: 0.9, t: ["wing", "defense", "scoring"], o: { ins: 14, diq: 14, stre: 10, reb: 6, tp: -14, spd: -10, drb: -10, pss: -6 } },
+		// Defensive slasher: dnk+diq without shooting, between Slashing Non-Shooter and Wing Stopper.
+		{ name: "Two-Way Slasher", min: 36, max: 66, w: 1.0, t: ["wing", "athletic", "defense", "scoring"], o: { dnk: 14, diq: 14, spd: 10, jmp: 6, tp: -14, ft: -10, pss: -8, oiq: -6 } },
+		// Attacks a closeout off the catch with a handle and dunk, distinct from Closeout Attacker (fg/ft).
+		{ name: "Catch-and-Drive Wing", min: 34, max: 67, w: 1.0, t: ["wing", "scoring", "shooting"], o: { drb: 12, dnk: 12, tp: 10, spd: 8, pss: -12, ins: -8, reb: -10, diq: -8, stre: -4 } },
+		// Jump-shooting athlete: jmp+tp wing, the athletic shooter who is neither Glide Athlete nor Relocation Shooter.
+		{ name: "High-Flying Shooter", min: 34, max: 66, w: 0.9, t: ["wing", "shooting", "athletic"], o: { jmp: 14, tp: 14, dnk: 8, spd: 6, ins: -12, stre: -10, pss: -10, drb: -8, oiq: -4 } },
+		// Modern connector wing: passes, defends and spaces at low usage (pss+diq+tp).
+		{ name: "Two-Way Connector Wing", min: 36, max: 67, w: 1.1, t: ["wing", "playmaking", "defense", "shooting"], o: { pss: 12, diq: 12, tp: 10, oiq: 6, dnk: -12, ins: -10, fg: -8, jmp: -6 } },
+		// A strong 3-and-D forward (stre+tp) who guards post-ups rather than ball-handlers.
+		{ name: "Bulky Three-and-D Forward", min: 44, max: 71, w: 1.0, t: ["wing", "shooting", "defense"], o: { tp: 14, stre: 14, diq: 8, ft: 6, spd: -12, drb: -10, jmp: -8, pss: -6 } },
+		// 6'8"-6'10" (48-74) self-creator: fg+tp+drb in the band where wing builds thin out.
+		{ name: "Jumbo Pull-Up Creator", min: 48, max: 74, w: 0.8, t: ["wing", "scoring", "shooting"], o: { fg: 16, tp: 12, drb: 14, pss: 6, ins: -10, reb: -10, stre: -8, diq: -8, spd: -6 } },
+		// Wing-band rim protection with rebounding (jmp+diq+reb), for the 6'7"-6'10" help defender.
+		{ name: "Rim-Protecting Wing", min: 46, max: 72, w: 0.9, t: ["wing", "defense", "athletic", "rebounding"], o: { jmp: 14, diq: 14, reb: 10, stre: 6, drb: -14, tp: -10, pss: -8, fg: -8 } },
+		// Historical: the mid-range/inside forward of the pre-three era (fg+ins+reb, tp -18).
+		{ name: "Pre-Three-Point Forward", min: 40, max: 70, w: 0.6, t: ["wing", "scoring", "rebounding"], o: { fg: 18, ins: 10, reb: 10, oiq: 8, tp: -18, spd: -8, dnk: -8, drb: -6 } },
+		// International/biography: club-system wing back from pro ball (proOrReturned), feel and defense over bounce.
+		{ name: "Club-System Wing", min: 40, max: 70, w: 0.8, pot: -3, bio: { proOrReturned: true }, t: ["wing", "playmaking", "defense"], o: { oiq: 14, pss: 10, diq: 10, tp: 8, jmp: -12, dnk: -12, spd: -8, stre: -6 } },
+		// Biography: freshman scoring wing (bio Freshman, pot +5) - raw feel, real tools.
+		{ name: "Freshman Wing Scorer", min: 34, max: 66, w: 0.8, pot: 5, bio: { years: ["Freshman"] }, t: ["wing", "scoring", "raw"], o: { fg: 14, dnk: 12, drb: 10, jmp: 6, oiq: -14, diq: -12, pss: -8, endu: -6 } },
+		// --- forwards and bigs -------------------------------------------------
+		// A four who shoots and handles (tp+pss+drb) and gives up the glass.
+		{ name: "Stretch Four Playmaker", min: 52, max: 78, w: 0.9, t: ["big", "shooting", "playmaking"], o: { tp: 14, pss: 14, drb: 10, spd: 6, ins: -12, reb: -12, stre: -10, dnk: -6 } },
+		// 6'9"-6'11" (56-80) rebound-and-initiate forward; the h68 band had the fewest wing-tagged builds.
+		{ name: "Point-Forward Rebounder", min: 56, max: 80, w: 0.9, t: ["big", "wing", "playmaking", "rebounding"], o: { reb: 14, pss: 14, drb: 10, spd: 6, tp: -12, ins: -10, stre: -8, jmp: -6, ft: -6 } },
+		// A face-up four who drives through bodies: stre+drb+ins.
+		{ name: "Point-Four Bully", min: 54, max: 80, w: 0.8, t: ["big", "scoring"], o: { stre: 14, drb: 12, ins: 12, fg: 8, tp: -12, diq: -10, pss: -10, jmp: -8, reb: -4 } },
+		// Short-corner/dunker-spot scorer with feel (ins+fg+oiq), no jumper.
+		{ name: "Short-Corner Forward", min: 56, max: 80, w: 0.9, t: ["big", "scoring"], o: { ins: 14, fg: 10, oiq: 10, dnk: 6, tp: -14, drb: -12, pss: -12, spd: -6 } },
+		// Strength-led dunker-spot four who rebounds (dnk+stre+reb); low-usage rim finisher.
+		{ name: "Dunker-Spot Four", min: 54, max: 80, w: 1.0, t: ["big", "rebounding", "scoring"], o: { dnk: 18, stre: 10, reb: 10, oiq: 8, tp: -14, drb: -12, pss: -12, spd: -6 } },
+		// Undersized five (46-66) who makes plays out of the short roll: pss+reb+stre.
+		{ name: "Short-Roll Small-Ball Five", min: 46, max: 66, w: 0.9, t: ["big", "playmaking", "rebounding"], o: { pss: 14, reb: 14, stre: 10, oiq: 6, tp: -12, spd: -8, jmp: -10, dnk: -6 } },
+		// Defensive hub big: pss+diq together, the passing-and-defending five.
+		{ name: "Two-Way Playmaking Big", min: 56, max: 100, w: 0.8, t: ["big", "playmaking", "defense"], o: { pss: 14, diq: 14, oiq: 8, reb: 8, ins: -10, fg: -10, dnk: -8, spd: -8, tp: -6 } },
+		// DHO hub: stre+pss five who screens and hands off, not a short-roll driver (Inverted Screener has drb).
+		{ name: "Dribble-Handoff Big", min: 58, max: 100, w: 0.9, t: ["big", "playmaking"], o: { pss: 14, stre: 14, oiq: 10, ft: 6, spd: -12, jmp: -12, tp: -8, dnk: -6 } },
+		// Big who attacks closeouts off the bounce: drb+spd+dnk with no glass.
+		{ name: "Dribble-Drive Big", min: 56, max: 90, w: 0.8, t: ["big", "athletic", "scoring"], o: { drb: 14, spd: 12, dnk: 10, fg: 6, ins: -10, reb: -12, stre: -8, pss: -6, tp: -6 } },
+		// Modern shooting rim protector (tp+diq+jmp) in the 56-100 band.
+		{ name: "Stretch Rim Protector", min: 56, max: 100, w: 0.9, pot: 2, t: ["big", "shooting", "defense"], o: { tp: 14, diq: 14, jmp: 8, ft: 6, ins: -12, drb: -12, pss: -12, stre: -6 } },
+		// Strength-based stretch big who guards the post (tp+stre), not a switch big.
+		{ name: "Post-Defending Stretch Big", min: 58, max: 100, w: 0.9, t: ["big", "shooting", "defense"], o: { tp: 14, stre: 14, diq: 8, reb: 6, spd: -14, drb: -10, jmp: -10, pss: -8, dnk: -4 } },
+		// Mid-range shooting big who rebounds: fg+reb, no dunk.
+		{ name: "Jump-Shooting Rebounder", min: 56, max: 100, w: 1.0, t: ["big", "scoring", "rebounding"], o: { fg: 14, reb: 14, ft: 8, oiq: 6, dnk: -12, spd: -12, pss: -10, tp: -8, drb: -8 } },
+		// Mid-post scorer: fg+ins with feel, no range and no lift.
+		{ name: "Mid-Post Big", min: 56, max: 96, w: 0.9, t: ["big", "scoring"], o: { fg: 16, ins: 12, oiq: 8, stre: 6, tp: -14, spd: -10, jmp: -8, pss: -8, reb: -6 } },
+		// --- seven-footers (min 74-78) -----------------------------------------
+		// No build gated min>=72 carried playmaking; the seven-foot passer from the high post.
+		{ name: "Seven-Foot Playmaker", min: 74, max: 100, w: 0.6, t: ["big", "playmaking", "scoring"], o: { pss: 18, fg: 12, oiq: 10, drb: 8, stre: -10, jmp: -10, dnk: -10, reb: -8, diq: -6 } },
+		// Low-post passing seven-footer: ins+pss, the back-to-the-basket hub.
+		{ name: "Seven-Foot Post Passer", min: 76, max: 100, w: 0.6, t: ["big", "playmaking", "scoring"], o: { ins: 14, pss: 14, oiq: 8, stre: 6, spd: -14, jmp: -10, tp: -12, dnk: -6 } },
+		// Drop-coverage seven-footer who is also the outlet passer: diq+pss.
+		{ name: "Seven-Foot Drop Big Who Passes", min: 74, max: 100, w: 0.7, t: ["big", "defense", "playmaking"], o: { diq: 16, pss: 12, oiq: 8, reb: 8, spd: -14, drb: -10, tp: -10, dnk: -8 } },
+		// Rare (w 0.45, pot +4) shooting, shot-blocking seven-footer; only one min>=72 shooting build existed.
+		{ name: "Unicorn Seven-Footer", min: 76, max: 100, w: 0.45, pot: 4, t: ["big", "shooting", "defense", "athletic"], o: { tp: 16, jmp: 12, diq: 12, ft: 8, spd: 6, stre: -14, ins: -10, pss: -8, reb: -6, endu: -6 } },
+		// Touch seven-footer: ft+fg, avoids contact; second center-gated shooting build.
+		{ name: "Soft-Touch Seven-Footer", min: 76, max: 100, w: 0.8, t: ["big", "shooting", "scoring"], o: { ft: 16, fg: 14, ins: 8, oiq: 6, stre: -12, reb: -10, jmp: -8, diq: -8, pss: -8 } },
+		// Perimeter-preferring seven-footer: fg/tp/jmp with stre -16 and no glass.
+		{ name: "Seven-Footer Who Avoids Contact", min: 74, max: 100, w: 0.7, t: ["big", "shooting", "raw"], o: { fg: 12, tp: 10, jmp: 8, ft: 8, stre: -16, reb: -12, ins: -10, diq: -6, pss: -6 } },
+		// Seven-footer with wing skills (drb+fg+tp) and no interior game.
+		{ name: "Seven-Footer Who Plays Small", min: 74, max: 100, w: 0.6, t: ["big", "scoring", "raw"], o: { drb: 14, fg: 12, tp: 8, spd: 6, reb: -14, stre: -12, ins: -10, diq: -6 } },
+		// Switch-capable seven-footer: spd+endu+diq at the top of the height range.
+		{ name: "Mobile Seven-Footer", min: 74, max: 100, w: 1.0, t: ["big", "athletic", "defense"], o: { spd: 18, endu: 12, diq: 10, jmp: 6, stre: -12, ins: -10, ft: -8, tp: -8, pss: -6 } },
+		// Transition seven-footer: endu+spd+dnk.
+		{ name: "Floor-Running Seven-Footer", min: 74, max: 100, w: 0.9, t: ["big", "athletic", "durability"], o: { endu: 16, spd: 12, dnk: 10, reb: 6, stre: -12, ins: -10, tp: -10, ft: -8, pss: -6 } },
+		// Durable post seven-footer (inj 0.7, endu +16): center-gated durability was all defensive.
+		{ name: "Iron Seven-Footer", min: 74, max: 100, w: 0.9, inj: 0.7, t: ["big", "durability", "scoring"], o: { endu: 16, ins: 12, ft: 10, oiq: 6, jmp: -14, spd: -10, tp: -12, drb: -8 } },
+		// Biography/medical: injury-prone 7'2"+ post scorer (inj 1.6, endu -16).
+		{ name: "Brittle Giant", min: 78, max: 100, w: 0.7, inj: 1.6, t: ["big", "durability", "scoring"], o: { ins: 18, reb: 10, oiq: 8, ft: 6, endu: -16, spd: -12, jmp: -8, pss: -8, tp: -6 } },
+		// Rebounding+defense seven-footer on bounce (jmp) rather than strength.
+		{ name: "Seven-Foot Glass Cleaner", min: 74, max: 100, w: 0.7, t: ["big", "defense", "rebounding"], o: { reb: 16, diq: 14, jmp: 10, endu: 6, stre: -10, ins: -12, fg: -10, drb: -10, pss: -4 } },
+		// Low-usage rim-runner seven-footer with a negative glass offset.
+		{ name: "Seven-Foot Lob Catcher Who Cannot Rebound", min: 76, max: 100, w: 0.6, t: ["big", "athletic"], o: { dnk: 20, jmp: 12, spd: 8, reb: -12, tp: -14, drb: -10, pss: -10, ft: -6 } },
+		// Athletic, raw seven-footer (pot +6) whose tools are spd/jmp, not length alone.
+		{ name: "Raw Seven-Foot Project", min: 76, max: 100, w: 1.0, pot: 6, t: ["big", "raw", "athletic"], o: { spd: 12, jmp: 12, endu: 8, dnk: 8, oiq: -16, ins: -12, ft: -10, pss: -8, fg: -6 } },
+		// Biography: freshman seven-foot bruiser (bio Freshman, pot +6), raw feel.
+		{ name: "Towering Freshman Center", min: 76, max: 100, w: 0.8, pot: 6, bio: { years: ["Freshman"] }, t: ["big", "raw", "rebounding"], o: { stre: 12, reb: 12, ins: 10, dnk: 8, oiq: -16, ft: -12, pss: -8, spd: -8 } },
+		// --- everyone ----------------------------------------------------------
+		// Biography: graduate transfer brought in for one role (bio Graduate, pot -5).
+		{ name: "Grad-Transfer Specialist", min: 0, max: 100, w: 0.8, pot: -5, bio: { years: ["Graduate"] }, t: ["shooting", "defense"], o: { tp: 14, diq: 10, oiq: 10, ft: 8, spd: -12, jmp: -12, dnk: -10, drb: -6 } },
+		// Biography: freshman whose defense is ahead of his offense (bio Freshman, pot +3).
+		{ name: "Freshman Ahead on Defense", min: 0, max: 100, w: 0.8, pot: 3, bio: { years: ["Freshman"] }, t: ["defense", "raw"], o: { diq: 16, endu: 10, stre: 8, reb: 6, oiq: -10, fg: -12, tp: -10, drb: -6 } },
 		{ name: "Balanced", min: 0, max: 100, w: 1.0, t: [], o: {} },
 	];
 	/* TAGS DERIVED FROM THE VECTOR, UNIONED WITH THE HAND LIST.
@@ -2415,6 +2556,14 @@
 			traits: { medical: 1.6, background: 1.6, character: 0.7 },
 			c: { injuryRate: 1.6, upsetFactor: 1.5, realignmentRate: 1,
 				coachTurnover: 175, transferShare: 60, bluebloodDownYears: 4 } },
+		{ name: "glass-eaters", w: 0.6, label: "the year everybody crashed the boards",
+			m: { rebounding: 2.4, big: 1.3, shooting: 0.7 }, traits: { rebounding: 1.8 }, c: { pace: 66 } },
+		{ name: "point-guard year", w: 0.6, label: "a class of floor generals",
+			m: { playmaking: 2.4, guard: 1.6, big: 0.7 }, traits: { passing: 1.8 } },
+		{ name: "late bloomers", w: 0.55, label: "the year the upperclassmen grew",
+			m: { durability: 1.3, raw: 0.7 }, c: { freshmanShare: 16, potBias: 0.6, potSpread: 2.0 } },
+		{ name: "finishers' year", w: 0.55, label: "everybody could finish at the rim",
+			m: { athletic: 1.6, scoring: 1.4, shooting: 0.7 }, traits: { finishing: 1.8, athleticism: 1.3 } },
 	];
 
 	/* The config bend a flavor applies to the whole class. Returned separately

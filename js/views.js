@@ -51,6 +51,7 @@
 		{ key: "pos", label: "Pos", num: false },
 		{ key: "year", label: "Year", num: false },
 		{ key: "board", label: "Brd", num: true, title: "Position on the mock draft board" },
+		{ key: "posRank", label: "Pos#", num: true, title: "Rank on the board among his position group (guards, wings, forwards, bigs). \u25c6 marks the best at his position who was not a five-star recruit" },
 		{ key: "move", label: "±", num: true, title: "Movement from the preseason board" },
 		{ key: "newOvr", label: "Ovr", num: true },
 		{ key: "newPot", label: "Pot", num: true },
@@ -466,6 +467,8 @@
 			if (ev.detail) line += " — " + ev.detail;
 			out.push(line);
 		}
+		const posLine = posStandingLine(p, res);
+		if (posLine) out.push(posLine);
 		if (p.surprise) out.push("Anomaly: " + (p.surprise.label || p.surprise.name));
 		if (p.stats) {
 			out.push("Season: " + n1(p.stats.ppg) + " ppg, " + n1(p.stats.rpg) + " rpg, " +
@@ -488,6 +491,43 @@
 		if ((p.awards || []).length) out.push("Honors: " + p.awards.slice(0, 4).join("; "));
 		return out;
 	}
+	/* U4: "1st of 11 guards in this class · 3-star recruit" — the line the
+	   "?" popover and the player page share. */
+	const POS_GROUP_OF = { PG: "guard", SG: "guard", G: "guard", GF: "wing", SF: "wing",
+		F: "forward", PF: "forward", FC: "big", C: "big" };
+	function posGroupSize(p, res) {
+		const g = p.posGroup;
+		if (!g || !res || !res.board) return 0;
+		let n = 0;
+		for (const q of res.board) if (q.posGroup === g) n++;
+		return n;
+	}
+	function ordinalWord(n) {
+		const s = ["th", "st", "nd", "rd"], v = n % 100;
+		return n + (s[(v - 20) % 10] || s[v] || s[0]);
+	}
+	function posStandingLine(p, res) {
+		if (!p.posBoardRank || !p.posGroup) return "";
+		const n = posGroupSize(p, res);
+		const stars = p.recruiting && p.recruiting.stars;
+		return ordinalWord(p.posBoardRank) + (n ? " of " + n + " " + p.posGroup + (n === 1 ? "" : "s") : " " + p.posGroup) +
+			" in this class" + (stars ? " · " + stars + "-star recruit" : "");
+	}
+	/* U4: the high-school positional rank, labelled as history so it does
+	   not read as where he stands now. */
+	function hsPosRankText(rec) {
+		return rec && rec.posRank ? " · No. " + rec.posRank + " " + rec.posLabel + " in his HS class" : "";
+	}
+	function posRankTitle(p) {
+		const stars = p.recruiting && p.recruiting.stars;
+		return "No. " + p.posBoardRank + " " + p.posGroup + " on the board (No. " +
+			p.boardRank + " overall)" + (p.posLeader
+			? " \u2014 the best " + p.posGroup + " in the class" + (p.posGem
+				? (stars ? ", and only a " + stars + "-star recruit" : ", and never a ranked recruit")
+				: "")
+			: "");
+	}
+
 	function whyButton(p, res) {
 		const btn = el("button", "whybtn tiny", "?");
 		btn.type = "button";
@@ -1064,6 +1104,28 @@
 
 	/* Q4. The prospects either side of this one, in board order (the board
 	   if the class has one, else the file's order). Wraps at the ends. */
+	/* Q16: the nearest prospects by cosine similarity over the ratings,
+	   centred on the class mean (the normalisation the archetype table is
+	   de-duplicated with), weighted by height overlap: two inches apart
+	   costs nothing, eight costs half. */
+	function closestProspects(res, p, n) {
+		const keys = (global.BBGM && global.BBGM.RATING_KEYS || []).filter((k) => k !== "hgt");
+		const pl = (res.players || []).filter((x) => x && x.newRatings);
+		if (!p || !p.newRatings || pl.length < 2 || !keys.length) return [];
+		const mean = {};
+		for (const k of keys) mean[k] = pl.reduce((a, x) => a + (x.newRatings[k] || 0), 0) / pl.length;
+		const vec = (x) => keys.map((k) => (x.newRatings[k] || 0) - mean[k]);
+		const norm = (v) => Math.sqrt(v.reduce((a, b) => a + b * b, 0)) || 1;
+		const pv = vec(p), pn = norm(pv);
+		return pl.filter((x) => x.key !== p.key).map((x) => {
+			const v = vec(x);
+			const cos = v.reduce((a, b, i) => a + b * pv[i], 0) / (norm(v) * pn);
+			const dh = Math.abs((x.newHgtInches || 0) - (p.newHgtInches || 0));
+			const hw = dh <= 2 ? 1 : Math.max(0, 1 - (dh - 2) / 12);
+			return { p: x, sim: cos * hw };
+		}).sort((a, b) => b.sim - a.sim).slice(0, n || 3).filter((x) => x.sim > 0);
+	}
+
 	function neighborKeys(res, key) {
 		const list = (res.board && res.board.length ? res.board : res.players) || [];
 		const i = list.findIndex((x) => x.key === key);
@@ -1176,32 +1238,45 @@
 			let leagueDropped = false;
 			let leagueBytes = 0;
 			list.forEach((f, i) => {
-				const lg = f.league && f.league.data && typeof f.league.data === "object"
-					? f.league : null;
-				if (!lg) return;
-				if (!at.has(lg.data)) {
-					// false in the cache: known to break the cap on its own.
-					let json = cache && cache.has(lg.data) ? cache.get(lg.data) : undefined;
-					if (json === undefined) {
-						json = JSON.stringify(lg.data);
-						if (cache) cache.set(lg.data, json.length > max ? false : json);
-						if (json.length > max) json = false;
-					}
-					if (json === false) at.set(lg.data, -1);
-					else {
-						at.set(lg.data, leagues.length);
-						leagues.push({ name: String(lg.name || ""), json });
-						leagueBytes += json.length;
+				const lg = f.league && typeof f.league === "object" ? f.league : null;
+				/* The league as the FILE it was dropped as (audit L5): IndexedDB
+				   stores a Blob natively, so nothing is stringified on the main
+				   thread, the size is the file's own (a .gz is 6-7x smaller
+				   than its JSON) and the decision is made without measuring. */
+				const blob = lg && typeof Blob === "function" && lg.blob instanceof Blob ? lg.blob : null;
+				const data = lg && lg.data && typeof lg.data === "object" ? lg.data : null;
+				const key = blob || data;
+				if (!key) return;
+				if (!at.has(key)) {
+					if (blob) {
+						const n = Number(blob.size) || 0;
+						if (n > max) at.set(key, -1);
+						else {
+							at.set(key, leagues.length);
+							leagues.push({ name: String(lg.name || ""), blob, gz: !!lg.gz });
+							leagueBytes += n;
+						}
+					} else {
+						/* A league with no file behind it (an older session's).
+						   Its string is not kept in the cache: a league held
+						   twice for the whole session was the +105 MB. */
+						const json = JSON.stringify(data);
+						if (json.length > max) at.set(key, -1);
+						else {
+							at.set(key, leagues.length);
+							leagues.push({ name: String(lg.name || ""), json });
+							leagueBytes += json.length;
+						}
 					}
 				}
-				recFiles[i].league = at.get(lg.data);
+				recFiles[i].league = at.get(key);
 			});
 			if (bytes + leagueBytes > max) {
 				leagues.length = 0;
 				for (const rf of recFiles) rf.league = -1;
 				leagueBytes = 0;
 			}
-			leagueDropped = list.some((f) => f.league && f.league.data) &&
+			leagueDropped = list.some((f) => f.league && (f.league.data || f.league.blob)) &&
 				recFiles.every((rf) => rf.league === -1);
 			const total = bytes + leagueBytes;
 			const sig = list.map((f, i) => (f.name || "") + "|" + (f.fingerprint || "") + "|" +
@@ -1232,7 +1307,11 @@
 		try {
 			const leagues = (Array.isArray(rec.leagues) ? rec.leagues : []).map((l) =>
 				(l && typeof l.json === "string"
-					? { name: String(l.name || ""), data: JSON.parse(l.json) } : null));
+					? { name: String(l.name || ""), data: JSON.parse(l.json) }
+					// A stored file is read again by the page (js/leaguescan.js).
+					: l && typeof Blob === "function" && l.blob instanceof Blob
+						? { name: String(l.name || ""), data: null, blob: l.blob, gz: !!l.gz }
+						: null));
 			const out = [];
 			for (const f of rec.files) {
 				if (!f || typeof f.json !== "string") return null;
@@ -1334,92 +1413,10 @@
 			lines: names.length, duplicates };
 	}
 
-	/* Q11. The locks CSV, parsed rows in, a plan out. Columns (matched by
-	   header, any order): key and/or name to find the prospect; then
-	   ovr, pot, archetype, college, newname (the new name), hgtinches,
-	   weight and the fifteen ratings hgt, stre, spd, jmp, endu, ins, dnk, ft,
-	   fg, tp, oiq, diq, drb, pss, reb. An empty cell is no lock. Anything out
-	   of range or unknown is refused and listed, never half-applied. */
-	function planLockRows(rows, players, lists) {
-		if (!rows || !rows.length) return { error: "That CSV has no rows." };
-		const head = rows[0].map((h) => String(h).trim().toLowerCase());
-		const idx = (name) => head.indexOf(name);
-		const byKey = {};
-		const byName = {};
-		for (const p of players) {
-			byKey[p.key] = p;
-			byName[p.name.toLowerCase()] = p;
-		}
-		const cols = {
-			key: idx("key"), name: idx("name"), ovr: idx("ovr"), pot: idx("pot"),
-			archetype: idx("archetype"), college: idx("college"), newname: idx("newname"),
-			hgtinches: idx("hgtinches"), weight: idx("weight"),
-		};
-		if (cols.key < 0 && cols.name < 0) {
-			return { error: "The CSV needs a `key` or `name` column to match players." };
-		}
-		const L = lists || {};
-		const applied = [];
-		const unmatched = [];
-		const rejected = [];
-		let total = 0;
-		for (let i = 1; i < rows.length; i++) {
-			const r = rows[i];
-			if (!r.length || r.every((c) => !String(c).trim())) continue;
-			total++;
-			const cell = (c) => (c >= 0 && r[c] !== undefined ? String(r[c]).trim() : "");
-			const k = cols.key >= 0 ? cell(cols.key) : null;
-			const nm = cols.name >= 0 ? cell(cols.name).toLowerCase() : null;
-			const p = (k && byKey[k]) || (nm && byName[nm]);
-			if (!p) { unmatched.push(k || nm); continue; }
-			const patch = {};
-			// An empty cell is no lock, not a lock at 0 (Number("") is 0).
-			const num = (c) => {
-				const t = cell(c);
-				const v = Number(t);
-				return t !== "" && Number.isFinite(v) ? v : null;
-			};
-			if (num(cols.ovr) !== null) patch.ovr = num(cols.ovr);
-			if (num(cols.pot) !== null) patch.pot = num(cols.pot);
-			/* A name the tool does not know is refused here, not applied:
-			   an unknown archetype fell back to the rolled build while the
-			   lock badge said otherwise, and an unknown school was written
-			   verbatim into the export with no team behind it. */
-			const a = cell(cols.archetype);
-			if (a) {
-				if (!L.archetypes || L.archetypes.has(a)) patch.archetype = a;
-				else rejected.push(p.name + ": unknown archetype \u201c" + a + "\u201d");
-			}
-			const c = cell(cols.college);
-			if (c) {
-				if (!L.schools || L.schools.has(c)) patch.college = c;
-				else rejected.push(p.name + ": unknown school \u201c" + c + "\u201d");
-			}
-			const nn = cell(cols.newname).replace(/\s+/g, " ").slice(0, 100).trim();
-			if (nn && nn !== p.name) patch.name = nn;
-			const h = num(cols.hgtinches);
-			if (h !== null) {
-				if (h >= 58 && h <= 96) patch.hgtInches = Math.round(h);
-				else rejected.push(p.name + ": hgtinches " + h + " is outside 58-96");
-			}
-			const w = num(cols.weight);
-			if (w !== null) {
-				if (w >= 120 && w <= 400) patch.weight = Math.round(w);
-				else rejected.push(p.name + ": weight " + w + " is outside 120-400");
-			}
-			const ratings = {};
-			for (const rk of RATING_COLUMN_KEYS) {
-				const v = num(idx(rk));
-				if (v === null) continue;
-				if (v >= 0 && v <= 100) ratings[rk] = Math.round(v);
-				else rejected.push(p.name + ": " + rk + " " + v + " is outside 0-100");
-			}
-			if (Object.keys(ratings).length) patch.ratings = ratings;
-			if (!Object.keys(patch).length) continue;
-			applied.push({ player: p, patch });
-		}
-		return { applied, unmatched, rejected, total };
-	}
+	/* Q11. The locks CSV, parsed rows in, a plan out. The parser lives in
+	   js/engine.js (Engine.planLockRows) now, so the command line's --locks
+	   reads the same columns the page writes (audit 2026-10-10 B10). */
+	const planLockRows = (rows, players, lists) => global.Engine.planLockRows(rows, players, lists);
 
 	/* One lock patch as a line for the import preview. */
 	function lockPatchText(patch) {
@@ -2008,6 +2005,12 @@
 	}
 
 	const SKILL_TAGS = ["3", "A", "B", "Di", "Dp", "Po", "Ps", "R", "V"];
+	// U25: BBGM's skill codes in words, for the chips' tooltips.
+	const SKILL_NAMES = {
+		"3": "Three-point shooter", A: "Athlete", B: "Ball handler",
+		Di: "Interior defender", Dp: "Perimeter defender", Po: "Post scorer",
+		Ps: "Passer", R: "Rebounder", V: "Volume scorer",
+	};
 	const SEARCH_HELP = "Plain words match the name, school, build, class year and honors. " +
 		"Or: pos:C school:Duke arch:\"Rim Protector\" year:sr skill:3 tag:sleeper " +
 		"ovr>=55 age<=20 ppg>15 ovr:50-60 is:locked is:starred is:transfer — " +
@@ -2157,7 +2160,7 @@
 			const b = el("button", "chip" + (on ? " on" : ""), sk);
 			b.type = "button";
 			b.setAttribute("aria-pressed", on ? "true" : "false");
-			b.title = "Only players with the " + sk + " skill" + (on ? " (on)" : "");
+			b.title = sk + " \u2014 " + (SKILL_NAMES[sk] || sk) + ": only players with this skill" + (on ? " (on)" : "");
 			b.addEventListener("click", () => {
 				const cur = st.filter.skills || (st.filter.skills = []);
 				const i = cur.indexOf(sk);
@@ -2327,7 +2330,7 @@
 		   looks short has a number on screen explaining why. */
 		const active = describeFilters();
 		if (active.length) {
-			const clear = el("button", "chip", "Clear " +
+			const clear = el("button", "chip clearfilters", "Clear " +
 				(active.length === 1 ? "1 filter" : active.length + " filters"));
 			clear.type = "button";
 			clear.title = "Active: " + active.join(" · ");
@@ -2649,21 +2652,33 @@
 		/* Realignment, the season's events and draft day used to be three more
 		   ·-joined walls here. They are proper dated articles on the News tab
 		   now, with every player and team mention a link. */
-		/* On a phone the filters, presets, range rows and bulk bar were three
-		   screens of controls above the first prospect. They fold into one
-		   "Filters (n)" disclosure there; on a wider screen the fold is
-		   always open and its summary is hidden (see .filterfold). */
-		const phone = typeof window !== "undefined" && window.innerWidth <= CARD_BREAKPOINT;
-		const fold = el("details", "filterfold");
-		fold.open = !phone || !!uiMemo.filtersOpen;
-		fold.addEventListener("toggle", () => { if (phone) uiMemo.filtersOpen = fold.open; });
+		/* U24: search, position, the column presets and "Clear n filters"
+		   stay in view; everything else folds behind "Filters (n active)" at
+		   every width, so the table starts near the top of the screen. The
+		   bulk bar sits above the table only while rows are selected. */
 		const nActive = describeFilters().length;
-		fold.appendChild(el("summary", null, "Filters" + (nActive ? " (" + nActive + ")" : "") +
-			" · columns · bulk edit"));
-		fold.appendChild(filterBar(res));
+		const bar = filterBar(res);
+		const quick = el("div", "filters quickfilters");
+		for (const sel of ["#prospectSearch", 'select[aria-label="Filter by position"]',
+			".presetchips", ".clearfilters"]) {
+			const n = bar.querySelector(sel);
+			if (n) quick.appendChild(n);
+		}
+		const fold = el("details", "filterfold");
+		fold.open = !!uiMemo.filtersOpen;
+		fold.addEventListener("toggle", () => { uiMemo.filtersOpen = fold.open; });
+		fold.appendChild(el("summary", null, "Filters" + (nActive ? " (" + nActive + " active)" : "") +
+			" · columns · units"));
+		fold.appendChild(bar);
 		fold.appendChild(rangeBar(res));
-		fold.appendChild(bulkBar(res));
-		view.appendChild(fold);
+		const bulk = bulkBar(res);
+		const picked = Object.keys(st.selected).length > 0;
+		if (!picked) fold.appendChild(bulk);
+		const head = el("div", "filterhead");
+		head.appendChild(quick);
+		head.appendChild(fold);
+		view.appendChild(head);
+		if (picked) view.appendChild(bulk);
 
 		/* On a phone the card layout picks its own columns (see CARD_COLUMNS):
 		   the desktop selection is a choice about a wide table and applying it
@@ -2792,6 +2807,13 @@
 				case "name":
 					td = el("td", "sticky");
 					td.appendChild(document.createTextNode(p.name));
+					if (p.posLeader) {
+						const b = el("span", "tag posbest" + (p.posGem ? " gem" : ""),
+							"Best " + p.posGroup);
+						b.title = posRankTitle(p);
+						td.appendChild(document.createTextNode(" "));
+						td.appendChild(b);
+					}
 					td.appendChild(whyButton(p, res));
 					sortVals.name = p.name;
 					break;
@@ -2807,6 +2829,17 @@
 					td = el("td", "num", p.boardRank === undefined ? "" : String(p.boardRank));
 					sortVals.board = p.boardRank;
 					break;
+				case "posRank": {
+					td = el("td", "num");
+					if (p.posBoardRank) {
+						td.appendChild(document.createTextNode(
+							(p.posGroup || "").charAt(0).toUpperCase() + p.posBoardRank));
+						if (p.posGem) td.appendChild(el("span", "gem", " \u25c6"));
+						td.title = posRankTitle(p);
+					}
+					sortVals.posRank = p.posBoardRank;
+					break;
+				}
 				case "move": {
 					td = el("td", "num");
 					const m = p.stockMove || 0;
@@ -3496,7 +3529,14 @@
 			return;
 		}
 		if (A().state.team) {
-			view.appendChild(teamPage(view, res, A().state.team));
+			/* Coach, conference and team-versus-team pages ride on the team
+			   destination with a prefix, so history, refresh and Back work the
+			   same way (audit Q11, Q12, Q13). */
+			const tk = String(A().state.team);
+			if (/^coach:/.test(tk)) view.appendChild(coachPage(res, tk.slice(6)));
+			else if (/^conf:/.test(tk)) view.appendChild(conferencePage(res, tk.slice(5)));
+			else if (/^vs:/.test(tk)) view.appendChild(versusPage(res, tk.slice(3)));
+			else view.appendChild(teamPage(view, res, A().state.team));
 			return;
 		}
 		view.appendChild(el("h3", null, "AP Top 25"));
@@ -3634,6 +3674,7 @@
 			// and records — the data was always there, only the final week
 			// was ever shown.
 			const wkSel = el("select");
+			wkSel.setAttribute("aria-label", "Poll week");
 			hist.forEach((wk, i) => {
 				const o = el("option", null,
 					wk.label || (wk.week === 0 ? "Preseason" : "Week " + wk.week));
@@ -3854,10 +3895,27 @@
 
 	/* The season as dated articles (see js/news.js), replacing the four
 	   ·-joined strips that used to sit above the prospect table. */
+	/* News.build per result and followed-program list, built once (audit
+	   P8): it ran every template on every visit to the tab and after every
+	   debounced filter keystroke — the heaviest single view. The articles
+	   are a pure function of the result (its seed-derived stream) and the
+	   followed list. */
+	const newsCache = new WeakMap();
+	function newsFor(res, followed) {
+		if (!global.News) return [];
+		let byKey = newsCache.get(res);
+		if (!byKey) { byKey = new Map(); newsCache.set(res, byKey); }
+		const key = JSON.stringify(followed === undefined ? null : followed);
+		if (!byKey.has(key)) {
+			if (byKey.size > 8) byKey.clear();
+			byKey.set(key, global.News.build(res, { followed }));
+		}
+		return byKey.get(key).slice();
+	}
 	function viewNews(view, res) {
 		const stN = A().state;
 		const followed = stN.cfg.universe && stN.universe ? stN.universe.followed : null;
-		const articles = global.News ? global.News.build(res, { followed }) : [];
+		const articles = res && typeof res === "object" ? newsFor(res, followed) : [];
 		view.appendChild(el("h3", null, "The season, as it happened"));
 		view.appendChild(el("p", "legendline",
 			"Every article is read off results the sim actually produced — " +
@@ -3876,6 +3934,7 @@
 		const f = st.newsFilter;
 		const bar = el("div", "filters");
 		const kindSel = el("select");
+		kindSel.setAttribute("aria-label", "Article kind");
 		kindSel.appendChild(new Option("every kind", ""));
 		const groups = {};
 		for (const a of articles) {
@@ -3894,6 +3953,7 @@
 		const box = el("input");
 		box.type = "search";
 		box.placeholder = "team or player…";
+		box.setAttribute("aria-label", "Filter articles by team or player");
 		box.value = f.text;
 		box.addEventListener("input", () => { f.text = box.value; A().render(); });
 		bar.appendChild(box);
@@ -4153,6 +4213,7 @@
 	   Read off Universe.registryOf, which is derived from results the chain
 	   already has; nothing here re-simulates. */
 	const REGISTRY_ROWS = 40;
+	const regSearch = { q: "" };
 	function registrySection(view, u) {
 		const reg = u.registry;
 		/* SAY WHY IT IS EMPTY, RATHER THAN RENDERING NOTHING.
@@ -4173,6 +4234,44 @@
 					"chain finishes; run the universe to fill it in.");
 			}
 			return;
+		}
+		/* Search everyone (audit Q25), not only the multi-season men below:
+		   "what happened to that kid from 2031?" */
+		{
+			const box = el("div", "filters registrysearch");
+			const inp = el("input");
+			inp.type = "search";
+			inp.id = "registrySearch";
+			inp.placeholder = "Search everyone in this world by name or school";
+			inp.setAttribute("aria-label", "Search the universe's players");
+			inp.value = regSearch.q;
+			const out = el("div", "registryhits");
+			const paint = () => {
+				regSearch.q = inp.value;
+				out.innerHTML = "";
+				for (const x of global.Universe.searchRegistry(reg, inp.value, 30)) {
+					const d = x.draft || {};
+					const line = el("div");
+					const b = el("button", "linky", x.name || "?");
+					b.type = "button";
+					b.addEventListener("click", () => {
+						if (Number.isFinite(x.fileIndex) && A().showPlayerInFile) {
+							const key = String(x.id).split("/").slice(1).join("/") || x.id;
+							A().showPlayerInFile(x.fileIndex, key);
+						}
+					});
+					line.appendChild(b);
+					line.appendChild(document.createTextNode(" — " + (d.season || "?") + " class, " +
+						(d.school || d.club || "?") + (d.slot ? ", went No. " + d.slot : "") +
+						" · " + global.Universe.proText(global.Universe.proOutcome(x))));
+					out.appendChild(line);
+				}
+			};
+			inp.addEventListener("input", paint);
+			box.appendChild(inp);
+			view.appendChild(box);
+			view.appendChild(out);
+			if (regSearch.q) paint();
 		}
 		const people = Object.keys(reg).map((id) => reg[id])
 			.filter((x) => x.span >= 2)
@@ -4341,7 +4440,36 @@
 		view.appendChild(cm);
 	}
 
+	/* All-decade teams and the hindsight redraft (audit Q27, Q28), from the
+	   registry. */
+	function registryRecords(view, u) {
+		const U = global.Universe;
+		if (!u || !u.registry || !U || !U.allDecadeTeams) return;
+		const dec = U.allDecadeTeams(u.registry).filter((d) => d.team.length);
+		if (dec.length) {
+			const c = el("div", "card alldecade");
+			c.appendChild(el("h4", null, "All-decade teams"));
+			c.appendChild(el("div", "note", dec.map((d) => d.decade + "s: " +
+				d.team.map((m) => m.name + " (" + m.school + ")").join(", ")).join("\n")));
+			view.appendChild(c);
+		}
+		const h = U.hindsight(u.registry);
+		if (h.classes.length) {
+			const c = el("details", "card hindsight");
+			c.appendChild(el("summary", null, "Hindsight redraft"));
+			c.appendChild(el("div", "note", h.classes.map((k) => k.season + ": " + k.top5.map((m) =>
+				m.redraft + ". " + m.name + " (went " + (m.slot ? "No. " + m.slot : "undrafted") + ", " + m.pro.tier + ")")
+				.join("; ")).join("\n") +
+				(h.steals.length ? "\n\nBiggest steals: " + h.steals.map((m) => m.season + " " + m.name +
+					" (" + (m.slot ? "No. " + m.slot : "undrafted") + ", " + m.pro.tier + ")").join("; ") : "") +
+				(h.busts.length ? "\nBiggest busts: " + h.busts.map((m) => m.season + " " + m.name +
+					" (No. " + m.slot + ")").join("; ") : "")));
+			view.appendChild(c);
+		}
+	}
+
 	function recordsSection(view, rec, u) {
+		registryRecords(view, u);
 		view.appendChild(el("h4", null, "Records book"));
 		view.appendChild(el("p", "legendline",
 			"All-time across this universe — every line is derived from the " +
@@ -4764,6 +4892,7 @@
 		}
 		sec.appendChild(bar);
 		programHistoryBlock(sec, chosen, all[chosen], { heading: "h5", link: true });
+		programAlumniBlock(sec, chosen);
 		view.appendChild(sec);
 	}
 
@@ -4814,6 +4943,64 @@
 		table.appendChild(tb);
 		wrap.appendChild(table);
 		view.appendChild(wrap);
+	}
+
+	/* ALUMNI / DRAFTED FROM (UV11): who the program sent to the draft and
+	   who played there, from the registry (Universe.programAlumni), with a
+	   draft-year filter. A real pro career (UV12, a league's pro history) is
+	   marked as such; the seeded one is "projected". */
+	function programAlumniBlock(box, name) {
+		const st = A().state;
+		const u = st.universe;
+		if (!u || !u.registry || !global.Universe || !global.Universe.programAlumni) return;
+		const all = global.Universe.programAlumni(u, name);
+		if (!all.length) return;
+		const head = el("h5", null, "Alumni / drafted from " + name);
+		box.appendChild(head);
+		const years = Array.from(new Set(all.map((x) => x.draftSeason).filter(Number.isFinite)))
+			.sort((a, b) => b - a);
+		const pick = st.universeAlumniYear || {};
+		const want = Number.isFinite(pick[name]) ? pick[name] : null;
+		if (years.length > 1) {
+			const sel = el("select");
+			sel.setAttribute("aria-label", "Draft year");
+			sel.appendChild(new Option("every draft", ""));
+			for (const y of years) sel.appendChild(new Option(y + " draft", String(y)));
+			sel.value = want === null ? "" : String(want);
+			sel.addEventListener("change", () => {
+				st.universeAlumniYear = Object.assign({}, st.universeAlumniYear,
+					{ [name]: sel.value === "" ? null : Number(sel.value) });
+				A().render();
+			});
+			box.appendChild(sel);
+		}
+		const list = want === null ? all : all.filter((x) => x.draftSeason === want);
+		const wrap = el("div", "scroll");
+		const t = el("table", "proghist alumni");
+		const hr = el("tr");
+		for (const h of ["Name", "Years", "Class", "Draft", "Honors", "Pro"]) hr.appendChild(el("th", null, h));
+		const thead = el("thead");
+		thead.appendChild(hr);
+		t.appendChild(thead);
+		const tb = el("tbody");
+		for (const x of list.slice(0, 60)) {
+			const tr = el("tr");
+			const td = el("td");
+			td.appendChild(personLink(x, u.registry));
+			if (x.imported) td.appendChild(el("span", "tag", "league"));
+			tr.appendChild(td);
+			tr.appendChild(el("td", null, x.from === x.to ? String(x.from) : x.from + "\u2013" + x.to));
+			tr.appendChild(el("td", null, x.classYear || "\u2014"));
+			tr.appendChild(el("td", null, !x.drafted ? "(played here)"
+				: x.draftSeason + (x.slot ? " · No. " + x.slot + (x.team ? " " + x.team : "") : " · undrafted")));
+			tr.appendChild(el("td", "num", String(x.honors)));
+			tr.appendChild(el("td", null, x.pro || "\u2014"));
+			tb.appendChild(tr);
+		}
+		t.appendChild(tb);
+		wrap.appendChild(t);
+		box.appendChild(wrap);
+		if (list.length > 60) box.appendChild(el("p", "hint", (list.length - 60) + " more not shown."));
 	}
 
 	/* THE RECORD BOOK FOR PEOPLE (Universe.peopleRecords): the registry's
@@ -5057,6 +5244,21 @@
 			part.addEventListener("click", () => { A().resumeUniverseDialog(); });
 			bar.appendChild(part);
 		}
+		/* UV12: a loaded league's last drafted classes, as history. */
+		const offer = A().state.pastProOffer;
+		if (!u.running && offer && offer.classes && offer.classes.length) {
+			const pro = el("button", null, "Add the last " + offer.classes.length +
+				" drafted classes to the universe's history");
+			pro.id = "btnPastPro";
+			pro.title = offer.classes.map((c) => c.year + ": " + c.drafted + " drafted, " +
+				c.undrafted + " undrafted signed").join("; ") +
+				(u.rows.length ? ". The world is already built, so they are added as a ledger " +
+					"(registry, alumni, real pro careers) without replaying their seasons."
+					: ". Their college seasons are played as the world's first seasons, with " +
+					"their real schools and draft order.");
+			pro.addEventListener("click", () => { A().addPastProClasses(); });
+			bar.appendChild(pro);
+		}
 		/* Past the last season: real games on synthetic classes. */
 		if (!u.running && u.rows.length && u.tail && !u.broken) {
 			const fwd = el("button", null, "Simulate more seasons…");
@@ -5110,11 +5312,29 @@
 			"Tools → Import players and tick “include stats”.";
 		expPlayers.addEventListener("click", () => { A().exportUniversePlayers(); });
 		bar.appendChild(expPlayers);
-		for (const [what, label] of [["timeline", "Timeline CSV"], ["records", "Records CSV"]]) {
+		for (const [what, label] of [["timeline", "Timeline CSV"], ["records", "Records CSV"], ["careers", "Careers CSV"]]) {
 			const b = el("button", null, label);
-			b.disabled = !u.rows.length || !!u.running || (what === "records" && !u.records);
+			b.disabled = !u.rows.length || !!u.running || (what === "records" && !u.records) ||
+				(what === "careers" && !u.registry);
 			b.addEventListener("click", () => { A().exportUniverseCsv(what); });
 			bar.appendChild(b);
+		}
+		const alm = el("button", null, "Universe almanac (Markdown)");
+		alm.disabled = !u.rows.length || !!u.running;
+		alm.title = "The whole world as one document: timeline, records, threads, the Hall, " +
+			"all-decade teams and the hindsight redraft";
+		alm.addEventListener("click", () => {
+			const md = global.Almanac && global.Almanac.universeMarkdown ? global.Almanac.universeMarkdown(u) : "";
+			if (md) A().downloadText(global.Universe.exportBaseName(u) + "-almanac.md", md, "text/markdown");
+		});
+		bar.appendChild(alm);
+		/* U22: a greyed button says why. */
+		const whyOff = u.running ? "Wait for the universe run to finish"
+			: !u.rows.length ? "Run a universe first (load two or more classes, or start a synthetic one)"
+			: u.viewOnly ? "This universe was imported view-only, without its class files"
+			: stranded ? "The class files this universe was built from are not loaded" : "";
+		for (const b of bar.querySelectorAll("button")) {
+			if (b.disabled && whyOff) b.title = whyOff + ". " + (b.title || "");
 		}
 		const impBtn = el("button", null, "Import universe…");
 		impBtn.disabled = !!u.running;
@@ -5676,6 +5896,86 @@
 				.join("\n");
 			view.appendChild(nit);
 		}
+		const png = el("button", null, "Bracket as PNG");
+		png.id = "btnBracketPng";
+		png.title = "The 64-team bracket as a picture, for a forum post";
+		png.addEventListener("click", () => A().exportBracketImage && A().exportBracketImage(res));
+		view.appendChild(png);
+		bracketOdds(view, res);
+		confTourneySection(view, res);
+	}
+
+	/* Pre-tournament odds (audit Q9): exact DP over the bracket with the
+	   model's pairwise chances, so this is what the bracket looked like
+	   before a game was played. Behind a details so it is no spoiler. */
+	function bracketOdds(view, res) {
+		const TT = global.Tournament;
+		if (!TT || !TT.titleOdds) return;
+		let odds = null;
+		try { odds = TT.titleOdds(res.tourney, res.effectiveCfg || res.cfg); } catch (e) { odds = null; }
+		if (!odds) return;
+		const d = el("details", "card bracketodds");
+		d.appendChild(el("summary", null, "Pre-tournament odds (the model, before tip-off)"));
+		const pc0 = (x) => (x >= 0.995 ? ">99" : x < 0.005 ? "<1" : String(Math.round(100 * x))) + "%";
+		const rows = odds.slice().sort((a, b) => b.rounds[5] - a.rounds[5] || b.rounds[3] - a.rounds[3]).slice(0, 24);
+		const table = el("table", "mini");
+		const hr = el("tr");
+		for (const h of ["Seed", "Team", "Region", "S16", "E8", "F4", "Win"]) hr.appendChild(el("th", null, h));
+		table.appendChild(hr);
+		for (const r of rows) {
+			const tr = el("tr");
+			tr.appendChild(el("td", "num", String(r.seed)));
+			const td = el("td");
+			td.appendChild(teamLink(r.team));
+			tr.appendChild(td);
+			tr.appendChild(el("td", null, r.region));
+			for (const k of [1, 2, 3, 5]) tr.appendChild(el("td", "num", pc0(r.rounds[k])));
+			table.appendChild(tr);
+		}
+		const wrap = el("div", "tablewrap");
+		wrap.appendChild(table);
+		d.appendChild(wrap);
+		d.appendChild(el("p", "hint", "Approximate: the game model's margin and noise without the " +
+			"endgame and overtime adjustments. The top 24 by title odds."));
+		view.appendChild(d);
+	}
+
+	/* Conference tournaments (audit Q7): thirty-odd brackets the season
+	   simulated and the app only marked with a trophy. */
+	const confUi = { conf: "" };
+	function confTourneySection(view, res) {
+		const ct = res.confTourneys;
+		if (!ct || typeof ct !== "object") return;
+		const names = Object.keys(ct).filter((k) => ct[k] && Array.isArray(ct[k].log) && ct[k].log.length).sort();
+		if (!names.length) return;
+		if (names.indexOf(confUi.conf) === -1) confUi.conf = names[0];
+		const sec = el("details", "card conftourneys");
+		sec.open = !!confUi.open;
+		sec.addEventListener("toggle", () => { confUi.open = sec.open; });
+		sec.appendChild(el("summary", null, "Conference tournaments (" + names.length + ")"));
+		const sel = el("select");
+		sel.id = "confTourneyPick";
+		sel.setAttribute("aria-label", "Conference tournament");
+		for (const n of names) sel.appendChild(new Option(n, n));
+		sel.value = confUi.conf;
+		sel.addEventListener("change", () => { confUi.conf = sel.value; A().render(); });
+		sec.appendChild(sel);
+		const c = ct[confUi.conf];
+		const seedOf = {};
+		(c.seeds || []).forEach((x, i) => { seedOf[x && x.name ? x.name : x] = i + 1; });
+		if (c.champ) {
+			const p0 = el("p", null, "Champion (the automatic bid): ");
+			p0.appendChild(teamLink(c.champ.name || c.champ));
+			sec.appendChild(p0);
+		}
+		const games = el("div", "confgames");
+		for (const g of c.log) {
+			const a = { name: g.a }, b = { name: g.b };
+			games.appendChild(gameNode(a, b, g.winner === g.a ? a : b, seedOf[g.a], seedOf[g.b],
+				g.score + (g.ot ? " (" + (g.ot > 1 ? g.ot : "") + "OT)" : "")));
+		}
+		sec.appendChild(games);
+		view.appendChild(sec);
 	}
 
 	/* --------------------------------------------------------------- awards */
@@ -5755,11 +6055,19 @@
 			: winners.size + " different winners across the six trophies. Each " +
 				"electorate weighs what a player's team did differently — that " +
 				"weight is the “résumé lean” under each name."));
+		/* U43: the key to the numbers on the cards. */
+		const key = el("p", "unit ballotkey");
+		key.textContent = "Key: −5.91 = ballot points behind the winner · résumé lean = how much " +
+			"that electorate weighs team success (0 none; higher counts it more, below 0 against) · " +
+			"“not in the class” = a returning player, not a draft prospect.";
+		wrap.appendChild(key);
 		const cards = el("div", "cards");
 		for (const b of rows) {
 			const card = el("div", "card");
 			card.appendChild(el("h4", null, b.award));
-			card.appendChild(el("p", "unit", "résumé lean " + b.resumeLean.toFixed(2)));
+			const lean = el("p", "unit", "résumé lean " + b.resumeLean.toFixed(2));
+			lean.title = "How much this electorate weighs team success: 0 is none, higher counts it more";
+			card.appendChild(lean);
 			const list = el("ol", "ballot");
 			for (const r of b.top) {
 				const li = el("li");
@@ -5778,9 +6086,16 @@
 				li.appendChild(document.createTextNode(" — "));
 				if (team) li.appendChild(teamLink(r.school));
 				else li.appendChild(document.createTextNode(r.school || ""));
-				li.appendChild(el("span", "unit",
-					r.rank === 1 ? "  winner" : "  −" + r.behind.toFixed(2)));
-				if (!r.inClass) li.appendChild(el("span", "unit", "  not in the class"));
+				const gap = el("span", "unit",
+					r.rank === 1 ? "  winner" : "  −" + r.behind.toFixed(2));
+				gap.title = r.rank === 1 ? "Won this ballot"
+					: r.behind.toFixed(2) + " ballot points behind the winner";
+				li.appendChild(gap);
+				if (!r.inClass) {
+					const nic = el("span", "unit", "  not in the class");
+					nic.title = "A returning player, not a prospect in this draft class";
+					li.appendChild(nic);
+				}
 				list.appendChild(li);
 			}
 			card.appendChild(list);
@@ -6080,10 +6395,38 @@
 		};
 		cards.appendChild(mk("Risers", res.risers || []));
 		cards.appendChild(mk("Fallers", res.fallers || []));
-		view.appendChild(cards);
+		/* U35: Risers and Fallers fold away (and start folded in compact
+		   mode), so the board itself is the first thing on screen. */
+		const stB = A().state;
+		const moverFold = el("details", "moverfold");
+		moverFold.open = uiMemo.moversOpen === undefined ? !stB.boardCompact : uiMemo.moversOpen;
+		moverFold.addEventListener("toggle", () => { uiMemo.moversOpen = moverFold.open; });
+		moverFold.appendChild(el("summary", null, "Risers and fallers"));
+		moverFold.appendChild(cards);
+		view.appendChild(moverFold);
 
-		const BOARD_HEADS = ["Board", "Rd", "Pick", "Player", "Pos", "Year", "Ovr", "Pot",
-			"School / club", "Preseason", "±", "PPG", "Honors"];
+		/* Ovr and Pot sit right after Pos so a phone sees them without a
+		   sideways scroll (U7); Pos# and the recruiting stars make "the best
+		   man at his position" a column, not a guess (U4). */
+		const BOARD_HEADS = BOARD_HEADS_ALL;
+		const BOARD_NUM = ["Board", "Rd", "Pick", "Ovr", "Pot", "Pos#", "Stars", "Preseason", "±", "PPG"];
+		const BOARD_TITLES = {
+			"Pos#": "Rank on the board within his position group (guards, wings, forwards, bigs)",
+			Stars: "Recruiting stars out of high school",
+		};
+		/* U36: the board's own columns — any of its fifteen but Board and
+		   Player can go, and a short whitelist from the Player Edit registry
+		   can join, just before Honors. */
+		const extraCols = boardExtraColumns(stB);
+		const heads = BOARD_HEADS.filter((h) => !(stB.boardHidden || {})[h] || BOARD_FIXED.indexOf(h) !== -1);
+		const at = heads.indexOf("Honors") === -1 ? heads.length : heads.indexOf("Honors");
+		heads.splice.apply(heads, [at, 0].concat(extraCols.map((c) => c.label)));
+		const extraByLabel = {};
+		for (const c of extraCols) {
+			extraByLabel[c.label] = c;
+			BOARD_TITLES[c.label] = c.title || c.label;
+			BOARD_NUM.push(c.num ? c.label : "");
+		}
 		if (!(res.board || []).length) {
 			const box = el("div", "card empty-state");
 			box.appendChild(el("h4", null, "No board to show"));
@@ -6108,9 +6451,20 @@
 		const posSel = el("select");
 		posSel.setAttribute("aria-label", "Board position filter");
 		posSel.appendChild(new Option("all positions", ""));
-		for (const pos of ["PG", "G", "SG", "GF", "SF", "F", "PF", "FC", "C"]) {
-			posSel.appendChild(new Option(pos, pos));
+		/* U20: groups first, so "guards" means PG, SG and G together. */
+		const grpOpt = el("optgroup");
+		grpOpt.label = "Position groups";
+		for (const [v, t] of [["grp:guard", "Guards (PG/SG/G)"], ["grp:wing", "Wings (GF/SF)"],
+			["grp:forward", "Forwards (F/PF)"], ["grp:big", "Bigs (FC/C)"]]) {
+			grpOpt.appendChild(new Option(t, v));
 		}
+		posSel.appendChild(grpOpt);
+		const exOpt = el("optgroup");
+		exOpt.label = "Exact position";
+		for (const pos of ["PG", "G", "SG", "GF", "SF", "F", "PF", "FC", "C"]) {
+			exOpt.appendChild(new Option(pos, pos));
+		}
+		posSel.appendChild(exOpt);
 		posSel.value = bf.pos;
 		posSel.addEventListener("change", () => { bf.pos = posSel.value; A().render(); });
 		fbar.appendChild(posSel);
@@ -6130,6 +6484,16 @@
 		starChip.title = "Show only the prospects on your watchlist (click ☆ beside a name to add one)";
 		starChip.addEventListener("click", () => { bf.starred = !bf.starred; A().render(); });
 		fbar.appendChild(starChip);
+		/* U37: the men the recruiting services missed — three stars or fewer
+		   and now top-30 on the board or first at their position. */
+		const nSleep = (res.board || []).filter(isSleeper).length;
+		const sleepChip = el("button", "chip" + (bf.sleepers ? " on" : ""),
+			"Sleepers" + (nSleep ? " (" + nSleep + ")" : ""));
+		sleepChip.type = "button";
+		sleepChip.setAttribute("aria-pressed", bf.sleepers ? "true" : "false");
+		sleepChip.title = "Prospects who were 3-star recruits or less and are now top 30 on the board or the best at their position";
+		sleepChip.addEventListener("click", () => { bf.sleepers = !bf.sleepers; A().render(); });
+		fbar.appendChild(sleepChip);
 		/* Q16: one chip per tag in use in this class; click to show only those. */
 		for (const t of PLAYER_TAGS) {
 			const n = (res.board || []).filter((p) => tagsOf(p).indexOf(t) !== -1).length;
@@ -6151,6 +6515,20 @@
 			A().render();
 		});
 		fbar.appendChild(heatChip);
+		/* U35: compact rows — one line each, honors as a count. */
+		const compChip = el("button", "chip" + (st0.boardCompact ? " on" : ""), "Compact");
+		compChip.type = "button";
+		compChip.id = "boardCompact";
+		compChip.setAttribute("aria-pressed", st0.boardCompact ? "true" : "false");
+		compChip.title = "One line per prospect: honors as a count, Risers and Fallers folded";
+		compChip.addEventListener("click", () => {
+			st0.boardCompact = !st0.boardCompact;
+			uiMemo.moversOpen = undefined;
+			A().persist();
+			A().render();
+		});
+		fbar.appendChild(compChip);
+		fbar.appendChild(boardColumnMenu());
 		// "12 of 70" — filled in once the list is filtered, below.
 		const count = el("span", "unit boardcount");
 		fbar.appendChild(count);
@@ -6161,7 +6539,8 @@
 		md.addEventListener("click", () => {
 			const rows = (res.board || []).map((p) => [
 				p.boardRank, p.mockRound || "", p.mockPick || "", p.name, p.newPos,
-				p.classYear, p.newOvr, p.newPot, p.proClub || p.newCollege,
+				p.newOvr, p.newPot, p.posBoardRank || "", (p.recruiting && p.recruiting.stars) || "",
+				p.classYear, p.proClub || p.newCollege,
 				p.preseasonRank, p.stockMove === 0 ? "" : (p.stockMove > 0 ? "+" : "") + p.stockMove,
 				p.stats ? n1(p.stats.ppg) : "", (p.awards || []).slice(0, 3).join("; "),
 			]);
@@ -6169,7 +6548,16 @@
 				(res.flavor && res.flavor.label ? ", " + res.flavor.label : "") + "**\n\n" +
 				markdownTable(BOARD_HEADS, rows), md, "Copy as markdown", "the draft board as markdown");
 		});
-		fbar.appendChild(md);
+		/* U47: the four copy/paste actions live in one small "Copy ▾" menu
+		   instead of four full-size buttons wrapping the filter bar. */
+		const copyMenu = el("details", "copymenu");
+		const copySum = el("summary", "chip", "Copy \u25be");
+		copySum.title = "Copy the board as markdown, a top-30 list or for a spreadsheet; paste names";
+		copyMenu.appendChild(copySum);
+		const copyList = el("div", "copymenu-list");
+		copyMenu.appendChild(copyList);
+		copyList.addEventListener("click", (e) => { if (e.target.closest("button")) copyMenu.open = false; });
+		copyList.appendChild(md);
 		/* A forum-ready top 30: a numbered list, one line a player, with his
 		   note when the user has written one. The table above is for a
 		   spreadsheet; this is what gets pasted into a thread. */
@@ -6189,7 +6577,7 @@
 				(res.flavor && res.flavor.label ? ", " + res.flavor.label : "") + "**\n\n" +
 				lines.join("\n"), top, "Copy top 30", "the top 30 as a markdown list");
 		});
-		fbar.appendChild(top);
+		copyList.appendChild(top);
 		/* Q22: the board as it is on screen — the rows after the search, the
 		   position and tag chips and the sort — as tab-separated text. */
 		const sheet = el("button", null, "Copy for spreadsheet");
@@ -6200,12 +6588,13 @@
 			if (!t) return;
 			A().copyText(domTableText(t, "tsv"), sheet, "Copy for spreadsheet", "the board for a spreadsheet");
 		});
-		fbar.appendChild(sheet);
+		copyList.appendChild(sheet);
 		const rename = el("button", null, "Paste names…");
 		rename.type = "button";
 		rename.title = "Paste a list of names, one per line, and rename the prospects in board order";
 		rename.addEventListener("click", () => A().renameDialog());
-		fbar.appendChild(rename);
+		copyList.appendChild(rename);
+		fbar.appendChild(copyMenu);
 		view.appendChild(fbar);
 
 		/* One sort value per heading. Pick is the overall mock slot
@@ -6215,18 +6604,24 @@
 			Pick: (p) => (p.mockRound ? p.mockRound * 100 + p.mockPick : undefined),
 			Player: (p) => p.name, Pos: (p) => p.newPos, Year: (p) => classYearRank(p.classYear),
 			Ovr: (p) => p.newOvr, Pot: (p) => p.newPot,
+			"Pos#": (p) => p.posBoardRank, Stars: (p) => (p.recruiting ? p.recruiting.stars : undefined),
 			"School / club": (p) => p.proClub || p.newCollege,
 			Preseason: (p) => p.preseasonRank, "±": (p) => p.stockMove,
 			PPG: (p) => (p.stats ? p.stats.ppg : undefined),
 			Honors: (p) => (p.awards || []).length,
 		};
-		const ASC_FIRST = { Board: 1, Rd: 1, Pick: 1, Player: 1, Pos: 1, Year: 1,
+		const ASC_FIRST = { Board: 1, Rd: 1, Pick: 1, Player: 1, Pos: 1, Year: 1, "Pos#": 1,
 			"School / club": 1, Preseason: 1 };
+		for (const c of extraCols) {
+			BOARD_SORT[c.label] = (p) => boardExtraValue(p, c.key, res);
+			if (!c.num || c.key === "recRank") ASC_FIRST[c.label] = 1;
+		}
 		const needle = bf.q.trim().toLowerCase();
 		const parsedQ = parseQuery(bf.q);
 		const qctx = queryCtx();
 		let list = (res.board || []).filter((p) => {
-			if (bf.pos && p.newPos !== bf.pos) return false;
+			if (bf.pos && !boardPosMatch(bf.pos, p)) return false;
+			if (bf.sleepers && !isSleeper(p)) return false;
 			if (bf.starred && !A().state.watch[A().userKey(p)]) return false;
 			if (bf.tag && tagsOf(p).indexOf(bf.tag) === -1) return false;
 			if (!needle) return true;
@@ -6246,16 +6641,21 @@
 			}
 		}
 
-		const wrap = el("div", "scroll");
-		const table = el("table", "boardtable");
+		const wrap = el("div", "scroll boardwrap");
+		const table = el("table", "boardtable" + (stB.boardCompact ? " boardcompact" : ""));
 		const thead = el("thead");
 		const hr = el("tr");
-		for (const h of BOARD_HEADS) {
-			const th = el("th", (["Board", "Rd", "Pick", "Ovr", "Pot", "Preseason", "±", "PPG"].indexOf(h) >= 0 ? "num " : "") +
-				(h === "Player" ? "sticky " : "") + "sortable", h);
+		let firstHead = true;
+		for (const h of heads) {
+			const th = el("th", (BOARD_NUM.indexOf(h) >= 0 ? "num " : "") +
+				(h === "Player" ? "sticky " : "") + (h === "Rd" || h === "Pick" ? "rdpick " : "") + "sortable", h);
 			th.scope = "col";
-			th.tabIndex = 0;
-			th.title = h + " — click to sort";
+			/* U30: one header in the tab order; ←/→ walk the rest. */
+			th.tabIndex = (bf.sort ? bf.sort.key === h : firstHead) ? 0 : -1;
+			firstHead = false;
+			const named = ({ Board: "Board: the consensus ranking", Rd: "Rd: draft night's round (the board after draft-night events)",
+				Pick: "Pick: draft night's pick in the round — not the team mock on the Mock draft tab" })[h];
+			th.title = (named || BOARD_TITLES[h] || h) + " — click to sort";
 			const on = bf.sort && bf.sort.key === h;
 			if (on) {
 				th.textContent = h + (bf.sort.dir < 0 ? " ▾" : " ▴");
@@ -6271,7 +6671,15 @@
 			};
 			th.addEventListener("click", go);
 			th.addEventListener("keydown", (e) => {
-				if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); }
+				if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); return; }
+				const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+				if (!d) return;
+				const sib = d > 0 ? th.nextElementSibling : th.previousElementSibling;
+				if (!sib) return;
+				e.preventDefault();
+				th.tabIndex = -1;
+				sib.tabIndex = 0;
+				sib.focus();
 			});
 			hr.appendChild(th);
 		}
@@ -6320,8 +6728,11 @@
 		   step down of TIER_DROP overall or more from the man above him. The
 		   board's round dividers say where the picks fall; this says where
 		   the class actually thins out, which is not the same place. */
-		const TIER_DROP = 3;
-		let prevOvr = null;
+		/* U19: tiers come from the board's own order, and only the biggest
+		   steps count — the five largest drops of at least TIER_DROP overall
+		   (scaled to the class spread), so a 70-man board shows a handful of
+		   labelled tiers instead of a rule on every third row. */
+		const tierAt = boardTiers(res.board || []);
 		let firstRow = true;
 		for (const p of list) {
 			const band = bandOf(p);
@@ -6329,16 +6740,17 @@
 				lastBand = band;
 				const sep = el("tr", "bandrow");
 				const cell = el("td", null, band);
-				cell.colSpan = BOARD_HEADS.length;
+				cell.colSpan = heads.length;
 				sep.appendChild(cell);
 				tb.appendChild(sep);
 			}
 			const tr = el("tr");
-			if (banded && prevOvr !== null && prevOvr - p.newOvr >= TIER_DROP) {
+			if (banded && tierAt[p.key]) {
 				tr.classList.add("tierbreak");
-				tr.title = "Tier break: " + (prevOvr - p.newOvr) + " overall below the man above";
+				tr.dataset.tier = "Tier " + tierAt[p.key].tier;
+				tr.title = "Tier " + tierAt[p.key].tier + " starts here: " + tierAt[p.key].drop +
+					" overall below the man above him on the board";
 			}
-			prevOvr = p.newOvr;
 			/* Roving tabindex, as in Player Edit: one row in the tab order
 			   and the arrow keys (or j/k) walk the rest, instead of sixty tab
 			   stops between the header and whatever is under the board. */
@@ -6382,12 +6794,21 @@
 				e.preventDefault();
 				A().showPlayer(p.key);
 			});
-			tr.appendChild(el("td", "num", String(p.boardRank)));
-			tr.appendChild(el("td", "num", p.mockRound ? String(p.mockRound) : "—"));
-			tr.appendChild(el("td", "num", p.mockPick ? String(p.mockPick) : "—"));
+			const rankTd = el("td", "num", String(p.boardRank));
+			if (tr.dataset.tier) rankTd.dataset.tier = tr.dataset.tier;
+			tr.appendChild(rankTd);
+			tr.appendChild(el("td", "num rdpick", p.mockRound ? String(p.mockRound) : "—"));
+			tr.appendChild(el("td", "num rdpick", p.mockPick ? String(p.mockPick) : "—"));
 			const nameTd = el("td", "sticky");
 			nameTd.appendChild(watchStar(p));
 			nameTd.appendChild(playerLink(p));
+			if (p.posLeader) {
+				const b = el("span", "tag posbest" + (p.posGem ? " gem" : ""), "Best " + p.posGroup);
+				b.title = posRankTitle(p);
+				b.dataset.nocopy = "";
+				nameTd.appendChild(document.createTextNode(" "));
+				nameTd.appendChild(b);
+			}
 			for (const t of tagsOf(p)) {
 				const tg = el("span", "tag tagmark", t);
 				tg.title = "Your tag: " + t;
@@ -6407,10 +6828,18 @@
 			nameTd.appendChild(ed);
 			tr.appendChild(nameTd);
 			tr.appendChild(el("td", null, p.newPos));
-			tr.appendChild(el("td", null, p.classYear));
 			tr.appendChild(heatCell(el("td", "num", String(p.newOvr)), heat.ovr, p.newOvr));
 			tr.appendChild(heatCell(el("td", "num", String(p.newPot)), heat.pot, p.newPot));
-			const schoolTd = el("td");
+			const prTd = el("td", "num", p.posBoardRank ? String(p.posBoardRank) : "—");
+			if (p.posBoardRank) prTd.title = posRankTitle(p);
+			if (p.posGem) prTd.appendChild(el("span", "gem", " \u25c6"));
+			tr.appendChild(prTd);
+			const stars = p.recruiting && p.recruiting.stars;
+			const stTd = el("td", "num", stars ? String(stars) : "—");
+			stTd.title = stars ? stars + "-star recruit" : "Not a ranked recruit";
+			tr.appendChild(stTd);
+			tr.appendChild(el("td", "wrapok", p.classYear));
+			const schoolTd = el("td", "wrapok");
 			if (!p.nonNcaa && res.teams[p.newCollege]) schoolTd.appendChild(teamLink(p.newCollege));
 			else schoolTd.appendChild(document.createTextNode(p.proClub || p.newCollege));
 			tr.appendChild(schoolTd);
@@ -6419,9 +6848,25 @@
 			mv.appendChild(el("span", p.stockMove > 0 ? "up" : p.stockMove < 0 ? "down" : "",
 				p.stockMove === 0 ? "—" : (p.stockMove > 0 ? "+" : "") + p.stockMove));
 			tr.appendChild(mv);
-			tr.appendChild(heatCell(el("td", "num", p.stats ? n1(p.stats.ppg) : "—"),
-				heat.ppg, p.stats ? p.stats.ppg : NaN));
-			tr.appendChild(honorsCell(p));
+			/* U46: say why the PPG cell is blank, where a touch screen can see it. */
+			const ppgTd = p.stats ? el("td", "num", n1(p.stats.ppg)) : el("td", "num");
+			if (!p.stats) {
+				const dnp = el("span", "tag dnptag", "DNP");
+				dnp.title = tr.title;
+				ppgTd.appendChild(dnp);
+			}
+			tr.appendChild(heatCell(ppgTd, heat.ppg, p.stats ? p.stats.ppg : NaN));
+			tr.appendChild(honorsCell(p, stB.boardCompact));
+			if (heads.length !== BOARD_HEADS.length || extraCols.length) {
+				const base = Array.from(tr.children);
+				tr.replaceChildren.apply(tr, heads.map((h) => {
+					const i = BOARD_HEADS.indexOf(h);
+					if (i !== -1) return base[i];
+					const c = extraByLabel[h];
+					const v = boardExtraValue(p, c.key, res);
+					return el("td", c.num ? "num" : "wrapok", boardExtraText(c.key, v));
+				}));
+			}
 			tb.appendChild(tr);
 		}
 		table.appendChild(tb);
@@ -6431,7 +6876,10 @@
 			const none = el("p", "hint boardnone", "No prospect on the board matches that search. ");
 			const clr = el("button", "chip", "Clear filters");
 			clr.type = "button";
-			clr.addEventListener("click", () => { bf.q = ""; bf.pos = ""; A().render(); });
+			clr.addEventListener("click", () => {
+				bf.q = ""; bf.pos = ""; bf.starred = false; bf.sleepers = false; bf.tag = "";
+				A().render();
+			});
 			none.appendChild(clr);
 			view.appendChild(none);
 		}
@@ -6439,11 +6887,19 @@
 
 	/* The Honors cell: a count badge and the list clamped to two lines;
 	   the badge expands the cell when there is more than fits. */
-	function honorsCell(p) {
+	function honorsCell(p, compact) {
 		if (!p.stats) return wrapCell("did not play");
 		const aw = p.awards || [];
 		const td = el("td", "wrap honors");
 		if (!aw.length) return td;
+		// U35: compact rows carry the count alone, with the list on hover.
+		if (compact) {
+			const n = el("span", "honorcount", String(aw.length));
+			n.title = aw.join("\n");
+			n.setAttribute("aria-label", aw.length + " honors: " + aw.join("; "));
+			td.appendChild(n);
+			return td;
+		}
 		const inner = el("div", "clamp", aw.join("; "));
 		inner.title = aw.join("\n");
 		if (aw.length > 2) {
@@ -6461,10 +6917,127 @@
 		td.appendChild(inner);
 		return td;
 	}
+	/* U36: what the board's Columns menu offers. Board and Player stay. */
+	const BOARD_HEADS_ALL = ["Board", "Rd", "Pick", "Player", "Pos", "Ovr", "Pot", "Pos#", "Stars",
+		"Year", "School / club", "Preseason", "±", "PPG", "Honors"];
+	const BOARD_FIXED = ["Board", "Player"];
+	const BOARD_EXTRA_KEYS = ["hgtInches", "weight", "age", "recRank", "composite", "hand",
+		"archetype", "conf", "rpg", "apg", "usg"];
+	const BOARD_EXTRA_NAMES = { hgtInches: "Height", weight: "Weight", age: "Age",
+		recRank: "Recruiting rank", composite: "Recruiting composite", hand: "Shooting hand",
+		archetype: "Build", conf: "Conference", rpg: "RPG", apg: "APG", usg: "USG%" };
+	function boardExtraColumns(st) {
+		const want = (st && st.boardExtra) || [];
+		return BOARD_EXTRA_KEYS.filter((k) => want.indexOf(k) !== -1)
+			.map((k) => COLUMNS.filter((c) => c.key === k)[0]).filter(Boolean)
+			.map((c) => ({ key: c.key, label: c.key === "archetype" ? "Build" : c.label, num: c.num, title: c.title }));
+	}
+	function boardExtraValue(p, key, res) {
+		if (key === "archetype") return p.archetype || "";
+		if (key === "hand") return p.hand || "right";
+		if (key === "conf") {
+			const t = res && res.teams ? res.teams[p.newCollege] : null;
+			return t ? t.conf : "";
+		}
+		return cellValue(p, key, res, "pg");
+	}
+	function boardExtraText(key, v) {
+		if (v === undefined || v === null || v === "" || (typeof v === "number" && !Number.isFinite(v))) return "—";
+		if (key === "hgtInches") return feet(v);
+		if (key === "weight") return metricUnits() ? Math.round(v * 0.4536) + " kg" : String(Math.round(v));
+		if (key === "usg") return v <= 1 ? (v * 100).toFixed(1) : n1(v);
+		if (typeof v === "number") return Number.isInteger(v) ? String(v) : n1(v);
+		return String(v);
+	}
+	/* The board's Columns menu: tick the fifteen it has and the extras. */
+	function boardColumnMenu() {
+		const st = A().state;
+		const menu = el("details", "boardcols");
+		const sum = el("summary", "chip", "Columns \u25be");
+		sum.title = "Choose the board's columns — hide some, add height, age, recruiting rank and more";
+		menu.appendChild(sum);
+		const list = el("div", "colsmenu");
+		list.setAttribute("role", "group");
+		list.setAttribute("aria-label", "Board columns");
+		const box = (label, on, disabled, onChange, title) => {
+			const lab = el("label", "check");
+			const cb = el("input");
+			cb.type = "checkbox";
+			cb.checked = on;
+			cb.disabled = !!disabled;
+			cb.addEventListener("change", () => { onChange(cb.checked); A().persist(); A().render(); });
+			lab.appendChild(cb);
+			lab.appendChild(document.createTextNode(" " + label));
+			if (title) lab.title = title;
+			list.appendChild(lab);
+		};
+		for (const h of BOARD_HEADS_ALL) {
+			box(h, !(st.boardHidden || {})[h], BOARD_FIXED.indexOf(h) !== -1, (on) => {
+				st.boardHidden = Object.assign({}, st.boardHidden);
+				if (on) delete st.boardHidden[h]; else st.boardHidden[h] = true;
+			});
+		}
+		list.appendChild(el("p", "unit", "Add from Player Edit"));
+		for (const k of BOARD_EXTRA_KEYS) {
+			const c = COLUMNS.filter((x) => x.key === k)[0];
+			if (!c) continue;
+			const on = (st.boardExtra || []).indexOf(k) !== -1;
+			box(BOARD_EXTRA_NAMES[k] || c.label, on, false, (v) => {
+				const cur = (st.boardExtra || []).filter((x) => x !== k);
+				if (v) cur.push(k);
+				st.boardExtra = cur;
+			});
+		}
+		const reset = el("button", "tiny", "Default columns");
+		reset.type = "button";
+		reset.addEventListener("click", () => {
+			st.boardHidden = {};
+			st.boardExtra = [];
+			menu.open = false;
+			A().persist();
+			A().render();
+		});
+		list.appendChild(reset);
+		menu.appendChild(list);
+		if (uiMemo.boardColsOpen) menu.open = true;
+		menu.addEventListener("toggle", () => { uiMemo.boardColsOpen = menu.open; });
+		return menu;
+	}
 	// Disclosure states that should survive a re-render but are not settings.
 	const uiMemo = { classInfoOpen: false, filtersOpen: false };
 	// The board's own search, position filter and sort (see viewBoard).
-	const boardFilter = { q: "", pos: "", sort: null, starred: false, tag: "" };
+	const boardFilter = { q: "", pos: "", sort: null, starred: false, tag: "", sleepers: false };
+	/* U20: "grp:guard" matches every guard position; a bare position is exact. */
+	function boardPosMatch(want, p) {
+		if (!want) return true;
+		if (want.indexOf("grp:") === 0) {
+			return (p.posGroup || POS_GROUP_OF[p.newPos] || "wing") === want.slice(4);
+		}
+		return p.newPos === want;
+	}
+	function isSleeper(p) {
+		const stars = p.recruiting && p.recruiting.stars;
+		if (stars > 3) return false;
+		return p.boardRank <= 30 || !!p.posLeader;
+	}
+	/* U19: the board's tier breaks. Map key -> {tier, drop}. */
+	function boardTiers(board) {
+		const TIER_DROP = 3;
+		const ovrs = board.map((p) => p.newOvr).filter(Number.isFinite);
+		if (ovrs.length < 4) return {};
+		const spread = Math.max.apply(null, ovrs) - Math.min.apply(null, ovrs);
+		const min = Math.max(TIER_DROP, Math.round(spread / 8));
+		const drops = [];
+		for (let i = 1; i < board.length; i++) {
+			const d = board[i - 1].newOvr - board[i].newOvr;
+			if (d >= min) drops.push({ i, d });
+		}
+		drops.sort((a, b) => b.d - a.d || a.i - b.i);
+		const keep = drops.slice(0, 5).sort((a, b) => a.i - b.i);
+		const out = {};
+		keep.forEach((x, k) => { out[board[x.i].key] = { tier: k + 2, drop: x.d }; });
+		return out;
+	}
 
 	/* --------------------------------------------------------- distributions */
 
@@ -6809,7 +7382,23 @@
 	/* What the Mock tab was last left on. A salt of 0 and a noise of 1.2 are the
 	   engine's own draft, and that is the one proFor caches. */
 	const MOCK_NOISE = 1.2;
-	const mockUi = { rounds: 2, salt: 0, noise: MOCK_NOISE, team: "" };
+	// `forced`: the user's own picks for "My team", {pickNo: key} (audit Q1), for one seed.
+	const mockUi = { rounds: 2, salt: 0, noise: MOCK_NOISE, team: "", forced: {}, forcedSeed: null };
+	const rangeCache = new WeakMap();
+	// The mock run at 25 salts (audit Q2), once per result.
+	function mockRangeFor(res, base) {
+		if (!global.Pro || !global.Pro.mockRange) return null;
+		let r = rangeCache.get(res);
+		if (!r) {
+			try { r = global.Pro.mockRange(res, { k: 25, projections: base.projections }); } catch (e) { r = null; }
+			if (r) rangeCache.set(res, r);
+		}
+		return r;
+	}
+	function forcedFor(res) {
+		if (mockUi.forcedSeed !== res.seed) { mockUi.forced = {}; mockUi.forcedSeed = res.seed; }
+		return mockUi.forced;
+	}
 	const mockCache = new WeakMap();
 
 	/* The engine's redraft options (a salt for the pick streams, a taste-noise
@@ -6827,10 +7416,12 @@
 		const rounds = mockUi.rounds;
 		const salt = sup.redraft ? mockUi.salt : 0;
 		const noise = sup.redraft ? mockUi.noise : MOCK_NOISE;
-		if (rounds === 2 && !salt && noise === MOCK_NOISE) return base.mock;
+		const forced = forcedFor(res);
+		const fkey = Object.keys(forced).sort().map((k) => k + "=" + forced[k]).join(",");
+		if (rounds === 2 && !salt && noise === MOCK_NOISE && !fkey) return base.mock;
 		let m = mockCache.get(res);
 		if (!m) { m = new Map(); mockCache.set(res, m); }
-		const key = rounds + "|" + salt + "|" + noise;
+		const key = rounds + "|" + salt + "|" + noise + "|" + fkey;
 		if (!m.has(key)) {
 			if (m.size > 12) m.clear();
 			const st = A().state;
@@ -6839,6 +7430,7 @@
 			const opts = { projections: base.projections, league, rounds };
 			if (salt) opts.salt = salt;
 			if (noise !== MOCK_NOISE) opts.noise = noise;
+			if (fkey) opts.forced = Object.assign({}, forced);
 			m.set(key, global.Pro.mockDraft(res, opts));
 		}
 		return m.get(key);
@@ -6912,13 +7504,27 @@
 			cards.appendChild(t);
 		}
 
+		const range = mockRangeFor(res, proFor(res));
+		if (range) {
+			const rc = el("div", "card mockrange");
+			rc.appendChild(el("h4", null, "Range of outcomes (" + range.k + " drafts)"));
+			const mv = range.mostVolatile;
+			rc.appendChild(el("div", "note",
+				"Most volatile: " + (mv ? mv.name + " (picks " + mv.min + "-" + mv.max + ")" : "none") +
+				"\nLocked-in top 3: " + (range.lockedTop3.length
+					? range.lockedTop3.map((r) => r.name).join(", ") : "nobody")));
+			rc.appendChild(el("p", "hint", "The same teams and order drafting " + range.k +
+				" times with their tastes redrawn (the Redraft button's salts 1-" + range.k + ")."));
+			cards.appendChild(rc);
+		}
+		const grades = global.Pro.gradeMock ? global.Pro.gradeMock(mock, range && range.expectedPeak) : {};
 		const tm = el("details", "card mockteams");
 		tm.appendChild(el("summary", null, "Teams (" + mock.teams.length + "): plan, need, rating, depth"));
 		const mine = {};
 		for (const k of mock.picks) mine[k.team] = (mine[k.team] || 0) + 1;
 		const table = el("table", "mini");
 		const hr = el("tr");
-		for (const h of ["Team", "Plan", "Need", "Ovr", "Depth G · W · B", "Picks"]) hr.appendChild(el("th", null, h));
+		for (const h of ["Team", "Plan", "Need", "Ovr", "Depth G · W · B", "Picks", "Grade"]) hr.appendChild(el("th", null, h));
 		table.appendChild(hr);
 		for (const t of mock.teams) {
 			const tr = el("tr", t.name === mockUi.team ? "myteam" : "");
@@ -6928,6 +7534,10 @@
 			tr.appendChild(el("td", "num", t.ovr === null || t.ovr === undefined ? "—" : String(t.ovr)));
 			tr.appendChild(el("td", "num", t.depth || "—"));
 			tr.appendChild(el("td", "num", String(mine[t.name] || 0)));
+			const g = grades[t.name];
+			const gd = el("td", "num", g ? g.grade : "—");
+			if (g) gd.title = (g.perPick >= 0 ? "+" : "") + g.perPick + " projected peak a pick against the slot's expectation";
+			tr.appendChild(gd);
 			table.appendChild(tr);
 		}
 		const wrap = el("div", "tablewrap");
@@ -7033,7 +7643,10 @@
 		const thead = el("thead");
 		const hr = el("tr");
 		const heads = ["Pick", "Team"].concat(mock.fromLeague ? ["Team ovr", "Depth G · W · B"] : [],
-			["Player", "Pos", "Ovr", "Pot", "Board", "Peak", "Career", "Verdict", "Why"]);
+			["Player", "Pos", "Ovr", "Pot", "Board", "Range", "Peak", "Career", "Verdict", "Why"]);
+		const rangeRows = {};
+		const rng0 = mockRangeFor(res, base);
+		if (rng0) for (const r of rng0.rows) rangeRows[r.key] = r;
 		for (const h of heads) hr.appendChild(el("th", null, h));
 		thead.appendChild(hr);
 		table.appendChild(thead);
@@ -7067,10 +7680,40 @@
 			const board = el("td", "num" + (k.reach >= 8 ? " down" : k.reach <= -8 ? " up" : ""),
 				k.consensus ? String(k.consensus) : "—");
 			tr.appendChild(board);
+			const rr0 = rangeRows[k.key];
+			const rcell = el("td", "num", rr0 ? rr0.mean + " (" + rr0.min + "-" + rr0.max + ")" : "—");
+			if (rr0) rcell.title = Math.round(100 * rr0.pFirst) + "% first round over " + rng0.k + " drafts";
+			tr.appendChild(rcell);
 			tr.appendChild(el("td", "num", proRange(x)));
 			tr.appendChild(el("td", "num", x ? x.years + " yrs" : "—"));
 			tr.appendChild(el("td", null, x ? x.verdict : "—"));
-			tr.appendChild(el("td", "hint", k.why));
+			const whyTd = el("td", "hint", k.why);
+			// On the clock (audit Q1): change "My team"'s pick; the rest re-runs.
+			if (mockUi.team && k.team === mockUi.team && sup.targets) {
+				const ch = el("select", "mockpick");
+				ch.setAttribute("aria-label", "Change pick " + k.pick);
+				ch.setAttribute("data-mock-pick", String(k.pick));
+				ch.appendChild(new Option("Change pick…", ""));
+				let targets = [];
+				try { targets = global.Pro.targetsFor(mock, k.team, k.pick - 1) || []; } catch (e) { targets = []; }
+				const gone = new Set(mock.picks.slice(0, k.pick - 1).map((q) => q.key));
+				const seen = new Set();
+				for (const t of targets) { seen.add(t.key); ch.appendChild(new Option("★ " + t.name + " " + t.ovr + "/" + t.pot, t.key)); }
+				for (const p of (res.board || []).filter((q) => !gone.has(q.key) && !seen.has(q.key))) {
+					ch.appendChild(new Option(p.name + " " + p.newOvr + "/" + p.newPot, p.key));
+				}
+				if (forcedFor(res)[k.pick]) ch.appendChild(new Option("Let the team choose", "__auto"));
+				ch.addEventListener("change", () => {
+					const f = forcedFor(res);
+					if (ch.value === "__auto") delete f[k.pick];
+					else if (ch.value) f[k.pick] = ch.value;
+					// Later forced picks may now name men already gone; the draft skips those.
+					A().render();
+				});
+				whyTd.appendChild(document.createElement("br"));
+				whyTd.appendChild(ch);
+			}
+			tr.appendChild(whyTd);
 			tbody.appendChild(tr);
 		}
 		table.appendChild(tbody);
@@ -7083,7 +7726,42 @@
 		mockExtras(view, res, mock, sup);
 	}
 
+	/* "Reminds of: 2029's X (same build, ±2 ovr, 1" taller) — went No. 4,
+	   star". The nearest registry entry from ANOTHER season with the same
+	   build and an overall within two (audit Q17). */
+	function universeComparable(registry, selfId, p, season) {
+		if (!registry || !p || !p.archetype) return null;
+		let best = null;
+		for (const id of Object.keys(registry)) {
+			const e = registry[id];
+			const d = e && e.draft;
+			if (!d || id === selfId || d.archetype !== p.archetype || d.season === season) continue;
+			if (!Number.isFinite(d.ovr) || Math.abs(d.ovr - p.newOvr) > 2) continue;
+			const dh = Number.isFinite(d.hgt) && Number.isFinite(p.newHgtInches) ? d.hgt - p.newHgtInches : 0;
+			const dist = Math.abs(d.ovr - p.newOvr) + Math.abs(dh) * 0.5;
+			if (!best || dist < best.dist) best = { e, d, dh, dist };
+		}
+		if (!best) return null;
+		const U = global.Universe;
+		const pro = U && U.proOutcome ? U.proOutcome(best.e) : null;
+		const dov = best.d.ovr - p.newOvr;
+		return (best.d.season || "?") + "'s " + (best.e.name || "?") + " (same build, " +
+			(dov === 0 ? "same ovr" : (dov > 0 ? "+" : "\u2212") + Math.abs(dov) + " ovr") +
+			(best.dh ? ", " + Math.abs(best.dh) + "\" " + (best.dh > 0 ? "taller" : "shorter") : "") + ")" +
+			(best.d.slot ? " — went No. " + best.d.slot : " — undrafted") +
+			(pro ? ", " + pro.tier : "");
+	}
+
 	/* The projection block on a player page. */
+	function draftOrderLegend(p, pick) {
+		const bits = [];
+		if (p.boardRank) bits.push("board No. " + p.boardRank + " (the consensus ranking)");
+		if (p.draftSlot) bits.push("draft night No. " + p.draftSlot + " (the board after draft-night events)");
+		if (p.mockRound) bits.push("note mock round " + p.mockRound + ", pick " + p.mockPick + " (draft night, in rounds)");
+		if (pick) bits.push("team mock No. " + pick.pick + " (each team's own value, above)");
+		return "Draft orders: " + (bits.length ? bits.join(" · ") : "none") + ".";
+	}
+
 	function proBlock(res, p) {
 		const { projections, mock } = proFor(res);
 		const x = projections[p.key];
@@ -7097,8 +7775,13 @@
 			x.peakAge + ", and " + x.years + " seasons in the league (" + x.yearsLow + "-" +
 			x.yearsHigh + "). " + Math.round(x.starChance * 100) + "% chance of a star's peak, " +
 			Math.round(x.bustChance * 100) + "% of a bust." +
-			(pick ? " Mock draft: No. " + pick.pick + " to the " + pick.team + " — " + pick.why + "."
-				: " Undrafted in the mock draft.")));
+			(pick ? " Team mock: No. " + pick.pick + " to the " + pick.team + " — " + pick.why + "."
+				: " Undrafted in the team mock.")));
+		/* Which order is which (audit Q32): a prospect carries the board's
+		   rank, draft night's slot, the note's slot-shaped mock and this
+		   team-by-team mock, and two of them side by side read as a
+		   contradiction unless they are named. */
+		box.appendChild(el("p", "hint draftorders", draftOrderLegend(p, pick)));
 		if (x.curve.length) {
 			box.appendChild(el("p", "hint", "A median career: " + x.curve.slice(0, 16)
 				.map((s) => s.age + ": " + s.ovr).join(" · ")));
@@ -7761,7 +8444,7 @@
 		head.appendChild(idbox);
 		box.appendChild(head);
 
-		const dl = el("dl", "shortcuts");
+		const dl = el("dl", "shortcuts playerdl");
 		const row = (k, v) => {
 			if (!v) return;
 			dl.appendChild(el("dt", null, k));
@@ -7829,6 +8512,9 @@
 			}
 			if (p.hand === "left") row("Hand", "Left-handed");
 		}
+		if (p.posBoardRank) {
+			row("Position", posRankTitle(p) + " · " + posStandingLine(p, res));
+		}
 		if (p.recruiting) {
 			/* The whole recruitment, not the box score of one. Rank and stars
 			   were all the page could say; who else was in on him, what he cut
@@ -7836,7 +8522,7 @@
 			   things a scout's file actually opens with. */
 			const rec = p.recruiting;
 			row("Recruiting", rec.stars + "-star, No. " + rec.rank + " nationally" +
-				(rec.posRank ? " · No. " + rec.posRank + " " + rec.posLabel : "") +
+				hsPosRankText(rec) +
 				(Number.isFinite(rec.composite) ? " · " + rec.composite.toFixed(4) : "") +
 				(rec.headliner ? " — headline signing" : "") +
 				(rec.diOnly === false ? " · not a Division I signing" : "") +
@@ -7869,9 +8555,13 @@
 				const f = stP.files[fi];
 				const id = UP.playerId(f && f.fingerprint, p.key);
 				const entry = (stP.universe.registry && stP.universe.registry[id]) ||
-					{ id, draft: { pot: p.newPot, slot: p.draftSlot || null } };
+					{ id, draft: { pot: p.newPot, ovr: p.newOvr, classYear: p.classYear,
+						slot: p.draftSlot || null } };
 				const pro = UP.proOutcome(entry);
 				if (pro) row("Pro career", UP.proText(pro) + " (projected)");
+				// Comparables from this universe's own history (audit Q17).
+				const cmp = universeComparable(stP.universe.registry, id, p, entry.draft && entry.draft.season);
+				if (cmp) row("Reminds of", cmp);
 			}
 		}
 		if (p.awards && p.awards.length) row("Honors", p.awards.join("; "));
@@ -7879,6 +8569,34 @@
 			row("Earlier honors", p.priorAwards.slice()
 				.sort((a, b) => b.season - a.season)
 				.map((a) => a.season + " " + a.award).join("; "));
+		}
+		// Combine measurables (audit Q15), derived from the traits and ratings.
+		{
+			const TR = global.Traits;
+			const m = TR && TR.measurables ? TR.measurables(p) : null;
+			if (m) {
+				row("Combine", "wingspan " + TR.inchesText(m.wingspan) + " · standing reach " +
+					TR.inchesText(m.reach) + " · no-step vertical " + m.vertical + "\" · lane agility " +
+					m.lane.toFixed(2) + "s");
+			}
+		}
+		// Closest builds in this class (audit Q16).
+		{
+			const near = closestProspects(res, p, 3);
+			if (near.length) {
+				const wrap = el("span");
+				near.forEach((x, i) => {
+					if (i) wrap.appendChild(document.createTextNode(" · "));
+					wrap.appendChild(playerLink(x.p.name, x.p.key));
+					wrap.appendChild(document.createTextNode(" (" + x.p.newOvr + ", " + (x.p.archetype || "?") +
+						", " + Math.round(100 * x.sim) + "% alike) "));
+					const cb = el("button", "linky", "compare");
+					cb.type = "button";
+					cb.addEventListener("click", () => compareWith(x.p, res));
+					wrap.appendChild(cb);
+				});
+				row("Closest builds", wrap);
+			}
 		}
 		box.appendChild(dl);
 		{
@@ -8152,7 +8870,7 @@
 		idbox.appendChild(pills);
 		head.appendChild(idbox);
 		box.appendChild(head);
-		const dl = el("dl", "shortcuts");
+		const dl = el("dl", "shortcuts playerdl");
 		const row = (k, v) => {
 			if (!v) return;
 			dl.appendChild(el("dt", null, k));
@@ -8216,7 +8934,7 @@
 		head.appendChild(idbox);
 		box.appendChild(head);
 
-		const dl = el("dl", "shortcuts");
+		const dl = el("dl", "shortcuts playerdl");
 		const row = (k, v) => {
 			if (!v) return;
 			dl.appendChild(el("dt", null, k));
@@ -8284,6 +9002,7 @@
 			A().render();
 		});
 		bar.appendChild(sel);
+		bar.appendChild(pageLink("Conference page", "conf:" + st.standingsConf));
 		box.appendChild(bar);
 		const pool = (byConf[st.standingsConf] || []).slice()
 			.sort((a, b) => (b.cw - b.cl) - (a.cw - a.cl) || b.rating - a.rating);
@@ -8410,6 +9129,182 @@
 		return svg;
 	}
 
+	function pageLink(text, target) {
+		const b = el("button", "linky", text);
+		b.type = "button";
+		b.setAttribute("data-page", target);
+		b.addEventListener("click", () => A().showTeam(target));
+		return b;
+	}
+	function backToTeams() {
+		const back = el("button", "tiny", "← All teams");
+		back.addEventListener("click", () => { A().state.team = null; A().persist(); A().render(); });
+		return back;
+	}
+	function dlRows(box) {
+		const dl = el("dl", "shortcuts");
+		box.appendChild(dl);
+		return (k, v) => {
+			dl.appendChild(el("dt", null, k));
+			const dd = el("dd");
+			if (typeof v === "string") dd.textContent = v;
+			else if (v) dd.appendChild(v);
+			dl.appendChild(dd);
+		};
+	}
+
+	/* A COACH PAGE (audit Q11). */
+	function coachPage(res, name) {
+		const box = el("div", "coachpage");
+		box.appendChild(backToTeams());
+		const t = Object.values(res.teams).filter((x) => x && x.coach && x.coach.name === name)[0];
+		box.appendChild(el("h3", null, name));
+		if (!t) { box.appendChild(el("p", "hint", "No coach of that name this season.")); return box; }
+		const c = t.coach;
+		const row = dlRows(box);
+		const tl = el("span");
+		tl.appendChild(teamLink(t.name));
+		tl.appendChild(document.createTextNode(" (" + t.conf + ") · year " + c.tenure));
+		row("Program", tl);
+		if (Number.isFinite(c.age)) row("Age", String(c.age));
+		if (t.style) row("Style", t.style.name + (t.style.defScheme ? ", " + t.style.defScheme + " defense" : "") +
+			(c.style && c.style.name !== t.style.name ? " (drifted from " + c.style.name + ")" : ""));
+		row("Situation", c.situationLabel || c.situation || "—");
+		if (c.philosophy) row("Philosophy", c.philosophy);
+		/* Against expectation: the record a program of this level usually
+		   has, read off the rest of the country. */
+		const all = Object.values(res.teams).filter((x) => x && Number.isFinite(x.level) && x.w + x.l > 0);
+		const near = all.filter((x) => Math.abs(x.level - t.level) <= 4);
+		const exp = near.length ? near.reduce((a, x) => a + x.w / (x.w + x.l), 0) / near.length : null;
+		const pct = t.w / Math.max(1, t.w + t.l);
+		row("This season", t.w + "-" + t.l + (exp !== null ? " · programs at his level won " +
+			Math.round(100 * exp) + "% of their games; he won " + Math.round(100 * pct) + "%" : "") +
+			(t.ncaaSeed ? " · No. " + t.ncaaSeed + " seed, " + t.ncaaResult : ""));
+		const honors = (res.coachHonors || []).filter((h) => h.coach === name);
+		row("Coach of the Year", honors.length ? honors.map((h) => h.award).join("; ") : "none this season");
+		const st = A().state;
+		if (st.universe && st.universe.rows && st.universe.rows.length && global.Universe &&
+			global.Universe.coachHistory) {
+			try {
+				const hist = global.Universe.coachHistory(st.universe, name);
+				if (hist && hist.length) {
+					box.appendChild(el("h4", null, "Career in this universe"));
+					box.appendChild(el("div", "note", hist.map((h) => h.season + " " + h.team + " " +
+						h.w + "-" + h.l + (h.result ? " · " + h.result : "")).join("\n")));
+				}
+			} catch (e) { /* history is optional */ }
+		}
+		return box;
+	}
+
+	/* A CONFERENCE PAGE (audit Q12). */
+	function conferencePage(res, conf) {
+		const box = el("div", "confpage");
+		box.appendChild(backToTeams());
+		box.appendChild(el("h3", null, conf));
+		const pool = Object.values(res.teams).filter((x) => x && x.conf === conf)
+			.sort((a, b) => (b.cw - b.cl) - (a.cw - a.cl) || b.rating - a.rating);
+		if (!pool.length) { box.appendChild(el("p", "hint", "No such conference this season.")); return box; }
+		const row = dlRows(box);
+		const meta = C.CONFERENCES[conf];
+		const bids = pool.filter((x) => x.ncaaSeed).length;
+		row("NCAA bids", bids + (meta && Number.isFinite(meta.bids) ? " (a typical year: " + meta.bids + ")" : ""));
+		const moved = pool.filter((x) => x.movedFrom);
+		if (moved.length) row("Arrived this season", moved.map((x) => x.name + " (from the " + x.movedFrom + ")").join(", "));
+		const ct = res.confTourneys && res.confTourneys[conf];
+		if (ct && ct.champ) row("Tournament champion", ct.champ.name || String(ct.champ));
+		box.appendChild(el("h4", null, "Standings"));
+		const table = el("table", "mini");
+		const hr = el("tr");
+		for (const h of ["Team", "Conf", "Overall", "Postseason"]) hr.appendChild(el("th", null, h));
+		table.appendChild(hr);
+		for (const t of pool) {
+			const tr = el("tr");
+			const td = el("td");
+			td.appendChild(teamLink(t.name));
+			tr.appendChild(td);
+			tr.appendChild(el("td", null, t.cw + "-" + t.cl));
+			tr.appendChild(el("td", null, t.w + "-" + t.l));
+			tr.appendChild(el("td", null, t.ncaaSeed ? "No. " + t.ncaaSeed + ", " + t.ncaaResult : (t.nitResult || "—")));
+			table.appendChild(tr);
+		}
+		const wrap = el("div", "tablewrap");
+		wrap.appendChild(table);
+		box.appendChild(wrap);
+		// The league's honors, read off the award names that carry its name.
+		const honors = [];
+		for (const p of res.players || []) {
+			for (const a of p.awards || []) if (a.indexOf(conf) !== -1) honors.push(a + " — " + p.name);
+		}
+		for (const h of res.fieldHonors || []) {
+			if (h && h.award && h.award.indexOf(conf) !== -1) honors.push(h.award + " — " + h.name);
+		}
+		if (honors.length) {
+			box.appendChild(el("h4", null, "Honors"));
+			box.appendChild(el("div", "note", honors.sort().join("\n")));
+		}
+		return box;
+	}
+
+	/* TEAM VERSUS TEAM (audit Q13). */
+	function versusPage(res, pair) {
+		const box = el("div", "versuspage");
+		box.appendChild(backToTeams());
+		const [an, bn] = String(pair).split("|");
+		const A0 = res.teams[an], B0 = res.teams[bn];
+		if (!A0 || !B0) { box.appendChild(el("p", "hint", "Pick two programs from this season.")); return box; }
+		const h = el("h3");
+		h.appendChild(teamLink(an));
+		h.appendChild(document.createTextNode(" vs "));
+		h.appendChild(teamLink(bn));
+		box.appendChild(h);
+		const table = el("table", "mini");
+		const hr = el("tr");
+		for (const x of ["", an, bn]) hr.appendChild(el("th", null, x));
+		table.appendChild(hr);
+		const line = (label, f) => {
+			const tr = el("tr");
+			tr.appendChild(el("td", null, label));
+			for (const t of [A0, B0]) {
+				let v;
+				try { v = f(t); } catch (e) { v = "—"; }
+				tr.appendChild(el("td", "num", v === undefined || v === null ? "—" : String(v)));
+			}
+			table.appendChild(tr);
+		};
+		line("Record", (t) => t.w + "-" + t.l);
+		line("Rating", (t) => t.rating.toFixed(1));
+		line("NET", (t) => t.netRank);
+		line("AP", (t) => t.apRank || "—");
+		line("Style", (t) => (t.style ? t.style.name : "—"));
+		line("Tempo", (t) => (Number.isFinite(t.pace) ? t.pace.toFixed(1) : "—"));
+		line("ORtg / DRtg", (t) => (t.offRtg ? t.offRtg.toFixed(1) : "—") + " / " + (t.defRtg ? t.defRtg.toFixed(1) : "—"));
+		line("Quad 1", (t) => (t.quads && t.quads[0] ? t.quads[0].w + "-" + t.quads[0].l : "—"));
+		line("NCAA", (t) => (t.ncaaSeed ? "No. " + t.ncaaSeed + ", " + t.ncaaResult : "—"));
+		const wrap = el("div", "tablewrap");
+		wrap.appendChild(table);
+		box.appendChild(wrap);
+		const TT = global.Tournament;
+		const wc = TT && TT.winChance ? TT.winChance(A0, B0, 0, res.effectiveCfg || res.cfg || {}, 1, false) : null;
+		if (wc) box.appendChild(el("p", "legendline", "On a neutral floor today: " + TT.lineText(A0, B0, wc) + " (approximate)"));
+		const met = (A0.log || []).filter((g) => g.opp === bn);
+		box.appendChild(el("h4", null, "Meetings this season"));
+		box.appendChild(el("div", "note", met.length ? met.map((g) => (g.won ? an : bn) + " won " +
+			Math.max(g.teamPts, g.oppPts) + "-" + Math.min(g.teamPts, g.oppPts) + (g.round ? " (" + g.round + ")" : "")).join("\n")
+			: "They did not play."));
+		const mA = {}, mB = {};
+		for (const g of A0.log || []) if (Number.isFinite(g.teamPts)) mA[g.opp] = (mA[g.opp] || []).concat([g.teamPts - g.oppPts]);
+		for (const g of B0.log || []) if (Number.isFinite(g.teamPts)) mB[g.opp] = (mB[g.opp] || []).concat([g.teamPts - g.oppPts]);
+		const common = Object.keys(mA).filter((o) => mB[o] && o !== an && o !== bn).sort();
+		if (common.length) {
+			const fmt = (l) => l.map((d) => (d > 0 ? "+" : "") + d).join(", ");
+			box.appendChild(el("h4", null, "Common opponents (" + common.length + ")"));
+			box.appendChild(el("div", "note", common.map((o) => o + ": " + an + " " + fmt(mA[o]) +
+				" · " + bn + " " + fmt(mB[o])).join("\n")));
+		}
+		return box;
+	}
+
 	function teamPage(view, res, name) {
 		const t = res.teams[name];
 		const box = el("div");
@@ -8426,7 +9321,7 @@
 		}
 		box.appendChild(el("h3", null, t.name + " — " + t.w + "-" + t.l +
 			(t.apRank ? "  (AP #" + t.apRank + ")" : "")));
-		const dl = el("dl", "shortcuts");
+		const dl = el("dl", "shortcuts playerdl");
 		const row = (k, v) => {
 			dl.appendChild(el("dt", null, k));
 			const dd = el("dd");
@@ -8440,9 +9335,28 @@
 		// Guard on t.style, which is the object actually read: it comes from
 		// the coach today, but the guard was on the wrong object.
 		if (t.coach && t.style) {
-			row("Coach", t.coach.name + ", year " + t.coach.tenure +
+			const cl = el("span");
+			cl.appendChild(pageLink(t.coach.name, "coach:" + t.coach.name));
+			cl.appendChild(document.createTextNode(", year " + t.coach.tenure +
 				" — plays " + t.style.name +
-				(t.coach.movedFrom ? " · hired away from " + t.coach.movedFrom : ""));
+				(t.coach.movedFrom ? " · hired away from " + t.coach.movedFrom : "")));
+			row("Coach", cl);
+		}
+		{
+			const cl = el("span");
+			cl.appendChild(pageLink(t.conf + " page", "conf:" + t.conf));
+			cl.appendChild(document.createTextNode(" · "));
+			const vs = el("select");
+			vs.setAttribute("aria-label", "Compare with another program");
+			vs.setAttribute("data-versus", "1");
+			vs.appendChild(new Option("Compare with…", ""));
+			for (const o of Object.values(res.teams).filter((x) => x && x.name !== t.name &&
+				!(/^__/.test(x.name))).sort((a, b) => (b.rating || 0) - (a.rating || 0))) {
+				vs.appendChild(new Option(o.name, o.name));
+			}
+			vs.addEventListener("change", () => { if (vs.value) A().showTeam("vs:" + t.name + "|" + vs.value); });
+			cl.appendChild(vs);
+			row("More", cl);
 		}
 		row("Program level", Math.round(t.level) + " (rating " +
 			t.rating.toFixed(1) + ")");
@@ -8514,6 +9428,7 @@
 			if (hist.length) {
 				const sec = el("section", "programs");
 				programHistoryBlock(sec, t.name, hist, { season: res.season });
+				programAlumniBlock(sec, t.name);
 				box.appendChild(sec);
 			}
 		}
@@ -8657,7 +9572,10 @@
 			tr.appendChild(td);
 			tr.appendChild(el("td", null,
 				g.home > 0 ? "home" : g.home < 0 ? "away" : "neutral"));
-			tr.appendChild(el("td", null, g.won ? "W" : "L"));
+			// "won at 18%" for an upset the model did not see coming (Q8).
+			const wc = g.won ? pregameChance(res, t, res.teams[g.opp], g) : null;
+			tr.appendChild(el("td", null, (g.won ? "W" : "L") +
+				(wc && wc.p < 0.3 ? " (won at " + Math.round(100 * wc.p) + "%)" : "")));
 			tr.appendChild(el("td", null, g.teamPts !== null
 				? g.teamPts + "-" + g.oppPts + (g.ot ? " (" + g.ot + "OT)" : "") : "—"));
 			tr.appendChild(el("td", null,
@@ -8687,6 +9605,16 @@
 	   claim is that it is a record. The page says so rather than filling the
 	   space. */
 	function gameKeyFor(team, index) { return team + "|" + index; }
+
+	// Tournament.winChance for one logged game, from team A's side.
+	function pregameChance(res, A0, B0, g) {
+		const TT = global.Tournament;
+		if (!TT || !TT.winChance || !A0 || !B0 || !g) return null;
+		try {
+			return TT.winChance(A0, B0, g.home || 0, res.effectiveCfg || res.cfg || {},
+				Number.isFinite(g.when) ? g.when : 0.5, g.stage === "ncaa");
+		} catch (e) { return null; }
+	}
 
 	// A game's stage in words; "reg" was printed as-is.
 	const STAGE_LABEL = {
@@ -8733,6 +9661,13 @@
 				: STAGE_LABEL[g.stage] || g.stage || "")) +
 			(away ? " · " + g.opp + " " + away.w + "-" + away.l +
 				" · " + home.name + " " + home.w + "-" + home.l : "")));
+		// The pregame line (audit Q8).
+		const wc = pregameChance(res, home, away, g);
+		if (wc) {
+			box.appendChild(el("p", "legendline gameline", "Line: " +
+				global.Tournament.lineText(home, away, wc) + " (approximate: the game model " +
+				"without the endgame and overtime adjustments)"));
+		}
 
 		const side = function (team, gameIndex, score) {
 			if (!team) return;
@@ -8868,7 +9803,7 @@
 			const t = mk("text", {
 				x: q[0].toFixed(1), y: q[1].toFixed(1),
 				"text-anchor": "middle", "dominant-baseline": "middle",
-				"font-size": "8", fill: "currentColor", opacity: "0.7",
+				"font-size": "11", fill: "currentColor", opacity: "0.85",
 			});
 			t.textContent = a[1];
 			svg.appendChild(t);
@@ -9164,7 +10099,7 @@
 		gamePage, gameKeyFor, quadBar, pollSpark, ballotCards,
 		COLUMNS, STAT_MODES, PCT_KEYS, DERIVED, derived, cellValue, statValue,
 		CARD_COLUMNS, CARD_BREAKPOINT, cardMode, orderedColumns, moveColumn,
-		dropColumn, setColumnOrder,
+		dropColumn, setColumnOrder, draftOrderLegend,
 		matchesFilter, numericColumns, histogram, feet, closeRowMenu,
 		// Quick wins: table text, zip, file names, search syntax, tags, filter views, units.
 		tableText, tableParts, domTableText, decorateTables, crc32, zipStore, exportFilename,
@@ -9172,11 +10107,12 @@
 		EXTRA_VALUE, EXTRA_COLUMNS, CSV_EXTRA, csvExtras, pathFlags, PATH_FILTERS, PLAYER_TAGS,
 		PIN_MAX, cleanStarredSettings, timeAgo, SESSION_MAX_BYTES, sessionShape, sessionFiles, sessionLabel,
 		cleanTags, tagsOf, emptyFilter, cleanFilter, cleanFilterViews, metricUnits, weightText,
-		SEARCH_HELP, SKILL_TAGS, neighborKeys, planRenames, planLockRows, lockPatchText,
+		SEARCH_HELP, SKILL_TAGS, neighborKeys, closestProspects, planRenames, planLockRows, lockPatchText,
 		RATING_COLUMN_KEYS,
 		sortRows, classYearRank, CLASS_YEAR_ORDER, defaultHiddenColumns, closeWhy,
-		currentColumnPreset, COLUMN_PRESETS,
+		currentColumnPreset, COLUMN_PRESETS, applyColumnPreset,
 		compareWith, sortableTable,
 		el, n1, pc, wrapCell, COMPARE_MAX, ratingRadar, RADAR_AXES,
+		boardPosMatch, isSleeper, boardExtraColumns, boardExtraText, BOARD_EXTRA_KEYS, boardTiers, posStandingLine, whyLines, hsPosRankText,
 	};
 })(window);

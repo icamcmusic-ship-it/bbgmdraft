@@ -506,6 +506,91 @@
 		return { field: pool, rounds, champion: champ };
 	}
 
+	/* PREGAME LINE (audit Q8). The same terms playGameScore uses — ratingOn,
+	   gameStrength, homeEdge, 0.72 points of margin a rating point and noise
+	   sd 9.4 times the regular or postseason multiplier — as Φ(margin/sd).
+	   Approximate: it ignores the endgame and overtime adjustments. */
+	const MARGIN_SD_APPROX = 9.4;
+	function normCdf(z) {
+		// Abramowitz-Stegun 7.1.26 on erf; |error| < 1.5e-7.
+		const x = Math.abs(z) / Math.SQRT2;
+		const t = 1 / (1 + 0.3275911 * x);
+		const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t +
+			0.254829592) * t * Math.exp(-x * x);
+		return z >= 0 ? 0.5 * (1 + y) : 0.5 * (1 - y);
+	}
+	function winChance(A, B, homeShare, cfg, when, postseason) {
+		const TS = global.TeamsSim;
+		if (!A || !B || !TS) return null;
+		const c = cfg || {};
+		const noise = postseason ? 1 + 0.2 * Math.max(0, Math.min(3, Number.isFinite(c.upsetFactor) ? c.upsetFactor : 1))
+			: (TS.REGULAR_NOISE || 1.2);
+		const share = Math.max(-1, Math.min(1, homeShare || 0));
+		const home = share === 0 ? 0
+			: share > 0 ? TS.homeEdge(A) * share : -TS.homeEdge(B) * Math.abs(share);
+		const rA = TS.ratingOn(A, when), rB = TS.ratingOn(B, when);
+		const edge = TS.gameStrength(rA, postseason, rB) - TS.gameStrength(rB, postseason, rA) + home;
+		const margin = edge * 0.72;
+		const sd = MARGIN_SD_APPROX * noise;
+		return { margin, p: normCdf(margin / sd) };
+	}
+	// "Duke −6.5 · 72%": the favourite's line, rounded to the half point.
+	function lineText(A, B, w) {
+		if (!w) return "";
+		const fav = w.margin >= 0 ? A : B;
+		const pts = Math.round(Math.abs(w.margin) * 2) / 2;
+		const p = w.margin >= 0 ? w.p : 1 - w.p;
+		return (fav.name || "?") + " \u2212" + pts.toFixed(1) + " \u00b7 " + Math.round(100 * p) + "%";
+	}
+
+	/* PRE-TOURNAMENT ODDS (audit Q9). Exact dynamic programming over the
+	   64-team bracket with winChance's pairwise probabilities, neutral floor,
+	   postseason noise: P(team reaches round r) = P(reached r-1) x Σ over the
+	   possible opponents of P(opponent reached r-1) x P(beats him). Returns
+	   [{team, seed, region, rounds: [P(R32), P(S16), P(E8), P(F4), P(final), P(title)]}]. */
+	function titleOdds(tourney, cfg) {
+		if (!tourney || !tourney.regions) return null;
+		const order = tourney.semiRegions || REGIONS;
+		const slots = [];
+		for (const r of order) {
+			const reg = tourney.regions[r];
+			if (!reg || !reg.seeds) return null;
+			const bySeed = {};
+			for (const x of reg.seeds) bySeed[x.seed] = x;
+			for (const sd of SEED_ORDER) {
+				if (!bySeed[sd]) return null;
+				slots.push({ team: bySeed[sd].team, seed: sd, region: r });
+			}
+		}
+		if (slots.length !== 64) return null;
+		const memo = new Map();
+		const pw = (i, j) => {
+			const k = i + "|" + j;
+			if (!memo.has(k)) {
+				const w = winChance(slots[i].team, slots[j].team, 0, cfg, 1, true);
+				memo.set(k, w ? w.p : 0.5);
+			}
+			return memo.get(k);
+		};
+		let prev = slots.map(() => 1);
+		const rounds = slots.map(() => []);
+		for (let r = 0; r < 6; r++) {
+			const size = 1 << r;   // block size each side
+			const next = new Array(64).fill(0);
+			for (let i = 0; i < 64; i++) {
+				const block = Math.floor(i / (2 * size)) * (2 * size);
+				const mineLo = Math.floor(i / size) * size;
+				const oppLo = mineLo === block ? block + size : block;
+				let s = 0;
+				for (let j = oppLo; j < oppLo + size; j++) s += prev[j] * pw(i, j);
+				next[i] = prev[i] * s;
+				rounds[i].push(next[i]);
+			}
+			prev = next;
+		}
+		return slots.map((x, i) => ({ team: x.team.name, seed: x.seed, region: x.region, rounds: rounds[i] }));
+	}
+
 	global.Tournament = { apPoll, simulate, selectField, simulateNit, REGIONS, SEED_ORDER,
-		bracketPenalty, balanceBracket };
+		bracketPenalty, balanceBracket, winChance, lineText, titleOdds, normCdf };
 })(typeof window !== "undefined" ? window : self);

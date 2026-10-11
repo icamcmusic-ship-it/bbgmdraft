@@ -345,7 +345,7 @@
 			note: "production that is hard to separate from the offence he plays in",
 			adj: "system-reliant" },
 		{ name: "would start anywhere", group: "role", w: 0.9, needs: { minOvr: 45 },
-			note: "a player who would start for any programme in the country",
+			note: "a player who would start for any program in the country",
 			adj: "high-floor" },
 		/* --- a hundred and fifty more ---------------------------------------
 
@@ -389,7 +389,7 @@
 			note: "a wingspan that measures seven feet on a six-five frame",
 			adj: "freakishly long" },
 		{ name: "shorter than listed", group: "frame", w: 1.2,
-			note: "a measurement at the combine that came back two inches under the programme's",
+			note: "a measurement at the combine that came back two inches under the program's",
 			adj: "over-listed" },
 		{ name: "taller than listed", group: "frame", w: 0.7,
 			note: "a measurement that came back over what he has been listed at for three years",
@@ -488,7 +488,7 @@
 			note: "a request to take the other team's best player that the staff granted",
 			adj: "willing", mood: "W" },
 		{ name: "carries the programme", group: "character", w: 1.0, needs: { minOvr: 48, years: ["Junior", "Senior", "Graduate"] },
-			note: "the man everything at the programme has been arranged around for two years",
+			note: "the man everything at the program has been arranged around for two years",
 			adj: "load-bearing", mood: "F" },
 		{ name: "a coach on the floor", group: "character", w: 1.3, needs: { off: { oiq: [-4, null] } },
 			note: "the kind of feel that makes the huddle quieter rather than louder",
@@ -757,13 +757,13 @@
 
 		// ------------------------------------------------------ background
 		{ name: "third school in four years", group: "background", w: 1.0, needs: { transfer: true },
-			note: "a third programme in four years, each one a level he was chasing",
+			note: "a third program in four years, each one a level he was chasing",
 			adj: "well-travelled", mood: "$" },
 		{ name: "junior-college route", group: "background", w: 1.1, needs: { years: ["Junior", "Senior", "Graduate"] },
 			note: "two years of junior college that nobody at the high-major level watched",
 			adj: "late-found" },
 		{ name: "came out of a national programme", group: "background", w: 1.2,
-			note: "a high-school programme that sends somebody to this level every year",
+			note: "a high-school program that sends somebody to this level every year",
 			adj: "well-coached", mood: "F" },
 		{ name: "grew up abroad", group: "background", w: 1.1,
 			note: "a first fifteen years of basketball played under different rules",
@@ -1203,9 +1203,42 @@
 		return list.length ? list[0].adj : null;
 	}
 
+	/* COMBINE MEASURABLES (audit Q15). Derived, never drawn into the model:
+	   seeded off the player's key, from his height, his frame traits and his
+	   jumping and speed ratings, so a "plus wingspan" MEASURES plus five to
+	   plus eight. Wingspan and standing reach in inches, no-step vertical in
+	   inches, lane agility in seconds (lower is quicker). */
+	function measurables(p) {
+		if (!p || !Number.isFinite(p.newHgtInches)) return null;
+		const h = global.BBGMRng.hashSeed("combine|" + p.key);
+		const u = () => (h() % 1000) / 1000;
+		const names = (p.traits || []).map((t) => t.name || t);
+		const has = (n) => names.indexOf(n) !== -1;
+		const r = p.newRatings || {};
+		let ape = 2 + u() * 3;   // a typical prospect: +2 to +5
+		if (has("plus wingspan")) ape = 5 + u() * 3;
+		if (has("short arms")) ape = -1 + u() * 2;
+		if (has("seven-foot wingspan at six-five")) ape = Math.max(ape, 84 - p.newHgtInches);
+		const wingspan = Math.round((p.newHgtInches + ape) * 4) / 4;
+		let reach = p.newHgtInches * 1.33 + (ape - 3) * 0.5 + (u() - 0.5) * 2;
+		if (has("elite standing reach")) reach += 2;
+		const jmp = Number.isFinite(r.jmp) ? r.jmp : 50;
+		const spd = Number.isFinite(r.spd) ? r.spd : 50;
+		const vertical = Math.round((22 + (jmp - 40) * 0.22 + (u() - 0.5) * 3) * 2) / 2;
+		const lane = Math.round((12.4 - (spd - 40) * 0.025 + (p.newHgtInches - 78) * 0.03 +
+			(u() - 0.5) * 0.4) * 100) / 100;
+		return { wingspan, reach: Math.round(reach * 2) / 2, vertical: Math.max(18, vertical),
+			lane: Math.max(10, lane) };
+	}
+	function inchesText(x) {
+		const ft = Math.floor(x / 12);
+		const inch = Math.round((x - ft * 12) * 4) / 4;
+		return ft + "'" + inch + "\"";
+	}
+
 	global.Traits = {
 		TRAITS, GROUPS, assign, matches, matchesFinished, eligible, classContext,
 		regateAfterAvailability, percentile, REF_DECILES,
-		noteClause, adjective, tagsOf, VOL_SPREAD,
+		noteClause, adjective, tagsOf, VOL_SPREAD, measurables, inchesText,
 	};
 })(typeof window !== "undefined" ? window : self);

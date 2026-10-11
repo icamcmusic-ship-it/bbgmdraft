@@ -404,7 +404,7 @@
 		{ name: "Bob Cousy Award", label: "best point guard", pos: ["PG", "G"] },
 		{ name: "Jerry West Award", label: "best shooting guard", pos: ["SG", "G"] },
 		{ name: "Julius Erving Award", label: "best small forward", pos: ["SF", "GF"] },
-		{ name: "Tim Duncan Award", label: "best power forward", pos: ["PF", "F"] },
+		{ name: "Karl Malone Award", label: "best power forward", pos: ["PF", "F"] },
 		{ name: "Kareem Abdul-Jabbar Award", label: "best center", pos: ["C", "FC"] },
 	];
 
@@ -417,7 +417,8 @@
 		[/^Consensus National Player of the Year/, 0],
 		[/^(Naismith Trophy|John R\. Wooden Award|Oscar Robertson Trophy|AP Player of the Year|NABC Player of the Year|Sporting News Player of the Year)$/, 1],
 		[/^(Naismith Defensive|NABC Defensive|Lefty Driesell)/, 2],
-		[/^(Bob Cousy|Jerry West|Julius Erving|Tim Duncan|Kareem Abdul-Jabbar|Pete Newell|Lute Olson|Wayman Tisdale) Award$/, 3],
+		[/^(Bob Cousy|Jerry West|Julius Erving|Karl Malone|Kareem Abdul-Jabbar|Pete Newell Big Man|Lute Olson|Wayman Tisdale|Frances Pomeroy Naismith) Award$/, 3],
+		[/^(Senior CLASS Award|Kyle Macy Freshman of the Year|Chip Hilton Player of the Year|Jersey Mike's Naismith Starting Five)$/, 3],
 		[/^Consensus First Team All-American$/, 4],
 		[/^Consensus Second Team All-American$/, 5],
 		[/^Third Team All-American$/, 6],
@@ -1037,6 +1038,7 @@
 			const winner = pool[0];
 			positioned.add(winner);
 			giveNat(winner, pa.name);
+			giveNat(winner, "Jersey Mike's Naismith Starting Five");
 		}
 		// Best big man in the country, regardless of the PF/C split.
 		const bigs = nation.filter((x) => ["PF", "FC", "C", "F"].indexOf(x.pos) !== -1);
@@ -1044,6 +1046,15 @@
 		// Best player who is not a freshman.
 		const vets = nation.filter((x) => !x.isFreshman);
 		if (vets.length) giveNat(vets[0], "Lute Olson Award");
+		// Best player 6'0" or shorter (prospects carry a height; fillers do not).
+		const small = nation.filter((x) => Number(x.newHgtInches) > 0 && Number(x.newHgtInches) <= 72);
+		if (small.length) giveNat(small[0], "Frances Pomeroy Naismith Award");
+		// Senior CLASS and Chip Hilton: a senior or graduate with a character trait.
+		const elders = nation.filter((x) =>
+			/^(Redshirt )?(Senior|Graduate)$/.test(String(x.classYear || "")) &&
+			(x.traits || []).some((t) => t && t.group === "character"));
+		if (elders.length) giveNat(elders[0], "Senior CLASS Award");
+		if (elders.length) giveNat(elders[1] || elders[0], "Chip Hilton Player of the Year");
 
 		// Same for the defensive ballots: gated first, so a trophy whose
 		// top vote-getter fails the defensive gate goes to the next man
@@ -1081,6 +1092,8 @@
 		// A one-winner trophy is one winner at any strictness; slots(1) was
 		// three at 0.4.
 		freshmen.slice(0, 1).forEach((x) => giveNat(x, "Wayman Tisdale Award"));
+		// A second freshman ballot (CBS); a close year splits the two.
+		freshmen.slice(0, 1).forEach((x) => giveNat(x, "Kyle Macy Freshman of the Year"));
 		freshmen.slice(0, slots(5)).forEach((x) => giveNat(x, "All-Freshman Team"));
 		const natAt = (arr, n) => (arr[Math.min(arr.length, n) - 1] || {});
 		const natBars = {
@@ -1130,6 +1143,14 @@
 		for (const pa of POSITION_AWARDS) {
 			const pool = nation.filter((x) => pa.pos.indexOf(x.pos) !== -1);
 			finalist(pool, 0, slots(4), pa.name + " finalist");
+			/* The best man in THIS CLASS at the position is always on the
+			   list, even when returning players crowd the top four: a
+			   3-star who became the class's best centre is exactly the
+			   prospect a position trophy's watch list exists to name, and
+			   a draft room reads it that way (audit C9). Production only —
+			   no stars, no board — so the ballot is still the season. */
+			const own = pool.find((x) => !x.filler && x.awards);
+			if (own) finalist([own], 0, 1, pa.name + " finalist");
 		}
 
 		/* Academic All-America. BBGM has no academics, so this is rolled from
@@ -1665,6 +1686,13 @@
 			give("Hugh Durham Award",
 				(r) => r.surprise * 0.8 + r.record * 0.4 + r.march * 0.5,
 				(r) => (global.Colleges.CONFERENCES[r.team.conf] || {}).tier !== "high");
+			give("Ben Jobe Award", (r) => r.surprise * 0.9 + r.record * 0.4,
+				(r) => (global.Colleges.CONFERENCES[r.team.conf] || {}).tier === "low");
+			give("Joe B. Hall Award", (r) => r.surprise * 1.0 + r.record * 0.4,
+				(r) => r.coach && r.coach.situation === "first year");
+			give("Clair Bee Coach of the Year", (r) => r.surprise * 0.6 + r.record * 0.6);
+			give("Jim Phelan Award", (r) => r.surprise * 0.7 + r.record * 0.4 + r.march * 0.3);
+			give("Adolph Rupp Cup", (r) => r.record * 0.7 + r.march * 0.5);
 			for (const conf of Object.keys(byConf)) {
 				const lb = label(conf);
 				give(lb + " Coach of the Year",
@@ -1757,7 +1785,9 @@
 		/^Third Team All-American$/,
 		/^(Naismith|NABC) Defensive Player of the Year$/,
 		/^Lefty Driesell Award$/,
-		/^(Bob Cousy|Jerry West|Julius Erving|Tim Duncan|Kareem Abdul-Jabbar) Award$/,
+		/^(Bob Cousy|Jerry West|Julius Erving|Karl Malone|Kareem Abdul-Jabbar) Award$/,
+		/^(Pete Newell Big Man|Frances Pomeroy Naismith|Senior CLASS) Award$/,
+		/^(Kyle Macy Freshman|Chip Hilton Player) of the Year$/,
 		/^Final Four Most Outstanding Player$/,
 		/^NCAA National Champion$/,
 		/^NCAA All-Tournament Team$/,

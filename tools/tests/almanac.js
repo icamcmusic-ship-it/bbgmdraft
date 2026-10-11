@@ -136,7 +136,11 @@ module.exports = function (ok, V) {
 		ok("almanac/no markdown pipes survive into the HTML body",
 			html.split("<body>")[1].indexOf("|") === -1);
 		ok("almanac/the champion is in the HTML too",
-			html.indexOf(res.tourney.champion.team.name) !== -1);
+			// Escaped the way the renderer escapes it: "St. John's" is
+			// written St. John&#39;s.
+			html.indexOf(res.tourney.champion.team.name) !== -1 ||
+				html.indexOf(res.tourney.champion.team.name.replace(/&/g, "&amp;")
+					.replace(/'/g, "&#39;").replace(/"/g, "&quot;")) !== -1);
 		/* < and & in a team or player name must not reach the page as markup.
 		   Nothing in the shipped data carries one, which is exactly why this
 		   is checked on the renderer rather than on a run. */

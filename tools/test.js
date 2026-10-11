@@ -1185,10 +1185,21 @@ console.log("\nStaged pipeline coverage");
 	const fingerprint = (res) => res.players.map((p) =>
 		p.newOvr + "/" + p.archetype + "/" + (p.stats ? p.stats.ppg.toFixed(2) : "-") +
 		"/" + (p.surprise ? p.surprise.name : "") + "/" + (p.backstory || "") +
-		"/" + (p.classYear || "") + "/" + (p.newCollege || "")).join("|");
-	const baseline = fingerprint(runner.run(global.Config.make({ seed: "deps" })));
+		"/" + (p.classYear || "") + "/" + (p.newCollege || "")).join("|") +
+		/* And the season around them: a flavor whose whole bend is the
+		   bracket ("blue bloods down": upsetFactor) moves the champion and
+		   the records, not a single prospect's line. */
+		"#" + (res.tourney && res.tourney.champion && res.tourney.champion.team
+			? res.tourney.champion.team.name : "") + "#" +
+		Object.keys(res.teams || {}).sort().map((n) => res.teams[n].w + "-" + res.teams[n].l).join(",");
+	/* Storylines off: a storyline drawn after the flavor can set the very
+	   setting the flavor bent (a "chalk" year pins upsetFactor), and which
+	   one is drawn depends on the seed, so the probe tested the draw rather
+	   than the dial. */
+	const base = { seed: "deps", narrative: false };
+	const baseline = fingerprint(runner.run(global.Config.make(base)));
 	for (const key of Object.keys(probes)) {
-		const cfg = global.Config.make({ seed: "deps" });
+		const cfg = global.Config.make(base);
 		cfg[key] = probes[key];
 		ok("moving " + key + " changes the class",
 			fingerprint(runner.run(cfg)) !== baseline);
@@ -1890,8 +1901,9 @@ console.log("\nThe trait layer");
 	ok("every trait's group is a declared group",
 		TR.TRAITS.every((t) => TR.GROUPS.indexOf(t.group) !== -1));
 	{
-		const notes = res.players.filter(
-			(p) => String(p.note || "").indexOf("Scouts note ") !== -1);
+		// The paragraph opens with one of several attributions now (audit R10).
+		const SCOUT = /(Scouts note|Scouts point to|Evaluators cite|One Western Conference scout cites|Front offices mention|Area scouts highlight|League personnel flag|The book on him starts with) /;
+		const notes = res.players.filter((p) => SCOUT.test(String(p.note || "")));
 		ok("the default note carries the trait line",
 			notes.length > res.players.length * 0.8,
 			notes.length + " of " + res.players.length);
@@ -2039,7 +2051,9 @@ console.log("\nUniverse");
 	   with a point of slack on each side for the season-to-season spread the
 	   comment above describes. */
 	ok("a carried coach is the same man next season",
-		total > 900 && same / total > 0.827 && same / total < 0.90,
+		// A point and a half of slack above: with the 2026-10-10 strength
+		// curve there are fewer collapses, so a few fewer firings.
+		total > 900 && same / total > 0.827 && same / total < 0.915,
 		same + " of " + total + " (" + (100 * same / total).toFixed(1) + "%, " +
 			Math.round(total - same) + " jobs turned over)");
 	/* The other half of the same fact: a coach who did NOT come back was
@@ -2050,7 +2064,12 @@ console.log("\nUniverse");
 		for (const name of Object.keys(b.teams)) {
 			const t = b.teams[name];
 			if (!t || !t.coach || !carry.coaches[name]) continue;
-			if (t.coach.name !== carry.coaches[name].coach.name && !vacated.has(name)) {
+			/* A job the coaching ladder or the retread pool filled after the
+			   season (Universe.harvest, audit UV7) is explained on the carry
+			   itself: "hired away", or a hire that names where he came from. */
+			const c = carry.coaches[name];
+			const laddered = c.reason === "hired away" || c.ladder || c.retread;
+			if (t.coach.name !== c.coach.name && !vacated.has(name) && !laddered) {
 				unexplained++;
 			}
 		}
@@ -2510,14 +2529,18 @@ console.log("\nEarlier seasons: nights, highs and honors; statlines abroad; the 
 				(m ? m[1] : "no claim") + " claimed against " +
 					RBt.ARCHETYPES.length + " builds");
 			const share = global.Config.DEFAULTS.archetypePool / RBt.ARCHETYPES.length;
-			ok("the default build pool is still about 13% of the table",
-				share >= 0.11 && share <= 0.15,
+			/* 46 builds is the per-class variety the calibration was fitted
+			   at; the table grew to 447 in October 2026 and the pool was left
+			   where it was (raising it moved a universe's records), so the
+			   share sits near 10% now. */
+			ok("the default build pool is still 10-15% of the table",
+				share >= 0.095 && share <= 0.15,
 				(share * 100).toFixed(1) + "% of " + RBt.ARCHETYPES.length);
 		}
-		ok("the Tim Duncan Award replaced the Karl Malone Award",
-			global.Awards.POSITION_AWARDS.some((a) => a.name === "Tim Duncan Award") &&
-			!global.Awards.POSITION_AWARDS.some((a) => /Malone/.test(a.name)) &&
-			global.Awards.isMajorAward("Tim Duncan Award"));
+		ok("the power-forward award is the Karl Malone Award (Hall of Fame)",
+			global.Awards.POSITION_AWARDS.some((a) => a.name === "Karl Malone Award") &&
+			!global.Awards.POSITION_AWARDS.some((a) => /Duncan/.test(a.name)) &&
+			global.Awards.isMajorAward("Karl Malone Award"));
 	}
 }
 

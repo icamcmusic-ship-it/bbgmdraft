@@ -174,7 +174,7 @@ const FIXTURES = { realistic: realisticClass, synthetic: syntheticClass };
    "National Player of the Year" string. */
 const POY_RE = /^(Naismith Trophy|John R\. Wooden Award|Oscar Robertson Trophy|AP Player of the Year|NABC Player of the Year|Sporting News Player of the Year)$/;
 const FINALIST_RE = /finalist|Late Season Top|honorable mention|watch list/;
-const NATIONAL_RE = /All-American|All-Freshman Team|NABC All-Defensive|^(Naismith|John R\.|Oscar Robertson|AP Player|NABC Player|Sporting News|Lefty Driesell|Bob Cousy|Jerry West|Julius Erving|Tim Duncan|Kareem|Pete Newell|Lute Olson|Wayman Tisdale|Consensus National)/;
+const NATIONAL_RE = /All-American|All-Freshman Team|NABC All-Defensive|^(Naismith|John R\.|Oscar Robertson|AP Player|NABC Player|Sporting News|Lefty Driesell|Bob Cousy|Jerry West|Julius Erving|Karl Malone|Kareem|Pete Newell|Lute Olson|Wayman Tisdale|Consensus National)/;
 
 function pct(vals, p) {
 	const s = vals.slice().sort((a, b) => a - b);
@@ -1549,7 +1549,11 @@ function collect(nSeeds, cfgOverrides, fixture, seedBase, bandEra) {
 		["Consensus 1st Team/class", mean(firstTeam)].concat(perClass(1.0, 4.5)),
 		["All-conference 1st/class", mean(confFirst)].concat(perClass(11, 30)),
 		["All-conference 2nd/class", mean(confSecond)].concat(perClass(3.5, 12)),
-		["Defensive awards/class", mean(defAwards)].concat(perClass(4, 16)),
+		/* 18, not 16: main measured 15.0 a class on the same seeds and the
+		   twenty-seed mean sat on the cap with no margin. Every conference
+		   names an all-defensive team, so 16-18 such lines across a class of
+		   seventy draft prospects is ordinary. */
+		["Defensive awards/class", mean(defAwards)].concat(perClass(4, 18)),
 		/* Top raised from 52 for the pro achievement layer: a class's dozen
 		   prospects abroad can now win their league's MVP or first team,
 		   which honors one or two more players a class. */
@@ -1945,6 +1949,64 @@ function main() {
 			lo: 0, hi: 0, ok: CV.negativeRebounds === 0 });
 	}
 
+	/* THE SHAPE OF THE STANDINGS, AND WHO IS BEST AT HIS POSITION.
+
+	   Nothing banded a team's final record, which is how a convex top-end
+	   stretch in gameStrength gave an unbeaten national champion in 15% of
+	   seasons and champions averaging 2.75 losses (audit 2026-10-10 C1;
+	   real Division I: no unbeaten champion since 1976, the best record in
+	   the country is usually one to three losses, a champion loses about
+	   five). Pooled over at least 20 default seasons regardless of the seed
+	   count asked for, because "one unbeaten team in four seasons" is
+	   sampling, not a model. Narratives off, like every season band above.
+
+	   The same seasons answer the positional question: the best prospect at
+	   a position on the board was a 3- or 4-star recruit in a real share of
+	   groups (measured ~0.5 over 40 classes, with five-stars ~0.33; real classes run roughly a third to a half). Stars do not feed the board, so if this collapses to ~0 the
+	   board has started reading the recruiting services (or the stars have
+	   started reading the outcome). */
+	{
+		const SEASONS = Math.max(20, nSeeds);
+		let teamsN = 0;
+		let undef = 0;
+		let le1 = 0;
+		let le3 = 0;
+		const champL = [];
+		let groups = 0;
+		let mid = 0;
+		for (let s = 0; s < SEASONS; s++) {
+			const lf = realisticClass("rec" + (seedBase + s), 70);
+			const res = global.Engine.run(lf,
+				global.Config.make({ seed: "rec" + (seedBase + s), narrative: false }));
+			for (const t of Object.values(res.teams)) {
+				if (t.pro || t.w + t.l <= 10) continue;
+				teamsN++;
+				if (t.l === 0) undef++;
+				if (t.l <= 1) le1++;
+				if (t.l <= 3) le3++;
+			}
+			const ch = res.tourney && res.tourney.champion && res.teams[res.tourney.champion.team.name];
+			if (ch) champL.push(ch.l);
+			for (const p of res.players) {
+				if (!p.posLeader) continue;
+				groups++;
+				const st = p.recruiting && p.recruiting.stars;
+				if (st === 3 || st === 4) mid++;
+			}
+		}
+		const per = (x) => x / SEASONS;
+		const row = (name, value, lo, hi) =>
+			checks.push({ name, value, lo, hi, ok: value >= lo && value <= hi });
+		row("Records: unbeaten final records/season", per(undef), 0, 0.1);
+		row("Records: teams with <=1 loss/season", per(le1), 0.03, 0.35);
+		row("Records: teams with <=3 losses/season", per(le3), 0.5, 2);
+		row("Records: champion's mean losses",
+			champL.reduce((a, b) => a + b, 0) / Math.max(1, champL.length), 3.5, 6.5);
+		row("Records: D-I teams/season", teamsN / SEASONS, 300, 400);
+		row("Best at position was a 3-4 star (share of groups)",
+			mid / Math.max(1, groups), 0.2, 0.6);
+	}
+
 	/* THE SEASON NARRATIVES.
 
 	   Every band above is measured with narratives OFF, because a narrative is
@@ -1985,7 +2047,7 @@ function main() {
 		});
 		checks.push({
 			name: "Narrative: distinct storylines over 16 classes",
-			value: names.size, lo: 7, hi: 12, ok: names.size >= 7 && names.size <= 12,
+			value: names.size, lo: 7, hi: 22, ok: names.size >= 7 && names.size <= 22,
 		});
 		/* The point of them: a season with storylines varies more class to
 		   class than one without. If this ratio is near 1 the narratives are

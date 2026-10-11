@@ -94,7 +94,11 @@ module.exports = function (ok, V) {
 		const reg = A.u.registry;
 		const back = Object.keys(reg).map((id) => reg[id]).filter((e) => (e.returned || []).length);
 		ok("undrafted returners are in the registry under the file they were drafted out of",
-			back.length > 0 && back.every((e) => e.draft && e.draft.season < e.returned[0] &&
+			/* UV3: a man who re-entered a later class is the same identity,
+			   so his draft row may be the later draft; his first class is
+			   still among his seasons. */
+			back.length > 0 && back.every((e) => e.draft &&
+				e.seasons.some((s) => s.as === "draft class" && s.season < e.returned[0]) &&
 				e.seasons.some((s) => s.as === "draft class" && s.season === e.draft.season)),
 			back.slice(0, 2).map((e) => JSON.stringify(e.seasons)).join(" | "));
 		const handed = Object.keys(A.u.cfgs).map((k) => A.u.cfgs[k].entrants || []);
@@ -102,6 +106,9 @@ module.exports = function (ok, V) {
 		ok("an out-of-eligibility returner re-enters the next synthetic class by name",
 			all.length > 0 && all.every((x) => reg[x.id] && reg[x.id].name === x.name),
 			JSON.stringify(handed.map((h) => h.length)));
+		ok("uv3/...as the same identity, whose draft row is the class he re-entered",
+			all.every((x) => reg[x.id].draft && reg[x.id].draft.season > x.from &&
+				reg[x.id].seasons.filter((s) => s.as === "draft class").length >= 2));
 		ok("...and his career row says so",
 			all.every((x) => reg[x.id].seasons.some((s) => s.as === "re-entered the draft")));
 		const files = U.synthFiles("s1", 2030, 4);

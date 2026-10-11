@@ -25,6 +25,8 @@
 		["colleges", "all"], ["config", "all"], ["calibration", "all"],
 		["ratings", "all"], ["traits", "all"], ["teams", "all"], ["stats", "all"],
 		["rankings", "all"], ["tournament", "all"], ["awards", "all"], ["engine", "all"],
+		// The league-file scanner: page and Node (the CLI streams merges with it).
+		["leaguescan", "node"],
 		/* The batch worker has no use for sample, but Node does: it is how a test
 		   gets a class without a file, and nothing in it touches the DOM. */
 		["sample", "node"], ["batch", "all"],
@@ -33,7 +35,10 @@
 		["news", "all"], ["universe", "all"], ["pro", "node"],
 		/* These build text and files from result objects and touch no DOM, so the
 		   harness loads them to test what they write; the worker never needs them. */
-		["almanac", "node"], ["replay", "node"], ["site", "node"], ["replaymeta", "node"],
+		["almanac", "node"], ["replay", "node"], ["site", "node"],
+		/* replaymeta is "all": Engine.strangeness reads its tourneyGames, and a
+		   batch worker without it scored strangeness differently from the page. */
+		["replaymeta", "all"],
 		["share", "node"], ["views", "page"], ["play", "node"], ["app", "page"],
 	];
 

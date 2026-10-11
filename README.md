@@ -129,7 +129,7 @@ its own pace, game length and youth minutes cap, its own clubs and league table,
 and its own honors.
 
 **2. Rebuilds ratings into varied, specialized builds — without inflating anyone.**
-Each player is assigned one of 385 archetypes (Floor General, Heliocentric
+Each player is assigned one of 447 archetypes (Floor General, Heliocentric
 Guard, Movement Shooter, 3&D Wing, Point Center, Rim Protector, Stretch Big,
 Lob Threat, Athletic Freak, Drop-Coverage Anchor, Boom-or-Bust Tools, …), gated by
 their height so a 7-footer never becomes a point guard. The archetype pushes some ratings up and others down, then the whole
@@ -149,7 +149,7 @@ compressed in log space (down from a measured 281×), and pool slots are drawn o
 the *authored* weights rather than the exposure-divided ones, which had quietly
 inverted the table (the three center builds gated at the top of the height range
 each made a quarter of all pools while Iron Man almost never did). A class then
-draws a **pool** of about forty-six of the 385 builds and takes its players from the pool — which is what makes a
+draws a **pool** of about forty-six of the 447 builds and takes its players from the pool — which is what makes a
 class "the year of the stretch bigs" rather than one of everything, every time.
 It also draws a **flavor** (guard-heavy, defense-first, a weak year,
 one-and-done heavy, a transfer-portal year, …) that tilts which builds enter the
@@ -694,8 +694,8 @@ pixels the table becomes one card per prospect.
 | **Flavor strength** | How strongly the flavor leans (guard-heavy, defense-first, a weak year, one-and-done heavy, a transfer-portal year, European in style, a post-up renaissance, feast or famine, a coaching carousel year, …). Some flavors also bend the class itself — how old it is, how good the top of it is — but only settings you have left at their default. |
 | **Variation** | The neighborhood of a seed. 0 is the class that seed has always produced. 1, 2, 3… keep its flavor, its build pool and its curve and re-roll every individual player, so the year is still "the year of the stretch bigs, weak at the top" and the sixty-eight men in it are different. Every shareable link ever made is variation 0, so none of them moved. |
 | **Avoid repeating recent builds** | How hard a build that was in one of the last three classes is pushed out of this one. Measured, the four heaviest builds returned in 14% of pools with this off and 6% with it at full strength — the ordering the weights describe survives, the repetition does not. |
-| **Avoid repeating recent flavors** | The same memory one layer up, and the axis that never had one. Sixty-six flavors drawn one a class repeat far sooner than forty-six builds drawn out of 385 do, so a session generating a dozen classes kept handing back a year it had already had. A null history is an exact no-op, so every shareable link ever made still resolves to the flavor it drew. |
-| **Builds per class** | How many of the 385 archetypes one class is drawn from. Lower is more distinctive ("the year of the stretch bigs"); 0 makes every build eligible in every class, which is one of everything, every time. |
+| **Avoid repeating recent flavors** | The same memory one layer up, and the axis that never had one. Sixty-six flavors drawn one a class repeat far sooner than forty-six builds drawn out of 447 do, so a session generating a dozen classes kept handing back a year it had already had. A null history is an exact no-op, so every shareable link ever made still resolves to the flavor it drew. |
+| **Builds per class** | How many of the 447 archetypes one class is drawn from. Lower is more distinctive ("the year of the stretch bigs"); 0 makes every build eligible in every class, which is one of everything, every time. |
 | **Anomalies per class** | How many forced surprises a class gets, drawn from thirty-two kinds: a five-star bust, an unranked riser, a 24-year-old JUCO, a 7'4" project, the coach's son, a man who never played a high school game, a season that ended in February — and six that change the numbers rather than the note: a suspension, an eligibility hold that costs the first ten games, a mid-season transfer, a double-double machine, a defensive breakout, and a year-long shooting slump that costs about seven points of 3P% off what his jumper says. |
 | **Realignment** | How often the map of college basketball changes. A realignment moves two to five good programs one rung up into a league whose footprint overlaps theirs — the database carries no state per school, so geography is a fact about the conference, and Tennessee State no longer lands in a New England league — and every conference stays schedulable. |
 | **Earlier seasons** | `Simulate` runs each of a prospect's previous college years through the same stat model the draft year goes through. `Reconstruct` is the older behavior: a backward-scaled copy of the draft-year line. |
@@ -826,7 +826,7 @@ liked. Ctrl+Z undoes a reroll like any other change.
 
 - *Class quality & depth* shapes the overall curve — switch **Overall ratings**
   to "Rebuild the class curve" to unlock it; "Preserve" never inflates anyone.
-- *Builds* decides how specialized players are, how many of the 385 archetypes
+- *Builds* decides how specialized players are, how many of the 447 archetypes
   one class draws from, the class flavor (pick one in the dropdown to keep the
   seed and change what kind of class it is), anomalies, and the pool memory
   that stops consecutive classes repeating themselves.
