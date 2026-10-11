@@ -6997,12 +6997,15 @@
 		   "A 6'10" freshman…". Stat-led, story-led and origin-led, each only
 		   when it has something to lead with. */
 		if (numbers) {
-			variants.push(() => Text.capitalize(numbers + (place ? " for " + place : "") +
+			// "Averaged", so the sentence opens on a word, not a digit.
+			variants.push(() => Text.capitalize("averaged " + numbers + (place ? " for " + place : "") +
 				" from " + Text.withArticle(who) + build + (clause ? ", with " + clause : "") + "."));
 		}
 		const rec = p.recruiting;
 		const story = p.transfer && p.transfer.from ? "a transfer from " + p.transfer.from
-			: rec && Number.isFinite(rec.rank) ? "the No. " + rec.rank + " recruit in his class"
+						/* The rank is a number, and a summary-only template (no stat
+			   line ticked) promises a sentence without numbers. */
+			: rec && Number.isFinite(rec.rank) && numbers ? "the No. " + rec.rank + " recruit in his class"
 				: p.reclassified ? "a reclassified prospect" : "";
 		if (story) {
 			variants.push(() => Text.capitalize(story + ", now " + Text.withArticle(who) + build + at +

@@ -1201,7 +1201,7 @@
 		"The preseason poll is out — {one} on top",
 		"Voters start with {one}",
 		"{one} begins the year as the team to beat",
-		"No. 1 in November: {one}",
+		"No. 1 before a ball is tipped: {one}",
 	];
 
 	const NIT_HEADS = [
@@ -6663,8 +6663,11 @@
 	TPL({
 		kind: "transfer who did not fit", group: "regular season", p: 0.4, when: 0.72,
 		find: (ctx) => {
+			/* A draft-class transfer is nearly always a starter (one in 135
+			   measured under 26 minutes and 9 points), so "did not fit" is a
+			   role short of a lead one, not the end of the bench. */
 			const cand = ctx.ncaa.filter((p) => p.transfer && p.stats &&
-				p.stats.gp >= 15 && p.stats.mpg <= 26 && p.stats.ppg <= 9);
+				p.stats.gp >= 15 && p.stats.mpg <= 30 && p.stats.ppg <= 11);
 			return cand.length ? ctx.rng.pick(cand) : null;
 		},
 		slots: (p) => ({

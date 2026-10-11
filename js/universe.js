@@ -5051,7 +5051,7 @@
 		}
 		return Object.keys(by).map(Number).sort((a, b) => a - b).map((dec) => ({
 			decade: dec,
-			team: Object.values(by[dec]).sort((a, b) => b.score - a.score || String(a.name).localeCompare(String(b.name))).slice(0, 5),
+			team: Object.values(by[dec]).sort((a, b) => b.score - a.score || cmpText(String(a.name), String(b.name))).slice(0, 5),
 		}));
 	}
 

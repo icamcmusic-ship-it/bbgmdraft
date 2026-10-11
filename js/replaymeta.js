@@ -340,6 +340,11 @@
 		"anomaly-six": 0.01, "bingo-line": 0.3, "bingo-full": 0.01,
 		// Not per-class rates: a collection takes many classes. Gold by fiat.
 		"collector-50": 0.01, "rare-hunter": 0.01,
+		/* The 2026-10-10 database additions, measured the same way over 60
+		   default classes of the harness's realistic file. same-school-12
+		   never fired in those 60, so it is gold at a nominal 0.5%. */
+		"walk-on-first": 0.33, "juco-lottery": 0.22, "low-major-poy": 0.017,
+		"same-school-12": 0.005, "no-ff-one-seed": 0.22,
 	};
 	function tierOf(id) {
 		const r = RARITY[id];
@@ -373,7 +378,7 @@
 		{ kind: "flavor", name: "volatile", requires: "cinderella-ff" },
 		{ kind: "flavor", name: "everything at once", requires: "strange-50" },
 		{ kind: "flavor", name: "one-man class", requires: "same-school-12" },
-		{ kind: "flavor", name: "walk-on year", requires: "walk-on-first" },
+		{ kind: "flavor", name: "walk-on year", requires: "low-major-poy" },
 	];
 
 	function lockFor(kind, name) {

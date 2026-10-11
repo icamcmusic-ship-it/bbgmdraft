@@ -88,7 +88,7 @@
 		   that. A sentence nothing reads is a sentence that goes stale.
 
 		   the table is 447 builds today */
-		archetypePool: 58,
+		archetypePool: 46,
 		/* How many forced anomalies a class gets: a five-star bust, an
 		   unranked recruit who turns into a lottery pick, a 24-year-old JUCO,
 		   a 7'4" project, the coach's son, the man whose season ended in
@@ -170,7 +170,7 @@
 		recentPools: null,
 		/* The same memory for the class FLAVOR, which had none — see
 		   flavorMemoryFactor in js/ratings.js. Sixty-six flavors and one draw
-		   a class repeats far sooner than a pool of fifty-eight builds does,
+		   a class repeats far sooner than a pool of forty-six builds does,
 		   and the pool is the one that had a dial. Null `recentFlavors` is an
 		   exact no-op, so the default here changes nothing until the caller
 		   starts supplying the ring. */

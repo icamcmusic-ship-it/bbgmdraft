@@ -105,7 +105,7 @@ module.exports = function (ok, V) {
 			rec.fp === U.fileFingerprint({ data: r3.leagueFile }) && rec.season === 2026,
 			JSON.stringify(rec));
 		ok("qw/recipe sits in the same root key as the potential stamp, which is untouched",
-			Object.keys(file.bbgmdraft).sort().join() === "pot,recipe,v" &&
+			Object.keys(file.bbgmdraft).sort().join() === "pot,recipe,recipes,v" &&
 			same(file.bbgmdraft.pot, E.exportFile(r3, EXPORT).bbgmdraft.pot));
 		ok("qw/the players are the same with or without the recipe",
 			same(file.players, E.exportFile(r3, EXPORT).players));

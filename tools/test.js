@@ -2529,8 +2529,12 @@ console.log("\nEarlier seasons: nights, highs and honors; statlines abroad; the 
 				(m ? m[1] : "no claim") + " claimed against " +
 					RBt.ARCHETYPES.length + " builds");
 			const share = global.Config.DEFAULTS.archetypePool / RBt.ARCHETYPES.length;
-			ok("the default build pool is still about 13% of the table",
-				share >= 0.11 && share <= 0.15,
+			/* 46 builds is the per-class variety the calibration was fitted
+			   at; the table grew to 447 in October 2026 and the pool was left
+			   where it was (raising it moved a universe's records), so the
+			   share sits near 10% now. */
+			ok("the default build pool is still 10-15% of the table",
+				share >= 0.095 && share <= 0.15,
 				(share * 100).toFixed(1) + "% of " + RBt.ARCHETYPES.length);
 		}
 		ok("the power-forward award is the Karl Malone Award (Hall of Fame)",

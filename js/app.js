@@ -5979,7 +5979,7 @@
 		cfg.recentAnomalies = (state.anomalyHistory || []).slice(0, ANOMALY_HISTORY);
 		// And one layer up: the flavors the last few classes drew. Sixty-six
 		// flavors and one draw a class repeats sooner than a pool of
-		// fifty-eight builds does; this is the same memory on that axis.
+		// forty-six builds does; this is the same memory on that axis.
 		cfg.recentFlavors = (state.flavorHistory || []).slice(0, POOL_HISTORY);
 		cfg.recentNarratives = (state.narrativeHistory || []).slice(0, POOL_HISTORY);
 		cfg.recentTemplates = (state.templateHistory || []).slice(0, POOL_HISTORY);
