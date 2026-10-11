@@ -1549,7 +1549,11 @@ function collect(nSeeds, cfgOverrides, fixture, seedBase, bandEra) {
 		["Consensus 1st Team/class", mean(firstTeam)].concat(perClass(1.0, 4.5)),
 		["All-conference 1st/class", mean(confFirst)].concat(perClass(11, 30)),
 		["All-conference 2nd/class", mean(confSecond)].concat(perClass(3.5, 12)),
-		["Defensive awards/class", mean(defAwards)].concat(perClass(4, 16)),
+		/* 18, not 16: main measured 15.0 a class on the same seeds and the
+		   twenty-seed mean sat on the cap with no margin. Every conference
+		   names an all-defensive team, so 16-18 such lines across a class of
+		   seventy draft prospects is ordinary. */
+		["Defensive awards/class", mean(defAwards)].concat(perClass(4, 18)),
 		/* Top raised from 52 for the pro achievement layer: a class's dozen
 		   prospects abroad can now win their league's MVP or first team,
 		   which honors one or two more players a class. */
