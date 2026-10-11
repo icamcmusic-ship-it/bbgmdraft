@@ -3065,6 +3065,14 @@ async function gotoProspects(page) {
 		await page.evaluate(() => window.App.startDaily("2026-09-25"));
 		await page.waitForFunction(() => document.getElementById("challengeScore") &&
 			window.App.state.challenge === "daily-2026-09-25", null, { timeout: 30000 });
+		/* The challenge is set before its run lands; the link and the result
+		   (which the code and the rival's fingerprint are taken from) follow
+		   the run. On a slow runner both were read a beat early. */
+		await page.waitForFunction(() => {
+			const r = window.App.state.results[window.App.state.active];
+			return /"ch":"daily-2026-09-25"/.test(decodeURIComponent(location.hash)) &&
+				r && r.cfg && r.cfg.seed === "daily-2026-09-25";
+		}, null, { timeout: 30000 });
 		const daily = await page.evaluate(() => [document.getElementById("challengeBar").textContent,
 			decodeURIComponent(location.hash), window.App.state.cfg.seed]);
 		ok("the daily challenge starts on its date's seed with par on the bar",
